@@ -17,7 +17,15 @@ function frame(){
  path($('frame-bottom'),`M ${x} ${h-18} L ${w*.34} ${h-53} H ${w*.41} M ${w*.59} ${h-53} H ${w*.66} L ${w-x} ${h-18}`)
  path($('frame-bottom'),`M ${x+18} ${h-10} L ${w*.34} ${h-43} M ${w*.66} ${h-43} L ${w-x-18} ${h-10}`,'secondary')
 }
-frame();addEventListener('resize',frame)
+function fitRails(){
+ const rails=[...document.querySelectorAll('.rail')]
+ const available=innerHeight-parseFloat(getComputedStyle(rails[0]).top)-76
+ const height=Math.max(...rails.map(rail=>rail.scrollHeight))
+ root.style.setProperty('--rail-scale',Math.min(1,Math.max(0,available)/height))
+}
+frame();fitRails();addEventListener('resize',()=>{frame();fitRails()})
+const railObserver=new ResizeObserver(fitRails)
+document.querySelectorAll('.rail').forEach(rail=>railObserver.observe(rail))
 const history=[];let lastSample=0,lastEnabled=false,animationTimer,preferences={},ai={},raf=0,lastFrame=0,phase=0
 const stateNames={idle:'待机',listening:'监听中',thinking:'思考中',speaking:'回答中',error:'连接异常',sleeping:'休眠',muted:'已闭麦',connecting:'连接中'}
 const text=(id,value)=>$(id).textContent=value

@@ -1,5 +1,5 @@
 // Production HUD windows + real OS data; isolated settings, no microphone or provider calls.
-import {app, BrowserWindow, ipcMain, net, protocol, session, desktopCapturer, systemPreferences} from 'electron'
+import {app, BrowserWindow, ipcMain, net, protocol, session, desktopCapturer, systemPreferences, screen} from 'electron'
 import {mkdtempSync,writeFileSync,readFileSync,mkdirSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {resolve,join} from 'node:path'
@@ -7,6 +7,7 @@ import {pathToFileURL} from 'node:url'
 import assert from 'node:assert/strict'
 import {registerAppScheme,installAppProtocol,buildRendererAssetGraph} from '../src/main/app-protocol.mjs'
 import {createVisor} from '../src/main/visor.mjs'
+import {visorLayout} from '../src/main/visor-layout.mjs'
 const fixture=mkdtempSync(join(tmpdir(),'nova-visor-smoke-'))
 app.setPath('userData',join(fixture,'profile'));registerAppScheme(protocol)
 app.on('window-all-closed',()=>{})
@@ -31,6 +32,30 @@ async function run(){
  assert.equal(hud.isVisible(),true);assert.equal(hud.isFocusable(),false)
  assert.equal(await hud.webContents.executeJavaScript("document.querySelector('#ai-state').textContent"),'未连接')
  assert.match(await hud.webContents.executeJavaScript("document.querySelector('#ram').textContent"),/GB/)
+ const display=screen.getPrimaryDisplay(),expected=visorLayout(display)
+ assert.deepEqual(hud.getBounds(),expected.hud)
+ assert.deepEqual(controls.getBounds(),expected.controls)
+ visor.configure({motion:false})
+ const layouts=[]
+ for(const [width,height] of [[640,360],[800,600],[1280,542],[1280,720],[1512,804],[1920,1080],[2560,1440],[3840,2160],[3440,1440],[1080,1920]]) {
+  hud.webContents.enableDeviceEmulation({screenPosition:'desktop',screenSize:{width,height},viewPosition:{x:0,y:0},viewSize:{width,height},deviceScaleFactor:1,scale:1})
+  await delay(80)
+  const geometry=await hud.webContents.executeJavaScript(`(() => {
+   const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}}
+   return {width:innerWidth,height:innerHeight,header:rect('header'),core:rect('#core'),left:rect('.hardware'),right:rect('.intelligence'),overflow:document.documentElement.scrollWidth>innerWidth}
+  })()`)
+  assert.equal(geometry.width,width);assert.equal(geometry.height,height)
+  for(const key of ['header','core']) assert.ok(Math.abs(geometry[key].x+geometry[key].width/2-width/2)<1,`${key} centred at ${width}x${height}`)
+  for(const key of ['left','right']) {
+   const r=geometry[key]
+   assert.ok(r.x>=0&&r.right<=width&&r.y>=0&&r.bottom<=height-70,`${key} within safe area at ${width}x${height}: ${JSON.stringify(r)}`)
+  }
+  assert.ok(geometry.left.right<geometry.right.x,'rails keep the centre open')
+  assert.equal(geometry.overflow,false)
+  layouts.push(geometry)
+ }
+ hud.webContents.disableDeviceEmulation()
+ await delay(100)
  const out=resolve(import.meta.dirname,'../../../output/visor-validation');mkdirSync(out,{recursive:true})
  writeFileSync(join(out,'showcase.png'),(await hud.webContents.capturePage()).toPNG())
  const bitmap=(await hud.webContents.capturePage()).toBitmap();let clear=0;for(let i=3;i<bitmap.length;i+=4)if(bitmap[i]===0)clear++
@@ -50,7 +75,7 @@ async function run(){
  visor.configure({hardware:true,ai:true,motion:true,opacity:.8,mode:'showcase'})
  ai={...ai,backend:'stopped',state:'inactive',muted:false,activated:false}
  await delay(2200)
- writeFileSync(join(out,'result.json'),JSON.stringify({passed:true,clearPixelRatio:clear/(bitmap.length/4),errors,hardware:visor.snapshot().hardware},null,2))
+ writeFileSync(join(out,'result.json'),JSON.stringify({passed:true,display:{bounds:display.bounds,workArea:display.workArea,scaleFactor:display.scaleFactor},layouts,clearPixelRatio:clear/(bitmap.length/4),errors,hardware:visor.snapshot().hardware},null,2))
  assert.deepEqual(errors,[])
  console.log('PASS Visor: real telemetry, transparency, modes, persistence, unavailable/muted state, reduced motion, hide, rapid lifecycle, no renderer errors')
  clearTimeout(deadline)

@@ -2,6 +2,7 @@ import {BrowserWindow, screen, nativeTheme} from 'electron'
 import {readFileSync,writeFileSync,renameSync,mkdirSync} from 'node:fs'
 import {dirname,resolve} from 'node:path'
 import {createHardwareSampler,visorPreferences} from './visor-data.mjs'
+import {visorLayout} from './visor-layout.mjs'
 
 export function createVisor({file,partition,preload,readAI,onOrb,onError = console.error}) {
   let preferences
@@ -15,9 +16,9 @@ export function createVisor({file,partition,preload,readAI,onOrb,onError = conso
   }
   const layout = () => {
     if (!alive(hud)) return
-    const area = screen.getPrimaryDisplay().workArea
-    hud.setBounds(area)
-    controls?.setBounds({x:Math.round(area.x+area.width/2-210),y:area.y+area.height-56,width:420,height:48})
+    const bounds = visorLayout(screen.getPrimaryDisplay())
+    hud.setBounds(bounds.hud)
+    if (alive(controls)) controls.setBounds(bounds.controls)
   }
   const tick = async () => {
     if (running || !preferences.enabled || disposed) return

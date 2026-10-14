@@ -83,3 +83,12 @@
 - Adapt HUD settings/report calls to novaPersonalAgentDesktop and route its return-to-orb control through the shared presentation transition. Preserve theme normalization and exclude visual settings from backend configuration.
 - Verification: runtime build, desktop build, desktop Node suite (1311 passed, 3 skipped, no failures); targeted bridge regression added and checked separately. Whitespace and outgoing public-history IP audit required before push.
 - No app install, provider calls or new visual generation. Existing public feature scope remains Themes, orb skins and Visor HUD.
+
+
+## 2026-10-14 — Centre Visor and fit telemetry to the current viewport
+
+- User reports right-shifted HUD and requests resolution adaptation. Filed public issue #28; update the existing unmerged HUD PR #12 rather than duplicate the feature contribution.
+- Centre the HUD and its controls on primary display bounds while symmetrically respecting work-area insets; keep Electron DIP coordinates without multiplying scaleFactor. Retain display-change relayout and mouse-through behavior.
+- Fit both telemetry rails to available height, compact RAM typography, and centre the core canvas even with wider status labels. No dependencies or provider calls added.
+- Verified 8 scoped Node tests (120 geometry cases plus production controller event relayout/cleanup), desktop build and production Electron smoke. Actual 1512×982 DIP / 2× native bounds and 10 emulated viewport geometries pass; transparency, controls, persistence, rapid toggles and renderer error checks pass.
+- Current bottom-Dock setup did not reproduce the reported horizontal shift; asymmetric side-bar work areas explain a reproducible centering defect. User's original environment and installed-client acceptance remain pending. No app replacement, physical multi-monitor/Windows/Linux certification or voice test.
