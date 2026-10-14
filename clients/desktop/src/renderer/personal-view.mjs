@@ -15,7 +15,7 @@ import {renderTasksPage,activeTaskCount} from './tasks-page.mjs'
 import {renderSourceSuggestions} from './workbench-suggestions.mjs'
 import {disposeSources} from './source-popover.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
-const PAGE_TITLE=Object.fromEntries(WORKSPACE_PAGES.map(item=>[item.id,`${item.label} · ${item.title}`]))
+const PAGE_TITLE=Object.fromEntries(WORKSPACE_PAGES.map(item=>[item.id,item.label===item.title?item.label:`${item.label} · ${item.title}`]))
 /** The workbench keeps Nova on the left and switches contextual pages on the right. */
 export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,applyPresentation,speakingLevel}) {
  const timelineExpanded=new Set(),lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map(),scheduleLocal={}
@@ -63,7 +63,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const tabs=mountWorkspaceTabs(workspace,{onSelect:id=>{selected=id;closeTask({restoreFocus:false})}})
  const pageTitle=el('h2','','page-title');pageTitle.hidden=true;workspace.append(pageTitle)
  const pageHead=el('header',undefined,'page-head');const status=el('span','正在连接','workbench-status');status.setAttribute('role','status')
- const presentation=el('select');presentation.setAttribute('aria-label','显示模式');for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','隐藏']]){const option=el('option',label);option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
+ const presentation=el('select');presentation.setAttribute('aria-label',t('显示模式'));for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','隐藏']]){const option=el('option',t(label));option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
  const chrome=mountWindowChrome(root,{api,el})
  const settings=button(t('设置'),()=>openSettings(),pageHead);settings.title=`${t('设置')} · ${t('打开设置')}`;settings.className='workspace-utility';settings.setAttribute('aria-label',settings.title)
  const collapseButton=button(t('收起'),()=>collapse(true),pageHead);collapseButton.title=`${t('收起')} · ${t('收起为悬浮球')}`;collapseButton.className='workspace-utility';collapseButton.setAttribute('aria-label',collapseButton.title)
@@ -165,7 +165,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  function update(){
   document.body.dataset.personalCollapsed=String(c.collapsed)
   document.body.dataset.presentationMode=c.presentationMode;presentation.value=c.presentationMode;presentation.disabled=c.presentationPending
-  const startupFailed=startupNotice.dataset.stage==='failed',active=activeTaskCount(durableTasks(),tasks());status.textContent=startupFailed?t('启动失败'):c.connected?`运行中 · ${active} 个后台任务`:c.everConnected?'已断开 · 草稿保留':'正在连接';status.dataset.state=startupFailed?'disconnected':c.connected?'connected':c.everConnected?'disconnected':'connecting'
+  const startupFailed=startupNotice.dataset.stage==='failed',active=activeTaskCount(durableTasks(),tasks());status.textContent=startupFailed?t('启动失败'):c.connected?t('运行中 · {0} 个后台任务',active):c.everConnected?t('已断开 · 草稿保留'):t('正在连接');status.dataset.state=startupFailed?'disconnected':c.connected?'connected':c.everConnected?'disconnected':'connecting'
   tabs.badge('tasks',active)
   inspector?.setVisible(c.presentationMode==='workbench')
   for(const node of [taskNotice,orbNotice]){const text=t(c.taskNotice);if(node.textContent!==text)node.textContent=text;node.hidden=!text}
