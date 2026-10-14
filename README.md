@@ -22,6 +22,8 @@
 
 ---
 
+> **Branch preview · Nova Visor:** A primary-display transparent HUD and Themes settings are implemented as a local macOS preview. [Usage and architecture (中文)](docs/VISOR_GUIDE.zh-CN.md) · [Validation and limitations](docs/VISOR_V1.md) · [Visual reference](docs/DESKTOP_VISOR_DEMO.md). Final installed GUI acceptance and cross-platform certification remain pending.
+
 ## News
 
 - **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **Continuous context, ongoing work:** GUI-use across browser, computer and phone (experimental), Scheduled Agent Tasks, and a full Timeline for context, evidence and task results.

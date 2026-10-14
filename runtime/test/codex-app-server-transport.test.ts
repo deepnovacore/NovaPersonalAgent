@@ -1427,9 +1427,9 @@ test('close-driven indefinitely pending spawn keeps credentials across bounded r
   const running = transport.run(
     {workOrder: 'close cannot abandon raw spawn ownership'},
     {},
-    {expiresAtMs: Date.now() + 50},
+    {expiresAtMs: Date.now() + 60_000},
   )
-  await entered.promise
+  await within(entered.promise, 5000, 'pending spawn admission')
   const firstClose = transport.close()
   assert.equal((await running).code, 'transport_lost')
 
@@ -1754,6 +1754,7 @@ test('a pending late spawn keeps credentials until its materialized owner is gon
 
 test('an indefinitely pending spawn keeps its credential barrier across bounded close retries', async () => {
   const entered = testDeferred<void>()
+  const controller = new AbortController()
   let spawnCount = 0
   let removalCount = 0
   const transport = createTransport({spawn: async () => {
@@ -1764,9 +1765,11 @@ test('an indefinitely pending spawn keeps its credential barrier across bounded 
   const running = transport.run(
     {workOrder: 'never materialized child still owns credentials'},
     {},
-    {expiresAtMs: Date.now() + 50},
+    {expiresAtMs: Date.now() + 60_000, signal: controller.signal},
   )
-  await entered.promise
+  await within(entered.promise, 5000, 'pending spawn admission')
+  // Cancel only after spawn owns credentials; CI load must not time out preflight instead.
+  controller.abort()
   assert.equal((await running).code, 'adapter_timeout')
   assert.equal(await transport.prewarm({expiresAtMs: Date.now() + 100}), null)
   assert.equal((await transport.run(

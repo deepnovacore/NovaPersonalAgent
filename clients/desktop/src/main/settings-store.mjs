@@ -1,3 +1,4 @@
+import {normalizeSkinSettings} from '../renderer/orb-skins.mjs'
 import {SELF_HOSTED_STAGES, validSelfHostedUrl, endpointOrigin} from '../renderer/voice-preset.mjs'
 import {validUploadUrl} from './voiceprint.mjs'
 import {CONTROL_CHARACTERS, RUNTIME_DEFAULTS} from './settings-defaults.mjs'
@@ -55,6 +56,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   startupView: 'workbench',
   lastPresentation: 'workbench',
   palette: 'ember',
+  skinId: 'nova',
+  importedSkins: Object.freeze([]),
   codingProgressNarration: 'smart',
   codingBackend: 'codex',
   codingBackendPaths: Object.freeze(normalizeCodingPaths()),
@@ -249,6 +252,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     : typeof rawVersion === 'number' && rawVersion >= SETTINGS_VERSION
   return {
     version: SETTINGS_VERSION,
+    ...normalizeSkinSettings(source, fallback),
     language: pick(source.language, fallback.language, DEFAULT_SETTINGS.language, value => ['zh-CN', 'en'].includes(value) ? value : null),
     startupView: pick(source.startupView, fallback.startupView, DEFAULT_SETTINGS.startupView, value => ['orb', 'workbench', 'last'].includes(value) ? value : null),
     lastPresentation: pick(source.lastPresentation, fallback.lastPresentation, DEFAULT_SETTINGS.lastPresentation, value => ['orb', 'workbench'].includes(value) ? value : null),
@@ -326,7 +330,7 @@ export function startupPresentation(settings, argv = []) {
 }
 
 export function backendSettings(settings) {
-  const {startupView, lastPresentation, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
+  const {skinId, importedSkins, startupView, lastPresentation, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -339,6 +343,8 @@ export function publicSettings(settings) {
     language: normalized.language,
     startupView: normalized.startupView,
     palette: normalized.palette,
+    skinId: normalized.skinId,
+    importedSkins: normalized.importedSkins,
     proactivity: normalized.proactivity,
     codingProgressNarration: normalized.codingProgressNarration,
     codingBackend: normalized.codingBackend,
@@ -400,6 +406,8 @@ export function orbSettings(settings) {
     codingProgressNarration: normalized.codingProgressNarration,
     language: normalized.language,
     palette: normalized.palette,
+    skinId: normalized.skinId,
+    importedSkins: normalized.importedSkins,
     conversationVisionEnabled: normalized.conversationVisionEnabled,
     startListeningOnLaunch: normalized.startListeningOnLaunch,
     wakeWordEnabled: normalized.wakeWordEnabled,

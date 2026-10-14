@@ -24,6 +24,7 @@ test('orb restart applies saved settings through the shared transaction and repo
       Menu: {buildFromTemplate: value => { rows = value; return {popup() {}} }},
       mainWindow: {}, presentationMode: 'orb', settingsReady: true, lifecycleCoordinator: coordinator,
       activeMcpSubmenu: () => [],
+      toggleVisor: () => {},
       applyDesktopSettings: async (patch, restart) => {
         called++
         assert.equal(JSON.stringify(patch), '{"settingsPatch":{}}')
@@ -57,6 +58,7 @@ test('the orb menu offers all presentation modes through the shared transition',
     mainWindow: {}, presentationMode: 'orb', settingsReady: true, lifecycleCoordinator: {busy: false},
     activeMcpSubmenu: () => [],
     requestPresentation: mode => requested.push(mode),
+    toggleVisor() {},
   }
   for(const mode of ['workbench','orb','background']){
     context.presentationMode=mode

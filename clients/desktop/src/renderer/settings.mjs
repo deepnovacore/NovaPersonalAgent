@@ -1,3 +1,4 @@
+import {createSkinPanel} from './skin-panel.mjs'
 import {SELF_HOSTED_STAGES, endpointOrigin} from './voice-preset.mjs'
 import {onButton} from './button-action.mjs'
 import {createVoiceprintPanel} from './voiceprint-panel.mjs'
@@ -155,6 +156,8 @@ const clarificationDepth = document.querySelector('#clarificationDepth')
 
 const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelector(`#category-${category.id}`))
 let activeCategory = SETTINGS_CATEGORIES[0].id
+const skinPanel = createSkinPanel({document, stage: patch => controller.stage(patch), discard: () => controller.discardFields(['skinId', 'importedSkins'])})
+window.addEventListener('beforeunload', () => skinPanel.destroy(), {once: true})
 const phonePanel = createPhonePanel({document, api, save: saveAll})
 
 // Sections are addressed by id from the category table rather than by a markup
@@ -444,6 +447,7 @@ function render(view, drafts, state) {
   document.getElementById('language').value = view.language ?? 'zh-CN'
   document.getElementById('language-restart-hint').hidden = (view.language ?? 'zh-CN') === currentLanguage()
   currentView = view
+  skinPanel.render(view, state)
   renderUsage()
   renderVision(view)
   capabilityEditor.render(view)

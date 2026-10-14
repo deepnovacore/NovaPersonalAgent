@@ -76,6 +76,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
     onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createPhonePanel, ...voicePreset, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    createSkinPanel: () => ({render() {}, destroy() {}}),
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
@@ -86,7 +87,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),
       createElement: () => ({children: [], append(...items) {this.children.push(...items)}}), addEventListener() {},
     },
-    window: {novaPersonalAgentDesktop: {settings: {
+    window: {addEventListener() {}, novaPersonalAgentDesktop: {settings: {
       phoneAction: async () => ({state: 'idle'}), get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
     }}},
   })
@@ -801,7 +802,7 @@ test('the panel omits the connection and microphone block while launch listening
 test('the panel talks to main only through the settings bridge', () => {
   assert.match(script, /window\.novaPersonalAgentDesktop\.settings/)
   assert.doesNotMatch(script, /fetch\(|WebSocket|memoryBoard|bootstrap/)
-  assert.doesNotMatch(html, /<script(?![^>]*src="\.\/settings\.mjs")/)
+  assert.doesNotMatch(html, /<script(?![^>]*src="\.\/(?:settings|visor-settings)\.mjs")/)
 })
 
 test('the panel writes secrets forward only and never reads a value back', () => {
@@ -1073,7 +1074,7 @@ test('the sidebar renders one button per category with the first current', () =>
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {
   const {categoryTabForKey} = settingsCategories
-  assert.equal(categoryTabForKey('general', 'ArrowDown'), 'usage')
+  assert.equal(categoryTabForKey('general', 'ArrowDown'), 'themes')
   assert.equal(categoryTabForKey('general', 'ArrowUp'), 'codex', 'wraps backwards')
   assert.equal(categoryTabForKey('codex', 'ArrowDown'), 'general', 'wraps forwards')
   assert.equal(categoryTabForKey('secrets', 'Home'), 'general')

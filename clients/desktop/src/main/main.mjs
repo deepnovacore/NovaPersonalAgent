@@ -1,3 +1,4 @@
+import {createVisor} from './visor.mjs'
 import {parseVoicePreset, exportVoicePreset, MAX_PRESET_BYTES} from '../renderer/voice-preset.mjs'
 import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
 import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-personal-agent/runtime/desktop'
@@ -205,6 +206,8 @@ let backendControl = null
 let settingsApplyStatus = 'idle'
 let settingsRestartPending = false
 let settingsRecoveryAvailable = false
+let visor = null
+let visorAI = {state:'idle',muted:false,activated:false}
 let mainWindow = null
 let boardWindow = null
 let clearingConversation = null
@@ -846,8 +849,53 @@ async function applyDesktopSettings(payload, restart = false) {
   return {...settingsView(), ...applied}
 }
 
+function visorUsage() {
+  const usage = frontendUsage.snapshot()
+  return {requests:usage.requests,costCny:usage.costCny,pricedReports:usage.pricedReports,
+    unpricedReports:usage.unpricedReports,missingReports:usage.missingReports,
+    rows:usage.rows.map(row=>({inputTokens:row.inputTokens,outputTokens:row.outputTokens}))}
+}
+
+function initializeVisor(launchId) {
+  visor = createVisor({file:resolve(app.getPath('userData'),'nova-visor.json'),
+    partition:`nova-orb-${launchId}`,preload:resolve(packageRoot,'src/preload/visor.cjs'),
+    readAI:()=>({...visorAI,backend:backendStatus.state,model:currentSettings?.pipelineMode==='cascaded' ? currentSettings?.cascadedLlmModels?.[currentSettings?.cascadedLlmProvider] : currentSettings?.integratedModel,
+      usage:visorUsage()}),
+    onOrb:()=>requestPresentation('orb'),
+    onError:message=>console.error(`[nova-visor] ${message}`),
+  })
+  const settingsSender = event => settingsWindow && event.sender===settingsWindow.webContents && event.senderFrame===event.sender.mainFrame
+  const visorSender = event => visor?.owns(event.sender) && event.senderFrame===event.sender.mainFrame
+  ipcMain.handle('nova:visor:get',event=>{
+    if (!settingsSender(event) && !visorSender(event)) throw new Error('Visor access denied')
+    return visor.snapshot()
+  })
+  ipcMain.handle('nova:visor:configure',(event,patch)=>{
+    if (!settingsSender(event) && !(visor?.controlsOwns(event.sender) && event.senderFrame===event.sender.mainFrame)) throw new Error('Visor controls denied')
+    return visor.configure(patch)
+  })
+  ipcMain.handle('nova:visor:orb',event=>{
+    if (!visor?.controlsOwns(event.sender) || event.senderFrame!==event.sender.mainFrame) throw new Error('Visor controls denied')
+    visor.showOrb()
+  })
+  ipcMain.on('nova:visor:state',(event,value)=>{
+    if (event.sender!==mainWindow?.webContents || event.senderFrame!==event.sender.mainFrame || !value || typeof value.state!=='string' || value.state.length>40) return
+    visorAI={state:value.state,muted:value.muted===true,activated:value.activated===true}
+  })
+  sendToOrb('nova:visor:refresh')
+  if (!sourceStartupSmoke) {
+    visor.start()
+    if (!globalShortcut.register('CommandOrControl+Shift+J',toggleVisor)) console.warn('[nova-visor] Shortcut unavailable; use Themes or tray menu')
+  }
+}
+
+function toggleVisor() {
+  try { visor?.toggle() } catch { dialog.showErrorBox('Nova Visor', t('无法保存主题设置，请检查本地文件权限。')) }
+}
+
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
+    { label: t('Nova Visor · 展开 / 收起'), click: toggleVisor },
     { label: t("显示模式"), submenu: [
       { label: t("工作台"), type: 'radio', checked: presentationMode === 'workbench', click: () => requestPresentation('workbench') },
       { label: t("悬浮球"), type: 'radio', checked: presentationMode === 'orb', click: () => requestPresentation('orb') },
@@ -919,6 +967,7 @@ function createTray() {
   const next = new Tray(trayImage())
   next.setToolTip('Nova Personal Agent Desktop')
   next.setContextMenu(Menu.buildFromTemplate([
+    { label: t('Nova Visor · 展开 / 收起'), click: toggleVisor },
     ...[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
     { label: t("退出"), click: () => app.quit() },
@@ -2067,6 +2116,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   // launch id or open them until the asynchronous asset graph is registered.
   await rendererLoaded
   activeLaunchId = launchId
+  initializeVisor(launchId)
   if (settingsReady) {
     try { await lifecycleCoordinator.run('startup', async () => {
       await paintStartup('configuration')
@@ -2311,6 +2361,7 @@ app.on('before-quit', event => {
   sourceSmokeStage('before_quit')
   if (quitDrained) return
   app.isQuitting = true
+  visor?.dispose()
   releaseSmokeChannel?.close()
   globalShortcut.unregisterAll()
   wakeWord?.stop()

@@ -22,6 +22,8 @@
 
 ---
 
+> **分支预览 · Nova Visor：** 已增加主显示器透明 HUD 和“主题”设置。[使用说明与架构扩展](docs/VISOR_GUIDE.zh-CN.md) · [验证结果与限制](docs/VISOR_V1.md) · [视觉参考](docs/DESKTOP_VISOR_DEMO.md)。当前为本地 macOS 预览，安装版最终 GUI 验收及跨平台认证尚未完成。
+
 ## News
 
 - **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **持续理解，持续行动：** 浏览器、电脑与手机的 GUI-use（实验能力）、定时 Agent 任务，以及保留上下文、证据和任务结果的完整 Timeline。
