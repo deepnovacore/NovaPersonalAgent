@@ -24,8 +24,7 @@
 
 ## News
 
-- **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **持续理解，持续行动：** 主会话与 Timeline、定时任务、增量来源与画像，以及更多编码代理。
-- **2026-10-09 · [v0.3.1](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.1)** — **上手更顺畅：** 文字对话开箱即用，桌面端升级更省心。
+- **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **持续理解，持续行动：** 浏览器、电脑与手机的 GUI-use（实验能力）、定时 Agent 任务，以及保留上下文、证据和任务结果的完整 Timeline。
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.0)** — **你的个人 Agent：** 待办、想法、目标、资讯和 Profile，配合有出处的记忆与按证据核验的任务。
 - **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.0)** — **按你的方式对话：** 可配置 ASR / LLM / TTS、个人记忆、MCP 与 iPhone 客户端。
 - **2026-08-31 · [v0.1.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.1.0)** — **常驻语音助手，前后双脑协作：** 前台持续对话，后台 Agent 执行，途中随时补充需求。
@@ -33,20 +32,11 @@
 <details>
 <summary>其他小版本更新</summary>
 
+- **2026-10-09 · [v0.3.1](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.1)** — **上手更顺畅：** 文字对话开箱即用，桌面端升级更省心。
 - **2026-09-24 · [v0.2.3](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.3)** — 首次启动引导，一个 DashScope API Key 即可开始对话。
 - **2026-09-21 · [v0.2.2](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.2)** — Ubuntu 桌面端与支持扫码配对的无头服务。
 
 </details>
-
-## v0.4.0 新功能
-
-- **持续陪伴的主会话。** Nova 对话与标签工作区并排，完整 Timeline 保留上下文、来源证据和任务结果。
-- **定时 Agent 任务。** 支持单次、每日、每周运行，在桌面端或手机端管理，结果回到主会话；任务与恢复状态持久保存。
-- **逐步积累的理解。** 来源增量同步与可恢复的后台处理持续更新可编辑画像，保留引用，支持纠正与来源撤回。
-- **更多编码代理。** 可选 Codex、OpenCode、CodeBuddy、Pi 和 DeepSeek Harness；已有会话保持原后端，改进 ACP 恢复及 Windows 原生启动。
-- **有授权和证据的专长执行。** 浏览器、电脑、手机执行共享审批、取消、截图证据和结果核验。GUI/设备支持仍属实验能力，详见[支持边界](docs/zh-CN/executors/coding.md)。
-
-画像默认仍只使用你发送的消息及直接 @ 你的消息；模型归纳可能有误，请核对引用。ACP 的权限与运行中追加要求能力不同于 Codex，详见编码文档。
 
 ## 1. 核心特性
 

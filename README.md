@@ -24,9 +24,7 @@
 
 ## News
 
-- **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **Continuous context, ongoing work:** a persistent home and Timeline, scheduled tasks, incremental sources and Profile, and more coding agents.
-
-- **2026-10-09 · [v0.3.1](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.1)** — **A smoother start:** ready-to-use text chat and easier desktop upgrades.
+- **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **Continuous context, ongoing work:** GUI-use across browser, computer and phone (experimental), Scheduled Agent Tasks, and a full Timeline for context, evidence and task results.
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.0)** — **Your personal agent:** Todos, Ideas, Goals, Feeds and Profile, with source-backed memory and evidence-checked tasks.
 - **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.0)** — **Voice, your way:** configurable ASR / LLM / TTS, personal memory, MCP and an iPhone companion.
 - **2026-08-31 · [v0.1.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.1.0)** — **Always-on voice assistant with dual brains:** responsive frontend conversation and background agent execution, with live steering.
@@ -34,20 +32,11 @@
 <details>
 <summary>Earlier minor releases</summary>
 
+- **2026-10-09 · [v0.3.1](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.1)** — **A smoother start:** ready-to-use text chat and easier desktop upgrades.
 - **2026-09-24 · [v0.2.3](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.3)** — Guided first run with one DashScope API key.
 - **2026-09-21 · [v0.2.2](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.2)** — Ubuntu desktop and a headless server with QR pairing.
 
 </details>
-
-## New in v0.4.0
-
-- **A persistent home for your work.** Keep talking to Nova beside a tabbed workspace; revisit context, evidence and task results in the full Timeline.
-- **Scheduled Agent Tasks.** Run a task once, daily or weekly, manage it from desktop or mobile, and receive its report in the main conversation. Runs and recovery state survive restarts.
-- **Understanding that builds over time.** Incremental source sync and resumable processing update an editable Profile, with references retained for correction and source withdrawal.
-- **More coding agents.** Choose Codex, OpenCode, CodeBuddy, Pi or DeepSeek Harness. Existing sessions retain their backend; ACP recovery and Windows native launching are improved.
-- **Guarded specialist execution.** Browser, computer and phone executors share approval, cancellation, screenshot evidence and result verification. GUI/device support remains experimental; see the [support boundaries](docs/en/executors/coding.md).
-
-The default message scope remains your own messages and direct mentions. Model-written profiles can be wrong: review their references. ACP permissions and live steering differ from Codex; see the coding guide.
 
 ## 1. Highlights
 
