@@ -109,6 +109,7 @@ export interface Assembly {
     path: string
     userScope: string
     newsLanguage: string
+    profileParticipantMessages?: boolean
     models: Required<Pick<HostOptions,
       'generateProfile' | 'generateDigests' | 'generateContext' | 'rankNews' | 'understand'
       | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover'>>
@@ -395,7 +396,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   }
   return {
     settings, taskVerifier,
-    ...(options.blackboard===undefined?{}:{personalAgentConfig: {path: options.blackboard.path + '.personal.json', userScope: settings.blackboard_owner_id, newsLanguage: settings.news_language, taskVerifier, models: {
+    ...(options.blackboard===undefined?{}:{personalAgentConfig: {path: options.blackboard.path + '.personal.json', userScope: settings.blackboard_owner_id, newsLanguage: settings.news_language, profileParticipantMessages: settings.profile_participant_messages, taskVerifier, models: {
       generateProfile: writer.generateProfile,
       generateDigests: writer.generateDigests,
       generateContext: writer.generateContext,

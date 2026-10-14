@@ -319,6 +319,14 @@ test('plan generation settings override the parent environment and preserve expl
   }
 })
 
+test('reading other people\'s messages is off unless the saved setting says true, whatever the parent environment holds', () => {
+  for (const [settings, expected] of [[undefined, 'false'], [{}, 'false'], [{profileParticipantMessages: false}, 'false'], [{profileParticipantMessages: true}, 'true']]) {
+    const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152',
+      parentEnv: {PROFILE_PARTICIPANT_MESSAGES: 'true'}, settings})
+    assert.equal(spec.env.PROFILE_PARTICIPANT_MESSAGES, expected)
+  }
+})
+
 test('the runtime receives the exact state root resolved for desktop maintenance', () => {
   const resolvedConfig = resolveDesktopConfig({
     settings: {},

@@ -92,7 +92,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #preparedSignatures=new Map<string,{signature:string;revision:number}>()
   #consolidating:Promise<void>|null=null
   #adaptation:PersonalMemoryResponseAdaptation={revision:0,replyPreferences:[]}
-  constructor(readonly options:{sourceProcessingLlm?:{baseUrl:string;apiKey:string};sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
+  constructor(readonly options:{sourceProcessingLlm?:{baseUrl:string;apiKey:string};sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;profileParticipantMessages?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
     this.prefix='personal:'+digest(options.userId)+':'
   }
   async open():Promise<void>{if(this.#opened)return;await this.options.client.open();await this.options.migrate?.();await this.options.client.memory('enable_files',{});this.#opened=true;this.#abort=new AbortController();await this.#maintain();this.#maintenance=setInterval(()=>{void this.#maintain().catch(()=>{ /* retry on the next maintenance tick */ })},60000);this.#maintenance.unref();await this.#refresh()}
@@ -102,7 +102,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   capabilities(){return {list:true,get:true,correct:true,forgetEntry:true,forgetSource:true,observeSource:true}}
   async profileSources(ids?:readonly string[]):Promise<ProfileInput[]>{
     this.#ready()
-    const records=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('profile_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),...(ids?{ids:ids.filter(id=>id.startsWith(this.prefix))}: {})}))
+    const records=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('profile_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),...(ids?{ids:ids.filter(id=>id.startsWith(this.prefix))}: {}),...(this.options.profileParticipantMessages?{participants:true}:{})}))
     return records.map(record=>profileSourceInput(record))
   }
 

@@ -24,6 +24,7 @@
       <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">执行器与 MCP</button>
       <button type="button" class="nav-item" id="category-im" data-category="im" aria-current="false" tabindex="-1">IM 渠道</button>
       <button type="button" class="nav-item" id="category-connections" data-category="connections" aria-current="false" tabindex="-1">连接与权限</button>
+      <button type="button" class="nav-item" id="category-privacy" data-category="privacy" aria-current="false" tabindex="-1">隐私与数据</button>
       <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
       <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
       <button type="button" class="nav-item" id="category-phone" data-category="phone" aria-current="false" tabindex="-1">连接 iPhone</button>
@@ -110,6 +111,12 @@
       </section>
       <section class="setting-section" id="im-section" hidden><h2>IM 渠道</h2><p class="hint">连接你使用的聊天工具，选择同步范围与提醒方式。</p><div id="im-connection"></div><p id="im-error" role="status" aria-live="polite"></p></section>
       <section class="setting-section" id="connections-section" hidden><h2>连接与权限</h2><p class="hint">只读取你授权的目录和会话。正文可能交由设置中的模型服务处理；读取权限不授予修改或发送权限。</p><div id="connections-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
+      <section class="setting-section" id="privacy-section">
+        <h2>隐私与数据</h2>
+        <p class="hint">这里决定哪些内容会交给你在设置里选的模型服务商处理。默认只读取你自己发的内容，以及直接 @ 你的消息。</p>
+        <label class="toggle-row"><input type="checkbox" role="switch" id="profileParticipantMessages"> 让「关于我」读取会话里他人的发言</label>
+        <p class="hint">打开后，你已授权同步的会话里其他人的发言也会发送给模型服务商，用来了解你和谁协作、怎么协作。不会扩大同步范围，也不会绕过会话授权。关闭后，依赖这些发言生成的画像内容会被清除。保存并重启后生效。</p>
+      </section>
       <section class="setting-section" id="knowledge-section">
         <h2>知识库配置</h2>
         <label class="toggle-row">文字回答前查找相关记忆<input id="memory-prerecall-enabled" type="checkbox" role="switch" aria-describedby="memory-prerecall-hint"></label>

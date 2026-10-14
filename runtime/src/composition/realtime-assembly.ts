@@ -370,6 +370,7 @@ export class RealtimeAssembly {
     this.#sharedPersonal = input.sharedPersonal !== undefined
     this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
       newsLanguage: input.core.personalAgentConfig?.newsLanguage ?? 'en',
+      profileParticipantMessages: input.core.personalAgentConfig?.profileParticipantMessages === true,
       path: input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),
       userScope: input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
       pool: input.core.runtime.core.suggestions,
@@ -1415,7 +1416,7 @@ export function composeRealtime(
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?options.settings.model_base_url:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       sourceProcessingLlm:{baseUrl:local?.embedding.baseUrl??options.settings.model_base_url,apiKey:local?.embedding.apiKey??resolveModelApiKey(options.settings)??''},
       extractionFingerprint:embeddingHash('sha256').update((local?.embedding.baseUrl??options.settings.model_base_url)+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
-      personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,
+      personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,profileParticipantMessages:options.settings.profile_participant_messages,
       conversationProviders: [...new Set([...(['text','voice'] as const).map(mode=>configuredMemoryConsumer(options.settings,mode)).filter((value): value is string=>value!==undefined),configuredTaskVerifierConsumer(options.settings)])],
       consolidation:{enabled:options.settings.memory_consolidation_enabled,timezone:options.settings.memory_consolidation_timezone,hour:options.settings.memory_consolidation_hour},
       gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},

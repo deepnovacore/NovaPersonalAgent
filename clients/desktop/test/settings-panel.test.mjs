@@ -1500,3 +1500,24 @@ test('self-hosted preset import stages included endpoints until Save and clears 
   assert.equal(calls[0].settingsPatch.secrets.selfHostedLlmApiKey, '')
   assert.equal(Object.hasOwn(calls[0].settingsPatch, 'cascadedAsrProvider'), false)
 })
+
+test('the privacy switch for reading other people\'s messages renders the saved value, defaults off and saves an explicit choice', async () => {
+  assert.match(html, /<section class="setting-section" id="privacy-section">/)
+  assert.match(html, /<input type="checkbox" role="switch" id="profileParticipantMessages">/)
+  const patches = []
+  const panel = await mountSettingsPanel(publicView({}), {
+    set: async ({settingsPatch}) => {
+      patches.push(settingsPatch)
+      return publicView({...settingsPatch, settingsApplyStatus: 'applied'})
+    },
+  })
+  assert.equal(panel.node('#profileParticipantMessages').checked, false, 'nothing is read from other people unless the user opted in')
+  panel.node('#profileParticipantMessages').checked = true
+  panel.node('#profileParticipantMessages').listeners.change()
+  panel.click('#settings-save')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(patches.length, 1)
+  assert.equal(patches[0].profileParticipantMessages, true)
+  panel.push(publicView({profileParticipantMessages: false}))
+  assert.equal(panel.node('#profileParticipantMessages').checked, false)
+})

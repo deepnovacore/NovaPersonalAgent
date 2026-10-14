@@ -296,3 +296,17 @@ test('an explicit refresh replaces the draft whole, while ordinary source churn 
   assert.equal(calls,2);assert.equal(replaced?.about?.text,'Written on request');assert.equal(replaced?.work.length,0,'a manual update drops the previous draft instead of merging it')
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('a draft written while other people\'s messages were read leaves disk when that switch is off',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-participants-')),path=join(dir,'draft.json')
+ const make=(participants:boolean)=>new ProfileWarmup(path,()=>Promise.resolve(fileDraft),()=>{/* snapshot observer */},{participants})
+ let service=make(true)
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh();assert.ok(service.snapshot().draft);await service.close()
+  assert.equal((JSON.parse(await readFile(path,'utf8')) as {participants:boolean}).participants,true)
+  service=make(true);await service.open();service.update([fileA,fileB]);assert.ok(service.snapshot().draft,'with the switch still on the draft is kept');await service.close()
+  service=make(false);await service.open()
+  const disk=JSON.parse(await readFile(path,'utf8')) as {draft:unknown;participants:boolean};assert.equal(disk.draft,null,'the draft is removed from disk, not only hidden');assert.equal(disk.participants,false)
+  service.update([fileA,fileB]);assert.equal(service.snapshot().draft,null)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})

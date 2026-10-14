@@ -160,23 +160,26 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
       }
       case 'processing_stamp':result=processingStamp(db,z.array(id).min(1).max(256).parse(value.ids),z.enum(['extraction','embedding','conversation']).parse(value.purpose),id.parse(value.provider));break
       case 'profile_evidence':{
-        const q=z.object({source_prefix:z.string().min(1).startsWith('personal:').endsWith(':'),provider:id,ids:z.array(id).max(256).optional()}).strict().parse(input)
+        const q=z.object({source_prefix:z.string().min(1).startsWith('personal:').endsWith(':'),provider:id,ids:z.array(id).max(256).optional(),participants:z.boolean().optional()}).strict().parse(input)
         const records:EvidenceRecord[]=[],counts=new Map<string,number>()
         if(q.ids?.some(value=>!value.startsWith(q.source_prefix)))throw Error('STORE_INVALID_OPERATION')
         const candidates=q.ids?q.ids.map(id=>({id})):db.prepare(`SELECT id FROM memory_evidence WHERE substr(source_id,1,?)=? AND json_extract(payload_json,'$.source_kind') IN ('im','mail') AND (
           (json_extract(payload_json,'$.source_kind')='im' AND (json_extract(payload_json,'$.source_metadata.sender_id')=json_extract(payload_json,'$.source_metadata.recipient_id') OR json_extract(payload_json,'$.source_metadata.mention')='direct')) OR
           (json_extract(payload_json,'$.source_kind')='mail' AND json_extract(payload_json,'$.source_metadata.sender_id')=json_extract(payload_json,'$.source_metadata.account_id')))
           ORDER BY json_extract(payload_json,'$.observed_at') DESC,id DESC LIMIT 1024`).all(q.source_prefix.length,q.source_prefix)
-        for(const row of candidates){
+        // Other people's messages are read only when the user switched that on, and from their own query so they never crowd out the user's messages.
+        const others=q.participants&&!q.ids?db.prepare(`SELECT id FROM memory_evidence WHERE substr(source_id,1,?)=? AND json_extract(payload_json,'$.source_kind')='im' AND json_extract(payload_json,'$.source_metadata.sender_id') IS NOT json_extract(payload_json,'$.source_metadata.recipient_id') AND json_extract(payload_json,'$.source_metadata.mention') IS NOT 'direct' ORDER BY json_extract(payload_json,'$.observed_at') DESC,id DESC LIMIT 1024`).all(q.source_prefix.length,q.source_prefix):[]
+        for(const row of [...candidates,...others]){
           const record=effectiveEvidence(db,String(row.id),{purpose:'extraction',provider:q.provider})
           const metadata=record?.source_metadata
           const own=record?.source_kind==='im'?metadata?.sender_id===metadata?.recipient_id:record?.source_kind==='mail'&&metadata?.sender_id===metadata?.account_id
-          const bucket=record?.source_kind+':'+(own?'self':'addressed')
+          const direct=record?.source_kind==='im'&&metadata?.mention==='direct'
+          const bucket=record?.source_kind+':'+(own?'self':direct||record?.source_kind==='mail'?'addressed':'participant')
           const head=record&&db.prepare('SELECT evidence_id FROM memory_message_heads WHERE key=?').get(createHash('sha256').update(canonicalJson([record.source_id,record.locator])).digest('hex'))
           const superseded=head?head.evidence_id!==record?.id:record&&db.prepare("SELECT 1 FROM memory_evidence WHERE source_id=? AND json_extract(payload_json,'$.locator')=? AND rowid>(SELECT rowid FROM memory_evidence WHERE id=?) LIMIT 1").get(record.source_id,record.locator,record.id)
-          if(superseded||!record?.raw_text||!metadata||(!own&&!(record.source_kind==='im'&&metadata.mention==='direct'))||Date.parse(record.observed_at)>Date.now()||(!q.ids&&(counts.get(bucket)??0)>=32))continue
+          if(superseded||!record?.raw_text||!metadata||(!own&&!direct&&!(q.participants&&record.source_kind==='im'))||Date.parse(record.observed_at)>Date.now()||(!q.ids&&(counts.get(bucket)??0)>=32))continue
           records.push(record);counts.set(bucket,(counts.get(bucket)??0)+1)
-          if(!q.ids&&records.length===96)break
+          if(!q.ids&&records.length===(q.participants?128:96))break
         }
         result=records;break
       }

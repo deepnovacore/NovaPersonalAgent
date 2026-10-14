@@ -1374,4 +1374,10 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "@我": "Mentioned you",
   "自动记录": "Recorded automatically",
   "来源有更新": "Source updated",
+  "隐私与数据": "Privacy & data",
+  "这里决定哪些内容会交给你在设置里选的模型服务商处理。默认只读取你自己发的内容，以及直接 @ 你的消息。": "These options decide what is handed to the model provider you chose in Settings. By default only what you wrote yourself and messages that @-mention you directly are read.",
+  "让「关于我」读取会话里他人的发言": "Let About me read what other people say in your chats",
+  "打开后，你已授权同步的会话里其他人的发言也会发送给模型服务商，用来了解你和谁协作、怎么协作。不会扩大同步范围，也不会绕过会话授权。关闭后，依赖这些发言生成的画像内容会被清除。保存并重启后生效。": "When on, what other people say in the chats you already allowed to sync is also sent to the model provider, to understand who you work with and how. It does not widen the sync scope or bypass a chat's permission. When off, profile content that relied on those messages is removed. Takes effect after saving and restarting.",
+  "立即更新": "Update now",
+  "正在更新…": "Updating…",
 })

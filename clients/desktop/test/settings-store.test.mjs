@@ -116,6 +116,7 @@ test('the default settings are the documented schema', () => {
     clarificationDepth: 'balanced',
     planReadback: 'summary',
     generatePlan: true,
+    profileParticipantMessages: false,
     plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
@@ -302,6 +303,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     clarificationDepth: 'balanced',
     planReadback: 'summary',
     generatePlan: true,
+    profileParticipantMessages: false,
     plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
@@ -394,6 +396,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'planReadback',
     'plannerModel',
     'proactivity',
+    'profileParticipantMessages',
     'progressBubbles',
     'secrets',
     'selfHostedAsrUrl', 'selfHostedLlmBaseUrl', 'selfHostedTtsUrl',
@@ -602,6 +605,7 @@ test('publicSettings never carries the secrets object', () => {
     'planReadback',
     'plannerModel',
     'proactivity',
+    'profileParticipantMessages',
     'progressBubbles',
     'selfHostedAsrUrl', 'selfHostedLlmBaseUrl', 'selfHostedTtsUrl',
     'startListeningOnLaunch',
@@ -1355,4 +1359,17 @@ test('Gemini speech selections and independent model/voice settings survive pers
  const exposed=backendSettings(value)
  assert.equal(exposed.cascadedAsrProvider,'gemini');assert.equal(exposed.cascadedTtsProvider,'gemini')
  assert.equal(exposed.geminiAsrModel,'asr-custom');assert.equal(exposed.geminiTtsModel,'tts-custom');assert.equal(exposed.geminiTtsVoice,'Puck')
+})
+
+test('reading other people\'s messages for the profile is off by default and only an explicit boolean turns it on', async () => {
+  assert.equal(normalizeSettings({}).profileParticipantMessages, false)
+  const on = applySettingsUpdate(DEFAULT_SETTINGS, {profileParticipantMessages: true})
+  assert.equal(publicSettings(on).profileParticipantMessages, true)
+  assert.equal(backendSettings(on).profileParticipantMessages, true)
+  for (const value of ['true', 1, null, 'yes']) {
+    assert.equal(applySettingsUpdate(DEFAULT_SETTINGS, {profileParticipantMessages: value}).profileParticipantMessages, false)
+    assert.equal(normalizeSettings({profileParticipantMessages: value}).profileParticipantMessages, false)
+  }
+  assert.equal(applySettingsUpdate(on, {profileParticipantMessages: false}).profileParticipantMessages, false)
+  assert.equal(applySettingsUpdate(on, {language: 'en'}).profileParticipantMessages, true, 'an unrelated update keeps the choice')
 })

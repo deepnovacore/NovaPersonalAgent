@@ -13,10 +13,10 @@ export type ProfileDraft=z.infer<typeof profileDraftSchema>
 export type ProfileInput=Pick<MemoryEntry,'id'|'version'|'content'|'origin'> & {observed_at?:string;source?:{project:string;document:string;kind?:'im'|'mail';relation?:'self'|'addressed'|'participant';sender_id?:string;sender_name?:string;thread_id?:string;message_id?:string;parent_id?:string;root_id?:string;upper_message_id?:string;recipient_ids?:string[];mention_ids?:string[]}}
 export type ProfileGenerator=(entries:readonly ProfileInput[],signal:AbortSignal)=>Promise<z.input<typeof profileDraftSchema>>
 export interface ProfileOutcome {outcome:'ok'|'timeout'|'aborted'|'schema'|'evidence'|'consent'|'provider'|'persist';latency_ms:number;items:number}
-export interface ProfileWarmupOptions {report?:(outcome:ProfileOutcome)=>void;timeoutMs?:number;backoffMs?:readonly number[];minIntervalMs?:number}
+export interface ProfileWarmupOptions {participants?:boolean;report?:(outcome:ProfileOutcome)=>void;timeoutMs?:number;backoffMs?:readonly number[];minIntervalMs?:number}
 /** Raise this whenever the way a profile is generated changes: drafts written by an older pipeline are then replaced whole instead of being mixed into the new one. */
 export const PROFILE_GENERATION_VERSION='understanding-v5'
-const diskSchema=z.object({key:z.string(),generation_version:z.string().default(''),draft:profileDraftSchema.nullable(),started_at:z.number().nonnegative().default(0),generated_at:z.number().nonnegative().default(0),stage:z.number().int().min(0).max(3).default(0)})
+const diskSchema=z.object({key:z.string(),generation_version:z.string().default(''),participants:z.boolean().default(false),draft:profileDraftSchema.nullable(),started_at:z.number().nonnegative().default(0),generated_at:z.number().nonnegative().default(0),stage:z.number().int().min(0).max(3).default(0)})
 const SOURCE_STAGES=[5*60_000,30*60_000,4*60*60_000] as const
 interface Ref {entry_id:string;version:ProfileInput['version']}
 const inputKey=(entries:readonly ProfileInput[])=>entries.length?createHash('sha256').update(JSON.stringify({generation_version:PROFILE_GENERATION_VERSION,entries})).digest('hex'):''
@@ -30,23 +30,26 @@ const classify=(error:unknown,signal:AbortSignal,controller:AbortController):Pro
 }
 /** Disposable suggestions only: never writes profile facts, news preferences, or consent. */
 export class ProfileWarmup{
- #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#cache:z.infer<typeof diskSchema>={key:'',generation_version:PROFILE_GENERATION_VERSION,draft:null,started_at:0,generated_at:0,stage:0}
+ #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#cache:z.infer<typeof diskSchema>={key:'',generation_version:PROFILE_GENERATION_VERSION,participants:false,draft:null,started_at:0,generated_at:0,stage:0}
  #entries:ProfileInput[]=[];#eligible:ProfileInput[]=[];#key='';#opened=false
  #abort=new AbortController();#run:Promise<void>|undefined;#runEntries:ProfileInput[]=[];#writes:Promise<void>=Promise.resolve()
  #stale=false;#timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey='';#withdrawals=0;#withdrawnDuringRun=new Set<string>()
- readonly #timeoutMs:number;readonly #backoffMs:readonly number[];readonly #minIntervalMs:number;readonly #report:((outcome:ProfileOutcome)=>void)|undefined
+ readonly #participants:boolean;readonly #timeoutMs:number;readonly #backoffMs:readonly number[];readonly #minIntervalMs:number;readonly #report:((outcome:ProfileOutcome)=>void)|undefined
  constructor(path:string,readonly generate:ProfileGenerator|undefined,readonly changed:()=>void,options:ProfileWarmupOptions={}){
-  this.#store=new BoundedJsonStore(path,diskSchema);this.#report=options.report
+  this.#store=new BoundedJsonStore(path,diskSchema);this.#report=options.report;this.#participants=options.participants===true
   this.#timeoutMs=options.timeoutMs??180_000;this.#backoffMs=options.backoffMs??[30_000,120_000,600_000];this.#minIntervalMs=options.minIntervalMs??300_000
  }
  async open(){
-  this.#cache=await this.#store.read(this.#cache);this.#lastRunAt=this.#cache.generated_at
+  this.#cache=await this.#store.read(this.#cache)
+  // A draft that was written while other people's messages were read cannot outlive that switch: facts grounded in them leave disk with it.
+  if(this.#cache.participants&&!this.#participants){this.#cache={...this.#cache,key:'',draft:null,participants:false,started_at:0,generated_at:0,stage:0};await this.#persist(this.#cache)}
+  this.#lastRunAt=this.#cache.generated_at
   // A draft written by an older pipeline stays visible until the new pipeline replaces it whole; with no draft there is nothing to replace, so the ordinary schedule applies.
   this.#stale=this.#cache.draft!==null&&this.#cache.generation_version!==PROFILE_GENERATION_VERSION;this.#opened=true
  }
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#abort.abort();await this.#run;await this.#writes}
  #persist(cache:z.infer<typeof diskSchema>){const write=this.#writes.then(()=>this.#store.write(cache));this.#writes=write.catch(()=>{/* The caller reports a failed persistence attempt. */});return write}
- async clear(){this.invalidate();this.#cache={key:'',generation_version:PROFILE_GENERATION_VERSION,draft:null,started_at:0,generated_at:0,stage:0};await this.#run;await this.#persist(this.#cache)}
+ async clear(){this.invalidate();this.#cache={key:'',generation_version:PROFILE_GENERATION_VERSION,participants:false,draft:null,started_at:0,generated_at:0,stage:0};await this.#run;await this.#persist(this.#cache)}
  // A source file keeps its facts while it is re-read (its version moves); a stated memory must match exactly because a correction replaces it.
  #grounded(ref:Ref,entries:readonly ProfileInput[]){return entries.some(e=>e.id===ref.entry_id&&(e.source&&!e.source.kind?true:(e.source!==undefined||e.origin==='stated')&&e.version===ref.version))}
  #prune(draft:ProfileDraft,entries:readonly ProfileInput[]):ProfileDraft|null{
@@ -148,7 +151,7 @@ export class ProfileWarmup{
     if(!this.#opened)return
     if(!current){this.#failures=0;this.#failedKey='';return}
     // Installed before the write so a withdrawal arriving mid-write prunes this draft and queues its own write after it.
-    const previous=this.#cache,cache={key,generation_version:PROFILE_GENERATION_VERSION,draft:current,started_at:this.#cache.started_at,generated_at:started,stage:this.#cache.started_at?Math.max(this.#cache.stage,SOURCE_STAGES.filter(delay=>started>=this.#cache.started_at+delay).length):0},withdrawals=this.#withdrawals;this.#cache=cache
+    const previous=this.#cache,cache={key,generation_version:PROFILE_GENERATION_VERSION,participants:this.#participants,draft:current,started_at:this.#cache.started_at,generated_at:started,stage:this.#cache.started_at?Math.max(this.#cache.stage,SOURCE_STAGES.filter(delay=>started>=this.#cache.started_at+delay).length):0},withdrawals=this.#withdrawals;this.#cache=cache
     try{await this.#persist(cache)}catch{
      // A rollback must not bring back facts withdrawn since the previous draft was captured.
      if(this.#cache===cache){const kept=withdrawals===this.#withdrawals?previous.draft:previous.draft&&this.#prune(previous.draft,this.#eligible);this.#cache={...previous,key:kept?previous.key:'',draft:kept}}
