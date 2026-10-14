@@ -243,7 +243,7 @@ export function createParticleCoreVisual(canvas, options = {}) {
     ctx.restore()
   }
   function refresh() {
-    if (destroyed) return
+    if (destroyed || doc.hidden) return
     draw()
     schedule()
   }
@@ -286,7 +286,7 @@ export function createParticleCoreVisual(canvas, options = {}) {
   }
   return {
     setState(name, { codexWorking = false } = {}) {
-      if (destroyed) return
+      if (destroyed || (state === name && working === codexWorking)) return
       state = name
       working = codexWorking
       refresh()

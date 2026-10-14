@@ -1,11 +1,19 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+let lastVisorState = null
+
 contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
   visor: Object.freeze({
     snapshot:()=>ipcRenderer.invoke('nova:visor:get'),
     configure:patch=>ipcRenderer.invoke('nova:visor:configure',patch),
-    report:value=>ipcRenderer.send('nova:visor:state',value),
-    onRefresh:callback=>{const listener=()=>callback();ipcRenderer.on('nova:visor:refresh',listener);return ()=>ipcRenderer.removeListener('nova:visor:refresh',listener)},
+    report:value=>{
+      const state = {state:value.state,muted:value.muted===true,activated:value.activated===true}
+      const key = JSON.stringify(state)
+      if (key === lastVisorState) return
+      lastVisorState = key
+      ipcRenderer.send('nova:visor:state',state)
+    },
+    onRefresh:callback=>{const listener=()=>{lastVisorState=null;callback()};ipcRenderer.on('nova:visor:refresh',listener);return ()=>ipcRenderer.removeListener('nova:visor:refresh',listener)},
   }),
   personal: Object.freeze({
     openArticle: url => ipcRenderer.invoke('nova:personal:article', url),

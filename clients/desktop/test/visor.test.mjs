@@ -48,3 +48,20 @@ test('Visor settings and reports use the published desktop bridge after the app 
  assert.match(orb,/window\.novaPersonalAgentDesktop\?\.visor\?\.report/)
  assert.match(main,/onOrb:\(\)=>requestPresentation\('orb'\)/)
 })
+
+test('orb preload sends only changed Visor state and refresh resends the current state', async () => {
+ const {readFile}=await import('node:fs/promises'),{default:vm}=await import('node:vm')
+ let bridge
+ const sent=[],listeners=new Map()
+ const ipcRenderer={send:(...args)=>sent.push(args),on:(name,fn)=>listeners.set(name,fn),removeListener(){}}
+ vm.runInNewContext(await readFile(new URL('../src/preload/preload.cjs',import.meta.url),'utf8'),{
+  require:()=>({contextBridge:{exposeInMainWorld:(_name,value)=>{bridge=value}},ipcRenderer}),process:{argv:[]},
+ })
+ const state={state:'listening',muted:false,activated:true}
+ bridge.visor.onRefresh(()=>bridge.visor.report(state))
+ for(let i=0;i<200;i++)bridge.visor.report({...state})
+ assert.equal(sent.length,1)
+ bridge.visor.report({...state,muted:true});assert.equal(sent.length,2)
+ listeners.get('nova:visor:refresh')();assert.equal(sent.length,3)
+ bridge.visor.report({...state});assert.equal(sent.length,3)
+})

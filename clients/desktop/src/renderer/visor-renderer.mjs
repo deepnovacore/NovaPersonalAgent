@@ -1,3 +1,6 @@
+import {t,setLanguage,localizeDocument} from './locale.mjs'
+setLanguage(window.visor.language)
+localizeDocument(document)
 import {compactOrbLabel} from './state.mjs'
 const $=id=>document.getElementById(id),root=$('visor'),svgNS='http://www.w3.org/2000/svg'
 function path(group,d,kind=''){const node=document.createElementNS(svgNS,'path');node.setAttribute('d',d);if(kind)node.setAttribute('class',kind);group.append(node)}
@@ -27,7 +30,7 @@ frame();fitRails();addEventListener('resize',()=>{frame();fitRails()})
 const railObserver=new ResizeObserver(fitRails)
 document.querySelectorAll('.rail').forEach(rail=>railObserver.observe(rail))
 const history=[];let lastSample=0,lastEnabled=false,animationTimer,preferences={},ai={},raf=0,lastFrame=0,phase=0
-const stateNames={idle:'待机',listening:'监听中',thinking:'思考中',speaking:'回答中',error:'连接异常',sleeping:'休眠',muted:'已闭麦',connecting:'连接中'}
+const stateNames={idle:t('待机'),listening:t('监听中'),thinking:t('思考中'),speaking:t('回答中'),error:t('连接异常'),sleeping:t('休眠'),muted:t('已闭麦'),connecting:t('连接中')}
 const text=(id,value)=>$(id).textContent=value
 const count=v=>Number.isFinite(v)?new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1}).format(v):'—'
 const percent=v=>Number.isFinite(v)?`${Math.round(v)}%`:'—'
@@ -40,12 +43,12 @@ function update(data){
  if(preferences.enabled&&!lastEnabled&&preferences.motion){root.classList.remove('assembling');void root.offsetWidth;root.classList.add('assembling');clearTimeout(animationTimer);animationTimer=setTimeout(()=>root.classList.remove('assembling'),2200)}
  lastEnabled=preferences.enabled;text('mode-label',preferences.mode==='focus'?'FOCUS':'SHOWCASE')
  const h=data.hardware
- if(h){text('cpu',percent(h.cpu));text('ram',`${(h.memoryUsed/2**30).toFixed(1)} / ${(h.memoryTotal/2**30).toFixed(0)} GB`);text('disk',percent(h.disk));text('battery',h.battery?percent(h.battery.percent):'—');text('battery-detail',h.battery?(h.battery.charging?'接通电源':'使用电池'):'无电池或暂不可用');$('ram-bar').style.width=`${100*h.memoryUsed/h.memoryTotal}%`;$('disk-bar').style.width=`${h.disk??0}%`;text('hardware-status',Date.now()-h.updatedAt<6000?'LIVE · 2s':'DATA DELAYED');if(h.updatedAt!==lastSample){lastSample=h.updatedAt;if(Number.isFinite(h.cpu))history.push(h.cpu);if(history.length>40)history.shift();$('cpu-graph').setAttribute('d',history.map((v,i)=>`${i?'L':'M'} ${i*180/39} ${30-v*.28}`).join(' '))}}
+ if(h){text('cpu',percent(h.cpu));text('ram',`${(h.memoryUsed/2**30).toFixed(1)} / ${(h.memoryTotal/2**30).toFixed(0)} GB`);text('disk',percent(h.disk));text('battery',h.battery?percent(h.battery.percent):'—');text('battery-detail',h.battery?(h.battery.charging?t('接通电源'):t('使用电池')):t('无电池或暂不可用'));$('ram-bar').style.width=`${100*h.memoryUsed/h.memoryTotal}%`;$('disk-bar').style.width=`${h.disk??0}%`;text('hardware-status',Date.now()-h.updatedAt<6000?'LIVE · 2s':'DATA DELAYED');if(h.updatedAt!==lastSample){lastSample=h.updatedAt;if(Number.isFinite(h.cpu))history.push(h.cpu);if(history.length>40)history.shift();$('cpu-graph').setAttribute('d',history.map((v,i)=>`${i?'L':'M'} ${i*180/39} ${30-v*.28}`).join(' '))}}
  const usage=ai.usage,rows=usage?.rows??[]
  text('requests',count(usage?.requests));text('input',rows.some(r=>Number.isFinite(r.inputTokens))?count(rows.reduce((s,r)=>s+(r.inputTokens??0),0)):'—');text('output',rows.some(r=>Number.isFinite(r.outputTokens))?count(rows.reduce((s,r)=>s+(r.outputTokens??0),0)):'—')
- text('cost',usage?.pricedReports>0?`¥${usage.costCny.toFixed(3)}`:'—');text('cost-detail',usage?.unpricedReports||usage?.missingReports?'部分用量未计价 · 已知部分估算':'接口报告用量 · 费用估算')
- const status=ai.backend!=='connected'?'未连接':ai.muted?'已闭麦':stateNames[ai.state]??compactOrbLabel(ai.state)
- text('ai-state',status);text('core-state',status);text('microphone',`MIC · ${ai.muted?'MUTED':ai.activated?'ACTIVE':'OFF'}`);text('model',ai.model||'未选择');text('clock',new Date().toLocaleTimeString('en-GB',{hour12:false}))
+ text('cost',usage?.pricedReports>0?`¥${usage.costCny.toFixed(3)}`:'—');text('cost-detail',usage?.unpricedReports||usage?.missingReports?t('部分用量未计价 · 已知部分估算'):t('接口报告用量 · 费用估算'))
+ const status=ai.backend!=='connected'?t('未连接'):ai.muted?t('已闭麦'):stateNames[ai.state]??compactOrbLabel(ai.state)
+ text('ai-state',status);text('core-state',status);text('microphone',`MIC · ${ai.muted?'MUTED':ai.activated?'ACTIVE':'OFF'}`);text('model',ai.model||t('未选择'));text('clock',new Date().toLocaleTimeString('en-GB',{hour12:false}))
  draw(performance.now());if(preferences.enabled&&preferences.motion&&!raf)raf=requestAnimationFrame(loop)
 }
 const canvas=$('core'),ctx=canvas.getContext('2d')
@@ -58,4 +61,4 @@ function draw(now){
 }
 function loop(now){raf=0;if(!preferences.enabled||!preferences.motion||document.hidden)return;if(now-lastFrame>1000/(preferences.mode==='focus'?15:30)){phase+=Math.min(.1,(now-lastFrame)/1000);lastFrame=now;draw(now)}raf=requestAnimationFrame(loop)}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&preferences.motion&&!raf)raf=requestAnimationFrame(loop)})
-window.visor.onChanged(update);window.visor.snapshot().then(update).catch(()=>text('ai-state','状态不可用'))
+window.visor.onChanged(update);window.visor.snapshot().then(update).catch(()=>text('ai-state',t('状态不可用')))

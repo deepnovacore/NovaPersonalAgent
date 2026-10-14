@@ -34,7 +34,7 @@ test('display changes relayout both production windows and dispose removes liste
     loadURL(){return Promise.resolve()} setBounds(value){this.bounds=value}
     isDestroyed(){return !!this.destroyed} destroy(){this.destroyed=true}
   }
-  const context=vm.createContext({BrowserWindow:Window,screen,nativeTheme,visorLayout,
+  const context=vm.createContext({BrowserWindow:Window,screen,nativeTheme,visorLayout,currentLanguage:()=> 'zh-CN',
     createHardwareSampler:()=>async()=>null,visorPreferences:()=>({enabled:true}),readFileSync:()=> '{}',
     setTimeout,clearTimeout,setInterval:()=>1,clearInterval,console})
   vm.runInContext(source+'; globalThis.visor=createVisor({readAI:()=>({})}); visor.start()',context)

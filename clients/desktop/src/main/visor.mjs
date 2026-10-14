@@ -2,6 +2,7 @@ import {BrowserWindow, screen, nativeTheme} from 'electron'
 import {readFileSync,writeFileSync,renameSync,mkdirSync} from 'node:fs'
 import {dirname,resolve} from 'node:path'
 import {createHardwareSampler,visorPreferences} from './visor-data.mjs'
+import {currentLanguage} from '../renderer/locale.mjs'
 import {visorLayout} from './visor-layout.mjs'
 
 export function createVisor({file,partition,preload,readAI,onOrb,onError = console.error}) {
@@ -29,7 +30,7 @@ export function createVisor({file,partition,preload,readAI,onOrb,onError = conso
   const make = (page,interactive) => {
     const w = new BrowserWindow({show:false,frame:false,transparent:true,backgroundColor:'#00000000',hasShadow:false,
       resizable:false,movable:false,fullscreenable:false,skipTaskbar:true,focusable:interactive,width:420,height:48,
-      webPreferences:{preload,partition,contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,backgroundThrottling:true}})
+      webPreferences:{preload,partition,additionalArguments:[`--nova-language=${currentLanguage()}`],contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,backgroundThrottling:true}})
     w.setAlwaysOnTop(true,'floating')
     w.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:false})
     if (!interactive) w.setIgnoreMouseEvents(true)

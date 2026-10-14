@@ -1,5 +1,6 @@
 const {contextBridge,ipcRenderer} = require('electron')
 contextBridge.exposeInMainWorld('visor',Object.freeze({
+  language:process.argv.includes('--nova-language=en')?'en':'zh-CN',
   snapshot:()=>ipcRenderer.invoke('nova:visor:get'),
   configure:patch=>ipcRenderer.invoke('nova:visor:configure',patch),
   orb:()=>ipcRenderer.invoke('nova:visor:orb'),

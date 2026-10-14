@@ -118,3 +118,20 @@ test('reduced motion draws once without starting an animation loop', () => {
   assert.equal(f.pending.size, 0)
   f.visual.destroy()
 })
+
+test('audio frames do not redraw an unchanged state or a hidden particle surface', () => {
+ for(const options of [{},{reducedMotion:true},{highContrast:true},{staticPreview:true}]) {
+  const f=fixture(options)
+  f.visual.setState('speaking')
+  const before=f.colors.length
+  for(let i=0;i<100;i++){f.visual.setLevel(i/100);f.visual.setState('speaking')}
+  assert.equal(f.colors.length,before,'same-state audio updates wait for the animation scheduler')
+  f.doc.hidden=true;f.listeners.get('visibilitychange')()
+  f.visual.setState('thinking',{codexWorking:true})
+  assert.equal(f.colors.length,before,'hidden surfaces retain state without painting')
+  assert.equal(f.pending.size,0)
+  f.doc.hidden=false;f.listeners.get('visibilitychange')()
+  assert.ok(f.colors.length>before,'visible surfaces redraw the latest state')
+  f.visual.destroy()
+ }
+})

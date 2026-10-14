@@ -890,12 +890,12 @@ function initializeVisor(launchId) {
 }
 
 function toggleVisor() {
-  try { visor?.toggle() } catch { dialog.showErrorBox('Nova Visor', '无法保存主题设置，请检查本地文件权限。') }
+  try { visor?.toggle() } catch { dialog.showErrorBox('Nova Visor', t('无法保存主题设置，请检查本地文件权限。')) }
 }
 
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
-    { label: 'Nova Visor · 展开 / 收起', click: toggleVisor },
+    { label: t('Nova Visor · 展开 / 收起'), click: toggleVisor },
     { label: t("显示模式"), submenu: [
       { label: t("工作台"), type: 'radio', checked: presentationMode === 'workbench', click: () => requestPresentation('workbench') },
       { label: t("悬浮球"), type: 'radio', checked: presentationMode === 'orb', click: () => requestPresentation('orb') },
@@ -967,7 +967,7 @@ function createTray() {
   const next = new Tray(trayImage())
   next.setToolTip('Nova Personal Agent Desktop')
   next.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Nova Visor · 展开 / 收起', click: toggleVisor },
+    { label: t('Nova Visor · 展开 / 收起'), click: toggleVisor },
     ...[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
     { label: t("退出"), click: () => app.quit() },

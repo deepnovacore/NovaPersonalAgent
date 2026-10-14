@@ -7,7 +7,10 @@ import {pathToFileURL} from 'node:url'
 import assert from 'node:assert/strict'
 import {registerAppScheme,installAppProtocol,buildRendererAssetGraph} from '../src/main/app-protocol.mjs'
 import {createVisor} from '../src/main/visor.mjs'
+import {setLanguage} from '../src/renderer/locale.mjs'
 import {visorLayout} from '../src/main/visor-layout.mjs'
+const english=process.argv.includes('--english')
+setLanguage(english?'en':'zh-CN')
 const fixture=mkdtempSync(join(tmpdir(),'nova-visor-smoke-'))
 app.setPath('userData',join(fixture,'profile'));registerAppScheme(protocol)
 app.on('window-all-closed',()=>{})
@@ -29,8 +32,10 @@ async function run(){
  const [hud,controls]=visor.windows()
  for(const w of [hud,controls]){w.webContents.on('console-message',details=>{if(details.level==='error')errors.push(details.message)});w.webContents.on('preload-error',(_e,_p,e)=>errors.push(e.message))}
  await delay(3200)
+ assert.equal(await hud.webContents.executeJavaScript('document.documentElement.lang'),english?'en':'zh-CN')
+ assert.equal(await controls.webContents.executeJavaScript("document.getElementById('focus').textContent"),english?'Focus':'专注')
  assert.equal(hud.isVisible(),true);assert.equal(hud.isFocusable(),false)
- assert.equal(await hud.webContents.executeJavaScript("document.querySelector('#ai-state').textContent"),'未连接')
+ assert.equal(await hud.webContents.executeJavaScript("document.querySelector('#ai-state').textContent"),english?'Disconnected':'未连接')
  assert.match(await hud.webContents.executeJavaScript("document.querySelector('#ram').textContent"),/GB/)
  const display=screen.getPrimaryDisplay(),expected=visorLayout(display)
  assert.deepEqual(hud.getBounds(),expected.hud)
@@ -64,8 +69,10 @@ async function run(){
  await delay(150);assert.equal(visor.preferences().mode,'focus')
  await controls.webContents.executeJavaScript("document.getElementById('orb').click()")
  await delay(100);assert.equal(orbClicks,1)
+ ai={...ai,backend:'connected',state:'inactive'}
+ await delay(2100);assert.equal(await hud.webContents.executeJavaScript("document.querySelector('#ai-state').textContent"),english?'Disabled':'未启用')
  ai={...ai,backend:'connected',state:'muted',muted:true,activated:true}
- await delay(2100);assert.equal(await hud.webContents.executeJavaScript("document.querySelector('#ai-state').textContent"),'已闭麦')
+ await delay(2100);assert.equal(await hud.webContents.executeJavaScript("document.querySelector('#ai-state').textContent"),english?'Muted':'已闭麦')
  visor.configure({motion:false,hardware:false,ai:false,opacity:.5})
  await delay(100);assert.equal(await hud.webContents.executeJavaScript("document.querySelector('#visor').classList.contains('hardware-hidden')"),true)
  assert.equal(JSON.parse(readFileSync(file)).opacity,.5)
