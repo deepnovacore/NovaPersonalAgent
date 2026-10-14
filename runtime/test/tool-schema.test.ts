@@ -68,7 +68,7 @@ test('compiled tool schemas preserve the frozen contract with the native persona
     assert.ok(expected !== undefined, scenario.id)
 
     // The frozen fixtures remain historical evidence. Only the documented native recall
-    // description/source extension is projected away; all other schema fields still compare.
+    // description/source/filter extension is projected away; all other schema fields still compare.
     const legacySchemas = structuredClone(compiled.schemas).filter(schema => record(record(schema).function).name !== 'memory__evidence')
     for (const schema of legacySchemas) {
       const fn = record(record(schema).function)
@@ -76,6 +76,11 @@ test('compiled tool schemas preserve the frozen contract with the native persona
       fn.description = '从当前会话的历史记忆中查找与用户问题相关的证据'
       const properties = record(record(fn.parameters).properties)
       delete properties.source
+      const filter=record(properties.source_filter),fields=record(filter.properties)
+      assert.equal(filter.additionalProperties,false)
+      assert.deepEqual(record(fields.kind).enum,['im','mail','calendar','file'])
+      assert.equal(record(fields.last_days).maximum,365)
+      delete properties.source_filter
       const parameters = record(fn.parameters)
       assert.ok(Array.isArray(parameters.required))
       parameters.required = parameters.required.filter(field => field !== 'source')

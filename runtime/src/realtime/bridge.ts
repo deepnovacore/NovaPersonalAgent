@@ -1,4 +1,5 @@
 import type {UnifiedRetrieval} from '../memory/retrieval.js'
+import {sourceFilterSchema,type SourceFilter} from '../memory/source-retrieval.js'
 /**
  * Translate admitted realtime tool proposals into existing Runtime dispatch.
  *
@@ -303,10 +304,11 @@ export class RealtimeRuntimeBridge {
     if (!request.ok) return request.acceptance
     if (request.source === 'session') return this.#acceptMemoryRecall(call, options.originRef ?? null)
     if (this.#retrieval) {
-      const result = await this.#retrieval.recall(request.query, {consumer:this.#conversationConsumer,scope: request.scope, limit: 8, ...(options.signal ? {signal: options.signal} : {})})
+      const result = await this.#retrieval.recall(request.query, {consumer:this.#conversationConsumer,scope: request.scope, limit: 8, ...(request.sourceFilter ? {sourceFilter:request.sourceFilter} : {}), ...(options.signal ? {signal: options.signal} : {})})
       return this.#inlineToolResult(call, JSON.stringify(result), result.state, {hit_count: result.entries.length + result.snippets.length, degraded: result.degraded})
     }
     if (request.source !== 'personal') return this.#refused(call, 'unsupported_tool')
+    if (request.sourceFilter) return this.#refused(call, 'source_retrieval_unavailable')
 
     const startedAt = this.#runtime.clock.now()
     const digest = createHmac('sha256', this.#queryDigestKey).update(request.query, 'utf8').digest('hex')
@@ -422,7 +424,7 @@ export class RealtimeRuntimeBridge {
   #memoryRecallRequest(
     call: ToolCallReady,
     originRef: string | null,
-  ): {readonly ok: true; readonly query: string; readonly scope: RecallScope; readonly source: 'session'|'personal'; readonly originRef: string}
+  ): {readonly ok: true; readonly query: string; readonly scope: RecallScope; readonly source: 'session'|'personal'; readonly originRef: string;readonly sourceFilter?:SourceFilter}
     | {readonly ok: false; readonly acceptance: ToolAcceptance} {
     const schema = this.#wireParams(call.name)
     if (schema === null || !validParams(call.arguments, schema)) {
@@ -446,10 +448,13 @@ export class RealtimeRuntimeBridge {
       || stripLikePython(query) === ''
       || (scope !== 'recent' && scope !== 'any')
       || (source !== 'session' && source !== 'personal')
+      || (source === 'session' && call.arguments.source_filter !== undefined)
     ) {
       return {ok: false, acceptance: this.#refused(call, 'invalid_params')}
     }
-    return {ok: true, query, scope, source, originRef: resolvedOriginRef}
+    const filter=sourceFilterSchema.optional().safeParse(call.arguments.source_filter)
+    if(!filter.success)return {ok:false,acceptance:this.#refused(call,'invalid_params')}
+    return {ok: true, query, scope, source, originRef: resolvedOriginRef,...(filter.data?{sourceFilter:filter.data}:{})}
   }
 
   #personalMemoryResult(

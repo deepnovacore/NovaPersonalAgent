@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto'
+import {sourceFilterSchema} from '../memory/source-retrieval.js'
 import {z} from 'zod'
 import {appContextArguments} from '../core/schedule-tools.js'
 import type {CompiledTools,ToolBinding} from '../core/tool-schema.js'
@@ -9,7 +10,7 @@ import type {UnifiedRetrieval} from '../memory/retrieval.js'
 import type {PersonalAgentHost} from './host.js'
 import type {ScheduledRunGrant} from './scheduled-run-authority.js'
 import type {ScheduledResponseScope} from './scheduled-response-scope.js'
-const recallSchema=z.object({query:z.string().trim().min(1).max(512),scope:z.enum(['recent','any']),source:z.literal('personal').optional()}).strict()
+const recallSchema=z.object({query:z.string().trim().min(1).max(512),scope:z.enum(['recent','any']),source:z.literal('personal').optional(),source_filter:sourceFilterSchema.optional()}).strict()
 const evidenceSchema=z.object({evidence_id:z.string().min(1).max(512)}).strict()
 export function scheduledToolResult(call:ToolCallReady,data:unknown,code='ok',accepted=true,maxBytes=32768):ToolAcceptance{
  const content=JSON.stringify(data)
@@ -42,7 +43,7 @@ export class ScheduledToolRuntime{
     let result,refs:string[]
     if(call.name==='memory__recall'){
      if(!context.memory&&!context.knowledge)throw Error('context_not_authorized')
-     const args=recallSchema.parse(call.arguments),found=await retrieval.recall(args.query,{scope:args.scope,consumer:grant.consumer,limit:8})
+     const args=recallSchema.parse(call.arguments),found=await retrieval.recall(args.query,{scope:args.scope,consumer:grant.consumer,limit:8,...(args.source_filter?{sourceFilter:args.source_filter}:{})})
      result={...found,entries:context.memory?found.entries:[],snippets:context.knowledge?found.snippets:[]}
      refs=[...new Set([...result.entries.flatMap(entry=>entry.evidence_refs),...result.snippets.map(snippet=>snippet.evidence_id)])]
     }else{

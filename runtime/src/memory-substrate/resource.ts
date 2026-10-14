@@ -282,6 +282,11 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     await this.options.client.memory('record_extraction',{evidence_id:record.id,attempt_id:'knowledge-index',extracted:{}})
     return {evidence_id:record.id}
   }
+  async recallSources(query:string,options:Parameters<NonNullable<PersonalMemoryResource['recallSources']>>[1]){
+    this.#ready();options.signal?.throwIfAborted()
+    const result=z.object({hits:z.array(z.object({evidence_id:z.string(),score:z.number()})),truncated:z.boolean()}).parse(await this.options.client.memory('source_search',{source_prefix:this.prefix,query,consumer:options.consumer,scope:options.scope,limit:options.limit,...(options.filter?{filter:options.filter}:{})}))
+    options.signal?.throwIfAborted();return result
+  }
   async readEvidence(id:string):Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}|null>{
     this.#ready();if(!id.startsWith(this.prefix))return null
     await this.options.client.memory('expire',{})
