@@ -1,4 +1,5 @@
 import type {ProcessingRequest} from '../memory-substrate/source-processing.js'
+import type {SourceFilter,SourceRecallResult} from './source-retrieval.js'
 import type {ProfileInput,ProfileGenerator} from '../personal-agent/profile-warmup.js'
 import type {EvaluatedCandidate} from '../understanding/candidates.js'
 import type {ResolvedLifeCandidate} from '../memory-substrate/resolution.js'
@@ -92,6 +93,7 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  readonly recallSources?: (query:string,options:{consumer:string;scope:'recent'|'any';limit:number;filter?:SourceFilter;signal?:AbortSignal})=>Promise<SourceRecallResult>
   /** Internal built-in maintenance port; identity and provider are supplied by the host. */
   readonly sourceProcessingLlm?: ()=>{baseUrl:string;apiKey:string;model:string}|undefined
   readonly sourceProcessingProfile?: (entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>)=>ReturnType<ProfileGenerator>

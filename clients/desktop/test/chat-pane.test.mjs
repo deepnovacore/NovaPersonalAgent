@@ -1,6 +1,6 @@
 import test,{afterEach} from 'node:test'
 import assert from 'node:assert/strict'
-import {t} from '../src/renderer/locale.mjs'
+import {t,setLanguage} from '../src/renderer/locale.mjs'
 import {mountPersonalView} from '../src/renderer/personal-view.mjs'
 class Node{
  constructor(tag,text){this.tag=tag;this.tagName=tag.toUpperCase();this.text=text;this.children=[];this.listeners={};this.dataset=new Proxy({},{set:(object,key,value)=>{object[key]=String(value);return true}});this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
@@ -21,6 +21,16 @@ function mount(options={}){
  return {body,sent,view,callbacks,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
 const feedState=(revision,selected='chat:proactive',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:proactive',kind:'proactive',title:'主动提醒',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'T\n## 前瞻\n- 一条'}]},...extra})
+test('workbench chrome and composer follow the selected language without translating conversation content',()=>{
+ try{for(const [language,title,placeholder,status]of [['zh-CN','主对话','输入消息…','运行中 · 0 个后台任务'],['en','Main conversation','Type a message…','Running · 0 background tasks']]){
+  setLanguage(language);const m=mount()
+  m.view.receive({type:'personal.state',revision:1,memory:{entries:[]},feed:[],tasks:[],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat',title:'stored title'}],messages:[{id:'u',conversation_id:'chat:main',role:'user',text:'保留原文 Settings'}]}})
+  assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,title)
+  assert.equal(m.all().find(n=>n.tag==='textarea').placeholder,placeholder)
+  assert.equal(m.all().find(n=>n.className==='workbench-status').textContent,status)
+  assert(m.all().some(n=>n.textContent==='保留原文 Settings'||n.text==='保留原文 Settings'))
+ }}finally{setLanguage('zh-CN')}
+})
 test('duplicate historical conversation labels distinguish dates and ties while selecting unchanged IDs',async()=>{
  const m=mount(),items=[
   {id:'a',kind:'chat',title:'新对话',created_at:'2025-01-01T12:00:00Z'},
@@ -304,7 +314,7 @@ test('native task details isolate results, preserve expansion across refresh/res
   m.view.refresh();assert.equal(details('b').open,true);assert.match(textOf(details('b')),/B result/u)
   assert.match(textOf(details('b')),/<b>literal<\/b>/u);assert.equal(descendants(details('b')).some(n=>n.tag==='b'),false)
   assert.match(textOf(details('b')),/2/u);assert.match(textOf(details('b')),/耗时：10\.0 秒/u)
-  selectPage(m,'Todos');selectPage(m,'任务');assert.equal(details('b').open,true)
+  selectPage(m,'待办');selectPage(m,'任务');assert.equal(details('b').open,true)
   results=[];m.view.refresh();assert.equal(details('b').open,true);assert.match(textOf(details('b')),/暂无结果/u)
   assert.doesNotMatch(textOf(details('b')),/B result/u)
   details('a').open=true;details('a').listeners.toggle()
@@ -496,7 +506,7 @@ test('life status shows saving, survives refresh and does not restore an obsolet
 test('goal adoption and status changes use the shared pending guard; conflicts refresh with readable feedback',async()=>{
  const m=mount(),goal={id:'g1',kind:'goal',title:'Goal',note:'',status:'active',version:1,progress:{total:0,done:0}}
  const state=revision=>feedState(revision,'c',{life:{todos:[],ideas:[],goals:[goal]},workbench_context:{cards:[{id:'s1',tab:'goals',title:'Suggested goal',body:'Details',refs:[]}]}})
- m.view.receive(state(1));m.all().find(n=>n.title==='Goals · 目标').listeners.click()
+ m.view.receive(state(1));m.all().find(n=>n.dataset.page==='goals').listeners.click()
  const adopt=()=>m.all().find(n=>n.textContent==='设为目标')
  adopt().listeners.click();const request=m.sent.at(-1);assert.equal(request.method,'context.adopt');assert.equal(adopt().disabled,true)
  const state2=state(2);state2.life.goals=[{...goal,note:'changed'}];m.view.receive(state2)

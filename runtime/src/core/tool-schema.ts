@@ -69,10 +69,20 @@ export function compileToolSchema(
     const wireName = 'memory__recall'
     schemas.push(functionSchema(
       wireName,
-      '查找与你相关的事实、事项和资料。主机统一检索记忆、文档和沟通记录；只回想当前对话用 source=session。一般知识无需检索。',
+      '查找与你相关的事实、事项和资料，包括已同步的飞书 IM 原文，无需先生成 profile。query 用简短主题、发送人姓名或渠道名；按来源或日期查原文用 source_filter（飞书为 kind=im, provider=feishu），此时只返回匹配原文，不以项目文件或推断记忆替代。最近 N 天用 last_days=N（由运行时计算当前时间）；明确日期用 since/before 的 ISO 时间，scope=any。只回想当前对话用 source=session。空结果不证明没有平台权限；依据工具状态说明。',
       {
         type: 'object',
         properties: {
+          source_filter: {
+            type:'object',additionalProperties:false,
+            description:'可选：严格限制原始来源及时间；只适用于 personal。last_days 与 since/before 互斥；since 含边界，before 不含边界。',
+            properties:{
+              kind:{type:'string',enum:['im','mail','calendar','file']},
+              provider:{type:'string',minLength:1,maxLength:80},
+              since:{type:'string',format:'date-time'},before:{type:'string',format:'date-time'},
+              last_days:{type:'integer',minimum:1,maximum:365},
+            },
+          },
           query: {
             type: 'string',
             minLength: 1,

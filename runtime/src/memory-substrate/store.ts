@@ -1,4 +1,5 @@
 import {imMetadataSchema} from '../memory/provenance.js'
+import {searchSourceEvidence} from './source-retrieval.js'
 import {initializePurge,isPermanentlyPurged} from './purge.js'
 import {normalizeWorkspaceContent,projectWorkspaceRevision} from './workspace-projections.js'
 import {initializeLife,lifeOperation,normalizeLifeContent} from './life-operations.js'
@@ -104,6 +105,10 @@ function evidence(db:LedgerDatabase,evidenceId:string):EvidenceRecord|null {cons
 export function effectiveEvidence(db:LedgerDatabase,evidenceId:string,options:{purpose:'local'|'extraction'|'embedding'|'conversation';provider?:string}={purpose:'local'}):EvidenceRecord|null {
   const ref=evidence(db,evidenceId);if(!ref)return null
   if(!isCurrentEvidence(db,ref.id,ref.source_id))return null
+  if(ref.source_kind==='im'||ref.source_kind==='mail'){
+    const head=db.prepare('SELECT evidence_id FROM memory_message_heads WHERE key=?').get(sha256(canonicalJson([ref.source_id,ref.locator])))
+    if(head&&head.evidence_id!==ref.id)return null
+  }
   if(ref.retention_until!==null&&Date.parse(ref.retention_until)<=Date.now())return null
   if(options.purpose!=='local'&&(!options.provider||!allowsProcessing(db,ref.source_id,options.purpose,options.provider)))return null
   if(db.prepare('SELECT hash FROM memory_suppressed WHERE hash=?').get(ref.hash))return null
@@ -139,7 +144,7 @@ function write(db:LedgerDatabase,candidate:Candidate,deleted=false):EntryRevisio
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
+export type MemoryOperation = 'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   const ledgerOnly=isLedgerOnlyOperation(operation,value)
@@ -149,6 +154,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
   try {
     let result:unknown=null
     switch(operation){
+      case 'source_search':result=searchSourceEvidence(db,input);break;
       case 'source_processing':result=sourceProcessingOperation(db,input);break;
       case 'life_load':case 'life_mutate':case 'life_capture_im':result=lifeOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
       case 'source_connection':case 'source_apply_page':case 'source_pending':case 'source_revision':case 'source_grant':case 'extraction_ticket':case 'commit_extraction':case 'source_events':result=sourceOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
@@ -356,7 +362,7 @@ export function reconcileMemoryFiles(db:LedgerDatabase):void {
 
 /** Raw admission and permission fences remain usable when editable documents need repair. */
 export function isLedgerOnlyOperation(operation:MemoryOperation,value:Record<string,unknown>):boolean {
- if(['source_processing','append_evidence_batch','profile_evidence','append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
+ if(['source_search','source_processing','append_evidence_batch','profile_evidence','append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
  // An extraction marker only records that an attempt ran; it never writes entries.
  if(operation==='record_extraction'||operation==='record_evidence_batch')return true
  return operation==='source_connection'&&['get','list','create','fence','sync_status','reset_sync'].includes(String(value.action))

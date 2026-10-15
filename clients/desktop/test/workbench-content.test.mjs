@@ -133,7 +133,7 @@ test('scan progress preserves a focused Todo draft and material content refresh 
  view.receive(state(1,'Original',1))
  const panel=body.querySelector('.workbench-page')??all(body).find(node=>node.className==='workbench-page')
  const edit=panel.querySelectorAll('textarea')[0];edit.value='Unsaved words';edit.selectionStart=2;edit.selectionEnd=7;edit.focus();panel.scrollTop=73
- view.receive(state(2,'Original',2));assert.equal(panel.querySelectorAll('textarea')[0],edit);assert.equal(document.activeElement,edit);assert.equal(panel.scrollTop,73);assert.match(all(body).find(node=>node.className==='page-title').textContent,/Todos/u)
+ view.receive(state(2,'Original',2));assert.equal(panel.querySelectorAll('textarea')[0],edit);assert.equal(document.activeElement,edit);assert.equal(panel.scrollTop,73);assert.equal(all(body).find(node=>node.className==='page-title').textContent,'待办')
  view.receive(state(3,'Updated',2));assert.match(all(panel).map(node=>node.textContent).join(' '),/Updated/u)
  const restored=panel.querySelectorAll('textarea')[0];assert.equal(document.activeElement,restored);assert.equal(restored.value,'Unsaved words');assert.equal(restored.selectionStart,2);assert.equal(restored.selectionEnd,7);assert.equal(panel.scrollTop,73)
  const candidate=id=>({id,kind:'todo',text:`Candidate ${id}`,quote:'said'})

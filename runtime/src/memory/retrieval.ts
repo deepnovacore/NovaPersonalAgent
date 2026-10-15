@@ -1,4 +1,5 @@
 import {abortable} from '../core/camera-session.js'
+import {sourceFilterSchema,type SourceFilter} from './source-retrieval.js'
 import type {JsonValue} from '../core/events.js'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 import type {PersonalMemoryResource, MemoryVersion} from './personal-memory.js'
@@ -105,7 +106,8 @@ export class UnifiedRetrieval {
     }
   }
 
-  async recall(query: string, options: {scope?: 'recent' | 'any'; limit?: number; signal?: AbortSignal;consumer?:string} = {}): Promise<UnifiedRetrievalResult> {
+  async recall(query: string, options: {scope?: 'recent' | 'any'; limit?: number; signal?: AbortSignal;consumer?:string;sourceFilter?:SourceFilter} = {}): Promise<UnifiedRetrievalResult> {
+    const filter=options.sourceFilter===undefined?undefined:sourceFilterSchema.parse(options.sourceFilter);
     const scope = options.scope ?? 'any', requested = options.limit ?? 8;
     if (typeof query !== 'string' || !query.trim() || query.length > 512 || query.includes('\0')
       || !['recent', 'any'].includes(scope) || !Number.isSafeInteger(requested) || requested < 1) throw new Error('invalid_retrieval_request');
@@ -117,14 +119,16 @@ export class UnifiedRetrieval {
       const abort = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
       return abortable(Promise.resolve().then(() => work(abort)), abort);
     };
-    const [recalled, raw] = await Promise.allSettled([
-      call(abort => resource.recall(query.trim(), {scope, limit: 8, signal: abort})),
+    const [recalled, raw, sources] = await Promise.allSettled([
+      filter?Promise.resolve({hits:[],degraded:false}):call(abort => resource.recall(query.trim(), {scope, limit: 8, signal: abort})),
       // Recent is the memory provider's bounded candidate window and those entries' originals.
       // The current raw index has no recent-window ranking contract, so search it only for any.
-      this.options.rawRecall && scope === 'any' ? call(abort => this.options.rawRecall!(query.trim(), 8, abort)) : Promise.resolve([]),
+      !filter && this.options.rawRecall && scope === 'any' ? call(abort => this.options.rawRecall!(query.trim(), 8, abort)) : Promise.resolve([]),
+      resource.recallSources && options.consumer ? call(abort=>resource.recallSources!(query.trim(),{scope,limit:8,consumer:options.consumer!,signal:abort,...(filter?{filter}:{})})) : Promise.resolve({hits:[],truncated:filter!==undefined}),
     ]);
     options.signal?.throwIfAborted();
-    let degraded = recalled.status === 'rejected' || raw.status === 'rejected';
+    let degraded = recalled.status === 'rejected' || raw.status === 'rejected' || sources.status === 'rejected';
+    if(sources.status==='fulfilled')degraded ||= sources.value.truncated;
     if (recalled.status === 'fulfilled') degraded ||= recalled.value.degraded;
     const entries = new Map<string, {rank: number; entry: RetrievedEntry}>();
     const evidenceRanks = new Map<string, number>();
@@ -155,6 +159,9 @@ export class UnifiedRetrieval {
         // Reciprocal rank fusion; index-specific similarity scores carry no cross-channel meaning.
         evidenceRanks.set(hit.evidence_id, (evidenceRanks.get(hit.evidence_id) ?? 0) + 1 / (60 + index + 1));
       }
+    }
+    if(sources.status==='fulfilled')for(const [index,hit] of sources.value.hits.entries()){
+      if(safeId(hit.evidence_id))evidenceRanks.set(hit.evidence_id,(evidenceRanks.get(hit.evidence_id)??0)+1/(60+index+1));
     }
     interface Candidate {rank: number; key: string; entry?: RetrievedEntry; evidenceId?: string}
     const candidates: Candidate[] = [
