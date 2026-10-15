@@ -562,12 +562,12 @@ test('a composition that overruns its reference and item counts keeps only items
 
 test('internal message keys and sender aliases never reach the profile prose',async()=>{
  const entries=Array.from({length:3},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i}))
- const leaky=(text:string)=>({about:{paragraphs:[{text,refs:['e0']}]},work:[{title:'部署 e5',text:'你和徐经纬（p19220cb4）协作（e14、e40、e91）。',refs:['e1']}],interests:[{text:'人脸融合妆造参考图（e50, e51），区间（e12–e15）、（e3–e5，e9）、本地服务（如192.168.2.219:8080、10.0.0.5）',refs:['e2']}]})
- const gateway=profileFixtureGateway(()=>leaky('你与王敏思（p01f93e57）和崔子庄 p19220cb4 协作，口型驱动限制（e110）要先验证，参考 Qwen3 与 e2e 测试和 Pi5。'))
+ const leaky=(text:string)=>({about:{paragraphs:[{text,refs:['e0']}]},work:[{title:'部署 e5',text:'你和示例甲（p00000001）协作（e14、e40、e91）。',refs:['e1']}],interests:[{text:'示例设计参考图（e50, e51），区间（e12–e15）、（e3–e5，e9）、本地服务（如192.0.2.10:8080、198.51.100.20）',refs:['e2']}]})
+ const gateway=profileFixtureGateway(()=>leaky('你与示例乙（p00000002）和示例丙 p00000001 协作，界面渲染限制（e110）要先验证，参考 Qwen3 与 e2e 测试和 Pi5。'))
  const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile(entries,new AbortController().signal)
  const all=[result.about!.text,...(result.work??[]).flatMap(item=>[item.title,item.text]),...result.interests.map(item=>item.text)].join('\n')
  assert.doesNotMatch(all,/\be\d+\b|\bp[0-9a-f]{8}\b|（[\s,，、–—-]*）|\(\s*\)|\d+\.\d+\.\d+\.\d+/u)
- assert.match(all,/王敏思/u);assert.match(all,/崔子庄/u);assert.match(all,/Qwen3/u);assert.match(all,/e2e/u);assert.match(all,/Pi5/u)
+ assert.match(all,/示例乙/u);assert.match(all,/示例丙/u);assert.match(all,/Qwen3/u);assert.match(all,/e2e/u);assert.match(all,/Pi5/u)
 })
 
 test('a profile item is never kept with fewer citations than its prose needs, so withdrawing any source retires it',async()=>{
