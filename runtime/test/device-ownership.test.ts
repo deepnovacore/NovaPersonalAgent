@@ -41,3 +41,14 @@ test('receipts replay before capacity checks and cannot conflict or evict', () =
   assert.notEqual(canonicalPayload([1, 2]), canonicalPayload([2, 1]))
   assert.throws(() => canonicalPayload({bad: undefined}), {code: 'request_conflict'})
 })
+
+test('canonical payload rejects cycles, sparse arrays and non-JSON or non-int53 values', () => {
+  const cycle: Record<string, unknown> = {}
+  cycle.self = cycle
+  for (const value of [cycle, new Array<unknown>(2), undefined, () => 1, NaN, Infinity,
+    Number.MAX_SAFE_INTEGER + 1, 0.5, {nested: undefined}, Symbol('value'), 1n]) {
+    assert.throws(() => canonicalPayload(value), {code: 'request_conflict'})
+  }
+  const shared = {value: 1}
+  assert.equal(canonicalPayload([shared, shared]), '[{"value":1},{"value":1}]')
+})

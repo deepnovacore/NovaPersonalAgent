@@ -42,3 +42,8 @@ test('reconciliation needs a separate approved read and preserves effects and ca
     assert.throws(() => advanceAttempt(resolved, {...event, grant: grant()}), {code: 'stale_fence'})
   }
 })
+
+test('unknown runtime events fail closed with a contract error', () => {
+  // Simulate an unrecognized event received across a language-neutral boundary.
+  assert.throws(() => advanceAttempt(state(), {op: 'future_event'} as never), {code: 'stale_fence'})
+})

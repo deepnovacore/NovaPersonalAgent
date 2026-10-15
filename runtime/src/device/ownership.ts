@@ -23,22 +23,29 @@ export function decodeIdentity(key: string): RequestIdentity {
   try { values = JSON.parse(key) } catch { throw new OwnershipError('request_conflict') }
   if (!Array.isArray(values) || values.length !== 3 || !values.every(nonempty))
     throw new OwnershipError('request_conflict')
-  const identity = {principal: values[0] as string, device_id: values[1] as string, request_id: values[2] as string}
+  const identity = {principal: values[0]!, device_id: values[1]!, request_id: values[2]!}
   if (encodeIdentity(identity) !== key) throw new OwnershipError('request_conflict')
   return identity
 }
 
 // Hash these canonical bytes at the host boundary; digests are supplied, not generated here.
 export function canonicalPayload(value: unknown): string {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value)
-  if (typeof value === 'number' && Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value)))
-    return JSON.stringify(value)
-  if (Array.isArray(value)) return '[' + value.map(canonicalPayload).join(',') + ']'
-  if (typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype) {
-    const record = value as Record<string, unknown>
-    return '{' + Object.keys(record).sort().map(key => JSON.stringify(key) + ':' + canonicalPayload(record[key])).join(',') + '}'
+  const ancestors = new Set<object>()
+  const encode = (item: unknown): string => {
+    if (item === null || typeof item === 'string' || typeof item === 'boolean') return JSON.stringify(item)
+    if (typeof item === 'number' && Number.isSafeInteger(item)) return JSON.stringify(item)
+    if (typeof item !== 'object' || item === null || ancestors.has(item))
+      throw new OwnershipError('request_conflict')
+    ancestors.add(item)
+    try {
+      if (Array.isArray(item)) return '[' + Array.from(item, encode).join(',') + ']'
+      if (Object.getPrototypeOf(item) !== Object.prototype || Object.getOwnPropertySymbols(item).length)
+        throw new OwnershipError('request_conflict')
+      const record = item as Record<string, unknown>
+      return '{' + Object.keys(record).sort().map(key => JSON.stringify(key) + ':' + encode(record[key])).join(',') + '}'
+    } finally { ancestors.delete(item) }
   }
-  throw new OwnershipError('request_conflict')
+  try { return encode(value) } catch { throw new OwnershipError('request_conflict') }
 }
 export function expireLease(state: Ownership): Ownership { return {...state, lease_expired: true} }
 export function requireOwner(state: Ownership, deviceId: string): void {

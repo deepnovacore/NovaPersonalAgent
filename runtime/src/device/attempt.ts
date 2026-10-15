@@ -56,7 +56,7 @@ export function advanceAttempt(state: AttemptState, event: AttemptEvent): Attemp
       if (attempt.status !== 'unknown-effect' || (terminal && state.task_phase !== 'cancelled'))
         throw new AttemptError('stale_fence')
       const grant = event.grant
-      if (!grant || grant.status !== 'approved' || !grant.grant_ref || grant.grant_ref === state.action_grant_ref
+      if (grant?.status !== 'approved' || !grant.grant_ref || grant.grant_ref === state.action_grant_ref
         || grant.scope !== 'sandbox.fs.read' || grant.attempt_id !== attempt.id
         || state.consumed_verification_grants?.includes(grant.grant_ref)) throw new AttemptError('approval_required')
       if (event.outcome !== 'completed' && event.outcome !== 'failed') throw new AttemptError('stale_fence')
@@ -65,5 +65,6 @@ export function advanceAttempt(state: AttemptState, event: AttemptEvent): Attemp
         evidence: evidence(event.evidence_ref),
         consumed_verification_grants: [...state.consumed_verification_grants ?? [], grant.grant_ref]}
     }
+    default: throw new AttemptError('stale_fence')
   }
 }
