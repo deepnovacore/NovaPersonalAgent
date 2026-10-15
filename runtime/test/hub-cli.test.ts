@@ -73,3 +73,41 @@ test('CLI watch reports completion, cancellation, interruption, expiry and timeo
   const timeout=await f.cli(['watch','--task','missing','--timeout-seconds','0.1']);assert.notEqual(timeout.code,0);assert.match(timeout.err,/watch_timeout/)
  }finally{await f.close()}
 })
+
+test('CLI options override environment and preserve schema and transport boundaries',async()=>{
+ const f=await fixture()
+ try{
+  f.online()
+  assert.equal((await f.cli(['devices','--url',f.url,'--token',f.mac.token],'bad')).code,0)
+  assert.match((await f.cli(['devices','--url','http://example.com'])).err,/HTTPS origin/)
+  assert.match((await f.cli(['devices','--url',`${f.url}/wrong`])).err,/HTTPS origin/)
+  assert.match((await f.cli([...f.send,'--ttl-seconds','NaN'])).err,/Invalid --ttl-seconds/)
+  assert.match((await f.cli([...f.send,'--capability','unknown'])).err,/invalid_request/)
+  assert.match((await f.cli(f.send.map(v=>v==='com.nova.fixture'?'not-a-package':v))).err,/invalid_target/)
+  assert.match((await f.cli(['todo','add','--title','x'.repeat(201)])).err,/invalid_request/)
+  assert.equal(f.store.snapshot(f.mac.token).cursor,0)
+ }finally{await f.close()}
+})
+
+test('CLI watch polls live changes and fails on rejection without inventing completion',async()=>{
+ const f=await fixture()
+ try{
+  f.online()
+  const sent=JSON.parse((await f.cli(f.send)).out) as {command_id:string;task_id:string}
+  f.store.routing.ack(f.phone.token,{command_id:sent.command_id,decision:'accepted'})
+  f.store.routing.publish(f.phone.token,{task_id:sent.task_id,seq:1,phase:'running',summary:'Started'})
+  const watched=f.cli(['watch','--task',sent.task_id,'--timeout-seconds','5'])
+  const timer=setTimeout(()=>{
+   f.store.routing.publish(f.phone.token,{task_id:sent.task_id,seq:2,phase:'verifying',summary:'Checked'})
+   f.store.routing.publish(f.phone.token,{task_id:sent.task_id,seq:3,phase:'completed',summary:'Done'})
+  },1000)
+  try{
+   const result=await watched;assert.equal(result.code,0,result.err)
+   const phases=result.out.trim().split('\n').map(line=>(JSON.parse(line) as {phase:string}).phase)
+   assert.equal(phases.at(-1),'completed')
+  }finally{clearTimeout(timer)}
+  const rejected=JSON.parse((await f.cli(f.send)).out) as {command_id:string;task_id:string}
+  f.store.routing.ack(f.phone.token,{command_id:rejected.command_id,decision:'rejected'})
+  const result=await f.cli(['watch','--task',rejected.task_id]);assert.equal(result.code,1);assert.match(result.out,/rejected/)
+ }finally{await f.close()}
+})
