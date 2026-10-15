@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'adapters/attempt.dart' as attempt;
 import 'adapters/authority.dart' as authority;
 import 'adapters/ownership.dart' as ownership;
+import 'adapters/task_ledger.dart' as task_ledger;
 import 'adapters/todo_sync.dart' as todo_sync;
 import 'contract_fixture.dart';
 
@@ -19,6 +20,7 @@ void main() {
     authority.adapters,
     ownership.adapters,
     attempt.adapters,
+    task_ledger.adapters,
     todo_sync.adapters,
   ]) {
     for (final entry in source.entries) {
