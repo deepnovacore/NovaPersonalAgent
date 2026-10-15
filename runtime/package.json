@@ -36,6 +36,7 @@
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json",
     "server": "node dist/src/server-entry.js",
+    "hub": "node dist/src/hub/cli.js",
     "server:pair": "node scripts/pair-device.mjs",
     "test:pair": "node --test scripts/pair-device.test.mjs",
     "server:token-init": "node dist/src/server-entry.js token-init",

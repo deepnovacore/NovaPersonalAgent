@@ -2,9 +2,13 @@ import {mkdirSync,chmodSync} from 'node:fs'
 import {dirname,resolve} from 'node:path'
 import {HubStore} from './store.js'
 import {createHubServer} from './server.js'
+import {runHubClient} from './client-cli.js'
 
 const [command,path,account,device]=process.argv.slice(2)
-if(!path||!['serve','enroll','revoke'].includes(command??'')){
+if(!['serve','enroll','revoke'].includes(command??'')){
+ try{process.exitCode=await runHubClient(process.argv.slice(2))}
+ catch(error){console.error(error instanceof Error?error.message:'hub_request_failed');process.exitCode=1}
+}else if(!path){
  console.error('Usage: hub serve <database> [bind-address] [port] | hub <enroll|revoke> <database> <account-id> <device-name-or-id>')
  process.exitCode=1
 }else{
