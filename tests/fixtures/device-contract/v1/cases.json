@@ -1,0 +1,365 @@
+{
+  "contract_version": 1,
+  "cases": [
+    {
+      "id": "stop-late-reply",
+      "semantics": [
+        "S2"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "begin_model_evaluation",
+        "stop_task",
+        "deliver_late_correction"
+      ],
+      "then": {
+        "phase": "cancelled",
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "stop-late-reply",
+        "scope": "local TaskService only"
+      }
+    },
+    {
+      "id": "approval-version-expiry",
+      "semantics": [
+        "S3"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "approve_action_at_version_1",
+        "change_bound_version_to_2",
+        "deliver_old_approval"
+      ],
+      "then": {
+        "approval": "expired",
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "ApprovalOffer has no full owner/observation/data-version binding; local task fences alone do not prove device approval invalidation."
+      }
+    },
+    {
+      "id": "intent-crash",
+      "semantics": [
+        "S5"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "persist_intent",
+        "mark_dispatch_started",
+        "restart_without_receipt",
+        "retry_dispatch"
+      ],
+      "then": {
+        "effect_status": "unknown",
+        "retry_error": "task_effect_unknown",
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "intent-crash",
+        "scope": "local TaskService only"
+      }
+    },
+    {
+      "id": "ack-lost",
+      "semantics": [
+        "S5",
+        "S6"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "write_once_without_ack",
+        "restart",
+        "retry_same_request"
+      ],
+      "then": {
+        "effect_status": "unknown",
+        "total_effects": 1
+      },
+      "coverage": {
+        "adapter": "ack-lost",
+        "scope": "local TaskService only"
+      }
+    },
+    {
+      "id": "todo-conflict-cas",
+      "semantics": [
+        "S1"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "receive_two_versions",
+        "display_choice_at_version_2",
+        "accept_concurrent_version_3",
+        "choose_with_expected_version_2"
+      ],
+      "then": {
+        "error": "version_conflict",
+        "accepted_version": 3,
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "LifeService has local expected_version CAS, but no cross-device conflict catalogue/selection authority in this checkout."
+      }
+    },
+    {
+      "id": "completed-projection-eviction",
+      "semantics": [
+        "S2",
+        "S6"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "complete_with_evidence",
+        "evict_projection",
+        "reconnect_old_projection"
+      ],
+      "then": {
+        "phase": "completed",
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No device projection eviction/reconnect protocol; local completion alone cannot exercise this event sequence."
+      }
+    },
+    {
+      "id": "permanent-delete-reconnect",
+      "semantics": [
+        "S6"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "persist_permanent_tombstone",
+        "reconnect_old_device",
+        "upload_old_snapshot"
+      ],
+      "then": {
+        "resurrected": false,
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No synchronized permanent tombstone admission; bounded local task retirement receipts are not deletion proof."
+      }
+    },
+    {
+      "id": "same-input-delegation",
+      "semantics": [
+        "S4",
+        "S6"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "delegate",
+        "replay_same_request",
+        "restart",
+        "replay_same_request",
+        "reuse_key_with_changed_payload"
+      ],
+      "then": {
+        "task_count": 1,
+        "same_task_id": true,
+        "conflict_error": "request_conflict"
+      },
+      "coverage": {
+        "adapter": "same-input-delegation",
+        "scope": "local TaskService only"
+      }
+    },
+    {
+      "id": "ios-background-reply",
+      "semantics": [
+        "S8",
+        "S2",
+        "S3"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "start_model_call",
+        "background_and_advance_generation",
+        "foreground",
+        "deliver_old_reply"
+      ],
+      "then": {
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No embedded iOS runtime lifecycle bridge or native generation-fenced callbacks in this checkout."
+      }
+    },
+    {
+      "id": "owner-lease-expiry",
+      "semantics": [
+        "S7"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "owner_goes_offline",
+        "lease_expires",
+        "other_device_attempts_takeover"
+      ],
+      "then": {
+        "owner": "device-1",
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "TaskService controller is not a device owner; device ownership/lease admission is not implemented."
+      }
+    },
+    {
+      "id": "stale-goal-fence",
+      "semantics": [
+        "S1",
+        "S3"
+      ],
+      "given": {
+        "request_id": "device-1:input-1:delegate",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        }
+      },
+      "when": [
+        "delegate",
+        "revise_goal",
+        "write_with_old_fence"
+      ],
+      "then": {
+        "error": "stale_task",
+        "new_effects": 0
+      },
+      "coverage": {
+        "adapter": "stale-goal-fence",
+        "scope": "local TaskService only"
+      }
+    }
+  ]
+}
