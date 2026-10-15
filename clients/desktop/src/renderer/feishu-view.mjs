@@ -5,7 +5,7 @@ export function renderFeishu({state={},notifications,local,card,el,button,comman
  const accountKey=state.account_id??state.account_name??null
  if(local.accountKey!==accountKey){local.accountKey=accountKey;local.chats=null;local.verification_url=null;local.editScope=false}
  if(!['ready','connected','paused'].includes(state.state))local.chats=null
- const a=card(t('飞书'),t('把选定会话里的约定和进展记下来。机器人提醒可单独开启。'))
+ const a=card(t('飞书'),t('记录选定会话里的约定和进展。'))
  a.classList.add('im-guide')
  let guideActions
  const originalButton=button
@@ -74,7 +74,7 @@ export function renderFeishu({state={},notifications,local,card,el,button,comman
   }
  } else {
   local.verification_url=null
-  note(t('只同步你选中的会话。原文默认保留 30 天，到期清理原文；已形成的记忆可单独管理。'))
+  note(t('消息保留 30 天；已形成的记忆可单独管理。'))
   button(completed?t('调整会话'):t('选择会话'),async()=>{const result=await call('chats');local.chats=result?.chats??result;local.editScope=true;refresh()},a)
   const chats=local.chats??state.chats??[]
   if(chats.length&&(!completed||local.editScope)){
@@ -92,8 +92,8 @@ export function renderFeishu({state={},notifications,local,card,el,button,comman
   }else if(local.chats)note(t('没有可选会话。请确认账号权限后重新加载。'))
   const processing=check(t('允许设置中的模型服务处理飞书内容'),state.processing_consent_required===false)
   processing.disabled=!completed
-  note(t('读取与模型处理分别授权。关闭模型处理后，已读取的内容保留在本机；保存新的会话范围后需重新开启。'))
-  if(state.processing_consent_required)note(t('尚未同意当前模型处理，或模型服务已变更；开启后才会交由当前服务整理。'))
+  note(t('读取与模型处理分别授权。调整会话后需重新开启。'))
+  if(state.processing_consent_required)note(t('尚未授权处理，或模型服务已变更。'))
   processing.addEventListener('change',async()=>{const consent=processing.checked;processing.disabled=true;try{await call('consent',{consent})}catch(error){processing.checked=!consent;local.onError(error)}finally{processing.disabled=!completed}})
   if(state.last_sync)note(t('上次同步：{0}',state.last_sync))
   button(t('立即同步'),()=>call('sync'),a)

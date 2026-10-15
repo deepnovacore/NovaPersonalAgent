@@ -1,9 +1,9 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath,chmod,readFile} from 'node:fs/promises'
+import {mkdtemp,rm,realpath,chmod,readFile,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {ProfileWarmup,type ProfileOutcome} from '../src/personal-agent/profile-warmup.js'
+import {ProfileWarmup,PROFILE_GENERATION_VERSION,type ProfileInput,type ProfileOutcome} from '../src/personal-agent/profile-warmup.js'
 const entries=[{id:'a',version:1,content:'I study voice interfaces',origin:'stated' as const}]
 const draft={about:{text:'I study voice interfaces',refs:[{entry_id:'a',version:1}]},work:[],interests:[{text:'Voice interfaces',refs:[{entry_id:'a',version:1}]}]}
 test('warmup caches grounded drafts without repeating generation on reopen',async()=>{
@@ -254,3 +254,73 @@ test('a verified newer message draft does not resurrect omitted historical plans
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(++calls===1?{about:{text:'Building a UI',refs:[{entry_id:old.id,version:1}]},work:[{title:'Deployment',text:'Plans deployment',refs:[{entry_id:old.id,version:1}]}],interests:[]}:{about:{text:'Working on the UI; deployment cancelled',refs:[{entry_id:'new-message',version:1}]},work:[],interests:[]}),()=>{/* observer */});
  try{await service.open();service.update([old]);await service.refresh();service.update([old,{...old,id:'new-message',content:'Deployment cancelled',observed_at:'2026-10-10T00:00:00Z'}]);await service.refresh();assert.deepEqual(service.snapshot().draft?.work,[])}finally{await service.close();await rm(dir,{recursive:true,force:true})}
 });
+
+const cites=(file:typeof fileA)=>[{entry_id:file.id,version:file.version}]
+const oldWork={title:'Old pipeline project list',text:'Written by the previous pipeline',refs:cites(fileA)}
+test('a draft written by an older pipeline stays visible, is regenerated at once and is replaced whole',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-version-')),path=join(dir,'draft.json');let phase=1,calls=0
+ const reply=()=>{calls++;return Promise.resolve(phase===1?{...fileDraft,work:[oldWork]}:{about:{text:'A fresh understanding',refs:cites(fileA)},work:[],interests:[]})}
+ let service=new ProfileWarmup(path,reply,()=>{/* snapshot observer */})
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh();assert.equal(service.snapshot().draft?.work.length,1);await service.close()
+  const disk=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;assert.equal(disk.generation_version,PROFILE_GENERATION_VERSION)
+  await writeFile(path,JSON.stringify({...disk,generation_version:'a-previous-pipeline'}))
+  phase=2;let release:(()=>void)|undefined
+  service=new ProfileWarmup(path,async()=>{await new Promise<void>(resolve=>{release=resolve});return reply()},()=>{/* snapshot observer */})
+  await service.open();service.update([fileA,fileB])
+  assert.equal(service.snapshot().status,'working','an old draft is regenerated at once, not on the 5/30/240 minute ladder')
+  assert.equal(service.snapshot().draft?.work[0]?.title,'Old pipeline project list','the old draft stays visible while the new one is written')
+  release?.();await service.refresh()
+  const after=service.snapshot().draft;assert.equal(after?.about?.text,'A fresh understanding');assert.equal(after?.work.length,0,'nothing from the old pipeline is mixed into the new draft')
+  assert.equal((JSON.parse(await readFile(path,'utf8')) as {generation_version:string}).generation_version,PROFILE_GENERATION_VERSION)
+  const before=calls;service.update([fileA,fileB]);await service.refresh();assert.equal(calls,before,'once replaced, the same inputs are not regenerated again')
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a cache file from before versions were stored is read and counts as an older pipeline',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-legacy-')),path=join(dir,'draft.json');let calls=0
+ const make=()=>new ProfileWarmup(path,()=>{calls++;return Promise.resolve({...fileDraft,work:[oldWork]})},()=>{/* snapshot observer */})
+ let service=make()
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh();await service.close()
+  const {generation_version:_dropped,...legacy}=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;void _dropped
+  await writeFile(path,JSON.stringify(legacy));service=make();await service.open();assert.equal(service.newsCleanupPending(),false,'a file without the mark has nothing pending')
+  service.update([fileA,fileB]);assert.equal(service.snapshot().status,'working');await service.refresh();assert.equal(calls,2)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('an explicit refresh replaces the draft whole, while ordinary source churn still keeps grounded work',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-manual-'));let calls=0
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(++calls===1?{...fileDraft,work:[oldWork]}:{about:{text:'Written on request',refs:cites(fileA)},work:[],interests:[]}),()=>{/* snapshot observer */})
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh();assert.equal(service.snapshot().draft?.work.length,1)
+  await service.refresh(true);const replaced=service.snapshot().draft
+  assert.equal(calls,2);assert.equal(replaced?.about?.text,'Written on request');assert.equal(replaced?.work.length,0,'a manual update drops the previous draft instead of merging it')
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a draft written while other people\'s messages were read leaves disk when that switch is off',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-participants-')),path=join(dir,'draft.json')
+ const make=(participants:boolean)=>new ProfileWarmup(path,()=>Promise.resolve(fileDraft),()=>{/* snapshot observer */},{participants})
+ let service=make(true)
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh();assert.ok(service.snapshot().draft);await service.close()
+  assert.equal((JSON.parse(await readFile(path,'utf8')) as {participants:boolean}).participants,true)
+  service=make(true);await service.open();service.update([fileA,fileB]);assert.ok(service.snapshot().draft,'with the switch still on the draft is kept');await service.close()
+  service=make(false);await service.open()
+  const disk=JSON.parse(await readFile(path,'utf8')) as {draft:unknown;participants:boolean};assert.equal(disk.draft,null,'the draft is removed from disk, not only hidden');assert.equal(disk.participants,false)
+  service.update([fileA,fileB]);assert.equal(service.snapshot().draft,null)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+const message=(id:string,relation:'self'|'addressed'|'participant'):ProfileInput=>({id,version:'m1',content:'message '+id,origin:'inferred',source:{project:'chat',document:'',kind:'im',relation}})
+test('other people\'s messages keep their own slots after the user\'s 96 messages, and are left out when the switch is off',async()=>{
+ const own=Array.from({length:64},(_,i)=>message('own-'+i,i%2?'self':'addressed')),others=Array.from({length:32},(_,i)=>message('other-'+i,'participant'))
+ for(const participants of [true,false]){
+  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-slots-'));let seen:readonly ProfileInput[]=[]
+  const service=new ProfileWarmup(join(dir,'draft.json'),entries=>{seen=entries;return Promise.resolve({about:{text:'x',refs:[{entry_id:'own-0',version:'m1'}]},work:[],interests:[]})},()=>{/* snapshot observer */},{participants})
+  try{
+   await service.open();service.update([...own,...Array.from({length:32},(_,i)=>message('more-'+i,'addressed')),...others]);await service.refresh()
+   assert.equal(seen.filter(e=>e.source?.relation==='participant').length,participants?32:0,participants?'all 32 other-people messages reach the generator':'none do when the switch is off')
+   assert.equal(seen.filter(e=>e.source?.relation!=='participant').length,96,'the user\'s own messages keep their 96')
+  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+ }
+})

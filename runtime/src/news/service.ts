@@ -36,6 +36,11 @@ export class NewsService{
   return this.#serial(async()=>{if(!texts.length||this.#state.profile_version!==0||this.#state.interests.length||!this.#state.enabled)return false
    await this.#save({...structuredClone(this.#state),profile_version:1,interests:texts.map(text=>({id:digest(text).slice(0,16),text,weight:1})),interests_seeded:true,rank_error:null});return true})
  }
+ /** Interests only guessed from the profile (never confirmed by the user) are dropped; confirmed ones are the user's own. */
+ clearSeededInterests():Promise<boolean>{
+  return this.#serial(async()=>{if(!this.#state.interests_seeded)return false
+   await this.#save({...structuredClone(this.#state),profile_version:0,interests:[],interests_seeded:false,rank_error:null});return true})
+ }
  async action(raw:unknown){const p=z.discriminatedUnion('action',[
   z.object({action:z.enum(['read','save']),id:z.string(),value:z.boolean()}).strict(),
   z.object({action:z.literal('weight'),interest_id:z.string(),value:z.number().min(0).max(2)}).strict(),

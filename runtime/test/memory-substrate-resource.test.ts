@@ -442,3 +442,26 @@ test('Profile evidence preserves timestamp and author, admits only direct mentio
   await memory.setProcessingConsent('im',memory.processingGrant(false,2));assert.deepEqual(await memory.profileSources(),[]);
  }finally{await memory.close();await rm(root,{recursive:true,force:true})}
 });
+
+test('other people\'s messages reach the profile only when that switch is on, and never crowd out the user\'s own',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-profile-participants-'));
+ const gateway:ModelGateway={async *stream(){/* extraction uses complete */},complete:()=>Promise.resolve({text:'{"entries":[]}'})};
+ const make=(profileParticipantMessages:boolean)=>new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'profile',gateway,model:'fixture',personalMemoryEnabled:false,profileParticipantMessages});
+ let memory=make(false)
+ try{
+  await memory.open();const grant=memory.processingGrant(true),start=Date.now()
+  const put=(locator:string,sender:string,at:number,extra:Record<string,unknown>={})=>memory.ingestEvidence({sourceId:'im',locator,text:locator,observedAt:new Date(at).toISOString(),kind:'im',im:{sender_id:sender,recipient_id:'ou_self',account_id:'opaque-account',...extra},processingConsent:grant})
+  await put('own','ou_self',start-5_000_000);await put('asked-me','ou_other',start-4_000_000,{mention:'direct'})
+  for(let i=0;i<40;i++)await put('group-'+i,'ou_other',start-3_000_000+i*1000)
+  const off=await memory.profileSources();assert.deepEqual(off.map(input=>input.content).sort(),['asked-me','own'],'with the switch off no group message is read')
+  assert(!off.some(input=>input.source?.relation==='participant'))
+  await memory.close();memory=make(true);await memory.open()
+  const on=await memory.profileSources(),others=on.filter(input=>input.source?.relation==='participant')
+  assert.equal(others.length,32,'other people\'s messages are capped per bucket, like the rest');assert(on.some(input=>input.content==='own')&&on.some(input=>input.content==='asked-me'),'the user\'s own messages are still read')
+  assert.equal((await memory.profileSources(on.map(input=>input.id))).length,on.length,'evidence the draft already cites stays readable while the switch is on')
+  await memory.close();memory=make(false);await memory.open()
+  assert.deepEqual(await memory.profileSources(on.map(input=>input.id)),off.filter(input=>on.some(item=>item.id===input.id)),'turning the switch off withdraws cited group messages at once')
+  await memory.setProcessingConsent('im',memory.processingGrant(false,2));await memory.close();memory=make(true);await memory.open()
+  assert.deepEqual(await memory.profileSources(),[],'the switch never widens what the model-processing consent allows')
+ }finally{await memory.close();await rm(root,{recursive:true,force:true})}
+})

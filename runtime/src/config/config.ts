@@ -58,6 +58,7 @@ export const settingsSchema = z.object({
   self_hosted_tts_api_key: z.string().nullable().default(null),
   cascade_tts_provider: cascadedTtsProviderNameSchema.default('volcengine'),
   camera_module_enabled: z.boolean().default(true),
+  profile_participant_messages: z.boolean().default(false),
   qwen_realtime_url: z.string().default('wss://dashscope.aliyuncs.com/api-ws/v1/realtime'),
   qwen_realtime_model: z.string().default('qwen-audio-3.0-realtime-plus'),
   qwen_realtime_voice: z.string().default('longanqian'),
@@ -331,6 +332,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     camera_module_enabled: optionalBoolean(
       environment.CAMERA_MODULE_ENABLED,
     ),
+    profile_participant_messages: optionalBoolean(environment.PROFILE_PARTICIPANT_MESSAGES),
     ...(pipelineMode === 'integrated' ? {
       ...(textConversations ? {cascade_llm_provider: parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER),
         cascade_llm_model: rawEnvironmentValue(environment.CASCADE_LLM_MODEL),

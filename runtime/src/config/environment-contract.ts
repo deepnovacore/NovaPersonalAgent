@@ -56,6 +56,7 @@ const rows: readonly Row[] = [
   ['CONVERSATION_VISION_ENABLED', 'camera', false, true, 'never', 'false', 'Attach a default-camera frame to user turns on verified cascaded VLMs.', '为已确认支持图片的级联模型附加默认摄像头画面。'],
   ['MONITOR_CAMERA_DEVICE_ID', 'camera', false, true, 'never', null, 'Exact monitor camera device ID; empty uses the default device.', '监控摄像头设备 ID；空值使用默认设备。'],
   ['CAMERA_MODULE_ENABLED', 'camera', false, true, 'never', 'true', 'Enable independent Vision monitoring.', '启用独立视觉监控。'],
+  ['PROFILE_PARTICIPANT_MESSAGES', 'core', false, true, 'never', 'false', 'Let the profile also read other people\'s messages in the chats you connected; they are sent to the model provider. The desktop privacy setting supplies it.', '让个人画像同时读取你已连接会话里他人的发言，这些内容会发送给模型服务商。桌面端的隐私设置会提供该值。'],
   ['INTEGRATED_PROVIDER', 'core', false, true, 'never', 'qwen', 'Integrated realtime provider.', '集成实时提供方。'],
   ['CASCADE_ENDPOINTING_PROVIDER', 'core', false, true, 'never', 'auto', 'Cascaded endpointing provider.', '级联端点检测提供方。'],
   ['CASCADE_ASR_PROVIDER', 'core', false, true, 'never', 'volcengine', 'Cascaded ASR provider.', '级联 ASR 提供方。'],

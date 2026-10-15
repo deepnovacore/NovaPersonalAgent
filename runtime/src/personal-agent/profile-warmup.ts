@@ -13,11 +13,13 @@ export type ProfileDraft=z.infer<typeof profileDraftSchema>
 export type ProfileInput=Pick<MemoryEntry,'id'|'version'|'content'|'origin'> & {observed_at?:string;source?:{project:string;document:string;kind?:'im'|'mail';relation?:'self'|'addressed'|'participant';sender_id?:string;sender_name?:string;thread_id?:string;message_id?:string;parent_id?:string;root_id?:string;upper_message_id?:string;recipient_ids?:string[];mention_ids?:string[]}}
 export type ProfileGenerator=(entries:readonly ProfileInput[],signal:AbortSignal)=>Promise<z.input<typeof profileDraftSchema>>
 export interface ProfileOutcome {outcome:'ok'|'timeout'|'aborted'|'schema'|'evidence'|'consent'|'provider'|'persist';latency_ms:number;items:number}
-export interface ProfileWarmupOptions {report?:(outcome:ProfileOutcome)=>void;timeoutMs?:number;backoffMs?:readonly number[];minIntervalMs?:number}
-const diskSchema=z.object({key:z.string(),draft:profileDraftSchema.nullable(),started_at:z.number().nonnegative().default(0),generated_at:z.number().nonnegative().default(0),stage:z.number().int().min(0).max(3).default(0)})
+export interface ProfileWarmupOptions {participants?:boolean;report?:(outcome:ProfileOutcome)=>void;timeoutMs?:number;backoffMs?:readonly number[];minIntervalMs?:number}
+/** Raise this whenever the way a profile is generated changes: drafts written by an older pipeline are then replaced whole instead of being mixed into the new one. */
+export const PROFILE_GENERATION_VERSION='understanding-v5'
+const diskSchema=z.object({key:z.string(),generation_version:z.string().default(''),participants:z.boolean().default(false),news_cleanup_pending:z.boolean().default(false),draft:profileDraftSchema.nullable(),started_at:z.number().nonnegative().default(0),generated_at:z.number().nonnegative().default(0),stage:z.number().int().min(0).max(3).default(0)})
 const SOURCE_STAGES=[5*60_000,30*60_000,4*60*60_000] as const
 interface Ref {entry_id:string;version:ProfileInput['version']}
-const inputKey=(entries:readonly ProfileInput[])=>entries.length?createHash('sha256').update(JSON.stringify({generation_version:'sender-grounded-prose-v4',entries})).digest('hex'):''
+const inputKey=(entries:readonly ProfileInput[])=>entries.length?createHash('sha256').update(JSON.stringify({generation_version:PROFILE_GENERATION_VERSION,entries})).digest('hex'):''
 const factCount=(draft:ProfileDraft)=>(draft.about?1:0)+draft.work.length+draft.interests.length
 const classify=(error:unknown,signal:AbortSignal,controller:AbortController):ProfileOutcome['outcome']=>{
  if(controller.signal.aborted)return 'aborted'
@@ -28,19 +30,26 @@ const classify=(error:unknown,signal:AbortSignal,controller:AbortController):Pro
 }
 /** Disposable suggestions only: never writes profile facts, news preferences, or consent. */
 export class ProfileWarmup{
- #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#cache:z.infer<typeof diskSchema>={key:'',draft:null,started_at:0,generated_at:0,stage:0}
+ #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#cache:z.infer<typeof diskSchema>={key:'',generation_version:PROFILE_GENERATION_VERSION,participants:false,news_cleanup_pending:false,draft:null,started_at:0,generated_at:0,stage:0}
  #entries:ProfileInput[]=[];#eligible:ProfileInput[]=[];#key='';#opened=false
  #abort=new AbortController();#run:Promise<void>|undefined;#runEntries:ProfileInput[]=[];#writes:Promise<void>=Promise.resolve()
- #timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey='';#withdrawals=0;#withdrawnDuringRun=new Set<string>()
- readonly #timeoutMs:number;readonly #backoffMs:readonly number[];readonly #minIntervalMs:number;readonly #report:((outcome:ProfileOutcome)=>void)|undefined
+ #stale=false;#timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey='';#withdrawals=0;#withdrawnDuringRun=new Set<string>()
+ readonly #participants:boolean;readonly #timeoutMs:number;readonly #backoffMs:readonly number[];readonly #minIntervalMs:number;readonly #report:((outcome:ProfileOutcome)=>void)|undefined
  constructor(path:string,readonly generate:ProfileGenerator|undefined,readonly changed:()=>void,options:ProfileWarmupOptions={}){
-  this.#store=new BoundedJsonStore(path,diskSchema);this.#report=options.report
+  this.#store=new BoundedJsonStore(path,diskSchema);this.#report=options.report;this.#participants=options.participants===true
   this.#timeoutMs=options.timeoutMs??180_000;this.#backoffMs=options.backoffMs??[30_000,120_000,600_000];this.#minIntervalMs=options.minIntervalMs??300_000
  }
- async open(){this.#cache=await this.#store.read(this.#cache);this.#lastRunAt=this.#cache.generated_at;this.#opened=true}
+ async open(){
+  this.#cache=await this.#store.read(this.#cache)
+  // A draft that was written while other people's messages were read cannot outlive that switch: facts grounded in them leave disk with it.
+  if(this.#cache.participants&&!this.#participants){this.#cache={...this.#cache,key:'',draft:null,participants:false,news_cleanup_pending:true,started_at:0,generated_at:0,stage:0};await this.#persist(this.#cache)}
+  this.#lastRunAt=this.#cache.generated_at
+  // A draft written by an older pipeline stays visible until the new pipeline replaces it whole; with no draft there is nothing to replace, so the ordinary schedule applies.
+  this.#stale=this.#cache.draft!==null&&this.#cache.generation_version!==PROFILE_GENERATION_VERSION;this.#opened=true
+ }
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#abort.abort();await this.#run;await this.#writes}
  #persist(cache:z.infer<typeof diskSchema>){const write=this.#writes.then(()=>this.#store.write(cache));this.#writes=write.catch(()=>{/* The caller reports a failed persistence attempt. */});return write}
- async clear(){this.invalidate();this.#cache={key:'',draft:null,started_at:0,generated_at:0,stage:0};await this.#run;await this.#persist(this.#cache)}
+ async clear(){this.invalidate();this.#cache={key:'',generation_version:PROFILE_GENERATION_VERSION,participants:false,news_cleanup_pending:this.#cache.news_cleanup_pending,draft:null,started_at:0,generated_at:0,stage:0};await this.#run;await this.#persist(this.#cache)}
  // A source file keeps its facts while it is re-read (its version moves); a stated memory must match exactly because a correction replaces it.
  #grounded(ref:Ref,entries:readonly ProfileInput[]){return entries.some(e=>e.id===ref.entry_id&&(e.source&&!e.source.kind?true:(e.source!==undefined||e.origin==='stated')&&e.version===ref.version))}
  #prune(draft:ProfileDraft,entries:readonly ProfileInput[]):ProfileDraft|null{
@@ -55,6 +64,9 @@ export class ProfileWarmup{
   // A visible draft reads as ready even while a background refresh runs or fails; the renderer never blanks it.
   const status=this.#run?'working' as const:draft?'ready' as const:this.#failures&&this.#failedKey===this.#key?'failed' as const:'idle' as const
   return {status,draft:draft?structuredClone(draft):null,sources:this.#entries.map(e=>({id:e.id,version:e.version,label:e.source?e.source.document?`${e.source.project}/${e.source.document}`:e.source.project:'你提供的信息'}))}}
+ /** Set on disk together with the purge of a draft written with other people's messages, and kept until the caller confirms that what was derived from the draft is gone too. */
+ newsCleanupPending():boolean{return this.#cache.news_cleanup_pending}
+ async confirmNewsCleanup(){if(!this.#cache.news_cleanup_pending)return;this.#cache={...this.#cache,news_cleanup_pending:false};await this.#persist(this.#cache)}
  retainedEvidenceIds():string[]{
   const draft=this.#cache.draft
   return [...new Set([...(draft?.about?.refs??[]),...(draft?.work.flatMap(item=>item.refs)??[]),...(draft?.interests.flatMap(item=>item.refs)??[])].map(ref=>ref.entry_id).concat(this.#runEntries.filter(input=>input.source?.kind).map(input=>input.id)))]
@@ -62,7 +74,7 @@ export class ProfileWarmup{
  update(entries:readonly ProfileInput[]){
   const usable=entries.filter(e=>e.version!==null&&e.content.trim())
   this.#eligible=[...usable]
-  const selected=[...usable.filter(e=>!e.source).slice(-16),...usable.filter(e=>e.source?.kind).slice(0,96),...usable.filter(e=>e.source&&!e.source.kind).slice(0,24)]
+  const selected=[...usable.filter(e=>!e.source).slice(-16),...usable.filter(e=>e.source?.kind&&e.source.relation!=='participant').slice(0,96),...(this.#participants?usable.filter(e=>e.source?.relation==='participant').slice(0,32):[]),...usable.filter(e=>e.source&&!e.source.kind).slice(0,24)]
    .map(e=>({id:e.id,version:e.version,content:e.content.slice(0,1500),origin:e.origin,...(e.observed_at?{observed_at:e.observed_at}:{}),...(e.source?{source:e.source}:{})})).sort((a,b)=>a.id.localeCompare(b.id))
   const key=inputKey(selected)
   if(key!==this.#key){
@@ -97,6 +109,7 @@ export class ProfileWarmup{
   if(sourced&&!this.#cache.started_at){this.#cache.started_at=now;void this.#persist({...this.#cache}).catch(()=>{/* A successful draft persists the anchor again. */})}
   let due=sourced?this.#cache.stage<3?this.#cache.started_at+SOURCE_STAGES[this.#cache.stage]!:this.#lastRunAt+SOURCE_STAGES[2]:now
   if(this.#cache.draft&&(!sourced||this.#minIntervalMs!==300_000))due=Math.max(due,this.#lastRunAt+this.#minIntervalMs)
+  if(this.#stale)due=now
   if(this.#failures){
    // Retries back off; once the ladder is spent the same inputs wait for an explicit retry, while new inputs retry at the slowest step.
    if(this.#failures>this.#backoffMs.length&&this.#failedKey===this.#key)return
@@ -111,7 +124,9 @@ export class ProfileWarmup{
   if(this.#run)return this.#run
   if(!this.#opened||!this.#key||!this.generate)return Promise.resolve()
   if(retry)this.#failures=0
-  else if(this.#cache.key===this.#key&&!(this.#cache.started_at&&this.#cache.stage<3&&Date.now()>=this.#cache.started_at+SOURCE_STAGES[this.#cache.stage]!))return Promise.resolve()
+  else if(!this.#stale&&this.#cache.key===this.#key&&!(this.#cache.started_at&&this.#cache.stage<3&&Date.now()>=this.#cache.started_at+SOURCE_STAGES[this.#cache.stage]!))return Promise.resolve()
+  // An explicit refresh, or the first one after the pipeline changed, replaces the draft whole: nothing the previous pipeline wrote is carried into the new draft.
+  const whole=retry||this.#stale
   const key=this.#key,entries=structuredClone(this.#entries),controller=new AbortController(),started=Date.now()
   this.#abort=controller;this.#runEntries=entries;this.#lastRunAt=started;this.#withdrawnDuringRun=new Set()
   const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(this.#timeoutMs)])
@@ -128,9 +143,9 @@ export class ProfileWarmup{
     outcome.items=factCount(draft)
     const current=this.#prune(draft,this.#eligible)
     // A reply that leaves about out keeps the previous one only while every entry it cites is unchanged; a re-read source may now say something else.
-    const previousAbout=this.#cache.draft?.about,kept=previousAbout?.refs.every(ref=>!this.#withdrawnDuringRun.has(ref.entry_id)&&this.#eligible.some(e=>e.id===ref.entry_id&&e.version===ref.version&&!e.source?.kind))?previousAbout:null
+    const previousAbout=this.#cache.draft?.about,kept=!whole&&previousAbout?.refs.every(ref=>!this.#withdrawnDuringRun.has(ref.entry_id)&&this.#eligible.some(e=>e.id===ref.entry_id&&e.version===ref.version&&!e.source?.kind))?previousAbout:null
     if(current&&!current.about&&kept)current.about=kept
-    if(current&&this.#cache.draft){
+    if(current&&this.#cache.draft&&!whole){
      const unchanged=(fact:{refs:Ref[]})=>fact.refs.every(ref=>!this.#withdrawnDuringRun.has(ref.entry_id)&&this.#eligible.some(e=>e.id===ref.entry_id&&e.version===ref.version&&!e.source?.kind))
      // A newly verified message draft may retire an old plan even when its original message still exists.
      current.work=[...current.work,...this.#cache.draft.work.filter(fact=>unchanged(fact)&&!current.work.some(item=>item.title===fact.title))].slice(0,6)
@@ -139,13 +154,13 @@ export class ProfileWarmup{
     if(!this.#opened)return
     if(!current){this.#failures=0;this.#failedKey='';return}
     // Installed before the write so a withdrawal arriving mid-write prunes this draft and queues its own write after it.
-    const previous=this.#cache,cache={key,draft:current,started_at:this.#cache.started_at,generated_at:started,stage:this.#cache.started_at?Math.max(this.#cache.stage,SOURCE_STAGES.filter(delay=>started>=this.#cache.started_at+delay).length):0},withdrawals=this.#withdrawals;this.#cache=cache
+    const previous=this.#cache,cache={key,generation_version:PROFILE_GENERATION_VERSION,participants:this.#participants,news_cleanup_pending:this.#cache.news_cleanup_pending,draft:current,started_at:this.#cache.started_at,generated_at:started,stage:this.#cache.started_at?Math.max(this.#cache.stage,SOURCE_STAGES.filter(delay=>started>=this.#cache.started_at+delay).length):0},withdrawals=this.#withdrawals;this.#cache=cache
     try{await this.#persist(cache)}catch{
      // A rollback must not bring back facts withdrawn since the previous draft was captured.
      if(this.#cache===cache){const kept=withdrawals===this.#withdrawals?previous.draft:previous.draft&&this.#prune(previous.draft,this.#eligible);this.#cache={...previous,key:kept?previous.key:'',draft:kept}}
      throw Error('profile_persist_failed')
     }
-    this.#failures=0;this.#failedKey=''
+    this.#failures=0;this.#failedKey='';this.#stale=false
    }catch(error){
     outcome={...outcome,outcome:classify(error,signal,controller)}
     if(this.#opened&&outcome.outcome!=='aborted'){this.#failures++;this.#failedKey=key}
