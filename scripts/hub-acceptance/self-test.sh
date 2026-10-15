@@ -41,9 +41,9 @@ export PATH="$TEST_DIR/bin:$PATH"
 echo '{}' > "$TEST_DIR/status.json"
 expect_fail() { if "$@" > "$TEST_DIR/rejected" 2>&1; then echo "Expected failure: $*" >&2; exit 1; fi; }
 bash "$SCRIPTS/start-hub.sh" > "$TEST_DIR/start"
-bash "$SCRIPTS/start-hub.sh" | grep -q 'already running'
-bash "$SCRIPTS/stop-hub.sh" | grep -q 'stopped'
-bash "$SCRIPTS/stop-hub.sh" | grep -q 'not running'
+bash "$SCRIPTS/start-hub.sh" | grep 'already running' > /dev/null
+bash "$SCRIPTS/stop-hub.sh" | grep 'stopped' > /dev/null
+bash "$SCRIPTS/stop-hub.sh" | grep 'not running' > /dev/null
 echo 'PASS lifecycle: start, idempotent start, stop, idempotent stop (mock process)'
 bash "$SCRIPTS/enroll.sh" test phone > "$TEST_DIR/enroll"
 ! grep -q 'not-a-real-token' "$TEST_DIR/enroll"
@@ -53,9 +53,9 @@ ln -s "$TEST_DIR/victim" "$HOME/.nova/hub-tokens/test-mac.json"
 expect_fail bash "$SCRIPTS/enroll.sh" test mac
 [[ ! -e "$TEST_DIR/victim" ]]
 echo 'PASS enrollment: private 0600 file, no stdout token, overwrite/symlink refused'
-bash "$SCRIPTS/expose-tailscale.sh" | grep -q 'https://test.example.ts.net:8443'
+bash "$SCRIPTS/expose-tailscale.sh" | grep 'https://test.example.ts.net:8443' > /dev/null
 [[ ! -e "$TEST_DIR/mutations" ]]
-HUB_HOST=manual.example.ts.net bash "$SCRIPTS/expose-tailscale.sh" --undo | grep -q 'Dry run'
+HUB_HOST=manual.example.ts.net bash "$SCRIPTS/expose-tailscale.sh" --undo | grep 'Dry run' > /dev/null
 [[ ! -e "$TEST_DIR/mutations" ]]
 bash "$SCRIPTS/expose-tailscale.sh" --yes > /dev/null
 grep -qx 'serve --bg --https=8443 http://127.0.0.1:8787' "$TEST_DIR/mutations"
