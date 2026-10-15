@@ -283,7 +283,7 @@ test('a cache file from before versions were stored is read and counts as an old
  try{
   await service.open();service.update([fileA,fileB]);await service.refresh();await service.close()
   const {generation_version:_dropped,...legacy}=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;void _dropped
-  await writeFile(path,JSON.stringify(legacy));service=make();await service.open()
+  await writeFile(path,JSON.stringify(legacy));service=make();await service.open();assert.equal(service.newsCleanupPending(),false,'a file without the mark has nothing pending')
   service.update([fileA,fileB]);assert.equal(service.snapshot().status,'working');await service.refresh();assert.equal(calls,2)
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })

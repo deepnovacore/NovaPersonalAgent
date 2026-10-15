@@ -610,3 +610,23 @@ test('turning the participant switch off removes the news interests guessed from
   host=make(false);await host.open();assert.deepEqual(host.snapshot().news.interests.map(i=>i.text),['Product design'],'an interest the user confirmed is kept')
  }finally{await host.close();await f.close()}
 })
+
+test('a failed cleanup of guessed news interests is retried on the next start, not forgotten',async()=>{
+ const f=await fixture();await f.host.close()
+ f.entries.set('plan',{...entry(),evidence_refs:['e:plan']});const memory={...f.host.options.memory()!,canProcessEvidence:()=>Promise.resolve(true)}
+ const make=(profileParticipantMessages:boolean)=>new PersonalAgentHost({...f.host.options,memory:()=>memory,profileParticipantMessages,generateProfile:entries=>{const ref=[{entry_id:entries[0]!.id,version:entries[0]!.version!}];return Promise.resolve(profileParticipantMessages?{about:null,interests:[{text:'Product design',refs:ref}]}:{about:{text:'Written without other people\'s messages',refs:ref},work:[],interests:[]})}})
+ let host=make(true)
+ try{
+  await host.open();await host.profileWarmup.refresh()
+  for(let i=0;i<100&&!host.snapshot().news.interests.length;i++)await new Promise(r=>setTimeout(r,5))
+  assert.equal(host.snapshot().news.interests_seeded,true);await host.close()
+  // The news store cannot write once (a full disk): the draft is purged, the guessed interests are not.
+  host=make(false);const real=host.news.clearSeededInterests.bind(host.news);let failures=1
+  host.news.clearSeededInterests=()=>failures-->0?Promise.reject(Object.assign(new Error('ENOSPC'),{code:'ENOSPC'})):real()
+  await host.open();assert.equal(host.snapshot().news.interests_seeded,true,'the failed cleanup left the guessed interests in place');await host.close()
+  host=make(false);await host.open()
+  assert.deepEqual(host.snapshot().news.interests,[],'the next start finishes the cleanup although the draft was already purged')
+  await host.close();host=make(false);const again=host.news.clearSeededInterests.bind(host.news);let calls=0
+  host.news.clearSeededInterests=()=>{calls++;return again()};await host.open();assert.equal(calls,0,'once confirmed, nothing is cleaned again')
+ }finally{await host.close();await f.close()}
+})
