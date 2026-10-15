@@ -16,9 +16,9 @@
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
-**An open-source personal agent that clarifies your intent through real-time conversation and turns it into action.**
+**An open-source personal agent with private memory, smart proactivity and realtime interaction.**
 
-Nova draws on your context and personal memory to understand what matters to you. Its dual brains keep the conversation responsive while background agents carry out longer tasks. Refine your goals as work progresses, revisit the results, and stay in control—with help that is proactive but never pushy.
+Nova draws on your context and private memory to understand what matters to you. It knows how and when to clarify, ask for approval, and move work forward. Its dual brains keep the conversation responsive while background agents handle longer tasks. Refine your goals as work progresses, revisit the results, and stay in control.
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Video demo](https://youtu.be/t1c-2O-QsxE)**
 

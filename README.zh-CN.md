@@ -16,9 +16,9 @@
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
-**开源个人 Agent：在实时对话中帮你厘清意图，再把想法付诸行动。**
+**开源个人 Agent：私有记忆、智能主动性与实时交互。**
 
-Nova 结合你的上下文与个人记忆，理解你关心什么。前后双脑协作，让后台 Agent 执行长任务时，前台依然能流畅交流。你可以边聊边调整目标，随时回看结果、接手工作。它主动提供帮助，也懂得把握分寸，始终由你掌控。
+Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如何、何时澄清意图、征求批准，再推进工作。前后双脑协作，让后台 Agent 执行长任务时，前台依然能流畅交流。你可以边聊边调整目标，随时回看结果，始终掌握主动权。
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [视频演示](https://youtu.be/t1c-2O-QsxE)**
 
