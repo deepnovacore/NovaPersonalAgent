@@ -2,11 +2,12 @@
 
 <div align="center">
 
-[English](README.md) · **简体中文**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
+  <img src="assets/brand/npa-header-light.svg" alt="NovaPersonalAgent — Understands you. Interacts in real time." width="100%">
+</picture>
 
-# Nova Personal Agent: Your Personal Agent and Voice Assistant
-
-**你的个人 Agent 与常驻语音助手：理解上下文，前后双脑协作，主动有分寸。**
+<a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
 
 [![CI](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
@@ -14,6 +15,10 @@
 [![npm downloads](https://img.shields.io/npm/d18m/nova-audio-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-audio-agent)
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
+
+**开源个人 Agent：在实时对话中帮你厘清意图，再把想法付诸行动。**
+
+Nova 结合你的上下文与个人记忆，理解你关心什么。前后双脑协作，让后台 Agent 执行长任务时，前台依然能流畅交流。你可以边聊边调整目标，随时回看结果、接手工作。它主动提供帮助，也懂得把握分寸，始终由你掌控。
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [视频演示](https://youtu.be/t1c-2O-QsxE)**
 

@@ -2,11 +2,12 @@
 
 <div align="center">
 
-**English** · [简体中文](README.zh-CN.md)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
+  <img src="assets/brand/npa-header-light.svg" alt="NovaPersonalAgent — Understands you. Interacts in real time." width="100%">
+</picture>
 
-# Nova Personal Agent: Your Personal Agent and Voice Assistant
-
-**Your personal agent and always-on voice assistant — aware of your context, with dual brains and restrained proactivity.**
+<a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
 
 [![CI](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
@@ -14,6 +15,10 @@
 [![npm downloads](https://img.shields.io/npm/d18m/nova-audio-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-audio-agent)
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
+
+**An open-source personal agent that clarifies your intent through real-time conversation and turns it into action.**
+
+Nova draws on your context and personal memory to understand what matters to you. Its dual brains keep the conversation responsive while background agents carry out longer tasks. Refine your goals as work progresses, revisit the results, and stay in control—with help that is proactive but never pushy.
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Video demo](https://youtu.be/t1c-2O-QsxE)**
 
