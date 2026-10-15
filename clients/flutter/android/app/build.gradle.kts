@@ -26,6 +26,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (providers.gradleProperty("novaAutonomyTest").orNull == "true") {
+                applicationIdSuffix = ".autonomy"
+            }
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
@@ -42,4 +47,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250107")
 }

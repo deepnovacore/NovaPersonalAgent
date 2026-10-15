@@ -1,8 +1,28 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/personal/personal_store.dart';
+import 'package:nova_mobile/personal/local_life.dart';
+import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  test('local personal data is editable without a connected host', () async {
+    final repo = LocalLife(MemoryLifePersistence());
+    await repo.open();
+    final store = PersonalStore(send: (_) => false, local: repo);
+    addTearDown(store.dispose);
+    expect(store.connected, false);
+    expect(store.available, true);
+    await store.command('life.mutate', {
+      'op': 'create',
+      'kind': 'todo',
+      'title': 'Offline',
+    });
+    expect(store.snapshot!.object('life')['todos'][0]['title'], 'Offline');
+    await expectLater(
+      store.command('tasks.create', {}),
+      throwsA(isA<PersonalCommandError>()),
+    );
+  });
   test('revision ordering, conflict, reload, disconnect and timeout', () async {
     final sent = <Map<String, dynamic>>[];
     final store = PersonalStore(
