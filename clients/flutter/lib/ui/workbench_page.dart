@@ -290,7 +290,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       leading: kind == 'todo'
           ? RoundCheck(
               value: done,
-              onChanged: store.connected
+              onChanged: store.available
                   ? (value) => _status(item, value ? 'done' : 'open')
                   : null,
             )
@@ -306,14 +306,14 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       trailing: kind == 'todo'
           ? null
           : const Icon(CupertinoIcons.ellipsis, size: 18, color: Nova.tertiary),
-      onTap: store.connected
+      onTap: store.available
           ? () => kind == 'todo' ? _editTodo(item) : _rowActions(item)
           : null,
     );
     return Dismissible(
       key: ValueKey('life:${row['id']}'),
       confirmDismiss: (direction) async {
-        if (store.connected) {
+        if (store.available) {
           if (kind == 'todo' && direction == DismissDirection.endToStart) {
             await _leftSwipe(item);
           } else {
@@ -1110,8 +1110,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         floatingActionButton: widget.page >= 2 && widget.page <= 4
             ? FloatingActionButton(
                 tooltip: 'New $_kind',
-                onPressed: store.connected ? _create : null,
-                backgroundColor: store.connected
+                onPressed: store.available ? _create : null,
+                backgroundColor: store.available
                     ? Nova.mint
                     : Nova.mint.withValues(alpha: .25),
                 child: const Icon(CupertinoIcons.add, size: 26),
@@ -1152,7 +1152,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                       ),
                     ),
                   ),
-                if (!store.connected)
+                if (!store.available)
                   _notice(
                     t('Offline · cached data. Reconnect to make changes.'),
                   ),

@@ -16,6 +16,7 @@ import 'assistant_text.dart';
 import 'workbench_page.dart';
 import 'components.dart';
 import 'theme.dart';
+import 'local_workspace.dart';
 
 const ink = Nova.ink, mint = Nova.mint;
 
@@ -510,6 +511,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: '本机空间',
+            icon: const Icon(CupertinoIcons.device_phone_portrait, size: 21),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const LocalWorkspace()),
+            ),
+          ),
           IconButton(
             tooltip: tr(session.language, 'Settings'),
             icon: const Icon(

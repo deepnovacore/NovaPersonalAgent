@@ -1,0 +1,3 @@
+<resources>
+    <string name="local_gui_description">Nova 可在你明确委托任务后读取屏幕、点击、滑动和输入。执行时可随时点“停止 Nova”。同步待办不会自动启动操作。</string>
+</resources>
