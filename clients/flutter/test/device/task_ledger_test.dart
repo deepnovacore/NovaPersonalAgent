@@ -161,25 +161,14 @@ void main() {
     ledger = TaskLedger.fromJson(snapshot, id: () => 'next', now: () => 1);
     expect(() => ledger.reserveInitial(f), error('task_terminal'));
   });
-  test(
-    'unknown input blocks new request IDs and malformed restored attempts',
-    () async {
-      final f = fence(ledger.delegate('r', input)['id']);
-      ledger.bindWork(f, 'w', 's');
-      await ledger.input('write', f, 's', 'text', () async => 'unknown');
-      await expectLater(
-        ledger.input('new', f, 's', 'text', () async => fail('retry')),
-        error('task_effect_unknown'),
-      );
-      final other = TaskLedger(id: () => 'task', now: () => 0);
-      final otherFence = fence(other.delegate('other', input)['id']);
-      final effectId = other.reserveInitial(otherFence);
-      final snapshot = other.toJson();
-      snapshot['effects'][effectId]['dispatch_started'] = true;
-      expect(
-        () => TaskLedger.fromJson(snapshot, id: () => 'new', now: () => 0),
-        error('request_conflict'),
-      );
-    },
-  );
+  test('malformed restored dispatch evidence is rejected', () {
+    final f = fence(ledger.delegate('r', input)['id']);
+    final effectId = ledger.reserveInitial(f);
+    final snapshot = ledger.toJson();
+    snapshot['effects'][effectId]['dispatch_started'] = true;
+    expect(
+      () => TaskLedger.fromJson(snapshot, id: () => 'new', now: () => 0),
+      error('request_conflict'),
+    );
+  });
 }

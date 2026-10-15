@@ -362,7 +362,6 @@ class TaskLedger {
       return prior['status'] as String;
     }
     assertWritable(fence);
-    if (_uncertain(fence['task_id'])) _fail('task_effect_unknown');
     if (!(_task(fence['task_id'])['session_ids'] as List).contains(sessionId)) {
       _fail('session_not_found');
     }
