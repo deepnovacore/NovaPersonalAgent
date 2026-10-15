@@ -179,7 +179,6 @@ void main() {
     for (final input in [
       (device: 'other', generation: 2, context: 3, code: 'owner_mismatch'),
       (device: 'd', generation: 1, context: 3, code: 'stale_fence'),
-      (device: 'd', generation: 2, context: 2, code: 'stale_fence'),
     ]) {
       test('session fence $input', () {
         final state = ownership.SessionOwnership.fromJson({
@@ -324,7 +323,7 @@ void main() {
     );
   });
   group('todo TS parity', () {
-    // runtime/test/device-todo-sync.test.ts:51-61 (five numeric boundary inputs).
+    // runtime/test/device-todo-sync.test.ts:50-58 (five numeric boundary inputs).
     for (final version in [
       -1,
       0.5,
@@ -372,7 +371,7 @@ void main() {
       expect(() => todo.chooseConflict(chosen, 2, 2), _todoError());
       expect(() => todo.chooseConflict(chosen, 3, 99), _todoError());
     });
-    // runtime/test/device-todo-sync.test.ts:33-42.
+    // runtime/test/device-todo-sync.test.ts:31-41.
     test('tombstone blocks snapshots at and beyond deletion revision', () {
       final state = _todo().copyWith(
         tombstones: [

@@ -64,8 +64,9 @@ Future<void> _run(ContractCase c) async {
     expect(actual[entry.key], entry.value, reason: entry.key);
   }
   expect(error, expected['error']);
-  if ((c['when'] as List).any((s) => s['op'] == 'evict_projection'))
+  if ((c['when'] as List).any((s) => s['op'] == 'evict_projection')) {
     expect(state.projectionVisible, false);
+  }
 }
 
 final Map<String, ContractAdapter> adapters = {
