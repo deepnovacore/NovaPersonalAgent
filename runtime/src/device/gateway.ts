@@ -1,1 +1,0 @@
-../../../../worker-2/runtime/src/device/gateway.ts
