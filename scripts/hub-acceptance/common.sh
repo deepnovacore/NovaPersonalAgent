@@ -32,6 +32,6 @@ owned_pid() {
   { read -r pid; IFS= read -r fingerprint; } < "$HUB_DIR/hub.pid"
   [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 && -n "$fingerprint" ]] || fail 'Invalid PID file; inspect manually'
   kill -0 "$pid" 2>/dev/null || return 1
-  current=$(ps -p "$pid" -o lstart= -o command=)
+  current=$(ps -ww -p "$pid" -o lstart= -o command=)
   [[ "$current" == "$fingerprint" && "$current" == *"$CLI serve $HUB_DIR/hub.db 127.0.0.1 8787" ]] || fail 'PID identity mismatch; refusing to signal or overwrite'
 }

@@ -12,7 +12,7 @@ nohup node "$CLI" serve "$HUB_DIR/hub.db" 127.0.0.1 8787 >> "$HUB_DIR/hub.log" 2
 pid=$!
 sleep 0.2
 kill -0 "$pid" 2>/dev/null || fail "Hub failed; inspect $HUB_DIR/hub.log"
-fingerprint=$(ps -p "$pid" -o lstart= -o command=)
+fingerprint=$(ps -ww -p "$pid" -o lstart= -o command=)
 printf '%s\n%s\n' "$pid" "$fingerprint" > "$HUB_DIR/hub.pid"
 chmod 600 "$HUB_DIR/hub.pid" "$HUB_DIR/hub.log"
 for ((i=0; i<30; i++)); do

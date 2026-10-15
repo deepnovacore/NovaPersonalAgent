@@ -42,9 +42,15 @@ echo '{}' > "$TEST_DIR/status.json"
 expect_fail() { if "$@" > "$TEST_DIR/rejected" 2>&1; then echo "Expected failure: $*" >&2; exit 1; fi; }
 bash "$SCRIPTS/start-hub.sh" > "$TEST_DIR/start"
 bash "$SCRIPTS/start-hub.sh" | grep 'already running' > /dev/null
+cp "$HOME/.nova/hub/hub.pid" "$TEST_DIR/pid-backup"
+read -r live_pid < "$HOME/.nova/hub/hub.pid"
+printf '%s\nwrong identity\n' "$live_pid" > "$HOME/.nova/hub/hub.pid"
+expect_fail bash "$SCRIPTS/stop-hub.sh"
+kill -0 "$live_pid"
+cp "$TEST_DIR/pid-backup" "$HOME/.nova/hub/hub.pid"
 bash "$SCRIPTS/stop-hub.sh" | grep 'stopped' > /dev/null
 bash "$SCRIPTS/stop-hub.sh" | grep 'not running' > /dev/null
-echo 'PASS lifecycle: start, idempotent start, stop, idempotent stop (mock process)'
+echo 'PASS lifecycle: start, idempotent start, stop, idempotent stop, PID mismatch refusal (mock process)'
 bash "$SCRIPTS/enroll.sh" test phone > "$TEST_DIR/enroll"
 ! grep -q 'not-a-real-token' "$TEST_DIR/enroll"
 "$REAL_NODE" -e 'const fs=require("fs"),p=process.env.HOME+"/.nova/hub-tokens/test-phone.json";if((fs.statSync(p).mode&511)!==384)throw Error("mode");if(!JSON.parse(fs.readFileSync(p)).token)throw Error("missing token")'
