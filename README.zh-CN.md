@@ -158,6 +158,14 @@ Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如
 
 ### 3.1 安装与启动
 
+**快捷下载 · v0.4.0** — [发布说明与 SHA-256 校验文件](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0) · [最新版本](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+
+| 平台 | 下载 |
+| --- | --- |
+| macOS · Apple Silicon（arm64） | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-macos-arm64-app.zip) |
+| Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-windows-x64.exe) · [便携版 ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-windows-x64-portable.zip) |
+| Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-linux-x64.deb) |
+
 环境要求：Node.js 22.13+ 与 npm。编码任务需安装并登录所选编码后端；Codex 使用 app-server。
 
 可直接用 npm 安装。

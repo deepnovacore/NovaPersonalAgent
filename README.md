@@ -158,6 +158,14 @@ The front brain handles conversation; the back brain does the work. Task events 
 
 ### 3.1 Install and run
 
+**Quick downloads · v0.4.0** — [Release notes and SHA-256 checksums](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0) · [Latest release](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+
+| Platform | Download |
+| --- | --- |
+| macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-macos-arm64-app.zip) |
+| Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-windows-x64.exe) · [Portable ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-windows-x64-portable.zip) |
+| Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-linux-x64.deb) |
+
 Requirements: Node.js 22.13+ and npm. For coding tasks, install and authenticate your chosen coding backend; Codex uses its app-server transport.
 
 Install the release with npm.
