@@ -139,8 +139,9 @@ void _validate(TodoState state) {
   }
   for (final tombstone in state.tombstones) {
     _version(tombstone.version);
-    if (tombstone.entityId.isEmpty || !tombstone.permanent)
+    if (tombstone.entityId.isEmpty || !tombstone.permanent) {
       throw const TodoSyncError('Invalid tombstone');
+    }
   }
 }
 
@@ -165,8 +166,9 @@ TodoState merge(TodoState local, TodoVersion incoming) {
   _validateVersion(incoming);
   if (_deleted(local)) return local.copyWith(projectionVisible: false);
   if (_same(local, incoming)) return local;
-  if (incoming.version <= local.version)
+  if (incoming.version <= local.version) {
     return local.copyWith(conflicts: _retain(local.conflicts, incoming));
+  }
   return local.copyWith(
     version: incoming.version,
     baseVersion: incoming.baseVersion,
@@ -195,8 +197,9 @@ TodoState chooseConflict(
     _entry(local),
     ...local.conflicts,
   ].where((c) => c.version == chosenVersion).toList();
-  if (candidates.length != 1)
+  if (candidates.length != 1) {
     throw const TodoSyncError('Choice missing or ambiguous');
+  }
   final chosen = candidates.single;
   final nextVersion =
       local.conflicts.fold<num>(
