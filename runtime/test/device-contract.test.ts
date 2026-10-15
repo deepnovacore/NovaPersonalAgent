@@ -8,42 +8,71 @@ import {z} from 'zod'
 import {TaskService, taskInputSchema} from '../src/personal-agent/tasks.js'
 import {TaskLoop} from '../src/personal-agent/task-loop.js'
 
+const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+const id = z.string().min(1)
+const phase = z.enum(['queued', 'running', 'verifying', 'waiting', 'completed', 'cancelled', 'failed'])
+const approval = z.enum(['pending', 'approved', 'consumed', 'expired', 'revoked'])
+const attempt = z.enum(['none', 'prepared', 'dispatching', 'accepted', 'failed', 'unknown-effect'])
+const fence = z.object({todo_version: integer, goal_revision: integer, control_revision: integer,
+  lifecycle_generation: integer, capability_revision: integer}).strict()
+const identity = z.object({principal: id, device_id: id, request_id: id}).strict()
 const fixture = z.object({
   contract_version: z.literal(1),
+  operations: z.record(id, z.array(id)),
   cases: z.array(z.object({
-    id: z.string().min(1),
-    semantics: z.array(z.enum(['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'])).min(1),
-    given: z.object({request_id: z.string().min(1), input: taskInputSchema}),
-    when: z.array(z.string().min(1)).min(1),
-    then: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
-    coverage: z.object({adapter: z.string(), scope: z.string().min(1), reason: z.string().min(1).optional()}),
-  })).min(1),
-}).parse(JSON.parse(readFileSync(
+    id, semantics: z.array(z.enum(['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'])).min(1),
+    given: z.object({
+      identity, request_key: id, input: taskInputSchema,
+      todo: z.object({id, version: integer, content: id, conflicts: z.array(z.unknown())}).strict(),
+      goal: z.object({id, revision: integer}).strict(),
+      task: z.object({id, phase, owner: id}).strict(),
+      session: z.object({id, owner: id, generation: integer, context_version: integer}).strict(),
+      fence,
+      approval: z.object({grant_ref: id, status: approval, bindings: fence.extend({
+        task_id: id, owner: id, conversation_generation: integer, data_version: integer,
+        observation_version: integer, permission_scope: z.array(id), effect_class: id,
+        proposal_digest: id, executable_digest: id, expires_at: integer,
+      }).strict()}).strict(),
+      attempt: z.object({id, status: attempt, dispatch_started: z.boolean()}).strict(),
+      tombstones: z.array(z.object({entity_id: id, version: integer, permanent: z.literal(true)}).strict()),
+      permissions: z.array(id), dedup: z.object({capacity: integer, receipts: z.array(z.object({
+        id, request_key: id, payload_digest: id, status: id,
+      }).strict())}).strict(), effects: integer,
+    }).strict(),
+    when: z.array(z.object({op: id, params: z.record(id, z.unknown())}).strict()).min(1),
+    then: z.object({task_phase: phase, attempt_status: attempt, approval_status: approval,
+      effects: integer}).catchall(z.unknown()),
+    coverage: z.object({adapter: z.enum(['local', 'pending']), scope: id, reason: id.optional()}).strict(),
+  }).strict()).min(1),
+}).strict().parse(JSON.parse(readFileSync(
   new URL('../../../tests/fixtures/device-contract/v1/cases.json', import.meta.url), 'utf8',
 )))
 
-const sequences: Record<string, string[]> = {
-  'stop-late-reply': ['begin_model_evaluation', 'stop_task', 'deliver_late_correction'],
-  'intent-crash': ['persist_intent', 'mark_dispatch_started', 'restart_without_receipt', 'retry_dispatch'],
-  'ack-lost': ['write_once_without_ack', 'restart', 'retry_same_request'],
-  'same-input-delegation': ['delegate', 'replay_same_request', 'restart', 'replay_same_request', 'reuse_key_with_changed_payload'],
-  'stale-goal-fence': ['delegate', 'revise_goal', 'write_with_old_fence'],
-}
-
-test('device contract fixture covers every mandatory semantic and known scenario', () => {
+test('device contract fixture is independent, structured and covers every mandatory semantic', () => {
   assert.equal(new Set(fixture.cases.map(c => c.id)).size, fixture.cases.length)
   assert.deepEqual([...new Set(fixture.cases.flatMap(c => c.semantics))].sort(),
     ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'])
-  for (const id of ['stop-late-reply', 'approval-version-expiry', 'intent-crash',
-    'ack-lost', 'todo-conflict-cas', 'completed-projection-eviction',
-    'permanent-delete-reconnect', 'same-input-delegation', 'ios-background-reply', 'owner-lease-expiry'])
-    assert.ok(fixture.cases.some(c => c.id === id), id)
+  for (const required of ['stop-late-reply', 'approval-version-expiry', 'intent-crash', 'ack-lost',
+    'same-input-delegation', 'stale-goal-fence', 'todo-conflict-cas', 'todo-cas-success',
+    'completed-projection-eviction', 'permanent-delete-reconnect', 'tombstone-equal-version',
+    'ios-background-reply', 'owner-lease-expiry', 'session-owner-rule', 'stop-revokes-before-ack',
+    'dedup-capacity', 'approval-single-consumption', 'permission-recheck', 'cross-device-payload-conflict',
+    'prepared-failed', 'unknown-resolved-completed', 'unknown-resolved-failed',
+    'capability-revision-recheck', 'exec-requires-approval'])
+    assert.ok(fixture.cases.some(c => c.id === required), required)
   for (const c of fixture.cases) {
-    if (c.coverage.adapter === 'pending') assert.ok(c.coverage.reason, c.id)
-    else {
-      assert.equal(c.coverage.adapter, c.id)
-      assert.deepEqual(c.when, sequences[c.id], 'unimplemented event sequence: ' + c.id)
+    const g = c.given
+    assert.equal(g.request_key, JSON.stringify([g.identity.principal, g.identity.device_id, g.identity.request_id]))
+    assert.equal(g.fence.todo_version, g.todo.version)
+    assert.equal(g.fence.goal_revision, g.goal.revision)
+    assert.equal(g.approval.bindings.task_id, g.task.id)
+    assert.equal(g.approval.bindings.owner, g.task.owner)
+    assert.equal(g.approval.bindings.conversation_generation, g.session.generation)
+    for (const step of c.when) {
+      assert.ok(Object.hasOwn(fixture.operations, step.op), step.op)
+      for (const key of Object.keys(step.params)) assert.ok(fixture.operations[step.op]!.includes(key), key)
     }
+    if (c.coverage.adapter === 'pending') assert.ok(c.coverage.reason, c.id)
   }
 })
 
@@ -56,88 +85,118 @@ for (const c of fixture.cases) {
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'device-contract-'))
     const path = join(dir, 'tasks.json')
     let tasks = new TaskService(path)
-    const restart = async () => {
-      await tasks.close()
-      tasks = new TaskService(path)
-      await tasks.open()
-    }
+    let loop: TaskLoop | undefined
+    let running: Promise<void> | undefined
+    let release: (() => void) | undefined
     try {
       await tasks.open()
-      const task = await tasks.delegate(c.given.request_id, c.given.input)
-      const fence = {task_id: task.id, control_revision: 0, goal_revision: 0}
+      // Only the existing local journal slice is adapted; device authority stays pending.
+      assert.equal(c.given.task.phase, 'queued')
+      assert.equal(c.given.attempt.status, 'none')
+      const task = await tasks.delegate(c.given.request_key, c.given.input)
+      const fence = {task_id: task.id, control_revision: c.given.fence.control_revision,
+        goal_revision: c.given.fence.goal_revision}
       const actor = {kind: 'nova'} as const
-      let effects = 0
-      switch (c.coverage.adapter) {
-        case 'same-input-delegation': {
-          const repeated = await tasks.delegate(c.given.request_id, c.given.input)
-          await restart()
-          const restored = await tasks.delegate(c.given.request_id, c.given.input)
-          assert.equal(repeated.id === task.id && restored.id === task.id, c.then.same_task_id)
-          assert.equal(tasks.list().length, c.then.task_count)
-          await assert.rejects(tasks.delegate(c.given.request_id, {...c.given.input, goal: 'Changed'}),
-            {message: c.then.conflict_error})
-          assert.equal(restored.conversation_id, c.given.input.conversation_id)
-          assert.equal(restored.origin_ref, c.given.input.origin_ref)
-          break
-        }
-        case 'intent-crash': {
-          const effect = await tasks.reserveInitial(fence)
-          await tasks.markEffectDispatching(effect)
-          await restart()
-          assert.equal(tasks.pendingEffect(task.id)?.status, c.then.effect_status)
-          await assert.rejects(tasks.reserveInitial(fence).then(() => {effects++}),
-            {message: c.then.retry_error})
-          assert.equal(effects, c.then.new_effects)
-          break
-        }
-        case 'ack-lost': {
-          await tasks.bindWork(fence, 'work-1', 'session-1')
-          const send = () => {effects++; return Promise.resolve('unknown' as const)}
-          const deliver = () => tasks.input('input-write-1', fence, actor, 'session-1', 'Write once', send)
-          assert.equal(await deliver(), c.then.effect_status)
-          await restart()
-          assert.equal(await deliver(), c.then.effect_status)
-          assert.equal(effects, c.then.total_effects)
-          break
-        }
-        case 'stale-goal-fence': {
-          await tasks.reviseGoal('revise-1', fence, actor, 'New goal', [])
-          await assert.rejects(tasks.bindWork(fence, 'stale-work').then(() => {effects++}),
-            {message: c.then.error})
-          assert.equal(effects, c.then.new_effects)
-          break
-        }
-        case 'stop-late-reply': {
-          await tasks.recordDelivery(fence, 'reply-1', 'Needs correction')
-          let release!: () => void
-          let started!: () => void
-          const gate = new Promise<void>(resolve => {release = resolve})
-          const ready = new Promise<void>(resolve => {started = resolve})
-          const loop = new TaskLoop(tasks, {
-            evaluate: async () => {
-              started()
-              await gate
-              return {kind: 'correct', instruction: 'Write late', evidence_refs: ['task-delivery:reply-1']}
-            },
-            execute: () => {effects++; return Promise.resolve()},
-            syncTodo: () => Promise.resolve('synced'),
-          })
-          const running = loop.wake(task.id)
-          try {
-            await ready
-            await tasks.cancel('stop-1', fence, actor)
-          } finally {
-            release()
-            await running
-            await loop.close()
+      let effects = c.given.effects
+      let effectId = ''
+      let receipt: ReturnType<TaskService['inputReceipts']>[number] | undefined
+      let deliveries = 0
+      let sameTask = true
+      const requestKey = (requestId: string) => JSON.stringify([
+        c.given.identity.principal, c.given.identity.device_id, requestId,
+      ])
+      for (const step of c.when) {
+        const p = step.params
+        const str = (key: string) => id.parse(p[key])
+        switch (step.op) {
+          case 'restart':
+            await tasks.close()
+            tasks = new TaskService(path)
+            await tasks.open()
+            break
+          case 'recover_uncertain':
+            assert.ok(tasks.pendingEffect(task.id)?.status === 'unknown'
+              || tasks.inputReceipts(task.id).some(receipt => receipt.status === 'unknown'))
+            await tasks.recoveryWait(task.id, str('reason'))
+            break
+          case 'replay_delegation': {
+            const repeated = await tasks.delegate(c.given.request_key, c.given.input)
+            sameTask = repeated.id === task.id && sameTask
+            break
           }
-          assert.equal(tasks.get(task.id).phase, c.then.phase)
-          assert.equal(effects, c.then.new_effects)
-          break
+          case 'conflicting_delegation':
+            await assert.rejects(tasks.delegate(c.given.request_key, {...c.given.input, goal: str('goal')}),
+              {message: str('error')})
+            break
+          case 'persist_intent': effectId = await tasks.reserveInitial(fence); break
+          case 'mark_dispatch_started': await tasks.markEffectDispatching(effectId); break
+          case 'retry_dispatch':
+            await assert.rejects(tasks.reserveInitial(fence).then(() => {effects++}), {message: str('error')})
+            break
+          case 'bind_work': {
+            const bind = () => tasks.bindWork(fence, str('work_id'), p.session_id === undefined ? undefined : str('session_id'))
+            if (p.error) await assert.rejects(bind().then(() => {effects++}), {message: str('error')})
+            else await bind()
+            break
+          }
+          case 'deliver_input': {
+            const result = z.enum(['accepted', 'failed', 'unknown']).parse(p.result)
+            assert.equal(await tasks.input(requestKey(str('request_id')), fence, actor, str('session_id'), str('text'),
+              () => {effects++; return Promise.resolve(result)}), result)
+            const current = tasks.inputReceipts(task.id)[0]!
+            assert.ok(current)
+            if (receipt) assert.deepEqual(current, receipt, 'replay must return original durable receipt content')
+            else receipt = structuredClone(current)
+            deliveries++
+            break
+          }
+          case 'revise_goal': await tasks.reviseGoal(requestKey(str('request_id')), fence, actor, str('goal'), []); break
+          case 'begin_model_evaluation': {
+            await tasks.recordDelivery(fence, str('delivery_id'), str('text'))
+            let started!: () => void
+            const gate = new Promise<void>(resolve => {release = resolve})
+            const ready = new Promise<void>(resolve => {started = resolve})
+            loop = new TaskLoop(tasks, {
+              evaluate: async () => {
+                started()
+                await gate
+                return {kind: 'correct', instruction: str('instruction'), evidence_refs: ['task-delivery:' + str('delivery_id')]}
+              },
+              execute: () => {effects++; return Promise.resolve()},
+              syncTodo: () => Promise.resolve('synced'),
+            })
+            running = loop.wake(task.id)
+            await ready
+            break
+          }
+          case 'stop_task': await tasks.cancel(requestKey(str('request_id')), fence, actor); break
+          case 'deliver_late_correction': release!(); await running; break
+          default: assert.fail('missing local operation: ' + step.op)
         }
-        default: assert.fail('missing adapter: ' + c.coverage.adapter)
       }
+      assert.equal(tasks.get(task.id).phase, c.then.task_phase)
+      assert.equal(effects, c.then.effects)
+      const status = tasks.pendingEffect(task.id)?.status ?? receipt?.status ?? 'none'
+      assert.equal(status === 'unknown' ? 'unknown-effect' : status, c.then.attempt_status)
+      if (c.then.same_task_id !== undefined) assert.equal(sameTask, c.then.same_task_id)
+      if (c.then.task_count !== undefined) assert.equal(tasks.list().length, c.then.task_count)
+      if (c.then.receipt_replayed) {
+        assert.equal(deliveries, 2)
+        const expected = z.object({request_id: id, status: id, session_id: id, text: id}).parse(c.then.receipt)
+        assert.equal(receipt!.request_id, requestKey(expected.request_id))
+        assert.equal(receipt!.status === 'unknown' ? 'unknown-effect' : receipt!.status, expected.status)
+        assert.equal(receipt!.session_id, expected.session_id)
+        assert.equal(receipt!.text, expected.text)
+        assert.deepEqual(receipt!.fence, fence)
+        assert.deepEqual(receipt!.actor, actor)
+        assert.equal(receipt!.task_id, task.id)
+      }
+      assert.equal(tasks.get(task.id).conversation_id, c.given.input.conversation_id)
+      assert.equal(tasks.get(task.id).origin_ref, c.given.input.origin_ref)
     } finally {
+      release?.()
+      await running
+      await loop?.close()
       await tasks.close()
       await rm(dir, {recursive: true, force: true})
     }
