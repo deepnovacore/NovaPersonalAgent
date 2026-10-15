@@ -25,17 +25,17 @@ test('CLI devices, todos and command replay use the real HTTP Hub',async()=>{
  const f=await fixture()
  try{
   f.online()
-  const devices=await f.cli(['devices']);assert.equal(devices.code,0,devices.err);assert.equal(JSON.parse(devices.out)[0].device_id,f.phone.device_id)
+  const devices=await f.cli(['devices']);assert.equal(devices.code,0,devices.err);assert.equal((JSON.parse(devices.out) as {device_id:string}[])[0]?.device_id,f.phone.device_id)
   const add=['todo','add','--title','Buy milk','--note','Two bottles','--op-id','todo-one']
   const first=await f.cli(add);assert.equal(first.code,0,first.err)
-  assert.deepEqual(JSON.parse((await f.cli(add)).out).result,JSON.parse(first.out).result)
-  assert.match((await f.cli([...add.slice(0,4),'Different','--op-id','todo-one'])).err,/op_id_conflict/)
-  const list=await f.cli(['todo','list']);assert.equal(JSON.parse(list.out).length,1);assert.equal(JSON.parse(list.out)[0].note,'Two bottles')
+  assert.deepEqual((JSON.parse((await f.cli(add)).out) as {result:unknown}).result,(JSON.parse(first.out) as {result:unknown}).result)
+  assert.match((await f.cli(add.map(v=>v==='Buy milk'?'Different':v))).err,/op_id_conflict/)
+  const list=await f.cli(['todo','list']);assert.equal((JSON.parse(list.out) as unknown[]).length,1);assert.equal((JSON.parse(list.out) as {note:string}[])[0]?.note,'Two bottles')
   const args=[...f.send,'--command-id','start-one','--task-id','task-one','--expires-at',String(Date.now()+60000)]
   const sent=await f.cli(args);assert.equal(sent.code,0,sent.err)
   assert.deepEqual(JSON.parse((await f.cli(args)).out),JSON.parse(sent.out))
   assert.match((await f.cli(args.map(v=>v==='Open app'?'Other goal':v))).err,/command_id_conflict/)
-  assert.equal(JSON.parse((await f.cli(['tasks'])).out)[0].task_id,'task-one')
+  assert.equal((JSON.parse((await f.cli(['tasks'])).out) as {task_id:string}[])[0]?.task_id,'task-one')
   const cancel=await f.cli(['cancel','--task','task-one','--to',f.phone.device_id]);assert.equal(cancel.code,0,cancel.err)
   assert.equal(f.store.routing.inbox(f.phone.token)[1]?.command.kind,'cancel')
  }finally{await f.close()}
@@ -66,7 +66,7 @@ test('CLI watch reports completion, cancellation, interruption, expiry and timeo
    f.store.routing.publish(f.phone.token,{task_id:sent.task_id,seq:1,phase:'verifying',summary:'Check'})
    f.store.routing.publish(f.phone.token,{task_id:sent.task_id,seq:2,phase,summary:'Done'})
    const watched=await f.cli(['watch','--task',sent.task_id,'--timeout-seconds','2'])
-   assert.equal(watched.code,phase==='completed'?0:1,watched.err);assert.equal(JSON.parse(watched.out).phase,phase)
+   assert.equal(watched.code,phase==='completed'?0:1,watched.err);assert.equal((JSON.parse(watched.out) as {phase:string}).phase,phase)
   }
   const pending=JSON.parse((await f.cli([...f.send,'--ttl-seconds','1'])).out) as {task_id:string}
   const expired=await f.cli(['watch','--task',pending.task_id,'--timeout-seconds','3']);assert.equal(expired.code,1);assert.match(expired.out,/expired/)
