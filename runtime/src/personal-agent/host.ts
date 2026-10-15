@@ -1,3 +1,4 @@
+import type {StopRevoker} from '../device/port.js';
 import {SourceProcessingAgent} from './source-processing-agent.js';
 import {notificationResultText} from '../notifications/content.js';
 import {NotificationService} from '../notifications/service.js';
@@ -85,6 +86,8 @@ export interface PersonalFeishu {
     close(): Promise<void>;
 }
 export interface HostOptions {
+    stopRevoker?: StopRevoker;
+    onDiagnostic?: (code: string) => void;
     notificationAdapters?:NotificationChannelAdapter[];
     generateContext?: ContextGenerator;
     newsLanguage?: string;
@@ -358,7 +361,7 @@ export class PersonalAgentHost {
     readonly taskLoop:TaskLoop;
     wakeTask(taskId:string):Promise<void>{if(this.#recovering||this.#recoveryBlocked.has(taskId))return Promise.resolve();return this.taskLoop.wake(taskId).finally(()=>{if(this.#opened&&this.tasks.get(taskId).trigger)void this.scheduledTaskTick().catch(()=>{/* the durable run retries on the next tick */})})}
     async taskOutcome(workId:string,outcome:string,content:unknown,refs:string[]=[]):Promise<void>{const task=this.tasks.list().find(task=>task.work_ids.includes(workId));if(!task)return;await this.tasks.recordWorkOutcome(workId,outcome,content,refs);if(this.#recoveryBlocked.has(task.id))await this.recoverTasks();else await this.wakeTask(task.id)}
-    async cancelTask(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{const prior=this.tasks.get(fence.task_id),lostDelivery=prior.trigger&&this.#recoveryBlocked.has(prior.id)&&prior.waiting_reason==='task_delivery_uncertain'?prior.pending_delivery:undefined;const task=await this.tasks.cancel(requestId,fence,actor);try{const port=this.taskRuntime(task.id);port.cancelTask?.(task.id);for(const work of this.tasks.activeWork(task.id))port.cancel(work)}catch{/* durable cancellation intent remains pending until the original executor confirms stop */}if(lostDelivery)await this.tasks.finishDelivery(task.id,lostDelivery);return this.tasks.get(task.id)}
+    async cancelTask(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{const prior=this.tasks.get(fence.task_id),lostDelivery=prior.trigger&&this.#recoveryBlocked.has(prior.id)&&prior.waiting_reason==='task_delivery_uncertain'?prior.pending_delivery:undefined;if(this.options.stopRevoker)try{await this.options.stopRevoker.revokeForStop(fence.task_id)}catch{try{this.options.onDiagnostic?.('device_stop_revocation_failed')}catch{/* diagnostics must not block cancellation */}}const task=await this.tasks.cancel(requestId,fence,actor);try{const port=this.taskRuntime(task.id);port.cancelTask?.(task.id);for(const work of this.tasks.activeWork(task.id))port.cancel(work)}catch{/* durable cancellation intent remains pending until the original executor confirms stop */}if(lostDelivery)await this.tasks.finishDelivery(task.id,lostDelivery);return this.tasks.get(task.id)}
     #recovering=false;
     #recoveryBlocked=new Set<string>();
     #recoveryFactory:ConversationRuntimeFactory|undefined;
