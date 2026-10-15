@@ -591,3 +591,22 @@ test('purge retires main runtime and removes a selected feed turn while preservi
  Object.assign(f.host.options.memory()!,{purgeEntry:()=>{erased=true;f.entries.delete('plan');return Promise.resolve({status:'complete',operation_id:'purge-selected',removed_entries:1,removed_evidence:0,removed_entry_ids:['plan'],removed_evidence_ids:[],backup_cleanup:{status:'complete',unresolved:[]}})}})
  try{f.host.setConversationRuntime(()=>Promise.resolve({runTurn:text=>Promise.resolve({assistant:'Reply '+text}),close:()=>{closed++;return Promise.resolve()}}),()=>{ /* no transport */ });await f.host.submitConversationText('chat:main','Unrelated history');await f.host.waitConversation('chat:main');assert.equal(await f.host.admit(proposal(),await f.host.discoverySnapshot()),'admitted');const feed=f.host.snapshot().feed[0]!;await f.host.command({type:'personal.command',request_id:'selected-feed',method:'conversations.discuss',params:{text:'Use this material',references:[{kind:'feed',id:feed.id,updated_at:feed.updated_at}]}});await f.host.waitConversation('chat:main');assert.equal(f.host.conversationSnapshot().messages.length,4);await f.host.command({type:'personal.command',request_id:'purge-selected',method:'memory.purge',params:{id:'plan',expected_version:1}});assert.equal(erased,true);assert.equal(closed,1);assert.deepEqual(f.host.conversationSnapshot().messages.map(m=>m.text),['Unrelated history','Reply Unrelated history'])}finally{await f.close()}
 })
+
+test('turning the participant switch off removes the news interests guessed from that draft, but not confirmed ones',async()=>{
+ const f=await fixture();await f.host.close()
+ f.entries.set('plan',{...entry(),evidence_refs:['e:plan']});const memory={...f.host.options.memory()!,canProcessEvidence:()=>Promise.resolve(true)}
+ const make=(profileParticipantMessages:boolean)=>new PersonalAgentHost({...f.host.options,memory:()=>memory,profileParticipantMessages,generateProfile:entries=>{const ref=[{entry_id:entries[0]!.id,version:entries[0]!.version!}];return Promise.resolve(profileParticipantMessages?{about:null,interests:[{text:'Product design',refs:ref}]}:{about:{text:'Written without other people\'s messages',refs:ref},work:[],interests:[]})}})
+ let host=make(true)
+ try{
+  await host.open();await host.profileWarmup.refresh()
+  for(let i=0;i<100&&!host.snapshot().news.interests.length;i++)await new Promise(r=>setTimeout(r,5))
+  assert.equal(host.snapshot().news.interests_seeded,true);await host.close()
+  host=make(false);await host.open()
+  assert.deepEqual(host.snapshot().news.interests,[],'a guess made while other people\'s messages were read is withdrawn')
+  await host.profileWarmup.refresh();assert.equal(host.snapshot().profile_preparation.draft?.interests.length,0,'the old draft is gone; the new one carries nothing from it')
+  await host.close();host=make(true);await host.open();await host.profileWarmup.refresh()
+  for(let i=0;i<100&&!host.snapshot().news.interests.length;i++)await new Promise(r=>setTimeout(r,5))
+  await host.close();host=make(true);await host.open();await host.news.configure({enabled:true,interests:['Product design'],explore:false});await host.close()
+  host=make(false);await host.open();assert.deepEqual(host.snapshot().news.interests.map(i=>i.text),['Product design'],'an interest the user confirmed is kept')
+ }finally{await host.close();await f.close()}
+})

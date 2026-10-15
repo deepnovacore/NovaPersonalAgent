@@ -34,7 +34,7 @@ export class ProfileWarmup{
  #entries:ProfileInput[]=[];#eligible:ProfileInput[]=[];#key='';#opened=false
  #abort=new AbortController();#run:Promise<void>|undefined;#runEntries:ProfileInput[]=[];#writes:Promise<void>=Promise.resolve()
  #stale=false;#timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey='';#withdrawals=0;#withdrawnDuringRun=new Set<string>()
- readonly #participants:boolean;readonly #timeoutMs:number;readonly #backoffMs:readonly number[];readonly #minIntervalMs:number;readonly #report:((outcome:ProfileOutcome)=>void)|undefined
+ #purgedParticipants=false;readonly #participants:boolean;readonly #timeoutMs:number;readonly #backoffMs:readonly number[];readonly #minIntervalMs:number;readonly #report:((outcome:ProfileOutcome)=>void)|undefined
  constructor(path:string,readonly generate:ProfileGenerator|undefined,readonly changed:()=>void,options:ProfileWarmupOptions={}){
   this.#store=new BoundedJsonStore(path,diskSchema);this.#report=options.report;this.#participants=options.participants===true
   this.#timeoutMs=options.timeoutMs??180_000;this.#backoffMs=options.backoffMs??[30_000,120_000,600_000];this.#minIntervalMs=options.minIntervalMs??300_000
@@ -42,7 +42,7 @@ export class ProfileWarmup{
  async open(){
   this.#cache=await this.#store.read(this.#cache)
   // A draft that was written while other people's messages were read cannot outlive that switch: facts grounded in them leave disk with it.
-  if(this.#cache.participants&&!this.#participants){this.#cache={...this.#cache,key:'',draft:null,participants:false,started_at:0,generated_at:0,stage:0};await this.#persist(this.#cache)}
+  if(this.#cache.participants&&!this.#participants){this.#cache={...this.#cache,key:'',draft:null,participants:false,started_at:0,generated_at:0,stage:0};this.#purgedParticipants=true;await this.#persist(this.#cache)}
   this.#lastRunAt=this.#cache.generated_at
   // A draft written by an older pipeline stays visible until the new pipeline replaces it whole; with no draft there is nothing to replace, so the ordinary schedule applies.
   this.#stale=this.#cache.draft!==null&&this.#cache.generation_version!==PROFILE_GENERATION_VERSION;this.#opened=true
@@ -64,6 +64,8 @@ export class ProfileWarmup{
   // A visible draft reads as ready even while a background refresh runs or fails; the renderer never blanks it.
   const status=this.#run?'working' as const:draft?'ready' as const:this.#failures&&this.#failedKey===this.#key?'failed' as const:'idle' as const
   return {status,draft:draft?structuredClone(draft):null,sources:this.#entries.map(e=>({id:e.id,version:e.version,label:e.source?e.source.document?`${e.source.project}/${e.source.document}`:e.source.project:'你提供的信息'}))}}
+ /** True once, after open(), when a draft written with other people's messages was removed because that switch is now off. */
+ takePurgedParticipants():boolean{const purged=this.#purgedParticipants;this.#purgedParticipants=false;return purged}
  retainedEvidenceIds():string[]{
   const draft=this.#cache.draft
   return [...new Set([...(draft?.about?.refs??[]),...(draft?.work.flatMap(item=>item.refs)??[]),...(draft?.interests.flatMap(item=>item.refs)??[])].map(ref=>ref.entry_id).concat(this.#runEntries.filter(input=>input.source?.kind).map(input=>input.id)))]
@@ -71,7 +73,7 @@ export class ProfileWarmup{
  update(entries:readonly ProfileInput[]){
   const usable=entries.filter(e=>e.version!==null&&e.content.trim())
   this.#eligible=[...usable]
-  const selected=[...usable.filter(e=>!e.source).slice(-16),...usable.filter(e=>e.source?.kind).slice(0,96),...usable.filter(e=>e.source&&!e.source.kind).slice(0,24)]
+  const selected=[...usable.filter(e=>!e.source).slice(-16),...usable.filter(e=>e.source?.kind&&e.source.relation!=='participant').slice(0,96),...(this.#participants?usable.filter(e=>e.source?.relation==='participant').slice(0,32):[]),...usable.filter(e=>e.source&&!e.source.kind).slice(0,24)]
    .map(e=>({id:e.id,version:e.version,content:e.content.slice(0,1500),origin:e.origin,...(e.observed_at?{observed_at:e.observed_at}:{}),...(e.source?{source:e.source}:{})})).sort((a,b)=>a.id.localeCompare(b.id))
   const key=inputKey(selected)
   if(key!==this.#key){

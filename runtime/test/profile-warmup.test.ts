@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath,chmod,readFile,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {ProfileWarmup,PROFILE_GENERATION_VERSION,type ProfileOutcome} from '../src/personal-agent/profile-warmup.js'
+import {ProfileWarmup,PROFILE_GENERATION_VERSION,type ProfileInput,type ProfileOutcome} from '../src/personal-agent/profile-warmup.js'
 const entries=[{id:'a',version:1,content:'I study voice interfaces',origin:'stated' as const}]
 const draft={about:{text:'I study voice interfaces',refs:[{entry_id:'a',version:1}]},work:[],interests:[{text:'Voice interfaces',refs:[{entry_id:'a',version:1}]}]}
 test('warmup caches grounded drafts without repeating generation on reopen',async()=>{
@@ -309,4 +309,18 @@ test('a draft written while other people\'s messages were read leaves disk when 
   const disk=JSON.parse(await readFile(path,'utf8')) as {draft:unknown;participants:boolean};assert.equal(disk.draft,null,'the draft is removed from disk, not only hidden');assert.equal(disk.participants,false)
   service.update([fileA,fileB]);assert.equal(service.snapshot().draft,null)
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+const message=(id:string,relation:'self'|'addressed'|'participant'):ProfileInput=>({id,version:'m1',content:'message '+id,origin:'inferred',source:{project:'chat',document:'',kind:'im',relation}})
+test('other people\'s messages keep their own slots after the user\'s 96 messages, and are left out when the switch is off',async()=>{
+ const own=Array.from({length:64},(_,i)=>message('own-'+i,i%2?'self':'addressed')),others=Array.from({length:32},(_,i)=>message('other-'+i,'participant'))
+ for(const participants of [true,false]){
+  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-slots-'));let seen:readonly ProfileInput[]=[]
+  const service=new ProfileWarmup(join(dir,'draft.json'),entries=>{seen=entries;return Promise.resolve({about:{text:'x',refs:[{entry_id:'own-0',version:'m1'}]},work:[],interests:[]})},()=>{/* snapshot observer */},{participants})
+  try{
+   await service.open();service.update([...own,...Array.from({length:32},(_,i)=>message('more-'+i,'addressed')),...others]);await service.refresh()
+   assert.equal(seen.filter(e=>e.source?.relation==='participant').length,participants?32:0,participants?'all 32 other-people messages reach the generator':'none do when the switch is off')
+   assert.equal(seen.filter(e=>e.source?.relation!=='participant').length,96,'the user\'s own messages keep their 96')
+  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+ }
 })

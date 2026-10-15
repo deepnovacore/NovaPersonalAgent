@@ -673,6 +673,8 @@ export class PersonalAgentHost {
             await this.recoverTasks();
             await this.news.open();
             await this.profileWarmup.open();
+            // Interests guessed from a draft that is now gone leave the news store with it; ones the user confirmed stay.
+            if(this.profileWarmup.takePurgedParticipants())await this.news.clearSeededInterests()
             this.#seedNews();
             await this.#sources?.open?.();
             if(acceptanceEnabled()){this.#acceptanceSample();this.#acceptanceTimer=setInterval(()=>this.#acceptanceSample(),1000);this.#acceptanceTimer.unref()}

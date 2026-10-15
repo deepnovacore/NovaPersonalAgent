@@ -120,3 +120,16 @@ test('news starts on as a timeline, takes Profile interests once, and an explici
   assert.equal(calls,1,'then it runs on its own');await service.refreshSoon();assert.equal(calls,2,'afterwards a seed refreshes at once')
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('interests guessed from the profile can be withdrawn, but ones the user confirmed stay',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-clear-seeded-'))
+ const service=new NewsService({path:join(dir,'news.json'),sources:[source],now,firstRefreshMs:null,fetcher:()=>Promise.resolve(new Response(xml)),rank:()=>Promise.resolve([])})
+ try{
+  await service.open();assert.equal(await service.clearSeededInterests(),false,'nothing guessed, nothing to clear')
+  assert.equal(await service.seedInterests(['AI','Design']),true);assert.equal(await service.clearSeededInterests(),true)
+  assert.deepEqual(service.snapshot().interests,[]);assert.equal(service.snapshot().interests_seeded,false);assert.equal(service.snapshot().profile_version,0)
+  assert.equal(await service.seedInterests(['Travel']),true,'after clearing, a later draft can seed again')
+  await service.configure({enabled:true,interests:['Travel'],explore:false});assert.equal(await service.clearSeededInterests(),false,'confirmed interests are the user\'s own')
+  assert.deepEqual(service.snapshot().interests.map(i=>i.text),['Travel'])
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
