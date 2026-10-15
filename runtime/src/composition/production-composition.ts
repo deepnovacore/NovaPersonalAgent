@@ -40,9 +40,11 @@ import {createRealtimeTelemetry} from '../realtime/telemetry.js'
 import type {ApprovalView as ExecutorApprovalView} from '../core/approval-port.js'
 import {buildIntegratedRealtimeAssembly, type IntegratedProviderRegistry} from './cascaded-realtime-assembly.js'
 
-export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage, environment = process.env}: {
+export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage, environment = process.env, deviceRuntimeEnabled = false}: {
   /** Receives the live coding resource so the desktop host can change the new-session default. */
   readonly onCoding?: (coding: {updateDefaultBackend?(backend: CodingBackendId): void}) => void
+  /** Programmatic opt-in only; no device storage or imports when disabled. */
+  readonly deviceRuntimeEnabled?: boolean
   readonly onUsage?: UsageReporter
   readonly token: string
   readonly stop: AbortController
@@ -241,6 +243,12 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     }))
   }
   const host = composition.realtime.personalAgent
+  if (deviceRuntimeEnabled) {
+    const {DeviceGateway} = await import('../device/gateway.js')
+    const {DeviceLedger} = await import('../device/ledger.js')
+    host.options.stopRevoker = new DeviceGateway(new DeviceLedger(host.path + '.device.json'))
+    host.options.onDiagnostic = onDiagnostic
+  }
   conversationOwner.host=host
   const projectAdapter=codexResource?.mode==='project'?codexResource.adapter as ProjectExecutorAdapter:undefined
   if(projectAdapter?.targetPort)host.setCodingTargets(projectAdapter.targetPort)
