@@ -2,7 +2,7 @@ import {Authority, type Bindings, type Clock, type DispatchRequest, type Fence} 
 import {advanceAttempt} from './attempt.js'
 import {recordReceipt, type Receipt, type RequestIdentity} from './ownership.js'
 import {merge, type TodoState, type TodoVersion} from './todo-sync.js'
-import {DeviceLedger, type DeviceState} from './ledger.js'
+import type {DeviceLedger, DeviceState} from './ledger.js'
 import type {StopRevoker} from './port.js'
 
 export class DeviceGateway implements StopRevoker {
@@ -53,7 +53,9 @@ export class DeviceGateway implements StopRevoker {
       const attempt = state.attempts.find(item => item.operation_id === operationId)
       if (!attempt) throw Error('stale_fence')
       const recorded = recordReceipt(state.ownership, identity, payloadDigest, receipt)
+      if (recorded.replayed && attempt.receipt_key !== recorded.receipt.request_key) throw Error('request_conflict')
       if (!recorded.replayed) attempt.state = advanceAttempt(attempt.state, {op: 'accept'})
+      attempt.receipt_key = recorded.receipt.request_key
       state.ownership = recorded.state
       return {receipt: recorded.receipt, replayed: recorded.replayed}
     })

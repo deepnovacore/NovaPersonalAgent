@@ -1,6 +1,6 @@
 import {z} from 'zod'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
-import {advanceAttempt} from './attempt.js'
+import {advanceAttempt, type AttemptState} from './attempt.js'
 
 const integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const text = z.string().min(1)
@@ -12,6 +12,15 @@ const bindings = z.object({
   effect_class: text, proposal_digest: text, executable_digest: text, expires_at: integer,
 })
 const version = z.object({version: integer, base_version: integer, content: text})
+const attemptSchema: z.ZodType<AttemptState> = z.object({
+  task_phase: phase,
+  attempt: z.object({
+    id: text, status: z.enum(['none', 'prepared', 'dispatching', 'accepted', 'failed', 'unknown-effect']),
+    dispatch_started: z.boolean(),
+  }),
+  effects: integer, evidence: z.array(text), action_grant_ref: text,
+  consumed_verification_grants: z.array(text).default([]),
+})
 export const deviceStateSchema = z.object({
   authority: z.object({
     lifecycle_generation: integer,
@@ -30,16 +39,8 @@ export const deviceStateSchema = z.object({
     receipts: z.array(z.object({id: text, request_key: text, payload_digest: text, status: text})),
   }),
   attempts: z.array(z.object({
-    operation_id: text,
-    state: z.object({
-      task_phase: phase,
-      attempt: z.object({
-        id: text, status: z.enum(['none', 'prepared', 'dispatching', 'accepted', 'failed', 'unknown-effect']),
-        dispatch_started: z.boolean(),
-      }),
-      effects: integer, evidence: z.array(text), action_grant_ref: text,
-      consumed_verification_grants: z.array(text).optional(),
-    }),
+    operation_id: text, receipt_key: text.optional(),
+    state: attemptSchema,
   })),
   todos: z.array(version.extend({
     id: text, conflicts: z.array(version),
