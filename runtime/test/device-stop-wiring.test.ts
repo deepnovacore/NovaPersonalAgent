@@ -8,18 +8,18 @@ import {SuggestionPool} from '../src/core/suggestions.js'
 import type {StopRevoker} from '../src/device/port.js'
 import {buildProductionComposition} from '../src/composition/production-composition.js'
 
-for(const mode of ['absent','success','failure'] as const)test('stop revoker: '+mode,async()=>{
+for(const mode of ['absent','success','failure','diagnostic-failure'] as const)test('stop revoker: '+mode,async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'device-stop-'))
  const order:string[]=[],diagnostics:string[]=[]
  let finish:()=>void=()=>undefined
  const pending=new Promise<void>(resolve=>{finish=resolve})
  const revoker:StopRevoker={revokeForStop:async id=>{
   assert.equal(id,task.id);order.push('revoke');await pending
-  if(mode==='failure')throw Error('private failure detail')
+  if(mode==='failure'||mode==='diagnostic-failure')throw Error('private failure detail')
  }}
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,
   pool:new SuggestionPool(),evidence:()=>null,...(mode==='absent'?{}:{stopRevoker:revoker}),
-  ...{onDiagnostic:(code:string)=>{diagnostics.push(code)}}})
+  ...{onDiagnostic:(code:string)=>{diagnostics.push(code);if(mode==='diagnostic-failure')throw Error('diagnostic sink failed')}}})
  let task:Awaited<ReturnType<typeof host.tasks.delegate>>
  try{
   await host.open()
@@ -30,24 +30,29 @@ for(const mode of ['absent','success','failure'] as const)test('stop revoker: '+
   if(mode!=='absent'){assert.deepEqual(order,['revoke']);finish()}
   assert.equal((await result).phase,'cancelled')
   assert.deepEqual(order,mode==='absent'?['cancel']:['revoke','cancel'])
-  assert.deepEqual(diagnostics,mode==='failure'?['device_stop_revocation_failed']:[])
+  assert.deepEqual(diagnostics,(mode==='failure'||mode==='diagnostic-failure')?['device_stop_revocation_failed']:[])
  }finally{finish();await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('default production composition creates no device gateway or ledger',async()=>{
+for(const enabled of [undefined,false,true])test('production device gateway opt-in: '+String(enabled),async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'device-default-'))
  const stop=new AbortController(),cleanups=new Set<()=>void|Promise<void>>()
  let composition:Awaited<ReturnType<typeof buildProductionComposition>>|undefined
  try{
   const capabilities=join(dir,'capabilities.json')
   await writeFile(capabilities,JSON.stringify({version:1,modules:{search:{enabled:false},camera:{enabled:false},coding:{enabled:false},knowledge:{enabled:false}}}))
-  composition=await buildProductionComposition({token:'0'.repeat(32),stop,
+  composition=await buildProductionComposition({...(enabled===undefined?{}:{deviceRuntimeEnabled:enabled}),token:'0'.repeat(32),stop,
    ownership:{own:cleanup=>{cleanups.add(cleanup);return()=>{cleanups.delete(cleanup)}}},
    onDiagnostic:()=>undefined,environment:{DASHSCOPE_API_KEY:'synthetic-text-key',PIPELINE_MODE:'integrated',
     CAPABILITIES_CONFIG:capabilities,REALTIME_TELEMETRY:join(dir,'telemetry.jsonl'),
     BLACKBOARD_PATH:join(dir,'blackboard.sqlite'),MEMORY_PATH:join(dir,'memory.sqlite'),WORKSPACE_GRAPH_PATH:join(dir,'workspace.sqlite')}})
   await composition.realtime.start()
-  assert.equal('stopRevoker' in composition.realtime.personalAgent.options,false)
-  assert.equal((await readdir(dir)).some(name=>name.includes('.device')),false)
+  const host=composition.realtime.personalAgent
+  assert.equal('stopRevoker' in host.options,enabled===true)
+  if(enabled){
+   const task=await host.tasks.delegate('declare',{conversation_id:'chat:main',goal:'stop',acceptance:[],origin_ref:'conversation:1'})
+   assert.equal((await host.cancelTask('stop',{task_id:task.id,goal_revision:0,control_revision:0},{kind:'nova'})).phase,'cancelled')
+  }
+  assert.equal((await readdir(dir)).some(name=>name.includes('.device')),enabled===true)
  }finally{stop.abort();await composition?.realtime.stop();for(const cleanup of [...cleanups].reverse())await cleanup();await rm(dir,{recursive:true,force:true})}
 })
