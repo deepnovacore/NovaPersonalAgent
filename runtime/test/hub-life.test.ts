@@ -96,3 +96,12 @@ test('imports preserve timestamps, receipts and logs without overwriting or resu
   assert.throws(()=>hub.mutate(token,{op_id:'profile',input:{op:'import',entity:{kind:'profile',id:'profile',about:'No'}}}))
  }finally{hub.close()}
 })
+
+test('import rejects prototype-reserved entity identifiers at the boundary',()=>{
+ const hub=new HubStore(':memory:')
+ try{
+  const {token}=hub.enroll('alice','desktop')
+  for(const id of ['__proto__','constructor','prototype'])assert.throws(()=>hub.mutate(token,{op_id:'import-'+id,input:{op:'import',entity:{kind:'idea',id,title:'Unsafe',note:'',status:'active',importance:'normal',goal_id:null}}}))
+  assert.equal(hub.snapshot(token).cursor,0)
+ }finally{hub.close()}
+})
