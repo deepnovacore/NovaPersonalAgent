@@ -3,7 +3,7 @@ import {spawn} from 'node:child_process'
 import {mkdir, mkdtemp, rm} from 'node:fs/promises'
 import {resolve} from 'node:path'
 
-import {prepareWindowsSmokeHomeOwnership} from './windows-smoke-home.mjs'
+import {candidateScratchParent, prepareWindowsSmokeHomeOwnership} from './windows-smoke-home.mjs'
 
 export const SOURCE_STARTUP_SMOKE_ARGUMENT = '--nova-source-startup-smoke-v1'
 const READY_LINE = '[desktop-smoke] source_window_ready\n'
@@ -46,13 +46,13 @@ export async function runSourceStartupSmoke({
   timeoutMs = 20_000,
 } = {}) {
   if (platform !== 'win32') return Object.freeze({status: 'skipped'})
-  const userData = await mkdtemp(resolve(packageRoot, 'build', 'source-startup-smoke-'))
+  const userData = await mkdtemp(resolve(candidateScratchParent({platform}), 'nova-source-startup-smoke-'))
   const home = resolve(userData, 'home')
-  await mkdir(home, {mode: 0o700})
-  prepareWindowsSmokeHomeOwnership({home, environment: process.env})
   const electron = resolve(packageRoot, 'node_modules/electron/dist/electron.exe')
   let child = null
   try {
+    await mkdir(home, {mode: 0o700})
+    prepareWindowsSmokeHomeOwnership({home, environment: process.env})
     const startedAt = performance.now()
     let readyAfterMs
     child = spawn(electron, [

@@ -125,6 +125,10 @@ export async function compileWindowsNative({
     '/O2',
     '/W4',
     '/WX',
+    // Older Windows SDK headers emit C5105 under C11. Keep project warnings
+    // strict while treating the toolchain's INCLUDE directories as external.
+    '/external:env:INCLUDE',
+    '/external:W0',
     '/GS',
     '/sdl',
     '/guard:cf',
