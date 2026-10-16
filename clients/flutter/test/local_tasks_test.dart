@@ -6,6 +6,8 @@ import 'package:nova_mobile/ui/local_tasks.dart';
 class TestAgent implements LocalAgent {
   String phase = 'verifying';
   int verifications = 0;
+  String platform = 'android';
+  String target = 'com.nova.nova_mobile';
   @override
   Future<dynamic> call(
     String method, [
@@ -14,7 +16,8 @@ class TestAgent implements LocalAgent {
     switch (method) {
       case 'capabilities':
         return {
-          'platform': 'android',
+          'platform': platform,
+          'host_package': 'com.nova.nova_mobile',
           'accessibility': true,
           'model_runtime': true,
           'model_configured': true,
@@ -26,6 +29,13 @@ class TestAgent implements LocalAgent {
             'goal': 'Toggle fixture',
             'acceptance': 'Count is 1',
             'phase': phase,
+            'target_package': target,
+            if (phase == 'waiting_approval')
+              'proposal': {
+                'id': 'p',
+                'summary': 'Return to workspace',
+                'action': {'type': 'back'},
+              },
             'summary': 'Count shows 1',
             'actions': [],
           },
@@ -48,6 +58,53 @@ class TestAgent implements LocalAgent {
 }
 
 void main() {
+  testWidgets('self GUI approval does not change the observed task card', (
+    tester,
+  ) async {
+    final agent = TestAgent()..phase = 'running';
+    await tester.pumpWidget(MaterialApp(home: LocalTasksPage(agent: agent)));
+    await tester.pumpAndSettle();
+    final before = tester.getRect(find.text('停止任务'));
+    agent.phase = 'waiting_approval';
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(find.text('执行中'), findsOneWidget);
+    expect(find.textContaining('拟执行：'), findsNothing);
+    expect(tester.getRect(find.text('停止任务')), before);
+    agent.phase = 'verifying';
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(find.text('确认已完成'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('iOS still exposes native approval controls', (tester) async {
+    final agent = TestAgent()
+      ..platform = 'ios'
+      ..phase = 'waiting_approval'
+      ..target = 'nova';
+    await tester.pumpWidget(MaterialApp(home: LocalTasksPage(agent: agent)));
+    await tester.pumpAndSettle();
+    expect(find.text('批准此操作'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('dismissing focused model settings keeps tasks usable', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: LocalTasksPage(agent: TestAgent())),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('模型设置'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'test-only-key');
+    await tester.tap(find.text('取消'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
+    expect(find.text('本机任务'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets(
     'model completion remains unverified until explicit user confirmation',
     (tester) async {

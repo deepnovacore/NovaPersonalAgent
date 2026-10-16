@@ -31,7 +31,7 @@ class MainActivity : FlutterActivity() {
             try {
                 val args=JSONObject(call.arguments as? String?:"{}")
                 when(call.method){
-                    "capabilities" -> result.success(JSONObject().put("schema_version",1).put("platform","android").put("android_api",Build.VERSION.SDK_INT).put("accessibility",LocalGuiService.current!=null).put("screenshots",Build.VERSION.SDK_INT>=30).put("model_runtime",true).put("model_configured",controller!!.modelSettings().getBoolean("configured")).toString())
+                    "capabilities" -> result.success(JSONObject().put("schema_version",1).put("platform","android").put("host_package",packageName).put("android_api",Build.VERSION.SDK_INT).put("accessibility",LocalGuiService.current!=null).put("screenshots",Build.VERSION.SDK_INT>=30).put("model_runtime",true).put("model_configured",controller!!.modelSettings().getBoolean("configured")).toString())
                     "modelSettings" -> result.success(controller!!.modelSettings().toString())
                     "saveModelSettings" -> result.success(controller!!.saveModelSettings(args).toString())
                     "run" -> result.success(controller!!.runModel(args).toString())

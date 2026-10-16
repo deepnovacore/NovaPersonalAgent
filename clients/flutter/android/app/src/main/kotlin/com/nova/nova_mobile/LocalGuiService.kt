@@ -141,7 +141,11 @@ class LocalGuiService : AccessibilityService() {
                 }
             }catch(error:Exception){future.completeExceptionally(error)}
         }
-        return future.get(10,TimeUnit.SECONDS)
+        val outcome=future.get(10,TimeUnit.SECONDS)
+        // Dispatch acknowledgement can precede the app transition. Space the
+        // next observation from dispatch too, not only from the last capture.
+        synchronized(this) { nextScreenshotAt=maxOf(nextScreenshotAt,SystemClock.elapsedRealtime()+500) }
+        return outcome
     }
     fun showStop(){
         main.post {

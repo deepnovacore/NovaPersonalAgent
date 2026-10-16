@@ -25,6 +25,12 @@ class LocalGuiModelTest {
         val request = LocalGuiModel.requestBody("vision-model",task,screen,0)
         assertEquals("vision-model",request.getString("model"))
         assertEquals("next_step",request.getJSONObject("tool_choice").getJSONObject("function").getString("name"))
+        val coordinates = request.getJSONArray("tools").getJSONObject(0).getJSONObject("function")
+            .getJSONObject("parameters").getJSONObject("properties").getJSONObject("action").getJSONObject("properties")
+        for (name in listOf("x", "y", "to_x", "to_y")) {
+            assertEquals(0.0, coordinates.getJSONObject(name).getDouble("minimum"), 0.0)
+            assertEquals(1.0, coordinates.getJSONObject(name).getDouble("maximum"), 0.0)
+        }
         val message = request.getJSONArray("messages").getJSONObject(1).getJSONArray("content")
         assertTrue(message.getJSONObject(0).getString("text").contains("Toggle once"))
         assertEquals("data:image/jpeg;base64,YWJj",message.getJSONObject(1).getJSONObject("image_url").getString("url"))

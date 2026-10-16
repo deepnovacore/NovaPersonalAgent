@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'local_dialog.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import '../personal/local_life.dart';
@@ -141,7 +142,7 @@ class _LocalWorkspaceState extends State<LocalWorkspace>
       token.dispose();
       return;
     }
-    final accepted = await showDialog<bool>(
+    final accepted = await showLocalDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('连接同步 Hub'),
@@ -221,7 +222,7 @@ class _LocalWorkspaceState extends State<LocalWorkspace>
       'success_criteria': '完成标准',
       'about': '个人描述',
     };
-    final choice = await showDialog<bool>(
+    final choice = await showLocalDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('这条记录在另一端有修改'),

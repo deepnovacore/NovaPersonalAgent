@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Nova reads calendar details for your selected task and changes events only after you approve each action.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Nova reads and changes calendar events for tasks you explicitly approve.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Nova reads reminders for your selected task and changes them only after you approve each action.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Nova reads and changes reminders for tasks you explicitly approve.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Nova uses your microphone after you start voice or dictation.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>

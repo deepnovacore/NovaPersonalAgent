@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'local_dialog.dart';
 import '../agent/local_agent.dart';
 import '../protocol/request_id.dart';
 import '../agent/hub_tasks.dart';
@@ -90,7 +91,19 @@ class _LocalTasksPageState extends State<LocalTasksPage>
       if (mounted) {
         setState(() {
           capabilities = Map<String, dynamic>.from(caps);
-          tasks = rows;
+          // Native Android overlays own approval. Keep our own target screen
+          // stable so displaying a proposal cannot invalidate its observation.
+          tasks = rows.map((row) {
+            if (caps['platform'] == 'android' &&
+                caps['host_package'] != null &&
+                row['target_package'] == caps['host_package'] &&
+                row['phase'] == 'waiting_approval') {
+              return Map<String, dynamic>.from(row as Map)
+                ..['phase'] = 'running'
+                ..remove('proposal');
+            }
+            return row;
+          }).toList();
         });
       }
     } catch (e) {
@@ -127,7 +140,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
   Future<void> _acceptOffer(Map<String, dynamic> command) async {
     final settings = await widget.agent.call('modelSettings') as Map;
     if (!mounted) return;
-    final accepted = await showDialog<bool>(
+    final accepted = await showLocalDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('在这台手机执行'),
@@ -161,7 +174,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
     try {
       final devices = await widget.hub!.devices();
       if (!mounted) return;
-      final device = await showDialog<Map<String, dynamic>>(
+      final device = await showLocalDialog<Map<String, dynamic>>(
         context: context,
         builder: (context) => SimpleDialog(
           title: const Text('在哪里执行？'),
@@ -206,7 +219,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
     final goal = TextEditingController(), acceptance = TextEditingController();
     Map? target;
     try {
-      final start = await showDialog<bool>(
+      final start = await showLocalDialog<bool>(
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, update) => AlertDialog(
@@ -295,7 +308,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
       );
       final key = TextEditingController();
       try {
-        final accepted = await showDialog<bool>(
+        final accepted = await showLocalDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('本机模型服务'),
@@ -372,7 +385,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
       Map? todo;
       bool consent = false;
       try {
-        final value = await showDialog<Map<String, dynamic>>(
+        final value = await showLocalDialog<Map<String, dynamic>>(
           context: context,
           builder: (context) => StatefulBuilder(
             builder: (context, setDialog) => AlertDialog(

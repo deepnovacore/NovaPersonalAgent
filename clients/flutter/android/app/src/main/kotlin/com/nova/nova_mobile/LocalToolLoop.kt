@@ -48,6 +48,23 @@ class LocalToolLoop(
         fun finish(summary: String)
         fun interrupt(reason: String)
     }
+    private fun rootCause(error: Throwable): Throwable {
+        var cause = error
+        repeat(8) { cause.cause?.let { if (it !== cause) cause = it } }
+        return cause
+    }
+    private fun observeStable(): JSONObject {
+        repeat(3) { attempt ->
+            try { return host.observe() } catch (error: Exception) {
+                val cause = rootCause(error)
+                // A transition can invalidate a read after an already dispatched
+                // action. Re-capture only; never repeat that action or its approval.
+                if (!host.active() || attempt == 2 || cause !is IllegalStateException ||
+                    cause.message != "screen_changed_during_capture") throw error
+            }
+        }
+        error("unreachable")
+    }
     fun run() {
         require(maxTurns in 1..100)
         var stage = "observation"
@@ -55,7 +72,7 @@ class LocalToolLoop(
             repeat(maxTurns) { turn ->
                 if(!host.active()) return
                 stage = "observation"
-                val observation = host.observe()
+                val observation = observeStable()
                 if(!host.active()) return
                 stage = "model"
                 val decision = model(observation, turn)
@@ -77,11 +94,21 @@ class LocalToolLoop(
             if(host.active()) host.interrupt("step_limit")
         } catch(error: Exception) {
             // Do not expose provider bodies, credentials or screen text in errors.
+            val cause = rootCause(error)
+            val safeGuiCodes = setOf("screen_changed", "screen_changed_before_dispatch",
+                "screen_changed_during_capture", "screen_unavailable", "outside_target_app",
+                "approval_required", "accessibility_required", "blocking_gui_call_on_main")
+            val safeModelCodes = setOf("invalid_model_decision", "unexpected_action", "unsupported_action",
+                "invalid_action_fields", "invalid_coordinate", "invalid_input", "one_model_choice_required",
+                "one_tool_call_required", "function_required", "unsupported_model_tool", "invalid_model_response")
             val reason = when {
-                stage == "model" && error is ModelHttpException -> "model_http_${error.status}"
-                stage == "model" && error is java.net.UnknownHostException -> "model_dns_failed"
-                stage == "model" && error is java.net.SocketTimeoutException -> "model_timeout"
-                stage == "model" && error is javax.net.ssl.SSLException -> "model_tls_failed"
+                stage == "model" && cause is ModelHttpException -> "model_http_${cause.status}"
+                stage == "model" && cause is java.net.UnknownHostException -> "model_dns_failed"
+                stage == "model" && cause is java.net.SocketTimeoutException -> "model_timeout"
+                stage == "model" && cause is javax.net.ssl.SSLException -> "model_tls_failed"
+                stage == "model" && cause is org.json.JSONException -> "model_invalid_response"
+                stage == "model" && cause is IllegalArgumentException && cause.message in safeModelCodes -> "model_${cause.message}"
+                stage != "model" && cause.message in safeGuiCodes -> "${stage}_${cause.message}"
                 else -> "${stage}_failed"
             }
             if(host.active()) host.interrupt(reason)
