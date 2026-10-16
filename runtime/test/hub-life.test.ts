@@ -4,6 +4,7 @@ import {mkdtemp, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {HubStore} from '../src/hub/store.js'
+import {lifeInputSchema} from '../src/personal-agent/life.js'
 
 test('separately initialized Hubs do not share an identity even with the same account name',()=>{
  const first=new HubStore(':memory:'),second=new HubStore(':memory:')
@@ -67,5 +68,31 @@ test('conversion aliases converge, undo is tombstoned and stale edits do not res
   assert.equal(hub.snapshot(a.token).state.todos.length,0)
   assert.equal(hub.mutate(a.token,{op_id:'convert-a',input:{op:'convert',id:idea,target:'todo',expected_version:1}}).result.id,one.result.id)
   assert.equal(hub.snapshot(a.token).state.todos.length,0)
+ }finally{hub.close()}
+})
+
+test('imports preserve timestamps, receipts and logs without overwriting or resurrecting IDs',()=>{
+ const hub=new HubStore(':memory:')
+ try{
+  const {token}=hub.enroll('alice','desktop')
+  const entity={kind:'todo',id:'legacy-id',title:'Legacy',note:'',status:'open',importance:'normal',due:null,goal_id:null}
+  const input={op:'import',entity,created_at:'2020-01-01T00:00:00.000Z',updated_at:'2021-01-01T00:00:00.000Z'}
+  const command={op_id:'import-legacy',input}
+  assert.equal(lifeInputSchema.safeParse(input).success,false)
+  assert.throws(()=>hub.mutate(token,{op_id:'leak',input:{...input,entity:{...entity,provenance_refs:['private']}}}))
+  assert.throws(()=>hub.mutate(token,{op_id:'date',input:{...input,created_at:'invalid'}}))
+  const first=hub.mutate(token,command)
+  assert.equal(first.snapshot.state.todos[0]?.created_at,input.created_at)
+  assert.equal(first.snapshot.state.todos[0]?.updated_at,input.updated_at)
+  assert.equal(first.result.version,1)
+  assert.deepEqual(hub.mutate(token,command).result,first.result)
+  assert.deepEqual(hub.changes(token,0).events[0]?.input,input)
+  assert.throws(()=>hub.mutate(token,{...command,input:{...input,entity:{...entity,title:'Changed'}}}),/op_id_conflict/)
+  assert.throws(()=>hub.mutate(token,{op_id:'duplicate-id',input}),/entity_id_conflict/)
+  assert.throws(()=>hub.mutate(token,{op_id:'missing-goal',input:{op:'import',entity:{...entity,id:'another',goal_id:'absent'}}}),/goal_not_found/)
+  hub.mutate(token,{op_id:'delete',input:{op:'undo_create',id:entity.id,expected_version:1}})
+  assert.throws(()=>hub.mutate(token,{op_id:'resurrect',input}),/item_deleted/)
+  assert.equal(hub.snapshot(token).state.todos.length,0)
+  assert.throws(()=>hub.mutate(token,{op_id:'profile',input:{op:'import',entity:{kind:'profile',id:'profile',about:'No'}}}))
  }finally{hub.close()}
 })

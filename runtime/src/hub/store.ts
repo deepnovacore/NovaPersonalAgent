@@ -4,9 +4,10 @@ import {z} from 'zod'
 import {applyLifeMutation, emptyLifeState, lifeInputSchema, lifeStateSchema} from '../personal-agent/life.js'
 import type {LifeState} from '../personal-agent/life.js'
 import {HubRouting} from './routing.js'
+import {hubImportSchema,importLifeEntity} from './life-projection.js'
 
 const id=z.string().min(1).max(200).regex(/^[a-zA-Z0-9_-]+$/)
-const commandSchema=z.object({op_id:id,input:lifeInputSchema}).strict()
+const commandSchema=z.object({op_id:id,input:z.union([lifeInputSchema,hubImportSchema])}).strict()
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex')
 function canonical(value:unknown):string {
  if(Array.isArray(value))return `[${value.map(canonical).join(',')}]`
@@ -78,8 +79,9 @@ export class HubStore {
     return {result:JSON.parse(String(previous.result)) as {id:string;version:number},snapshot:this.#snapshot(accountId)}
    }
    const snapshot=this.#snapshot(accountId)
+   if(command.input.op==='import'&&Object.hasOwn(snapshot.tombstones,command.input.entity.id))throw Error('item_deleted')
    const next=(()=>{
-    try{return applyLifeMutation(snapshot.state,command.input,command.op_id)}catch(error){
+    try{return command.input.op==='import'?importLifeEntity(snapshot.state,command.input):applyLifeMutation(snapshot.state,command.input,command.op_id)}catch(error){
      if(error instanceof z.ZodError&&error.issues.some(issue=>issue.code==='too_big'&&issue.path.length===1&&['todos','ideas','goals'].includes(String(issue.path[0]))))throw Error('store_capacity')
      throw error
     }
