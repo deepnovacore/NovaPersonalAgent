@@ -2,8 +2,35 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:nova_mobile/personal/local_life.dart';
-import 'package:nova_mobile/ui/local_workspace.dart';
+import 'package:nova_mobile/ui/app.dart';
+import 'package:nova_mobile/personal/life_host.dart';
+import 'package:nova_mobile/connection/session.dart';
+import 'package:nova_mobile/services/preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'support/fake_audio.dart';
+import 'conversation_widget_test.dart' show MemoryCredentials;
 import 'local_life_test.dart' show MemoryLifePersistence;
+
+Future<void> mount(WidgetTester tester, LocalLife repo) async {
+  FlutterSecureStorage.setMockInitialValues({});
+  SharedPreferences.setMockInitialValues({});
+  final session = Session(
+    audio: FakeAudio(),
+    requestMicrophone: () async => false,
+  );
+  addTearDown(session.dispose);
+  await tester.pumpWidget(
+    NovaApp(
+      session: session,
+      store: MemoryCredentials(),
+      preferences: Preferences(await SharedPreferences.getInstance()),
+      lifeHost: LifeHost(repository: repo),
+    ),
+  );
+  await tester.pump(const Duration(milliseconds: 100));
+  await tester.tap(find.text("Todos").last);
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets('dismissing focused Hub settings keeps the workspace usable', (
@@ -12,9 +39,7 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({});
     final repo = LocalLife(MemoryLifePersistence());
     await repo.open();
-    await tester.pumpWidget(
-      MaterialApp(home: LocalWorkspace(repository: repo)),
-    );
+    await mount(tester, repo);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('同步设置'));
     await tester.pumpAndSettle();
@@ -40,12 +65,11 @@ void main() {
         'kind': 'todo',
         'title': 'Read locally',
       });
-      await tester.pumpWidget(
-        MaterialApp(home: LocalWorkspace(repository: repo)),
-      );
+      await mount(tester, repo);
+      await tester.tap(find.text("Todos").last);
       await tester.pumpAndSettle();
       expect(find.text('Read locally'), findsOneWidget);
-      expect(find.text('本机空间'), findsOneWidget);
+      expect(find.byTooltip('本机空间'), findsNothing);
       expect(find.textContaining('1 项待同步'), findsOneWidget);
       await tester.tap(find.text('Goals'));
       await tester.pumpAndSettle();

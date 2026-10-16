@@ -7,7 +7,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:nova_mobile/personal/local_life.dart';
 import 'package:nova_mobile/protocol/request_id.dart';
-import 'package:nova_mobile/ui/local_workspace.dart';
+import 'package:nova_mobile/ui/app.dart';
+import 'package:nova_mobile/personal/life_host.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -91,8 +92,10 @@ void main() {
       expect(restored.life['todos'][0]['goal_id'], goal['id']);
       expect(restored.pendingCount, 2);
       await tester.pumpWidget(
-        MaterialApp(home: LocalWorkspace(repository: restored)),
+        NovaApp(lifeHost: LifeHost(repository: restored)),
       );
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.text('Todos').last);
       await tester.pumpAndSettle();
       expect(find.text('离线保存待办（合成）'), findsOneWidget);
       await tester.tap(find.text('Goals'));
