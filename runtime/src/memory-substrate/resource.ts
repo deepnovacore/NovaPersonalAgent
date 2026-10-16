@@ -477,7 +477,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   lifeBackend():LifeBackend {
     const namespace=this.prefix+'life:'
     const grant=()=>this.options.inputConsent===true?{processingGrant:this.processingGrant(true)}:{}
-    const run=async(operation:'life_load'|'life_mutate',input:unknown):Promise<unknown>=>{
+    const run=async(operation:'life_load'|'life_mutate'|'life_sync_projection',input:unknown):Promise<unknown>=>{
       try{const result=await this.options.client.memory(operation,input);return result?await this.#projectLife(result as LifeSnapshot):result}catch(error){
         if(error instanceof MemoryLedgerClientError){const code=({STORE_STALE_REVISION:'version_conflict',STORE_IDEMPOTENCY_CONFLICT:'request_id_conflict',STORE_NOT_FOUND:'item_not_found'} as Record<string,string>)[error.code];if(code)throw Error(code)}
         throw error
@@ -485,6 +485,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     }
     return {
       peek:async()=>{this.#ready();return await run('life_load',{namespace}) as LifeSnapshot|null},
+      applySyncProjection:async value=>{this.#ready();const snapshot=await run('life_sync_projection',{namespace,...value,...grant()}) as LifeSnapshot;await this.#refresh();return snapshot},
       load:async(legacy,options)=>{this.#ready();const snapshot=await run('life_load',{namespace,legacy,...grant(),...(options?.legacyPath?{hostMigrationPath:options.legacyPath}:{})}) as LifeSnapshot;await this.#refresh();return snapshot},
       mutate:async value=>{this.#ready();const snapshot=await run('life_mutate',{namespace,...value,...grant()}) as LifeSnapshot&{result:{id:string;version:number}};await this.#refresh();return snapshot},
     }

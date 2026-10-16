@@ -1,3 +1,4 @@
+import {applyLifeSyncProjection,lifeSyncProjectionSchema} from '../hub/life-projection.js'
 import {queueMemoryFiles} from './file-authority.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
@@ -97,7 +98,7 @@ function checkResolution(run:Run,namespace:string,resolution:LifeResolution):Ent
 }
 
 /** The caller's enclosing memory worker transaction owns evidence, merge and receipts atomically. */
-export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_mutate'|'life_capture_im',value:unknown,run:Run):unknown{
+export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_mutate'|'life_capture_im'|'life_sync_projection',value:unknown,run:Run):unknown{
  if(operation==='life_capture_im')return captureIm(db,value,run)
  if(operation==='life_load'){
   const q=z.object({namespace:namespaceSchema,legacy:lifeStateSchema.optional(),processingGrant:processingGrantSchema.optional(),hostMigrationPath:z.string().min(1).max(4096).optional(),resolution:lifeResolutionSchema.optional()}).strict().parse(value)
@@ -117,6 +118,26 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
   const state=stateFrom(entries,meta.receipts)
   if((meta.profile_version??0)<state.profile.version){meta={...meta,profile_version:state.profile.version};saveMeta(db,q.namespace,meta)}
   return {state,revision:meta.revision}
+ }
+ if(operation==='life_sync_projection'){
+  const q=z.object({namespace:namespaceSchema,projection:lifeSyncProjectionSchema,requestId:z.string().min(1).max(512),expectedRevision:z.number().int().nonnegative(),processingGrant:processingGrantSchema.optional()}).strict().parse(value)
+  const meta=readMeta(db,q.namespace);if(!meta)throw Error('life_not_initialized')
+  const entries=rows(run,q.namespace),state=stateFrom(entries,meta.receipts)
+  if(Object.hasOwn(meta.receipts,q.requestId)){
+   applyLifeSyncProjection(state,q.projection,q.requestId)
+   const stamp=signature(entries),refreshed=meta.signature===stamp?meta:{...meta,signature:stamp,revision:meta.revision+1}
+   if(refreshed!==meta)saveMeta(db,q.namespace,refreshed)
+   return {state,revision:refreshed.revision}
+  }
+  if(meta.revision!==q.expectedRevision||meta.signature!==signature(entries))throw Error('version_conflict')
+  const next=applyLifeSyncProjection(state,q.projection,q.requestId),now=new Date().toISOString(),evidenceId=q.namespace+'e:'+hash(q.requestId)
+  if(next.state.profile.version!==state.profile.version)next.state.profile.version=Math.max(next.state.profile.version,(meta.profile_version??0)+1)
+  run('append_evidence',EvidenceRecordSchema.parse({id:evidenceId,source_id:q.namespace+'event:'+hash(q.requestId),source_kind:'user_correction',locator:'life-sync:'+q.requestId,observed_at:now,recorded_at:now,raw_text:canonicalJson(q.projection),hash:hash(canonicalJson({namespace:q.namespace,projection:q.projection,requestId:q.requestId})),trust:'trusted_user',extracted:{event:'life_sync_projection'}}))
+  if(q.processingGrant)run('source_grant',{source_id:q.namespace+'event:'+hash(q.requestId),expected_revision:0,grant:q.processingGrant})
+  persist(run,q.namespace,entries,next.state,evidenceId,now)
+  const updated=rows(run,q.namespace),updatedMeta:Meta={...meta,profile_version:Math.max(meta.profile_version??0,next.state.profile.version),revision:meta.revision+1,receipts:next.state.receipts,signature:signature(updated)}
+  saveMeta(db,q.namespace,updatedMeta)
+  return {state:stateFrom(updated,updatedMeta.receipts),revision:updatedMeta.revision}
  }
  const q=z.object({namespace:namespaceSchema,input:lifeInputSchema,requestId:z.string().min(1).max(512),expectedRevision:z.number().int().nonnegative(),provenance:provenanceSchema.optional(),processingGrant:processingGrantSchema.optional()}).strict().parse(value)
  const meta=readMeta(db,q.namespace);if(!meta)throw Error('life_not_initialized')
