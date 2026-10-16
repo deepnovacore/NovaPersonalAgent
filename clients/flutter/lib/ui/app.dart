@@ -129,7 +129,16 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   taskId: operationId,
                 );
                 if (input == null || !mounted) return {'status': 'denied'};
-                final task = await const NativeLocalAgent().call('run', input);
+                final Object? task;
+                try {
+                  task = await const NativeLocalAgent()
+                      .call('run', input)
+                      .timeout(const Duration(seconds: 15));
+                } on TimeoutException {
+                  // The native host may still have started it: report an
+                  // unknown outcome and never retry.
+                  return {'status': 'outcome_unknown'};
+                }
                 return {
                   'status': 'started',
                   'task': task,
