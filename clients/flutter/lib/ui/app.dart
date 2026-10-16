@@ -18,6 +18,10 @@ import 'components.dart';
 import 'theme.dart';
 import 'local_workspace.dart';
 import '../personal/life_host.dart';
+import '../agent_core/agent_core_host.dart';
+import '../agent_core/tool_registry.dart';
+import '../agent_core/web_fetch.dart';
+import '../conversation/local_chat_panel.dart';
 
 const ink = Nova.ink, mint = Nova.mint;
 
@@ -28,11 +32,13 @@ class NovaApp extends StatelessWidget {
     this.store,
     this.preferences,
     this.lifeHost,
+    this.agentCore,
   });
   final Session? session;
   final CredentialStore? store;
   final Preferences? preferences;
   final LifeHost? lifeHost;
+  final AgentCoreHost? agentCore;
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -44,6 +50,7 @@ class NovaApp extends StatelessWidget {
       store: store,
       preferences: preferences,
       lifeHost: lifeHost,
+      agentCore: agentCore,
     ),
   );
 }
@@ -54,11 +61,13 @@ class _WorkbenchShell extends StatefulWidget {
     this.store,
     this.preferences,
     this.lifeHost,
+    this.agentCore,
   });
   final Session? session;
   final CredentialStore? store;
   final Preferences? preferences;
   final LifeHost? lifeHost;
+  final AgentCoreHost? agentCore;
   @override
   State<_WorkbenchShell> createState() => _WorkbenchShellState();
 }
@@ -67,6 +76,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   late final Session session;
   late final LifeHost lifeHost;
   final conversation = GlobalKey<_ConversationScreenState>();
+  AgentCoreHost? agentCore;
+  String? chatId;
   int tab = 0;
   bool _sheet = false;
   final _shown = <String>{};
@@ -82,10 +93,51 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         widget.session ??
         Session(audio: audio, requestMicrophone: audio.requestMicrophone);
     session.addListener(_changed);
+    unawaited(_openAgentCore());
     _resets = session.resets.listen((_) {
       _shown.clear();
     });
   }
+
+  /// Local chat is additive: if the core cannot open, the computer chat
+  /// screen keeps working exactly as before.
+  Future<void> _openAgentCore() async {
+    try {
+      final host =
+          widget.agentCore ??
+          await AgentCoreHost.open(
+            registry: ToolRegistry(
+              snapshot: lifeHost.snapshot,
+              mutate: lifeHost.mutate,
+              hasConflict: () => lifeHost.hasConflict,
+              fetch: SafeWebFetch().fetch,
+            ),
+          );
+      final known = host.store.conversations;
+      final id = known.isEmpty
+          ? await host.store.create(computerConnected: session.connected)
+          : known.last['id'] as String;
+      if (!mounted) {
+        if (widget.agentCore == null) host.dispose();
+        return;
+      }
+      setState(() {
+        agentCore = host;
+        chatId = id;
+      });
+    } catch (error) {
+      debugPrint('Local chat unavailable: $error');
+    }
+  }
+
+  Widget _computerChat() => ConversationScreen(
+    key: conversation,
+    session: session,
+    store: widget.store,
+    preferences: widget.preferences,
+    active: tab == 0,
+    embedded: true,
+  );
 
   void _lifeChanged() {
     if (mounted) setState(() {});
@@ -487,6 +539,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   void dispose() {
     lifeHost.removeListener(_lifeChanged);
     lifeHost.dispose();
+    if (widget.agentCore == null) agentCore?.dispose();
     session.removeListener(_changed);
     _resets?.cancel();
     if (widget.session == null) session.dispose();
@@ -598,14 +651,14 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               children: [
                 TickerMode(
                   enabled: tab == 0,
-                  child: ConversationScreen(
-                    key: conversation,
-                    session: session,
-                    store: widget.store,
-                    preferences: widget.preferences,
-                    active: tab == 0,
-                    embedded: true,
-                  ),
+                  child: agentCore == null || chatId == null
+                      ? _computerChat()
+                      : LocalChatPanel(
+                          host: agentCore!,
+                          conversationId: chatId!,
+                          computerConnected: session.connected,
+                          computerPanel: _computerChat(),
+                        ),
                 ),
                 for (final page in [1, 2, 3, 4])
                   tab == page
