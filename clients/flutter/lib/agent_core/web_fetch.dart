@@ -23,6 +23,7 @@ class SafeWebFetch {
           b[0] >= 224 ||
           (b[0] == 100 && b[1] >= 64 && b[1] <= 127) ||
           (b[0] == 169 && b[1] == 254) ||
+          (b[0] == 168 && b[1] == 63 && b[2] == 129 && b[3] == 16) ||
           (b[0] == 172 && b[1] >= 16 && b[1] <= 31) ||
           (b[0] == 192 &&
               (b[1] == 168 ||
@@ -71,11 +72,26 @@ class SafeWebFetch {
           throw const FormatException('web_fetch_unsafe_address');
         }
         // Connect to the validated IP, but retain the URL host for TLS validation.
-        client.connectionFactory = (uri, proxyHost, proxyPort) {
+        client.connectionFactory = (uri, proxyHost, proxyPort) async {
           if (finished || uri.origin != initial.origin || proxyHost != null) {
             throw const FormatException('web_fetch_unsafe_connection');
           }
-          return Socket.startConnect(addresses.first, uri.port);
+          final task = await Socket.startConnect(addresses.first, uri.port);
+          Socket? connected;
+          return ConnectionTask.fromSocket(
+            task.socket.then((socket) {
+              connected = socket;
+              if (finished) {
+                socket.destroy();
+                throw TimeoutException('web_fetch_timeout');
+              }
+              return SecureSocket.secure(socket, host: host);
+            }),
+            () {
+              task.cancel();
+              connected?.destroy();
+            },
+          );
         };
         var uri = initial;
         for (var redirects = 0; ; redirects++) {

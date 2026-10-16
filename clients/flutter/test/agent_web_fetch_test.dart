@@ -72,6 +72,27 @@ void main() {
     );
   });
 
+  test(
+    'connection receives validated IP rather than resolving host again',
+    () async {
+      Object? connectedHost;
+      final client = _Client([])..connect = true;
+      await IOOverrides.runZoned(
+        () async {
+          await expectLater(runFetch([], client: client), throwsStateError);
+        },
+        socketStartConnect: (host, port, {sourceAddress, sourcePort = 0}) {
+          connectedHost = host;
+          return Future<ConnectionTask<Socket>>.error(
+            StateError('stop before network'),
+          );
+        },
+      );
+      expect(connectedHost, isA<InternetAddress>());
+      expect((connectedHost as InternetAddress).address, '8.8.8.8');
+    },
+  );
+
   test('rejects non-public addresses including IPv6 tunnels', () {
     for (final address in [
       '0.0.0.0',
@@ -79,6 +100,7 @@ void main() {
       '100.100.100.200',
       '127.0.0.1',
       '169.254.169.254',
+      '168.63.129.16',
       '172.16.0.1',
       '192.168.1.1',
       '192.0.0.1',
@@ -154,6 +176,7 @@ class _Client implements HttpClient {
   final List<_Response> responses;
   final request = _Request();
   bool closed = false;
+  bool connect = false;
   @override
   Duration? connectionTimeout;
   @override
@@ -163,6 +186,7 @@ class _Client implements HttpClient {
   connectionFactory;
   @override
   Future<HttpClientRequest> getUrl(Uri url) async {
+    if (connect) await connectionFactory!(url, null, null);
     request.response = responses.removeAt(0);
     return request;
   }
