@@ -144,7 +144,7 @@ function write(db:LedgerDatabase,candidate:Candidate,deleted=false):EntryRevisio
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
+export type MemoryOperation = 'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'life_sync_projection'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   const ledgerOnly=isLedgerOnlyOperation(operation,value)
@@ -156,7 +156,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
     switch(operation){
       case 'source_search':result=searchSourceEvidence(db,input);break;
       case 'source_processing':result=sourceProcessingOperation(db,input);break;
-      case 'life_load':case 'life_mutate':case 'life_capture_im':result=lifeOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
+      case 'life_load':case 'life_mutate':case 'life_capture_im':case 'life_sync_projection':result=lifeOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
       case 'source_connection':case 'source_apply_page':case 'source_pending':case 'source_revision':case 'source_grant':case 'extraction_ticket':case 'commit_extraction':case 'source_events':result=sourceOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
       case 'conversation_snapshot': {
         const q=z.object({entry_prefix:id,consumer:id}).strict().parse(value)

@@ -265,3 +265,79 @@ test('new local edits made after a lost acknowledgement survive in the conflict 
   assert.equal(f.life.snapshot().todos[0]?.title,'First')
  }finally{await f.close()}
 })
+
+test('local undo after a lost upload acknowledgement stays deleted on restart',async t=>{
+ const f=await fixture()
+ try{
+  const todo=await f.life.mutate({op:'create',kind:'todo',title:'Undo offline'},'undo-offline')
+  const original=globalThis.fetch
+  let dropped=false
+  const mock=t.mock.method(globalThis,'fetch',async(...args:Parameters<typeof fetch>)=>{
+   const response=await original(...args)
+   if(args[1]?.method==='POST'&&!dropped){dropped=true;throw Error('lost acknowledgement')}
+   return response
+  })
+  await assert.rejects(f.client.sync(),/hub_transport_failed/);mock.mock.restore()
+  await f.life.mutate({op:'undo_create',id:todo.id,expected_version:1},'undo')
+  const restarted=new LifeSyncClient(f.life,f.statePath,f.credentialsPath);await restarted.open();await restarted.sync()
+  assert.ok(restarted.status().unpropagated_local_deletions.includes(todo.id))
+  assert.equal(f.life.snapshot().todos.length,0)
+  assert.equal(f.hub.snapshot(f.device.token).state.todos[0]?.id,todo.id)
+  await restarted.sync();assert.equal(f.life.snapshot().todos.length,0)
+ }finally{await f.close()}
+})
+
+test('own idea update advances queued conversion version across a lost acknowledgement',async t=>{
+ const f=await fixture()
+ try{
+  const idea=await f.life.mutate({op:'create',kind:'idea',title:'Idea'},'idea')
+  await f.client.sync()
+  await f.life.mutate({op:'update',kind:'idea',id:idea.id,expected_version:1,title:'Edited idea'},'edit-idea')
+  const todo=await f.life.mutate({op:'convert',id:idea.id,target:'todo',expected_version:2},'convert-edited')
+  const original=globalThis.fetch
+  let dropped=false
+  const mock=t.mock.method(globalThis,'fetch',async(...args:Parameters<typeof fetch>)=>{
+   const response=await original(...args)
+   if(args[1]?.method==='POST'&&!dropped){dropped=true;throw Error('lost acknowledgement')}
+   return response
+  })
+  await assert.rejects(f.client.sync(),/hub_transport_failed/);mock.mock.restore()
+  const restarted=new LifeSyncClient(f.life,f.statePath,f.credentialsPath);await restarted.open();await restarted.sync()
+  assert.equal(restarted.status().conflicts.length,0)
+  assert.equal(f.hub.snapshot(f.device.token).state.todos[0]?.id,todo.id)
+  assert.equal(f.hub.snapshot(f.device.token).state.todos[0]?.title,'Edited idea')
+ }finally{await f.close()}
+})
+
+test('valid Object prototype names are own entity keys for seed and local deletion',async()=>{
+ const f=await fixture()
+ try{
+  await f.life.mutate({op:'create',kind:'todo',title:'Named ID'},'named')
+  const state=f.life.syncState();state.todos[0]!.id='toString'
+  await writeFile(f.life.path,JSON.stringify(state));await f.life.open()
+  await f.client.sync()
+  assert.equal(f.hub.snapshot(f.device.token).state.todos[0]?.id,'toString')
+  f.hub.mutate(f.device.token,{op_id:'value-of',input:{op:'import',entity:{...lifeProjection(f.life.syncState())['toString'],id:'valueOf'}}})
+  await f.client.sync()
+  await f.life.mutate({op:'undo_create',id:'valueOf',expected_version:1},'delete-value-of')
+  await f.client.sync()
+  assert.ok(f.client.status().unpropagated_local_deletions.includes('valueOf'))
+  assert.equal(f.life.snapshot().todos.some(row=>row.id==='valueOf'),false)
+ }finally{await f.close()}
+})
+
+test('incremental news conversion uploads create without private source fields',async()=>{
+ const f=await fixture()
+ try{
+  await f.client.sync()
+  const todo=await f.life.mutate({op:'from_news',kind:'todo',title:'News',article:{article_id:'private-article',source_id:'private-source',url:'https://example.com/private',content_hash:'private-hash',title:'Article',summary:'Private evidence',published_at:null}},'incremental-news')
+  await f.client.sync()
+  const events=f.hub.changes(f.device.token,0).events
+  assert.equal((events[0]!.input as {op:string}).op,'create')
+  assert.equal(events[0]!.op_id,'incremental-news')
+  assert.equal(f.hub.snapshot(f.device.token).state.todos[0]?.id,todo.id)
+  const remote=JSON.stringify({events,state:f.hub.snapshot(f.device.token).state})
+  for(const field of ['news_source','sources','provenance_refs','auto_recorded','source_changed','private-article','private-source','Private evidence'])assert.equal(remote.includes(field),false)
+  assert.equal(f.life.snapshot().todos[0]?.news_source?.article_id,'private-article')
+ }finally{await f.close()}
+})

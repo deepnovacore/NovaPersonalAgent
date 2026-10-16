@@ -2,11 +2,22 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {DatabaseSync} from 'node:sqlite'
 import {initializeMemory,memoryOperation,type MemoryOperation,type EntryRevision} from '../src/memory-substrate/store.js'
-import {emptyLifeState,type LifeSnapshot,type LifeState} from '../src/personal-agent/life.js'
+import {LifeService,emptyLifeState,type LifeSnapshot,type LifeState} from '../src/personal-agent/life.js'
+
+import {mkdtemp,realpath,rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import type {AddressInfo} from 'node:net'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
+import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
+import {HubStore} from '../src/hub/store.js'
+import {createHubServer} from '../src/hub/server.js'
+import {LifeSyncClient} from '../src/hub/life-sync.js'
+import {saveHubCredentials} from '../src/hub/life-sync-transport.js'
 
 const namespace='personal:hub-test:life:'
 const todo={kind:'todo',id:'imported-id',title:'Remote',note:'',status:'open',importance:'normal',due:null,goal_id:null}
-function setup(legacy:LifeState=emptyLifeState()){const db=new DatabaseSync(':memory:');initializeMemory(db);const run=(op:string,input:unknown)=>memoryOperation(db,op as MemoryOperation,input) as LifeSnapshot;run('life_load',{namespace,legacy});return {db,run}}
+function setup(legacy:LifeState=emptyLifeState()){const db=new DatabaseSync(':memory:');initializeMemory(db);const run=(op:MemoryOperation,input:unknown)=>memoryOperation(db,op,input) as LifeSnapshot;run('life_load',{namespace,legacy});return {db,run}}
 
 test('Hub backend projection preserves arbitrary IDs, uses CAS and retries idempotently',()=>{
  const {db,run}=setup()
@@ -50,7 +61,7 @@ test('Hub backend projection rolls back evidence, grants and state after failed 
   const before=snapshot()
   const faulty={exec:db.exec.bind(db),close:db.close.bind(db),prepare:(sql:string)=>{if(sql==='INSERT INTO memory_revisions VALUES(?,?,?)')throw Error('synthetic revision failure');return db.prepare(sql)}}
   const request={namespace,projection:{entities:[todo]},requestId:'atomic',expectedRevision:0,processingGrant:{revision:1,scope_revision:0,extraction_provider:'consented-model',embedding_provider:null}}
-  assert.throws(()=>memoryOperation(faulty,'life_sync_projection' as MemoryOperation,request),/synthetic revision failure/)
+  assert.throws(()=>memoryOperation(faulty,'life_sync_projection',request),/synthetic revision failure/)
   assert.deepEqual(snapshot(),before)
   assert.equal(run('life_sync_projection',request).state.todos.length,1)
  }finally{db.close()}
@@ -65,4 +76,40 @@ test('Hub backend projection rejects an out-of-band ledger edit even at the same
   assert.throws(()=>run('life_sync_projection',{namespace,projection:{entities:[todo]},requestId:'stale',expectedRevision:first.revision}),/version_conflict/)
   assert.equal(run('life_load',{namespace}).state.todos[0]?.title,'Edited outside Life')
  }finally{db.close()}
+})
+
+
+test('Substrate Life backend roundtrips local and remote changes through the Hub',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'hub-substrate-roundtrip-'))
+ const client=new MemoryLedgerClient(join(dir,'memory.sqlite'))
+ const resource=new SubstrateMemoryResource({client,userId:'hub-roundtrip',model:'fixture',inputConsent:true,consolidation:{enabled:false},gateway:{complete:()=>Promise.reject(Error('unexpected model call')),async *stream(){throw Error('unexpected model call')}}})
+ const hub=new HubStore(':memory:'),server=createHubServer(hub)
+ const life=new LifeService(join(dir,'legacy-life.json'),()=>undefined,resource.lifeBackend())
+ const credentialsPath=join(dir,'credentials'),sync=new LifeSyncClient(life,join(dir,'sync-state'),credentialsPath)
+ try{
+  await resource.open();await life.open()
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve))
+  const device=hub.enroll('synthetic','desktop')
+  await saveHubCredentials(credentialsPath,{url:`http://127.0.0.1:${(server.address() as AddressInfo).port}`,token:device.token})
+  await sync.open()
+  const local=await life.mutate({op:'create',kind:'todo',title:'Desktop item'},'desktop-item')
+  await sync.sync()
+  assert.equal(hub.snapshot(device.token).state.todos.find(row=>row.id===local.id)?.title,'Desktop item')
+  hub.mutate(device.token,{op_id:'phone-edit',input:{op:'update',kind:'todo',id:local.id,expected_version:1,title:'Phone edit'}})
+  hub.mutate(device.token,{op_id:'phone-import',input:{op:'import',entity:todo}})
+  await sync.sync()
+  assert.equal(life.snapshot().todos.find(row=>row.id===local.id)?.title,'Phone edit')
+  assert.equal(life.snapshot().todos.find(row=>row.id===todo.id)?.title,'Remote')
+  const remote=life.snapshot().todos.find(row=>row.id===todo.id)!
+  await life.mutate({op:'update',kind:'todo',id:remote.id,expected_version:remote.version,note:'Edited on desktop'},'desktop-edit')
+  await sync.sync()
+  assert.equal(hub.snapshot(device.token).state.todos.find(row=>row.id===todo.id)?.note,'Edited on desktop')
+  const reopened=new LifeService(join(dir,'legacy-life.json'),()=>undefined,resource.lifeBackend())
+  try{await reopened.open();assert.deepEqual(reopened.snapshot(),life.snapshot())}finally{await reopened.close()}
+  assert.equal(sync.status().conflicts.length,0)
+ }finally{
+  await sync.close();await life.close();await resource.close()
+  if(server.listening)await new Promise<void>(resolve=>server.close(()=>resolve()))
+  hub.close();await rm(dir,{recursive:true,force:true})
+ }
 })
