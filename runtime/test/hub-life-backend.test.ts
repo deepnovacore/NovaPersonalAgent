@@ -82,7 +82,7 @@ test('Hub backend projection rejects an out-of-band ledger edit even at the same
 test('Substrate Life backend roundtrips local and remote changes through the Hub',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'hub-substrate-roundtrip-'))
  const client=new MemoryLedgerClient(join(dir,'memory.sqlite'))
- const resource=new SubstrateMemoryResource({client,userId:'hub-roundtrip',model:'fixture',inputConsent:true,consolidation:{enabled:false},gateway:{complete:()=>Promise.reject(Error('unexpected model call')),async *stream(){throw Error('unexpected model call')}}})
+ const resource=new SubstrateMemoryResource({client,userId:'hub-roundtrip',model:'fixture',inputConsent:true,consolidation:{enabled:false},gateway:{complete:()=>Promise.reject(Error('unexpected model call')),async *stream(){await Promise.reject(Error('unexpected model call'))}}})
  const hub=new HubStore(':memory:'),server=createHubServer(hub)
  const life=new LifeService(join(dir,'legacy-life.json'),()=>undefined,resource.lifeBackend())
  const credentialsPath=join(dir,'credentials'),sync=new LifeSyncClient(life,join(dir,'sync-state'),credentialsPath)
