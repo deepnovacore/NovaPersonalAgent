@@ -76,4 +76,41 @@ void main() {
       expect(find.byTooltip('New goal'), findsOneWidget);
     },
   );
+  testWidgets(
+    'tabs and settings retain one local store across foreground changes',
+    (tester) async {
+      final repo = LocalLife(MemoryLifePersistence());
+      await repo.open();
+      for (final kind in ['todo', 'idea', 'goal']) {
+        await repo.mutate({
+          'op': 'create',
+          'kind': kind,
+          'title': 'Local $kind',
+        });
+      }
+      await mount(tester, repo);
+      final host = tester.widget<NovaApp>(find.byType(NovaApp)).lifeHost!;
+      final store = host.store;
+      for (final entry in {
+        'Todos': 'todo',
+        'Ideas': 'idea',
+        'Goals': 'goal',
+      }.entries) {
+        await tester.tap(find.text(entry.key).last);
+        await tester.pumpAndSettle();
+        expect(find.text('Local ${entry.value}'), findsOneWidget);
+        expect(identical(host.store, store), isTrue);
+      }
+      await tester.tap(find.byTooltip('同步设置'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(identical(host.store, store), isTrue);
+      expect(host.snapshot()['todos'], hasLength(1));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 }
