@@ -317,7 +317,7 @@ test('valid Object prototype names are own entity keys for seed and local deleti
   await writeFile(f.life.path,JSON.stringify(state));await f.life.open()
   await f.client.sync()
   assert.equal(f.hub.snapshot(f.device.token).state.todos[0]?.id,'toString')
-  f.hub.mutate(f.device.token,{op_id:'value-of',input:{op:'import',entity:{...lifeProjection(f.life.syncState())['toString'],id:'valueOf'}}})
+  f.hub.mutate(f.device.token,{op_id:'value-of',input:{op:'import',entity:{...Object.values(lifeProjection(f.life.syncState())).find(entity=>entity.id==='toString'),id:'valueOf'}}})
   await f.client.sync()
   await f.life.mutate({op:'undo_create',id:'valueOf',expected_version:1},'delete-value-of')
   await f.client.sync()
