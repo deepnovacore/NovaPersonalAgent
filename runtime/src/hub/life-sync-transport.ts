@@ -55,7 +55,7 @@ export class LifeSyncTransport{
    if(!response.body)throw Error('hub_response_invalid')
    const chunks:Uint8Array[]=[];let bytes=0
    const reader=response.body.getReader()
-   try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>16*1024*1024)throw Error('hub_response_too_large');chunks.push(value)}}
+   try{for(;;){const result=await reader.read();if(result.done)break;const value:unknown=result.value;if(!(value instanceof Uint8Array))throw Error('hub_response_invalid');bytes+=value.length;if(bytes>16*1024*1024)throw Error('hub_response_too_large');chunks.push(value)}}
    finally{await reader.cancel().catch(()=>{/* release connection on rejection */})}
    const value:unknown=JSON.parse(Buffer.concat(chunks).toString('utf8'))
    if(!response.ok){
@@ -70,9 +70,15 @@ export class LifeSyncTransport{
    throw Error('hub_transport_failed')
   }
  }
- async snapshot(){return hubSnapshotSchema.parse(await this.#request('state'))}
- async changes(after:number){counter.parse(after);return hubChangesSchema.parse(await this.#request('changes?after='+after))}
+ async snapshot(){return checked(hubSnapshotSchema,await this.#request('state'))}
+ async changes(after:number){counter.parse(after);return checked(hubChangesSchema,await this.#request('changes?after='+after))}
  async mutate(command:unknown){
-  return z.object({result:z.object({id:z.string(),version:counter}),snapshot:hubSnapshotSchema}).strict().parse(await this.#request('mutations',command))
+  return checked(z.object({result:z.object({id:z.string(),version:counter}),snapshot:hubSnapshotSchema}).strict(),await this.#request('mutations',command))
  }
+}
+
+function checked<T>(schema:z.ZodType<T>,raw:unknown):T{
+ const parsed=schema.safeParse(raw)
+ if(!parsed.success)throw Error('hub_response_invalid')
+ return parsed.data
 }
