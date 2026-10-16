@@ -110,8 +110,9 @@ class AgentCoreHost extends ChangeNotifier {
           if (delta['content'] is String) draft += delta['content'] as String;
           for (final fragment in delta['tool_calls'] as List? ?? []) {
             final index = fragment['index'];
-            if (index is! int || index < 0 || index >= 8)
+            if (index is! int || index < 0 || index >= 8) {
               throw const AgentFailure('invalid_tool_calls');
+            }
             final call = calls.putIfAbsent(
               index,
               () => {
@@ -120,14 +121,16 @@ class AgentCoreHost extends ChangeNotifier {
                 'function': {'name': '', 'arguments': ''},
               },
             );
-            if (fragment['id'] is String)
+            if (fragment['id'] is String) {
               call['id'] = '${call['id']}${fragment['id']}';
+            }
             final function = fragment['function'] as Map?;
             if (function != null) {
               for (final field in ['name', 'arguments']) {
-                if (function[field] is String)
+                if (function[field] is String) {
                   call['function'][field] =
                       '${call['function'][field]}${function[field]}';
+                }
               }
             }
           }
