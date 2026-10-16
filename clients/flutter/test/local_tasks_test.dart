@@ -5,7 +5,8 @@ import 'package:nova_mobile/ui/local_tasks.dart';
 
 class TestAgent implements LocalAgent {
   String phase = 'verifying';
-  int verifications = 0;
+  int verifications = 0, runs = 0;
+  Map<String, dynamic>? lastRun;
   String platform = 'android';
   String target = 'com.nova.nova_mobile';
   @override
@@ -47,7 +48,13 @@ class TestAgent implements LocalAgent {
           'model': 'vision',
         };
       case 'apps':
-        return <dynamic>[];
+        return [
+          {'package': 'com.example.fixture', 'label': 'Fixture App'},
+        ];
+      case 'run':
+        runs++;
+        lastRun = Map<String, dynamic>.from(input);
+        return {'id': input['id'], 'phase': 'running'};
       case 'verify':
         verifications++;
         phase = 'completed';
@@ -105,6 +112,45 @@ void main() {
     expect(find.text('本机任务'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets('cancelled local task request does not dispatch run', (
+    tester,
+  ) async {
+    final agent = TestAgent();
+    await tester.pumpWidget(MaterialApp(home: LocalTasksPage(agent: agent)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('委托任务'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(agent.runs, 0);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('confirmed local task request dispatches one native run', (
+    tester,
+  ) async {
+    final agent = TestAgent();
+    await tester.pumpWidget(MaterialApp(home: LocalTasksPage(agent: agent)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('委托任务'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fixture App').last);
+    await tester.pumpAndSettle();
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Open the fixture');
+    await tester.enterText(fields.at(1), 'Fixture is open');
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('开始任务'));
+    await tester.pumpAndSettle();
+    expect(agent.runs, 1);
+    expect(agent.lastRun!['id'], isNotEmpty);
+    expect(agent.lastRun!['goal'], 'Open the fixture');
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
     'model completion remains unverified until explicit user confirmation',
     (tester) async {

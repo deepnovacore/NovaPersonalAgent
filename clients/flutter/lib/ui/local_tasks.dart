@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'local_dialog.dart';
+import 'local_task_request.dart';
 import '../agent/local_agent.dart';
-import '../protocol/request_id.dart';
 import '../agent/hub_tasks.dart';
 import '../agent/task_todo_completion.dart';
 import '../personal/local_life.dart';
@@ -376,131 +376,12 @@ class _LocalTasksPageState extends State<LocalTasksPage>
 
   Future<void> _newTask() async {
     try {
-      final apps = await widget.agent.call('apps') as List;
-      final settings = await widget.agent.call('modelSettings') as Map;
-      if (!mounted) return;
-      final goal = TextEditingController(),
-          acceptance = TextEditingController();
-      String? package;
-      Map? todo;
-      bool consent = false;
-      try {
-        final value = await showLocalDialog<Map<String, dynamic>>(
-          context: context,
-          builder: (context) => StatefulBuilder(
-            builder: (context, setDialog) => AlertDialog(
-              title: const Text('在这台手机执行'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: '允许操作的范围'),
-                      items: apps
-                          .map(
-                            (app) => DropdownMenuItem<String>(
-                              value: app['package'] as String,
-                              child: Text(
-                                app['label'] as String,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) => setDialog(() => package = value),
-                    ),
-                    TextField(
-                      controller: goal,
-                      maxLength: 4000,
-                      decoration: const InputDecoration(labelText: '希望完成什么'),
-                      maxLines: 2,
-                    ),
-                    if (widget.life != null)
-                      DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: '关联待办（可选）',
-                        ),
-                        items: [
-                          const DropdownMenuItem(value: '', child: Text('不关联')),
-                          for (final row in widget.life!.life['todos'] as List)
-                            if (!['done', 'cancelled'].contains(row['status']))
-                              DropdownMenuItem(
-                                value: row['id'] as String,
-                                child: Text(
-                                  row['title'] as String,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                        ],
-                        onChanged: (id) => setDialog(
-                          () => todo =
-                              (widget.life!.life['todos'] as List)
-                                      .where((row) => row['id'] == id)
-                                      .firstOrNull
-                                  as Map?,
-                        ),
-                      ),
-                    TextField(
-                      controller: acceptance,
-                      maxLength: 2000,
-                      decoration: const InputDecoration(labelText: '怎样确认完成'),
-                      maxLines: 2,
-                    ),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: consent,
-                      onChanged: (value) =>
-                          setDialog(() => consent = value ?? false),
-                      title: Text(
-                        '允许将本次目标、${capabilities['platform'] == 'ios' ? '所选范围的待办／目标或日历／提醒事项内容' : '所选 App 界面和截图'}发送给 ${Uri.tryParse(settings['endpoint'] as String? ?? '')?.host ?? '模型服务'}，模型 ${settings['model']}。',
-                      ),
-                    ),
-                    Text(
-                      capabilities['platform'] == 'ios'
-                          ? '请保持 Nova 在前台，每一步修改由你确认。进入后台会停止执行，任务最多运行 5 分钟。系统可能请求日历或提醒事项权限。'
-                          : '开始后打开所选 App。每一步操作由你确认，可随时点屏幕上的“停止 Nova”。任务最多运行 5 分钟。',
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: !consent || package == null
-                      ? null
-                      : () {
-                          if (goal.text.trim().isEmpty ||
-                              acceptance.text.trim().isEmpty) {
-                            return;
-                          }
-                          Navigator.pop(context, {
-                            'id': requestId(),
-                            'goal': goal.text.trim(),
-                            'acceptance': acceptance.text.trim(),
-                            'target_package': package,
-                            if (todo != null)
-                              'todo_ref': {
-                                'id': todo!['id'],
-                                'version': todo!['version'],
-                              },
-                          });
-                        },
-                  child: const Text('开始任务'),
-                ),
-              ],
-            ),
-          ),
-        );
-        if (value != null) await _command('run', value);
-      } finally {
-        goal.dispose();
-        acceptance.dispose();
-      }
+      final value = await requestLocalTask(
+        context,
+        agent: widget.agent,
+        life: widget.life,
+      );
+      if (value != null) await _command('run', value);
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     }

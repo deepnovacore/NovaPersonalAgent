@@ -17,6 +17,8 @@ import 'workbench_page.dart';
 import 'components.dart';
 import 'theme.dart';
 import 'local_workspace.dart';
+import 'local_task_request.dart';
+import '../agent/local_agent.dart';
 import '../personal/life_host.dart';
 import '../agent_core/agent_core_host.dart';
 import '../agent_core/tool_registry.dart';
@@ -111,6 +113,29 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               mutate: lifeHost.mutate,
               hasConflict: () => lifeHost.hasConflict,
               fetch: SafeWebFetch().fetch,
+              requestDeviceTask: (goal, operationId) async {
+                Map<String, dynamic>? snapshot;
+                try {
+                  snapshot = lifeHost.snapshot();
+                } catch (_) {
+                  // The dialog can still open while LifeHost is initializing.
+                }
+                final input = await requestLocalTask(
+                  context,
+                  agent: const NativeLocalAgent(),
+                  life: lifeHost.repo,
+                  lifeSnapshot: snapshot,
+                  goal: goal,
+                  taskId: operationId,
+                );
+                if (input == null || !mounted) return {'status': 'denied'};
+                final task = await const NativeLocalAgent().call('run', input);
+                return {
+                  'status': 'started',
+                  'task': task,
+                  'completion_requires_user_verification': true,
+                };
+              },
             ),
           );
       final known = host.store.conversations;
