@@ -76,6 +76,7 @@ class AgentCoreHost extends ChangeNotifier {
     try {
       final config = await settings.read();
       if (config == null) throw const AgentFailure('model_settings_required');
+      await store.recoverInterruptedCalls();
       await store.append(conversationId, {
         'role': 'user',
         'content': text.trim(),
@@ -136,6 +137,11 @@ class AgentCoreHost extends ChangeNotifier {
           }
           _changed();
         }
+        final callIds = calls.values.map((e) => e['id']).toSet();
+        if (callIds.length != calls.length ||
+            callIds.any((id) => id is! String || id.isEmpty)) {
+          throw const AgentFailure('invalid_tool_calls');
+        }
         await store.append(conversationId, {
           'role': 'assistant',
           'content': draft,
@@ -163,6 +169,7 @@ class AgentCoreHost extends ChangeNotifier {
               arguments: Map<String, dynamic>.from(
                 jsonDecode(call['function']['arguments'] as String) as Map,
               ),
+              isCancelled: () => _cancelRequested || _disposed,
               approve: (offer) async =>
                   !_cancelRequested &&
                   await approve(offer) &&

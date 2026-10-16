@@ -5,6 +5,15 @@ import 'package:nova_mobile/agent_core/tool_registry.dart';
 import 'package:nova_mobile/personal/life_reducer.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 
+class ObservedPersistence extends MemoryPersistence {
+  void Function(String)? onWrite;
+  @override
+  Future<void> write(String data) async {
+    await super.write(data);
+    onWrite?.call(data);
+  }
+}
+
 void main() {
   test('approval binds canonical args, expires and is single use', () {
     var now = DateTime.utc(2026);
@@ -94,6 +103,8 @@ void main() {
       runner = ToolRunner(registry: registry, journal: restored);
       expect((await run('unknown', true))['status'], 'outcome_unknown');
       expect(writes, 1);
+      expect((await run('new_turn', true))['status'], 'outcome_unknown');
+      expect(writes, 1);
     },
   );
   test('restart marks in-flight durable intent unknown', () async {
@@ -108,6 +119,65 @@ void main() {
     await restored.open();
     expect(restored.get('call')!['status'], 'outcome_unknown');
     expect(restored.get('call')!['operation_id'], 'stable');
+  });
+  test('cancel during intent persistence prevents dispatch', () async {
+    final persistence = ObservedPersistence();
+    final journal = ToolJournal(persistence);
+    await journal.open();
+    var cancelled = false, writes = 0;
+    persistence.onWrite = (data) {
+      if (data.contains('executing')) cancelled = true;
+    };
+    final runner = ToolRunner(
+      journal: journal,
+      registry: ToolRegistry(
+        snapshot: emptyLife,
+        hasConflict: () => false,
+        mutate: (input, {required operationId}) async {
+          writes++;
+          return {};
+        },
+        fetch: (_) async => {},
+      ),
+    );
+    final result = await runner.run(
+      turnId: 't',
+      callId: 'c',
+      name: 'life_create',
+      arguments: {'kind': 'todo', 'title': 'test'},
+      approve: (_) async => true,
+      isCancelled: () => cancelled,
+    );
+    expect(result['status'], 'cancelled');
+    expect(writes, 0);
+  });
+  test('native unknown result is terminal rather than completed', () async {
+    final journal = ToolJournal(MemoryPersistence());
+    await journal.open();
+    var starts = 0;
+    final runner = ToolRunner(
+      journal: journal,
+      registry: ToolRegistry(
+        snapshot: emptyLife,
+        hasConflict: () => false,
+        mutate: (input, {required operationId}) async => {},
+        fetch: (_) async => {},
+        requestDeviceTask: (_, _) async {
+          starts++;
+          return {'status': 'outcome_unknown'};
+        },
+      ),
+    );
+    Future<Map<String, dynamic>> run(String turn) => runner.run(
+      turnId: turn,
+      callId: 'c',
+      name: 'device_run_task',
+      arguments: {'goal': 'test'},
+      approve: (_) async => true,
+    );
+    expect((await run('t'))['status'], 'outcome_unknown');
+    expect((await run('new'))['status'], 'outcome_unknown');
+    expect(starts, 1);
   });
   test(
     'web prompt injection cannot grant writes, add tools or authorize internal HTTP',

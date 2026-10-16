@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../ui/local_dialog.dart';
 import '../agent_core/agent_core_host.dart';
 import '../agent_core/model_client.dart';
 import '../agent_core/model_settings.dart';
@@ -22,7 +23,7 @@ Future<void> showLocalModelSettings(
   String? error;
   var saving = false;
   try {
-    await showDialog<void>(
+    await showLocalDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
@@ -127,7 +128,7 @@ class _LocalChatPanelState extends State<LocalChatPanel> {
 
   Future<bool> _approve(ApprovalOffer offer) async {
     if (!mounted) return false;
-    return await showDialog<bool>(
+    return await showLocalDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
             title: Text('允许 ${offer.tool}？'),

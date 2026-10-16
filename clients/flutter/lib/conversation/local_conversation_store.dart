@@ -41,9 +41,59 @@ class ConversationStore {
           }
         }
       }
+      final repaired = _recover(data);
+      if (repaired) await persistence.write(jsonEncode(data));
       _data = data;
     }
     _ready = true;
+  }
+
+  Future<void> recoverInterruptedCalls() => _write((data) {
+    _recover(data);
+  });
+
+  bool _recover(Map<String, dynamic> data) {
+    var repaired = false;
+    for (final item in data['conversations'] as List) {
+      final pending = <String>{};
+      final recovered = <dynamic>[];
+      void closePending() {
+        for (final id in pending) {
+          recovered.add({
+            'role': 'tool',
+            'tool_call_id': id,
+            'content': jsonEncode({
+              'untrusted': true,
+              'status': 'outcome_unknown',
+            }),
+            'time': DateTime.now().toUtc().toIso8601String(),
+          });
+          repaired = true;
+        }
+        pending.clear();
+      }
+
+      for (final message in item['messages'] as List) {
+        if (message['role'] != 'tool') closePending();
+        recovered.add(message);
+        if (message['tool_calls'] is List) {
+          for (final call in message['tool_calls'] as List) {
+            if (call is! Map ||
+                call['id'] is! String ||
+                (call['id'] as String).isEmpty) {
+              throw const FormatException('invalid_tool_call');
+            }
+            pending.add(call['id'] as String);
+          }
+        }
+        if (message['role'] == 'tool') {
+          pending.remove(message['tool_call_id']);
+        }
+      }
+      closePending();
+      item['messages'] = recovered;
+    }
+    return repaired;
   }
 
   Future<T> _write<T>(T Function(Map<String, dynamic>) change) {

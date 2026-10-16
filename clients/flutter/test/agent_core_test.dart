@@ -47,6 +47,31 @@ void main() {
     await expectLater(store.create(computerConnected: false), throwsStateError);
     expect(persistence.value, '{"schema_version":99,"conversations":[]}');
   });
+  test('restart closes interrupted tool exchange without replay', () async {
+    final persistence = MemoryPersistence();
+    final store = ConversationStore(persistence);
+    await store.open();
+    final id = await store.create(computerConnected: false);
+    await store.append(id, {
+      'role': 'assistant',
+      'content': '',
+      'tool_calls': [
+        {
+          'id': 'pending',
+          'type': 'function',
+          'function': {'name': 'life_create', 'arguments': '{}'},
+        },
+      ],
+    });
+    final restored = ConversationStore(persistence);
+    await restored.open();
+    final messages = restored.conversation(id)['messages'] as List;
+    expect(messages.last['tool_call_id'], 'pending');
+    expect(jsonDecode(messages.last['content'])['status'], 'outcome_unknown');
+    final again = ConversationStore(persistence);
+    await again.open();
+    expect(again.conversation(id)['messages'], hasLength(2));
+  });
   test('settings reject unsafe URL and header injection', () {
     for (final endpoint in [
       'http://example.com/v1',

@@ -147,12 +147,13 @@ class ToolRegistry {
             'type': 'string',
             'enum': [
               'open',
-              'in_progress',
+              'doing',
+              'waiting',
               'cancelled',
               'active',
               'paused',
               'archived',
-              'captured',
+              'completed',
             ],
           },
         },
@@ -279,6 +280,16 @@ class ToolJournal {
     _ready = true;
   }
 
+  bool hasUnknown(String fingerprint) => _records.entries.any(
+    (entry) =>
+        entry.key.endsWith(':$fingerprint') &&
+        [
+          'executing',
+          'awaiting_approval',
+          'outcome_unknown',
+        ].contains(entry.value['status']),
+  );
+
   Map<String, dynamic>? get(String key) => _records[key] == null
       ? null
       : copyJson(Map<String, dynamic>.from(_records[key]));
@@ -310,11 +321,19 @@ class ToolRunner {
     required String name,
     required Map<String, dynamic> arguments,
     required ToolApproval approve,
+    bool Function()? isCancelled,
   }) async {
     if (_busy) throw const AgentFailure('tool_runner_busy');
     _busy = true;
     try {
-      return await _run(turnId, callId, name, copyJson(arguments), approve);
+      return await _run(
+        turnId,
+        callId,
+        name,
+        copyJson(arguments),
+        approve,
+        isCancelled ?? () => false,
+      );
     } finally {
       _busy = false;
     }
@@ -326,6 +345,7 @@ class ToolRunner {
     String name,
     Map<String, dynamic> args,
     ToolApproval approve,
+    bool Function() isCancelled,
   ) async {
     final tool = registry.resolve(name, args);
     final fingerprint = lifeFingerprint({'name': name, 'arguments': args});
@@ -336,6 +356,9 @@ class ToolRunner {
         return Map<String, dynamic>.from(previous['result']);
       }
       return {'untrusted': true, 'status': previous['status']};
+    }
+    if (journal.hasUnknown(fingerprint)) {
+      return {'untrusted': true, 'status': 'outcome_unknown'};
     }
     final record = <String, dynamic>{
       'tool': tool.name,
@@ -356,10 +379,39 @@ class ToolRunner {
     }
     record['status'] = 'executing';
     await journal.put(key, record);
+    if (isCancelled()) {
+      record['status'] = 'cancelled';
+      await journal.put(key, record);
+      return {'untrusted': true, 'status': 'cancelled'};
+    }
     try {
-      final output = await registry
-          .execute(tool, args, record['operation_id'] as String)
-          .timeout(const Duration(seconds: 65));
+      final execution = registry.execute(
+        tool,
+        args,
+        record['operation_id'] as String,
+      );
+      // Device callback includes an explicit user-start dialog; only its native
+      // dispatch is timed by requestNativeTask, never the user's decision time.
+      final output = tool.name == 'device.run_task'
+          ? await execution
+          : await execution.timeout(const Duration(seconds: 65));
+      if (tool.name == 'device.run_task' && output['status'] == 'denied') {
+        record['status'] = 'denied';
+        await journal.put(key, record);
+        return {'untrusted': true, 'status': 'denied'};
+      }
+      if (tool.name == 'device.run_task' &&
+          [
+            'outcome_unknown',
+            'failed',
+            'cancelled',
+          ].contains(output['status'])) {
+        record['status'] = output['status'] == 'cancelled'
+            ? 'cancelled'
+            : 'outcome_unknown';
+        await journal.put(key, record);
+        return {'untrusted': true, 'status': record['status']};
+      }
       final result = {'untrusted': true, 'status': 'completed', 'data': output};
       record['status'] = 'completed';
       record['result'] = result;
