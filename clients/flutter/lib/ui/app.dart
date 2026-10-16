@@ -17,14 +17,22 @@ import 'workbench_page.dart';
 import 'components.dart';
 import 'theme.dart';
 import 'local_workspace.dart';
+import '../personal/life_host.dart';
 
 const ink = Nova.ink, mint = Nova.mint;
 
 class NovaApp extends StatelessWidget {
-  const NovaApp({super.key, this.session, this.store, this.preferences});
+  const NovaApp({
+    super.key,
+    this.session,
+    this.store,
+    this.preferences,
+    this.lifeHost,
+  });
   final Session? session;
   final CredentialStore? store;
   final Preferences? preferences;
+  final LifeHost? lifeHost;
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -35,21 +43,29 @@ class NovaApp extends StatelessWidget {
       session: session,
       store: store,
       preferences: preferences,
+      lifeHost: lifeHost,
     ),
   );
 }
 
 class _WorkbenchShell extends StatefulWidget {
-  const _WorkbenchShell({this.session, this.store, this.preferences});
+  const _WorkbenchShell({
+    this.session,
+    this.store,
+    this.preferences,
+    this.lifeHost,
+  });
   final Session? session;
   final CredentialStore? store;
   final Preferences? preferences;
+  final LifeHost? lifeHost;
   @override
   State<_WorkbenchShell> createState() => _WorkbenchShellState();
 }
 
 class _WorkbenchShellState extends State<_WorkbenchShell> {
   late final Session session;
+  late final LifeHost lifeHost;
   final conversation = GlobalKey<_ConversationScreenState>();
   int tab = 0;
   bool _sheet = false;
@@ -58,6 +74,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   @override
   void initState() {
     super.initState();
+    lifeHost = widget.lifeHost ?? LifeHost();
+    lifeHost.addListener(_lifeChanged);
+    unawaited(lifeHost.open().catchError((Object _) {}));
     final audio = ChannelAudio();
     session =
         widget.session ??
@@ -66,6 +85,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     _resets = session.resets.listen((_) {
       _shown.clear();
     });
+  }
+
+  void _lifeChanged() {
+    if (mounted) setState(() {});
   }
 
   void _changed() {
@@ -417,7 +440,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         .whereType<Map>()
         .map(Map<String, dynamic>.from)
         .toList();
-    final life = snapshot?.object('life') ?? {};
+    final life = lifeHost.store?.snapshot?.object('life') ?? {};
     switch (tab) {
       case 0:
         final selected = rows(
@@ -462,6 +485,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   @override
   void dispose() {
+    lifeHost.removeListener(_lifeChanged);
+    lifeHost.dispose();
     session.removeListener(_changed);
     _resets?.cancel();
     if (widget.session == null) session.dispose();
@@ -511,13 +536,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           ),
         ),
         actions: [
-          IconButton(
-            tooltip: '本机空间',
-            icon: const Icon(CupertinoIcons.device_phone_portrait, size: 21),
-            onPressed: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(builder: (_) => const LocalWorkspace()),
-            ),
-          ),
           IconButton(
             tooltip: tr(session.language, 'Settings'),
             icon: const Icon(
@@ -573,31 +591,40 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       body: Column(
         children: [
           _pendingBanner(),
+          LifeControls(host: lifeHost),
           Expanded(
             child: IndexedStack(
               index: tab,
               children: [
-                ConversationScreen(
-                  key: conversation,
-                  session: session,
-                  store: widget.store,
-                  preferences: widget.preferences,
-                  active: tab == 0,
-                  embedded: true,
+                TickerMode(
+                  enabled: tab == 0,
+                  child: ConversationScreen(
+                    key: conversation,
+                    session: session,
+                    store: widget.store,
+                    preferences: widget.preferences,
+                    active: tab == 0,
+                    embedded: true,
+                  ),
                 ),
                 for (final page in [1, 2, 3, 4])
                   tab == page
-                      ? WorkbenchPage(
-                          key: ValueKey(page),
-                          store: session.personal,
-                          page: page,
-                          language: session.language,
-                          showHeading: false,
-                          onOpenConversation: () => setState(() => tab = 0),
-                          onDelegate: _delegate,
-                          onSettings: () =>
-                              conversation.currentState?._settings(),
-                        )
+                      ? page >= 2 && lifeHost.store == null
+                            ? const Center(child: CircularProgressIndicator())
+                            : WorkbenchPage(
+                                key: ValueKey(page),
+                                store: page >= 2
+                                    ? lifeHost.store!
+                                    : session.personal,
+                                page: page,
+                                language: session.language,
+                                showHeading: false,
+                                onOpenConversation: () =>
+                                    setState(() => tab = 0),
+                                onDelegate: _delegate,
+                                onSettings: () =>
+                                    conversation.currentState?._settings(),
+                              )
                       : const SizedBox(),
               ],
             ),

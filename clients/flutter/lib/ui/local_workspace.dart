@@ -1,140 +1,36 @@
-import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'local_dialog.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:path_provider/path_provider.dart';
+import '../personal/life_host.dart';
 import '../personal/local_life.dart';
-import '../personal/personal_store.dart';
-import '../personal/hub_transport.dart';
-import '../personal/life_sync_scheduler.dart';
-import 'workbench_page.dart';
-import 'local_tasks.dart';
-import '../agent/life_tool_bridge.dart';
 import '../agent/hub_tasks.dart';
-import '../agent/local_agent.dart';
+import 'local_dialog.dart';
+import 'local_tasks.dart';
 
-/// An explicit local dataset: opening this view never imports host snapshots.
-class LocalWorkspace extends StatefulWidget {
-  const LocalWorkspace({super.key, this.repository});
-  final LocalLife? repository;
+/// Controls for the application-owned dataset; never opens a second repository.
+class LifeControls extends StatefulWidget {
+  const LifeControls({super.key, required this.host});
+  final LifeHost host;
   @override
-  State<LocalWorkspace> createState() => _LocalWorkspaceState();
+  State<LifeControls> createState() => _LifeControlsState();
 }
 
-class _LocalWorkspaceState extends State<LocalWorkspace>
-    with WidgetsBindingObserver {
-  LocalLife? repo;
-  PersonalStore? store;
-  int tab = 0;
-  bool busy = false;
-  String? error;
-  LifeSyncScheduler? scheduler;
-  String? lastPromptedConflict;
+class _LifeControlsState extends State<LifeControls> {
+  LocalLife? get repo => widget.host.repo;
   bool choosing = false;
-  LifeToolBridge? lifeTools;
-  final secrets = const FlutterSecureStorage(
-    iOptions: IOSOptions(
-      accessibility: KeychainAccessibility.unlocked_this_device,
-    ),
-  );
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    unawaited(_open());
-  }
+  String? lastPromptedConflict;
+  String? error;
 
-  Future<void> _open() async {
+  Future<void> _run(Future<void> Function() action) async {
     try {
-      final local =
-          widget.repository ??
-          LocalLife(
-            FileLifePersistence(
-              File(
-                '${(await getApplicationSupportDirectory()).path}/local-life-v1.json',
-              ),
-            ),
-          );
-      if (!local.ready) await local.open();
-      if (!mounted) {
-        if (widget.repository == null) local.dispose();
-        return;
-      }
-      repo = local;
-      if (Platform.isIOS) lifeTools = LifeToolBridge(local)..attach();
-      store = PersonalStore(send: (_) => false, local: local);
-      local.addListener(_changed);
-      if (widget.repository == null) {
-        scheduler = LifeSyncScheduler(
-          sync: () => _sync(automatic: true),
-          onError: (_) {},
-        );
-        scheduler!.setForeground(
-          WidgetsBinding.instance.lifecycleState == null ||
-              WidgetsBinding.instance.lifecycleState ==
-                  AppLifecycleState.resumed,
-        );
-      }
-      setState(() {});
-    } catch (e) {
-      if (mounted) setState(() => error = e.toString());
-    }
-  }
-
-  void _changed() {
-    if (mounted) setState(() {});
-    if (repo?.pendingCount != 0 && repo?.conflict == null) scheduler?.changed();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    scheduler?.setForeground(state == AppLifecycleState.resumed);
-  }
-
-  @override
-  void dispose() {
-    lifeTools?.detach();
-    scheduler?.dispose();
-    WidgetsBinding.instance.removeObserver(this);
-    repo?.removeListener(_changed);
-    store?.dispose();
-    if (widget.repository == null) repo?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _sync({bool automatic = false}) async {
-    if (busy || repo == null) return;
-    setState(() => busy = true);
-    try {
-      var endpoint = await secrets.read(key: 'nova.local.hub.url');
-      var token = await secrets.read(key: 'nova.local.hub.token');
-      if (endpoint == null || token == null) {
-        if (automatic) return;
-        await _settings();
-        endpoint = await secrets.read(key: 'nova.local.hub.url');
-        token = await secrets.read(key: 'nova.local.hub.token');
-      }
-      if (endpoint == null || token == null) return;
-      await repo!.sync(HttpLifeSync(endpoint, token));
+      await action();
       if (mounted) setState(() => error = null);
-      if (mounted &&
-          repo!.conflict != null &&
-          !choosing &&
-          (!automatic || lastPromptedConflict != repo!.conflictToken)) {
-        await _choose();
-      }
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
-      if (automatic) rethrow;
-    } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() => error = widget.host.error ?? '操作失败，请检查事项状态。');
     }
   }
 
   Future<void> _settings() async {
     final url = TextEditingController(
-      text: await secrets.read(key: 'nova.local.hub.url') ?? '',
+      text: await widget.host.readHubUrl() ?? '',
     );
     final token = TextEditingController();
     if (!mounted) {
@@ -183,17 +79,9 @@ class _LocalWorkspaceState extends State<LocalWorkspace>
     );
     try {
       if (accepted == true) {
-        final transport = HttpLifeSync(url.text.trim(), token.text.trim());
-        final snapshot = await transport.snapshot();
-        repo?.validateSnapshot(snapshot);
-        if (repo?.accountId != null &&
-            snapshot['account_id'] != repo!.accountId) {
-          throw StateError('账号不匹配，请使用当前账号的设备令牌。');
-        }
-        await secrets.write(key: 'nova.local.hub.url', value: url.text.trim());
-        await secrets.write(
-          key: 'nova.local.hub.token',
-          value: token.text.trim(),
+        await widget.host.configureHub(
+          url: url.text.trim(),
+          token: token.text.trim(),
         );
       }
     } finally {
@@ -291,32 +179,12 @@ class _LocalWorkspaceState extends State<LocalWorkspace>
   Future<void> _openTasks() async {
     HubTasks? hub;
     try {
-      final url = await secrets.read(key: 'nova.local.hub.url');
-      final token = await secrets.read(key: 'nova.local.hub.token');
-      if (url != null && token != null && repo != null) {
-        final transport = HttpLifeSync(url, token);
-        final snapshot = await transport.snapshot();
-        repo!.validateSnapshot(snapshot);
-        final candidate = HubTasks(
-          request: transport.request,
-          persistence: FileLifePersistence(
-            File(
-              '${(await getApplicationSupportDirectory()).path}/task-delivery-v1.json',
-            ),
-          ),
-          agent: const NativeLocalAgent(),
-          hubId: snapshot['hub_id'],
-          accountId: snapshot['account_id'],
-        );
-        await candidate.open();
-        hub = candidate;
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hub 暂不可用，本机任务仍可使用：$e')));
-      }
+      hub = await widget.host.getTasks();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Hub 暂不可用，本机任务仍可使用。')));
     }
     if (!mounted) return;
     await Navigator.push(
@@ -328,47 +196,54 @@ class _LocalWorkspaceState extends State<LocalWorkspace>
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('本机空间'),
-      actions: [
-        IconButton(
-          tooltip: '本机任务',
-          onPressed: _openTasks,
-          icon: const Icon(Icons.play_circle_outline),
-        ),
-        IconButton(
-          tooltip: '同步设置',
-          onPressed: busy
-              ? null
-              : () => _settings().catchError((Object e) {
-                  if (mounted) setState(() => error = e.toString());
-                }),
-          icon: const Icon(Icons.settings_outlined),
-        ),
-        IconButton(
-          tooltip: '同步',
-          onPressed: busy ? null : _sync,
-          icon: const Icon(Icons.sync),
-        ),
-      ],
-    ),
-    body: Column(
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.host,
+    builder: (context, _) => Column(
       children: [
-        if (repo != null)
-          ListTile(
-            dense: true,
-            title: Text(
-              '${repo!.pendingCount} 项待同步 · ${repo!.accountId ?? "仅本机"}',
+        Row(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  repo == null
+                      ? '正在打开本机事项'
+                      : '${repo!.pendingCount} 项待同步 · ${repo!.accountId ?? "仅本机"}',
+                ),
+              ),
             ),
-            subtitle: const Text('个人资料可离线编辑。执行任务需要另行委托。'),
-          ),
-        if (busy) const LinearProgressIndicator(),
-        if (error != null)
+            IconButton(
+              tooltip: '本机任务',
+              onPressed: repo == null ? null : () => _run(_openTasks),
+              icon: const Icon(Icons.play_circle_outline),
+            ),
+            IconButton(
+              tooltip: '同步设置',
+              onPressed: widget.host.busy || repo == null
+                  ? null
+                  : () => _run(_settings),
+              icon: const Icon(Icons.settings_outlined),
+            ),
+            IconButton(
+              tooltip: '同步',
+              onPressed: widget.host.busy || repo == null
+                  ? null
+                  : () => _run(() async {
+                      if (!widget.host.hubConfigured) await _settings();
+                      await widget.host.sync();
+                    }),
+              icon: const Icon(Icons.sync),
+            ),
+          ],
+        ),
+        if (widget.host.lastSync != null)
+          Text('最近同步：${widget.host.lastSync!.toLocal()}'),
+        if (widget.host.busy) const LinearProgressIndicator(),
+        if (error != null || widget.host.error != null)
           Padding(
             padding: const EdgeInsets.all(12),
             child: SelectableText(
-              error!,
+              error ?? widget.host.error!,
               style: const TextStyle(color: Colors.red),
             ),
           ),
@@ -376,36 +251,8 @@ class _LocalWorkspaceState extends State<LocalWorkspace>
           ListTile(
             title: const Text('有修改需要选择版本'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: busy
-                ? null
-                : () => _choose().catchError((Object e) {
-                    if (mounted) setState(() => error = e.toString());
-                  }),
+            onTap: widget.host.busy ? null : () => _run(_choose),
           ),
-        Expanded(
-          child: store == null
-              ? const Center(child: CircularProgressIndicator())
-              : WorkbenchPage(
-                  store: store!,
-                  page: tab + 2,
-                  onSettings: _settings,
-                ),
-        ),
-      ],
-    ),
-    bottomNavigationBar: NavigationBar(
-      selectedIndex: tab,
-      onDestinationSelected: (value) => setState(() => tab = value),
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(Icons.check_box_outlined),
-          label: 'Todos',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.lightbulb_outline),
-          label: 'Ideas',
-        ),
-        NavigationDestination(icon: Icon(Icons.flag_outlined), label: 'Goals'),
       ],
     ),
   );

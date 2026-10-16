@@ -22,18 +22,44 @@ class HubTasks {
     required this.accountId,
   });
   final HubRequest request;
+  bool _disposed = false;
+  void dispose() => _disposed = true;
+  void _checkActive() {
+    if (_disposed) throw StateError('hub_tasks_disposed');
+  }
+
+  Future<dynamic> _request(
+    String method,
+    String path, [
+    Map<String, dynamic>? body,
+  ]) async {
+    _checkActive();
+    final result = await request(method, path, body);
+    _checkActive();
+    return result;
+  }
+
+  Future<dynamic> _call(String method, [Map<String, dynamic> args = const {}]) {
+    _checkActive();
+    return agent.call(method, args);
+  }
+
   final LifePersistence persistence;
   final LocalAgent agent;
   final String hubId, accountId;
   Map<String, dynamic> _data = {};
   Future<void> _tail = Future.value();
   Future<T> _serial<T>(Future<T> Function() work) {
-    final future = _tail.then((_) => work());
+    final future = _tail.then((_) {
+      _checkActive();
+      return work();
+    });
     _tail = future.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return future;
   }
 
   Future<void> open() async {
+    _checkActive();
     final raw = await persistence.read();
     _data = raw == null
         ? {
@@ -46,7 +72,7 @@ class HubTasks {
     if (_data['hub_id'] != hubId || _data['account_id'] != accountId) {
       throw StateError('task_hub_identity_changed');
     }
-    final identity = await request('GET', 'identity') as Map;
+    final identity = await _request('GET', 'identity') as Map;
     if (identity['hub_id'] != hubId ||
         identity['account_id'] != accountId ||
         identity['device_id'] is! String) {
@@ -62,16 +88,17 @@ class HubTasks {
   }
 
   Future<void> _save(Map<String, dynamic> next) async {
+    _checkActive();
     await persistence.write(jsonEncode(next));
     _data = next;
   }
 
   Future<List<dynamic>> devices() async =>
-      (await request('GET', 'devices') as List)
+      (await _request('GET', 'devices') as List)
           .where((device) => device['device_id'] != _data['device_id'])
           .toList();
   Future<List<dynamic>> offers() async {
-    final offers = (await request('GET', 'commands') as List)
+    final offers = (await _request('GET', 'commands') as List)
         .where((row) => row['command']['kind'] == 'start')
         .toList();
     for (final record in (_data['incoming'] as Map).values) {
@@ -91,7 +118,7 @@ class HubTasks {
   }
 
   Future<List<dynamic>> projections() async =>
-      await request('GET', 'tasks') as List;
+      await _request('GET', 'tasks') as List;
   String localId(String task) => lifeId('$hubId:$accountId:$task');
   Future<void> send({
     required String device,
@@ -136,7 +163,7 @@ class HubTasks {
           DateTime.now().millisecondsSinceEpoch) {
         continue;
       }
-      await request('POST', 'commands', Map<String, dynamic>.from(command));
+      await _request('POST', 'commands', Map<String, dynamic>.from(command));
       final next = copyJson(_data);
       next['outgoing'].remove(command['command_id']);
       await _save(next);
@@ -178,7 +205,7 @@ class HubTasks {
   });
   Future<void> _dispatch(String id) async {
     final record = _data['incoming'][id], command = record['command'];
-    await request('POST', 'commands/ack', {
+    await _request('POST', 'commands/ack', {
       'command_id': id,
       'decision': record['decision'],
     });
@@ -191,7 +218,7 @@ class HubTasks {
     final next = copyJson(_data);
     next['incoming'][id]['stage'] = 'dispatch_intent';
     await _save(next);
-    await agent.call('run', {
+    await _call('run', {
       'id': localId(command['task_id']),
       'goal': command['goal'],
       'acceptance': command['acceptance'],
@@ -204,14 +231,14 @@ class HubTasks {
 
   Future<void> poll() => _serial(() async {
     await _flushOutgoing();
-    final caps = await agent.call('capabilities') as Map;
+    final caps = await _call('capabilities') as Map;
     final platform = caps['platform'];
     if (caps['model_configured'] == true &&
         (platform == 'ios' || caps['accessibility'] == true)) {
       final capability = platform == 'ios' ? 'ios_native' : 'android_native';
-      final apps = await agent.call('apps') as List;
+      final apps = await _call('apps') as List;
       final identity =
-          await request('POST', 'devices/heartbeat', {
+          await _request('POST', 'devices/heartbeat', {
                 'name': platform == 'ios' ? '我的 iPhone' : '我的 Android',
                 'capabilities': [capability],
                 'targets': apps
@@ -241,7 +268,7 @@ class HubTasks {
     for (final id in (_data['incoming'] as Map).keys.toList()) {
       final record = _data['incoming'][id];
       if (record['stage'] == 'consented' && record['decision'] == 'rejected') {
-        await request('POST', 'commands/ack', {
+        await _request('POST', 'commands/ack', {
           'command_id': id,
           'decision': 'rejected',
         });
@@ -250,7 +277,7 @@ class HubTasks {
         await _save(next);
       }
     }
-    final inbox = await request('GET', 'commands') as List;
+    final inbox = await _request('GET', 'commands') as List;
     for (final entry in inbox) {
       final command = Map<String, dynamic>.from(entry['command']);
       if (command['kind'] != 'cancel') continue;
@@ -260,13 +287,13 @@ class HubTasks {
             r['decision'] == 'accepted',
       );
       if (!owned) continue;
-      await agent.call('stop', {'id': localId(command['task_id'])});
-      await request('POST', 'commands/ack', {
+      await _call('stop', {'id': localId(command['task_id'])});
+      await _request('POST', 'commands/ack', {
         'command_id': command['command_id'],
         'decision': 'accepted',
       });
     }
-    final native = await agent.call('tasks') as List;
+    final native = await _call('tasks') as List;
     for (final id in (_data['incoming'] as Map).keys.toList()) {
       var record = _data['incoming'][id];
       if (record['decision'] != 'accepted' ||
@@ -336,7 +363,7 @@ class HubTasks {
     var next = copyJson(_data);
     next['incoming'][id]['pending_event'] = event;
     await _save(next);
-    await request('POST', 'tasks/events', event);
+    await _request('POST', 'tasks/events', event);
     next = copyJson(_data);
     next['incoming'][id].remove('pending_event');
     next['incoming'][id]['seq'] = event['seq'];
