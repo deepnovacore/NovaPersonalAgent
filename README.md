@@ -29,12 +29,6 @@ Nova draws on your context and private memory to understand what matters to you.
 
 ---
 
-## Meet Nova in a minute
-
-**[▶ Watch in English · 64s](https://deepnovacore.github.io/NovaPersonalAgent/#film)** · [中文版 · 57 秒](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)
-
-From a changed deadline to a website taking shape while you talk. A product scenario film with fictional characters.
-
 https://github.com/user-attachments/assets/89a52d5a-b8c8-4587-b0c9-e082cf27fae9
 
 ## News

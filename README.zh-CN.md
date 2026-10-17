@@ -29,12 +29,6 @@ Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如
 
 ---
 
-## 一分钟，认识 Nova
-
-**[▶ 播放中文版 · 57 秒](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)** · [English · 64s](https://deepnovacore.github.io/NovaPersonalAgent/#film)
-
-从发现截止日期变化，到边聊边做个人网站。产品场景演绎，人物为虚构。
-
 https://github.com/user-attachments/assets/6f050c21-aede-4b2a-8f79-e7794d5137d4
 
 ## News
