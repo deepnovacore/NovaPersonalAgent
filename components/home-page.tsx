@@ -2,13 +2,14 @@
 import Image from 'next/image';
 import { featureCards } from '../lib/home-features';
 import { sitePath } from '../lib/site-path';
-import { ArrowRight, ArrowUpRight } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Play } from 'lucide-react';
 import { Header, Footer, repo } from './site-header';
 import { InstallCommand } from './install-command';
 import { StarField } from './star-field';
 import { HeroHeaderScope } from './hero-header-scope';
 export function HomePage({ en = false }: { en?: boolean }) {
   const doc = sitePath(en ? '/en/docs' : '/docs');
+  const film = sitePath(`/media/film/nova-film-${en ? 'en' : 'zh'}`);
   const highlights = en ? [
     ['A persistent home and Timeline', 'Keep Nova beside your tabbed workspace. Revisit context, evidence and task results without leaving the conversation.'],
     ['Scheduled Agent Tasks', 'Run work once, daily or weekly. Manage schedules on desktop or mobile and receive reports in your main conversation.'],
@@ -81,15 +82,44 @@ export function HomePage({ en = false }: { en?: boolean }) {
               <a className="button primary" href={doc}>
                 {en ? 'Get started' : '开始使用'} <ArrowUpRight size={15} />
               </a>
+              <a className="button secondary" href="#film">
+                <Play size={14} aria-hidden="true" /> {en ? 'Watch the film · 64s' : '看宣传片 · 57 秒'}
+              </a>
             </div>
           </div>
           <div className="hero-bottom">
             <span aria-hidden="true" />
-            <a href="#demo" aria-label={en ? 'Explore Nova' : '了解 Nova'}>
+            <a href="#film" aria-label={en ? 'Explore Nova' : '了解 Nova'}>
               ↓
             </a>
             <span>Apache 2.0</span>
           </div>
+        </section>
+        <section className="film-section wrap" id="film" aria-labelledby="film-title">
+          <div className="film-heading">
+            <p className="section-label">{en ? 'THE FILM · 64 SECONDS' : '宣传片 · 57 秒'}</p>
+            <h2 id="film-title">{en ? 'A little context. A lot in motion.' : '懂你所想，帮你所需。'}</h2>
+            <p className="lead">
+              {en
+                ? 'A deadline changes. An idea becomes a website. See how Nova keeps work moving while the conversation continues.'
+                : '截止日期变了，一个想法变成了网站。看看 Nova 如何理解你的上下文，陪你边聊边做。'}
+            </p>
+          </div>
+          <figure className="film-player">
+            <video controls playsInline preload="none" poster={`${film}.png`} width={1920} height={1080}
+              aria-label={en ? 'Nova product film — English, 64 seconds' : 'Nova 中文宣传片，57 秒'}
+              aria-describedby="film-caption">
+              <source src={`${film}.mp4`} type="video/mp4" />
+              <a href={`${film}.mp4`}>{en ? 'Open the film' : '打开宣传片'}</a>
+            </video>
+            <figcaption id="film-caption">
+              <span>{en ? 'A product scenario film with fictional characters.' : '产品场景演绎，人物为虚构。'}</span>
+              <div className="film-links">
+                <a href={`${film}.mp4`}>{en ? 'Open video' : '打开视频'} <ArrowUpRight size={14} aria-hidden="true" /></a>
+                <a href={`${sitePath(en ? '/zh' : '/')}#film`} lang={en ? 'zh-CN' : 'en'}>{en ? '中文版 · 57 秒' : 'English · 64s'}</a>
+              </div>
+            </figcaption>
+          </figure>
         </section>
         <section className="intro-section reading" id="demo">
           <p className="section-label">{en ? 'New in v0.4.0' : 'v0.4.0 新功能'}</p>
