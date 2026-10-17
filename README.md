@@ -54,5 +54,3 @@ Homepage feature copy is maintained independently in `lib/home-features.ts`; ima
 Both READMEs embed the corresponding uploaded GitHub video attachment as a bare URL, outside HTML blocks, immediately before News. GitHub hosts the README players; the website serves its own copies from `public/media/film/`. When replacing a film, upload a new attachment and update only the corresponding README URL. The official GitHub CLI supports `--attach` for issue/PR commands; its upload API accepts the same existing CLI authentication without requiring a placeholder issue. Do not publish an issue merely to obtain an attachment URL.
 
 The prepared MP4s are below 10,000,000 bytes, suitable for GitHub's free-plan video attachment limit. GitHub's paid-plan limit is 100 MB; website delivery is independent of attachment limits. Reference: <https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files>.
-
-The README visitors badges share the Hits key `github.com/deepnovacore/NovaPersonalAgent`. This is a badge-request counter, affected by caching, not a count of unique people or historical GitHub traffic. No historical offset is added.
