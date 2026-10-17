@@ -13,7 +13,6 @@
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
 [![npm downloads](https://img.shields.io/npm/d18m/nova-audio-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-audio-agent)
-[![Visitors](https://hits.sh/github.com/deepnovacore/NovaPersonalAgent.svg?label=visitors&color=0a66e4)](https://hits.sh/github.com/deepnovacore/NovaPersonalAgent/)
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
