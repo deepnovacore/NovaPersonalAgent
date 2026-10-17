@@ -13,6 +13,7 @@
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
 [![npm downloads](https://img.shields.io/npm/d18m/nova-audio-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-audio-agent)
+[![Visitors](https://hits.sh/github.com/deepnovacore/NovaPersonalAgent.svg?label=visitors&color=0a66e4)](https://hits.sh/github.com/deepnovacore/NovaPersonalAgent/)
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
@@ -20,13 +21,21 @@
 
 Nova draws on your context and private memory to understand what matters to you. It knows how and when to clarify, ask for approval, and move work forward. Its dual brains keep the conversation responsive while background agents handle longer tasks. Refine your goals as work progresses, revisit the results, and stay in control.
 
-**[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Video demo](https://youtu.be/t1c-2O-QsxE)**
+**[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://deepnovacore.github.io/NovaPersonalAgent/#film)**
 
 [Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [Use cases](#23-use-cases) · [Roadmap](#5-roadmap)
 
 </div>
 
 ---
+
+## Meet Nova in a minute
+
+**[▶ Watch in English · 64s](https://deepnovacore.github.io/NovaPersonalAgent/#film)** · [中文版 · 57 秒](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)
+
+From a changed deadline to a website taking shape while you talk. A product scenario film with fictional characters.
+
+https://github.com/user-attachments/assets/89a52d5a-b8c8-4587-b0c9-e082cf27fae9
 
 ## News
 

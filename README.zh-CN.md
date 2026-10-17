@@ -13,6 +13,7 @@
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
 [![npm downloads](https://img.shields.io/npm/d18m/nova-audio-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-audio-agent)
+[![Visitors](https://hits.sh/github.com/deepnovacore/NovaPersonalAgent.svg?label=visitors&color=0a66e4)](https://hits.sh/github.com/deepnovacore/NovaPersonalAgent/)
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
@@ -20,13 +21,21 @@
 
 Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如何、何时澄清意图、征求批准，再推进工作。前后双脑协作，让后台 Agent 执行长任务时，前台依然能流畅交流。你可以边聊边调整目标，随时回看结果，始终掌握主动权。
 
-**[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [视频演示](https://youtu.be/t1c-2O-QsxE)**
+**[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)**
 
 [快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [使用案例](#23-使用案例) · [路线图](#5-路线图)
 
 </div>
 
 ---
+
+## 一分钟，认识 Nova
+
+**[▶ 播放中文版 · 57 秒](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)** · [English · 64s](https://deepnovacore.github.io/NovaPersonalAgent/#film)
+
+从发现截止日期变化，到边聊边做个人网站。产品场景演绎，人物为虚构。
+
+https://github.com/user-attachments/assets/6f050c21-aede-4b2a-8f79-e7794d5137d4
 
 ## News
 
