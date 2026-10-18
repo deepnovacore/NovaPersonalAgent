@@ -272,6 +272,11 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
   }
 
   String _message(Object error) => switch (error) {
+    ProfileRunFailure(code: 'profile_deadline') => t(
+      '本轮整理已到时，已暂停。点击“继续生成”，可在资料和授权不变时接着已保存的进度整理。',
+      'This processing session reached its time limit and paused. Choose Resume generation to reuse saved progress while sources and permissions are unchanged.',
+    ),
+    ProfileRunFailure(code: 'profile_cancelled') ||
     AgentFailure(code: 'cancelled') => t(
       '已暂停生成，消息仍保存在手机。资料和授权未变化时，可继续使用已保存的进度。',
       'Generation paused. Messages remain on this phone. Saved progress can be reused while sources and permissions are unchanged.',

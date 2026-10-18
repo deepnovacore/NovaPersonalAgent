@@ -10,6 +10,7 @@ import 'package:nova_mobile/connectors/feishu/auth.dart';
 import 'package:nova_mobile/connectors/feishu/host.dart';
 import 'package:nova_mobile/context/profile_agent.dart';
 import 'package:nova_mobile/context/source_store.dart';
+import 'package:nova_mobile/context/secure_persistence.dart';
 import 'package:nova_mobile/device/space_authority.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
@@ -30,9 +31,74 @@ class DelayedModels extends ModelSettings {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  for (final deadline in [false, true]) {
+  test(
+    'persisted failure codes never contain arbitrary provider text or observation details',
+    () {
+      expect(
+        profileRunErrorCode(const AgentFailure('api-key-and-private-message')),
+        'profile_run_failed',
+      );
+      expect(
+        profileRunErrorCode(StateError('private source prose')),
+        'profile_run_failed',
+      );
+      expect(
+        profileRunErrorCode(const FormatException('private source prose')),
+        'profile_run_failed',
+      );
+      expect(
+        profileRunErrorCode(const AgentFailure('model_http_429')),
+        'model_http_429',
+      );
+      expect(
+        profileRunErrorCode(const AgentFailure('model_http_429 private')),
+        'profile_run_failed',
+      );
+    },
+  );
+  test(
+    'preflight failure replaces old receipt with a safe code and empty current coverage',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({
+        ProfileAgent.receiptKey:
+            '{"status":"completed","coverage":{"eligible_records":999}}',
+      });
+      final host = FeishuHost();
+      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+      final agent = ProfileAgent(host, authority, FailingModels());
+      await expectLater(agent.run(), throwsStateError);
+      final raw = await const SecureContextPersistence(
+        ProfileAgent.receiptKey,
+      ).read();
+      final receipt = jsonDecode(raw!) as Map;
+      expect(receipt['status'], 'interrupted');
+      expect(receipt['error_code'], 'profile_run_failed');
+      expect(receipt['coverage'], isEmpty);
+      expect(raw, isNot(contains('private-api-key')));
+      host.dispose();
+    },
+  );
+  for (final scenario in [
+    'cancel',
+    'deadline',
+    'consent',
+    'consent_deadline',
+    'authority',
+    'source',
+    'model_error_cancel',
+  ]) {
+    final deadline = scenario == 'deadline' || scenario == 'consent_deadline';
+    final paused = scenario == 'cancel' || scenario == 'deadline';
+    final expectedCode = switch (scenario) {
+      'cancel' => 'profile_cancelled',
+      'deadline' => 'profile_deadline',
+      'consent' || 'consent_deadline' => 'processing_consent_required',
+      'authority' => 'publisher_required',
+      'source' => 'stale_inputs',
+      _ => 'invalid_model_settings',
+    };
     test(
-      'cancel during model settings read prevents transmission (deadline: $deadline)',
+      'interruption during model settings read preserves reason and prevents transmission ($scenario)',
       () async {
         FlutterSecureStorage.setMockInitialValues({});
         final previousHttp = HttpOverrides.current;
@@ -108,6 +174,7 @@ void main() {
         final authority = SpaceAuthorityRepository(MemoryLifePersistence());
         await authority.open();
         final host = FeishuHost(auth: auth, sources: sources);
+        await host.open();
         final agent = ProfileAgent(
           host,
           authority,
@@ -120,22 +187,60 @@ void main() {
         final failed = expectLater(
           result,
           throwsA(
-            isA<AgentFailure>().having((e) => e.code, 'code', 'cancelled'),
+            predicate<Object>(
+              (error) =>
+                  profileRunErrorCode(error) == expectedCode &&
+                  (error is ProfileRunFailure) == paused,
+              'failure $expectedCode, paused=$paused',
+            ),
           ),
         );
         await models.entered.future;
-        if (deadline) {
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        } else {
+        if (scenario.startsWith('consent')) {
+          await sources.grantProcessing(
+            '${models.configuration.endpoint}|fixture',
+            'profile',
+            false,
+          );
+        } else if (scenario == 'authority') {
+          await authority.freezePublication();
+        } else if (scenario == 'source') {
+          await sources.setAllAccessible(false);
+        } else if (!deadline) {
           agent.cancel();
         }
-        models.release.complete();
+        if (deadline) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        if (scenario == 'model_error_cancel') {
+          models.release.completeError(
+            const AgentFailure('invalid_model_settings'),
+          );
+        } else {
+          models.release.complete();
+        }
         await failed;
         expect(requests, 0);
         expect(agent.repository.value, isNull);
         expect(agent.busy, false);
+        final raw = await const SecureContextPersistence(
+          ProfileAgent.receiptKey,
+        ).read();
+        final receipt = jsonDecode(raw!) as Map;
+        expect(receipt['status'], paused ? 'paused' : 'interrupted');
+        expect(receipt['error_code'], expectedCode);
+        expect(receipt['coverage'], isA<Map>());
+        expect(receipt['coverage']['eligible_records'], 1);
+        expect(raw, isNot(contains('synthetic project plan')));
+        expect(raw, isNot(contains('synthetic')));
         host.dispose();
       },
     );
   }
+}
+
+class FailingModels extends ModelSettings {
+  @override
+  Future<ModelConfiguration?> read() async =>
+      throw StateError('private-api-key and source prose');
 }

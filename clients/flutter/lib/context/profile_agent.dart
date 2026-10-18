@@ -13,6 +13,83 @@ import 'profile_writer.dart';
 import 'profile_budget.dart';
 import 'profile_observation_checkpoint.dart';
 
+/// Distinguish a planned pause from provider/network and permission failures.
+class ProfileRunFailure extends AgentFailure {
+  const ProfileRunFailure.deadline() : super('profile_deadline');
+  const ProfileRunFailure.cancelled() : super('profile_cancelled');
+}
+
+/// Only fixed diagnostic codes may be persisted; provider text is untrusted.
+String profileRunErrorCode(Object error) {
+  final code = error is AgentFailure
+      ? error.code
+      : error is StateError
+      ? error.message
+      : null;
+  const allowed = {
+    'profile_deadline',
+    'profile_cancelled',
+    'cancelled',
+    'model_required',
+    'connector_unavailable',
+    'source_expired',
+    'model_request_failed',
+    'model_timeout',
+    'model_output_limit',
+    'model_response_too_large',
+    'model_stream_interrupted',
+    'model_stream_required',
+    'invalid_model_response',
+    'invalid_model_settings',
+    'invalid_chatgpt_endpoint',
+    'invalid_tool_calls',
+    'unsupported_model_output',
+    'invalid_profile_json',
+    'profile_not_published',
+    'profile_budget_exhausted',
+    'profile_budget_model_unsupported',
+    'profile_budget_request_unsupported',
+    'profile_budget_unavailable',
+    'profile_budget_usage_exceeds_reservation',
+    'profile_budget_usage_invalid',
+    'profile_checkpoint_storage_full',
+    'invalid_profile_observations',
+    'invalid_profile_observation_text',
+    'invalid_profile_observation_refs',
+    'observation_refs_not_list',
+    'observation_refs_empty',
+    'observation_refs_too_many',
+    'observation_ref_outside_batch',
+    'invalid_profile_review',
+    'insufficient_profile_evidence',
+    'profile_context_too_large',
+    'corrections_changed',
+    'authorization_changed',
+    'provider_changed',
+    'authority_changed',
+    'stale_inputs',
+    'processing_not_allowed',
+    'processing_consent_required',
+    'stale_authority',
+    'authority_transition',
+    'publisher_required',
+    'invalid_projection',
+    'ungrounded_projection',
+    'invalid_projection_kind',
+    'invalid_profile_category',
+    'profile_requires_self_evidence',
+    'timeline_time_not_grounded',
+    'invalid_profile_time',
+    'unread_context',
+    'missing_timeline',
+  };
+  if (code is String && allowed.contains(code)) return code;
+  if (code is String && RegExp(r'^model_http_[1-5]\d{2}$').hasMatch(code)) {
+    return code;
+  }
+  return 'profile_run_failed';
+}
+
 /// Phone-owned orchestration; desktop's observation/write/review recipe in Dart.
 class ProfileAgent {
   ProfileAgent(
@@ -24,6 +101,9 @@ class ProfileAgent {
   });
   final Duration maxDuration;
   bool _timedOut = false;
+  bool _userCancelled = false;
+  Object? _invalidationFailure;
+  static const receiptKey = 'nova.profile.task.receipt.v1';
   final VoidCallback? onProgress;
   String status = '';
   static const budgetId = String.fromEnvironment('NOVA_PROFILE_BUDGET_ID');
@@ -57,50 +137,70 @@ class ProfileAgent {
     _running = true;
     _cancelled = false;
     _timedOut = false;
+    _userCancelled = false;
+    _invalidationFailure = null;
+    var receiptStarted = false;
     final deadlineTimer = Timer(maxDuration, () {
-      _timedOut = true;
-      cancel();
+      if (!_userCancelled) {
+        _timedOut = true;
+        _stopClients();
+      }
     });
     _report('正在读取本机资料…');
     try {
-      await _run();
-    } catch (error) {
-      final reason = _timedOut
-          ? '已达到本轮处理时长上限'
-          : error is ProfileValidationFailure
-          ? '${error.message}（${error.detail['path']}）'
-          : error is ProfileObservationFailure
-          ? '${error.message}（${error.detail}）'
-          : error is AgentFailure
-          ? error.code
-          : profileRepairReason(error) ??
-                switch (error) {
-                  StateError(message: final message)
-                      when const {
-                        'invalid_profile_observations',
-                        'invalid_profile_observation_text',
-                        'invalid_profile_observation_refs',
-                        'invalid_profile_review',
-                        'insufficient_profile_evidence',
-                        'profile_context_too_large',
-                        'corrections_changed',
-                        'authorization_changed',
-                        'provider_changed',
-                        'authority_changed',
-                        'stale_inputs',
-                        'processing_not_allowed',
-                      }.contains(message) =>
-                    message,
-                  _ => null,
-                };
-      _report(
-        '整理未完成${reason == null ? '' : '：$reason'}，消息仍保存在手机。已保存的观察可在资料和授权未变化时继续使用。',
+      await const SecureContextPersistence(receiptKey).write(
+        jsonEncode({
+          'status': 'running',
+          'started_at': DateTime.now().toUtc().toIso8601String(),
+          'coverage': <String, int>{},
+        }),
       );
-      rethrow;
+      receiptStarted = true;
+      await _run();
+    } catch (error, stack) {
+      final failure = _pauseFailure(error);
+      final code = profileRunErrorCode(failure);
+      final reason = code == 'profile_deadline'
+          ? '本轮整理已到时，已暂停'
+          : code == 'profile_cancelled'
+          ? '已暂停生成'
+          : '整理未完成：$code';
+      _report('$reason，消息仍保存在手机。已保存的观察可在资料和授权未变化时继续使用。');
+      // Preserve coverage written by the writer, including an interrupted run.
+      // Failure before writer creation still replaces the previous run's receipt.
+      try {
+        final raw = receiptStarted
+            ? await const SecureContextPersistence(receiptKey).read()
+            : null;
+        final previous = raw == null ? null : jsonDecode(raw);
+        await const SecureContextPersistence(receiptKey).write(
+          jsonEncode({
+            if (previous is Map<String, dynamic>) ...previous,
+            'status': failure is ProfileRunFailure ? 'paused' : 'interrupted',
+            'error_code': code,
+            'finished_at': DateTime.now().toUtc().toIso8601String(),
+            if (previous is! Map || previous['coverage'] is! Map)
+              'coverage': <String, int>{},
+          }),
+        );
+      } catch (_) {
+        /* Diagnostics must not replace the actual failure. */
+      }
+      Error.throwWithStackTrace(failure, stack);
     } finally {
       deadlineTimer.cancel();
       _running = false;
     }
+  }
+
+  Object _pauseFailure(Object error) {
+    // Only a cancelled operation can be attributed to a requested pause.
+    // Permission failures and unrelated provider/storage errors keep their cause.
+    if (error is! AgentFailure || error.code != 'cancelled') return error;
+    if (_invalidationFailure != null) return _invalidationFailure!;
+    if (_timedOut) return const ProfileRunFailure.deadline();
+    if (_userCancelled) return const ProfileRunFailure.cancelled();
+    return error;
   }
 
   Future<void> _run() async {
@@ -126,29 +226,16 @@ class ProfileAgent {
     );
     void checkRun({bool ignoreCancellation = false}) {
       if (_cancelled && !ignoreCancellation) {
-        throw const AgentFailure('cancelled');
+        throw _invalidationFailure ?? const AgentFailure('cancelled');
       }
       if (evidence.expired(connector.sources.now())) {
         throw const AgentFailure('source_expired');
       }
     }
 
-    Future<void> validate({bool ignoreCancellation = false}) async {
-      checkRun(ignoreCancellation: ignoreCancellation);
-      await corrections.open();
-      final current = await models.read();
-      checkRun(ignoreCancellation: ignoreCancellation);
-      if (corrections.context(repository.correctionScope, provider) !=
-          correctionContext) {
-        throw StateError('corrections_changed');
-      }
+    void validateSourceScope() {
       if (!connector.ready || connector.auth.generation != generation) {
         throw StateError('authorization_changed');
-      }
-      if (current == null ||
-          '${current.endpoint}|${current.model}' != provider ||
-          current.protocol != model.protocol) {
-        throw StateError('provider_changed');
       }
       authority.validatePublish(epoch);
       connector.sources.validateProcessing(
@@ -162,6 +249,23 @@ class ProfileAgent {
       if (connector.sources.revision != sourceRevision) {
         throw StateError('stale_inputs');
       }
+    }
+
+    Future<void> validate({bool ignoreCancellation = false}) async {
+      checkRun(ignoreCancellation: ignoreCancellation);
+      await corrections.open();
+      final current = await models.read();
+      checkRun(ignoreCancellation: ignoreCancellation);
+      if (corrections.context(repository.correctionScope, provider) !=
+          correctionContext) {
+        throw StateError('corrections_changed');
+      }
+      if (current == null ||
+          '${current.endpoint}|${current.model}' != provider ||
+          current.protocol != model.protocol) {
+        throw StateError('provider_changed');
+      }
+      validateSourceScope();
     }
 
     final checkpoint = evidence.expiresAt == null
@@ -245,20 +349,12 @@ class ProfileAgent {
 
     void changed() {
       try {
-        authority.validatePublish(epoch);
-        connector.sources.validateProcessing(
-          provider,
-          'profile',
-          consentRevision,
-        );
-        if (!connector.ready ||
-            connector.sources.revision != sourceRevision ||
-            connector.auth.generation != generation ||
-            authority.publicationGeneration != authorityGeneration) {
-          cancel();
-        }
-      } catch (_) {
-        cancel();
+        validateSourceScope();
+      } catch (error) {
+        // Preserve the first invalidation even if stopping the HTTP client
+        // subsequently reports only cancellation or cleanup crosses a deadline.
+        _invalidationFailure ??= error;
+        _stopClients();
       }
     }
 
@@ -266,13 +362,14 @@ class ProfileAgent {
           'nova.profile.task.context.v1',
         ),
         journalDisk = SecureContextPersistence('nova.profile.task.tools.v1'),
-        receipt = SecureContextPersistence('nova.profile.task.receipt.v1');
+        receipt = SecureContextPersistence(receiptKey);
     // Remove legacy transcripts; intermediate text now stays only in memory.
     await conversationDisk.write('{"schema_version":1,"conversations":[]}');
     await journalDisk.write('{"schema_version":1,"records":{}}');
     connector.addListener(changed);
     authority.addListener(changed);
     var outcome = 'interrupted';
+    String? failureCode;
     final writer = ProfileWriter(
       complete: complete,
       onProgress: _report,
@@ -338,22 +435,43 @@ class ProfileAgent {
         '${excludedEvidence.values.every((n) => n == 0) ? '' : '观察前排除：${evidence.expiringCount} 条即将到期、${evidence.copiedCount} 条重复转贴他人正文、${evidence.emptyOrRedactedCount} 条空白或脱敏后无内容。'}'
         '${writer.incompleteBatches == 0 ? '' : '${writer.incompleteBatches} 批观察未全部通过核对，仅使用已通过部分，结果不完整。'}',
       );
-    } catch (error) {
+    } catch (error, stack) {
+      var failure = error;
       // Cancel/time limits keep valid completed work; permission or source
       // changes erase it even when publication failed before a cache operation.
       try {
         await validate(ignoreCancellation: true);
-      } catch (_) {
+      } catch (validationError) {
         await checkpoint?.clear();
+        if (const {
+          'source_expired',
+          'corrections_changed',
+          'authorization_changed',
+          'provider_changed',
+          'authority_changed',
+          'stale_inputs',
+          'processing_consent_required',
+          'stale_authority',
+          'authority_transition',
+          'publisher_required',
+        }.contains(profileRunErrorCode(validationError))) {
+          failure = validationError;
+        }
       }
-      rethrow;
+      failure = _pauseFailure(failure);
+      failureCode = profileRunErrorCode(failure);
+      Error.throwWithStackTrace(failure, stack);
     } finally {
       connector.removeListener(changed);
       authority.removeListener(changed);
-      cancel();
+      _stopClients();
       await receipt.write(
         jsonEncode({
           'status': outcome,
+          'error_code': ?failureCode,
+          'model': ['qwen-flash', 'qwen3-vl-plus'].contains(model.model)
+              ? model.model
+              : 'other',
           'authority_epoch': epoch,
           'source_revision': sourceRevision,
           'consent_revision': consentRevision,
@@ -367,6 +485,11 @@ class ProfileAgent {
   }
 
   void cancel() {
+    if (!_timedOut) _userCancelled = true;
+    _stopClients();
+  }
+
+  void _stopClients() {
     _cancelled = true;
     for (final client in _clients) {
       client.cancel();

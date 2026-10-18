@@ -183,6 +183,20 @@ void main() {
         findsOneWidget,
       );
 
+      models.failure = const ProfileRunFailure.deadline();
+      await tester.scrollUntilVisible(
+        find.text('继续生成'),
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('继续生成'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('本轮整理已到时，已暂停。点击“继续生成”，可在资料和授权不变时接着已保存的进度整理。'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('请检查应用配置'), findsNothing);
+
       models.failure = const AgentFailure('source_expired');
       // The expanded settings scrolls the primary action out of the lazy list.
       await tester.scrollUntilVisible(
