@@ -18,7 +18,7 @@ const definitionSchema=scheduleInputSchema.extend({shared:z.object({owner_revisi
 export type Schedule=z.infer<typeof definitionSchema>
 const summarySchema=z.object({outcome:z.enum(['completed','cancelled','missed','skipped','failed']),text:z.string().max(16000),evidence_refs:z.array(id).max(128),consumer:id.nullable().optional(),published:z.boolean()}).strict()
 // Preserve accounting metadata written by newer runtimes sharing this local store.
-const runSchema=z.object({processing:z.object({batch_id:id,recipe:id,exhausted:z.boolean().default(false),model_calls:z.number().int().nonnegative().optional(),reserved_output_tokens:z.number().int().nonnegative().optional(),calls:z.array(id).max(24)}).strict().optional(),run_id:id,schedule_id:id,definition_revision:z.number().int().positive(),definition_hash:id,definition:scheduleInputSchema,authority:authoritySchema,slot:slotSchema.nullable(),trigger:z.enum(['scheduled','manual']),claimed_at:instant,input:internalTaskInputSchema,stage:z.enum(['claimed','bound','prepared','terminal']),task_id:id.nullable(),prepared_namespace:id.nullable(),terminal_summary:summarySchema.nullable()}).strict()
+const runSchema=z.object({processing:z.object({batch_id:id,recipe:id,attempts:z.array(id).max(24).default([]),exhausted:z.boolean().default(false),model_calls:z.number().int().nonnegative().optional(),reserved_output_tokens:z.number().int().nonnegative().optional(),calls:z.array(id).max(24)}).strict().optional(),run_id:id,schedule_id:id,definition_revision:z.number().int().positive(),definition_hash:id,definition:scheduleInputSchema,authority:authoritySchema,slot:slotSchema.nullable(),trigger:z.enum(['scheduled','manual']),claimed_at:instant,input:internalTaskInputSchema,stage:z.enum(['claimed','bound','prepared','terminal']),task_id:id.nullable(),prepared_namespace:id.nullable(),terminal_summary:summarySchema.nullable()}).strict()
 export type ScheduleRun=z.infer<typeof runSchema>
 const adoptionResultSchema=z.object({id,version:z.number().int().positive()}).strict()
 const stateSchema=z.object({items:z.array(definitionSchema).max(4096),runs:z.array(runSchema).max(4096),receipts:z.record(z.string(),z.object({hash:id,kind:z.enum(['schedule','run']),id}).strict()),adoptions:z.record(z.string(),z.object({hash:id,run_id:id,result:adoptionResultSchema.nullable()}).strict()).default({})}).strict()
@@ -116,7 +116,7 @@ export class ScheduleService{
    if(prior)return structuredClone(prior)
    if(Date.parse(item.processing.next_attempt)>+this.now())throw Error('processing_backoff')
    if(next.runs.some(run=>run.schedule_id===item.id&&run.stage!=='terminal'))throw Error('schedule_running')
-   const run=this.#run(item,null,'scheduled',runId);run.processing={batch_id:batchId,recipe,exhausted:false,calls:[]};next.runs.push(run);return structuredClone(run)
+   const run=this.#run(item,null,'scheduled',runId);run.processing={batch_id:batchId,recipe,attempts:[],exhausted:false,calls:[]};next.runs.push(run);return structuredClone(run)
   })
  }
  exhaustSourceProcessing(runId:string){return this.#changeRun(runId,run=>{if(run.processing)run.processing.exhausted=true})}
@@ -125,6 +125,12 @@ export class ScheduleService{
   const count=run.processing.model_calls??0,budget=run.processing.reserved_output_tokens??0
   if(count>=8||budget+maxTokens>64000)throw Error('processing_model_budget_exhausted')
   run.processing.model_calls=count+1;run.processing.reserved_output_tokens=budget+maxTokens
+ })}
+ reserveSourceProcessingAttempt(runId:string,attemptId:string){return this.#changeRun(runId,run=>{
+  if(!run.processing||run.stage==='terminal')throw Error('builtin_schedule')
+  if(run.processing.attempts.includes(id.parse(attemptId)))return
+  if(run.processing.exhausted||run.processing.attempts.length>=24)throw Error('processing_budget_exhausted')
+  run.processing.attempts.push(attemptId)
  })}
  reserveSourceProcessingCall(runId:string,callId:string){return this.#changeRun(runId,run=>{
   if(!run.processing||run.stage==='terminal')throw Error('builtin_schedule')

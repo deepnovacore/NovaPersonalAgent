@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto'
+import {randomUUID,createHash} from 'node:crypto'
 import {sourceFilterSchema} from '../memory/source-retrieval.js'
 import {z} from 'zod'
 import {appContextArguments} from '../core/schedule-tools.js'
@@ -27,10 +27,17 @@ export class ScheduledToolRuntime{
   return false
  }
  async accept(call:ToolCallReady):Promise<ToolAcceptance>{
-  const {host,grant,scope,tools,retrieval}=this.options,session=this.options.session(),responseId=call.response_id??session.activeProviderResponseId
+  const {host,grant,scope,tools,retrieval}=this.options,session=this.options.session(),responseId=call.response_id??session.activeProviderResponseId,active=!!responseId&&call.session_epoch===session.sessionEpoch&&session.activeProviderResponseId===responseId&&session.providerTurnPhase(responseId)==='active'&&!session.providerTurnWasFenced(responseId)
   try{
+   // A provider refusal is still a paid attempt. Attribute it only to this
+   // current host grant; authorization and response-scope checks remain below.
+   host.scheduledAuthority.assert(grant,grant.fence)
+   if(host.schedules.getRun(grant.run_id).processing){
+    const attempt=createHash('sha256').update(JSON.stringify([call.session_epoch,responseId,call.call_id])).digest('hex')
+    try{await host.schedules.reserveSourceProcessingAttempt(grant.run_id,attempt)}catch(error){if(error instanceof Error&&error.message==='processing_budget_exhausted')await host.schedules.exhaustSourceProcessing(grant.run_id);throw error}
+   }
    if(!responseId)throw Error('scheduled_response_unbound')
-   scope.acceptCall(call.session_epoch,responseId,call.call_id,call.session_epoch===session.sessionEpoch&&session.activeProviderResponseId===responseId&&session.providerTurnPhase(responseId)==='active'&&!session.providerTurnWasFenced(responseId))
+   scope.acceptCall(call.session_epoch,responseId,call.call_id,active)
    if(!await this.validateContext())throw Error('context_authorization_changed')
    const run=host.schedules.getRun(grant.run_id),context=run.definition.context,binding=tools.bindings.get(call.name)
    if(run.processing){if(call.name!=='source__process')throw Error('scheduled_tool_readonly');return scheduledToolResult(call,await host.sourceProcessingAgent.call(grant,call.call_id,call.arguments),'ok',true,131072,true)}
