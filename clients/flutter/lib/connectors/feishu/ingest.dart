@@ -93,7 +93,7 @@ class FeishuIngest {
       if (!sources.excluded(id)) {
         await sources.select(
           id,
-          now().subtract(const Duration(days: 30)),
+          DateTime.utc(1970),
           expectedIdentity: identity,
           expectedGeneration: generation,
           requireAllAccessible: true,

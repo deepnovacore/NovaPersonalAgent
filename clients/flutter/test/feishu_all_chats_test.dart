@@ -73,7 +73,7 @@ void main() {
       expect(store.checkpoint('chat1')['paused'], true);
       expect(
         store.checkpoint('chat29')['from'],
-        clock.subtract(const Duration(days: 30)).toIso8601String(),
+        DateTime.utc(1970).toIso8601String(),
       );
       await store.setAllAccessible(false);
       final restored = SourceStore(disk, now: () => clock);

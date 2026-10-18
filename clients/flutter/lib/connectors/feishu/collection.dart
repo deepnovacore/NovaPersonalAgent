@@ -75,7 +75,7 @@ class FeishuCollection extends ChangeNotifier with WidgetsBindingObserver {
   String get status => discovering
       ? '正在查找可访问的对话…'
       : total == 0
-      ? '准备好后，继续同步最近的消息。'
+      ? '准备好后，读取可访问的历史消息。'
       : '本次完成 $completed / $total 个对话 · 已保存 $pages 页'
             '${failures > 0 ? ' · $failures 个读取失败' : ''}'
             '${pausedBySystem ? ' · 等待回到前台继续' : ''}';
@@ -146,6 +146,8 @@ class FeishuCollection extends ChangeNotifier with WidgetsBindingObserver {
           _notify();
         }
       });
+      if (!_valid) return;
+      await ingest.sources.prune();
       if (!_valid) return;
       if (chat == null && ingest.sources.allAccessible) {
         discovering = true;

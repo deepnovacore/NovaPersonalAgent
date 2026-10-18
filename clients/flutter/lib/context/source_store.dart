@@ -3,6 +3,15 @@ import 'package:flutter/foundation.dart';
 import '../personal/local_life.dart';
 import '../personal/life_reducer.dart';
 
+/// Content age is independent of access retention. Legacy rows retain their
+/// original deadline until fetched again; opening a cache never refreshes access.
+int sourceAccessTime(Map message) =>
+    (message['fetched_at'] ?? message['created_at']) as int;
+DateTime sourceAccessExpiry(Map message) => DateTime.fromMillisecondsSinceEpoch(
+  sourceAccessTime(message),
+  isUtc: true,
+).add(const Duration(days: 30));
+
 /// Bounded encrypted snapshots in production. A page and checkpoint commit
 /// together; storage exhaustion stops ingestion without advancing the cursor.
 class SourceStore extends ChangeNotifier {
@@ -18,6 +27,7 @@ class SourceStore extends ChangeNotifier {
   final DateTime Function() now;
   Map<String, dynamic> _data = {
     'version': 1,
+    'history_policy': 'fetch-v1',
     'identity': null,
     'generation': 0,
     'revision': 0,
@@ -47,15 +57,37 @@ class SourceStore extends ChangeNotifier {
       if (value['version'] != 1) throw StateError('source_schema');
       _data = value;
     }
-    await prune();
+    await _write((data) {
+      if (data['history_policy'] == 'fetch-v1') return;
+      // Upgrade the previous implicit 30-day default once. Keep messages for
+      // deduplication, pauses and exclusions; explicit selected ranges survive.
+      if (data['chat_scope'] != 'selected') {
+        for (final source in (data['sources'] as Map).values) {
+          source['from'] = DateTime.utc(1970).toIso8601String();
+          source['history_from'] = source['from'];
+          source['full_history'] = true;
+          source['page_token'] = null;
+          source['window_end'] = null;
+          source['read_through'] = null;
+          source['seen_pages'] = <String>[];
+          source['scope_revision'] = (source['scope_revision'] as int) + 1;
+        }
+      }
+      data['grants'] = {};
+      data['processing_revision'] = (data['processing_revision'] as int) + 1;
+      data['history_policy'] = 'fetch-v1';
+    });
   }
 
-  Future<void> _write(void Function(Map<String, dynamic>) change) {
+  Future<void> _write(
+    void Function(Map<String, dynamic>) change, {
+    bool refreshExpired = false,
+  }) {
     final result = _tail.then((_) async {
       if (_disposed) throw StateError('source_disposed');
       final next = copyJson(_data);
       change(next);
-      _prune(next);
+      _prune(next, refreshExpired: refreshExpired);
       if (lifeFingerprint(next) == lifeFingerprint(_data)) return;
       next['revision'] = (next['revision'] as int) + 1;
       final encoded = jsonEncode(next);
@@ -106,7 +138,9 @@ class SourceStore extends ChangeNotifier {
       throw StateError('invalid_source');
     }
     final existing = data['sources'][id];
-    if (existing != null && !updateRange) return;
+    final expandHistory =
+        requireAllAccessible && existing?['full_history'] != true;
+    if (existing != null && !updateRange && !expandHistory) return;
     if (updateRange) {
       (data['messages'] as Map).removeWhere(
         (_, message) =>
@@ -120,8 +154,11 @@ class SourceStore extends ChangeNotifier {
               data['tombstones'][id] as int? ??
               0) +
           1,
-      'paused': false,
+      'paused': expandHistory && (existing?['paused'] == true),
       'from': from.toUtc().toIso8601String(),
+      'history_from': from.toUtc().toIso8601String(),
+      'full_history': requireAllAccessible,
+      'seen_pages': <String>[],
       'page_token': null,
       'window_end': null,
       'read_through': null,
@@ -189,7 +226,11 @@ class SourceStore extends ChangeNotifier {
     _validateFence(data, expected);
     if (messages.length > 50 ||
         nextPage == '' ||
-        (nextPage != null && nextPage == expected['page_token'])) {
+        (nextPage != null &&
+            (nextPage == expected['page_token'] ||
+                (data['sources'][expected['chat_id']]['seen_pages'] as List? ??
+                        [])
+                    .contains(nextPage)))) {
       throw StateError('invalid_page');
     }
     for (final raw in messages) {
@@ -200,9 +241,10 @@ class SourceStore extends ChangeNotifier {
       }
       final timestamp = int.tryParse('${raw['create_time']}');
       if (timestamp == null) throw StateError('invalid_message_time');
-      if (timestamp <
-          now().subtract(const Duration(days: 30)).millisecondsSinceEpoch) {
-        continue;
+      if (timestamp < 0 ||
+          timestamp >
+              now().add(const Duration(minutes: 5)).millisecondsSinceEpoch) {
+        throw StateError('invalid_message_time');
       }
       String? text;
       if (raw['deleted'] != true && raw['msg_type'] == 'text') {
@@ -213,9 +255,8 @@ class SourceStore extends ChangeNotifier {
           /* Explicit missing-body state below. */
         }
       }
-      if (text != null && text.length > 16000) {
-        throw StateError('message_too_large');
-      }
+      final tooLarge = text != null && text.length > 16000;
+      if (tooLarge) text = null;
       final id = lifeFingerprint({
         'identity': identity,
         'chat_id': expected['chat_id'],
@@ -232,6 +273,7 @@ class SourceStore extends ChangeNotifier {
         'chat_id': expected['chat_id'],
         'message_id': raw['message_id'],
         'created_at': timestamp,
+        'fetched_at': now().millisecondsSinceEpoch,
         'text': text,
         'sender_id': senderId,
         'relation': senderId == null
@@ -241,6 +283,8 @@ class SourceStore extends ChangeNotifier {
             : 'participant',
         'status': raw['deleted'] == true
             ? 'deleted'
+            : tooLarge
+            ? 'too_large'
             : text != null
             ? 'available'
             : raw['msg_type'] == 'text'
@@ -249,6 +293,9 @@ class SourceStore extends ChangeNotifier {
       };
     }
     final source = data['sources'][expected['chat_id']];
+    final seen = List<String>.from(source['seen_pages'] as List? ?? []);
+    if (nextPage != null) seen.add(nextPage);
+    source['seen_pages'] = nextPage == null ? <String>[] : seen;
     source['page_token'] = nextPage;
     source['window_end'] = nextPage == null
         ? null
@@ -258,22 +305,69 @@ class SourceStore extends ChangeNotifier {
       source['from'] = windowEnd.toUtc().toIso8601String();
     }
   });
-  void _prune(Map<String, dynamic> data) {
+  void _prune(Map<String, dynamic> data, {bool refreshExpired = false}) {
     final cutoff = now()
         .subtract(const Duration(days: 30))
         .millisecondsSinceEpoch;
-    (data['messages'] as Map).removeWhere(
-      (_, message) => message['created_at'] < cutoff,
-    );
+    final expiredChats = <String>{};
+    (data['messages'] as Map).removeWhere((_, message) {
+      if (sourceAccessTime(message) > cutoff) return false;
+      expiredChats.add(message['chat_id'] as String);
+      return true;
+    });
+    // Erase expired content immediately, but never rewrite a page's committed
+    // cursor. Refresh history at the next explicit prune/collection boundary,
+    // after any resumed pagination completes.
+    for (final id in expiredChats) {
+      final source = data['sources'][id];
+      if (source != null) source['history_refresh_pending'] = true;
+    }
+    if (!refreshExpired) return;
+    for (final source in (data['sources'] as Map).values) {
+      if (source['history_refresh_pending'] != true ||
+          source['page_token'] != null) {
+        continue;
+      }
+      source.remove('history_refresh_pending');
+      source['from'] = source['history_from'] ?? source['from'];
+      source['page_token'] = null;
+      source['window_end'] = null;
+      source['read_through'] = null;
+      source['seen_pages'] = <String>[];
+      source['scope_revision'] = (source['scope_revision'] as int) + 1;
+    }
   }
 
-  Future<void> prune() => _write((_) {});
+  Future<void> prune() => _write((_) {}, refreshExpired: true);
+
+  Map<String, int> get statusCounts {
+    final counts = <String, int>{};
+    for (final message in sources.expand(messages)) {
+      final status = message['status'] as String;
+      counts.update(status, (count) => count + 1, ifAbsent: () => 1);
+    }
+    return counts;
+  }
+
+  String get skippedSummary {
+    const reasons = {
+      'too_large': '正文超过16000字',
+      'missing_body': '正文不可用',
+      'unsupported_type': '非文本消息',
+      'deleted': '消息已删除',
+    };
+    final counts = statusCounts;
+    return reasons.entries
+        .where((entry) => (counts[entry.key] ?? 0) > 0)
+        .map((entry) => '${counts[entry.key]} 条${entry.value}')
+        .join('；');
+  }
   List<Map<String, dynamic>> messages(String id) => (_data['messages'] as Map)
       .values
       .where(
         (m) =>
             m['chat_id'] == id &&
-            m['created_at'] >=
+            sourceAccessTime(m) >
                 now().subtract(const Duration(days: 30)).millisecondsSinceEpoch,
       )
       .map((m) => copyJson(m))
