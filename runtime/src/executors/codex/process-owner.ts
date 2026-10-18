@@ -3,7 +3,7 @@ import { closeSync,fstatSync,openSync,readSync,statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import type { Readable,Writable } from 'node:stream'
 import { managedMcpConfigToml,managedMcpEnvironment,type ManagedCodexMcp } from './managed-mcp.js'
-import { apiKeyProviderOverrides,NOVA_API_KEY_ENV,validateCodexEnvironment } from './spawn-env.js'
+import { apiKeyProviderOverrides,NOVA_API_KEY_ENV,NOVA_RESPONSES_PROXY_ENV,validateCodexEnvironment } from './spawn-env.js'
 
 import {
 hostEphemeralHomeFromConfig,
@@ -126,7 +126,7 @@ export function createCodexSpawnSpec(input: {
       ...validateBinaryPrefixArgs(input.prefixArgs),
       ...(input.managedMcp ? ['-c', managedMcpConfigToml(input.managedMcp).trim()] : []),
       ...(input.sharedHomeOverrides ?? []),
-      ...(environment[NOVA_API_KEY_ENV] === undefined ? [] : apiKeyProviderOverrides()),
+      ...(environment[NOVA_API_KEY_ENV] === undefined ? [] : apiKeyProviderOverrides(environment[NOVA_RESPONSES_PROXY_ENV])),
       ...codexAppServerArgv(input.launchProfile ?? resolveCodexLaunchProfile({
         approvalMode: 'ask', project: false, foregroundBroker: false,
       }), input.managedMcp !== undefined || input.preserveHome === true),
