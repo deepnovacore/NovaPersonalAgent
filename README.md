@@ -2,17 +2,23 @@
 
 <div align="center">
 
-**English** · [简体中文](README.zh-CN.md)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
+  <img src="assets/brand/npa-header-light.svg" alt="NovaPersonalAgent — Understands you. Interacts in real time." width="100%">
+</picture>
 
-# Nova Personal Agent: Your Personal Agent and Voice Assistant
-
-**Your personal agent and always-on voice assistant — aware of your context, with dual brains and restrained proactivity.**
+<a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
 
 [![CI](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
+[![npm downloads](https://img.shields.io/npm/d18m/nova-audio-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-audio-agent)
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
+
+**An open-source personal agent with private memory, smart proactivity and realtime interaction.**
+
+Nova draws on your context and private memory to understand what matters to you. It knows how and when to clarify, ask for approval, and move work forward. Its dual brains keep the conversation responsive while background agents handle longer tasks. Refine your goals as work progresses, revisit the results, and stay in control.
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Video demo](https://youtu.be/t1c-2O-QsxE)**
 
@@ -21,8 +27,6 @@
 </div>
 
 ---
-
-> **Branch preview · Nova Visor:** A primary-display transparent HUD and Themes settings are implemented as a local macOS preview. [Usage and architecture (中文)](docs/VISOR_GUIDE.zh-CN.md) · [Validation and limitations](docs/VISOR_V1.md) · [Visual reference](docs/DESKTOP_VISOR_DEMO.md). Final installed GUI acceptance and cross-platform certification remain pending.
 
 ## News
 
@@ -153,6 +157,14 @@ The front brain handles conversation; the back brain does the work. Task events 
 ## 3. Quickstart
 
 ### 3.1 Install and run
+
+**Quick downloads · v0.4.0** — [Release notes and SHA-256 checksums](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0) · [Latest release](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+
+| Platform | Download |
+| --- | --- |
+| macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-macos-arm64-app.zip) |
+| Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-windows-x64.exe) · [Portable ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-windows-x64-portable.zip) |
+| Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-linux-x64.deb) |
 
 Requirements: Node.js 22.13+ and npm. For coding tasks, install and authenticate your chosen coding backend; Codex uses its app-server transport.
 
