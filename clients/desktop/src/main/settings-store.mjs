@@ -1,3 +1,4 @@
+import {isEndpointSecret, COMPATIBLE_STAGES, COMPATIBLE_FIELDS, validCompatibleUrl} from '../renderer/compatible-providers.mjs'
 import {normalizeSkinSettings} from '../renderer/orb-skins.mjs'
 import {SELF_HOSTED_STAGES, validSelfHostedUrl, endpointOrigin} from '../renderer/voice-preset.mjs'
 import {validUploadUrl} from './voiceprint.mjs'
@@ -14,6 +15,9 @@ export {CODING_BACKENDS} from './coding-settings.mjs'
 export const SETTINGS_VERSION = 4
 
 export const SECRET_KEYS = Object.freeze([
+  'openaiCompatibleApiKey',
+  'compatibleAsrApiKey',
+  'compatibleTtsApiKey',
   'selfHostedAsrApiKey',
   'selfHostedLlmApiKey',
   'selfHostedTtsApiKey',
@@ -37,9 +41,9 @@ export const PROACTIVITY_LEVELS = Object.freeze(['conservative', 'balanced', 'ea
 export const PIPELINE_MODES = Object.freeze(['integrated', 'cascaded'])
 export const INTEGRATED_PROVIDERS = Object.freeze(['qwen', 'stepfun', 'openai', 'gemini'])
 export const CASCADED_ENDPOINTING_PROVIDERS = Object.freeze(['auto'])
-export const CASCADED_ASR_PROVIDERS = Object.freeze(['volcengine','gemini','self-hosted'])
-export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted'])
-export const CASCADED_TTS_PROVIDERS = Object.freeze(['volcengine','gemini','self-hosted'])
+export const CASCADED_ASR_PROVIDERS = Object.freeze(['volcengine','gemini','self-hosted','openai-compatible'])
+export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted', 'openai-compatible'])
+export const CASCADED_TTS_PROVIDERS = Object.freeze(['volcengine','gemini','self-hosted','openai-compatible'])
 export const HEARTBEAT_MIN_SECONDS = 15
 export const HEARTBEAT_MAX_SECONDS = 120
 export const MAX_MODEL_OR_VOICE_LENGTH = 64
@@ -150,6 +154,10 @@ function validEmbeddingProvider(value) {
   return value
 }
 
+function validCompatibleModel(value) {
+  return typeof value === 'string' && value.trim() && value.trim().length <= 256 && !CONTROL_CHARACTERS.test(value) ? value.trim() : null
+}
+
 function validModelOrVoice(value) {
   if (typeof value !== 'string') return null
   if (CONTROL_CHARACTERS.test(value)) return null
@@ -203,6 +211,7 @@ function normalizeCascadedLlmModels(raw, base) {
   const source = isRecord(raw) ? raw : {}
   const fallback = isRecord(base) ? base : DEFAULT_SETTINGS.cascadedLlmModels
   return {
+    'openai-compatible': pick(source['openai-compatible'], fallback['openai-compatible'], '', value => value === '' ? '' : validCompatibleModel(value)),
     'self-hosted': pick(source['self-hosted'], fallback['self-hosted'], '', validModelOrVoice),
     qwen: pick(source.qwen, fallback.qwen, DEFAULT_SETTINGS.cascadedLlmModels.qwen, validModelOrVoice),
     deepseek: pick(source.deepseek, fallback.deepseek, DEFAULT_SETTINGS.cascadedLlmModels.deepseek, validModelOrVoice),
@@ -229,7 +238,7 @@ function normalizeSecrets(raw) {
   const secrets = {}
   if (!isRecord(raw)) return secrets
   for (const key of SECRET_KEYS) {
-    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && raw[key]?.enc === 'cleared') { secrets[key] = {enc:'cleared',data:''}; continue }
+    if ((key === 'composioApiKey' || isEndpointSecret(key)) && raw[key]?.enc === 'cleared') { secrets[key] = {enc:'cleared',data:''}; continue }
     const entry = validSecretEntry(raw[key])
     if (entry) secrets[key] = entry
   }
@@ -286,6 +295,14 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     geminiAsrModel: pick(source.geminiAsrModel, fallback.geminiAsrModel, DEFAULT_SETTINGS.geminiAsrModel, validModelOrVoice),
     geminiTtsModel: pick(source.geminiTtsModel, fallback.geminiTtsModel, DEFAULT_SETTINGS.geminiTtsModel, validModelOrVoice),
     geminiTtsVoice: pick(source.geminiTtsVoice, fallback.geminiTtsVoice, DEFAULT_SETTINGS.geminiTtsVoice, validModelOrVoice),
+    openaiCompatibleBaseUrl: pick(source.openaiCompatibleBaseUrl, fallback.openaiCompatibleBaseUrl, DEFAULT_SETTINGS.openaiCompatibleBaseUrl, validCompatibleUrl),
+    openaiCompatibleProtocol: pick(source.openaiCompatibleProtocol, fallback.openaiCompatibleProtocol, DEFAULT_SETTINGS.openaiCompatibleProtocol, value => ['chat-completions','responses'].includes(value) ? value : null),
+    compatibleAsrBaseUrl: pick(source.compatibleAsrBaseUrl, fallback.compatibleAsrBaseUrl, DEFAULT_SETTINGS.compatibleAsrBaseUrl, validCompatibleUrl),
+    compatibleAsrModel: pick(source.compatibleAsrModel, fallback.compatibleAsrModel, DEFAULT_SETTINGS.compatibleAsrModel, validCompatibleModel),
+    compatibleTtsBaseUrl: pick(source.compatibleTtsBaseUrl, fallback.compatibleTtsBaseUrl, DEFAULT_SETTINGS.compatibleTtsBaseUrl, validCompatibleUrl),
+    compatibleTtsModel: pick(source.compatibleTtsModel, fallback.compatibleTtsModel, DEFAULT_SETTINGS.compatibleTtsModel, validCompatibleModel),
+    compatibleTtsVoice: pick(source.compatibleTtsVoice, fallback.compatibleTtsVoice, DEFAULT_SETTINGS.compatibleTtsVoice, validCompatibleModel),
+    compatibleTtsSendSampleRate: pick(source.compatibleTtsSendSampleRate, fallback.compatibleTtsSendSampleRate, DEFAULT_SETTINGS.compatibleTtsSendSampleRate, value => typeof value === 'boolean' ? value : null),
     selfHostedAsrUrl: pick(source.selfHostedAsrUrl, fallback.selfHostedAsrUrl, '', value => validSelfHostedUrl(value, 'asr')),
     selfHostedLlmBaseUrl: pick(source.selfHostedLlmBaseUrl, fallback.selfHostedLlmBaseUrl, '', value => validSelfHostedUrl(value, 'llm')),
     selfHostedTtsUrl: pick(source.selfHostedTtsUrl, fallback.selfHostedTtsUrl, '', value => validSelfHostedUrl(value, 'tts')),
@@ -367,6 +384,7 @@ export function publicSettings(settings) {
     geminiAsrModel: normalized.geminiAsrModel,
     geminiTtsModel: normalized.geminiTtsModel,
     geminiTtsVoice: normalized.geminiTtsVoice,
+    ...Object.fromEntries(COMPATIBLE_FIELDS.map(key => [key, normalized[key]])),
     selfHostedAsrUrl: normalized.selfHostedAsrUrl,
     selfHostedLlmBaseUrl: normalized.selfHostedLlmBaseUrl,
     selfHostedTtsUrl: normalized.selfHostedTtsUrl,
@@ -495,7 +513,7 @@ function updatedSecrets(stored, updates, codec) {
       continue
     }
     if (value === '') {
-      if (key === 'composioApiKey' || key.startsWith('selfHosted')) secrets[key] = {enc:'cleared',data:''}
+      if (key === 'composioApiKey' || isEndpointSecret(key)) secrets[key] = {enc:'cleared',data:''}
       else delete secrets[key]
       continue
     }
@@ -554,6 +572,10 @@ export function applySettingsUpdate(current, patch, codec) {
   for (const {endpoint, secret, stage} of SELF_HOSTED_STAGES) {
     if (Object.hasOwn(source, endpoint) && validSelfHostedUrl(source[endpoint], stage) === null) throw Object.assign(new Error('invalid_self_hosted_url'), {code: 'invalid_settings_commit', problems: ['invalid_self_hosted_url']})
     if (endpointOrigin(stored[endpoint]) !== endpointOrigin(next[endpoint])) previousSecrets[secret] = {enc: 'cleared', data: ''}
+  }
+  for (const {endpoint, secret} of COMPATIBLE_STAGES) {
+    if (Object.hasOwn(source, endpoint) && validCompatibleUrl(source[endpoint]) === null) throw Object.assign(new Error('invalid_compatible_url'), {code: 'invalid_settings_commit', problems: ['invalid_compatible_url']})
+    if (stored[endpoint] !== next[endpoint]) previousSecrets[secret] = {enc:'cleared', data:''}
   }
   // Bind explicit new credentials to the new origin; never retain the old token.
   const {secrets, rejected} = updatedSecrets(previousSecrets, source.secrets, codec)

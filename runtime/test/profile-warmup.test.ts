@@ -4,6 +4,7 @@ import {mkdtemp,rm,realpath,chmod,readFile,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {ProfileWarmup,PROFILE_GENERATION_VERSION,type ProfileInput,type ProfileOutcome} from '../src/personal-agent/profile-warmup.js'
+const until=async(check:()=>boolean)=>{for(let i=0;i<200&&!check();i++)await new Promise(r=>setTimeout(r,5));assert.ok(check())}
 const entries=[{id:'a',version:1,content:'I study voice interfaces',origin:'stated' as const}]
 const draft={about:{text:'I study voice interfaces',refs:[{entry_id:'a',version:1}]},work:[],interests:[{text:'Voice interfaces',refs:[{entry_id:'a',version:1}]}]}
 test('warmup caches grounded drafts without repeating generation on reopen',async()=>{
@@ -18,7 +19,7 @@ test('warmup caches grounded drafts without repeating generation on reopen',asyn
 test('revoked evidence and an abort-ignoring provider cannot restore a stale draft',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let resolve!:(v:typeof draft)=>void
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>new Promise(r=>{resolve=r}),()=>{/* observer fixture */})
- try{await service.open();service.update(entries);const run=service.refresh();assert.equal(service.snapshot().status,'working');service.update([]);resolve(draft);await run;assert.equal(service.snapshot().draft,null);assert.equal(service.snapshot().status,'idle')}
+ try{await service.open();service.update(entries);const run=service.refresh();assert.equal(service.snapshot().status,'working');await until(()=>typeof resolve==='function');service.update([]);resolve(draft);await run;assert.equal(service.snapshot().draft,null);assert.equal(service.snapshot().status,'idle')}
  finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
 test('close terminates warmup even when a provider ignores its signal',async()=>{
@@ -58,37 +59,31 @@ test('old facts keep authorized evidence outside the next generation sample',asy
   await service.forgetUnavailable(new Set(newest.map(input=>input.id)));assert.equal(service.snapshot().draft,null);
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 });
-test('stable inputs still reach the first three profile stages after reopening',async context=>{
- const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-stable-'));let calls=0;
- const make=()=>new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.resolve({...fileDraft,interests:[]})},()=>{/* snapshot observer */});
- let service=make();
+test('daily automatic quota survives input churn, clear, restart and clock rollback; manual refresh is allowed',async context=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-daily-'));let calls=0
+ const make=()=>new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.resolve(draft)},()=>{/* observer */})
+ let service=make()
  try{
-  await service.open();context.mock.timers.enable({apis:['Date','setTimeout'],now:Date.now()});service.update([fileA]);
-  context.mock.timers.tick(5*60_000);await service.refresh();assert.equal(calls,1);
-  await service.close();service=make();await service.open();service.update([fileA]);
-  context.mock.timers.tick(25*60_000);await service.refresh();assert.equal(calls,2);
-  context.mock.timers.tick(210*60_000);await service.refresh();assert.equal(calls,3);
-  await service.close();service=make();await service.open();service.update([{...fileA,version:'f2'}]);
-  context.mock.timers.tick(239*60_000);assert.equal(calls,3);
-  context.mock.timers.tick(60_000);await service.refresh();assert.equal(calls,4);
+  context.mock.timers.enable({apis:['Date'],now:new Date(2026,9,17,12).getTime()})
+  await service.open();service.update(entries);await service.refresh();assert.equal(calls,1);assert.equal(service.snapshot().automatic_available,false)
+  service.update([...entries,{...entries[0]!,id:'b'}]);await service.refresh(false,true);assert.equal(calls,1)
+  await service.clear();await service.close();service=make();await service.open();service.update(entries)
+  await service.refresh(false,true);assert.equal(calls,1)
+  context.mock.timers.setTime(new Date(2026,9,16,12).getTime());await service.refresh(false,true);assert.equal(calls,1)
+  await service.refresh(true);assert.equal(calls,2,'explicit manual refresh bypasses only the daily quota')
+  context.mock.timers.setTime(new Date(2026,9,18,12).getTime());service.update([...entries,{...entries[0]!,id:'c'}]);await service.refresh(false,true);assert.equal(calls,3)
  }finally{context.mock.timers.reset();await service.close();await rm(dir,{recursive:true,force:true})}
-});
-const until=async(check:()=>boolean)=>{for(let i=0;i<200&&!check();i++)await new Promise(r=>setTimeout(r,5));assert.ok(check())}
-test('ongoing source changes produce drafts at 5 minutes, 30 minutes and 4 hours',async context=>{
- const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-stages-'));let calls=0;
- const service=new ProfileWarmup(join(dir,'draft.json'),inputs=>{calls++;return Promise.resolve({about:{text:'Builds a voice agent',refs:[{entry_id:inputs[0]!.id,version:inputs[0]!.version!}]},work:[],interests:[]})},()=>{/* snapshot observer */});
+})
+test('source collection waits five minutes and no longer regenerates at 30 minutes and four hours',async context=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-daily-sources-'));let calls=0
+ const service=new ProfileWarmup(join(dir,'draft.json'),inputs=>{calls++;return Promise.resolve({about:{text:'Works on voice',refs:[{entry_id:inputs[0]!.id,version:inputs[0]!.version!}]},work:[],interests:[]})},()=>{/* observer */})
  try{
-  await service.open();context.mock.timers.enable({apis:['Date','setTimeout'],now:Date.now()});
-  service.update([fileA]);
-  context.mock.timers.tick(4*60_000);service.update([{...fileA,version:'f2'}]);assert.equal(calls,0);
-  context.mock.timers.tick(60_000);await service.refresh();assert.equal(calls,1);
-  service.update([{...fileA,version:'f3'}]);context.mock.timers.tick(24*60_000);assert.equal(calls,1);
-  context.mock.timers.tick(60_000);await service.refresh();assert.equal(calls,2);
-  service.update([{...fileA,version:'f4'}]);context.mock.timers.tick(209*60_000);assert.equal(calls,2);
-  context.mock.timers.tick(60_000);await service.refresh();assert.equal(calls,3);
-  context.mock.timers.tick(4*60*60_000);assert.equal(calls,3,'unchanged evidence does not trigger another request');
+  await service.open();context.mock.timers.enable({apis:['Date','setTimeout'],now:new Date(2026,9,17,9).getTime()});service.update([fileA])
+  context.mock.timers.tick(5*60_000);await service.refresh();assert.equal(calls,1)
+  service.update([{...fileA,version:'f2'}]);context.mock.timers.tick(4*60*60_000);await service.refresh(false,true);assert.equal(calls,1)
+  context.mock.timers.tick(20*60*60_000);await service.refresh(false,true);assert.equal(calls,2)
  }finally{context.mock.timers.reset();await service.close();await rm(dir,{recursive:true,force:true})}
-});
+})
 test('a source change during generation keeps the in-flight answer and only the uncited facts disappear',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let resolve!:(v:typeof fileDraft)=>void
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>new Promise(r=>{resolve=r}),()=>{/* observer fixture */},{minIntervalMs:60_000})
@@ -132,23 +127,24 @@ test('invented references are dropped, and a draft with nothing grounded fails a
   await until(()=>outcomes.length===2);assert.deepEqual(outcomes,['evidence','ok'])
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
-test('a timed-out generation retries on its own with backoff',async()=>{
+test('a timed-out automatic generation waits for a manual retry',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let calls=0;const outcomes:ProfileOutcome['outcome'][]=[]
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>++calls===1?new Promise(()=>{/* ignores its signal */}):Promise.resolve(draft),()=>{/* observer fixture */},{timeoutMs:20,backoffMs:[20],report:r=>outcomes.push(r.outcome)})
  try{
   await service.open();service.update(entries)
-  await until(()=>service.snapshot().status==='ready')
+  await until(()=>service.snapshot().status==='failed');assert.equal(calls,1);assert.equal(service.snapshot().automatic_available,false)
+  await service.refresh(true)
   assert.equal(calls,2);assert.deepEqual(outcomes,['timeout','ok'])
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
-test('automatic retries stop once the backoff ladder is spent',async()=>{
+test('a failed automatic attempt consumes the daily quota',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let calls=0
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.reject(Error('provider_down'))},()=>{/* observer fixture */},{backoffMs:[5,5]})
  try{
   await service.open();service.update(entries)
-  await until(()=>calls===3);await new Promise(r=>setTimeout(r,50))
-  assert.equal(calls,3);assert.equal(service.snapshot().status,'failed')
-  await service.refresh(true);assert.equal(calls,4)
+  await until(()=>service.snapshot().status==='failed');await new Promise(r=>setTimeout(r,50))
+  assert.equal(calls,1);assert.equal(service.snapshot().status,'failed')
+  await service.refresh(true);assert.equal(calls,2)
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
 test('a withdrawal during generation or during the draft write never leaves the withdrawn facts on disk',async()=>{
@@ -270,7 +266,7 @@ test('a draft written by an older pipeline stays visible, is regenerated at once
   await service.open();service.update([fileA,fileB])
   assert.equal(service.snapshot().status,'working','an old draft is regenerated at once, not on the 5/30/240 minute ladder')
   assert.equal(service.snapshot().draft?.work[0]?.title,'Old pipeline project list','the old draft stays visible while the new one is written')
-  release?.();await service.refresh()
+  await until(()=>release!==undefined);release?.();await service.refresh()
   const after=service.snapshot().draft;assert.equal(after?.about?.text,'A fresh understanding');assert.equal(after?.work.length,0,'nothing from the old pipeline is mixed into the new draft')
   assert.equal((JSON.parse(await readFile(path,'utf8')) as {generation_version:string}).generation_version,PROFILE_GENERATION_VERSION)
   const before=calls;service.update([fileA,fileB]);await service.refresh();assert.equal(calls,before,'once replaced, the same inputs are not regenerated again')
@@ -323,4 +319,49 @@ test('other people\'s messages keep their own slots after the user\'s 96 message
    assert.equal(seen.filter(e=>e.source?.relation!=='participant').length,96,'the user\'s own messages keep their 96')
   }finally{await service.close();await rm(dir,{recursive:true,force:true})}
  }
+})
+
+
+test('failed background refresh keeps the previous draft and exposes a retryable status',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-failure-'));let fail=false
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>fail?Promise.reject(Error('offline')):Promise.resolve(draft),()=>{/* Snapshot observer. */})
+ try{await service.open();service.update(entries);await service.refresh();fail=true;await service.refresh(true)
+  assert.equal(service.snapshot().status,'failed');assert.deepEqual(service.snapshot().draft,draft)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('deferred generation restores draft eligibility without starting model work',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-held-'));let calls=0
+ const make=()=>new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.resolve(draft)},()=>{/* Snapshot observer. */})
+ let service=make()
+ try{
+  await service.open();service.update(entries);await service.refresh();await service.close();assert.equal(calls,1)
+  service=make();await service.open({deferGeneration:true});service.update(entries)
+  await service.forgetUnavailable(new Set());await service.refresh(true)
+  assert.deepEqual(service.snapshot().draft,draft);assert.equal(calls,1)
+  service.startGeneration();await service.refresh(true);assert.equal(calls,2)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('unreadable optional profile cache does not fail startup or automatically regenerate',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-profile-corrupt-')),path=join(dir,'draft.json');let calls=0
+ await writeFile(path,'{broken json')
+ const service=new ProfileWarmup(path,()=>{calls++;return Promise.resolve(draft)},()=>{/* observer */})
+ try{await service.open();service.update(entries);await service.refresh(false,true)
+  assert.equal(calls,0);assert.equal(service.snapshot().status,'failed');assert.equal(service.snapshot().automatic_available,false)
+  assert.equal(await readFile(path,'utf8'),'{broken json')
+  await service.refresh(true);assert.equal(calls,1);assert.equal(service.snapshot().status,'ready')
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('source-processing and warmup share one durable automatic claim',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-profile-claim-'));let calls=0
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.resolve(draft)},()=>{/* observer */})
+ try{await service.open();assert.deepEqual(await Promise.all([service.claimAutomaticUpdate(),service.claimAutomaticUpdate()]),[true,false])
+  service.update(entries);await service.refresh(false,true);assert.equal(calls,0)
+  await service.refresh(true);assert.equal(calls,1)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })

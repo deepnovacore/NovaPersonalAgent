@@ -3607,24 +3607,26 @@ test('failed provider connect keeps recovered blackboard owned until retry or fi
   } finally { await realtime.stop(); await rm(directory, {recursive: true, force: true}) }
 })
 
-test('personal host shares opened memory, persists configuration and closes with production owner', async () => {
+test('personal host shares opened memory, persists configuration and closes with production owner', {timeout:5000}, async () => {
   const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-personal-assembly-'))
-  let opens=0,closes=0,lists=0
+  let opens=0,closes=0,lists=0,release!:()=>void
+  const memoryPage=new Promise<void>(resolve=>{release=resolve})
   const resource:PersonalMemoryResource={
     open:()=>{opens++;return Promise.resolve()},close:()=>{closes++;return Promise.resolve()},
     recall:()=>Promise.resolve({source:'personal',state:'empty',scope:'recent',hits:[],degraded:false}),
-    list:()=>{assert.equal(opens,1);lists++;return Promise.resolve({entries:[],cursor:null})},
+    list:async()=>{assert.equal(opens,1);lists++;await memoryPage;return {entries:[],cursor:null}},
   }
   const realtime=buildRealtimeAssembly({core:realCore(new RecordingFrameSource(),{path:join(dir,'board.sqlite'),ownerId:'test'}),provider:new AbortAwareProvider(),createPersonalMemory:()=>resource})
   try {
     await realtime.start()
     assert.equal(realtime.personalMemory,resource)
     assert.equal(opens,1)
+    release();await realtime.personalAgent.sourceChanged()
     assert(lists>0)
     const result=await realtime.personalAgent.command({type:'personal.command',request_id:'configure',method:'discovery.configure',params:{enabled:false}})
     assert.equal((result as {ok:boolean}).ok,true)
     assert.equal(realtime.personalAgent.snapshot().settings.discovery_enabled,false)
-  } finally {await realtime.stop();await rm(dir,{recursive:true,force:true})}
+  } finally {release();await realtime.stop();await rm(dir,{recursive:true,force:true})}
   assert.equal(closes,1)
 })
 
@@ -5259,6 +5261,7 @@ test('core gateway preserves compressor choices and falls back for provider defa
     ] as const
     for (const scenario of cases) {
       const records: GatewayRequest[] = []
+      const metered:{model:string}[]=[]
       const restoreFetch = installRecordingFetch(records)
       const configured = settings({
         EXECUTOR: 'fast_sim',
@@ -5280,6 +5283,7 @@ test('core gateway preserves compressor choices and falls back for provider defa
       try {
         realtime = buildCascadedRealtimeAssembly(assemblyOptions(configured, {
           clock: new VirtualClock(),
+          onUsage:report=>metered.push(report),
           frameSource: new RecordingFrameSource(),
           executors: [modelProbeAdapter],
         }))
@@ -5287,6 +5291,7 @@ test('core gateway preserves compressor choices and falls back for provider defa
         restoreFetch()
       }
       await exerciseCoreModels(realtime, records)
+      assert.deepEqual(metered.map(report=>report.model).sort(),records.map(record=>record.model).sort())
       assert.deepEqual({
         fast: configured.fast_model,
         watch: configured.watch_model,

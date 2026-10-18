@@ -1,3 +1,4 @@
+import {isEndpointSecret} from '../renderer/compatible-providers.mjs'
 import {createVisor} from './visor.mjs'
 import {parseVoicePreset, exportVoicePreset, MAX_PRESET_BYTES} from '../renderer/voice-preset.mjs'
 import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
@@ -242,6 +243,22 @@ let releaseSmokeChannel = null
 // Settings and debug boards are main-owned IPC surfaces. Neither relays through
 // the orb renderer or shares the realtime voice socket.
 const frontendUsage = createFrontendUsage({file: resolve(app.getPath('userData'), 'frontend-usage.json')})
+let usageRefreshTimer
+let usageRefreshInFlight=false
+let usageRefreshAgain=false
+function refreshRuntimeUsage() {
+ if(usageRefreshInFlight){usageRefreshAgain=true;return}
+ if(usageRefreshTimer)return
+ usageRefreshTimer=setTimeout(async()=>{
+  usageRefreshTimer=undefined
+  const control=backendControl
+  if(!control)return
+  usageRefreshInFlight=true
+  try{const snapshot=await control.request('usage.snapshot',{});if(control===backendControl&&frontendUsage.setRuntimeSnapshot(snapshot))sendToSettings('nova:settings:changed',settingsView())}catch{/* Retain the last known projection while the backend starts or stops. */}
+  finally{usageRefreshInFlight=false;if(usageRefreshAgain){usageRefreshAgain=false;refreshRuntimeUsage()}}
+ },250)
+}
+
 let startup = Object.freeze({stage: 'configuration', code: null})
 // "Connection lost" is only true after a connection existed; a backend that keeps failing to start is still starting.
 let backendEverConnected = false
@@ -349,8 +366,8 @@ function settingsView() {
   const {secretsPresent: effectivePresence, secretSources} = resolveSecretConfiguration(
     {}, process.env, developmentEnv)
   for (const [key, present] of Object.entries(secretsPresent(currentSettings))) {
-    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && currentSettings.secrets?.[key]?.enc === 'cleared') { effectivePresence[key]=false; secretSources[key]='cleared'; continue }
-    if (present && (key === 'composioApiKey' || key.startsWith('selfHosted') || secretSources[key] !== 'dotenv')) {
+    if ((key === 'composioApiKey' || isEndpointSecret(key)) && currentSettings.secrets?.[key]?.enc === 'cleared') { effectivePresence[key]=false; secretSources[key]='cleared'; continue }
+    if (present && (key === 'composioApiKey' || isEndpointSecret(key) || secretSources[key] !== 'dotenv')) {
       effectivePresence[key] = true
       secretSources[key] = 'settings'
     }
@@ -851,7 +868,7 @@ async function applyDesktopSettings(payload, restart = false) {
 
 function visorUsage() {
   const usage = frontendUsage.snapshot()
-  return {requests:usage.requests,costCny:usage.costCny,pricedReports:usage.pricedReports,
+  return {requests:usage.requests,costCny:usage.costCny,costUsd:usage.costUsd,reportedCostReports:usage.reportedCostReports,estimatedCostReports:usage.estimatedCostReports,pricedReports:usage.pricedReports,
     unpricedReports:usage.unpricedReports,missingReports:usage.missingReports,
     rows:usage.rows.map(row=>({inputTokens:row.inputTokens,outputTokens:row.outputTokens}))}
 }
@@ -984,7 +1001,7 @@ function decryptSecretsForSpawn(settings, codec) {
   const present = secretsPresent(settings)
   const decrypted = {}
   for (const key of SECRET_KEYS) {
-    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && settings.secrets?.[key]?.enc === 'cleared') { decrypted[key]=''; continue }
+    if ((key === 'composioApiKey' || isEndpointSecret(key)) && settings.secrets?.[key]?.enc === 'cleared') { decrypted[key]=''; continue }
     if (!present[key]) continue
     const plaintext = readSecret(settings, key, codec)
     if (typeof plaintext !== 'string' || !plaintext) {
@@ -1242,11 +1259,12 @@ async function launchBackend(smokeChannel, onExit) {
     const acceptanceProof=acceptance?waitForAcceptanceRuntimeGate(spawnedBackend,{buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(spec.entry)}):Promise.resolve()
     backend = spawnedBackend
     backendControl?.close()
-    backendControl = createBackendControl(spawnedBackend, {onUsage: report => {
+    backendControl = createBackendControl(spawnedBackend, {onUsage: () => {
       if (backend !== spawnedBackend || launchGeneration !== generation) return
-      if (frontendUsage.add(generation, report) && settingsWindow) sendToSettings('nova:settings:changed', settingsView())
+      refreshRuntimeUsage()
     }, onStatus: status => {
       if (backend !== spawnedBackend || launchGeneration !== generation) return
+      refreshRuntimeUsage()
       diagnostic.pushCapabilityStatus(status)
       runtimeCapabilities = {...status, generation, diskGeneration, state: backendStatus.state === 'connected' ? 'running' : status.state}
       sendToSettings('nova:settings:changed', settingsView())

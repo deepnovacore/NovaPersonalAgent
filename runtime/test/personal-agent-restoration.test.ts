@@ -44,7 +44,7 @@ test('notifications during disk read stay pending until restored state is availa
  const f=await fixture(),host=f.make(),entered=deferred(),resume=deferred();const read=Reflect.get(PersonalStore.prototype,'read');
  const mock=t.mock.method(PersonalStore.prototype,'read',async function(this:PersonalStore){if(this.path===f.path){entered.resolve();await resume.promise}return read.call(this)});
  const opening=host.open();
- try{await entered.promise;await host.sourceChanged({revision:1,phase:'ready'});f.preserved(JSON.parse(await readFile(f.path,'utf8')) as PersonalState);resume.resolve();await opening;assert.ok((await read.call(f.store)).revision>12);f.preserved(await read.call(f.store))}
+ try{await entered.promise;await host.sourceChanged({revision:1,phase:'ready'});f.preserved(JSON.parse(await readFile(f.path,'utf8')) as PersonalState);resume.resolve();await opening;await host.sourceChanged({revision:1,phase:'ready'});assert.ok((await read.call(f.store)).revision>12);f.preserved(await read.call(f.store))}
  finally{resume.resolve();await opening.catch(()=>undefined);mock.mock.restore();await host.close();await f.cleanup()}
 });
 
@@ -155,3 +155,64 @@ test('text submitted while closing is rejected before it is persisted or run',as
  assert.equal(saved.some(message=>message.request_id==='queued'||message.request_id==='late'),false);
  assert.equal(runs,0);
 });
+
+for(const background of ['discovery','scheduled processing','notification delivery'])test(`pending optional ${background} does not hold startup or lose shutdown ownership`,async()=>{
+ const f=await fixture(),host=f.make(),entered=deferred(),resume=deferred();
+ const stalled=async()=>{entered.resolve();await resume.promise};
+ if(background==='discovery')host.discover=stalled;else if(background==='scheduled processing')host.sourceProcessingAgent.tick=stalled;else host.notifications.dispatch=stalled;
+ await host.sourceChanged({revision:1,phase:'ready'});
+ const opening=host.open();let timer:ReturnType<typeof setTimeout>|undefined;
+ try{
+  await entered.promise;
+  const opened=await Promise.race([opening.then(()=>true),new Promise<boolean>(resolve=>{timer=setTimeout(()=>resolve(false),1000)})]);
+  assert.equal(opened,true,'optional background work must not block the backend readiness handshake');
+  f.preserved(await f.store.read());
+  let closed=false;const closing=host.close().then(()=>{closed=true});
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(closed,false);await assert.rejects(acquirePersonalLock(f.path),/personal_store_locked/);
+  resume.resolve();await closing;f.preserved(await f.store.read());
+  const release=await acquirePersonalLock(f.path);await release();
+ }finally{clearTimeout(timer);resume.resolve();await opening;await host.close();await f.cleanup()}
+});
+
+
+test('a source notification immediately after open is processed before its acknowledgement',async()=>{
+ const f=await fixture(),host=f.make();
+ try{await host.open();let refreshed=0;const refresh=host.refreshMemory.bind(host);
+  host.refreshMemory=async()=>{refreshed++;await refresh()};
+  await host.sourceChanged({revision:1,phase:'ready'});
+  assert.ok(refreshed>0,'the completed startup drain must not swallow a new notification');
+  f.preserved(await f.store.read());
+ }finally{await host.close();await f.cleanup()}
+});
+
+
+test('composition can restore state before starting optional work',async()=>{
+ const f=await fixture(),host=f.make(),resume=deferred();const entered=new Set<string>();
+ const background=(name:string)=>async()=>{entered.add(name);await resume.promise};
+ host.discover=background('discovery');host.sourceProcessingAgent.tick=background('processing');host.notifications.dispatch=background('notifications');
+ try{
+  await host.sourceChanged({revision:1,phase:'ready'});
+  await host.open({deferBackground:true});
+  await host.sourceChanged({revision:2,phase:'ready'});
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.deepEqual([...entered],[],'restoring state must not compete with the connection handshake');
+  f.preserved(await f.store.read());
+  host.startBackgroundWork();resume.resolve();
+  await host.sourceChanged({revision:2,phase:'ready'});await host.scheduledTaskTick();await host.flushNotifications();
+  assert.deepEqual([...entered].sort(),['discovery','notifications','processing']);
+ }finally{resume.resolve();await host.close();await f.cleanup()}
+});
+
+
+test('restoration does not schedule profile, digest or context generation before activation',async t=>{
+ const f=await fixture(),host=f.make(),entered:string[]=[]
+ for(const [name,service] of [['profile',host.profileWarmup],['digests',host.projectDigests],['context',host.workbenchContext]] as const)
+  t.mock.method(service,'startGeneration',()=>{entered.push(name)})
+ try{
+  await host.open({deferBackground:true});await host.refreshMemory()
+  assert.equal(entered.length,0,'even implicit update scheduling must wait until the connection is ready')
+  host.startBackgroundWork()
+  assert.ok(entered.includes('profile'));assert.ok(entered.includes('context'))
+ }finally{await host.close();await f.cleanup()}
+})

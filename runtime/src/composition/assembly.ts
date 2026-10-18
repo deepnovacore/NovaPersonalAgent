@@ -1,3 +1,5 @@
+import {observeOperation} from '../usage/context.js'
+import type {UsageReporter} from '../realtime/usage.js'
 import {GatewayProactivity} from '../model/proactivity.js'
 import {GatewayTaskVerifier} from '../model/task-verifier.js'
 import {GatewayPersonalWriter} from '../model/personal-writer.js'
@@ -88,6 +90,7 @@ export interface AssemblyOptions {
   readonly ids?: IdFactory
   readonly gateway?: ModelGateway
   readonly metrics?: MetricsSink
+  readonly onUsage?: UsageReporter
   /** Extra adapters beyond the simulators, keyed by the manifest name they serve. */
   readonly executors?: readonly ExecutorAdapter[]
   /** Test/host seam below SearchAdapter; production constructs TavilyTransport. */
@@ -111,7 +114,7 @@ export interface Assembly {
     newsLanguage: string
     profileParticipantMessages?: boolean
     models: Required<Pick<HostOptions,
-      'generateProfile' | 'generateDigests' | 'generateContext' | 'rankNews' | 'understand'
+      'generateProfile' | 'generateDigests' | 'generateContext' | 'generateTimeline' | 'rankNews' | 'understand'
       | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover'>>
     taskVerifier: Pick<GatewayTaskVerifier, 'evaluateTask'>
   }
@@ -229,6 +232,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   // Preserve Python's validation order: the model credential is checked before
   // Tavily when neither production transport is injected.
   const gateway = options.gateway ?? new OpenAIModelGateway({
+    ...(options.onUsage?{onUsage:options.onUsage}:{}),
     baseUrl: settings.model_base_url,
     apiKey: requireApiKey(settings),
     clock,
@@ -250,6 +254,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   const watchModel = stripLikePython(settings.watch_model ?? '') || settings.fast_model
   const watchConnection = cameraModuleEnabled || settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)) ? resolveWatchModelConnection(settings) : null
   const watchGateway = watchConnection === null ? gateway : new OpenAIModelGateway({
+    ...(options.onUsage?{onUsage:options.onUsage}:{}),
     ...watchConnection, clock, ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
   const visionLifecycle = cameraModuleEnabled ? new VisionLifecycleBridge() : undefined
@@ -308,7 +313,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       || !descriptor.ownedChannels.some(channel => (options.executors ?? []).some(adapter => adapter.manifest.name === channel && adapter.manifest.roles.includes('coding')))),
     ...(cameraModuleEnabled ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
-  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true})
+  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, includeExplicitMemory: options.scheduledContext!==true&&options.sourceProcessingContext!==true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true})
 
   const proactive = new GatewayProactivity({
     gateway,
@@ -317,7 +322,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   })
   const writer = new GatewayPersonalWriter({gateway,model:settings.support_model})
   const taskVerifier = new GatewayTaskVerifier({gateway,model:settings.support_model,vision:{gateway:watchGateway,model:watchModel}})
-  const jev = {apiKey:settings.openrouter_api_key ?? ''}
+  const jev = {apiKey:settings.openrouter_api_key ?? '',...(options.onUsage?{onUsage:options.onUsage}:{})}
   const compressor = new GatewayCompressor({gateway, model: settings.compressor_model})
 
   const proactivity = resolveProactivity(settings)
@@ -397,15 +402,16 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   return {
     settings, taskVerifier,
     ...(options.blackboard===undefined?{}:{personalAgentConfig: {path: options.blackboard.path + '.personal.json', userScope: settings.blackboard_owner_id, newsLanguage: settings.news_language, profileParticipantMessages: settings.profile_participant_messages, taskVerifier, models: {
-      generateProfile: writer.generateProfile,
-      generateDigests: writer.generateDigests,
-      generateContext: writer.generateContext,
-      rankNews: createJevNewsRanker(jev),
-      understand: createUnderstandingPipeline({gateway,model:settings.support_model,judge:createJevJudge(jev)}),
-      prepareBrief: writer.prepareBrief.bind(writer),
-      prepareProposal: writer.prepareProposal.bind(writer),
-      summarizeMemory: writer.summarizeMemory.bind(writer),
-      discover: proactive.discover.bind(proactive),
+      generateProfile: observeOperation('profile',writer.generateProfile),
+      generateDigests: observeOperation('digest',writer.generateDigests),
+      generateContext: observeOperation('context',writer.generateContext),
+      generateTimeline:observeOperation('timeline',writer.generateTimeline),
+      rankNews: observeOperation('news',createJevNewsRanker(jev)),
+      understand: observeOperation('understanding',createUnderstandingPipeline({gateway,model:settings.support_model,judge:createJevJudge(jev)})),
+      prepareBrief: observeOperation('digest',writer.prepareBrief.bind(writer)),
+      prepareProposal: observeOperation('proactivity',writer.prepareProposal.bind(writer)),
+      summarizeMemory: observeOperation('memory',writer.summarizeMemory.bind(writer)),
+      discover: observeOperation('proactivity',proactive.discover.bind(proactive)),
     }}}),
     capabilities,
     capabilityStatus: capabilityStatus(capabilities, tools.schemas.length),

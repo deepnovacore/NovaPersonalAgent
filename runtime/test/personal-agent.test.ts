@@ -558,7 +558,7 @@ test('adopting a goal suggestion creates one goal even across retries and a fail
   const card={id:'goal-card',candidate_id:'goal-card',tab:'goals' as const,title:'让 Nova 成为每天在用的助手',body:'一周里大部分事情都交给它。',why:null,next:'先把待办页跑顺',refs:[]}
   const context=f.host.workbenchContext as unknown as {snapshot:()=>unknown;dismiss:(id:string)=>Promise<void>};const real=context.snapshot.bind(context)
   let failures=1;const dismissed:string[]=[]
-  context.snapshot=()=>({...(real() as object),cards:[card,{...card,id:'todo-card',tab:'todos'}]})
+  context.snapshot=()=>({...(real() as object),cards:[card,{...card,id:'idea-card',tab:'ideas'}]})
   context.dismiss=id=>{if(failures-->0)return Promise.reject(Error('disk_full'));dismissed.push(id);return Promise.resolve()}
   const adopt=(request_id:string,id='goal-card')=>f.host.command({type:'personal.command',request_id,method:'context.adopt',params:{id}}) as Promise<{ok:boolean;error?:string}>
   assert.equal((await adopt('first')).ok,false,'the dismiss failure surfaces')
@@ -569,7 +569,7 @@ test('adopting a goal suggestion creates one goal even across retries and a fail
   assert.equal((await adopt('reworded')).ok,true,'a regenerated card with the same id is already adopted')
   assert.equal(f.host.life.snapshot().goals.length,1)
   assert.deepEqual(dismissed,['goal-card','goal-card','goal-card'])
-  assert.equal((await adopt('todo','todo-card')).ok,false,'only a goal suggestion can be adopted')
+  assert.equal((await adopt('idea','idea-card')).ok,false,'idea suggestions are not adopted as tasks')
  }finally{await f.close()}
 })
 
@@ -629,4 +629,24 @@ test('a failed cleanup of guessed news interests is retried on the next start, n
   await host.close();host=make(false);const again=host.news.clearSeededInterests.bind(host.news);let calls=0
   host.news.clearSeededInterests=()=>{calls++;return again()};await host.open();assert.equal(calls,0,'once confirmed, nothing is cleaned again')
  }finally{await host.close();await f.close()}
+})
+
+test('a source todo suggestion is adopted explicitly without inventing a deadline, dedupes completed items, and keeps refs',async()=>{
+ const f=await fixture()
+ try{
+  const card={id:'todo-source',candidate_id:'todo-source',tab:'todos',title:'Review the draft',body:'A grounded suggestion',why:null,next:'Check acceptance criteria',refs:[{entry_id:'source:doc',version:'v1'}]}
+  const context=f.host.workbenchContext as unknown as {snapshot:()=>unknown;dismiss:(id:string)=>Promise<void>};const snapshot=context.snapshot.bind(context)
+  context.snapshot=()=>({...snapshot() as object,cards:[card]});context.dismiss=()=>Promise.resolve()
+  const adopt=(id:string)=>f.host.command({type:'personal.command',request_id:id,method:'context.adopt',params:{id:card.id}}) as Promise<{ok:boolean;error?:string}>
+  assert.equal((await adopt('adopt')).ok,true)
+  const todo=f.host.life.snapshot().todos[0]!
+  assert.equal(todo.due,null);assert.equal(todo.note,'A grounded suggestion\n下一步：Check acceptance criteria')
+  assert.deepEqual((todo as unknown as {context_source:unknown}).context_source,{candidate_id:card.id,refs:card.refs})
+  await f.host.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,status:'done'},'done')
+  for(let n=0;n<260;n++)await f.host.life.mutate({op:'profile',about:String(n),expected_version:n},'evict'+n)
+  assert.equal((await adopt('again')).ok,true)
+  assert.equal(f.host.life.snapshot().todos.length,1);assert.equal(f.host.life.snapshot().todos[0]!.status,'done')
+  context.snapshot=()=>({...snapshot() as object,cards:[]})
+  assert.equal((await adopt('stale')).ok,false)
+ }finally{await f.close()}
 })

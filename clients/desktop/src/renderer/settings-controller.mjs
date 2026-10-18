@@ -46,6 +46,9 @@ export function settingsButtonState({
 // same names are legitimate boolean fields inside `secretsPresent`, so that
 // presence-only shape is sanitized separately instead of recursively denied.
 const SECRET_KEY_NAMES = [
+  'openaiCompatibleApiKey',
+  'compatibleAsrApiKey',
+  'compatibleTtsApiKey',
   'selfHostedAsrApiKey',
   'selfHostedLlmApiKey',
   'selfHostedTtsApiKey',

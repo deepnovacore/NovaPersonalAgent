@@ -1,3 +1,4 @@
+import {COMPATIBLE_STAGES, COMPATIBLE_FIELDS, COMPATIBLE_PRESETS, isEndpointSecret} from './compatible-providers.mjs'
 import {createSkinPanel} from './skin-panel.mjs'
 import {SELF_HOSTED_STAGES, endpointOrigin} from './voice-preset.mjs'
 import {onButton} from './button-action.mjs'
@@ -39,6 +40,9 @@ const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
 const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
+  'openaiCompatibleApiKey',
+  'compatibleAsrApiKey',
+  'compatibleTtsApiKey',
   'selfHostedAsrApiKey',
   'selfHostedLlmApiKey',
   'selfHostedTtsApiKey',
@@ -47,6 +51,9 @@ const SECRET_KEYS = [
   'arkApiKey', 'deepseekApiKey', 'openaiApiKey', 'geminiApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
+  openaiCompatibleApiKey: 'OpenAI-compatible LLM',
+  compatibleAsrApiKey: 'OpenAI-compatible ASR',
+  compatibleTtsApiKey: 'OpenAI-compatible TTS',
   selfHostedAsrApiKey: 'Self-hosted ASR',
   selfHostedLlmApiKey: 'Self-hosted LLM',
   selfHostedTtsApiKey: 'Self-hosted TTS',
@@ -253,7 +260,7 @@ function renderBadges(present, sources) {
   for (const key of SECRET_KEYS) {
     const badge = document.querySelector(`#badge-${key}`)
     const stored = present?.[key] === true
-    const fromFile = sources?.[key] === 'dotenv'
+    const fromFile = sources?.[key] === 'dotenv' && !isEndpointSecret(key)
     badge.textContent = fromFile ? t("来自 .env") : stored ? (sources?.[key] === 'environment' ? t("来自环境变量") : t("已设置")) : t("未设置")
     secretInput(key).hidden = stored && !dirtySecretKeys.has(key)
     secretInput(key).disabled = fromFile
@@ -267,6 +274,7 @@ function renderBadges(present, sources) {
 // These labels reflect selected public providers only, never any key material.
 function keyUsage(view) {
   return {
+    ...Object.fromEntries(COMPATIBLE_STAGES.map(({provider,secret}) => [secret, view[provider] === 'openai-compatible' && (provider === 'cascadedLlmProvider' || view.pipelineMode === 'cascaded') ? t("必需") : t("当前未使用")])),
     dashscopeApiKey: (view.pipelineMode === 'integrated' && view.integratedProvider === 'qwen')
       || (view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'qwen') ? t("必需")
       : view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun'
@@ -413,6 +421,8 @@ onButton(document.getElementById('camera-refresh'), async () => {
 })
 
 let usageScope = 'session'
+let usageGroup = 'features'
+document.getElementById('usage-group').addEventListener('change',event=>{usageGroup=event.target.value;renderUsage()})
 function renderUsage() {
   const usage = currentView?.frontendUsage
   const selected = usageScope === 'history' ? usage?.history : usage
@@ -429,13 +439,13 @@ function renderUsage() {
   if (selected?.unpricedReports) notices.push(t("无法估价 {0} 次", selected.unpricedReports))
   const status = document.getElementById('frontend-usage')
   status.textContent = usage?.persistenceError
-    ? (usage.persistenceError === 'read_failed' ? t("历史记录读取失败，原文件已保留；当前仅显示本次启动用量。") : t("历史用量保存失败，本次用量仍保留在内存中。"))
-    : selected?.requests ? notices.join(' · ') : t("开始对话后显示用量")
+    ? (usage.persistenceError === 'storage_failed' ? t("运行时用量存储失败，显示的历史可能不完整。") : usage.persistenceError === 'read_failed' ? t("历史记录读取失败，原文件已保留；当前仅显示本次启动用量。") : t("历史用量保存失败，本次用量仍保留在内存中。"))
+    : selected?.requests ? notices.join(' · ') : t("模型调用后显示用量")
   status.hidden = !status.textContent
   const breakdown = document.getElementById('usage-breakdown')
   breakdown.hidden = !selected?.requests
   if (breakdown.hidden) breakdown.open = true
-  renderFrontendUsage(document.getElementById('frontend-usage-details'), selected, document)
+  renderFrontendUsage(document.getElementById('frontend-usage-details'), selected, document,usageGroup)
 }
 for (const scope of ['history', 'session']) document.getElementById(`usage-${scope}`).addEventListener('click', () => {
   usageScope = scope
@@ -522,6 +532,15 @@ function render(view, drafts, state) {
     const input = document.querySelector(`#${endpoint}`)
     if (document.activeElement !== input) input.value = view[endpoint] ?? ''
   }
+  for (const {stage, provider} of COMPATIBLE_STAGES) {
+    document.querySelector(`#compatible-${stage}-settings`).hidden = view[provider] !== 'openai-compatible'
+  }
+  for (const key of COMPATIBLE_FIELDS) {
+    const input = document.querySelector(`#${key}`)
+    if (key === 'compatibleTtsSendSampleRate') input.checked = view[key] === true
+    else if (document.activeElement !== input) input.value = view[key] ?? ''
+  }
+  cascadedLlmModel.maxLength = view.cascadedLlmProvider === 'openai-compatible' ? 256 : 64
   cascadedAsrProvider.value = view.cascadedAsrProvider
   geminiAsrModel.value = view.geminiAsrModel
   geminiTtsModel.value = view.geminiTtsModel
@@ -542,7 +561,7 @@ function render(view, drafts, state) {
   }[view.cascadedLlmProvider] ?? [])
   populatePresetOptions(cascadedLlmModelPreset, modelPresets, t("自定义模型 ID…"))
   renderPreset(cascadedLlmModelPreset, cascadedLlmModel, view.cascadedLlmModels?.[view.cascadedLlmProvider], modelPresets)
-  document.querySelector('#cascaded-tts-voice-settings').hidden = view.cascadedTtsProvider === 'self-hosted'
+  document.querySelector('#cascaded-tts-voice-settings').hidden = ['self-hosted','openai-compatible'].includes(view.cascadedTtsProvider)
   cascadedTtsProvider.value = view.cascadedTtsProvider
   const ttsVoices = view.cascadedTtsProvider === 'gemini' ? GEMINI_TTS_VOICES : VOLCENGINE_TTS_VOICES
   populatePresetOptions(cascadedTtsVoicePreset, ttsVoices)
@@ -667,6 +686,38 @@ bindStage(integratedModel, 'change', () => ({
 }))
 bindStage(geminiAsrModel, 'input', () => ({geminiAsrModel: geminiAsrModel.value}))
 bindStage(geminiTtsModel, 'input', () => ({geminiTtsModel: geminiTtsModel.value}))
+function stageCompatiblePatch(patch) {
+  for (const {endpoint, secret} of COMPATIBLE_STAGES) {
+    if (Object.hasOwn(patch, endpoint) && currentView?.[endpoint] !== patch[endpoint]) {
+      secretInput(secret).value = ''
+      dirtySecretKeys.add(secret)
+      secretRevisions.noteInput(secret)
+    }
+  }
+  controller.stage(patch)
+}
+for (const {stage, endpoint, model} of COMPATIBLE_STAGES) {
+  const preset = document.querySelector(`#compatible-${stage}-preset`)
+  for (const item of COMPATIBLE_PRESETS[stage]) {
+    const option = document.createElement('option'); option.value = item.id; option.textContent = item.label; preset.append(option)
+  }
+  preset.addEventListener('change', () => {
+    const item = COMPATIBLE_PRESETS[stage].find(item => item.id === preset.value)
+    if (!item) return
+    const patch = {[endpoint]: item.baseUrl}
+    if (model) patch[model] = item.model
+    if (stage === 'llm') { patch.openaiCompatibleProtocol = item.protocol; patch.cascadedLlmModels = {'openai-compatible': ''} }
+    if (stage === 'tts') { patch.compatibleTtsVoice = item.voice; patch.compatibleTtsSendSampleRate = item.sendSampleRate }
+    stageCompatiblePatch(patch)
+  })
+}
+for (const key of COMPATIBLE_FIELDS) {
+  const input = document.querySelector(`#${key}`)
+  input.addEventListener('change', () => {
+    for (const {stage} of COMPATIBLE_STAGES) document.querySelector(`#compatible-${stage}-preset`).value = ''
+    stageCompatiblePatch({[key]: key === 'compatibleTtsSendSampleRate' ? input.checked : input.value})
+  })
+}
 function stageSelfHostedPatch(patch) {
   for (const {endpoint, secret} of SELF_HOSTED_STAGES) {
     if (Object.hasOwn(patch, endpoint) && endpointOrigin(currentView?.[endpoint]) !== endpointOrigin(patch[endpoint])) {

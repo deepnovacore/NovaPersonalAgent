@@ -75,6 +75,7 @@ export class KnowledgeService {
     this.#stop.abort(); this.#active?.abort.abort()
     for(const active of this.#syncing.values())active.abort.abort()
     await Promise.allSettled([...this.#syncing.values()].map(active=>active.done))
+    await this.#binding?.catch(()=>{/* Stopping migration leaves unlinked chunks retryable. */})
     await this.#store.close()
   }
   purgeEvidence(ids:readonly string[]):Promise<void>{return this.#store.purgeEvidence(ids)}

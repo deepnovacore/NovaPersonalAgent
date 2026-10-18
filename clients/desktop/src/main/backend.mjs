@@ -1,3 +1,4 @@
+import {isEndpointSecret, COMPATIBLE_STAGES} from '../renderer/compatible-providers.mjs'
 import { createServer } from 'node:net'
 import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute, resolve } from 'node:path'
@@ -14,6 +15,9 @@ const NEWLINE = 0x0a
 // `.env` (or parent environment) keeps winning. Names match the Settings
 // aliases accepted by the Node runtime configuration contract exactly.
 export const SECRET_ENV_MAP = Object.freeze({
+  openaiCompatibleApiKey: 'OPENAI_COMPATIBLE_API_KEY',
+  compatibleAsrApiKey: 'COMPATIBLE_ASR_API_KEY',
+  compatibleTtsApiKey: 'COMPATIBLE_TTS_API_KEY',
   selfHostedAsrApiKey: 'SELF_HOSTED_ASR_API_KEY',
   selfHostedLlmApiKey: 'SELF_HOSTED_LLM_API_KEY',
   selfHostedTtsApiKey: 'SELF_HOSTED_TTS_API_KEY',
@@ -36,10 +40,10 @@ export const SECRET_ENV_MAP = Object.freeze({
 export function resolveSecretConfiguration(saved = {}, environment = {}, developmentEnv = {}) {
   const secrets = {}, secretsPresent = {}, secretSources = {}
   for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {
-    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && saved[key] === '') { secrets[key]=''; secretsPresent[key]=false; secretSources[key]='cleared'; continue }
+    if ((key === 'composioApiKey' || isEndpointSecret(key)) && saved[key] === '') { secrets[key]=''; secretsPresent[key]=false; secretSources[key]='cleared'; continue }
     const fromFile = developmentEnv[name]
     const fromEnvironment = environment[name]
-    const candidates = key === 'composioApiKey' || key.startsWith('selfHosted')
+    const candidates = key === 'composioApiKey' || isEndpointSecret(key)
       ? [['settings', saved[key]], ['dotenv', fromFile], ['environment', fromEnvironment]]
       : [['dotenv', fromFile], ['settings', saved[key]], ['environment', fromEnvironment]]
     const selected = candidates.find(([, value]) => typeof value === 'string' && value.trim() && !CONTROL_CHARACTERS.test(value))
@@ -259,6 +263,8 @@ export function backendLaunchSpec({
     CASCADE_LLM_MODEL: settings?.cascadedLlmModels?.[llmProvider]
       ?? SETTINGS_DEFAULTS.cascadedLlmModels[llmProvider]
       ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen,
+    OPENAI_COMPATIBLE_BASE_URL: settings?.openaiCompatibleBaseUrl ?? SETTINGS_DEFAULTS.openaiCompatibleBaseUrl,
+    OPENAI_COMPATIBLE_PROTOCOL: settings?.openaiCompatibleProtocol ?? SETTINGS_DEFAULTS.openaiCompatibleProtocol,
     SELF_HOSTED_LLM_BASE_URL: settings?.selfHostedLlmBaseUrl ?? '',
   })
   if (pipelineMode === 'cascaded') {
@@ -269,6 +275,12 @@ export function backendLaunchSpec({
       DOUBAO_ASR_VOICEPRINT_NAME: settings?.voiceprintName ?? '',
       CASCADE_ENDPOINTING_PROVIDER: settings?.cascadedEndpointingProvider
         ?? SETTINGS_DEFAULTS.cascadedEndpointingProvider,
+      COMPATIBLE_ASR_BASE_URL: settings?.compatibleAsrBaseUrl ?? SETTINGS_DEFAULTS.compatibleAsrBaseUrl,
+      COMPATIBLE_ASR_MODEL: settings?.compatibleAsrModel ?? SETTINGS_DEFAULTS.compatibleAsrModel,
+      COMPATIBLE_TTS_BASE_URL: settings?.compatibleTtsBaseUrl ?? SETTINGS_DEFAULTS.compatibleTtsBaseUrl,
+      COMPATIBLE_TTS_MODEL: settings?.compatibleTtsModel ?? SETTINGS_DEFAULTS.compatibleTtsModel,
+      COMPATIBLE_TTS_VOICE: settings?.compatibleTtsVoice ?? SETTINGS_DEFAULTS.compatibleTtsVoice,
+      COMPATIBLE_TTS_SEND_SAMPLE_RATE: String(settings?.compatibleTtsSendSampleRate ?? false),
       SELF_HOSTED_ASR_URL: settings?.selfHostedAsrUrl ?? '',
       SELF_HOSTED_TTS_URL: settings?.selfHostedTtsUrl ?? '',
       GEMINI_ASR_MODEL: settings?.geminiAsrModel ?? SETTINGS_DEFAULTS.geminiAsrModel,
@@ -620,15 +632,16 @@ export async function shutdownBackendBestEffort(child, options) {
 export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}, document) {
   const env = {...parentEnv}
   const pipelineMode = settings?.pipelineMode ?? SETTINGS_DEFAULTS.pipelineMode
-  if (decryptedSecrets && typeof decryptedSecrets === 'object') {
+  {
+    decryptedSecrets = decryptedSecrets && typeof decryptedSecrets === 'object' ? decryptedSecrets : {}
     const activeSecretKeys = new Set(ALWAYS_ACTIVE_SECRET_KEYS)
     const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
-    activeSecretKeys.add(llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
+    activeSecretKeys.add(llmProvider === 'openai-compatible' ? 'openaiCompatibleApiKey' : llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
     if (pipelineMode === 'cascaded') {
-      activeSecretKeys.add(settings?.cascadedTtsProvider === 'self-hosted' ? 'selfHostedTtsApiKey' : (settings?.cascadedTtsProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
+      activeSecretKeys.add(settings?.cascadedTtsProvider === 'openai-compatible' ? 'compatibleTtsApiKey' : settings?.cascadedTtsProvider === 'self-hosted' ? 'selfHostedTtsApiKey' : (settings?.cascadedTtsProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
       // Optional override only. When absent, the runtime falls back to the
       // big-model key; Main does not synthesize a duplicate secret value.
-      activeSecretKeys.add(settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoAsrApiKey')
+      activeSecretKeys.add(settings?.cascadedAsrProvider === 'openai-compatible' ? 'compatibleAsrApiKey' : settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoAsrApiKey')
       if ((settings?.cascadedAsrProvider ?? 'volcengine') === 'volcengine') activeSecretKeys.add('doubaoBigmodelApiKey')
     } else {
       const integrated = settings?.integratedProvider ?? 'qwen'
@@ -649,10 +662,15 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
     for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {
       if (references.includes('${' + name + '}') || (search?.enabled !== false && provider === 'tavily' && search?.tavily?.apiKeyEnv === name)) activeSecretKeys.add(key)
     }
+    // Empty overrides also mask inherited values in backendLaunchSpec's environment.
+    for (const {secret} of COMPATIBLE_STAGES) {
+      const name = SECRET_ENV_MAP[secret]
+      if (!activeSecretKeys.has(secret) && Object.hasOwn(env, name)) env[name] = ''
+    }
     for (const [secretKey, envName] of Object.entries(SECRET_ENV_MAP)) {
       if (!activeSecretKeys.has(secretKey)) continue
       const value = decryptedSecrets[secretKey]
-      if ((secretKey === 'composioApiKey' || secretKey.startsWith('selfHosted')) && value === '') { env[envName]=''; continue }
+      if ((secretKey === 'composioApiKey' || isEndpointSecret(secretKey)) && value === '') { env[envName]=''; continue }
       if (typeof value !== 'string') continue
       if (CONTROL_CHARACTERS.test(value)) continue
       const trimmed = value.trim()

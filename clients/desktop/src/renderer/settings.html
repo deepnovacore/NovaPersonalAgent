@@ -108,9 +108,10 @@
         <h2>用量与费用</h2>
         <div class="usage-overview" aria-label="用量统计范围">
           <button type="button" class="usage-scope" id="usage-history" aria-pressed="false"><span>历史累计</span><strong id="usage-history-cost">—</strong><span id="usage-history-count">0 次调用</span></button>
-          <button type="button" class="usage-scope" id="usage-session" aria-pressed="true"><span>本次启动</span><strong id="usage-session-cost">—</strong><span id="usage-session-count">0 次调用</span></button>
+          <button type="button" class="usage-scope" id="usage-session" aria-pressed="true"><span>本次运行</span><strong id="usage-session-cost">—</strong><span id="usage-session-count">0 次调用</span></button>
         </div>
-        <p id="frontend-usage" role="status" aria-live="polite">开始对话后显示用量</p>
+        <p id="frontend-usage" role="status" aria-live="polite">模型调用后显示用量</p>
+        <p class="usage-note">包含前台对话与后台任务。人民币为估算费用，美元为服务商返回费用；未计价不代表免费。</p><p class="usage-note">外部编程／GUI Agent 和独立 SDK 未返回的用量不在 token 总量内。</p><label for="usage-group">统计维度</label><select id="usage-group"><option value="features">按功能</option><option value="models">按模型</option><option value="runs">按任务运行（最近 100 组）</option></select>
         <details id="usage-breakdown" open hidden><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
       </section>
       <section class="setting-section" id="capabilities-section">
@@ -351,10 +352,24 @@
             <div class="field">
               <label for="cascadedAsrProvider">服务</label>
               <select id="cascadedAsrProvider">
+                <option value="openai-compatible">OpenAI 兼容 API</option>
                 <option value="self-hosted">自托管</option>
                 <option value="volcengine">火山引擎 ASR</option>
                 <option value="gemini">Gemini ASR</option>
               </select>
+            </div>
+            <div id="compatible-asr-settings" hidden>
+              <div class="field"><label for="compatible-asr-preset">服务预设</label><select id="compatible-asr-preset"><option value="">自定义</option></select></div>
+              <p class="hint">预设仅填写接口参数；请确认账号可用的模型。更改地址会清除本阶段密钥，请重新填写。</p>
+              <div class="field"><label for="compatibleAsrBaseUrl">API Base URL</label><input id="compatibleAsrBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
+              <div class="field"><label for="compatibleAsrModel">模型 ID</label><input id="compatibleAsrModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
+              <p class="hint">说完一句后返回最终转录，不显示实时中间结果。</p>
+              <div class="secret" data-key="compatibleAsrApiKey">
+                <label for="compatibleAsrApiKey">本阶段 API 密钥</label>
+                <span class="badge" id="badge-compatibleAsrApiKey">未设置</span><span class="key-usage" id="usage-compatibleAsrApiKey"></span>
+                <input type="password" id="compatibleAsrApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
+                <button type="button" class="clear" data-key="compatibleAsrApiKey">清除</button>
+              </div>
             </div>
             <div id="self-hosted-asr-settings" hidden>
               <div class="field"><label for="selfHostedAsrUrl">自托管 ASR 地址</label><input id="selfHostedAsrUrl" type="url" placeholder="wss://host/asr" maxlength="2048" autocomplete="off" spellcheck="false"></div>
@@ -389,6 +404,7 @@
             <div class="field">
               <label for="cascadedLlmProvider">服务商</label>
               <select id="cascadedLlmProvider">
+                <option value="openai-compatible">OpenAI 兼容 API</option>
                 <option value="self-hosted">自托管</option>
                 <option value="openai">OpenAI</option>
                 <option value="gemini">Google Gemini</option>
@@ -396,6 +412,19 @@
                 <option value="ark">Ark（火山方舟）</option>
                 <option value="deepseek">DeepSeek（官方）</option>
               </select>
+            </div>
+            <div id="compatible-llm-settings" hidden>
+              <div class="field"><label for="compatible-llm-preset">服务预设</label><select id="compatible-llm-preset"><option value="">自定义</option></select></div>
+              <p class="hint">预设仅填写接口参数；请确认账号可用的模型。更改地址会清除本阶段密钥，请重新填写。</p>
+              <div class="field"><label for="openaiCompatibleBaseUrl">API Base URL</label><input id="openaiCompatibleBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
+              <div class="field"><label for="openaiCompatibleProtocol">协议</label><select id="openaiCompatibleProtocol"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></div>
+              <p class="hint">请在下方填写模型 ID。工具调用、视觉等能力取决于所选模型与服务。</p>
+              <div class="secret" data-key="openaiCompatibleApiKey">
+                <label for="openaiCompatibleApiKey">本阶段 API 密钥</label>
+                <span class="badge" id="badge-openaiCompatibleApiKey">未设置</span><span class="key-usage" id="usage-openaiCompatibleApiKey"></span>
+                <input type="password" id="openaiCompatibleApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
+                <button type="button" class="clear" data-key="openaiCompatibleApiKey">清除</button>
+              </div>
             </div>
             <div id="self-hosted-llm-settings" hidden>
               <div class="field"><label for="selfHostedLlmBaseUrl">自托管 LLM 地址</label><input id="selfHostedLlmBaseUrl" type="url" placeholder="https://host/v1" maxlength="2048" autocomplete="off" spellcheck="false"></div>
@@ -417,10 +446,26 @@
             <div class="field">
               <label for="cascadedTtsProvider">服务</label>
               <select id="cascadedTtsProvider">
+                <option value="openai-compatible">OpenAI 兼容 API</option>
                 <option value="self-hosted">自托管</option>
                 <option value="volcengine">火山引擎 TTS</option>
                 <option value="gemini">Gemini TTS</option>
               </select>
+            </div>
+            <div id="compatible-tts-settings" hidden>
+              <div class="field"><label for="compatible-tts-preset">服务预设</label><select id="compatible-tts-preset"><option value="">自定义</option></select></div>
+              <p class="hint">预设仅填写接口参数；请确认账号可用的模型。更改地址会清除本阶段密钥，请重新填写。</p>
+              <div class="field"><label for="compatibleTtsBaseUrl">API Base URL</label><input id="compatibleTtsBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
+              <div class="field"><label for="compatibleTtsModel">模型 ID</label><input id="compatibleTtsModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
+              <div class="field"><label for="compatibleTtsVoice">音色 ID</label><input id="compatibleTtsVoice" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
+              <label class="toggle-row"><input id="compatibleTtsSendSampleRate" type="checkbox">发送 24000 Hz 采样率参数</label>
+              <p class="hint">服务需返回 24000 Hz PCM 音频；仅在服务支持 sample_rate 参数时开启。</p>
+              <div class="secret" data-key="compatibleTtsApiKey">
+                <label for="compatibleTtsApiKey">本阶段 API 密钥</label>
+                <span class="badge" id="badge-compatibleTtsApiKey">未设置</span><span class="key-usage" id="usage-compatibleTtsApiKey"></span>
+                <input type="password" id="compatibleTtsApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
+                <button type="button" class="clear" data-key="compatibleTtsApiKey">清除</button>
+              </div>
             </div>
             <div id="self-hosted-tts-settings" hidden>
               <div class="field"><label for="selfHostedTtsUrl">自托管 TTS 地址</label><input id="selfHostedTtsUrl" type="url" placeholder="https://host/tts" maxlength="2048" autocomplete="off" spellcheck="false"></div>

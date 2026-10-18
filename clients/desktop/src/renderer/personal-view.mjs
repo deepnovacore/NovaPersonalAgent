@@ -109,7 +109,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const pageKey=()=>{
   const s=c.snapshot,sourceStates=s?.sources?.map(source=>[source.id,source.state,source.health,source.processing_consent_required])
   if(['todos','ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
-  if(selected==='timeline')return JSON.stringify([selected,s?.life,s?.settings?.timezone,c.connected,timelineDate(c.snapshot)])
+  if(selected==='timeline')return JSON.stringify([selected,s?.life,s?.timeline,s?.settings?.timezone,c.connected,timelineDate(c.snapshot)])
   if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.life,s?.profile_preparation,c.connected])
   if(selected==='tasks')return JSON.stringify([selected,taskTab,s?.schedules,s?.capabilities?.schedules,durableTasks(),tasks(),results(),c.connected])
   return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.news,s?.capabilities,c.connected])

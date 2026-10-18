@@ -1,3 +1,4 @@
+import type {UsageContext} from '../usage/context.js'
 import {resolveModelApiKey} from '../config/config.js'
 import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
@@ -203,6 +204,7 @@ async function responseAdaptationFor(
 }
 
 export interface RealtimeAssemblyOptions {
+  readonly usageContext?: UsageContext
   readonly conversationContext?:()=>Promise<string|null>
   readonly suppressMemoryAdaptation?:boolean
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
@@ -301,6 +303,8 @@ export class RealtimeAssembly {
   readonly #idFactory: () => string
   readonly #unbindSuggestionSelected: (() => void) | undefined
   readonly #createPersonalMemory: (() => PersonalMemoryResource) | undefined
+  #knowledgeBinding:Promise<void>|undefined
+  #bindKnowledge:(()=>Promise<void>)|undefined
   #personalMemory: PersonalMemoryResource | undefined
   readonly #knowledgeLedger:KnowledgeEvidenceLedger={
     processingGrant:(...args)=>this.#personalMemory?.processingGrant?.(...args),
@@ -530,7 +534,7 @@ export class RealtimeAssembly {
         this.#acceptProjectContext(context)
       }
       await this.core.start()
-      if (!this.#sharedPersonal) await this.personalAgent.open()
+      if (!this.#sharedPersonal) await this.personalAgent.open({deferBackground:true})
     } catch (error) {
       if (this.#state === 'starting') {
         await this.#closePersonalMemory()
@@ -569,6 +573,12 @@ export class RealtimeAssembly {
     }
     if (this.#state === 'starting') {
       this.#state = 'started'
+      // Optional work shares the memory worker; start it only after the connection is ready.
+      if (!this.#sharedPersonal) {
+        if(this.#bindKnowledge){this.#knowledgeBinding=this.#bindKnowledge().catch(()=>{this.#diagnose('knowledge_memory_ledger_unavailable')});this.#bindKnowledge=undefined}
+        this.personalAgent.startBackgroundWork()
+        this.#personalMemory?.startBackgroundWork?.()
+      }
       if (!this.#sharedPersonal && this.#codexResource !== undefined) {
         try {
           void this.#codexResource.start().catch(() => undefined)
@@ -744,6 +754,7 @@ export class RealtimeAssembly {
     if (!this.#sharedPersonal) await this.personalAgent.close()
     const personalMemory = this.#personalMemory
     if (personalMemory === undefined) return {kind: 'resolved'}
+    await this.#knowledgeBinding;this.#knowledgeBinding=undefined;this.#bindKnowledge=undefined
     this.#personalMemory = undefined
     return this.#cleanupWithinGrace(
       () => personalMemory.close(),
@@ -761,7 +772,7 @@ export class RealtimeAssembly {
       if (this.#personalMemory === undefined) return
       // Cold SDK/Worker initialization needs the full memory RPC deadline, not shutdown grace.
       const opened = await this.#settleWithinGrace(
-        this.#personalMemory.open(),
+        this.#personalMemory.open({deferBackground:true}),
         'personal_memory_open_abandoned',
         30_000,
       )
@@ -770,7 +781,7 @@ export class RealtimeAssembly {
       if(this.core.knowledge){
         const memory=this.#personalMemory
         if(memory?.recordEvidence&&memory.readEvidence&&memory.forgetSource){
-          await this.core.knowledge.service.bindEvidenceLedger(this.#knowledgeLedger)
+          this.#bindKnowledge=()=>this.core.knowledge!.service.bindEvidenceLedger(this.#knowledgeLedger)
         }else{this.#diagnose('knowledge_memory_ledger_unavailable')}
       }
     } catch (error) {
@@ -947,12 +958,13 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     throw new AssemblyError('coding agent controller factory requires a coding executor')
   }
   const personalMemorySessionId = randomUUID()
-  const retrieval=new UnifiedRetrieval({memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
+  const retrieval=new UnifiedRetrieval({...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
     if(!personalMemoryHolder.current?.readEvidence)return []
     const result=await core.knowledge!.service.recall(query,Math.min(5,limit),signal)
     return result.flatMap(hit=>'evidence_id' in hit&&typeof hit.evidence_id==='string'?[{evidence_id:hit.evidence_id,score:hit.score}]:[])
   }}:{})})
   const bridge = new RealtimeRuntimeBridge({
+    explicitMemory:()=>personalMemoryHolder.current,
     ...(options.memoryConsumerFingerprint ? {conversationConsumer: options.memoryConsumerFingerprint} : {}),
     runtime: core.runtime,
     retrieval,
@@ -1408,8 +1420,8 @@ export function composeRealtime(
   const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
   let sharedClient: MemoryLedgerClient | undefined
   const getClient = () => sharedClient ??= new MemoryLedgerClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
-  const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
-  const memoryGateway=local?new OpenAIModelGateway({baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,clock:new RealClock()}):core.gateway
+  const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
+  const memoryGateway=local?new OpenAIModelGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,clock:new RealClock()}):core.gateway
   const useLocalLedger=local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
   const createPersonalMemory = useLocalLedger ? () => {
     const memory = new SubstrateMemoryResource({client:getClient(),userId:local?.userId??options.settings.memory_user_id,

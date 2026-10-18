@@ -97,7 +97,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(failed){recovery.append(el('summary',t('未发送的卡片请求')),el('p',failed.text));const restore=button(t('放入空草稿'),()=>{c.draft=failed.text;c.state().references=failed.references??[];c.state().failed_card=null;update();draft.focus()},recovery);restore.disabled=Boolean(c.draft.trim()||c.submittedRequestId||c.isVoiceConversation);button(t('关闭'),()=>{c.state().failed_card=null;renderSource()},recovery)}
   referenceChips.replaceChildren()
   for(const ref of c.state().references??[]){
-   const list=ref.kind==='todo'?c.snapshot?.life?.todos:ref.kind==='goal'?c.snapshot?.life?.goals:ref.kind==='feed'?c.snapshot?.feed:[...(c.snapshot?.news?.items??[]),...(c.snapshot?.news?.saved??[])]
+   const list=ref.kind==='todo'?c.snapshot?.life?.todos:ref.kind==='goal'?c.snapshot?.life?.goals:ref.kind==='feed'?c.snapshot?.feed:ref.kind==='timeline'?c.snapshot?.timeline?.cards:[...(c.snapshot?.news?.items??[]),...(c.snapshot?.news?.saved??[])]
    const title=list?.find(item=>item.id===ref.id)?.title??ref.id
    const chip=button(t('引用 · {0} ×',title),()=>{c.state().references=c.state().references.filter(item=>item!==ref);renderSource()},referenceChips);chip.className='reference-chip';chip.setAttribute('aria-label',t('移除引用：{0}',title))
   }

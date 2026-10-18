@@ -1,3 +1,7 @@
+import {UsageLedger} from '../usage/ledger.js'
+import {reportUsage} from '../realtime/usage.js'
+import {homedir} from 'node:os'
+import {resolve} from 'node:path'
 import {feishuNotificationAdapter} from '../notifications/adapters/feishu.js';
 import {ClientServer} from '../server/client-server.js'
 import {ClientPairing} from '../server/client-pairing.js'
@@ -40,7 +44,7 @@ import {createRealtimeTelemetry} from '../realtime/telemetry.js'
 import type {ApprovalView as ExecutorApprovalView} from '../core/approval-port.js'
 import {buildIntegratedRealtimeAssembly, type IntegratedProviderRegistry} from './cascaded-realtime-assembly.js'
 
-export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage, environment = process.env}: {
+export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage: publishUsage, environment = process.env}: {
   /** Receives the live coding resource so the desktop host can change the new-session default. */
   readonly onCoding?: (coding: {updateDefaultBackend?(backend: CodingBackendId): void}) => void
   readonly onUsage?: UsageReporter
@@ -60,6 +64,9 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   else if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
   else requireSelectedCascadedRealtimeConfig(loadedSettings)
   if (remote) requireBlockingCredentials(loadedSettings)
+  const usage=new UsageLedger(resolve(loadedSettings.blackboard_path.replace(/^~(?=\/)/u,homedir())+'.usage.sqlite'))
+  ownership.own(()=>usage.close())
+  const onUsage:UsageReporter=report=>{usage.add(report);reportUsage(publishUsage,report)}
   const configuredCapabilities=loadCapabilityRegistry({environment:remote?{...environment,CAMERA_MODULE_ENABLED:'false'}:environment})
   const acceptanceCapabilities=acceptanceCapabilityRegistry(configuredCapabilities)
   const externalMcp = await prepareExternalMcp(withoutUncredentialedModules(acceptanceCapabilities, loadedSettings), stop.signal)
@@ -70,7 +77,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     ...loadedSettings, executors: loadedSettings.executors.filter(name => name !== 'codex'),
   }
   for (const override of capabilities.overrides) onDiagnostic(`[capability-override] ${override}`)
-  const knowledge = await prepareKnowledge(settings, capabilities, stop.signal)
+  const knowledge = await prepareKnowledge(settings, capabilities, stop.signal,onUsage)
   if (knowledge !== undefined) {
     ownership.own(() => knowledge.close())
     onKnowledge?.(knowledge)
@@ -277,7 +284,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       const memory = composition.realtime.personalMemory
       if (!(memory instanceof SubstrateMemoryResource)) throw Error('请先启用本地记忆')
       signal.throwIfAborted()
-      const changed=await memory.ingestEvidenceBatch(messages.map(message => ({sourceId:message.source_id,locator:message.locator,text:message.raw_text,observedAt:message.observed_at,kind:'im',...(message.sender_id?{im:{sender_id:message.sender_id,account_id:message.account_id,provider:'feishu',message_id:message.message_id,chat_id:message.chat_id,recipient_id:message.recipient_id,sender_name:message.sender_name,mention_ids:message.mention_ids,thread_id:message.thread_id,parent_id:message.parent_id,root_id:message.root_id,upper_message_id:message.upper_message_id,source_url:message.source_url,mention:message.mention,auto_capture:message.auto_capture}}:{}),...(message.processing_consent?{processingConsent:message.processing_consent}:{}),retentionUntil:message.retention_until,senderId:message.sender_id,accountId:message.account_id})))
+      const changed=await memory.ingestEvidenceBatch(messages.map(message => ({sourceId:message.source_id,locator:message.locator,text:message.raw_text,observedAt:message.observed_at,kind:'im',...(message.sender_id?{im:{sender_type:message.sender_type,sender_id:message.sender_id,account_id:message.account_id,provider:'feishu',message_id:message.message_id,chat_id:message.chat_id,recipient_id:message.recipient_id,sender_name:message.sender_name,mention_ids:message.mention_ids,thread_id:message.thread_id,parent_id:message.parent_id,root_id:message.root_id,upper_message_id:message.upper_message_id,source_url:message.source_url,mention:message.mention,auto_capture:message.auto_capture}}:{}),...(message.processing_consent?{processingConsent:message.processing_consent}:{}),retentionUntil:message.retention_until,senderId:message.sender_id,accountId:message.account_id})))
       signal.throwIfAborted()
       if(changed)await host.sourceChanged()
     },
@@ -345,8 +352,9 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   return {
     ...composition,
     phoneControl,
+    usage,
     closeAuxiliary: async () => {
-      try { await phoneQueue; await closePhone(); await Promise.all(guiExecutors.map(phone => phone.close())) } finally { closeSharedApproval(); telemetry.close() }
+      try { await phoneQueue; await closePhone(); await Promise.all(guiExecutors.map(phone => phone.close())) } finally { closeSharedApproval(); telemetry.close(); await usage.close() }
     },
   }
 }

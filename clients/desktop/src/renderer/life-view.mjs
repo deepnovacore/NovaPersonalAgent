@@ -48,6 +48,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
 export function renderProfile(panel,{state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate}){
  panel.append(el('h2','Profile · 关于我'))
  renderWarmup(panel,{warmup,command,button})
+ if(warmup)panel.append(el('p',warmup.automatic_available===false?'今日自动更新次数已用完，如需再次更新可手动触发。':'每天最多自动更新一次，额外更新可手动触发。'))
  const card=el('section');card.className='preference-card';panel.append(card)
  const confirmed=state?.profile?.about??'',suggested=state?.profile?.version>0?'':warmup?.draft?.about?.text??'',about=confirmed||suggested
  const work=state?.profile?.version>0?[]:warmup?.draft?.work??[]
@@ -67,7 +68,7 @@ export function renderProfile(panel,{state,news,warmup,command,button,local,pref
   button(about||work.length?'编辑概览':'自己写一段',()=>{local.profile={about:confirmed||[suggested,...work.map(item=>`${item.title}：${item.text}`)].filter(Boolean).join('\n\n'),version:state?.profile?.version??0};rerender()},actions)
   if(delegate)button('和 Nova 聊聊',()=>delegate('我想完善个人介绍，请根据已有资料和我一起调整。'),actions)
   // The draft is only on screen until the user writes their own; a first draft that is still working or has failed shows its own status box above.
-  if(!confirmed&&!(state?.profile?.version>0)&&warmup&&(warmup.draft||warmup.status==='idle')){const working=warmup.status==='working',update=button(working?'正在更新…':'立即更新',()=>command('profile.refresh',{}),actions);update.disabled=working;if(working)update.setAttribute('aria-busy','true')}
+  if(warmup){const working=warmup.status==='working',update=button(working?'正在更新…':'立即更新',()=>command('profile.refresh',{}),actions);update.disabled=working;if(working)update.setAttribute('aria-busy','true')}
  }
  renderInterests(panel,{news,warmup,command,button,local:preferencesLocal,rerender,delegate})
 }
