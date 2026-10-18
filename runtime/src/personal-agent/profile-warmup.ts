@@ -10,12 +10,13 @@ export const profileDraftSchema=z.object({
  interests:z.array(z.object({text:z.string().trim().min(1).max(100),refs}).strict()).max(8),
 }).strict()
 export type ProfileDraft=z.infer<typeof profileDraftSchema>
-export type ProfileInput=Pick<MemoryEntry,'id'|'version'|'content'|'origin'> & {observed_at?:string;source?:{project:string;document:string;kind?:'im'|'mail';relation?:'self'|'addressed'|'participant';sender_id?:string;sender_name?:string;thread_id?:string;message_id?:string;parent_id?:string;root_id?:string;upper_message_id?:string;recipient_ids?:string[];mention_ids?:string[]}}
-export type ProfileGenerator=(entries:readonly ProfileInput[],signal:AbortSignal)=>Promise<z.input<typeof profileDraftSchema>>
+export type ProfileInput=Pick<MemoryEntry,'id'|'version'|'content'|'origin'> & {identity_key?:string;observed_at?:string;source?:{project:string;document:string;kind?:'im'|'mail';relation?:'self'|'addressed'|'participant';sender_id?:string;sender_name?:string;thread_id?:string;message_id?:string;parent_id?:string;root_id?:string;upper_message_id?:string;recipient_ids?:string[];mention_ids?:string[]}}
+export interface ProfileObservation {kind:'people'|'work'|'style';text:string;refs:{entry_id:string;version:ProfileInput['version']}[]}
+export type ProfileGenerator=(entries:readonly ProfileInput[],signal:AbortSignal,observations?:readonly ProfileObservation[])=>Promise<z.input<typeof profileDraftSchema>>
 export interface ProfileOutcome {outcome:'ok'|'timeout'|'aborted'|'schema'|'evidence'|'consent'|'provider'|'persist';latency_ms:number;items:number}
 export interface ProfileWarmupOptions {participants?:boolean;report?:(outcome:ProfileOutcome)=>void;timeoutMs?:number;backoffMs?:readonly number[];minIntervalMs?:number}
 /** Raise this whenever the way a profile is generated changes: drafts written by an older pipeline are then replaced whole instead of being mixed into the new one. */
-export const PROFILE_GENERATION_VERSION='understanding-v5'
+export const PROFILE_GENERATION_VERSION='understanding-v8'
 const diskSchema=z.object({key:z.string(),generation_version:z.string().default(''),participants:z.boolean().default(false),news_cleanup_pending:z.boolean().default(false),draft:profileDraftSchema.nullable(),started_at:z.number().nonnegative().default(0),generated_at:z.number().nonnegative().default(0),stage:z.number().int().min(0).max(3).default(0)})
 const SOURCE_STAGES=[5*60_000,30*60_000,4*60*60_000] as const
 interface Ref {entry_id:string;version:ProfileInput['version']}

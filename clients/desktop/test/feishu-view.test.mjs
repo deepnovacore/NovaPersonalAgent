@@ -195,7 +195,7 @@ test('Nova stays visible while all contextual tabs live in the right topbar',asy
  for(const page of ['todos','profile','timeline']){await body.querySelectorAll('button').find(node=>node.dataset.page===page).listeners.click();assert.equal(pane.hidden,false);assert.equal(pane.parentElement,parent)}
  assert.equal(body.querySelectorAll('button').some(node=>node.className==='chat-toggle'||node.className==='chat-close'),false)
  const tabs=body.querySelectorAll('button').filter(node=>node.className==='workspace-tab').map(node=>node.children.find(c=>c.className==='workspace-tab-label')?.textContent)
- assert.deepEqual(tabs,['时间线','待办','想法','目标','资讯','任务','关于我']);assert.equal(calls.length,0)
+ assert.deepEqual(tabs,['时间线','待办','想法','目标','资讯','任务','Profile']);assert.equal(calls.length,0)
 })
 
 test('guide progress follows actual application and OAuth state, with an explicit waiting handoff',()=>{
@@ -246,7 +246,7 @@ test('permanent memory deletion requires its own confirmation and reports incomp
  const sent=[],view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}});view.controller.connect()
  view.receive({type:'personal.state',revision:1,memory:{entries:[{id:'selected',version:3,content:'合成记忆',kind:'preference',status:'active',source_refs:[]}]},capabilities:{memory:{list:true,purgeEntry:true}}})
  const click=label=>body.querySelectorAll('button').find(node=>node.textContent===label||node.children.some(c=>c.className==='workspace-tab-label'&&c.textContent===label)).listeners.click()
- await click('关于我');await click('彻底删除')
+ await click('Profile');await click('彻底删除')
  assert.equal(sent.filter(frame=>frame.method==='memory.purge').length,0)
  const pending=click('确认彻底删除');const request=sent.at(-1)
  assert.equal(request.method,'memory.purge');assert.deepEqual(request.params,{id:'selected',expected_version:3})

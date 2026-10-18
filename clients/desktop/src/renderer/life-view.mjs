@@ -45,8 +45,8 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
   card.append(footer)
  }
 }
-export function renderProfile(panel,{state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate}){
- panel.append(el('h2','Profile · 关于我'))
+export function renderProfile(panel,{products,state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate}){
+ panel.append(el('h2','Profile'))
  renderWarmup(panel,{warmup,command,button})
  const card=el('section');card.className='preference-card';panel.append(card)
  const confirmed=state?.profile?.about??'',suggested=state?.profile?.version>0?'':warmup?.draft?.about?.text??'',about=confirmed||suggested
@@ -68,6 +68,13 @@ export function renderProfile(panel,{state,news,warmup,command,button,local,pref
   if(delegate)button('和 Nova 聊聊',()=>delegate('我想完善个人介绍，请根据已有资料和我一起调整。'),actions)
   // The draft is only on screen until the user writes their own; a first draft that is still working or has failed shows its own status box above.
   if(!confirmed&&!(state?.profile?.version>0)&&warmup&&(warmup.draft||warmup.status==='idle')){const working=warmup.status==='working',update=button(working?'正在更新…':'立即更新',()=>command('profile.refresh',{}),actions);update.disabled=working;if(working)update.setAttribute('aria-busy','true')}
+ }
+ if(products?.projects?.length){
+  const section=el('section',undefined,'profile-projects');section.append(el('h3','项目与参与'));panel.append(section)
+  for(const project of products.projects){const row=el('article',undefined,'profile-project');row.append(el('h4',project.name),el('p',project.summary));const controls=el('div',undefined,'card-actions');row.append(controls)
+   for(const [value,label]of [['participating','正在参与'],['historical','历史项目'],['reference','参考资料'],['automatic','自动判断']]){const b=button(label,()=>command('projects.correct',{id:project.id,value}),controls);b.className='quiet';b.setAttribute('aria-pressed',String(products.corrections?.[project.id]===value))}
+   section.append(row)
+  }
  }
  renderInterests(panel,{news,warmup,command,button,local:preferencesLocal,rerender,delegate})
 }

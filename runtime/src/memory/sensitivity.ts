@@ -137,12 +137,15 @@ function *boundedAbsolutePathCandidates(line: string): Generator<string> {
 
 /** Removes credential-bearing spans while retaining the non-sensitive field context. */
 export class SensitiveContentPolicy {
-  scrub(_field: string, value: string): ScrubResult {
+  scrub(field: string, value: string): ScrubResult {
     let matches = 0
     let scrubbed = value
     const lines=value.split('\n'),credentialLines=new Set<number>()
     for(let index=0;index<lines.length;index++){
       const token=lines[index]!.trim()
+      // Free-form message bodies may contain bare credentials without a password label.
+      // These standalone tokens have no useful role in a personal portrait.
+      if(field==='source_processing'&&(/^(?:[A-Za-z_-]+-)?[a-fA-F0-9]{32,}$/u.test(token)||/^(?=.*[A-Za-z])(?=.*\d)(?=.*[!@#$%^&*+=])[A-Za-z\d!@#$%^&*_.+=-]{8,128}$/u.test(token)))credentialLines.add(index)
       if(/^["']?(?:密码|口令|密钥|私钥|访问令牌)["']?\s*[:：=]?\s*$/u.test(token)&&/^[A-Za-z0-9!@#$%^&*_.+=\/-]{3,}$/u.test(lines[index+1]?.trim()??''))credentialLines.add(index+1)
     }
     scrubbed=lines.map((line,index)=>credentialLines.has(index)?(matches++,'[redacted]'):line).join('\n')
@@ -176,7 +179,7 @@ export class SensitiveContentPolicy {
       return '[redacted]'
     })
     scrubbed = replaceAll(scrubbed, /(?:密码|口令|密钥|私钥|访问令牌|CVC|CVV|安全码)[ \t]+[`"']?[A-Za-z0-9!@#$%^&*_.+=\/-]{3,}[`"']?/giu,()=>{matches++;return '[redacted]'})
-    scrubbed = replaceAll(scrubbed, /\b(?:sk|rk|pk|ak|xox[baprs]|ghp|github_pat)[_-][A-Za-z0-9][A-Za-z0-9_-]{11,}\b/giu, () => {
+    scrubbed = replaceAll(scrubbed, /\b(?:sk|rk|pk|ak|tskey|xox[baprs]|ghp|github_pat)[_-][A-Za-z0-9][A-Za-z0-9_-]{11,}\b/giu, () => {
       matches += 1
       return '[redacted]'
     })

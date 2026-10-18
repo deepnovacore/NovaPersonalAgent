@@ -137,3 +137,21 @@ test('importance stays an explicit versioned mutation and is separate from the m
  star.listeners.click();assert.deepEqual(commands,[['life.mutate',{op:'update',kind:'todo',id:'date',expected_version:1,importance:'normal'}]])
  const action=card.querySelectorAll('.timeline-actions')[0].querySelectorAll('button')[0];assert.equal(action.textContent,'拆成行动步骤');action.listeners.click();assert.deepEqual(calls[0][0],[{kind:'todo',id:'date',version:1}]);assert.match(calls[0][1],/Draft/)
 })
+
+test('shared suggestions appear without a saved todo and adoption uses the shared command',()=>{
+ const state={settings:{timezone:'Asia/Shanghai'},life:{todos:[],goals:[]},derived_understanding:{sources:[],suggestions:[{id:'suggestion',kind:'action',title:'Review interface',body:'The design needs review',due:'2026-10-12',todo_id:null,refs:[]}]},profile_preparation:{status:'ready'}}
+ const calls=[],{parent}=render(state,{command:(...args)=>calls.push(args)})
+ const card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='suggestion');assert.ok(card)
+ assert.equal(card.dataset.suggested,'true')
+ card.querySelectorAll('button').find(node=>node.textContent==='加入待办').listeners.click()
+ assert.deepEqual(calls,[['context.adopt',{id:'suggestion'}]])
+ assert.equal(state.life.todos.length,0)
+})
+
+test('shared suggestion preserves its original IM channel and source URL',()=>{
+ const state={life:{todos:[]},derived_understanding:{sources:[{id:'message',type:'im',provider:'feishu',label:'Project chat',observed_at:'2026-10-13T03:51:00Z',url:'https://example.com/message'}],suggestions:[{id:'s',kind:'action',title:'Review',body:'Discuss the proposal',due:null,todo_id:null,refs:[{entry_id:'message',version:'1'}]}]}}
+ const source=timelineGroups(state)[0].items[0].sources[0]
+ assert.equal(source.type,'im');assert.equal(source.provider,'feishu');assert.equal(source.url,'https://example.com/message')
+ const {parent}=render(state)
+ assert.ok(parent.querySelectorAll('strong').some(node=>node.textContent==='飞书'))
+})

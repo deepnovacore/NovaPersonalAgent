@@ -10,7 +10,7 @@ import {BoundedJsonStore} from '../storage/bounded-json.js'
 export const newsArticleSchema=z.object({article_id:z.string().min(1).max(512),source_id:z.string().min(1).max(256),url:z.string().url().max(4096).refine(value=>['https:','http:'].includes(new URL(value).protocol),'news_web_url_required'),content_hash:z.string().min(1).max(256),title:z.string().max(300),summary:z.string().max(1500),published_at:z.string().nullable()}).strict()
 const newsSourceSchema=newsArticleSchema.extend({action:z.literal('user_conversion'),converted_at:z.string().datetime()})
 const importanceSchema=z.enum(['normal','high'])
-const fields={importance:importanceSchema.optional(),sources:z.array(sourceTagSchema).max(256).optional(),provenance_refs:z.array(z.string().max(600)).max(256).optional(),auto_recorded:z.boolean().optional(),source_changed:z.boolean().optional(),news_source:newsSourceSchema.optional(),id:z.string(),version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200),note:z.string().max(4000),created_at:z.string(),updated_at:z.string()}
+const fields={source_suggestion_id:z.string().max(128).optional(),importance:importanceSchema.optional(),sources:z.array(sourceTagSchema).max(256).optional(),provenance_refs:z.array(z.string().max(600)).max(256).optional(),auto_recorded:z.boolean().optional(),source_changed:z.boolean().optional(),news_source:newsSourceSchema.optional(),id:z.string(),version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200),note:z.string().max(4000),created_at:z.string(),updated_at:z.string()}
 const todoSchema=z.object({...fields,status:z.enum(['open','doing','waiting','done','cancelled']),due:z.string().date().nullable(),goal_id:z.string().nullable(),idea_id:z.string().nullable()})
 const ideaSchema=z.object({...fields,status:z.enum(['active','archived']),goal_id:z.string().nullable()})
 const goalSchema=z.object({...fields,status:z.enum(['active','paused','completed','archived']),success_criteria:z.string().max(2000),idea_id:z.string().nullable()})
@@ -27,6 +27,7 @@ export type LifeBackendSource=LifeBackend|(()=>LifeBackend|undefined)
 export const emptyLifeState=():LifeState=>({todos:[],ideas:[],goals:[],profile:{about:'',version:0},receipts:{}})
 const kind=z.enum(['todo','idea','goal'])
 export const lifeInputSchema=z.discriminatedUnion('op',[
+ z.object({op:z.literal('from_suggestion'),kind:kind.default('todo'),suggestion_id:z.string().min(1).max(128),title:z.string().min(1).max(200),note:z.string().max(4000),due:z.string().date().nullable(),todo_id:z.string().nullable(),sources:z.array(sourceTagSchema).max(64),provenance_refs:z.array(z.string()).min(1).max(64)}).strict(),
  z.object({op:z.literal('from_news'),kind,title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),article:newsArticleSchema}).strict(),
  z.object({op:z.literal('create'),kind,importance:importanceSchema.optional(),title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
  z.object({op:z.literal('update'),kind,id:z.string(),expected_version:z.number().int().nonnegative(),importance:importanceSchema.optional(),title:z.string().trim().min(1).max(200).optional(),note:z.string().max(4000).optional(),status:z.string().optional(),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
@@ -49,7 +50,14 @@ export function applyLifeMutation(state:LifeState,raw:unknown,requestId:string,n
   if('goal_id'in p&&p.goal_id){const previous=p.op==='update'?(p.kind==='todo'?next.todos:next.ideas).find(r=>r.id===p.id)?.goal_id:null
    if(!next.goals.some(g=>g.id===p.goal_id&&(g.status!=='archived'||previous===p.goal_id)))throw Error('goal_not_found')
   }
-  if(p.op==='undo_create'){const old=next.todos.find(r=>r.id===p.id);if(!old)throw Error('item_not_found');if(old.version!==p.expected_version)throw Error('version_conflict');next.todos=next.todos.filter(r=>r.id!==p.id);result={id:p.id,version:old.version}}
+  if(p.op==='from_suggestion'){
+   const existing=[...next.todos,...next.ideas,...next.goals].find(todo=>todo.source_suggestion_id===p.suggestion_id)
+   if(existing)result=existing
+   else if(p.kind==='idea'){const row={...base(p.title,p.note),status:'active' as const,goal_id:null,source_suggestion_id:p.suggestion_id,sources:p.sources,provenance_refs:p.provenance_refs};next.ideas.push(row);result=row}
+   else if(p.kind==='goal'){const row={...base(p.title,p.note),status:'active' as const,success_criteria:p.note,idea_id:null,source_suggestion_id:p.suggestion_id,sources:p.sources,provenance_refs:p.provenance_refs};next.goals.push(row);result=row}
+   else if(p.todo_id){const todo=next.todos.find(todo=>todo.id===p.todo_id);if(!todo)throw Error('item_not_found');todo.note=[todo.note,p.note].filter(Boolean).join('\n').slice(0,4000);todo.version++;todo.updated_at=now;todo.source_suggestion_id=p.suggestion_id;todo.provenance_refs=[...new Set([...(todo.provenance_refs??[]),...p.provenance_refs])];todo.sources=[...(todo.sources??[]),...p.sources];result=todo}
+   else{const todo={...base(p.title,p.note),status:'open' as const,due:p.due,goal_id:null,idea_id:null,source_suggestion_id:p.suggestion_id,sources:p.sources,provenance_refs:p.provenance_refs};next.todos.push(todo);result=todo}
+  }else if(p.op==='undo_create'){const old=next.todos.find(r=>r.id===p.id);if(!old)throw Error('item_not_found');if(old.version!==p.expected_version)throw Error('version_conflict');next.todos=next.todos.filter(r=>r.id!==p.id);result={id:p.id,version:old.version}}
   else if(p.op==='profile'){if(next.profile.version!==p.expected_version)throw Error('version_conflict');next.profile={about:p.about,version:p.expected_version+1};result={id:'profile',version:next.profile.version}}
   else if(p.op==='from_news'){
    const rows=p.kind==='todo'?next.todos:p.kind==='idea'?next.ideas:next.goals
@@ -113,6 +121,7 @@ export class LifeService{
   if(fresh.revision===this.#revision&&JSON.stringify(fresh.state)===JSON.stringify(this.#state))return
   this.#state=lifeStateSchema.parse(fresh.state);this.#revision=fresh.revision;this.changed()
  });this.#tail=run.catch(()=>{/* preserve the mutation queue after a failed refresh */});return run}
+ receipt(requestId:string){return structuredClone(this.#state.receipts[requestId]?.result)}
  snapshot(){const state=structuredClone(this.#state);return {todos:state.todos.map(r=>({...r,kind:'todo' as const})),ideas:state.ideas.map(r=>({...r,kind:'idea' as const})),profile:state.profile,goals:state.goals.map(g=>{const todos=state.todos.filter(t=>t.goal_id===g.id&&t.status!=='cancelled');return {...g,kind:'goal' as const,progress:{done:todos.filter(t=>t.status==='done').length,total:todos.length}}})}}
  async completeTaskTodo(task:TaskRecord):Promise<'synced'|'conflict'>{
   if(!task.todo_ref)return 'synced'

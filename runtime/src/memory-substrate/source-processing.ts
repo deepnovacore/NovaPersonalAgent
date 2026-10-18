@@ -1,21 +1,27 @@
+import {understandingProductsSchema,projectCorrectionSchema} from '../personal-agent/understanding-products.js'
 import {randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {LedgerDatabase} from '../memory-ledger/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {sha256} from './source-state.js'
 import {effectiveEvidence,processingStamp,type EvidenceRecord} from './store.js'
-import {profileDraftSchema} from '../personal-agent/profile-warmup.js'
+import {profileDraftSchema,PROFILE_GENERATION_VERSION} from '../personal-agent/profile-warmup.js'
 
 const id=z.string().min(1).max(512)
 const cursorSchema=z.object({seq:z.number().int().nonnegative(),offset:z.number().int().nonnegative()}).strict()
 export const processingRefSchema=z.object({evidence_id:id,stamp:id,start:z.number().int().nonnegative(),end:z.number().int().positive()}).strict().refine(r=>r.end>r.start&&r.end-r.start<=4000)
 export type ProcessingRef=z.infer<typeof processingRefSchema>
+export const processingObservationSchema=z.object({kind:z.enum(['people','work','style']),text:z.string().trim().min(1).max(400),refs:z.array(processingRefSchema).min(1).max(8)}).strict()
+export type ProcessingObservation=z.infer<typeof processingObservationSchema>
+
+const profileCacheSchema=z.object({about_parts:z.array(profileDraftSchema.shape.about.unwrap()).optional(),draft:profileDraftSchema,refs:z.array(processingRefSchema),products:understandingProductsSchema.optional(),generated_at:z.string().optional()}).extend({generation_version:z.string().optional(),fact_scopes:z.record(z.string(),z.array(processingRefSchema)).optional(),publication_key:z.string().optional(),synthesis_key:z.string().optional(),profile_pending:z.boolean().optional()})
+const storedIdentitySchema=z.object({id:z.string(),kind:z.string(),title:z.string(),project_id:z.string().nullable(),source_key:z.string()})
 export const processingTopicSchema=z.object({title:z.string().trim().min(1).max(120),summary:z.string().trim().min(1).max(1500),refs:z.array(processingRefSchema).min(1).max(8)}).strict()
-const batchSchema=z.object({id,prefix:id,provider:id,items:z.array(processingRefSchema).min(1).max(8),end:cursorSchema,status:z.enum(['claimed','bound','completed','failed','invalidated']),task_id:id.nullable(),run_id:id.nullable(),created_at:z.string(),result_hash:id.nullable()}).strict()
+const batchSchema=z.object({profile_only:z.boolean().optional(),priority:z.boolean().optional(),correction_version:z.string().optional(),id,prefix:id,provider:id,items:z.array(processingRefSchema).min(1).max(8),end:cursorSchema,status:z.enum(['claimed','bound','completed','failed','invalidated']),task_id:id.nullable(),run_id:id.nullable(),created_at:z.string(),result_hash:id.nullable()}).strict()
 export type ProcessingBatch=z.infer<typeof batchSchema>
 const stateSchema=z.object({cursor:cursorSchema,completed_batches:z.number().int().nonnegative(),processed_chars:z.number().int().nonnegative(),last_success:z.string().nullable()}).strict()
-export const SOURCE_PROCESSING_VERSION='source-processing-v2'
-const base=z.object({prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,recipe:id.default(SOURCE_PROCESSING_VERSION)})
+export const SOURCE_PROCESSING_VERSION='source-processing-v5'
+const base=z.object({prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,recipe:id.default(SOURCE_PROCESSING_VERSION),participants:z.boolean().default(false)})
 const owner={batch_id:id,task_id:id,run_id:id}
 export const processingRequestSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('claim')}).strict(),
@@ -30,7 +36,16 @@ export const processingRequestSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('topics'),batch_id:id.optional(),after:z.number().int().nonnegative().default(0),limit:z.number().int().min(1).max(100).default(20),query:z.string().trim().max(200).default('')}).strict(),
  z.object({action:z.literal('evidence'),...owner,refs:z.array(processingRefSchema).min(1).max(8).refine(refs=>refs.reduce((sum,ref)=>sum+ref.end-ref.start,0)<=16000)}).strict(),
  z.object({action:z.literal('profile'),batch_id:id.optional()}).strict(),
- z.object({action:z.literal('publish'),...owner,expected_revision:z.number().int().nonnegative(),draft:profileDraftSchema,refs:z.array(processingRefSchema).min(1).max(64)}).strict(),
+ z.object({action:z.literal('observe'),...owner,refs:z.array(processingRefSchema).min(1).max(8),observations:z.array(processingObservationSchema).max(24)}).strict(),
+ z.object({action:z.literal('profile_context'),...owner}).strict(),
+ z.object({action:z.literal('identities'),...owner,refs:z.array(processingRefSchema).min(1).max(8)}).strict(),
+ z.object({action:z.literal('products'),include_dismissed:z.boolean().optional()}).strict(),
+ z.object({action:z.literal('confirm_cleanup')}).strict(),
+ z.object({action:z.literal('dismiss'),id}).strict(),
+ z.object({action:z.literal('correct_project'),id,value:projectCorrectionSchema}).strict(),
+ z.object({action:z.literal('refresh')}).strict(),
+ z.object({action:z.literal('project_state'),ids:z.array(id).min(1).max(512),fingerprint:id}).strict(),
+ z.object({action:z.literal('publish'),...owner,expected_revision:z.number().int().nonnegative(),draft:profileDraftSchema,refs:z.array(processingRefSchema).max(128),profile_context_key:id.optional(),defer_profile:z.boolean().optional(),product_refs:z.array(processingRefSchema).max(8).optional(),products:understandingProductsSchema.optional()}).strict(),
 ])
 export type ProcessingRequest=z.input<typeof processingRequestSchema>
 
@@ -47,7 +62,10 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  CREATE TABLE IF NOT EXISTS processing_receipts(prefix TEXT NOT NULL,provider TEXT NOT NULL,ref_key TEXT NOT NULL,evidence_id TEXT NOT NULL,PRIMARY KEY(prefix,provider,ref_key));
  CREATE TABLE IF NOT EXISTS processing_topics(seq INTEGER PRIMARY KEY AUTOINCREMENT,prefix TEXT NOT NULL,provider TEXT NOT NULL,batch_id TEXT NOT NULL,payload_json TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS processing_topics_scope ON processing_topics(prefix,provider,seq);`)
- db.exec(`CREATE TABLE IF NOT EXISTS processing_heads(key TEXT PRIMARY KEY,revision INTEGER NOT NULL);
+ db.exec(`CREATE TABLE IF NOT EXISTS processing_observations(prefix TEXT NOT NULL,provider TEXT NOT NULL,key TEXT NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(prefix,provider,key));
+ CREATE TABLE IF NOT EXISTS processing_identities(prefix TEXT NOT NULL,id TEXT NOT NULL,evidence_id TEXT NOT NULL,source_key TEXT NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(prefix,id));
+ CREATE TABLE IF NOT EXISTS processing_decisions(prefix TEXT NOT NULL,kind TEXT NOT NULL,id TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(prefix,kind,id));
+ CREATE TABLE IF NOT EXISTS processing_heads(key TEXT PRIMARY KEY,revision INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS processing_profiles(prefix TEXT NOT NULL,provider TEXT NOT NULL,revision INTEGER NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(prefix,provider));
  CREATE TABLE IF NOT EXISTS processing_reads(batch_id TEXT NOT NULL,ref_key TEXT NOT NULL,PRIMARY KEY(batch_id,ref_key));
  CREATE TRIGGER IF NOT EXISTS processing_head_insert AFTER INSERT ON memory_message_heads BEGIN
@@ -65,14 +83,23 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  // Erase revoked clauses, retain unrelated profile clauses, and requeue surviving mixed-topic inputs.
  db.exec(`DROP TRIGGER IF EXISTS processing_erase_derived;
  CREATE TRIGGER processing_erase_derived AFTER DELETE ON memory_evidence BEGIN
+ INSERT INTO processing_decisions(prefix,kind,id,value)
+ SELECT prefix,'policy','cleanup','pending' FROM processing_profiles p WHERE EXISTS(
+ SELECT 1 FROM json_each(p.payload_json,'$.draft.interests') interest,json_each(interest.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)
+ ON CONFLICT(prefix,kind,id) DO UPDATE SET value='pending';
+ DELETE FROM processing_identities WHERE evidence_id=OLD.id;
+ DELETE FROM processing_observations WHERE EXISTS(SELECT 1 FROM json_each(payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')=OLD.id);
  INSERT INTO processing_events(prefix,evidence_id) SELECT substr(source_id,1,9+instr(substr(source_id,10),':')),id FROM memory_evidence WHERE id IN (${affected}) AND id<>OLD.id;
  DELETE FROM processing_receipts WHERE evidence_id=OLD.id OR evidence_id IN (${affected});
  DELETE FROM processing_topics WHERE EXISTS(SELECT 1 FROM json_each(processing_topics.payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')=OLD.id);
- UPDATE processing_profiles SET revision=revision+1,payload_json=json_object('draft',json_object(
+ UPDATE processing_profiles SET revision=revision+1,payload_json=json_set(payload_json,'$.draft',json_object(
  'about',CASE WHEN EXISTS(SELECT 1 FROM json_each(payload_json,'$.draft.about.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id) THEN NULL ELSE json_extract(payload_json,'$.draft.about') END,
  'work',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.work') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
  'interests',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.interests') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)))),
- 'refs',json((SELECT json_group_array(json(r.value)) FROM json_each(payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')<>OLD.id)))
+ '$.refs',json((SELECT json_group_array(json(r.value)) FROM json_each(payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')<>OLD.id)),
+ '$.about_parts',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.about_parts') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
+ '$.products.projects',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.products.projects') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
+ '$.products.suggestions',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.products.suggestions') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))))
  WHERE EXISTS(SELECT 1 FROM json_each(processing_profiles.payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')=OLD.id);
  END;`)
  const scope=(source:string)=>`substr(${source},1,9+instr(substr(${source},10),':'))`
@@ -91,6 +118,7 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
   db.exec(`CREATE TRIGGER IF NOT EXISTS processing_${table}_update AFTER UPDATE ON ${table} WHEN ${changed}
    BEGIN INSERT INTO processing_events(prefix,evidence_id) SELECT ${scope('e.source_id')},e.id FROM memory_evidence e WHERE ${where}; END;`)
  }
+ db.exec(`CREATE TRIGGER IF NOT EXISTS processing_correction_insert AFTER INSERT ON memory_revisions WHEN json_extract(NEW.payload_json,'$.written_by')='user_correction' BEGIN INSERT INTO processing_events(prefix,evidence_id) SELECT substr(e.source_id,1,9+instr(substr(e.source_id,10),':')),e.id FROM memory_evidence e,json_each(NEW.payload_json,'$.evidence_refs') refs WHERE e.id=refs.value AND json_extract(e.payload_json,'$.source_kind')='user_correction'; END;`)
  // Ledger initialization runs in a transaction. Existing evidence is bootstrapped once.
  db.exec(`INSERT INTO processing_events(prefix,evidence_id) SELECT ${scope('source_id')},id FROM memory_evidence WHERE NOT EXISTS(SELECT 1 FROM processing_meta WHERE id=1);
  INSERT OR IGNORE INTO processing_meta VALUES(1);`)
@@ -98,26 +126,33 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  }catch(error){db.exec('ROLLBACK TO processing_initialize; RELEASE processing_initialize');throw error}
 }
 
-function source(db:LedgerDatabase,prefix:string,provider:string,evidenceId:string,recipe:string):{record:EvidenceRecord;stamp:string}|null{
+function joinAbout(parts:z.infer<typeof profileDraftSchema>['about'][]){
+ const selected:NonNullable<z.infer<typeof profileDraftSchema>['about']>[]=[];let length=0
+ for(const part of parts){if(!part||length+part.text.length+2>2600)continue;selected.push(part);length+=part.text.length+2}
+ return selected.length?{text:selected.map(p=>p.text).join('\n\n'),refs:[...new Map(selected.flatMap(p=>p.refs).map(ref=>[ref.entry_id,ref])).values()].slice(0,64)}:null
+}
+function source(db:LedgerDatabase,prefix:string,provider:string,evidenceId:string,recipe:string,participants=false):{record:EvidenceRecord;stamp:string}|null{
  const record=effectiveEvidence(db,evidenceId,{purpose:'extraction',provider})
- if(!record?.raw_text||!record.id.startsWith(prefix)||!record.source_id.startsWith(prefix)||!['file','mail','im'].includes(record.source_kind))return null
+ if(!record?.raw_text||!record.id.startsWith(prefix)||!record.source_id.startsWith(prefix)||!['file','mail','im','conversation','user_correction'].includes(record.source_kind))return null
+ if(record.source_kind==='user_correction'&&!db.prepare("SELECT 1 FROM memory_revisions r,json_each(r.payload_json,'$.evidence_refs') refs WHERE refs.value=? AND r.revision=(SELECT max(v.revision) FROM memory_revisions v WHERE v.entry_id=r.entry_id) AND json_extract(r.payload_json,'$.op')<>'tombstone' AND json_extract(r.payload_json,'$.kind') NOT IN ('todo','idea','goal','profile') LIMIT 1").get(record.id))return null
  // Content-addressed message versions retain history; only their current head is eligible.
  if(['mail','im'].includes(record.source_kind)){
   const head=db.prepare('SELECT evidence_id FROM memory_message_heads WHERE key=?').get(sha256(canonicalJson([record.source_id,record.locator])))
   if(head?.evidence_id!==undefined&&head.evidence_id!==record.id)return null
   if(!head&&db.prepare("SELECT 1 FROM memory_evidence WHERE source_id=? AND json_extract(payload_json,'$.locator')=? AND rowid>(SELECT rowid FROM memory_evidence WHERE id=?) LIMIT 1").get(record.source_id,record.locator,record.id))return null
   const m=record.source_metadata
-  if(!m||(record.source_kind==='im'?m.sender_id!==m.recipient_id&&m.mention!=='direct':m.sender_id!==m.account_id))return null
+  if(!m||(record.source_kind==='im'?m.sender_id!==m.recipient_id&&m.mention!=='direct'&&!participants:m.sender_id!==m.account_id))return null
  }
  const grant=processingStamp(db,[record.id],'extraction',provider)
  const headRevision=db.prepare('SELECT revision FROM processing_heads WHERE key=?').get(sha256(canonicalJson([record.source_id,record.locator])))?.revision??0
- return grant?{record,stamp:sha256(canonicalJson({record,grant,headRevision,recipe,algorithm:SOURCE_PROCESSING_VERSION}))}:null
+ const project=db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='git' AND id=?").get(prefix,evidenceId)?.value??null
+ return grant?{record,stamp:sha256(canonicalJson({record,grant,headRevision,recipe,project,algorithm:SOURCE_PROCESSING_VERSION}))}:null
 }
-function readRefs(db:LedgerDatabase,prefix:string,provider:string,refs:ProcessingRef[],recipe:string){
+function readRefs(db:LedgerDatabase,prefix:string,provider:string,refs:ProcessingRef[],recipe:string,participants=false){
  const items=[]
- for(const ref of refs){const current=source(db,prefix,provider,ref.evidence_id,recipe)
+ for(const ref of refs){const current=source(db,prefix,provider,ref.evidence_id,recipe,participants)
   if(current?.stamp!==ref.stamp||ref.end>current.record.raw_text!.length)return null
-  items.push({...ref,text:current.record.raw_text!.slice(ref.start,ref.end),version:current.record.hash,source_kind:current.record.source_kind,observed_at:current.record.observed_at,source_metadata:current.record.source_metadata??null,locator:current.record.locator})
+  items.push({...ref,source_key:sha256(canonicalJson([current.record.source_id,current.record.locator])),text:current.record.raw_text!.slice(ref.start,ref.end),version:current.record.hash,source_kind:current.record.source_kind,observed_at:current.record.observed_at,source_metadata:current.record.source_metadata??null,locator:current.record.locator})
  }
  return {items}
 }
@@ -126,13 +161,31 @@ function saveState(db:LedgerDatabase,prefix:string,provider:string,state:z.infer
 
 /** Runs exclusively inside the memory worker transaction. No timers or model calls. */
 export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unknown{
- const fields=z.record(z.string(),z.unknown()).parse(input),{prefix,provider:consumer,recipe}=base.parse(fields)
- const provider=sha256(canonicalJson({consumer,recipe,algorithm:SOURCE_PROCESSING_VERSION}))
- const {prefix:ignoredPrefix,provider:ignoredProvider,recipe:ignoredRecipe,...request}=fields
- void ignoredPrefix;void ignoredProvider;void ignoredRecipe
+ const fields=z.record(z.string(),z.unknown()).parse(input),{prefix,provider:consumer,recipe,participants}=base.parse(fields)
+ const provider=sha256(canonicalJson({consumer,recipe,participants,algorithm:SOURCE_PROCESSING_VERSION}))
+ const {prefix:ignoredPrefix,provider:ignoredProvider,recipe:ignoredRecipe,participants:ignoredParticipants,...request}=fields
+ void ignoredPrefix;void ignoredProvider;void ignoredRecipe;void ignoredParticipants
  const q=processingRequestSchema.parse(request)
+ const decision=(kind:string,key:string,value:string)=>db.prepare('INSERT INTO processing_decisions VALUES(?,?,?,?) ON CONFLICT(prefix,kind,id) DO UPDATE SET value=excluded.value').run(prefix,kind,key,value)
+ const priorRecipe=db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='active_recipe'").get(prefix)
+ if(priorRecipe?priorRecipe.value!==provider:!!db.prepare('SELECT 1 FROM processing_profiles WHERE prefix=? AND provider<>? LIMIT 1').get(prefix,provider))decision('policy','cleanup','pending')
+ decision('policy','active_recipe',provider)
+ const priorPolicy=db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='participants'").get(prefix)
+ if(priorPolicy?.value==='true'&&!participants){
+  decision('policy','cleanup','pending')
+  db.prepare('DELETE FROM processing_profiles WHERE prefix=?').run(prefix)
+  db.prepare('DELETE FROM processing_observations WHERE prefix=?').run(prefix)
+ }
+ decision('policy','participants',String(participants))
+ if(q.action==='project_state'){
+  for(const id of q.ids){if(!source(db,prefix,consumer,id,recipe,participants))continue;const prior=db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='git' AND id=?").get(prefix,id);if(prior?.value===q.fingerprint)continue;decision('git',id,q.fingerprint);db.prepare('INSERT INTO processing_events(prefix,evidence_id) VALUES(?,?)').run(prefix,id)}
+  return {ok:true}
+ }
+ if(q.action==='confirm_cleanup'){decision('policy','cleanup','done');return {ok:true}}
+
  const saved=db.prepare('SELECT payload_json FROM processing_state WHERE prefix=? AND provider=?').get(prefix,provider)
- const state=saved?stateSchema.parse(JSON.parse(String(saved.payload_json))):{cursor:{seq:0,offset:0},completed_batches:0,processed_chars:0,last_success:null}
+ let state=saved?stateSchema.parse(JSON.parse(String(saved.payload_json))):{cursor:{seq:0,offset:0},completed_batches:0,processed_chars:0,last_success:null}
+ const correctionVersion=()=>sha256(canonicalJson(db.prepare("SELECT id,value FROM processing_decisions WHERE prefix=? AND kind='project' ORDER BY id").all(prefix)))
  const active=()=>{const row=db.prepare("SELECT payload_json FROM processing_batches WHERE prefix=? AND provider=? AND status IN ('claimed','bound')").get(prefix,provider);return row?batchSchema.parse(JSON.parse(String(row.payload_json))):null}
  if(q.action==='retire'){
   const row=db.prepare('SELECT payload_json FROM processing_batches WHERE id=? AND prefix=?').get(q.batch_id,prefix)
@@ -151,12 +204,33 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
  }
  if(q.action==='claim'){
   const existing=active();if(existing)return existing
+  if(db.prepare("SELECT 1 FROM processing_decisions WHERE prefix=? AND kind='refresh' AND id=? AND value='pending'").get(prefix,provider)){
+   db.prepare('DELETE FROM processing_receipts WHERE prefix=? AND provider=?').run(prefix,provider);db.prepare('DELETE FROM processing_state WHERE prefix=? AND provider=?').run(prefix,provider)
+   state={cursor:{seq:0,offset:0},completed_batches:0,processed_chars:0,last_success:null};decision('refresh',provider,'done');decision('warmup',provider,'pending')
+  }
   if(db.prepare("SELECT 1 FROM processing_batches WHERE prefix=? AND status IN ('claimed','bound')").get(prefix))throw Error('STORE_OPERATION_CONFLICT')
+  // A first/explicit refresh starts with recent authorized statements. Its cursor stays
+  // put: ordinary receipts then deduplicate these slices without skipping older files.
+  if(!db.prepare("SELECT 1 FROM processing_decisions WHERE prefix=? AND kind='warmup' AND id=? AND value='done'").get(prefix,provider)){
+   const rows=db.prepare("SELECT id FROM memory_evidence WHERE substr(source_id,1,?)=? AND json_extract(payload_json,'$.source_kind') IN ('conversation','user_correction','im','mail') ORDER BY json_extract(payload_json,'$.observed_at') DESC,id DESC LIMIT 64").all(prefix.length,prefix)
+   const items:ProcessingRef[]=[];let size=0
+   for(const row of rows){const current=source(db,prefix,consumer,String(row.id),recipe,participants);if(!current)continue;const end=Math.min(4000,current.record.raw_text!.length),ref={evidence_id:current.record.id,stamp:current.stamp,start:0,end};if(!end||db.prepare('SELECT 1 FROM processing_receipts WHERE prefix=? AND provider=? AND ref_key=?').get(prefix,provider,sha256(canonicalJson(ref))))continue;if(items.length>=8||size+end>16000)break;items.push(ref);size+=end}
+   if(items.length){const batch:ProcessingBatch={priority:true,correction_version:correctionVersion(),id:randomUUID(),prefix,provider,items,end:{...state.cursor},status:'claimed',task_id:null,run_id:null,created_at:new Date().toISOString(),result_hash:null};saveBatch(db,batch);return batch}
+   decision('warmup',provider,'done')
+  }
+  // A generation-rule change is work even when the source event queue is empty.
+  // Keep observation receipts; one authorized seed batch rehydrates the whole selection.
+  const stored=db.prepare('SELECT payload_json FROM processing_profiles WHERE prefix=? AND provider=?').get(prefix,provider),cached=stored?profileCacheSchema.parse(JSON.parse(String(stored.payload_json))):null
+  if(cached?.synthesis_key&&cached.generation_version!==PROFILE_GENERATION_VERSION){
+   const items:ProcessingRef[]=[];let chars=0
+   for(const ref of cached.refs){if(!readRefs(db,prefix,consumer,[ref],recipe,participants))continue;if(items.length>=8||chars+ref.end-ref.start>16000)break;items.push(ref);chars+=ref.end-ref.start}
+   if(items.length){const batch:ProcessingBatch={profile_only:true,correction_version:correctionVersion(),id:randomUUID(),prefix,provider,items,end:{...state.cursor},status:'claimed',task_id:null,run_id:null,created_at:new Date().toISOString(),result_hash:null};saveBatch(db,batch);return batch}
+  }
   const events=db.prepare('SELECT seq,evidence_id FROM processing_events WHERE prefix=? AND seq>=? ORDER BY seq LIMIT 200').all(prefix,state.cursor.seq+Number(state.cursor.offset===0))
   if(!events.length)return null
   const end={...state.cursor},items:ProcessingRef[]=[],seen=new Set<string>();let chars=0
   for(const event of events){
-   const seq=Number(event.seq),current=source(db,prefix,consumer,String(event.evidence_id),recipe)
+   const seq=Number(event.seq),current=source(db,prefix,consumer,String(event.evidence_id),recipe,participants)
    if(!current){end.seq=seq;end.offset=0;continue}
    const text=current.record.raw_text!;let start=seq===end.seq?end.offset:0
    while(start<text.length){
@@ -172,36 +246,111 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
    if(start<text.length)break
   }
   if(!items.length){state.cursor=end;saveState(db,prefix,provider,state);return null}
-  const batch:ProcessingBatch={id:randomUUID(),prefix,provider,items,end,status:'claimed',task_id:null,run_id:null,created_at:new Date().toISOString(),result_hash:null}
+  const batch:ProcessingBatch={correction_version:correctionVersion(),id:randomUUID(),prefix,provider,items,end,status:'claimed',task_id:null,run_id:null,created_at:new Date().toISOString(),result_hash:null}
   saveBatch(db,batch);return batch
  }
  const track=(batchId:string,refs:ProcessingRef[])=>{for(const ref of refs)db.prepare('INSERT INTO processing_reads(batch_id,ref_key,payload_json) VALUES(?,?,?) ON CONFLICT(batch_id,ref_key) DO UPDATE SET payload_json=excluded.payload_json').run(batchId,sha256(canonicalJson(ref)),canonicalJson(ref))}
  if(q.action==='topics'){
   const rows=db.prepare("SELECT seq,payload_json FROM processing_topics WHERE prefix=? AND provider=? AND seq>? AND (?='' OR instr(lower(json_extract(payload_json,'$.title')||' '||json_extract(payload_json,'$.summary')),lower(?))>0) ORDER BY seq LIMIT ?").all(prefix,provider,q.after,q.query,q.query,q.limit+1)
   const page=rows.slice(0,q.limit)
-  return {items:page.flatMap(row=>{const topic=processingTopicSchema.parse(JSON.parse(String(row.payload_json)));if(!readRefs(db,prefix,consumer,topic.refs,recipe))return [];if(q.batch_id)track(q.batch_id,topic.refs);return [{id:Number(row.seq),...topic}]}),next:rows.length>q.limit?Number(page.at(-1)!.seq):null}
+  return {items:page.flatMap(row=>{const topic=processingTopicSchema.parse(JSON.parse(String(row.payload_json)));if(!readRefs(db,prefix,consumer,topic.refs,recipe,participants))return [];if(q.batch_id)track(q.batch_id,topic.refs);return [{id:Number(row.seq),...topic}]}),next:rows.length>q.limit?Number(page.at(-1)!.seq):null}
  }
- if(q.action==='profile'){
+ if(q.action==='dismiss'||q.action==='correct_project'){
+  const kind=q.action==='dismiss'?'dismiss':'project',value=q.action==='dismiss'?'dismissed':q.value
+  db.prepare('INSERT INTO processing_decisions VALUES(?,?,?,?) ON CONFLICT(prefix,kind,id) DO UPDATE SET value=excluded.value').run(prefix,kind,q.id,value)
+  return {ok:true}
+ }
+ if(q.action==='refresh'){
+  decision('refresh',provider,'pending')
+  return {queued:true}
+ }
+ if(q.action==='profile'||q.action==='products'){
   const saved=db.prepare('SELECT revision,payload_json FROM processing_profiles WHERE prefix=? AND provider=?').get(prefix,provider)
-  if(!saved)return {revision:0,draft:null}
-  const content=z.object({draft:profileDraftSchema,refs:z.array(processingRefSchema)}).parse(JSON.parse(String(saved.payload_json)))
+  if(!saved&&q.action==='profile')return {revision:0,draft:null}
+  const content=profileCacheSchema.parse(saved?JSON.parse(String(saved.payload_json)):{draft:{about:null,work:[],interests:[]},refs:[]})
   const valid=(fact:{refs:{entry_id:string;version:unknown}[]})=>fact.refs.every(ref=>{
    const refs=content.refs.filter(item=>item.evidence_id===ref.entry_id)
-   return refs.length>0&&readRefs(db,prefix,consumer,refs,recipe)!==null
+   return refs.length>0&&readRefs(db,prefix,consumer,refs,recipe,participants)!==null
   })
-  if(q.batch_id)track(q.batch_id,content.refs.filter(ref=>readRefs(db,prefix,consumer,[ref],recipe)!==null))
-  const draft={...content.draft,about:content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid)}
-  return {revision:Number(saved.revision),draft:draft.about||draft.work.length||draft.interests.length?draft:null}
+  const invalidInterests=content.draft.interests.filter(fact=>!valid(fact))
+  if(invalidInterests.length){
+   const invalidKey=sha256(canonicalJson({invalidInterests,refs:content.refs}))
+   if(db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='invalid_interests'").get(prefix)?.value!==invalidKey){decision('policy','cleanup','pending');decision('policy','invalid_interests',invalidKey)}
+  }
+  if(q.action==='profile'&&q.batch_id)track(q.batch_id,content.refs.filter(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)!==null))
+  const draft={...content.draft,about:content.about_parts?joinAbout(content.about_parts.filter(valid)):content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid)}
+  const result={revision:Number(saved?.revision??0),draft:draft.about||draft.work.length||draft.interests.length?draft:null}
+  if(q.action==='profile')return result
+  const decisions=db.prepare('SELECT kind,id,value FROM processing_decisions WHERE prefix=?').all(prefix)
+  const corrections=Object.fromEntries(decisions.filter(row=>row.kind==='project').map(row=>[String(row.id),String(row.value)]))
+  const dismissed=new Set(decisions.filter(row=>row.kind==='dismiss').map(row=>row.id))
+  const projects=(content.products?.projects??[]).filter(valid).map(project=>({...project,...(corrections[project.id]==='reference'?{relation:'reference' as const}:corrections[project.id]==='historical'?{status:'historical' as const}:corrections[project.id]==='participating'?{relation:'participating' as const,status:'current' as const}:{})}))
+  const changedProjects=(content.products?.projects??[]).filter(p=>corrections[p.id]&&corrections[p.id]!=='automatic'&&canonicalJson(projects.find(current=>current.id===p.id))!==canonicalJson(p)),changedIds=new Set(changedProjects.flatMap(p=>p.refs.map(r=>r.entry_id)))
+  const unchanged=(fact:{refs:{entry_id:string}[]})=>!fact.refs.some(r=>changedIds.has(r.entry_id))
+  if(result.draft){result.draft={...result.draft,about:result.draft.about&&unchanged(result.draft.about)?result.draft.about:null,work:result.draft.work.filter(unchanged),interests:result.draft.interests.filter(unchanged)}}
+  const suggestions=(content.products?.suggestions??[]).filter(item=>valid(item)&&(q.include_dismissed===true||!dismissed.has(item.id))&&(!item.project_id||projects.some(project=>project.id===item.project_id&&project.relation==='participating'&&project.status==='current')))
+  const originals=content.refs.flatMap(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)?.items??[])
+  return {...result,projects,suggestions,corrections,profile_pending:content.profile_pending===true,news_cleanup_pending:decisions.some(row=>row.kind==='policy'&&row.id==='cleanup'&&row.value==='pending'),generated_at:content.generated_at??null,sources:[...new Map(originals.map(item=>[item.evidence_id,{id:item.evidence_id,version:item.version,label:item.locator,observed_at:item.observed_at,type:item.source_kind==='user_correction'?'conversation':item.source_kind==='task_result'?'task':item.source_kind,...(item.source_metadata?.provider?{provider:item.source_metadata.provider.slice(0,80)}:{}),...(item.source_metadata?.source_url?{url:item.source_metadata.source_url}:{})}])).values()]}
+
  }
  const row=db.prepare('SELECT payload_json FROM processing_batches WHERE id=? AND prefix=? AND provider=?').get(q.batch_id,prefix,provider)
  if(!row)throw Error('STORE_NOT_FOUND')
  const batch=batchSchema.parse(JSON.parse(String(row.payload_json)))
  const read=(refs:ProcessingRef[])=>{
-  const result=readRefs(db,prefix,consumer,refs,recipe)
+  const result=readRefs(db,prefix,consumer,refs,recipe,participants)
   if(result)track(batch.id,refs)
   return result
  }
- if(q.action==='batch'){const reads=db.prepare('SELECT payload_json FROM processing_reads WHERE batch_id=?').all(batch.id);return {batch,valid:readRefs(db,prefix,consumer,batch.items,recipe)!==null&&reads.every(row=>row.payload_json&&readRefs(db,prefix,consumer,[processingRefSchema.parse(JSON.parse(String(row.payload_json)))],recipe)!==null)}}
+ const profileContext=()=>{
+  const rows=db.prepare(`WITH ranked AS (
+   SELECT payload_json,row_number() OVER(PARTITION BY json_extract(payload_json,'$.kind') ORDER BY rowid) n,
+   count(*) OVER(PARTITION BY json_extract(payload_json,'$.kind')) total FROM processing_observations WHERE prefix=? AND provider=?
+  ) SELECT payload_json FROM ranked WHERE n=1 OR n=total OR (n-1)%max(1,CAST((total+127)/128 AS INTEGER))=0`).all(prefix,provider)
+  const available=rows.flatMap(row=>{const observation=processingObservationSchema.parse(JSON.parse(String(row.payload_json))),originals=readRefs(db,prefix,consumer,observation.refs,recipe,participants);return originals?[{observation,originals,at:originals.items.map(i=>i.observed_at).sort()[0]??''}]:[]}).sort((a,b)=>a.at.localeCompare(b.at)||canonicalJson(a.observation).localeCompare(canonicalJson(b.observation)))
+  // Every prefix samples the entire history, with separate lanes for relationships,
+  // recurring work and working style. A high-volume recent topic cannot take all slots.
+  const spread=(n:number,count:number)=>{let value=0;for(let width=1;width<count;width*=2){value=value*2+n%2;n=Math.floor(n/2)}return value}
+  const lanes=(['people','style','work'] as const).map(kind=>{const lane=available.filter(item=>item.observation.kind===kind);return lane.map((item,index)=>({item,order:spread(index,lane.length)})).sort((a,b)=>a.order-b.order).map(row=>row.item)})
+  const refs:ProcessingRef[]=[],observations:ProcessingObservation[]=[],items:NonNullable<ReturnType<typeof readRefs>>['items']=[],chosen=new Set<string>(),texts=new Set<string>();let chars=0
+  for(let round=0;round<Math.max(0,...lanes.map(lane=>lane.length));round++)for(const lane of lanes){
+   const item=lane[round];if(!item)continue
+   const textKey=item.observation.kind+':'+item.observation.text.normalize('NFKC').replace(/\s+/gu,' ')
+   if(texts.has(textKey))continue
+   const additions=item.originals.items.filter(i=>!chosen.has(canonicalJson({evidence_id:i.evidence_id,stamp:i.stamp,start:i.start,end:i.end})))
+   if(refs.length+additions.length>120||chars+additions.reduce((n,i)=>n+i.text.length,0)>48000)continue
+   for(const original of additions){const ref={evidence_id:original.evidence_id,stamp:original.stamp,start:original.start,end:original.end};refs.push(ref);items.push(original);chosen.add(canonicalJson(ref));chars+=original.text.length}
+   observations.push(item.observation);texts.add(textKey)
+  }
+  const key=sha256(canonicalJson({provider,generation_version:PROFILE_GENERATION_VERSION,corrections:correctionVersion(),observations,refs}))
+  const current=new Set(batch.items.map(ref=>canonicalJson(ref)))
+  const pending=batch.priority?db.prepare("SELECT id FROM memory_evidence WHERE substr(source_id,1,?)=? AND json_extract(payload_json,'$.source_kind') IN ('conversation','user_correction','im','mail') ORDER BY json_extract(payload_json,'$.observed_at') DESC,id DESC LIMIT 64").all(prefix.length,prefix).some(row=>{
+   const value=source(db,prefix,consumer,String(row.id),recipe,participants);if(!value)return false
+   const ref={evidence_id:value.record.id,stamp:value.stamp,start:0,end:Math.min(4000,value.record.raw_text!.length)}
+   return ref.end>0&&!current.has(canonicalJson(ref))&&!db.prepare('SELECT 1 FROM processing_receipts WHERE prefix=? AND provider=? AND ref_key=?').get(prefix,provider,sha256(canonicalJson(ref)))
+  }):false
+  const prior=db.prepare('SELECT payload_json FROM processing_profiles WHERE prefix=? AND provider=?').get(prefix,provider),cached=prior?profileCacheSchema.parse(JSON.parse(String(prior.payload_json))):null
+  return {refs,items,observations,key,ready:!pending,unchanged:cached?.generation_version===PROFILE_GENERATION_VERSION&&cached.synthesis_key===key}
+
+ }
+ if(q.action==='observe'){
+  if(batch.status!=='bound'||!read(q.refs))throw Error('STORE_STALE_REVISION')
+  const supplied=new Set(q.refs.map(ref=>canonicalJson(ref)))
+  if(batch.items.some(ref=>!supplied.has(canonicalJson(ref))))throw Error('STORE_INVALID_OPERATION')
+  if(q.observations.some(observation=>observation.refs.some(ref=>!supplied.has(canonicalJson(ref)))))throw Error('STORE_INVALID_OPERATION')
+  // Re-observing a slice replaces even an empty result, rather than retaining a stale inference.
+  for(const row of db.prepare('SELECT key,payload_json FROM processing_observations WHERE prefix=? AND provider=?').all(prefix,provider)){
+   const prior=processingObservationSchema.parse(JSON.parse(String(row.payload_json)))
+   if(prior.refs.some(ref=>q.refs.some(next=>next.evidence_id===ref.evidence_id&&next.start<ref.end&&ref.start<next.end)))db.prepare('DELETE FROM processing_observations WHERE prefix=? AND provider=? AND key=?').run(prefix,provider,String(row.key))
+  }
+  for(const observation of q.observations){const payload=canonicalJson(observation);db.prepare('INSERT OR REPLACE INTO processing_observations VALUES(?,?,?,?)').run(prefix,provider,sha256(payload),payload)}
+  decision('observed',batch.id,'done')
+  return {applied:true}
+ }
+ if(q.action==='profile_context'){
+  if(batch.status!=='bound')throw Error('STORE_INVALID_OPERATION')
+  const context=profileContext();track(batch.id,context.refs);return context
+ }
+ if(q.action==='batch'){const reads=db.prepare('SELECT payload_json FROM processing_reads WHERE batch_id=?').all(batch.id);return {batch,published:!!db.prepare("SELECT 1 FROM processing_decisions WHERE prefix=? AND kind='published' AND id=? AND value='done'").get(prefix,batch.id),observed:!!db.prepare("SELECT 1 FROM processing_decisions WHERE prefix=? AND kind='observed' AND id=? AND value='done'").get(prefix,batch.id),valid:(!batch.correction_version||batch.correction_version===correctionVersion())&&readRefs(db,prefix,consumer,batch.items,recipe,participants)!==null&&reads.every(row=>row.payload_json&&readRefs(db,prefix,consumer,[processingRefSchema.parse(JSON.parse(String(row.payload_json)))],recipe,participants)!==null)}}
  if(q.action==='read')return ['claimed','bound'].includes(batch.status)?read(batch.items):null
  if(q.action==='bind'){
   if(batch.task_id===q.task_id&&batch.run_id===q.run_id)return batch
@@ -209,21 +358,45 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   batch.task_id=q.task_id;batch.run_id=q.run_id;batch.status='bound';saveBatch(db,batch);return batch
  }
  if(batch.task_id!==q.task_id||batch.run_id!==q.run_id)throw Error('STORE_IDEMPOTENCY_CONFLICT')
+ if(q.action==='identities'){
+  if(!['bound','completed'].includes(batch.status))throw Error('STORE_INVALID_OPERATION');const current=read(q.refs);if(!current)throw Error('STORE_STALE_REVISION')
+  const keys=new Set(current.items.map(item=>item.source_key)),items=db.prepare('SELECT source_key,payload_json FROM processing_identities WHERE prefix=? ORDER BY rowid DESC LIMIT 1000').all(prefix).filter(row=>keys.has(String(row.source_key))).map(row=>storedIdentitySchema.parse(JSON.parse(String(row.payload_json))))
+  return {items:items.slice(0,64)}
+ }
  if(q.action==='evidence'){
   if(!['bound','completed'].includes(batch.status))throw Error('STORE_INVALID_OPERATION')
   return read(q.refs)
  }
  if(q.action==='publish'){
+  if(batch.correction_version&&batch.correction_version!==correctionVersion())throw Error('STORE_STALE_REVISION')
   if(!['bound','completed'].includes(batch.status))throw Error('STORE_INVALID_OPERATION')
   const saved=db.prepare('SELECT revision,payload_json FROM processing_profiles WHERE prefix=? AND provider=?').get(prefix,provider)
-  const revision=Number(saved?.revision??0),payload=canonicalJson({draft:q.draft,refs:q.refs})
-  if(revision===q.expected_revision+1&&saved?.payload_json===payload)return {applied:true,revision}
+  const revision=Number(saved?.revision??0),publicationKey=sha256(canonicalJson(q)),old=saved?profileCacheSchema.parse(JSON.parse(String(saved.payload_json))):null
+  if(revision===q.expected_revision+1&&old?.publication_key===publicationKey){decision('published',batch.id,'done');return {applied:true,revision}}
   if(revision!==q.expected_revision)throw Error('STORE_STALE_REVISION')
-  const originals=readRefs(db,prefix,consumer,q.refs,recipe);if(!originals)return {applied:false,revision}
+  if(q.profile_context_key){const context=profileContext();if(context.key!==q.profile_context_key||!context.ready&&!q.defer_profile)throw Error('STORE_STALE_REVISION')}
+  if(q.product_refs?.some(ref=>!q.refs.some(value=>canonicalJson(value)===canonicalJson(ref))))throw Error('STORE_INVALID_OPERATION')
+  const originals=readRefs(db,prefix,consumer,q.refs,recipe,participants);if(!originals)return {applied:false,revision}
   if(q.refs.some(ref=>!db.prepare('SELECT 1 FROM processing_reads WHERE batch_id=? AND ref_key=?').get(batch.id,sha256(canonicalJson(ref)))))throw Error('STORE_INVALID_OPERATION')
-  const cited=[...(q.draft.about?.refs??[]),...q.draft.work.flatMap(item=>item.refs),...q.draft.interests.flatMap(item=>item.refs)]
-  if(!cited.length||cited.some(ref=>!originals.items.some(item=>item.evidence_id===ref.entry_id&&item.version===ref.version)))throw Error('STORE_INVALID_OPERATION')
+  const cited=[...(q.products?.projects.flatMap(item=>item.refs)??[]),...(q.products?.suggestions.flatMap(item=>item.refs)??[]),...(q.defer_profile?[]:[...(q.draft.about?.refs??[]),...q.draft.work.flatMap(item=>item.refs),...q.draft.interests.flatMap(item=>item.refs)])]
+  if((!cited.length&&!q.profile_context_key)||cited.some(ref=>!originals.items.some(item=>item.evidence_id===ref.entry_id&&item.version===ref.version)))throw Error('STORE_INVALID_OPERATION')
+  // A bounded batch revises only its evidence scope. Keep other currently authorized facts.
+  const factKey=(fact:unknown)=>sha256(canonicalJson(fact))
+  const authorizedFact=(fact:{refs:{entry_id:string;version:unknown}[]})=>fact.refs.every(ref=>{const refs=(old?.refs??[]).filter((r:ProcessingRef)=>r.evidence_id===ref.entry_id);return refs.length>0&&readRefs(db,prefix,consumer,refs,recipe,participants)!==null})
+  const retain=(fact:{refs:{entry_id:string;version:unknown}[]})=>!(old?.fact_scopes?.[factKey(fact)]??(old?.refs??[]).filter((r:ProcessingRef)=>fact.refs.some(ref=>ref.entry_id===r.evidence_id))).some((prior:ProcessingRef)=>(q.product_refs??q.refs).some(next=>next.evidence_id===prior.evidence_id&&next.start<prior.end&&prior.start<next.end))&&authorizedFact(fact)
+  const merge=<T>(fresh:T[],prior:T[],key:(item:T)=>string,limit:number)=>[...new Map([...fresh,...prior].map(item=>[key(item),item] as const).reverse()).values()].reverse().slice(0,limit)
+  const aboutParts=q.defer_profile?(old?.about_parts??(old?.draft.about?[old.draft.about]:[])).filter(authorizedFact):q.profile_context_key?(q.draft.about?[q.draft.about]:[]):[...(q.draft.about?[q.draft.about]:[]),...(old?.about_parts??(old?.draft.about?[old.draft.about]:[])).filter(retain)].slice(0,6)
+  const draft=profileDraftSchema.parse(q.defer_profile?{about:joinAbout(aboutParts),work:(old?.draft.work??[]).filter(authorizedFact),interests:(old?.draft.interests??[]).filter(authorizedFact)}:q.profile_context_key?q.draft:{...q.draft,about:joinAbout(aboutParts),work:merge(q.draft.work,(old?.draft.work??[]).filter(retain),(item)=>item.title,6),interests:merge(q.draft.interests,(old?.draft.interests??[]).filter(retain),(item)=>item.text,8)})
+  const products=q.products?understandingProductsSchema.parse({projects:merge(q.products.projects,(old?.products?.projects??[]).filter(retain),(item)=>item.id,24),suggestions:merge(q.products.suggestions,(old?.products?.suggestions??[]).filter(retain),(item)=>item.id,24)}):batch.profile_only&&old?.products?{projects:old.products.projects.filter(authorizedFact),suggestions:old.products.suggestions.filter(authorizedFact)}:undefined
+  const facts=[...(draft.about?[draft.about]:[]),...draft.work,...draft.interests,...(products?.projects??[]),...(products?.suggestions??[])],ids=new Set(facts.flatMap(f=>f.refs.map(r=>r.entry_id)))
+  const refs=[...new Map([...q.refs,...(old?.refs??[])].filter((r:ProcessingRef)=>ids.has(r.evidence_id)&&readRefs(db,prefix,consumer,[r],recipe,participants)!==null).map((r:ProcessingRef)=>[canonicalJson(r),r])).values()]
+  const fact_scopes=Object.fromEntries(facts.map(fact=>[factKey(fact),old?.fact_scopes?.[factKey(fact)]??q.refs.filter(ref=>fact.refs.some(r=>r.entry_id===ref.evidence_id))]));for(const part of aboutParts)fact_scopes[factKey(part)]=old?.fact_scopes?.[factKey(part)]??q.refs.filter(ref=>part.refs.some((r:{entry_id:string})=>r.entry_id===ref.evidence_id))
+  const payload=canonicalJson({draft,refs,about_parts:aboutParts,fact_scopes,publication_key:publicationKey,profile_pending:q.defer_profile===true,...(q.profile_context_key&&!q.defer_profile?{synthesis_key:q.profile_context_key,generation_version:PROFILE_GENERATION_VERSION}:{}),...(products?{products,generated_at:batch.profile_only?old?.generated_at:batch.created_at}:{})})
+  for(const item of products?.suggestions??[]){const original=readRefs(db,prefix,consumer,refs.filter((ref:ProcessingRef)=>item.refs.some(r=>r.entry_id===ref.evidence_id)),recipe,participants)?.items[0];if(!original)continue;const identity={id:item.id,kind:item.kind,title:item.title,project_id:item.project_id,source_key:original.source_key};db.prepare('INSERT INTO processing_identities VALUES(?,?,?,?,?) ON CONFLICT(prefix,id) DO UPDATE SET evidence_id=excluded.evidence_id,source_key=excluded.source_key,payload_json=excluded.payload_json').run(prefix,item.id,original.evidence_id,original.source_key,canonicalJson(identity))}
+  db.prepare('DELETE FROM processing_identities WHERE prefix=? AND rowid NOT IN (SELECT rowid FROM processing_identities WHERE prefix=? ORDER BY rowid DESC LIMIT 1000)').run(prefix,prefix)
   db.prepare('INSERT INTO processing_profiles VALUES(?,?,?,?) ON CONFLICT(prefix,provider) DO UPDATE SET revision=excluded.revision,payload_json=excluded.payload_json').run(prefix,provider,revision+1,payload)
+  decision('published',batch.id,'done')
+  if(batch.profile_only&&q.profile_context_key&&!q.defer_profile)decision('observed',batch.id,'done')
   return {applied:true,revision:revision+1}
  }
  if(q.action==='fail'){
@@ -236,7 +409,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
  if(batch.status!=='bound')throw Error('STORE_INVALID_OPERATION')
  const available=new Set(batch.items.map(ref=>canonicalJson(ref)))
  if(q.topics.some(topic=>topic.refs.some(ref=>!available.has(canonicalJson(ref)))))throw Error('STORE_INVALID_OPERATION')
- if(!readRefs(db,prefix,consumer,batch.items,recipe)){batch.status='invalidated';saveBatch(db,batch);return {applied:false}}
+ if(!readRefs(db,prefix,consumer,batch.items,recipe,participants)){batch.status='invalidated';saveBatch(db,batch);return {applied:false}}
  for(const topic of q.topics)db.prepare('INSERT INTO processing_topics(prefix,provider,batch_id,payload_json) VALUES(?,?,?,?)').run(prefix,provider,batch.id,canonicalJson(topic))
  for(const ref of batch.items)db.prepare('INSERT OR IGNORE INTO processing_receipts VALUES(?,?,?,?)').run(prefix,provider,sha256(canonicalJson(ref)),ref.evidence_id)
  state.cursor=batch.end;state.completed_batches++;state.processed_chars+=batch.items.reduce((sum,ref)=>sum+ref.end-ref.start,0);state.last_success=new Date().toISOString()

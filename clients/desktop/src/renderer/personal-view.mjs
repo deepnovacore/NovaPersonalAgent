@@ -105,14 +105,14 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const clampable=(node,id,title)=>{node.type='button';node.dataset.cardBodyId=id;const sync=()=>{const open=expandedBodies.has(id);node.dataset.expanded=String(open);node.setAttribute('aria-expanded',String(open));node.setAttribute('aria-label',`${open?'收起':'展开'}正文：${title}`)};const measure=()=>{if(node.isConnected===false||!node.clientHeight)return;node.disabled=!expandedBodies.has(id)&&node.scrollHeight<=node.clientHeight};sync();node.addEventListener('click',()=>{if(globalThis.getSelection?.()?.toString())return;expandedBodies.has(id)?expandedBodies.delete(id):expandedBodies.add(id);sync();measure()});bodyMeasures.set(node,measure);bodyObserver?.observe(node);globalThis.requestAnimationFrame?.(measure)}
  const card=(title,summary)=>{const a=el('article',undefined,'card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
  const continueChat=text=>chat.focusDraft(`关于「${text}」：`)
- let renderedPageKey=null
+ let renderedPageKey=null,sourceDetailsOpen=false
  const pageKey=()=>{
   const s=c.snapshot,sourceStates=s?.sources?.map(source=>[source.id,source.state,source.health,source.processing_consent_required])
   if(['todos','ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
-  if(selected==='timeline')return JSON.stringify([selected,s?.life,s?.settings?.timezone,c.connected,timelineDate(c.snapshot)])
+  if(selected==='timeline')return JSON.stringify([selected,s?.life,s?.settings?.timezone,s?.derived_understanding,s?.profile_preparation?.status,s?.sources,c.connected,timelineDate(c.snapshot)])
   if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.life,s?.profile_preparation,c.connected])
   if(selected==='tasks')return JSON.stringify([selected,taskTab,s?.schedules,s?.capabilities?.schedules,durableTasks(),tasks(),results(),c.connected])
-  return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.news,s?.capabilities,c.connected])
+  return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.derived_understanding,s?.news,s?.capabilities,c.connected])
  }
  function renderPanel(){
   syncLayout();if(inspector)return
@@ -120,6 +120,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const fields=[...panel.querySelectorAll('input,textarea,select')],focusIndex=focused?fields.indexOf(focused):-1
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
+  const sourceDetails=panel.querySelector('details.source-status');if(sourceDetails)sourceDetailsOpen=sourceDetails.open
   for(const details of panel.querySelectorAll('details')){const local=taskLocal.get(details.dataset.workId);if(local)local.expanded=details.open}
   bodyObserver?.disconnect();disposeSources(panel);scheduleView?.dispose();scheduleView=null;panel.replaceChildren();tabs.select(selected);pageTitle.textContent=t(PAGE_TITLE[selected]??selected)
   const s=c.snapshot;const caps=s?.capabilities??{}
@@ -137,7 +138,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
    if(selected!=='todos')suggestions()
    if(selected==='todos')button('查看 Agent 执行任务',()=>{selected='tasks';renderPanel()},pageLinks()).className='link-button'
   }else if(selected==='timeline'){
-   renderTimeline(panel,{snapshot:s,el,button,discuss,openTodos,openArticle:url=>api.personal.openArticle(url),command:(...args)=>c.command(...args),expanded:timelineExpanded,connected:c.connected})
+   renderTimeline(panel,{snapshot:s,el,button,discuss,openTodos,openSettings,openArticle:url=>api.personal.openArticle(url),command:(...args)=>c.command(...args),expanded:timelineExpanded,connected:c.connected})
   }else if(selected==='feeds'){
    renderNews(panel,{news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings,connected:c.connected})
   }else if(selected==='tasks'){
@@ -152,12 +153,13 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
     target.draft=draft;chat.reveal()
    }})
   }else if(selected==='profile'){
-   renderProfile(panel,{state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
+   renderProfile(panel,{products:s?.derived_understanding,state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
    renderMemorySection(panel,{snapshot:s,caps,el,button,chips,command:(m,p)=>c.command(m,p),continueChat,bindPending,connected:c.connected,local:lifeLocal})
   }
   for(const b of panel.querySelectorAll('button'))if(!c.connected)b.disabled=true
   syncPending()
+  const nextSourceDetails=panel.querySelector('details.source-status');if(nextSourceDetails)nextSourceDetails.open=sourceDetailsOpen
   if(edit){const next=[...panel.querySelectorAll('input,textarea,select')],target=edit.key?next.find(node=>node.getAttribute?.('data-editor-key')===edit.key):next[edit.index];if(target&&(target.tagName??target.tag)===edit.tag&&target.getAttribute?.('aria-label')===edit.label&&!target.disabled){if(edit.tag!=='SELECT')target.value=edit.value;if(typeof edit.start==='number'&&typeof target.setSelectionRange==='function')target.setSelectionRange(edit.start,edit.end);else{target.selectionStart=edit.start;target.selectionEnd=edit.end}target.scrollTop=edit.scrollTop;target.focus?.({preventScroll:true})}}
   else if(focusBodyId||focusWorkId||focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select,summary')].find(node=>focusBodyId?node.dataset?.cardBodyId===focusBodyId:focusWorkId?node.getAttribute('data-task-result')===focusWorkId:focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
   panel.scrollTop=panelScroll;renderedPageKey=pageKey()

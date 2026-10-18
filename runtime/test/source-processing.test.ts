@@ -255,3 +255,276 @@ test('revocation after whole-profile critique prevents the final editing request
  await assert.rejects(resource.sourceProcessingProfile([{id:'personal:test:e',version:'v',origin:'stated',content:'我计划验证接口'}],new AbortController().signal,()=>allowed?Promise.resolve():Promise.reject(Error('revoked'))),/revoked/)
  assert.equal(calls,2)
 })
+
+test('shared products project only current evidence and keep dismissal through regeneration',()=>{
+ const {db,process,add,bind}=setup()
+ try{
+  const evidence=add('shared','Next: review the interface');const batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id})
+  const refs=[{entry_id:evidence,version:'shared'}],draft={about:{text:'Works on interfaces.',refs},work:[],interests:[]}
+  const products={projects:[],suggestions:[{id:'review',kind:'action',title:'Review interface',body:'Review the proposed interface',project_id:null,todo_id:null,due:null,refs}]}
+  const publish={action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,draft,refs:batch.items,products}
+  process(publish)
+  const snapshot=()=>process({action:'products'}) as {revision:number;draft:unknown;suggestions:unknown[]}
+  assert.equal(snapshot().revision,1);assert.equal(snapshot().suggestions.length,1)
+  process({action:'dismiss',id:'review'});assert.equal(snapshot().suggestions.length,0)
+  process({...publish,expected_revision:1,products:{...products,suggestions:[{...products.suggestions[0],title:'Review updated interface'}]}})
+  assert.equal(snapshot().suggestions.length,0)
+  memoryOperation(db,'source_grant',{source_id:prefix+'source:shared',expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:[]}})
+  assert.equal(snapshot().draft,null)
+ }finally{db.close()}
+})
+
+test('shared products reject ungrounded suggestions even when the profile is grounded',()=>{
+ const {db,process,add,bind}=setup()
+ try{
+  const evidence=add('shared');const batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id})
+  const refs=[{entry_id:evidence,version:'shared'}]
+  assert.throws(()=>process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,draft:{about:{text:'Known',refs},work:[],interests:[]},refs:batch.items,products:{projects:[],suggestions:[{id:'bad',kind:'action',title:'Invented',body:'Unknown',project_id:null,todo_id:null,due:null,refs:[{entry_id:'not-read',version:'v'}]}]}}),/INVALID/)
+ }finally{db.close()}
+})
+
+test('participant policy is enforced during reads and opt-out records durable interest cleanup',()=>{
+ const {db}=setup();const now=new Date().toISOString(),source_id=prefix+'chat',evidence=prefix+'participant'
+ const process=(participants:boolean,request:Record<string,unknown>)=>memoryOperation(db,'source_processing',{prefix,provider,participants,...request}) as Record<string,unknown>
+ try{memoryOperation(db,'append_evidence',{id:evidence,source_id,source_kind:'im',locator:'message',raw_text:'Other participant message',hash:'p',observed_at:now,recorded_at:now,trust:'untrusted_external',source_metadata:{sender_id:'other',recipient_id:'self',account_id:'acct',mention:'none'}});memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
+ assert.equal(process(false,{action:'claim'}),null)
+ const batch=process(true,{action:'claim'}) as unknown as Batch;assert.equal(batch.items.length,1)
+ process(true,{action:'bind',batch_id:batch.id,task_id:'t',run_id:'r'});process(true,{action:'read',batch_id:batch.id})
+ process(true,{action:'publish',batch_id:batch.id,task_id:'t',run_id:'r',expected_revision:0,draft:{about:{text:'Participant context',refs:[{entry_id:evidence,version:'p'}]},work:[],interests:[]},refs:batch.items})
+ assert.ok(process(true,{action:'products'}).draft)
+ const off=process(false,{action:'products'});assert.equal(off.draft,null);assert.equal(off.news_cleanup_pending,true)
+ assert.equal(process(false,{action:'products'}).news_cleanup_pending,true)
+ process(false,{action:'confirm_cleanup'});assert.equal(process(false,{action:'products'}).news_cleanup_pending,false)
+ }finally{db.close()}
+})
+
+test('incremental publications preserve unrelated current products and erase revoked derivatives',()=>{
+ const {db,process,add,bind,commit}=setup()
+ const publish=(key:string,revision:number)=>{const id=add(key),batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id});const refs=[{entry_id:id,version:key}];process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:revision,refs:batch.items,draft:{about:null,work:[{title:key,text:key,refs}],interests:[]},products:{projects:[],suggestions:[{id:key,kind:'action',title:key,body:key,project_id:null,todo_id:null,due:null,refs}]}});commit(batch)}
+ try{publish('one',0);publish('two',1)
+ const products=process({action:'products'}) as {suggestions:{id:string}[];draft:{work:{title:string}[]}}
+ assert.deepEqual(products.suggestions.map(s=>s.id).sort(),['one','two']);assert.equal(products.draft.work.length,2)
+ memoryOperation(db,'delete_source',{source_id:prefix+'source:one'})
+ const row=db.prepare('SELECT payload_json FROM processing_profiles').get()!
+ assert.ok(!String(row.payload_json).includes('"title":"one"'));assert.ok(String(row.payload_json).includes('"title":"two"'))
+ }finally{db.close()}
+})
+
+test('refresh requested while a batch is active survives completion and restart',()=>{
+ const {db,process,add,commit}=setup()
+ try{add('one');const batch=process({action:'claim'})!;process({action:'refresh'});commit(batch);initializeMemory(db);assert.ok(process({action:'claim'}))}finally{db.close()}
+})
+
+test('adoption rechecks current published suggestion and source permission in the Life transaction',()=>{
+ const {db,process,add,bind}=setup()
+ try{
+  const evidence=add('adopt'),batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id})
+  const refs=[{entry_id:evidence,version:'adopt'}],item={id:'adopt',kind:'action',title:'Check interface',body:'Use the agreed examples',project_id:null,todo_id:null,due:null,refs}
+  process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,refs:batch.items,draft:{about:null,work:[],interests:[]},products:{projects:[],suggestions:[item]}})
+  const namespace=prefix+'life:',legacy={todos:[],ideas:[],goals:[],profile:{about:'',version:0},receipts:{}}
+  memoryOperation(db,'life_load',{namespace,legacy})
+  const mutation={namespace,requestId:'adopt',expectedRevision:0,sourcePolicy:{provider,recipe:'source-processing-v3',participants:false},input:{op:'from_suggestion',suggestion_id:'adopt',title:item.title,note:item.body,todo_id:null,due:null,sources:[],provenance_refs:[evidence]}}
+  memoryOperation(db,'source_grant',{source_id:prefix+'source:adopt',expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:[]}})
+  assert.throws(()=>memoryOperation(db,'life_mutate',mutation),/STALE/)
+  const after=memoryOperation(db,'life_load',{namespace}) as {state:{todos:unknown[]}};assert.equal(after.state.todos.length,0)
+ }finally{db.close()}
+})
+
+test('Git state changes invalidate published project claims and enqueue new work',()=>{
+ const {db,process,add,bind,commit}=setup()
+ try{const id=add('git');process({action:'project_state',ids:[id],fingerprint:'head-one'});const batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id});const refs=[{entry_id:id,version:'git'}]
+ process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,refs:batch.items,draft:{about:{text:'Historical work',refs},work:[],interests:[]}});commit(batch)
+ process({action:'project_state',ids:[id],fingerprint:'head-two'});assert.equal((process({action:'products'}) as {draft:unknown}).draft,null);assert.ok(process({action:'claim'}))
+ }finally{db.close()}
+})
+
+test('later slices of one document preserve earlier Profile parts and suggestions',()=>{
+ const {db,process,add,bind,commit}=setup()
+ try{const id=add('long-profile','a'.repeat(24000)),refs=[{entry_id:id,version:'long-profile'}]
+ for(const [index,title] of ['First work','Later work'].entries()){const batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id});process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:index,refs:batch.items,draft:{about:{text:title,refs},work:[{title,text:title,refs}],interests:[]},products:{projects:[],suggestions:[{id:title,kind:'action',title,body:title,project_id:null,todo_id:null,due:null,refs}]}});commit(batch)}
+ const current=process({action:'products'}) as {draft:{about:{text:string};work:unknown[]};suggestions:unknown[]}
+ assert.equal(current.draft.work.length,2);assert.equal(current.suggestions.length,2);assert.match(current.draft.about.text,/First work/);assert.match(current.draft.about.text,/Later work/)
+ }finally{db.close()}
+})
+
+test('user correction atomically supersedes source-derived understanding and can be processed',()=>{
+ const {db,process,add,bind}=setup()
+ try{const evidence=add('incorrect'),refs=[{entry_id:evidence,version:'incorrect'}],batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id})
+ process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,refs:batch.items,draft:{about:{text:'Wrong role',refs},work:[],interests:[]}})
+ const now=new Date().toISOString(),entry_id=prefix+'fact:role'
+ memoryOperation(db,'merge',{entry_id,expected_revision:0,kind:'fact',origin:'inferred',written_by:'merge',evidence_refs:[evidence],content:{text:'Wrong role'},recorded_at:now})
+ const correction=prefix+'e:correction',source_id=prefix+'correction';memoryOperation(db,'append_evidence',{id:correction,source_id,source_kind:'user_correction',locator:'correction',observed_at:now,recorded_at:now,raw_text:'I coordinate the team, not implementation.',hash:'corrected',trust:'trusted_user'})
+ memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
+ memoryOperation(db,'merge',{entry_id,expected_revision:1,kind:'fact',origin:'stated',written_by:'user_correction',evidence_refs:[correction],content:{text:'I coordinate the team, not implementation.'},recorded_at:now})
+ assert.equal((process({action:'products'}) as {draft:unknown}).draft,null)
+ assert.equal((process({action:'batch',batch_id:batch.id}) as {valid:boolean}).valid,false)
+ process({action:'retire',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,reason:'task_terminal'})
+ const next=process({action:'claim'})!;assert.ok(next.items.some(item=>item.evidence_id===correction));assert.ok(!next.items.some(item=>item.evidence_id===evidence))
+ }finally{db.close()}
+})
+
+test('dismissed identities survive rewritten evidence but never bypass current permission',()=>{
+ const {db,process,add,bind,commit}=setup()
+ try{const id=add('rewrite','Check the API'),batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id});const refs=[{entry_id:id,version:'rewrite'}]
+ process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,refs:batch.items,draft:{about:null,work:[],interests:[]},products:{projects:[],suggestions:[{id:'stable-action',kind:'action',title:'Check API',body:'Check API',project_id:null,todo_id:null,due:null,refs}]}});process({action:'dismiss',id:'stable-action'});commit(batch)
+ const now=new Date().toISOString();memoryOperation(db,'append_evidence',{id:id+'-v2',source_id:prefix+'source:rewrite',source_kind:'file',locator:'rewrite',raw_text:'Verify the revised interface',hash:'rewrite-v2',observed_at:now,recorded_at:now,trust:'untrusted_external'})
+ const next=process({action:'claim'})!;bind(next);const query={action:'identities',batch_id:next.id,task_id:'task:'+next.id,run_id:'run:'+next.id,refs:next.items}
+ const rows=process(query) as {items:{id:string;body?:string}[]};assert.equal(rows.items[0]?.id,'stable-action');assert.equal(rows.items[0]?.body,undefined)
+ memoryOperation(db,'source_grant',{source_id:prefix+'source:rewrite',expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:[]}})
+ assert.throws(()=>process(query),/STALE|INVALID|NOT_FOUND/)
+ }finally{db.close()}
+})
+
+
+test('todo model context excludes revoked sources and fences revocation during generation',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'nova-processing-todos-')),client=new MemoryLedgerClient(join(dir,'ledger.sqlite'))
+ const resource=new SubstrateMemoryResource({client,userId:'todo-context',model:'fixture',extractionFingerprint:provider,personalMemoryEnabled:false,gateway:{async *stream(){/* unused */},complete(){throw Error('unused')}}})
+ try{
+  await resource.open();const now=new Date().toISOString(),source_id=resource.prefix+'source:todo',id=resource.prefix+'e:todo'
+  await client.memory('append_evidence',{id,source_id,source_kind:'file',locator:'plan',raw_text:'Private action',hash:'v1',observed_at:now,recorded_at:now,trust:'untrusted_external'})
+  await client.memory('source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
+  await client.memory('merge',{entry_id:resource.prefix+'todo:one',expected_revision:0,kind:'todo',origin:'inferred',written_by:'merge',evidence_refs:[id],content:{text:'Private action',life_data:{id:'one',title:'Private action',status:'open',version:1,note:'',due:null,goal_id:null,idea_id:null,created_at:now,updated_at:now}},recorded_at:now})
+  const initial=await resource.sourceProcessingTodoContext();assert.equal(initial.todos.length,1)
+  await client.memory('source_grant',{source_id,expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:[]}})
+  await assert.rejects(initial.authorize(),/processing_context_unavailable/)
+  assert.deepEqual((await resource.sourceProcessingTodoContext()).todos,[])
+ }finally{await resource.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('first refresh prioritizes recent authorized messages without skipping the older file queue',()=>{
+ const {db,process,add,bind,commit}=setup()
+ try{const file=add('old-file'),at=new Date().toISOString(),source_id=prefix+'recent',id=prefix+'e:recent'
+ memoryOperation(db,'append_evidence',{id,source_id,source_kind:'conversation',locator:'recent',raw_text:'Review my interface tomorrow',hash:'recent',observed_at:at,recorded_at:at,trust:'trusted_user'})
+ memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
+ const first=process({action:'claim'})!;assert.deepEqual(first.items.map(item=>item.evidence_id),[id]);bind(first);process({action:'fail',batch_id:first.id,task_id:'task:'+first.id,run_id:'run:'+first.id})
+ const retry=process({action:'claim'})!;assert.deepEqual(retry.items,first.items);commit(retry)
+ const next=process({action:'claim'})!;assert.ok(next.items.some(item=>item.evidence_id===file));assert.ok(!next.items.some(item=>item.evidence_id===id));commit(next);assert.equal(process({action:'claim'}),null)
+ process({action:'refresh'});assert.equal(process({action:'claim'})?.items[0]?.evidence_id,id)
+ }finally{db.close()}
+})
+
+test('priority refresh drains multiple message batches before the old file backlog',()=>{
+ const {db,process,add,commit}=setup()
+ try{
+  const file=add('backlog'),messages=new Set<string>()
+  for(let n=0;n<12;n++){
+   const source_id=prefix+'message:'+n,id=prefix+'e:message:'+n,at=new Date(Date.UTC(2026,9,15,0,n)).toISOString();messages.add(id)
+   memoryOperation(db,'append_evidence',{id,source_id,source_kind:'conversation',locator:String(n),raw_text:'A distinct authorized conversation '+n,hash:String(n),observed_at:at,recorded_at:at,trust:'trusted_user'})
+   memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
+  }
+  const first=process({action:'claim'})!;assert.equal(first.items.length,8);commit(first)
+  const second=process({action:'claim'})!;assert.equal(second.items.length,4);assert.ok(second.items.every(item=>messages.has(item.evidence_id)));assert.ok(second.items.every(item=>!first.items.some(prior=>prior.evidence_id===item.evidence_id)));commit(second)
+  const next=process({action:'claim'})!;assert.deepEqual(next.items.map(item=>item.evidence_id),[file]);commit(next);assert.equal(process({action:'claim'}),null)
+ }finally{db.close()}
+})
+
+test('profile synthesis reads durable observations across batches and replaces the whole portrait',()=>{
+ const {db,process,add,bind,commit}=setup()
+ try{
+  add('long-term','I lead the Orchard project with Mei.');const first=process({action:'claim'})!;bind(first)
+  const owner=(b:Batch)=>({batch_id:b.id,task_id:'task:'+b.id,run_id:'run:'+b.id})
+  process({action:'evidence',...owner(first),refs:first.items})
+  process({action:'observe',...owner(first),refs:first.items,observations:[{kind:'people',text:'Coordinates Orchard with Mei.',refs:first.items}]})
+  commit(first)
+  add('recent-test','Please run the microphone acceptance check.');const next=process({action:'claim'})!;bind(next)
+  process({action:'evidence',...owner(next),refs:next.items})
+  process({action:'observe',...owner(next),refs:next.items,observations:[]})
+  const context=process({action:'profile_context',...owner(next)}) as {items:{evidence_id:string;text:string}[];observations:{text:string}[];refs:Item[];key:string}
+  assert.deepEqual(context.items.map(i=>i.evidence_id),[prefix+'e:long-term'])
+  assert.equal(context.observations[0]?.text,'Coordinates Orchard with Mei.')
+  const draft={about:{text:'You coordinate Orchard with Mei.',refs:[{entry_id:prefix+'e:long-term',version:'long-term'}]},work:[],interests:[]}
+  process({action:'publish',...owner(next),expected_revision:0,draft,refs:context.refs,profile_context_key:context.key,products:{projects:[],suggestions:[{id:'orchard-review',kind:'action',title:'Review Orchard',body:'Review with Mei',project_id:null,todo_id:null,due:null,refs:draft.about.refs}]}})
+  const published=process({action:'profile'}) as {draft:typeof draft}
+  assert.equal(published.draft.about.text,'You coordinate Orchard with Mei.')
+  commit(next)
+  add('updated','Orchard is now complete.');const last=process({action:'claim'})!;bind(last)
+  process({action:'evidence',...owner(last),refs:last.items})
+  process({action:'observe',...owner(last),refs:last.items,observations:[{kind:'work',text:'Orchard completed.',refs:last.items}]})
+  const updated=process({action:'profile_context',...owner(last)}) as typeof context
+  process({action:'publish',...owner(last),expected_revision:1,draft:{...draft,about:{text:'You completed Orchard with Mei.',refs:[...draft.about.refs,{entry_id:prefix+'e:updated',version:'updated'}]}},refs:updated.refs,profile_context_key:updated.key,product_refs:last.items,products:{projects:[],suggestions:[]}})
+  assert.equal((process({action:'profile'}) as {draft:typeof draft}).draft.about.text,'You completed Orchard with Mei.')
+  assert.equal((process({action:'products'}) as {suggestions:{id:string}[]}).suggestions[0]?.id,'orchard-review')
+ }finally{db.close()}
+})
+
+test('revocation invalidates a previously prepared whole-profile publication',()=>{
+ const {db,process,add,bind}=setup()
+ try{
+  add('one');const batch=process({action:'claim'})!;bind(batch);const owner={batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id}
+  process({action:'evidence',...owner,refs:batch.items})
+  process({action:'observe',...owner,refs:batch.items,observations:[{kind:'work',text:'Project planning',refs:batch.items}]})
+  const context=process({action:'profile_context',...owner}) as {key:string;refs:Item[]}
+  memoryOperation(db,'source_grant',{source_id:prefix+'source:one',expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:[]}})
+  assert.throws(()=>process({action:'publish',...owner,expected_revision:0,profile_context_key:context.key,refs:context.refs,draft:{about:{text:'Project planner',refs:[{entry_id:prefix+'e:one',version:'one'}]},work:[],interests:[]}}),/STALE|INVALID/)
+  assert.equal((process({action:'profile'}) as {draft:unknown}).draft,null)
+ }finally{db.close()}
+})
+
+test('initial profile waits for the authorized message sample, then survives restart',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'profile-observation-restart-')),path=join(dir,'ledger.sqlite');let fixture=setup(path)
+ try{
+  for(let i=0;i<10;i++){
+   const source_id=prefix+'chat:'+i,id=prefix+'message:'+i,at=new Date(1790000000000+i*1000).toISOString()
+   memoryOperation(fixture.db,'append_evidence',{id,source_id,source_kind:'conversation',locator:'conversation:'+i,raw_text:'I coordinate Orchard with Mei '+i,hash:'v'+i,observed_at:at,recorded_at:at,trust:'trusted_user'})
+   memoryOperation(fixture.db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
+  }
+  const owner=(b:Batch)=>({batch_id:b.id,task_id:'task:'+b.id,run_id:'run:'+b.id})
+  const first=fixture.process({action:'claim'})!;fixture.bind(first)
+  fixture.process({action:'observe',...owner(first),refs:first.items,observations:[{kind:'people',text:'Coordinates Orchard with Mei',refs:[first.items[0]]}]})
+  assert.equal((fixture.process({action:'profile_context',...owner(first)}) as {ready:boolean}).ready,false)
+  fixture.commit(first);fixture.db.close();fixture=setup(path)
+  const second=fixture.process({action:'claim'})!;fixture.bind(second)
+  fixture.process({action:'observe',...owner(second),refs:second.items,observations:[]})
+  const context=fixture.process({action:'profile_context',...owner(second)}) as {ready:boolean;observations:{text:string}[]}
+  assert.equal(context.ready,true);assert.equal(context.observations[0]?.text,'Coordinates Orchard with Mei')
+ }finally{fixture.db.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('provider changes and revoked interest evidence request durable cleanup without endless retries',()=>{
+ const {db,process,add,bind}=setup()
+ try{
+  const id=add('interest'),batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id})
+  process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,refs:batch.items,draft:{about:null,work:[],interests:[{text:'Orchard research',refs:[{entry_id:id,version:'interest'}]}]}})
+  memoryOperation(db,'source_grant',{source_id:prefix+'source:interest',expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:[]}})
+  assert.equal((process({action:'products'}) as {news_cleanup_pending:boolean}).news_cleanup_pending,true)
+  process({action:'confirm_cleanup'})
+  assert.equal((process({action:'products'}) as {news_cleanup_pending:boolean}).news_cleanup_pending,false)
+  assert.equal((memoryOperation(db,'source_processing',{prefix,provider:'replacement-provider',action:'products'}) as {news_cleanup_pending:boolean}).news_cleanup_pending,true)
+ }finally{db.close()}
+})
+
+test('shared sources retain the original channel metadata for display and adoption',()=>{
+ const {db,process,bind}=setup()
+ try{
+  const id=prefix+'e:message',source_id=prefix+'messages',now=new Date().toISOString()
+  memoryOperation(db,'append_evidence',{id,source_id,source_kind:'im',locator:'feishu://message/synthetic',raw_text:'I will review the design.',hash:'1',observed_at:now,recorded_at:now,trust:'untrusted_external',source_metadata:{sender_id:'self',recipient_id:'self',account_id:'synthetic',provider:'feishu',source_url:'https://example.com/message'}})
+  memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
+  const batch=process({action:'claim'})!;bind(batch);const owner={batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id}
+  process({action:'evidence',...owner,refs:batch.items})
+  process({action:'publish',...owner,expected_revision:0,draft:{about:{text:'I will review the design.',refs:[{entry_id:id,version:'1'}]},work:[],interests:[]},refs:batch.items,products:{projects:[],suggestions:[]}})
+  const result=process({action:'products'}) as {sources:{type:string;provider:string;url:string}[]}
+  assert.equal(result.sources[0]?.type,'im');assert.equal(result.sources[0]?.provider,'feishu');assert.equal(result.sources[0]?.url,'https://example.com/message')
+ }finally{db.close()}
+})
+
+
+test('older synthesis rules require rewriting without discarding durable observations',()=>{
+ const {db,process,add,bind}=setup()
+ try{
+  const id=add('project','I lead Orchard.'),batch=process({action:'claim'})!;bind(batch)
+  const owner={batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id}
+  process({action:'observe',...owner,refs:batch.items,observations:[{kind:'work',text:'Leads Orchard',refs:batch.items}]})
+  const context=process({action:'profile_context',...owner}) as {key:string;refs:Item[]}
+  const publish=()=>process({action:'publish',...owner,expected_revision:(process({action:'profile'}) as {revision:number}).revision,profile_context_key:context.key,refs:context.refs,draft:{about:{text:'You lead Orchard.',refs:[{entry_id:id,version:'project'}]},work:[],interests:[]}})
+  publish();assert.equal((process({action:'profile_context',...owner}) as {unchanged:boolean}).unchanged,true)
+  process({action:'commit',...owner,topics:[]});assert.equal(process({action:'claim'}),null)
+  db.prepare("UPDATE processing_profiles SET payload_json=json_remove(payload_json,'$.generation_version')").run()
+  const rewrite=process({action:'claim'});assert.ok(rewrite,'upgraded rules must schedule a rewrite even with no new source events');bind(rewrite)
+  const rewriteOwner={batch_id:rewrite.id,task_id:'task:'+rewrite.id,run_id:'run:'+rewrite.id}
+  const old=process({action:'profile_context',...rewriteOwner}) as {unchanged:boolean;observations:unknown[];key:string;refs:Item[]}
+  assert.equal(old.unchanged,false);assert.equal(old.observations.length,1)
+  process({action:'publish',...rewriteOwner,expected_revision:1,profile_context_key:old.key,refs:old.refs,draft:{about:{text:'You lead Orchard.',refs:[{entry_id:id,version:'project'}]},work:[],interests:[]}})
+  process({action:'commit',...rewriteOwner,topics:[]});assert.equal(process({action:'claim'}),null)
+ }finally{db.close()}
+})
