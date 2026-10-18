@@ -23,3 +23,12 @@ Swift ledger tests and CoreCheck use the repository's shared frame fixtures. The
 CoreCheck executable is an alternate harness for the same native core when SwiftPM
 manifest loading is unavailable. Device build, live route control and acoustic
 validation are still separate acceptance gates.
+
+`playback.progress` carries the current identity and cumulative `played_ms` from
+the same native render ledger used by terminal receipts, at most once per 100 ms
+of credited audio. It never uses enqueue time or a wall-clock estimate. The phone
+coordinator limits outstanding native audio to 50 seconds (below the ledger's
+60-second cap), waiting for these receipts for credit. Incoming burst storage is
+separately capped at 120 seconds of PCM16/24 kHz and 4096 events; a source exceeding
+that bounded burst contract fails visibly. Clearing/stopping releases waits and
+fences queued frames immediately.

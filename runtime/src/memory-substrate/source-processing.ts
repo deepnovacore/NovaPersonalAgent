@@ -379,7 +379,8 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const originals=readRefs(db,prefix,consumer,q.refs,recipe,participants);if(!originals)return {applied:false,revision}
   if(q.refs.some(ref=>!db.prepare('SELECT 1 FROM processing_reads WHERE batch_id=? AND ref_key=?').get(batch.id,sha256(canonicalJson(ref)))))throw Error('STORE_INVALID_OPERATION')
   const cited=[...(q.products?.projects.flatMap(item=>item.refs)??[]),...(q.products?.suggestions.flatMap(item=>item.refs)??[]),...(q.defer_profile?[]:[...(q.draft.about?.refs??[]),...q.draft.work.flatMap(item=>item.refs),...q.draft.interests.flatMap(item=>item.refs)])]
-  if((!cited.length&&!q.profile_context_key)||cited.some(ref=>!originals.items.some(item=>item.evidence_id===ref.entry_id&&item.version===ref.version)))throw Error('STORE_INVALID_OPERATION')
+  // Shared explicit corrections may remove every inferred clause; originals remain authorized above.
+  if(cited.some(ref=>!originals.items.some(item=>item.evidence_id===ref.entry_id&&item.version===ref.version)))throw Error('STORE_INVALID_OPERATION')
   // A bounded batch revises only its evidence scope. Keep other currently authorized facts.
   const factKey=(fact:unknown)=>sha256(canonicalJson(fact))
   const authorizedFact=(fact:{refs:{entry_id:string;version:unknown}[]})=>fact.refs.every(ref=>{const refs=(old?.refs??[]).filter((r:ProcessingRef)=>r.evidence_id===ref.entry_id);return refs.length>0&&readRefs(db,prefix,consumer,refs,recipe,participants)!==null})

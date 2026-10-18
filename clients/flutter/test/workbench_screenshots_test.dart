@@ -1,15 +1,20 @@
+import 'support/mobile_navigation.dart';
+import 'package:nova_mobile/agent_core/agent_core_host.dart';
+import 'package:nova_mobile/agent_core/model_settings.dart';
+import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nova_mobile/connection/session.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:nova_mobile/personal/life_host.dart';
+import 'package:nova_mobile/personal/local_life.dart';
 import 'package:nova_mobile/services/preferences.dart';
 import 'package:nova_mobile/ui/app.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'conversation_widget_test.dart' show MemoryCredentials;
+import 'local_life_test.dart' show MemoryLifePersistence;
 import 'support/fake_audio.dart';
-import 'support/fake_transport.dart';
 
 void main() {
   setUpAll(() async {
@@ -22,6 +27,8 @@ void main() {
     ).parent.parent.path;
     for (final font in {
       'Roboto': 'Roboto-Regular.ttf',
+      'CupertinoSystemText': 'Roboto-Regular.ttf',
+      'CupertinoSystemDisplay': 'Roboto-Regular.ttf',
       'MaterialIcons': 'MaterialIcons-Regular.otf',
     }.entries) {
       final loader = FontLoader(font.key)
@@ -32,8 +39,17 @@ void main() {
         );
       await loader.load();
     }
+    final icons = packages.singleWhere((p) => p['name'] == 'cupertino_icons');
+    await (FontLoader('packages/cupertino_icons/CupertinoIcons')..addFont(
+          File.fromUri(
+            config.absolute.uri.resolve(
+              "${icons['rootUri']}/assets/CupertinoIcons.ttf",
+            ),
+          ).readAsBytes().then((bytes) => ByteData.sublistView(bytes)),
+        ))
+        .load();
   });
-  testWidgets('five workbench tabs render cached state at phone size', (
+  testWidgets('library pages remain accessible from settings at phone size', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -41,21 +57,72 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({'language': 'en'});
-    final session = Session(
+    FlutterSecureStorage.setMockInitialValues({});
+    final repo = LocalLife(MemoryLifePersistence());
+    await repo.open();
+    final goal = await repo.mutate({
+      'op': 'create',
+      'kind': 'goal',
+      'title': 'Ship mobile workbench',
+      'success_criteria': 'Daily use for two weeks',
+    });
+    await repo.mutate({
+      'op': 'create',
+      'kind': 'idea',
+      'title': 'A weekly reflection',
+    });
+    await repo.mutate({
+      'op': 'create',
+      'kind': 'todo',
+      'title': 'Prepare the demo',
+      'note': 'Review the checklist',
+      'goal_id': goal['id'],
+    });
+    for (final item in [
+      {
+        'title': 'Send the weekly update',
+        'status': 'doing',
+        'due': '2000-01-01',
+      },
+      {'title': 'Book the review room', 'status': 'done'},
+    ]) {
+      final todo = await repo.mutate({
+        'op': 'create',
+        'kind': 'todo',
+        'title': item['title'],
+        if (item['due'] != null) 'due': item['due'],
+      });
+      await repo.mutate({
+        'op': 'update',
+        'kind': 'todo',
+        'id': todo['id'],
+        'expected_version': todo['version'],
+        'status': item['status'],
+      });
+    }
+    final audioConfig = (
       audio: FakeAudio(),
       requestMicrophone: () async => false,
-      openTransport: (_) async => FakeTransport(),
     );
-    addTearDown(session.dispose);
+
+    final conversations = ConversationStore(MemoryLifePersistence());
+    await conversations.open();
+    final core = AgentCoreHost(store: conversations, settings: ModelSettings());
+    addTearDown(core.dispose);
+    final lifeHost = LifeHost(repository: repo);
+    await lifeHost.open();
     await tester.pumpWidget(
       NovaApp(
-        session: session,
-        store: MemoryCredentials(),
+        audio: audioConfig.audio,
+        requestMicrophone: audioConfig.requestMicrophone,
+        lifeHost: lifeHost,
+        agentCore: core,
+
         preferences: Preferences(await SharedPreferences.getInstance()),
       ),
     );
     await tester.pump();
-    session.personal.receive({
+    lifeHost.store!.receive({
       'type': 'personal.state',
       'revision': 1,
       'conversations': {
@@ -107,58 +174,6 @@ void main() {
         'saved': [],
       },
       'life': {
-        'todos': [
-          {
-            'id': 'todo',
-            'kind': 'todo',
-            'version': 2,
-            'title': 'Prepare the demo',
-            'note': 'Review the checklist',
-            'status': 'open',
-            'due': null,
-            'goal_id': 'goal',
-          },
-          {
-            'id': 'todo-2',
-            'kind': 'todo',
-            'version': 1,
-            'title': 'Send the weekly update',
-            'note': '',
-            'status': 'doing',
-            'due': '2000-01-01',
-          },
-          {
-            'id': 'todo-3',
-            'kind': 'todo',
-            'version': 1,
-            'title': 'Book the review room',
-            'note': '',
-            'status': 'done',
-            'due': null,
-          },
-        ],
-        'ideas': [
-          {
-            'id': 'idea',
-            'kind': 'idea',
-            'version': 1,
-            'title': 'A weekly reflection',
-            'note': '',
-            'status': 'active',
-          },
-        ],
-        'goals': [
-          {
-            'id': 'goal',
-            'kind': 'goal',
-            'version': 1,
-            'title': 'Ship mobile workbench',
-            'note': '',
-            'status': 'active',
-            'success_criteria': 'Daily use for two weeks',
-            'progress': {'done': 2, 'total': 5},
-          },
-        ],
         'profile': {
           'about': 'I build useful tools and keep a weekly plan.',
           'version': 1,
@@ -235,12 +250,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     for (final page in ['Nova', 'Feeds', 'Todos', 'Ideas', 'Goals']) {
       if (page != 'Nova') {
-        await tester.tap(
-          find.descendant(
-            of: find.byType(BottomAppBarTabs),
-            matching: find.text(page),
-          ),
-        );
+        await openLibrary(tester, page);
         await tester.pumpAndSettle();
       }
       expect(tester.takeException(), isNull);
@@ -250,9 +260,13 @@ void main() {
           'goldens/workbench-${page.toLowerCase().replaceAll('·', '-')}.png',
         ),
       );
+      if (page != 'Nova') {
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+      }
     }
 
-    await tester.tap(find.byTooltip('Profile'));
+    await openLibrary(tester, 'Profile');
     await tester.pumpAndSettle();
     await expectLater(
       find.byType(NovaApp),
@@ -264,14 +278,12 @@ void main() {
     tester.platformDispatcher.textScaleFactorTestValue = 1.3;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     for (final page in ['Nova', 'Feeds', 'Todos', 'Ideas', 'Goals']) {
-      await tester.tap(
-        find.descendant(
-          of: find.byType(BottomAppBarTabs),
-          matching: find.text(page),
-        ),
-      );
-      await tester.pumpAndSettle();
+      if (page != 'Nova') await openLibrary(tester, page);
       expect(tester.takeException(), isNull);
+      if (page != 'Nova') {
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+      }
     }
     await tester.pumpWidget(const SizedBox());
   });

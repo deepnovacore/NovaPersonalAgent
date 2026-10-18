@@ -1,0 +1,2959 @@
+{
+  "contract_version": 1,
+  "operations": {
+    "approve": [],
+    "authorize_verification": [
+      "grant_ref",
+      "scope"
+    ],
+    "background": [
+      "lifecycle_generation"
+    ],
+    "begin_model_evaluation": [
+      "delivery_id",
+      "instruction",
+      "text"
+    ],
+    "bind_work": [
+      "error",
+      "session_id",
+      "work_id"
+    ],
+    "change_binding": [
+      "field",
+      "value"
+    ],
+    "choose_conflict": [
+      "chosen_version",
+      "expected_version"
+    ],
+    "conflicting_delegation": [
+      "error",
+      "goal"
+    ],
+    "delegate_new": [
+      "request_id"
+    ],
+    "deliver_input": [
+      "request_id",
+      "result",
+      "session_id",
+      "text"
+    ],
+    "deliver_late_correction": [],
+    "deliver_old_reply": [
+      "lifecycle_generation"
+    ],
+    "dispatch": [
+      "executable_digest",
+      "kind",
+      "operation_id"
+    ],
+    "evict_projection": [],
+    "expire_owner_lease": [],
+    "foreground": [],
+    "mark_dispatch_started": [],
+    "observe_stop_ack": [],
+    "persist_intent": [],
+    "process_input": [
+      "context_version",
+      "device_id",
+      "generation"
+    ],
+    "prove_not_dispatched": [
+      "evidence_ref"
+    ],
+    "receive_version": [
+      "base_version",
+      "content",
+      "version"
+    ],
+    "replay_delegation": [],
+    "replay_via_device": [
+      "goal",
+      "identity",
+      "transport_device"
+    ],
+    "restart": [],
+    "retry_dispatch": [
+      "error"
+    ],
+    "revise_goal": [
+      "goal",
+      "request_id"
+    ],
+    "revoke_permission": [
+      "scope"
+    ],
+    "stop_task": [
+      "request_id"
+    ],
+    "takeover": [
+      "device_id"
+    ],
+    "upload_snapshot": [
+      "phase",
+      "version"
+    ],
+    "verify_outcome": [
+      "evidence_ref",
+      "outcome"
+    ],
+    "recover_uncertain": [
+      "reason"
+    ]
+  },
+  "cases": [
+    {
+      "id": "stop-late-reply",
+      "semantics": [
+        "S2"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "begin_model_evaluation",
+          "params": {
+            "delivery_id": "reply-1",
+            "text": "Needs correction",
+            "instruction": "Write late"
+          }
+        },
+        {
+          "op": "stop_task",
+          "params": {
+            "request_id": "stop-1"
+          }
+        },
+        {
+          "op": "deliver_late_correction",
+          "params": {}
+        }
+      ],
+      "then": {
+        "task_phase": "cancelled",
+        "attempt_status": "none",
+        "approval_status": "revoked",
+        "effects": 0
+      },
+      "coverage": {
+        "adapter": "local",
+        "scope": "local task journal only; device approval/owner/fence fields are not implemented"
+      }
+    },
+    {
+      "id": "approval-version-expiry",
+      "semantics": [
+        "S3"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "approve",
+          "params": {}
+        },
+        {
+          "op": "change_binding",
+          "params": {
+            "field": "todo_version",
+            "value": 2
+          }
+        },
+        {
+          "op": "dispatch",
+          "params": {
+            "operation_id": "op-1"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "expired",
+        "effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No full device-bound approval ledger."
+      }
+    },
+    {
+      "id": "intent-crash",
+      "semantics": [
+        "S5"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "approved",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "persist_intent",
+          "params": {}
+        },
+        {
+          "op": "mark_dispatch_started",
+          "params": {}
+        },
+        {
+          "op": "restart",
+          "params": {}
+        },
+        {
+          "op": "recover_uncertain",
+          "params": {
+            "reason": "task_effect_unknown"
+          }
+        },
+        {
+          "op": "retry_dispatch",
+          "params": {
+            "error": "task_effect_unknown"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "waiting",
+        "attempt_status": "unknown-effect",
+        "approval_status": "consumed",
+        "effects": 0
+      },
+      "coverage": {
+        "adapter": "local",
+        "scope": "local task journal only; device approval/owner/fence fields are not implemented"
+      }
+    },
+    {
+      "id": "ack-lost",
+      "semantics": [
+        "S5",
+        "S6"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "approved",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "bind_work",
+          "params": {
+            "work_id": "work-1",
+            "session_id": "session-1"
+          }
+        },
+        {
+          "op": "deliver_input",
+          "params": {
+            "request_id": "write-1",
+            "session_id": "session-1",
+            "text": "Write once",
+            "result": "unknown"
+          }
+        },
+        {
+          "op": "restart",
+          "params": {}
+        },
+        {
+          "op": "recover_uncertain",
+          "params": {
+            "reason": "task_effect_unknown"
+          }
+        },
+        {
+          "op": "deliver_input",
+          "params": {
+            "request_id": "write-1",
+            "session_id": "session-1",
+            "text": "Write once",
+            "result": "unknown"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "waiting",
+        "attempt_status": "unknown-effect",
+        "approval_status": "consumed",
+        "effects": 1,
+        "receipt_replayed": true,
+        "receipt": {
+          "request_id": "write-1",
+          "status": "unknown-effect",
+          "session_id": "session-1",
+          "text": "Write once"
+        }
+      },
+      "coverage": {
+        "adapter": "local",
+        "scope": "local task journal only; device approval/owner/fence fields are not implemented"
+      }
+    },
+    {
+      "id": "same-input-delegation",
+      "semantics": [
+        "S4",
+        "S6"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "replay_delegation",
+          "params": {}
+        },
+        {
+          "op": "restart",
+          "params": {}
+        },
+        {
+          "op": "replay_delegation",
+          "params": {}
+        },
+        {
+          "op": "conflicting_delegation",
+          "params": {
+            "goal": "Changed",
+            "error": "request_conflict"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "task_count": 1,
+        "same_task_id": true
+      },
+      "coverage": {
+        "adapter": "local",
+        "scope": "local task journal only; device approval/owner/fence fields are not implemented"
+      }
+    },
+    {
+      "id": "stale-goal-fence",
+      "semantics": [
+        "S1",
+        "S3"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "revise_goal",
+          "params": {
+            "request_id": "revise-1",
+            "goal": "New goal"
+          }
+        },
+        {
+          "op": "bind_work",
+          "params": {
+            "work_id": "stale-work",
+            "error": "stale_task"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "expired",
+        "effects": 0
+      },
+      "coverage": {
+        "adapter": "local",
+        "scope": "local task journal only; device approval/owner/fence fields are not implemented"
+      }
+    },
+    {
+      "id": "todo-conflict-cas",
+      "semantics": [
+        "S1"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "receive_version",
+          "params": {
+            "version": 2,
+            "content": "Other",
+            "base_version": 1
+          }
+        },
+        {
+          "op": "receive_version",
+          "params": {
+            "version": 3,
+            "content": "Concurrent",
+            "base_version": 1
+          }
+        },
+        {
+          "op": "choose_conflict",
+          "params": {
+            "expected_version": 2,
+            "chosen_version": 2
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "error": "version_conflict",
+        "accepted_version": 3,
+        "conflicts": [
+          {
+            "version": 1,
+            "content": "Original",
+            "base_version": 1
+          },
+          {
+            "version": 2,
+            "content": "Other",
+            "base_version": 1
+          }
+        ]
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No cross-device conflict catalogue/selection authority."
+      }
+    },
+    {
+      "id": "todo-cas-success",
+      "semantics": [
+        "S1"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "receive_version",
+          "params": {
+            "version": 2,
+            "content": "Other",
+            "base_version": 1
+          }
+        },
+        {
+          "op": "choose_conflict",
+          "params": {
+            "expected_version": 2,
+            "chosen_version": 1
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "accepted_version": 3,
+        "accepted_content": "Original",
+        "conflicts": [
+          {
+            "version": 2,
+            "content": "Other",
+            "base_version": 1
+          }
+        ]
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No cross-device conflict catalogue/selection authority."
+      }
+    },
+    {
+      "id": "completed-projection-eviction",
+      "semantics": [
+        "S2",
+        "S6"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "completed",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "evict_projection",
+          "params": {}
+        },
+        {
+          "op": "upload_snapshot",
+          "params": {
+            "version": 1,
+            "phase": "running"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "completed",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No device projection reconnect protocol."
+      }
+    },
+    {
+      "id": "permanent-delete-reconnect",
+      "semantics": [
+        "S6"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [
+          {
+            "entity_id": "todo-1",
+            "version": 2,
+            "permanent": true
+          }
+        ],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "upload_snapshot",
+          "params": {
+            "version": 1,
+            "phase": "queued"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "resurrected": false,
+        "tombstone_version": 2
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No synchronized permanent tombstone admission."
+      }
+    },
+    {
+      "id": "tombstone-equal-version",
+      "semantics": [
+        "S6"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [
+          {
+            "entity_id": "todo-1",
+            "version": 2,
+            "permanent": true
+          }
+        ],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "upload_snapshot",
+          "params": {
+            "version": 2,
+            "phase": "queued"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "resurrected": false,
+        "tombstone_version": 2
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No synchronized tombstone dominance admission."
+      }
+    },
+    {
+      "id": "ios-background-reply",
+      "semantics": [
+        "S8",
+        "S2",
+        "S3"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "running",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "consumed",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "dispatching",
+          "dispatch_started": true
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 1
+      },
+      "when": [
+        {
+          "op": "background",
+          "params": {
+            "lifecycle_generation": 1
+          }
+        },
+        {
+          "op": "foreground",
+          "params": {}
+        },
+        {
+          "op": "deliver_old_reply",
+          "params": {
+            "lifecycle_generation": 0
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "waiting",
+        "attempt_status": "unknown-effect",
+        "approval_status": "expired",
+        "effects": 1,
+        "late": true
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No native lifecycle generation fence bridge."
+      }
+    },
+    {
+      "id": "owner-lease-expiry",
+      "semantics": [
+        "S7"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "expire_owner_lease",
+          "params": {}
+        },
+        {
+          "op": "takeover",
+          "params": {
+            "device_id": "device-2"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "owner": "device-1",
+        "error": "owner_mismatch"
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No device execution owner ledger."
+      }
+    },
+    {
+      "id": "session-owner-rule",
+      "semantics": [
+        "S4",
+        "S7"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "process_input",
+          "params": {
+            "device_id": "device-2",
+            "generation": 0,
+            "context_version": 1
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "owner": "device-1",
+        "error": "owner_mismatch"
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No conversation processing owner admission."
+      }
+    },
+    {
+      "id": "stop-revokes-before-ack",
+      "semantics": [
+        "S2",
+        "S3"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "approved",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "stop_task",
+          "params": {
+            "request_id": "stop-1"
+          }
+        },
+        {
+          "op": "observe_stop_ack",
+          "params": {}
+        },
+        {
+          "op": "dispatch",
+          "params": {
+            "operation_id": "op-1"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "cancelled",
+        "attempt_status": "none",
+        "approval_status": "revoked",
+        "effects": 0,
+        "stop_ack_grant_status": "revoked",
+        "error": "approval_revoked"
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No durable device grant revocation/stop ACK transaction."
+      }
+    },
+    {
+      "id": "dedup-capacity",
+      "semantics": [
+        "S6"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 1,
+          "receipts": [
+            {
+              "id": "receipt-1",
+              "request_key": "[\"user-1\",\"device-1\",\"old-input\"]",
+              "payload_digest": "sha256:old",
+              "status": "accepted"
+            }
+          ]
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "delegate_new",
+          "params": {
+            "request_id": "input-2"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "error": "dedup_capacity",
+        "retained_receipts": [
+          "receipt-1"
+        ]
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No device receipt-capacity admission."
+      }
+    },
+    {
+      "id": "approval-single-consumption",
+      "semantics": [
+        "S3",
+        "S5"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "approved",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "dispatch",
+          "params": {
+            "operation_id": "op-1"
+          }
+        },
+        {
+          "op": "dispatch",
+          "params": {
+            "operation_id": "op-2"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "running",
+        "attempt_status": "accepted",
+        "approval_status": "consumed",
+        "effects": 1,
+        "error": "approval_consumed"
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No grant_ref single-consumption ledger."
+      }
+    },
+    {
+      "id": "permission-recheck",
+      "semantics": [
+        "S3"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "approved",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "revoke_permission",
+          "params": {
+            "scope": "sandbox.command"
+          }
+        },
+        {
+          "op": "dispatch",
+          "params": {
+            "operation_id": "op-1"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "revoked",
+        "effects": 0,
+        "error": "permission_denied"
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No native permission recheck adapter."
+      }
+    },
+    {
+      "id": "cross-device-payload-conflict",
+      "semantics": [
+        "S4",
+        "S6"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": [
+            {
+              "id": "receipt-1",
+              "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+              "payload_digest": "sha256:original",
+              "status": "accepted"
+            }
+          ]
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "replay_via_device",
+          "params": {
+            "transport_device": "device-2",
+            "identity": {
+              "principal": "user-1",
+              "device_id": "device-1",
+              "request_id": "input-1"
+            },
+            "goal": "Changed"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "error": "request_conflict"
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No authenticated cross-device receipt transport."
+      }
+    },
+    {
+      "id": "prepared-failed",
+      "semantics": [
+        "S2",
+        "S5"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "prepared",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "prove_not_dispatched",
+          "params": {
+            "evidence_ref": "journal-1"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "failed",
+        "attempt_status": "failed",
+        "approval_status": "pending",
+        "effects": 0
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "Task failed terminal phase is not implemented."
+      }
+    },
+    {
+      "id": "unknown-resolved-completed",
+      "semantics": [
+        "S2",
+        "S3",
+        "S5"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "waiting",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "consumed",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "unknown-effect",
+          "dispatch_started": true
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 1
+      },
+      "when": [
+        {
+          "op": "authorize_verification",
+          "params": {
+            "grant_ref": "read-grant-1",
+            "scope": "sandbox.fs.read"
+          }
+        },
+        {
+          "op": "verify_outcome",
+          "params": {
+            "outcome": "completed",
+            "evidence_ref": "verification-1"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "completed",
+        "attempt_status": "accepted",
+        "approval_status": "consumed",
+        "effects": 1
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No separately authorized device reconciliation read."
+      }
+    },
+    {
+      "id": "unknown-resolved-failed",
+      "semantics": [
+        "S2",
+        "S3",
+        "S5"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "waiting",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "consumed",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "unknown-effect",
+          "dispatch_started": true
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 1
+      },
+      "when": [
+        {
+          "op": "authorize_verification",
+          "params": {
+            "grant_ref": "read-grant-1",
+            "scope": "sandbox.fs.read"
+          }
+        },
+        {
+          "op": "verify_outcome",
+          "params": {
+            "outcome": "failed",
+            "evidence_ref": "verification-1"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "failed",
+        "attempt_status": "failed",
+        "approval_status": "consumed",
+        "effects": 1
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No separately authorized device reconciliation read."
+      }
+    },
+    {
+      "id": "capability-revision-recheck",
+      "semantics": [
+        "S3",
+        "S8"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "approved",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "change_binding",
+          "params": {
+            "field": "capability_revision",
+            "value": 2
+          }
+        },
+        {
+          "op": "dispatch",
+          "params": {
+            "operation_id": "op-1"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "expired",
+        "effects": 0,
+        "error": "stale_fence"
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No device capability revision admission."
+      }
+    },
+    {
+      "id": "exec-requires-approval",
+      "semantics": [
+        "S3",
+        "S5"
+      ],
+      "given": {
+        "identity": {
+          "principal": "user-1",
+          "device_id": "device-1",
+          "request_id": "input-1"
+        },
+        "request_key": "[\"user-1\",\"device-1\",\"input-1\"]",
+        "input": {
+          "conversation_id": "conversation-1",
+          "conversation_generation": 0,
+          "goal": "Produce a checked result",
+          "acceptance": [
+            "checked"
+          ],
+          "origin_ref": "input-1"
+        },
+        "todo": {
+          "id": "todo-1",
+          "version": 1,
+          "content": "Original",
+          "conflicts": []
+        },
+        "goal": {
+          "id": "goal-1",
+          "revision": 0
+        },
+        "task": {
+          "id": "task-1",
+          "phase": "queued",
+          "owner": "device-1"
+        },
+        "session": {
+          "id": "session-1",
+          "owner": "device-1",
+          "generation": 0,
+          "context_version": 1
+        },
+        "fence": {
+          "todo_version": 1,
+          "goal_revision": 0,
+          "control_revision": 0,
+          "lifecycle_generation": 0,
+          "capability_revision": 1
+        },
+        "approval": {
+          "grant_ref": "grant-1",
+          "status": "pending",
+          "bindings": {
+            "todo_version": 1,
+            "goal_revision": 0,
+            "control_revision": 0,
+            "lifecycle_generation": 0,
+            "capability_revision": 1,
+            "task_id": "task-1",
+            "owner": "device-1",
+            "conversation_generation": 0,
+            "data_version": 1,
+            "observation_version": 1,
+            "permission_scope": [
+              "sandbox.command"
+            ],
+            "effect_class": "write",
+            "proposal_digest": "sha256:action-1",
+            "executable_digest": "sha256:script-1",
+            "expires_at": 100
+          }
+        },
+        "attempt": {
+          "id": "attempt-1",
+          "status": "none",
+          "dispatch_started": false
+        },
+        "tombstones": [],
+        "permissions": [
+          "sandbox.command"
+        ],
+        "dedup": {
+          "capacity": 10,
+          "receipts": []
+        },
+        "effects": 0
+      },
+      "when": [
+        {
+          "op": "dispatch",
+          "params": {
+            "operation_id": "op-1",
+            "kind": "sandbox.command",
+            "executable_digest": "sha256:script-1"
+          }
+        }
+      ],
+      "then": {
+        "task_phase": "queued",
+        "attempt_status": "none",
+        "approval_status": "pending",
+        "effects": 0,
+        "error": "approval_required"
+      },
+      "coverage": {
+        "adapter": "pending",
+        "scope": "contract",
+        "reason": "No device sandbox approval adapter."
+      }
+    }
+  ]
+}

@@ -96,6 +96,7 @@ export class SourceProcessingAgent{
    }
   }
   if(this.host.schedules.activeRuns().some(run=>run.processing)||this.host.sourceProcessingForegroundBusy()||Date.parse(schedule.processing!.next_attempt)>this.host.sourceProcessingNow())return
+  try{await memory.syncSharedContext?.()}catch{return /* Offline or a secondary PC cannot start shared synthesis. */}
   const status=await this.operation({action:'status'}) as {active_batch:ProcessingBatch|null;reconciliation_required:boolean}
   const active=status.active_batch
   if(active){

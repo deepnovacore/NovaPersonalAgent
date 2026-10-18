@@ -11,3 +11,19 @@ Run `flutter pub get`, `flutter test`, and `flutter analyze` from this directory
 Use external SDK/cache/build storage as documented in the approved migration design.
 No production endpoint or token is embedded. Development app identity is separate
 from the original native application so both can coexist during comparison.
+
+## Device connections
+
+The Flutter app runs chat, dictation, voice and authorized Feishu collection on
+this phone. Cross-device discovery, data synchronization and task delegation use
+the configured Hub. Open **Devices** for device presence, connection settings and
+tasks. Direct computer Runtime URLs, QR pairing and computer-chat switching have
+been retired; the native iOS client is a separate implementation.
+
+Existing local conversation messages are retained; legacy `computer` backend
+metadata is migrated to `local` on load. Old Runtime keychain credentials and
+snapshot caches remain untouched for recovery, but are no longer read or used.
+These remote snapshot caches are not imported into local conversation history.
+
+Build and test only in an isolated copy/output directory on the selected external
+disk, namespaced by canonical worktree path and chat ID, including `TMPDIR`.

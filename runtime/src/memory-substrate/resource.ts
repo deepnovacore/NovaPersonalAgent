@@ -3,10 +3,11 @@ import {generateUnderstandingProducts} from '../model/understanding-writer.js'
 import type {ProductGenerationContext} from '../personal-agent/understanding-products.js'
 import {withModelPurpose} from '../model/model-purpose.js'
 import {SOURCE_PROCESSING_GOAL,SOURCE_PROCESSING_INSTRUCTIONS} from '../core/source-processing-instructions.js'
+import type {HubContextBridge} from '../hub/context-bridge.js'
 import {explicitMemoryTurn,type ExplicitMemoryTurn,type ExplicitMemoryArguments,type ExplicitMemoryLookup,type ExplicitMemoryReceipt,type ExplicitMemoryPage} from '../memory/explicit-memory.js'
 import {profileSourceInput} from './profile-source-input.js'
 import {GatewayPersonalWriter} from '../model/personal-writer.js'
-import type {ProfileObservation,ProfileInput} from '../personal-agent/profile-warmup.js'
+import {profileDraftSchema,type ProfileObservation,type ProfileInput} from '../personal-agent/profile-warmup.js'
 import {processingRequestSchema,SOURCE_PROCESSING_VERSION,type ProcessingRequest} from './source-processing.js'
 import {type SourceTag,type ImMetadata} from '../memory/provenance.js'
 import {assertAcceptable,type EvaluatedCandidate} from '../understanding/candidates.js'
@@ -34,12 +35,15 @@ const extractionSchema=z.object({entries:z.array(z.object({
 }).strict()).max(8)}).strict()
 const purgeResultSchema=z.object({status:z.enum(['complete','incomplete']),operation_id:z.string().min(1),removed_entries:z.number().int().nonnegative(),removed_evidence:z.number().int().nonnegative(),removed_entry_ids:z.array(z.string().min(1)).max(4096).default([]),removed_evidence_ids:z.array(z.string().min(1)).max(4096).default([]),index_evidence_ids:z.array(z.string().min(1)).max(4096).default([]),backup_cleanup:z.object({status:z.enum(['complete','incomplete']),unresolved:z.array(z.string())}).strict()}).strict()
 const pendingPurgeSchema=purgeResultSchema.extend({entry_id:z.string().min(1),expected_revision:z.number().int().positive()})
-const evidenceInputSchema=z.object({sourceId:z.string().min(1).max(256),locator:z.string().min(1).max(4096),text:z.string().min(1).max(100000),observedAt:z.iso.datetime({offset:true}),kind:z.enum(['file','im']),embeddingConsent:z.boolean(),processingConsent:processingGrantSchema.optional()}).strict()
+const evidenceInputSchema=z.object({sourceId:z.string().min(1).max(256),locator:z.string().min(1).max(4096),text:z.string().min(1).max(100000),observedAt:z.iso.datetime({offset:true}),kind:z.enum(['file','im']),embeddingConsent:z.boolean(),processingConsent:processingGrantSchema.optional(),retentionUntil:z.string().datetime().optional(),im:EvidenceRecordSchema.shape.source_metadata.optional()}).strict()
 const displayText=(value:unknown)=>typeof value==='string'?value:''
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex')
 
 /** Personal projections over the same worker-owned database as Workspace Graph. */
 export class SubstrateMemoryResource implements PersonalMemoryResource {
+  #sharedContext:HubContextBridge|undefined
+  setSharedContext(bridge:HubContextBridge){this.#sharedContext=bridge}
+  async syncSharedContext(){await this.#sharedContext?.prepare()}
   readonly prefix:string
   #onChange:(()=>void)|undefined
   setOnChange(listener:()=>void):void{this.#onChange=listener}
@@ -99,7 +103,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #preparedSignatures=new Map<string,{signature:string;revision:number}>()
   #consolidating:Promise<void>|null=null
   #adaptation:PersonalMemoryResponseAdaptation={revision:0,replyPreferences:[]}
-  constructor(readonly options:{sourceProcessingLlm?:{baseUrl:string;apiKey:string};sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;profileParticipantMessages?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
+  constructor(readonly options:{sourceProcessingLlm?:{baseUrl:string;apiKey:string};sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];conversationRecipients?:Record<string,string>;personalMemoryEnabled?:boolean;profileParticipantMessages?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
     this.prefix='personal:'+digest(options.userId)+':'
   }
   async open({deferBackground=false}:{deferBackground?:boolean}={}):Promise<void>{
@@ -141,12 +145,12 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async profileSources(ids?:readonly string[]):Promise<ProfileInput[]>{
     this.#ready()
     const records=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('profile_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),...(ids?{ids:ids.filter(id=>id.startsWith(this.prefix))}: {}),...(this.options.profileParticipantMessages?{participants:true}:{})}))
-    return records.map(record=>profileSourceInput(record))
+    return records.filter(record=>!record.source_id.startsWith(this.prefix+'hub-context:')).map(record=>profileSourceInput(record))
   }
 
   sourceProcessingLlm(){return this.options.sourceProcessingLlm?{...this.options.sourceProcessingLlm,model:this.options.model}:undefined}
-  sourceProcessingObserve(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const reply=await this.options.gateway.complete(request);await authorize();signal.throwIfAborted();return reply}};return withModelPurpose('profile',()=>new GatewayPersonalWriter({gateway,model:this.options.model}).observeProfile(entries,signal))}
-  sourceProcessingProfile(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>,observations?:readonly ProfileObservation[]){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const reply=await this.options.gateway.complete(request);await authorize();signal.throwIfAborted();return reply}};return withModelPurpose('profile',()=>new GatewayPersonalWriter({gateway,model:this.options.model}).generateProfile(entries,signal,observations))}
+  sourceProcessingObserve(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await this.#sharedContext?.authorize();await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const reply=await this.options.gateway.complete({...request,system:request.system+(this.#sharedContext?.correctionContext()?'\n'+this.#sharedContext.correctionContext():'')});await this.#sharedContext?.authorize();await authorize();signal.throwIfAborted();return reply}};return withModelPurpose('profile',()=>new GatewayPersonalWriter({gateway,model:this.options.model}).observeProfile(entries,signal))}
+  sourceProcessingProfile(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>,observations?:readonly ProfileObservation[]){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await this.#sharedContext?.authorize();await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const reply=await this.options.gateway.complete({...request,system:request.system+(this.#sharedContext?.correctionContext()?'\n'+this.#sharedContext.correctionContext():'')});await this.#sharedContext?.authorize();await authorize();signal.throwIfAborted();return reply}};return withModelPurpose('profile',()=>new GatewayPersonalWriter({gateway,model:this.options.model}).generateProfile(entries,signal,observations))}
   async sourceProcessingTodoContext(){
     const provider=this.#extractionFingerprint(),authorized=await this.#authorizedRows((await this.#rows()).filter(row=>row.kind==='todo'&&row.content.life_data&&!((row.content.life_data as Record<string,unknown>).source_changed)))
     const todos=authorized.entries.flatMap(row=>{const item=row.content.life_data as Record<string,unknown>;return typeof item.id==='string'&&typeof item.title==='string'&&typeof item.status==='string'?[{id:item.id,title:item.title,status:item.status,due:typeof item.due==='string'?item.due:null}]:[]})
@@ -154,7 +158,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     await authorize();return {todos,authorize}
   }
   sourceProcessingProducts(entries:readonly ProfileInput[],context:ProductGenerationContext,signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>){
-    const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const result=await this.options.gateway.complete(request);await authorize();signal.throwIfAborted();return result}}
+    const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await this.#sharedContext?.authorize();await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const result=await this.options.gateway.complete({...request,system:request.system+(this.#sharedContext?.correctionContext()?'\n'+this.#sharedContext.correctionContext():'')});await this.#sharedContext?.authorize();await authorize();signal.throwIfAborted();return result}}
     return withModelPurpose('context',()=>generateUnderstandingProducts(gateway,this.options.model,entries,context,signal))
   }
   sourceProcessingConsumer():string{return this.#extractionFingerprint()}
@@ -162,7 +166,12 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async sourceProcessing(request:ProcessingRequest):Promise<unknown>{
     this.#ready()
     const parsed=processingRequestSchema.parse(request)
-    const result=await this.options.client.memory('source_processing',{...parsed,prefix:this.prefix,...this.#sourcePolicy()})
+    // Cleanup/status remain available when authority or consent is invalidated.
+    if(!['status','retire'].includes(parsed.action))await this.#sharedContext?.authorize()
+    const effective=parsed.action==='publish'&&this.#sharedContext?{...parsed,draft:this.#sharedContext.suppressCorrected(parsed.draft)}:parsed
+    const result=await this.options.client.memory('source_processing',{...effective,prefix:this.prefix,...this.#sourcePolicy()})
+    if(parsed.action==='publish'&&z.object({applied:z.boolean()}).parse(result).applied)await this.#sharedContext?.publish(parsed.draft)
+    if(parsed.action==='profile'&&this.#sharedContext){const profile=z.object({revision:z.number(),draft:profileDraftSchema.nullable()}).passthrough().parse(result);return {...profile,draft:profile.draft?this.#sharedContext.suppressCorrected(profile.draft):null,explicit_corrections:this.#sharedContext.explicitCorrections()}}
     if(['read','evidence','profile_context'].includes(parsed.action)&&result&&typeof result==='object'&&'items' in result&&Array.isArray(result.items)){
       const scrubber=new SensitiveContentPolicy()
       return {...result,items:result.items.map((item:Record<string,unknown>)=>{if(typeof item.text!=='string')return item;const scrubbed=scrubber.scrub('source_processing',item.text);return {...item,text:scrubbed.kind==='clean'?item.text:scrubbed.kind==='redacted'?scrubbed.value:''}})}
@@ -185,12 +194,20 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(workEpoch!==this.#memoryWorkEpoch)return {revision:++this.#preparedRevision,replyPreferences:[],memoryContext:{text:'',voice:''}}
     const summary=rows.find(row=>row.entry_id===this.prefix+'summary:daily')??null,now=new Date()
     const projection={replyPreferences:rows.filter(row=>row.kind==='preference'&&row.origin==='stated').slice(0,16).map(row=>({id:row.entry_id,text:displayText(row.content.text),evidenceIds:row.evidence_refs})),memoryContext:{text:memoryReadContext(rows,summary,{now,mode:'text'}),voice:memoryReadContext(rows,summary,{now,mode:'voice'})}}
-    const signature=JSON.stringify(projection),old=this.#preparedSignatures.get(consumer)
+    let explicitUserContext:string|undefined
+    const recipient=this.options.conversationRecipients?.[consumer]
+    if(this.#sharedContext&&recipient&&this.options.conversationProviders?.includes(consumer)){
+      // Refresh explicit statements without launching synthesis. An unavailable
+      // Hub hides shared context, but does not disable unrelated local chat.
+      try{await this.#sharedContext.prepare();explicitUserContext=this.#sharedContext.correctionContext(recipient)}catch{signal?.throwIfAborted()}
+    }
+    const enriched={...projection,...(explicitUserContext?{explicitUserContext}:{})}
+    const signature=JSON.stringify(enriched),old=this.#preparedSignatures.get(consumer)
     const revision=old?.signature===signature?old.revision:Math.max(++this.#preparedRevision,this.#adaptation.revision+1)
     this.#preparedRevision=Math.max(this.#preparedRevision,revision)
     // Only configured recipients need a stable cache key; arbitrary denied recipients must not grow this map.
     if(this.options.conversationProviders?.includes(consumer))this.#preparedSignatures.set(consumer,{signature,revision})
-    return {revision,...projection}
+    return {revision,...enriched}
   }
   async #rows(history=false,workspace=false,personalView=false):Promise<EntryRevision[]>{
     this.#ready()
@@ -347,11 +364,11 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return results
   }
   /** All chunks of one document in a single ledger transaction; the source grant is stated once. */
-  async recordEvidenceBatch(inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}[]):Promise<{evidence_id:string}[]>{
+  async recordEvidenceBatch(inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant;retentionUntil?:string;im?:ImMetadata}[]):Promise<{evidence_id:string}[]>{
     this.#ready()
     const items=inputs.map(input=>evidenceInputSchema.parse(input))
     if(!items.length)return []
-    const records=items.map(q=>this.#evidenceRecord({type:q.kind,ref:q.locator,observed_at:q.observedAt},q.text,q.kind,q.sourceId,undefined,false,undefined,q.embeddingConsent))
+    const records=items.map(q=>this.#evidenceRecord({type:q.kind,ref:q.locator,observed_at:q.observedAt},q.text,q.kind,q.sourceId,q.retentionUntil,false,q.im??undefined,q.embeddingConsent))
     const saved=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('record_evidence_batch',{items:records.map(evidence=>({evidence,attempt_id:'knowledge-index'}))}))
     const granted=new Set<string>()
     for(const q of items)if(q.processingConsent&&!granted.has(q.sourceId)){granted.add(q.sourceId);await this.setProcessingConsent(q.sourceId,q.processingConsent)}
@@ -559,7 +576,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   lifeBackend():LifeBackend {
     const namespace=this.prefix+'life:'
     const grant=()=>this.options.inputConsent===true?{processingGrant:this.processingGrant(true)}:{}
-    const run=async(operation:'life_load'|'life_mutate',input:unknown):Promise<unknown>=>{
+    const run=async(operation:'life_load'|'life_mutate'|'life_sync_projection',input:unknown):Promise<unknown>=>{
       try{const result=await this.options.client.memory(operation,input);return result?await this.#projectLife(result as LifeSnapshot):result}catch(error){
         if(error instanceof MemoryLedgerClientError){const code=({STORE_STALE_REVISION:'version_conflict',STORE_IDEMPOTENCY_CONFLICT:'request_id_conflict',STORE_NOT_FOUND:'item_not_found'} as Record<string,string>)[error.code];if(code)throw Error(code)}
         throw error
@@ -567,6 +584,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     }
     return {
       peek:async()=>{this.#ready();return await run('life_load',{namespace}) as LifeSnapshot|null},
+      applySyncProjection:async value=>{this.#ready();const snapshot=await run('life_sync_projection',{namespace,...value,...grant()}) as LifeSnapshot;await this.#refresh();return snapshot},
       load:async(legacy,options)=>{this.#ready();const snapshot=await run('life_load',{namespace,legacy,...grant(),...(options?.legacyPath?{hostMigrationPath:options.legacyPath}:{})}) as LifeSnapshot;if(this.#backgroundStarted)await this.#refresh();return snapshot},
       mutate:async value=>{this.#ready();const snapshot=await run('life_mutate',{namespace,...value,...grant(),sourcePolicy:this.#sourcePolicy(),...((value.input as {op?:string})?.op==='from_workbench'?{workbench_provider:this.#extractionFingerprint()}:{})}) as LifeSnapshot&{result:{id:string;version:number}};await this.#refresh();return snapshot},
     }

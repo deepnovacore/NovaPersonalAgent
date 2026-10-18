@@ -265,4 +265,4 @@ npm ci && npm run check && npm run build && npm test
 
 ## 7. 许可证
 
-版权所有 2026 DeepNovaCore，[Apache License 2.0](LICENSE)。
+版权所有 2026 DeepNovaCore，[GNU GPL v3 或更高版本](LICENSE)。

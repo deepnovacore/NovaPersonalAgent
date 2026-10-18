@@ -168,6 +168,8 @@ const rows: readonly Row[] = [
   ['SERVER_PORT', 'host_private', false, false, 'when_selected', null, 'Fixed loopback remote server port.', '远程服务固定本地端口。'],
   ['SERVER_TOKEN_FILE', 'host_private', true, false, 'when_selected', null, 'Absolute path to the private remote credential file.', '远程服务私有凭据文件的绝对路径。'],
   ['DESKTOP_TOKEN', 'host_private', true, false, 'when_selected', null, 'Desktop transport handshake token.', '桌面传输握手令牌。'],
+  ['NOVA_HUB_URL', 'host_private', false, false, 'when_selected', null, 'HTTPS origin of the sync Hub used by the hub command-line client.', 'Hub 命令行客户端使用的同步 Hub HTTPS 地址。'],
+  ['NOVA_HUB_TOKEN', 'host_private', true, false, 'when_selected', null, 'Device token for the sync Hub command-line client.', 'Hub 命令行客户端使用的设备令牌。'],
   ['DESKTOP_READY_ENDPOINT', 'host_private', false, false, 'when_selected', null, 'Desktop readiness endpoint.', '桌面就绪端点。'],
   ['DESKTOP_READY_FD', 'host_private', false, false, 'never', null, 'Legacy desktop readiness descriptor.', '旧桌面就绪描述符。'],
   ['DEV_BACKEND_ENTRY', 'host_private', false, false, 'never', null, 'Unpackaged desktop backend entry override.', '未打包桌面的开发后端入口覆盖。'],

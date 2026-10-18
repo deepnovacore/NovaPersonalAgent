@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../protocol/request_id.dart';
 import 'models.dart';
+import 'local_life.dart';
 
 final class PersonalCommandError implements Exception {
   const PersonalCommandError(this.code);
@@ -16,7 +17,24 @@ final class PersonalStore extends ChangeNotifier {
   PersonalStore({
     required this.send,
     this.timeout = const Duration(seconds: 30),
-  });
+    this.local,
+  }) {
+    local?.addListener(_localChanged);
+    if (local != null) _localChanged();
+  }
+  final LocalLife? local;
+  bool get available => local?.ready ?? connected;
+  void _localChanged() {
+    final repository = local;
+    if (repository == null || !repository.ready) return;
+    snapshot = PersonalSnapshot({
+      'type': 'personal.state',
+      'revision': repository.revision,
+      'life': repository.life,
+    });
+    notifyListeners();
+  }
+
   final bool Function(Map<String, dynamic>) send;
   final Duration timeout;
   final _pending = <String, ({Completer<dynamic> result, Timer timer})>{};
@@ -67,6 +85,10 @@ final class PersonalStore extends ChangeNotifier {
   }
 
   void refresh({bool force = false}) {
+    if (local != null) {
+      _localChanged();
+      return;
+    }
     if (!connected || _reloadRequested || (_reloadBlocked && !force)) return;
     _reloadBlocked = false;
     _reloadRequested = true;
@@ -96,6 +118,16 @@ final class PersonalStore extends ChangeNotifier {
     Map<String, dynamic> params,
     String id,
   ) {
+    final repository = local;
+    if (repository != null) {
+      if (method == 'state') return Future.value(snapshot?.data);
+      if (method == 'life.mutate') {
+        return repository.mutate(params, operationId: id);
+      }
+      return Future.error(
+        const PersonalCommandError('This action requires a connected host.'),
+      );
+    }
     if (_pending.containsKey(id)) {
       return Future.error(
         const PersonalCommandError('Wait for pending operations'),
@@ -180,6 +212,7 @@ final class PersonalStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    local?.removeListener(_localChanged);
     for (final pending in _pending.values) {
       pending.timer.cancel();
       pending.result.completeError(const PersonalCommandError('Disposed'));

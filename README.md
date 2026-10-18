@@ -264,4 +264,4 @@ invariants: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 7. License
 
-Copyright 2026 DeepNovaCore, [Apache License 2.0](LICENSE).
+Copyright 2026 DeepNovaCore, [GNU GPL v3 or later](LICENSE).

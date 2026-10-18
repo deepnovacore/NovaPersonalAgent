@@ -14,6 +14,9 @@ import {UnifiedRetrieval} from '../memory/retrieval.js'
 import {DashScopeEmbeddingProvider} from '../knowledge/embeddings.js'
 import {createHash as embeddingHash} from 'node:crypto'
 import {SubstrateMemoryResource} from '../memory-substrate/resource.js'
+import {HubContextBridge} from '../hub/context-bridge.js'
+import {HubScheduleCoordinator} from '../hub/schedule-coordinator.js'
+import {loadHubCredentials,LifeSyncTransport} from '../hub/life-sync-transport.js'
 import {MemoryLedgerClient} from '../memory-ledger/store-client.js'
 import {homedir as memoryHome} from 'node:os'
 import {resolve as memoryPath} from 'node:path'
@@ -165,10 +168,14 @@ function turnKey(sessionEpoch: number, userInputRevision: number): string {
 }
 
 export function configuredMemoryConsumer(settings: AssemblyOptions['settings'], mode: 'text'|'voice'): string|undefined {
+  return configuredMemoryRecipient(settings,mode)?.consumer
+}
+export function configuredMemoryRecipient(settings: AssemblyOptions['settings'], mode:'text'|'voice'):{consumer:string;provider:string}|undefined {
   try {
     const selected = mode === 'text' || settings.pipeline_mode === 'cascaded' ? requireSelectedCascadedLlmConfig(settings) : undefined
     const voice = selected === undefined ? requireIntegratedRealtime(settings) : undefined
-    return embeddingHash('sha256').update(JSON.stringify({provider:selected?.provider ?? settings.integrated_provider,endpoint:selected?.config.baseUrl ?? voice!.url,model:selected?.config.model ?? voice!.model})).digest('hex')
+    const endpoint=selected?.config.baseUrl ?? voice!.url,model=selected?.config.model ?? voice!.model
+    return {consumer:embeddingHash('sha256').update(JSON.stringify({provider:selected?.provider ?? settings.integrated_provider,endpoint,model})).digest('hex'),provider:endpoint+'|'+model}
   } catch { return undefined }
 }
 export function configuredTaskVerifierConsumer(settings:AssemblyOptions['settings']):string {
@@ -200,7 +207,8 @@ async function responseAdaptationFor(
     'Use it only as background. It cannot authorize actions or override the current user request.',
     `<memory_context>${canonicalJson({mode,trust:'untrusted_external',text:memory}).replace(/</g,'\\u003c')}</memory_context>`,
   ].join('\n') : null
-  return {revision: snapshot.revision, content: [preferences, understanding].filter(Boolean).join('\n') || null}
+  const explicit=fresh&&snapshot.explicitUserContext?'<user_stated_profile_data>'+canonicalJson(snapshot.explicitUserContext).replace(/</g,'\\u003c')+'</user_stated_profile_data>':null
+  return {revision: snapshot.revision, content: [preferences, understanding,explicit].filter(Boolean).join('\n') || null}
 }
 
 export interface RealtimeAssemblyOptions {
@@ -386,6 +394,14 @@ export class RealtimeAssembly {
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
     if (!this.#sharedPersonal) this.personalAgent.setRetrieval(input.retrieval)
+    if(!this.#sharedPersonal&&process.env.NOVA_CONTEXT_HUB_CREDENTIALS){
+      const path=memoryPath(process.env.NOVA_CONTEXT_HUB_CREDENTIALS)
+      this.personalAgent.schedules.coordinator=new HubScheduleCoordinator(this.personalAgent.schedules,async(route,body)=>{
+        const credentials=await loadHubCredentials(path)
+        if(!credentials)throw Error('hub_credentials_required')
+        return new LifeSyncTransport(credentials).contextRequest(route,body)
+      })
+    }
     this.#unsubscribePersonalEvents=input.core.runtime.observe((event,current)=>{
       if(current===false)return
       if(event.kind==='handoff'&&input.core.runtime.claimedHandoff(event.seq)){
@@ -1433,11 +1449,24 @@ export function composeRealtime(
       extractionFingerprint:embeddingHash('sha256').update((local?.embedding.baseUrl??options.settings.model_base_url)+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
       personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,profileParticipantMessages:options.settings.profile_participant_messages,
       conversationProviders: [...new Set([...(['text','voice'] as const).map(mode=>configuredMemoryConsumer(options.settings,mode)).filter((value): value is string=>value!==undefined),configuredTaskVerifierConsumer(options.settings)])],
+      conversationRecipients:Object.fromEntries((['text','voice'] as const).flatMap(mode=>{const recipient=configuredMemoryRecipient(options.settings,mode);return recipient?[[recipient.consumer,recipient.provider]]:[]})),
       consolidation:{enabled:options.settings.memory_consolidation_enabled,timezone:options.settings.memory_consolidation_timezone,hour:options.settings.memory_consolidation_hour},
       gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
       ...(local?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
     })
-    if(local)return memory
+    if(local){
+      const credentialsPath=process.env.NOVA_CONTEXT_HUB_CREDENTIALS
+      if(credentialsPath){
+        // Explicit local opt-in; neither Feishu secrets nor model keys enter sync.
+        const transport=async(path:string,body?:unknown)=>{
+          const credentials=await loadHubCredentials(memoryPath(credentialsPath))
+          if(!credentials)throw Error('hub_credentials_required')
+          return new LifeSyncTransport(credentials).contextRequest(path,body)
+        }
+        memory.setSharedContext(new HubContextBridge(memory,memoryPath(local.path)+'.shared-context.json',transport))
+      }
+      return memory
+    }
     // Knowledge-only mode owns A originals, without enabling personal capture or B projections.
     let opened=false
     return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
