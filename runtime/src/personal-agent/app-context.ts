@@ -5,7 +5,7 @@ import type {JsonValue} from '../core/events.js'
 import type {PersonalAgentHost} from './host.js'
 import type {ScheduledRunGrant} from './scheduled-run-authority.js'
 import {scheduleHash} from './scheduled-tasks.js'
-const sectionSchema=z.enum(['todos','goals','tasks'])
+const sectionSchema=z.enum(['todos','goals','tasks','profile','projects'])
 export type AppContextSection=z.infer<typeof sectionSchema>
 export interface AppContextPage{
  section:AppContextSection
@@ -21,7 +21,7 @@ export class ScheduledAppContext{
  constructor(readonly host:PersonalAgentHost){}
  async read(section:AppContextSection,cursor:string|null,grant:ScheduledRunGrant):Promise<AppContextPage>{
   section=sectionSchema.parse(section);this.host.scheduledAuthority.assert(grant,grant.fence)
-  if(!this.host.schedules.getRun(grant.run_id).definition.context[section])throw Error('context_not_authorized')
+  if(!this.host.schedules.getRun(grant.run_id).definition.context[section==='profile'||section==='projects'?'memory':section])throw Error('context_not_authorized')
   const projection=await this.#project(section,grant.consumer,grant.task_id),version=scheduleHash(projection)
   let offset=0
   if(cursor){
@@ -58,7 +58,7 @@ export class ScheduledAppContext{
  }
  async validateRefs(refs:readonly string[],consumer:string|null,taskId:string):Promise<boolean>{
   for(const ref of refs){
-   const match=/^app:(todos|goals|tasks):([a-f0-9]{64})$/.exec(ref)
+   const match=/^app:(todos|goals|tasks|profile|projects):([a-f0-9]{64})$/.exec(ref)
    if(match){if(scheduleHash(await this.#project(sectionSchema.parse(match[1]),consumer,taskId))!==match[2])return false}
    else if(!consumer||!await this.host.options.memory()?.canReadConversationEvidence?.(ref,consumer))return false
   }
@@ -68,7 +68,11 @@ export class ScheduledAppContext{
   await this.host.life.refresh()
   const items:AppContextPage['items']=[];let omitted=0
   if(section==='tasks'){
-   for(const task of this.host.tasks.list().filter(task=>task.id!==taskId))items.push({id:task.id,version:task.control_revision+':'+task.goal_revision+':'+task.phase,status:task.phase,waiting:task.waiting_reason!==null,execution_route:task.execution_route??null})
+   for(const task of this.host.tasks.list().filter(task=>task.id!==taskId&&(!task.trigger||!this.host.schedules.findRun(task.trigger.run_id)?.processing)))items.push({id:task.id,version:task.control_revision+':'+task.goal_revision+':'+task.phase,status:task.phase,waiting:task.waiting_reason!==null,execution_route:task.execution_route??null})
+  }else if(section==='profile'||section==='projects'){
+   await this.host.sourceProcessingAgent.reload();const product=this.host.sourceProcessingAgent.snapshot()
+   const entries=section==='projects'?product.projects:product.draft?[...(product.draft.about?[{id:'about',...product.draft.about}]:[]),...product.draft.work.map((item,index)=>({id:'work:'+index,...item})),...product.draft.interests.map((item,index)=>({id:'interest:'+index,...item}))]:[]
+   for(const item of entries){if(!consumer||(await Promise.all(item.refs.map(ref=>this.host.options.memory()?.canReadConversationEvidence?.(ref.entry_id,consumer)??Promise.resolve(false)))).some(allowed=>!allowed)){omitted++;continue}items.push({...item,version:product.revision,suggested:true})}
   }else{
    for(const row of this.host.life.snapshot()[section]){
     const sources=[...new Set([...(row.provenance_refs??[]),...(row.sources??[]).map(source=>source.evidence_id)])]
@@ -76,6 +80,10 @@ export class ScheduledAppContext{
     const note=row.note.slice(0,900),criteria='success_criteria' in row?row.success_criteria.slice(0,600):null
     items.push({id:row.id,version:row.version,title:row.title,note,status:row.status,...('due'in row?{due:row.due,goal_id:row.goal_id}:{success_criteria:criteria}),truncated:note.length<row.note.length||('success_criteria'in row&&criteria!.length<row.success_criteria.length)})
    }
+  }
+  if(section==='todos'||section==='goals'){
+   await this.host.sourceProcessingAgent.reload();const product=this.host.sourceProcessingAgent.snapshot()
+   for(const item of product.suggestions.filter(item=>section==='goals'?item.kind==='goal':item.kind==='action'||item.kind==='progress')){if(!consumer||(await Promise.all(item.refs.map(ref=>this.host.options.memory()?.canReadConversationEvidence?.(ref.entry_id,consumer)??Promise.resolve(false)))).some(allowed=>!allowed)){omitted++;continue}items.push({id:item.id,title:item.title,note:item.body,due:item.due,todo_id:item.todo_id,kind:item.kind,version:product.revision,suggested:true,status:'suggested'})}
   }
   return {items,omitted}
  }

@@ -80,6 +80,12 @@ export class ScheduleService{
   })
  }
  exhaustSourceProcessing(runId:string){return this.#changeRun(runId,run=>{if(run.processing)run.processing.exhausted=true})}
+ reserveSourceProcessingModelCall(runId:string,maxTokens:number){return this.#changeRun(runId,run=>{
+  if(!run.processing||run.stage==='terminal')throw Error('builtin_schedule')
+  const count=run.processing.model_calls??0,budget=run.processing.reserved_output_tokens??0
+  if(count>=8||budget+maxTokens>64000)throw Error('processing_model_budget_exhausted')
+  run.processing.model_calls=count+1;run.processing.reserved_output_tokens=budget+maxTokens
+ })}
  reserveSourceProcessingCall(runId:string,callId:string){return this.#changeRun(runId,run=>{
   if(!run.processing||run.stage==='terminal')throw Error('builtin_schedule')
   if(run.processing.calls.includes(id.parse(callId)))return

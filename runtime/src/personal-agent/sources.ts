@@ -277,6 +277,10 @@ export class LocalDirectorySources {
     const expected=this.#options.processingGrant?.(true,1,0)
     return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isComputerExcludedPath(record.view,f.path))).map(file=>{const root=file.unit??computerUnit(record.view.path,file.path),activity=this.#activity?.peek(root),gitMs=activity?.lastGitCommitMs;return {last_commit_ms:gitMs??null,own_commits:activity?.ownCommits??0,kind:'file' as const,id:'source:'+file.id,version:file.fingerprint,content:file.excerpt!,source_id:record.view.id,file_id:file.id,root,rel_path:record.view.scope==='computer'?relative(record.view.path,file.path):join(basename(record.view.path),relative(record.view.path,file.path)),role:/\.(?:md|markdown|txt|pdf|docx)$/iu.test(file.path)?'document' as const:/\.(?:json|yaml|yml|csv)$/iu.test(file.path)?'config' as const:'code' as const,mtime_ms:file.mtime,hidden_prefix_depth:hiddenPrefixDepth(record.view,file.path),priority:record.view.priority_dirs.some(dir=>within(dir,file.path))?3:record.view.scope==='directory'?2:this.#workspacePath&&within(this.#workspacePath,file.path)?1:gitMs!==null&&gitMs!==undefined&&Date.now()-gitMs<30*86_400_000?1:0}}))
   }
+  projectRoots(ids:readonly string[]=[]):{evidence_id:string;root:string;file:string}[]{
+    const allowed=new Map(this.contextEntries().filter(entry=>entry.kind==='file').map(entry=>[entry.file_id,entry.root]))
+    return this.#records.flatMap(record=>record.files.flatMap(file=>{const root=allowed.get(file.id);return root?(file.evidence_ids??[]).filter(id=>!ids.length||ids.includes(id)).map(evidence_id=>({evidence_id,root,file:file.path})):[]}))
+  }
   evidenceSnapshot(): {ref: string; summary: string}[] {
     const fingerprints = new Set<string>()
     return interleave(this.#records.filter(record => !record.deleting).map(record =>

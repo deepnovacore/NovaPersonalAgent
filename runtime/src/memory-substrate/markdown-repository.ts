@@ -149,6 +149,8 @@ export class MarkdownRepository {
   const names=readdirSync(join(this.root,'entries')).sort()
   if(names.length>MAX_ENTRIES)throw failure('LIMIT')
   const head=this.head(),tracked=head?this.git(['ls-tree','-r','--name-only',head]).split('\n').filter(Boolean):[]
+  // Publication replaces the whole owned Git tree; never drop a foreign tracked file.
+  for(const path of tracked)if(path!==MARKER&&!/^entries\/[a-f0-9]{64}\.md$/u.test(path)&&!semanticPath.test(path))throw failure('CONFLICT')
   const recordPaths=tracked.filter(path=>path.startsWith('entries/'))
   for(const path of recordPaths)if(!names.includes(path.slice('entries/'.length)))throw failure('CONFLICT')
   const committedFiles=head?this.committedFiles(head,[...recordPaths,...(tracked.includes(MARKER)?[MARKER]:[])]):new Map<string,string>()

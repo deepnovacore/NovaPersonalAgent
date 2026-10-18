@@ -1,4 +1,5 @@
 import {attachSources,attachSourceTags,disposeSources} from './source-popover.mjs'
+import {renderSourceStatus} from './source-status.mjs'
 import {t,currentLanguage} from './locale.mjs'
 import {renderCardTags} from './card-tags.mjs'
 const LABEL={overdue:'已过截止',current:'今天到期',soon:'接下来 7 天',later:'之后',waiting:'等待中 · 未设期限',unscheduled:'尚未安排',completed:'已完成'}
@@ -7,15 +8,18 @@ export function timelineDate(snapshot,now=new Date()){return now.toLocaleDateStr
 export function timelineGroups(snapshot,now=new Date()){
  const currentDate=timelineDate(snapshot,now),week=new Date(Date.parse(currentDate+'T00:00:00Z')+7*86400000).toISOString().slice(0,10)
  const grouped=new Map(Object.keys(LABEL).map(id=>[id,[]]))
- for(const todo of snapshot?.life?.todos??[]){
+ const recorded=snapshot?.life?.todos??[],derived=snapshot?.derived_understanding
+ const proposed=(derived?.suggestions??[]).filter(item=>(item.kind==='action'||item.kind==='progress')&&!item.todo_id&&!recorded.some(todo=>todo.source_suggestion_id===item.id)).map(item=>({...item,suggested:true,status:'open',note:item.body,sources:item.refs.flatMap(ref=>{const source=derived.sources?.find(source=>source.id===ref.entry_id);return source?.type?[{evidence_id:ref.entry_id,type:source.type,provider:source.provider,url:source.url,label:source.label,observed_at:source.observed_at}]:[]})}))
+ for(const todo of [...recorded,...proposed]){
   if(todo.status==='cancelled')continue
   const date=todo.due??null,id=todo.status==='done'?'completed':date?(date<currentDate?'overdue':date===currentDate?'current':date<=week?'soon':'later'):todo.status==='waiting'?'waiting':'unscheduled'
   grouped.get(id).push({...todo,date,reference:{kind:'todo',id:todo.id,version:todo.version},goal:snapshot.life?.goals?.find(goal=>goal.id===todo.goal_id)?.title??null})
  }
  return [...grouped].filter(([,items])=>items.length).map(([id,items])=>({id,label:LABEL[id],items:items.sort((a,b)=>(a.date??'').localeCompare(b.date??'')||a.title.localeCompare(b.title))}))
 }
-export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,openArticle,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
+export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,openArticle,openSettings,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
  const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}${snapshot?.timeline?' timeline-briefing':''}`);parent.append(root)
+ renderSourceStatus(root,{sources:snapshot?.sources??[],status:snapshot?.profile_preparation?.status,processing:snapshot?.profile_preparation?.processing,el,button,openSettings})
  const groups=snapshot?.timeline?[]:timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),currentDate=timelineDate(snapshot,now)
  const formatDate=date=>new Date(date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{...(date.slice(0,4)!==currentDate.slice(0,4)?{year:'numeric'}:{}),month:'short',day:'numeric',timeZone:'UTC'})
  if(!snapshot?.life){const status=el('p',t(connected?'正在读取事项…':'连接后可查看安排。'),'hint');status.setAttribute('role','status');root.append(status);return}
@@ -25,6 +29,18 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
   const summary=el('div',undefined,'timeline-overview-summary');summary.append(el('span',t('{0} 项有截止日期',active.filter(item=>item.date).length)))
   const waiting=active.filter(item=>item.status==='waiting').length;if(waiting)summary.append(el('span',t('{0} 项等待回复',waiting)))
   if(!snapshot.timeline)overview.append(summary);root.append(overview)
+ }
+ const separate=(snapshot?.derived_understanding?.suggestions??[]).filter(item=>snapshot.timeline||item.kind==='idea'||item.kind==='goal')
+ if(separate.length){
+  const section=el('section',undefined,'timeline-suggestions');section.append(el('h3',t('待确认建议'),'timeline-group-title'));root.append(section)
+  for(const item of separate){
+   const card=el('article',undefined,'timeline-card');card.dataset.objectId=item.id;card.dataset.suggested='true';card.append(el('h3',item.title,'timeline-title'),el('p',item.body,'timeline-note'));section.append(card)
+   const sources=item.refs.flatMap(ref=>{const source=snapshot.derived_understanding.sources?.find(source=>source.id===ref.entry_id);return source?.type?[{...source,evidence_id:ref.entry_id}]:[]})
+   attachSourceTags(card,sources,{openArticle,title:t('事项依据')})
+   const actions=el('div',undefined,'timeline-actions');card.append(actions)
+   button(t(item.kind==='progress'?'确认进展':item.kind==='idea'?'加入想法':item.kind==='goal'?'加入目标':'加入待办'),()=>command?.('understanding.adopt',{id:item.id}),actions).className='soft'
+   button(t('忽略'),()=>command?.('understanding.dismiss',{id:item.id}),actions).className='ghost'
+  }
  }
  const attention=snapshot.timeline
  const briefCards=[]
@@ -104,24 +120,33 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    }
   }else{section.append(el('h3',`${t(group.label)} · ${group.items.length}`,'timeline-group-title'));root.append(section)}
   for(const item of group.items){
-   const card=el('article',undefined,'timeline-card');card.dataset.objectId=item.id;cards.append(card)
+   const card=el('article',undefined,'timeline-card');card.dataset.objectId=item.id;cards.append(card);if(item.suggested)card.dataset.suggested='true'
    const days=item.date?Math.round((Date.parse(item.date)-Date.parse(currentDate))/86400000):null
    const pressure=item.status==='done'?t('已完成'):days===null?t(item.status==='waiting'?'等待回复 · 未设期限':'尚未安排'):days<0?t('已过截止 {0} 天',-days):days===0?t('今天到期'):days===1?t('明天到期'):t('还有 {0} 天',days)
    card.dataset.tone=item.status==='done'?'progress':days!==null&&days<0?'attention':days!==null&&days<=1?'time':days===null&&item.status==='waiting'?'waiting':'context';card.dataset.period=days!==null&&days<=1&&item.importance==='high'&&item.status!=='done'?'near':'later'
    const repeated=group.id==='current'||group.id==='waiting'||group.id==='completed'
    if(!repeated){const meta=el('div',pressure,'timeline-meta');card.append(meta);if(compact&&item.date){const time=el('time',formatDate(item.date));time.dateTime=item.date;meta.append(time)}}
    const dateLabel=item.date?formatDate(item.date):null
-   const title=button(item.title,()=>item.status==='done'?openTodos(item.id):discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title'
+   const title=item.suggested?el('h3',item.title,'timeline-title'):button(item.title,()=>item.status==='done'?openTodos(item.id):discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title';if(item.suggested)card.append(title)
    if(item.source_changed)card.append(el('p',t('来源内容已变化，请先核对。'),'timeline-caution'))
    const excerpt=item.note||item.sources?.find(source=>typeof source?.summary==='string'&&source.summary.trim())?.summary
    if(excerpt){const context=el('div',undefined,'timeline-context');context.append(el('span',t(item.note?'当前记录':'来源摘录'),'timeline-context-label'),el('p',excerpt,'timeline-note'));card.append(context)}
-   const tags=[]
+   const tags=item.suggested?[{label:item.kind==='progress'?'进展建议':'建议',tone:'context'}]:[]
    if(item.date&&item.status==='done')tags.push({label:t('原截止 {0}',dateLabel),tone:'context'})
    if(item.importance==='high')tags.push({label:'重要',tone:'importance'})
    tags.push({label:item.status==='done'?'已完成':STATUS[item.status]??item.status,tone:item.status==='done'?'progress':item.status==='waiting'?'waiting':item.status==='doing'?'progress':'context'})
    if(item.goal)tags.push({label:item.goal,tone:'project'})
    renderCardTags(card,tags,{el});const sourceDetails=attachSourceTags(card,item.sources,{autoRecorded:item.auto_recorded,sourceChanged:false,openArticle,title:compact?undefined:t('事项依据')})
    const actions=el('div',undefined,'timeline-actions');card.append(actions)
+   if(item.suggested){
+    button(t('加入待办'),()=>command?.('understanding.adopt',{id:item.id}),actions).className='soft'
+    button(t('忽略'),()=>command?.('understanding.dismiss',{id:item.id}),actions).className='ghost'
+    continue
+   }
+   for(const update of snapshot?.derived_understanding?.suggestions??[])if(update.todo_id===item.id){
+    const note=el('div',undefined,'timeline-context');note.append(el('span',t('进展建议'),'timeline-context-label'),el('p',update.body,'timeline-note'))
+    button(t('确认进展'),()=>command?.('understanding.adopt',{id:update.id}),note).className='soft';button(t('忽略'),()=>command?.('understanding.dismiss',{id:update.id}),note).className='ghost';card.append(note)
+   }
    const action=item.source_changed?'核对来源':item.status==='waiting'?'起草跟进':item.status==='doing'?'整理下一步':'拆成行动步骤'
    const prompt=item.source_changed?'请针对「{0}」核对已记录的来源内容，说明哪些已知、哪些需要进一步确认，再整理下一步行动。':item.status==='waiting'?'请针对「{0}」起草一条跟进消息，先给我草稿。':item.status==='doing'?'请针对「{0}」结合当前记录和真实截止日期，整理下一步行动和需要确认的问题。':'请针对「{0}」拆成可执行的行动步骤，结合真实截止日期，说明建议顺序。'
    const primary=item.status==='done'?null:button(t(action),()=>discuss([item.reference],t(prompt,item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
@@ -142,10 +167,11 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
  if(!compact&&(attention?.cards?.length??0)>visibleCount){
   const more=button(t('继续查看进展（还有 {0} 条）',attention.cards.length-visibleCount),()=>{
    expanded.add(pageKey+pages);disposeSources(root)
-   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,openTodos,openArticle,command,expanded,compact,connected,now})
+   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,openTodos,openArticle,openSettings,command,expanded,compact,connected,now})
    const replacement=holder.children[0];root.replaceWith(replacement)
    replacement.querySelectorAll('.timeline-attention-card')[visibleCount]?.focus?.({preventScroll:true})
   },root,'timeline:more');more.className='soft timeline-load-more'
  }
+ root.append(el('p',t('这里展示已记录的事项和待确认建议，不代表完整日程。'),'timeline-source-note'))
  for(const node of root.querySelectorAll('button'))if(!connected&&node.className!=='source-info')node.disabled=true
 }

@@ -81,7 +81,7 @@ test('empty Life and source states use specific copy without inventing work',t=>
  renderLife(h.panel,{...h,kind:'goal',state:{todos:[],ideas:[],goals:[]}})
  assert.match(text(h.panel),/还没有设定目标/u)
  renderSourceSuggestions(h.panel,{tab:'ideas',context:{status:'ready',candidate_count:0,cards:[],empty_reason:'no_eligible_sources'},sources:[{state:'connected',scan_pending:true}],button:h.button,command:h.command,continueChat:()=>{}})
- assert.match(text(h.panel),/还在读你给我的资料/u)
+ assert.match(text(h.panel),/资料索引仍在更新/u)
  assert.doesNotMatch(text(h.panel),/值得关注|持续推进/u)
 })
 test('unloaded Life data and paused sources never claim an empty list or active scan',t=>{
@@ -91,7 +91,7 @@ test('unloaded Life data and paused sources never claim an empty list or active 
  assert.doesNotMatch(text(h.panel),/还没有待办/u)
  renderSourceSuggestions(h.panel,{tab:'todos',context:{status:'idle',candidate_count:0,cards:[]},sources:[{state:'paused',scan_pending:true}],button:h.button,command:h.command,continueChat:()=>{}})
  assert.match(text(h.panel),/资料来源已暂停/u)
- assert.doesNotMatch(text(h.panel),/还在读你给我的资料/u)
+ assert.doesNotMatch(text(h.panel),/资料索引仍在更新/u)
 })
 test('disconnected source state does not claim that no sources are connected',t=>{
  const h=harness(t)
@@ -116,8 +116,8 @@ test('a partial source failure remains visible beside available suggestions',t=>
  const h=harness(t)
  renderSourceSuggestions(h.panel,{tab:'ideas',context:{status:'ready',cards:[{id:'card',tab:'ideas',title:'Simplify setup',body:'The note suggests a shorter setup.',refs:[]}]},sources:[{scope:'computer',state:'error'}],button:h.button,command:h.command,continueChat:()=>{},openSettings:()=>{}})
  assert.match(text(h.panel),/Simplify setup/u)
- assert.match(text(h.panel),/整机资料还没读完/u)
- assert.match(text(h.panel),/查看来源/u)
+ assert.match(text(h.panel),/部分来源暂不可用/u)
+ assert.match(text(h.panel),/来源设置/u)
 })
 test('disabled news has an honest empty state',t=>{
  const h=harness(t)

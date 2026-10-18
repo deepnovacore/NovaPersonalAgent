@@ -1,3 +1,4 @@
+import {renderSourceStatus} from './source-status.mjs'
 import {t} from './locale.mjs'
 import {attachSources,attachSourceTags} from './source-popover.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
@@ -34,7 +35,8 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
   button('隐藏',()=>command('context.dismiss',{id:item.id}),actions,`suggestion:${item.id}`).className='quiet'
  }
  const failed=sources.filter(source=>source.state==='error'),sourceName=source=>source.scope==='computer'?'整机资料':source.path?.split(/[\\/]/u).filter(Boolean).pop()??'已连接目录'
- if(cards.length){if(failed.length){const note=el('p',`${failed.map(sourceName).join('、')}还没读完，先给你看读到的部分。`,'hint');section.append(note);if(openSettings)button('查看来源',()=>openSettings('connections'),section)}return}
+ renderSourceStatus(section,{sources,status:context?.status,el,button,openSettings})
+ if(cards.length)return
  const empty=el('div',undefined,'workbench-empty');section.append(empty)
  const reason=context?.empty_reasons?.[tab]??context?.empty_reason
  let title='暂时没什么要提的',body='想查资料里的东西，直接问我就行。'
@@ -48,7 +50,7 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  else if(context?.status==='working'){title='我在看你的资料';body='稍等一下，已有的记录照常能用。'}
  else if(context?.status==='failed'){title='这次没整理完';body='我过一会儿再试，已有的记录照常能用。'}
  else if(tab==='todos'&&reason==='digests_pending'){title='还在看你最近的项目';body='看完就把你在忙什么、接下来可以做什么放在这里。'}
- else if(sources.some(source=>source.scan_pending&&source.state==='connected')){title='还在读你给我的资料';body='读完再来这里看看。'}
+ else if(sources.some(source=>source.scan_pending&&source.state==='connected')){title='资料索引仍在更新';body='已有内容可以继续查看，新资料整理后会出现在这里。'}
  else if(reason==='validation_filtered'){title='这次没有可靠的结果';body='生成的内容没有通过来源校验，可以稍后重新整理。'}
  else if(reason==='model_abstained'){title='暂时没什么要提的';body='资料我都看过了，没找到有把握的建议。'}
  else if(reason==='no_eligible_sources'){title='暂时没什么要提的';body='现有的资料里还没有适合放这里的事。'}

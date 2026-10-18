@@ -263,3 +263,33 @@ test('briefings display name-only people tags without inventing roles or changin
  assert.deepEqual(parent.querySelectorAll('.tag-person').map(node=>node.textContent),['林舟'])
  assert.equal(parent.querySelectorAll('.timeline-people')[0]['aria-label'],'相关同事')
 })
+
+test('shared suggestions appear without a saved todo and adoption uses the shared command',()=>{
+ const state={settings:{timezone:'Asia/Shanghai'},life:{todos:[],goals:[]},derived_understanding:{sources:[],suggestions:[{id:'suggestion',kind:'action',title:'Review interface',body:'The design needs review',due:'2026-10-12',todo_id:null,refs:[]}]},profile_preparation:{status:'ready'}}
+ const calls=[],{parent}=render(state,{command:(...args)=>calls.push(args)})
+ const card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='suggestion');assert.ok(card)
+ assert.equal(card.dataset.suggested,'true')
+ card.querySelectorAll('button').find(node=>node.textContent==='加入待办').listeners.click()
+ assert.deepEqual(calls,[['understanding.adopt',{id:'suggestion'}]])
+ assert.equal(state.life.todos.length,0)
+})
+
+test('shared suggestion preserves its original IM channel and source URL',()=>{
+ const state={life:{todos:[]},derived_understanding:{sources:[{id:'message',type:'im',provider:'feishu',label:'Project chat',observed_at:'2026-10-13T03:51:00Z',url:'https://example.com/message'}],suggestions:[{id:'s',kind:'action',title:'Review',body:'Discuss the proposal',due:null,todo_id:null,refs:[{entry_id:'message',version:'1'}]}]}}
+ const source=timelineGroups(state)[0].items[0].sources[0]
+ assert.equal(source.type,'im');assert.equal(source.provider,'feishu');assert.equal(source.url,'https://example.com/message')
+ const {parent}=render(state)
+ assert.ok(parent.querySelectorAll('strong').some(node=>node.textContent==='飞书'))
+})
+
+
+test('unified actions and progress remain visible beside TimelineBrief and use independent commands',()=>{
+ const calls=[],state={life:{todos:[],goals:[]},timeline:{status:'ready',cards:[]},derived_understanding:{sources:[],suggestions:[{id:'s',kind:'action',title:'Review',body:'Check draft',refs:[]},{id:'p',kind:'progress',title:'Finished review',body:'Review completed',todo_id:'existing',refs:[]}]}}
+ const {parent}=render(state,{command:(...args)=>calls.push(args)})
+ assert.equal(parent.querySelectorAll('.timeline-suggestions').length,1)
+ const cards=parent.querySelectorAll('article').filter(node=>node.dataset.suggested==='true');assert.equal(cards.length,2)
+ cards[0].querySelectorAll('button').find(node=>node.textContent==='加入待办').listeners.click()
+ cards[1].querySelectorAll('button').find(node=>node.textContent==='确认进展').listeners.click()
+ assert.deepEqual(calls,[['understanding.adopt',{id:'s'}],['understanding.adopt',{id:'p'}]])
+ assert.equal(parent.querySelectorAll('.timeline-axis').length,1)
+})

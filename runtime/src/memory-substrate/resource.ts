@@ -1,8 +1,12 @@
+import {SensitiveContentPolicy} from '../memory/sensitivity.js'
+import {generateUnderstandingProducts} from '../model/understanding-writer.js'
+import type {ProductGenerationContext} from '../personal-agent/understanding-products.js'
+import {withModelPurpose} from '../model/model-purpose.js'
 import {SOURCE_PROCESSING_GOAL,SOURCE_PROCESSING_INSTRUCTIONS} from '../core/source-processing-instructions.js'
 import {explicitMemoryTurn,type ExplicitMemoryTurn,type ExplicitMemoryArguments,type ExplicitMemoryLookup,type ExplicitMemoryReceipt,type ExplicitMemoryPage} from '../memory/explicit-memory.js'
 import {profileSourceInput} from './profile-source-input.js'
 import {GatewayPersonalWriter} from '../model/personal-writer.js'
-import type {ProfileInput} from '../personal-agent/profile-warmup.js'
+import type {ProfileObservation,ProfileInput} from '../personal-agent/profile-warmup.js'
 import {processingRequestSchema,SOURCE_PROCESSING_VERSION,type ProcessingRequest} from './source-processing.js'
 import {type SourceTag,type ImMetadata} from '../memory/provenance.js'
 import {assertAcceptable,type EvaluatedCandidate} from '../understanding/candidates.js'
@@ -141,12 +145,29 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   }
 
   sourceProcessingLlm(){return this.options.sourceProcessingLlm?{...this.options.sourceProcessingLlm,model:this.options.model}:undefined}
-  sourceProcessingProfile(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await authorize();signal.throwIfAborted();const reply=await this.options.gateway.complete(request);await authorize();signal.throwIfAborted();return reply}};return new GatewayPersonalWriter({gateway,model:this.options.model}).generateProfile(entries,signal)}
+  sourceProcessingObserve(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const reply=await this.options.gateway.complete(request);await authorize();signal.throwIfAborted();return reply}};return withModelPurpose('profile',()=>new GatewayPersonalWriter({gateway,model:this.options.model}).observeProfile(entries,signal))}
+  sourceProcessingProfile(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>,observations?:readonly ProfileObservation[]){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const reply=await this.options.gateway.complete(request);await authorize();signal.throwIfAborted();return reply}};return withModelPurpose('profile',()=>new GatewayPersonalWriter({gateway,model:this.options.model}).generateProfile(entries,signal,observations))}
+  async sourceProcessingTodoContext(){
+    const provider=this.#extractionFingerprint(),authorized=await this.#authorizedRows((await this.#rows()).filter(row=>row.kind==='todo'&&row.content.life_data&&!((row.content.life_data as Record<string,unknown>).source_changed)))
+    const todos=authorized.entries.flatMap(row=>{const item=row.content.life_data as Record<string,unknown>;return typeof item.id==='string'&&typeof item.title==='string'&&typeof item.status==='string'?[{id:item.id,title:item.title,status:item.status,due:typeof item.due==='string'?item.due:null}]:[]})
+    const authorize=async()=>{if(provider!==this.#extractionFingerprint())throw Error('processing_context_unavailable');const current=new Map((await this.#rows()).map(row=>[row.entry_id,row.revision]));for(const row of authorized.entries){if(current.get(row.entry_id)!==row.revision||await this.options.client.memory('processing_stamp',{ids:row.evidence_refs,purpose:'extraction',provider})!==authorized.contexts.get(row.entry_id)!.stamp)throw Error('processing_context_unavailable')}}
+    await authorize();return {todos,authorize}
+  }
+  sourceProcessingProducts(entries:readonly ProfileInput[],context:ProductGenerationContext,signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>){
+    const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await authorize();await modelCall?.(request.maxTokens??0);await authorize();signal.throwIfAborted();const result=await this.options.gateway.complete(request);await authorize();signal.throwIfAborted();return result}}
+    return withModelPurpose('context',()=>generateUnderstandingProducts(gateway,this.options.model,entries,context,signal))
+  }
   sourceProcessingConsumer():string{return this.#extractionFingerprint()}
+  #sourcePolicy(){return {provider:this.#extractionFingerprint(),participants:this.options.profileParticipantMessages===true,recipe:digest(JSON.stringify({recipe:this.options.sourceProcessingRecipe??SOURCE_PROCESSING_VERSION,agent:SOURCE_PROCESSING_GOAL,instructions:SOURCE_PROCESSING_INSTRUCTIONS,profile:'sender-grounded-prose-v4',model:this.options.model}))}}
   async sourceProcessing(request:ProcessingRequest):Promise<unknown>{
     this.#ready()
     const parsed=processingRequestSchema.parse(request)
-    return this.options.client.memory('source_processing',{...parsed,prefix:this.prefix,provider:this.#extractionFingerprint(),recipe:digest(JSON.stringify({recipe:this.options.sourceProcessingRecipe??SOURCE_PROCESSING_VERSION,agent:SOURCE_PROCESSING_GOAL,instructions:SOURCE_PROCESSING_INSTRUCTIONS,profile:'sender-grounded-prose-v4',model:this.options.model}))})
+    const result=await this.options.client.memory('source_processing',{...parsed,prefix:this.prefix,...this.#sourcePolicy()})
+    if(['read','evidence','profile_context'].includes(parsed.action)&&result&&typeof result==='object'&&'items' in result&&Array.isArray(result.items)){
+      const scrubber=new SensitiveContentPolicy()
+      return {...result,items:result.items.map((item:Record<string,unknown>)=>{if(typeof item.text!=='string')return item;const scrubbed=scrubber.scrub('source_processing',item.text);return {...item,text:scrubbed.kind==='clean'?item.text:scrubbed.kind==='redacted'?scrubbed.value:''}})}
+    }
+    return result
   }
   async invalidateMessage(sourceId:string,locator:string):Promise<void>{
     this.#ready()
@@ -547,7 +568,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return {
       peek:async()=>{this.#ready();return await run('life_load',{namespace}) as LifeSnapshot|null},
       load:async(legacy,options)=>{this.#ready();const snapshot=await run('life_load',{namespace,legacy,...grant(),...(options?.legacyPath?{hostMigrationPath:options.legacyPath}:{})}) as LifeSnapshot;if(this.#backgroundStarted)await this.#refresh();return snapshot},
-      mutate:async value=>{this.#ready();const snapshot=await run('life_mutate',{namespace,...value,...grant(),...((value.input as {op?:string})?.op==='from_workbench'?{workbench_provider:this.#extractionFingerprint()}:{})}) as LifeSnapshot&{result:{id:string;version:number}};await this.#refresh();return snapshot},
+      mutate:async value=>{this.#ready();const snapshot=await run('life_mutate',{namespace,...value,...grant(),sourcePolicy:this.#sourcePolicy(),...((value.input as {op?:string})?.op==='from_workbench'?{workbench_provider:this.#extractionFingerprint()}:{})}) as LifeSnapshot&{result:{id:string;version:number}};await this.#refresh();return snapshot},
     }
   }
   async sourceTags(ids:readonly string[]):Promise<SourceTag[]>{

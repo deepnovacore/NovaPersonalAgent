@@ -600,3 +600,14 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 
 .timeline-people{margin:9px 0 11px;gap:6px}
 .timeline-people .tag-person{font-size:11px;font-weight:500;border-radius:999px;padding:3px 10px;color:var(--ink-dim);background:color-mix(in srgb,var(--brief-accent) 7%,var(--surface));border-color:color-mix(in srgb,var(--brief-accent) 15%,transparent)}
+/* Ordinary speech has a quiet surface; actionable feeds retain their own card. */
+.workbench .message.assistant:not(.message-feed){padding:14px 18px;border:1px solid color-mix(in srgb,var(--line) 45%,transparent);border-radius:16px;background:color-mix(in srgb,var(--surface-raised) 70%,transparent);align-self:flex-start}
+.workbench .message.assistant.message-feed{background:transparent;padding:0;border:0}
+.timeline-card[data-suggested="true"]{border:1px dashed var(--line-strong);box-shadow:none}
+.source-status{font-size:12px;color:var(--ink-dim);line-height:1.6;max-width:100%}
+.source-status summary{display:inline-flex;gap:8px;align-items:center;cursor:pointer;list-style:none}
+.source-status summary::after{content:'⌄';font-size:13px}
+.source-status[open] summary::after{content:'⌃'}
+.source-status-details{padding:10px 12px;margin-top:6px;background:var(--surface-inset);border-radius:10px;display:grid;gap:8px;overflow-wrap:anywhere}
+.workbench .source-status button{width:auto;justify-self:start;padding:4px 0;border:0;background:transparent;color:var(--accent)}
+.profile-projects{display:grid;gap:14px}.profile-project{padding:14px;border:1px solid var(--line);border-radius:12px;display:grid;gap:8px}

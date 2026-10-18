@@ -1,3 +1,5 @@
+import {sourceProcessingOperation} from './source-processing.js'
+import type {UnderstandingSnapshot} from '../personal-agent/understanding-products.js'
 import {queueMemoryFiles} from './file-authority.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
@@ -118,7 +120,7 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
   if((meta.profile_version??0)<state.profile.version){meta={...meta,profile_version:state.profile.version};saveMeta(db,q.namespace,meta)}
   return {state,revision:meta.revision}
  }
- const q=z.object({namespace:namespaceSchema,input:lifeInputSchema,requestId:z.string().min(1).max(512),expectedRevision:z.number().int().nonnegative(),provenance:provenanceSchema.optional(),workbench_provider:z.string().min(1).max(512).optional(),processingGrant:processingGrantSchema.optional()}).strict().parse(value)
+ const q=z.object({namespace:namespaceSchema,input:lifeInputSchema,requestId:z.string().min(1).max(512),expectedRevision:z.number().int().nonnegative(),sourcePolicy:z.object({provider:z.string(),recipe:z.string(),participants:z.boolean()}).strict().optional(),provenance:provenanceSchema.optional(),workbench_provider:z.string().min(1).max(512).optional(),processingGrant:processingGrantSchema.optional()}).strict().parse(value)
  const meta=readMeta(db,q.namespace);if(!meta)throw Error('life_not_initialized')
  const entries=rows(run,q.namespace),state=stateFrom(entries,meta.receipts)
  // A durable idempotency receipt takes precedence over a stale client's aggregate revision.
@@ -127,6 +129,14 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
   const refreshed=meta.signature===stamp?meta:{...meta,signature:stamp,revision:meta.revision+1}
   if(refreshed!==meta)saveMeta(db,q.namespace,refreshed)
   return {state,revision:refreshed.revision,result:prior.result}
+ }
+ if(q.input.op==='from_suggestion'){
+  if(!q.sourcePolicy)throw Error('suggestion_authorization_required')
+  const current=sourceProcessingOperation(db,{...q.sourcePolicy,prefix:q.namespace.slice(0,-5),action:'products'}) as UnderstandingSnapshot
+  const input=q.input,item=current.suggestions.find(item=>item.id===input.suggestion_id)
+  const anchor=item?.anchor,ref=anchor&&item?.refs.find(ref=>ref.entry_id===anchor.entry_id),expectedSource=anchor?.quote&&ref?{candidate_id:item!.id,refs:[{...ref,version:String(ref.version),quote:anchor.quote}]}:undefined
+  if(canonicalJson(input.source??null)!==canonicalJson(expectedSource??null))throw Error('STORE_STALE_REVISION')
+  if(!item||(item.kind==='goal'?'goal':item.kind==='idea'?'idea':'todo')!==q.input.kind||item.title!==q.input.title||item.body!==q.input.note||item.due!==q.input.due||item.todo_id!==q.input.todo_id||canonicalJson(item.refs.map(ref=>ref.entry_id))!==canonicalJson(q.input.provenance_refs))throw Error('STORE_STALE_REVISION')
  }
  const resolutionEntries=q.provenance?.resolution?checkResolution(run,q.namespace,q.provenance.resolution):[]
  if(meta.revision!==q.expectedRevision||meta.signature!==signature(entries))throw Error('version_conflict')

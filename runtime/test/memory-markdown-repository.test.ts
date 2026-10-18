@@ -117,6 +117,26 @@ test('partially published multi-file batches recover only their own staging file
  assert.ok(!git(root,'ls-tree','-r','--name-only','HEAD').includes('batch'))
 })
 
+test('a foreign tracked file blocks publication while untracked notes remain allowed',t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root),note=join(root,'unrelated-note.txt')
+ repo.open([first]);writeFileSync(note,'Keep my note')
+ repo.publish([first,next])
+ assert.equal(readFileSync(note,'utf8'),'Keep my note')
+ assert.ok(!git(root,'ls-tree','-r','--name-only','HEAD').includes('unrelated-note.txt'))
+
+ git(root,'read-tree','HEAD')
+ git(root,'add','--','unrelated-note.txt')
+ git(root,'-c','user.name=Fixture','-c','user.email=fixture@localhost','commit','-m','Track auxiliary note')
+ const head=git(root,'rev-parse','HEAD')
+ assert.ok(git(root,'ls-tree','-r','--name-only','HEAD').includes('.nova-memory.json'))
+ assert.throws(()=>new MarkdownRepository(root).read(),/CONFLICT/u)
+ assert.throws(()=>repo.publish([first,next]),/CONFLICT/u)
+ assert.equal(repo.pendingOperationId(),null)
+ assert.equal(git(root,'rev-parse','HEAD'),head)
+ assert.equal(git(root,'show','HEAD:unrelated-note.txt'),'Keep my note')
+ assert.equal(readFileSync(note,'utf8'),'Keep my note')
+})
+
 test('deleted documents and rewritten machine history cannot silently rebuild the index',t=>{
  const root=fixture(t);const repo=new MarkdownRepository(root);repo.open([first]);const path=document(root);const original=readFileSync(path,'utf8')
  writeFileSync(path,original.replace('Prefer concise replies','Forged earlier revision'))

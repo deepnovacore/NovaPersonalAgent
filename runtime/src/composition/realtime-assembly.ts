@@ -70,7 +70,7 @@ import type {CoordinatorDecision} from '../executors/coding-executor.js'
 const USER_AWAITED_TOOL = {kind: 'realtime_tool', priority: USER_PRIORITY, routing_class: 'user_awaited', origin: null, selected_suggestion: null} as const
 import {intakeModels, type IntakeModels} from '../executors/coding/intake-model.js'
 import type {IntakeAdmission, IntakeOptions, IntakeSettings, IntakeSession} from '../executors/coding/intake.js'
-import {OpenAIModelGateway,type ModelGateway} from '../model/model-gateway.js'
+import {OpenAIModelGateway,type OpenAIGatewayOptions,type ModelGateway} from '../model/model-gateway.js'
 import {RealClock} from '../core/clock.js'
 import type {PersonalMemoryResource} from '../memory/personal-memory.js'
 
@@ -1410,6 +1410,9 @@ export function filterDisabledCoding<T extends AssemblyOptions & Pick<RealtimeAs
   return selected
 }
 
+/** Local extraction and Profile share one explicitly configured model transport. */
+export const createLocalMemoryGateway=(options:OpenAIGatewayOptions)=>new OpenAIModelGateway({...options,...(options.baseUrl==='https://dashscope.aliyuncs.com/compatible-mode/v1'?{thinkingControl:'qwen' as const}:{})})
+
 /** Shared production wiring; provider policy remains at each pipeline boundary. */
 export function composeRealtime(
   core: Assembly,
@@ -1421,7 +1424,7 @@ export function composeRealtime(
   let sharedClient: MemoryLedgerClient | undefined
   const getClient = () => sharedClient ??= new MemoryLedgerClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
-  const memoryGateway=local?new OpenAIModelGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,clock:new RealClock()}):core.gateway
+  const memoryGateway=local?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,clock:new RealClock()}):core.gateway
   const useLocalLedger=local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
   const createPersonalMemory = useLocalLedger ? () => {
     const memory = new SubstrateMemoryResource({client:getClient(),userId:local?.userId??options.settings.memory_user_id,
