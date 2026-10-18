@@ -174,6 +174,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     },
   }),
   windowDrag: Object.freeze({
+    native: process.platform === 'win32',
     start: () => ipcRenderer.send('nova:window-drag:start'),
     move: (dx, dy) => ipcRenderer.send('nova:window-drag:move', { dx, dy }),
     end: () => ipcRenderer.send('nova:window-drag:end'),

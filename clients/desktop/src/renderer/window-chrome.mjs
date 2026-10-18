@@ -8,8 +8,8 @@ const CONTROLS=[
 
 /**
  * Close and minimize controls for the frameless workbench (maximize is the topbar double-click), plus a drag strip that also maximizes on double-click.
- * `dblclick` never fires on a native `-webkit-app-region: drag` element, so the blank part of the topbar is a
- * no-drag strip that drives the move itself through the main process's cursor poll.
+ * Windows uses a native drag region to preserve physical window size at fractional DPI scales; main handles
+ * its double-click. Other platforms use a no-drag strip with cursor polling so DOM `dblclick` still fires.
  */
 export function mountWindowChrome(root,{api,el}){
  const controls=el('div',undefined,'window-controls');controls.setAttribute('role','group');controls.setAttribute('aria-label',t('窗口控制'))
@@ -22,8 +22,9 @@ export function mountWindowChrome(root,{api,el}){
  root.append(controls)
 
  const grip=el('div',undefined,'window-grip');grip.setAttribute('aria-hidden','true')
- const gesture=new OrbDragGesture()
  const drag=api.windowDrag
+ if(drag?.native){grip.className+=' native-window-drag';return {controls,grip}}
+ const gesture=new OrbDragGesture()
  grip.addEventListener('pointerdown',event=>{
   if(event.button!==0)return
   gesture.start(event.clientX,event.clientY)

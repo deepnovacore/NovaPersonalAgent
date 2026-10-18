@@ -92,6 +92,7 @@ async function visualStudioEnvironment() {
   const located = spawnSync(vswhere, [
     '-utf8',
     '-latest',
+    '-prerelease',
     '-products', '*',
     '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
     '-property', 'installationPath',

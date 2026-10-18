@@ -44,7 +44,7 @@ test('directory and connector authorization IPC accept both windows and reject o
  let handler;new Function('ipcMain','mainWindow','settingsWindow','shell','connectorAuthorizationUrl',connector)({handle:(_,fn)=>{handler=fn}},mainWindow,settingsWindow,{openExternal:async url=>opened.push(url)},url=>url)
  await assert.rejects(handler({sender:{}},'https://x'),/rejected/)
  await handler({sender:mainWindow.webContents},'https://a');await handler({sender:settingsWindow.webContents},'https://b');assert.deepEqual(opened,['https://a','https://b'])
- const directory=source.slice(source.indexOf("  ipcMain.handle('nova:personal:directory'"),source.indexOf("  mainWindow.on('close'"))
+ const directory=source.slice(source.indexOf("  ipcMain.handle('nova:personal:directory'"),source.indexOf('  const bindPresentationClose ='))
  new Function('ipcMain','mainWindow','settingsWindow','dialog',directory)({handle:(_,fn)=>{handler=fn}},mainWindow,settingsWindow,{showOpenDialog:async(owner)=>{dialogs.push(owner);return {canceled:false,filePaths:['/p']}}})
  await assert.rejects(handler({sender:{}}),/rejected/)
  assert.equal(await handler({sender:mainWindow.webContents}),'/p');assert.equal(await handler({sender:settingsWindow.webContents}),'/p')

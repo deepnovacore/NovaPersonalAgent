@@ -1280,6 +1280,7 @@ async function boot() {
     savedNarrationMode = bootstrap.settings?.codingProgressNarration ?? 'smart'
     bubbleMode = bootstrap.settings?.progressBubbles ?? 'milestones'
     axes.platform = bootstrap.platform
+    if (bootstrap.platform === 'win32') document.body.dataset.platform = 'win32'
     taskBanner.setPlatform(bootstrap.platform)
     if (!receivedStatus) {personalView.startup(bootstrap.startup);welcomeFlow?.startup(bootstrap.startup)}
     if (!receivedStatus) axes.backendState = typeof bootstrap.backendStatus === 'string'

@@ -28,6 +28,36 @@ test('natural bounds are the pre-maximize rectangle while maximized', () => {
  assert.deepEqual(frame.naturalBounds(),{x:100,y:80,width:800,height:600})
 })
 
+test('a work area rounded by Windows DPI scaling still toggles back to the original size', {skip:process.platform!=='win32'}, () => {
+ const original={x:100,y:80,width:800,height:600},area={x:0,y:0,width:2195,height:1187}
+ let bounds={...original}
+ const frame=createWorkbenchFrame({
+  platform:'win32',
+  getBounds:()=>({...bounds}),
+  setBounds:value=>{bounds=value.width===area.width?{...value,width:value.width+1,height:value.height+1}:{...value}},
+  getWorkArea:()=>area,
+ })
+ assert.equal(frame.toggleMaximize(),true)
+ assert.equal(frame.maximized,true)
+ assert.deepEqual(frame.naturalBounds(),original)
+ assert.equal(frame.toggleMaximize(),false)
+ assert.deepEqual(bounds,original)
+})
+
+for(const platform of ['darwin','linux'])test(`${platform} keeps the requested maximize bounds without the Windows DPI readback`, () => {
+ const original={x:100,y:80,width:800,height:600},area={x:0,y:0,width:1440,height:900}
+ let bounds={...original},reads=0
+ const frame=createWorkbenchFrame({
+  platform,
+  getBounds:()=>{reads++;return {...bounds}},
+  setBounds:value=>{bounds={...value,width:value.width+1}},
+  getWorkArea:()=>area,
+ })
+ frame.toggleMaximize()
+ assert.equal(reads,1,'only read the pre-maximize bounds on macOS/Linux')
+ assert.equal(frame.maximized,false,'do not apply the Windows rounding exception')
+})
+
 test('a manual resize after maximizing makes the next toggle maximize again', () => {
  const {state,frame}=setup()
  frame.toggleMaximize()
