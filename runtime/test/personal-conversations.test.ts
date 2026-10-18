@@ -96,9 +96,9 @@ test('voice command admitted before shutdown cannot create a runtime after pool 
  try{
   await host.open()
   host.setConversationRuntime(()=>{created++;return Promise.resolve({runTurn:()=>Promise.resolve({assistant:'ok'}),close:()=>Promise.resolve()})},()=>{ /* no transport */ })
-  const refresh=host.refreshMemory.bind(host)
-  host.refreshMemory=async()=>{entered();await resume;await refresh()}
-  const first=host.command({type:'personal.command',request_id:'slow-state',method:'state',params:{}})
+  // State reads refresh in the background; hold a command that really owns the queue.
+  host.setCodingTargets({list:async()=>{entered();await resume;return []},validate:()=>Promise.reject(Error('unused')),resolve:()=>Promise.reject(Error('unused'))})
+  const first=host.command({type:'personal.command',request_id:'slow-targets',method:'conversations.targets',params:{}})
   await blocked
   const voice=host.command({type:'personal.command',request_id:'queued-voice',method:'conversations.voice',params:{id:'chat:main',enabled:true}})
   const closing=host.close();await poolClosed;release()

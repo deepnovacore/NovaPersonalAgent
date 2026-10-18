@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {chmod,mkdtemp,readFile,realpath,rm,writeFile} from 'node:fs/promises'
+import {mkdtemp,readFile,realpath,rename,rm,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {dirname,join} from 'node:path'
 import {test} from 'node:test'
@@ -68,12 +68,12 @@ test('an active executor session cannot be rebound to another task',async()=>{
 })
 
 test('a failed disk write does not publish staged task state',async()=>{
- const path=await temporaryPath(),tasks=new TaskService(path),dir=dirname(path)
- try{await tasks.open();const first=await tasks.delegate('request:1',input);await chmod(dir,0o500)
-  try{await assert.rejects(tasks.delegate('request:2',{...input,goal:'Must not publish'}))}finally{await chmod(dir,0o700)}
+ const path=await temporaryPath(),tasks=new TaskService(path),dir=dirname(path),displacedDir=dir+'-unavailable'
+ try{await tasks.open();const first=await tasks.delegate('request:1',input);await rename(dir,displacedDir)
+  try{await assert.rejects(tasks.delegate('request:2',{...input,goal:'Must not publish'}),{code:'ENOENT'})}finally{await rename(displacedDir,dir)}
   assert.deepEqual(tasks.list().map(task=>task.id),[first.id])
   await tasks.close();const restored=new TaskService(path);try{await restored.open();assert.deepEqual(restored.list().map(task=>task.id),[first.id])}finally{await restored.close()}
- }finally{await chmod(dir,0o700).catch(()=>undefined);await tasks.close();await rm(dir,{recursive:true,force:true})}
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true});await rm(displacedDir,{recursive:true,force:true})}
 })
 
 test('personal host opens, snapshots, and closes its task service',async()=>{

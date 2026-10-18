@@ -46,7 +46,7 @@ test('actual main turns Coding off instead of blocking on an unfinished manual C
     currentSettings: {}, process: {env: {}, cwd: () => '/tmp'}, desktopConfig: {codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'ready'},
     randomBytes: () => Buffer.alloc(16), createReadinessListener: () => ({endpoint: Promise.resolve('ep'), close() {}}), createBackendDiagnosticCollector: () => ({}),
     decryptSecretsForSpawn: () => ({}), secretCodec: {}, settingsGeneration: 0, launchGeneration: 0, mainWindow: null, app: {isPackaged: false, getAppPath: () => '/app', getPreferredSystemLanguages: () => ['en']},
-    nodeRuntimeEntry: () => 'entry', packageRoot: '/pkg', resolve: (...parts) => parts.join('/'), openSetupWindow: () => {},
+    nodeRuntimeEntry: () => 'entry', packageRoot: '/pkg', realpathSync: value => value, existsSync: () => false, chatGptFile: () => '/tmp/fixture-chatgpt-accounts.enc', resolve: (...parts) => parts.join('/'), openSetupWindow: () => {},
     backendLaunchSpec: () => { const spec = {env: {}}; specs.push(spec); return spec },
     // Stop right after the spawn environment is built; the fork itself is not under test.
     describeMissingBlockingEnvironment: (_environment, textConversations) => {assert.equal(textConversations, true); return {pipeline: 'cascaded', missing: ['DASHSCOPE_API_KEY']}}})

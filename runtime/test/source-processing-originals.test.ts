@@ -18,26 +18,26 @@ for(const mode of ['direct','observed','profile_only'] as const)test(`compose pr
  let publication:Record<string,unknown>|undefined
  const memory={
   sourceProcessingConsumer:()=> 'provider',
-  sourceProcessing:async(request:{action:string;[key:string]:unknown})=>{
-   if(request.action==='batch')return {batch,valid:true}
-   if(request.action==='evidence')return {items:[original]}
-   if(request.action==='profile')return {revision:0,draft:null}
-   if(request.action==='identities')return {items:[]}
-   if(request.action==='products')return products
-   if(request.action==='observe')return {applied:true}
-   if(request.action==='profile_context')return {items:[original],observations:[],refs:[ref],key:'context',ready:true,unchanged:false}
-   if(request.action==='publish'){publication=request;return {applied:true}}
+  sourceProcessing:(request:{action:string;[key:string]:unknown})=>{try{
+   if(request.action==='batch')return Promise.resolve({batch,valid:true});
+   if(request.action==='evidence')return Promise.resolve({items:[original]});
+   if(request.action==='profile')return Promise.resolve({revision:0,draft:null});
+   if(request.action==='identities')return Promise.resolve({items:[]});
+   if(request.action==='products')return Promise.resolve(products);
+   if(request.action==='observe')return Promise.resolve({applied:true});
+   if(request.action==='profile_context')return Promise.resolve({items:[original],observations:[],refs:[ref],key:'context',ready:true,unchanged:false});
+   if(request.action==='publish'){publication=request;return Promise.resolve({applied:true});}
    throw Error('unexpected operation '+request.action)
-  },
-  sourceProcessingProducts:async()=>({projects:[project],suggestions:[]}),
-  ...(mode!=='direct'?{sourceProcessingObserve:async(entries:ProfileInput[])=>{observed.push(structuredClone(entries));return []}}:{}),
-  sourceProcessingProfile:async(entries:ProfileInput[])=>{generated.push(structuredClone(entries));return {about:null,work:[],interests:[]}},
+  }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},
+  sourceProcessingProducts:()=>{try{return Promise.resolve(({projects:[project],suggestions:[]}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},
+  ...(mode!=='direct'?{sourceProcessingObserve:(entries:ProfileInput[])=>{try{observed.push(structuredClone(entries));return Promise.resolve([]);}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}}:{}),
+  sourceProcessingProfile:(entries:ProfileInput[])=>{try{generated.push(structuredClone(entries));return Promise.resolve({about:null,work:[],interests:[]});}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},
  }
  const host={options:{memory:()=>memory},
-  scheduledAuthority:{assert:()=>{},signal:()=>new AbortController().signal},
-  schedules:{getRun:()=>run,reserveSourceProcessingCall:async()=>run},
+  scheduledAuthority:{assert:()=>{/* This fixture deliberately has no side effects. */},signal:()=>new AbortController().signal},
+  schedules:{getRun:()=>run,reserveSourceProcessingCall:()=>{try{return Promise.resolve(run)}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}},
   sourceProcessingForegroundBusy:()=>false,sourceProjectRoots:()=>[],
-  snapshot:()=>({settings:{timezone:'UTC'}}),understandingProductsChanged:()=>{},
+  snapshot:()=>({settings:{timezone:'UTC'}}),understandingProductsChanged:()=>{/* This fixture deliberately has no side effects. */},
  } as unknown as PersonalAgentHost
  const grant={run_id:'run',task_id:'task',consumer:'provider',fence:{task_id:'task'}} as ScheduledRunGrant
  await new SourceProcessingAgent(host).call(grant,'compose',{action:'compose',refs:[ref]})

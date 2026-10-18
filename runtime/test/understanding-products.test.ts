@@ -83,7 +83,7 @@ test('prototype property names are not relative dates and never fail a products 
 test('action and progress suggestions require a nonempty exact quotation from their cited current evidence',()=>{
  const todos=[{id:'todo',title:'核对接口',status:'open',due:null}]
  for(const kind of ['action','progress'] as const)for(const anchor of [undefined,null,{entry_id:'e1',quote:''},{entry_id:'e1',quote:' '},{entry_id:'e1',quote:'不存在的原文'},{entry_id:'uncited',quote:'核对接口'}]){
-  const {anchor:_existing,...unanchored}=suggestion;const raw={...unanchored,kind,todo_id:kind==='progress'?'todo':null,...(anchor===undefined?{}:{anchor})}
+  const unanchored=Object.fromEntries(Object.entries(suggestion).filter(([key])=>key!=='anchor'));const raw={...unanchored,kind,todo_id:kind==='progress'?'todo':null,...(anchor===undefined?{}:{anchor})}
   assert.deepEqual(validateProducts({projects:[],suggestions:[raw]},[entry],[],{},'UTC',{projects:[],suggestions:[]},[],todos).suggestions,[],`${kind}: ${JSON.stringify(anchor)}`)
  }
  const valid={...suggestion,anchor:{entry_id:'e1',quote:'核对接口'}}
@@ -106,13 +106,13 @@ test('missing source metadata never fabricates a file provenance tag',()=>{
 })
 test('already cancelled product generation never invokes the gateway',async()=>{
  const abort=new AbortController();abort.abort();let calls=0
- const gateway={complete:async()=>{calls++;return {text:'{"projects":[],"suggestions":[]}'}}} as unknown as ModelGateway
+ const gateway={complete:()=>{try{calls++;return Promise.resolve({text:'{"projects":[],"suggestions":[]}'});}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  await assert.rejects(generateUnderstandingProducts(gateway,'fixture',[entry],{projects:[],previous:{projects:[],suggestions:[]},corrections:{},timezone:'UTC',todos:[]},abort.signal),{name:'AbortError'})
  assert.equal(calls,0)
 })
 test('cancellation during a non-cooperative gateway call cannot yield products or a format-repair call',async()=>{
  const abort=new AbortController();let calls=0
- const gateway={complete:async()=>{calls++;abort.abort();return {text:'[]'}}} as unknown as ModelGateway
+ const gateway={complete:()=>{try{calls++;abort.abort();return Promise.resolve({text:'[]'});}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  await assert.rejects(generateUnderstandingProducts(gateway,'fixture',[entry],{projects:[],previous:{projects:[],suggestions:[]},corrections:{},timezone:'UTC',todos:[]},abort.signal),{name:'AbortError'})
  assert.equal(calls,1)
 })
@@ -125,7 +125,7 @@ import {z} from 'zod'
 test('sensitivity screening preserves the nonempty schema envelope while removing a synthetic private key',async()=>{
  let prompt=''
  const input={...entry,content:'-----BEGIN PRIVATE KEY-----\nsynthetic-private-material\n-----END PRIVATE KEY-----'}
- const gateway={complete:async(request:CompleteRequest)=>{prompt=request.prompt;return {text:'{"projects":[],"suggestions":[]}'}}} as unknown as ModelGateway
+ const gateway={complete:(request:CompleteRequest)=>{try{prompt=request.prompt;return Promise.resolve({text:'{"projects":[],"suggestions":[]}'});}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  await generateUnderstandingProducts(gateway,'fixture',[input],{projects:[],previous:{projects:[],suggestions:[]},corrections:{},timezone:'UTC',todos:[]},new AbortController().signal)
  assert.match(prompt,/"output_schema":/);assert.ok(prompt.length>0);assert.doesNotMatch(prompt,/synthetic-private-material/)
 })

@@ -502,7 +502,7 @@ test('deferred memory startup serves authorized snapshots before optional mainte
 
 test('Timeline carries pseudonymous authorship separately from the actor described in a message',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-timeline-attribution-'))
- const gateway:ModelGateway={async *stream(){},complete:async()=>({text:'{"entries":[]}'})}
+ const gateway:ModelGateway={async *stream(){/* No streaming output is used by this fixture. */},complete:()=>{try{return Promise.resolve(({text:'{"entries":[]}'}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}}
  const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'attribution',gateway,model:'fixture',personalMemoryEnabled:false})
  try{
   await memory.open();const at=new Date(Date.now()-1000).toISOString(),grant=memory.processingGrant(true)

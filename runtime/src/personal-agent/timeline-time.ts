@@ -2,7 +2,7 @@ import {z} from 'zod'
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/u)
 export const temporalSchema=z.object({kind:z.enum(['event','ongoing','deadline','scheduled','synthesis','background','unknown']),dates:z.array(z.object({role:z.enum(['occurred','started','deadline','scheduled']),date,ref:z.string().min(1).max(600),quote:z.string().min(1).max(600)}).strict()).max(3)}).strict()
 export const resolvedTimeSchema=z.object({kind:temporalSchema.shape.kind,anchor_date:date.nullable(),anchor_basis:z.enum(['occurred','deadline','scheduled','reported','unknown']),occurred_on:date.nullable(),started_on:date.nullable(),due_on:date.nullable(),scheduled_on:date.nullable(),last_reported_on:date.nullable(),evidence_from:date.nullable(),evidence_to:date.nullable(),as_of:date})
-type TimeInput={id:string;kind:string;text:string;observed_at:string}
+interface TimeInput {id:string;kind:string;text:string;observed_at:string}
 const validDate=(value:string)=>/^\d{4}-\d{2}-\d{2}$/u.test(value)&&Number.isFinite(Date.parse(value))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value
 const reportedDate=(input:TimeInput,timezone:string)=>['im','mail'].includes(input.kind)&&Number.isFinite(Date.parse(input.observed_at))?new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:timezone}):null
 const shift=(day:string,offset:number)=>new Date(Date.parse(day+'T00:00:00Z')+offset*86400000).toISOString().slice(0,10)

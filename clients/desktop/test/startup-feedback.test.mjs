@@ -1,3 +1,4 @@
+import {isEndpointSecret} from '../src/renderer/compatible-providers.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
@@ -25,7 +26,7 @@ test('settings public projection never opens the keychain or capability files', 
 test('unreadable stored credentials never become silent omissions', () => {
   const body = source.slice(source.indexOf('function decryptSecretsForSpawn('), source.indexOf('async function prepareDesktopConfiguration('))
   for (const reason of ['denied','cancelled','corrupt']) {
-    const context=vm.createContext({secretsPresent:()=>({modelApiKey:true}),SECRET_KEYS:['modelApiKey'],readSecret:()=>null,
+    const context=vm.createContext({isEndpointSecret,secretsPresent:()=>({modelApiKey:true}),SECRET_KEYS:['modelApiKey'],readSecret:()=>null,
       secretValueIsSafe:()=>true,classifyBackendFailure,resolveSecretConfiguration:()=>({secrets:{}}),process:{env:{}},developmentEnv:{},console})
     vm.runInContext(body,context)
     assert.throws(()=>context.decryptSecretsForSpawn({},{}), error=>error.code==='credential_access_failed',reason)

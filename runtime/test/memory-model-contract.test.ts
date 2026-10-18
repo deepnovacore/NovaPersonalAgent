@@ -15,9 +15,9 @@ async function fixture(){
  return {root,path,get memory(){return memory},async restart(){await memory.close();memory=create();await memory.open({deferBackground:true})},turn:(id:string,text:string)=>memory.beginExplicitTurn({sourceId:id,text,occurredAt:new Date().toISOString()}),async close(){await memory.close();await rm(root,{recursive:true,force:true})}}
 }
 
-test('interactive model has remember/recall/evidence without overlapping lookup',()=>{
+test('interactive model exposes exact lookup alongside remember, recall and evidence',()=>{
  const names=compileToolSchema([],{includeExplicitMemory:true,includeMemoryRecall:true}).schemas.map(s=>(s.function as {name:string}).name)
- assert.ok(names.includes('memory__remember'));assert.ok(names.includes('memory__recall'));assert.ok(names.includes('memory__evidence'));assert.ok(!names.includes('memory__lookup'))
+ assert.ok(names.includes('memory__remember'));assert.ok(names.includes('memory__recall'));assert.ok(names.includes('memory__evidence'));assert.ok(names.includes('memory__lookup'));assert.equal(names.filter(name=>name==='memory__lookup').length,1)
 })
 
 test('user-scoped facts enter USER and fresh context while general facts stay in memory documents',async()=>{

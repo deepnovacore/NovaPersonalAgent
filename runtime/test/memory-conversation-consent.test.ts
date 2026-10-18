@@ -34,7 +34,7 @@ for(const revokeBeforeEdit of [false,true])test(`send-time preparation reconcile
   const directory=join(path+'.memory','entries'),file=join(directory,(await readdir(directory))[0]!),text=await readFile(file,'utf8'),at=text.lastIndexOf('我不吃辣')
   await writeFile(file,text.slice(0,at)+'现在可以吃微辣'+text.slice(at+'我不吃辣'.length))
   const fresh=await resource.prepareResponseAdaptation('consumer-a');assert.ok(!fresh.memoryContext?.voice.includes('我不吃辣'))
-  if(revokeBeforeEdit)assert.equal(fresh.memoryContext?.voice,'');else{assert.ok(fresh.memoryContext?.voice.includes('现在可以吃微辣'));assert.ok(fresh.memoryContext?.voice.includes('@2'))}
+  if(revokeBeforeEdit)assert.equal(fresh.memoryContext?.voice,'');else{assert.ok(fresh.memoryContext?.voice.includes('现在可以吃微辣'));assert.match(fresh.memoryContext!.voice,/revision=2(?:;|\])/)}
  }finally{await resource.close();await rm(root,{recursive:true,force:true})}
 })
 

@@ -53,7 +53,7 @@ test('briefing retains evidence time across days and omits static background or 
 test('timeline distinguishes pending generation, timeout, and an actual empty result',async(t)=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-status-'))
  const controller=new AbortController();t.mock.method(AbortSignal,'timeout',()=>controller.signal)
- const brief=new TimelineBrief(join(dir,'timeline.json'),()=>new Promise(()=>{}),()=>undefined)
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>new Promise(()=>{/* This fixture deliberately has no side effects. */}),()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai')
   assert.equal(brief.snapshot().status,'queued')
@@ -64,7 +64,7 @@ test('timeline distinguishes pending generation, timeout, and an actual empty re
 
 test('superseded generation restarts after debounce instead of a five minute failure backoff',async(t)=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-reschedule-'));let calls=0
- const brief=new TimelineBrief(join(dir,'timeline.json'),()=>++calls===1?new Promise(()=>{}):Promise.resolve({cards:[]}),()=>undefined)
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>++calls===1?new Promise(()=>{/* This fixture deliberately has no side effects. */}):Promise.resolve({cards:[]}),()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');const old=brief.refresh()
   while(calls===0)await new Promise(resolve=>setImmediate(resolve))
@@ -111,11 +111,11 @@ test('rechecking unchanged source permissions hides cached cards without cancell
 test('more than six independent briefings survive storage and restart',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-many-'))
  const cards=Array.from({length:13},(_,i)=>({...reply.cards[0]!,title:'Independent update '+i}))
- let brief=new TimelineBrief(join(dir,'timeline.json'),async()=>({cards}),()=>undefined)
+ let brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
   assert.equal(brief.snapshot().cards.length,13)
-  await brief.close();brief=new TimelineBrief(join(dir,'timeline.json'),async()=>({cards:[]}),()=>undefined)
+  await brief.close();brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards:[]}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
   await brief.open();brief.update([input],'2026-10-17','UTC');assert.equal(brief.snapshot().cards.length,13)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
@@ -123,10 +123,10 @@ test('more than six independent briefings survive storage and restart',async()=>
 test('batch diagnostics survive persistence alongside the grounded cards',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-diagnostics-'))
  const diagnostics={input_count:1,selected_inputs:1,screened_topics:2,composition_batches:2,pending_batches:0,failed_batches:[{batch:1,reason:'invalid_evidence'}],stages:[{batch:0,phase:'compose' as const,received:2,accepted:1,dropped:{unsupported_quote:1}}],host_received:0,published:0,host_dropped:{}}
- let brief=new TimelineBrief(join(dir,'timeline.json'),async()=>({...reply,diagnostics}),()=>undefined)
+ let brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({...reply,diagnostics}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh();await brief.close()
-  brief=new TimelineBrief(join(dir,'timeline.json'),async()=>({cards:[]}),()=>undefined);await brief.open();brief.update([input],'2026-10-17','UTC')
+  brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards:[]}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined);await brief.open();brief.update([input],'2026-10-17','UTC')
   assert.equal(brief.snapshot().diagnostics?.published,1)
   assert.deepEqual(brief.snapshot().diagnostics?.failed_batches,[{batch:1,reason:'invalid_evidence'}])
   assert.equal(brief.snapshot().diagnostics?.stages[0]?.dropped.unsupported_quote,1)
@@ -138,7 +138,7 @@ test('checked batches appear while working and survive timeout; withdrawal still
  const timeout=new AbortController();t.mock.method(AbortSignal,'timeout',()=>timeout.signal)
  let published=false
  const brief=new TimelineBrief(join(dir,'timeline.json'),async(_inputs,_context,_signal,progress)=>{
-  await progress?.(reply);published=true;return new Promise(()=>{})
+  await progress?.(reply);published=true;return new Promise(()=>{/* This fixture deliberately has no side effects. */})
  },()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC');const run=brief.refresh()
@@ -176,7 +176,7 @@ test('people tags retain only names grounded in the card sources and prose, and 
   {name:'杜撰姓名',quote:peer.text,ref:peer.id},
   {name:'路人',quote:'路人负责',ref:'missing'},
  ]}
- const make=()=>new TimelineBrief(join(dir,'timeline.json'),async()=>({cards:[card]}),()=>undefined)
+ const make=()=>new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards:[card]}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  let brief=make()
  try{
   await brief.open();brief.update([peer],'2026-10-17','Asia/Shanghai');await brief.refresh()
@@ -189,7 +189,7 @@ test('people tags retain only names grounded in the card sources and prose, and 
 test('unrelated source edits preserve still-authorized published cards while changed citations disappear',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-independent-'))
  const other={...input,id:'other',version:'v1'}
- const brief=new TimelineBrief(join(dir,'timeline.json'),async()=>({cards:[reply.cards[0]!,{...reply.cards[0]!,title:'Other issue',refs:['other'],facts:[{text:other.text,quote:other.text,ref:'other'}]}]}),()=>undefined)
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards:[reply.cards[0]!,{...reply.cards[0]!,title:'Other issue',refs:['other'],facts:[{text:other.text,quote:other.text,ref:'other'}]}]}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  try{
   await brief.open();brief.update([input,other],'2026-10-17','Asia/Shanghai');await brief.refresh()
   brief.update([input,{...other,version:'v2'}],'2026-10-17','Asia/Shanghai')
@@ -202,11 +202,11 @@ test('unrelated source edits preserve still-authorized published cards while cha
 
 test('cached briefings from the old relevance policy require regeneration before display',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-policy-')),path=join(dir,'timeline.json')
- const make=()=>new TimelineBrief(path,async()=>reply,()=>undefined)
+ const make=()=>new TimelineBrief(path,()=>{try{return Promise.resolve(reply)}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  let brief=make()
  try{
   await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');await brief.refresh();await brief.close()
-  const saved=JSON.parse(await readFile(path,'utf8'));delete saved.perspective_revision;await writeFile(path,JSON.stringify(saved))
+  const saved=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;delete saved.perspective_revision;await writeFile(path,JSON.stringify(saved))
   brief=make();await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai')
   assert.equal(brief.snapshot().cards.length,0)
   await brief.refresh();assert.equal(brief.snapshot().cards.length,1)
@@ -218,7 +218,7 @@ test('a colleague name may be grounded in sender metadata but not an unrelated n
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-named-author-'))
  const peer={...input,text:'我已经完成复现。',author:{key:'peer',name:'林舟',kind:'person' as const,is_user:false}}
  const card={...reply.cards[0]!,title:'林舟已完成复现',facts:[{text:'林舟已完成复现。',quote:peer.text,ref:peer.id}],people:[{name:'林舟',quote:peer.text,ref:peer.id}]}
- const brief=new TimelineBrief(join(dir,'timeline.json'),async()=>({cards:[card]}),()=>undefined)
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards:[card]}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  try{
   await brief.open();brief.update([peer],'2026-10-17','Asia/Shanghai');await brief.refresh()
   assert.deepEqual(brief.snapshot().cards[0]!.people.map(person=>person.name),['林舟'])

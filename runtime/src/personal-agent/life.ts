@@ -44,7 +44,7 @@ export const lifeInputSchema=z.discriminatedUnion('op',[
 ])
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex')
 /** Shared source ID alone is insufficient: separate claims can occur in one message. */
-export function lifeEvidenceMatches(left:readonly {entry_id:string;version:string|number;quote?:string}[],right:readonly {entry_id:string;version:string|number;quote?:string}[]):boolean{
+export function lifeEvidenceMatches(left:readonly {entry_id:string;version:string|number;quote?:string|undefined}[],right:readonly {entry_id:string;version:string|number;quote?:string|undefined}[]):boolean{
  return left.some(a=>!!a.quote?.trim()&&right.some(b=>a.entry_id===b.entry_id&&String(a.version)===String(b.version)&&a.quote!.trim()===b.quote?.trim()))
 }
 /** Shared domain transition; persistence and evidence admission belong to the backend. */

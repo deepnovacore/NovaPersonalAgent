@@ -706,7 +706,7 @@ test('timeline writer accepts ordinary signals and restores only supplied short 
 test('timeline repairs unsupported event dates once instead of silently losing grounded cards',async()=>{
  let calls=0
  const card={category:'Design',title:'Clarification design advanced',why_now:'A concrete design choice was recorded',facts:[{text:'Ask a question first',quote:'Ask first',ref:'e0'}],uncertainty:'',actions:[],refs:['e0']}
- const gateway={complete:async()=>({text:JSON.stringify({cards:[{...card,temporal:calls++===0?{kind:'event',dates:[{role:'occurred',date:'2026-10-17',quote:'Ask first',ref:'e0'}]}:{kind:'synthesis',dates:[]}}]})})} as unknown as ModelGateway
+ const gateway={complete:()=>{try{return Promise.resolve(({text:JSON.stringify({cards:[{...card,temporal:calls++===0?{kind:'event',dates:[{role:'occurred',date:'2026-10-17',quote:'Ask first',ref:'e0'}]}:{kind:'synthesis',dates:[]}}]})}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  const writer=new GatewayPersonalWriter({gateway,model:'same'})
  const result=await writer.generateTimeline([{id:'m',version:'v1',kind:'im',text:'Ask first',observed_at:'2026-10-13T01:00:00Z'}],{local_date:'2026-10-17',timezone:'Asia/Shanghai'},new AbortController().signal)
  assert.equal(calls,3);assert.equal(result.cards.length,1);assert.deepEqual(result.cards[0]!.temporal?.dates,[])
@@ -720,12 +720,12 @@ test('timeline can retain nine original references for a multi-day synthesis wit
 })
 
 test('timeline composition preserves conversation boundaries after screening',async()=>{
- const gateway={complete:async(request:CompleteRequest)=>{
+ const gateway={complete:(request:CompleteRequest)=>{try{
   const prompt=JSON.parse(request.prompt) as {inputs:{group:string}[]}
   assert.notEqual(prompt.inputs[0]!.group,prompt.inputs[1]!.group)
   assert.match(request.system,/仅当原文明示指向同一事项才跨group合并/)
-  return {text:JSON.stringify({cards:[]})}
- }} as unknown as ModelGateway
+  return Promise.resolve({text:JSON.stringify({cards:[]})});
+ }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  const writer=new GatewayPersonalWriter({gateway,model:'fixture'})
  await writer.generateTimeline([{id:'a',version:'1',kind:'im',group:'project-a',text:'Windows UI is updated',observed_at:'2026-10-17T00:00:00Z'},{id:'b',version:'1',kind:'im',group:'project-b',text:'Deploy next week',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
 })
@@ -733,15 +733,15 @@ test('timeline composition preserves conversation boundaries after screening',as
 test('timeline reviews causal claims against bounded original context before publication',async()=>{
  let calls=0
  const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered',why_now:'Cleanup freed capacity',facts:[{text:'The alert recovered',quote:'Alert recovered',ref:'e0'}],uncertainty:'Cause unknown',actions:[],refs:['e0']}
- const gateway={complete:async(request:CompleteRequest)=>{
+ const gateway={complete:(request:CompleteRequest)=>{try{
   calls++
   if(request.system.includes('现在是发布前的事实校对')){
    const prompt=JSON.parse(request.prompt) as {inputs:{key:string}[]}
    assert.deepEqual(prompt.inputs.map(x=>x.key),['e0','e1'])
-   return {text:JSON.stringify({cards:[{...card,why_now:'The alert recovered; its cause is not reported'}]})}
+   return Promise.resolve({text:JSON.stringify({cards:[{...card,why_now:'The alert recovered; its cause is not reported'}]})});
   }
-  return {text:JSON.stringify({cards:[card]})}
- }} as unknown as ModelGateway
+  return Promise.resolve({text:JSON.stringify({cards:[card]})});
+ }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  const writer=new GatewayPersonalWriter({gateway,model:'fixture'})
  const result=await writer.generateTimeline([{id:'alert',version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'},{id:'other',version:'1',kind:'im',text:'Unrelated data',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
  assert.equal(calls,2);assert.equal(result.cards[0]!.why_now,'The alert recovered; its cause is not reported')
@@ -778,13 +778,13 @@ test('timeline prose does not expose evidence keys while exact quotes and refere
 
 test('timeline composes every screened topic in batches and reports validation losses',async()=>{
  const inputs=Array.from({length:201},(_,i)=>({id:'m'+i,version:'1',kind:'im',text:'Update '+i,observed_at:'2026-10-17T00:00:00Z'}))
- const gateway={complete:async(request:CompleteRequest)=>{
-  if(request.usage?.operation==='reconcile'){const body=JSON.parse(request.prompt) as {topics:{id:string}[]};return {text:JSON.stringify({groups:body.topics.map(topic=>({members:[topic.id]}))})}}
+ const gateway={complete:(request:CompleteRequest)=>{try{
+  if(request.usage?.operation==='reconcile'){const body=JSON.parse(request.prompt) as {topics:{id:string}[]};return Promise.resolve({text:JSON.stringify({groups:body.topics.map(topic=>({members:[topic.id]}))})});}
   const prompt=JSON.parse(request.prompt) as {output_schema?:unknown;inputs:{key:string;text:string}[];cards?:unknown[]}
-  if(prompt.output_schema)return {text:JSON.stringify({topics:prompt.inputs.slice(0,12).map(input=>({title:input.text,refs:[input.key]}))})}
-  if(prompt.cards)return {text:JSON.stringify({cards:prompt.cards})}
-  return {text:JSON.stringify({cards:prompt.inputs.map(input=>({temporal:{kind:'event',dates:[]},category:'Progress',title:input.text,why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.key}],uncertainty:'',actions:[],refs:[input.key]}))})}
- }} as unknown as ModelGateway
+  if(prompt.output_schema)return Promise.resolve({text:JSON.stringify({topics:prompt.inputs.slice(0,12).map(input=>({title:input.text,refs:[input.key]}))})});
+  if(prompt.cards)return Promise.resolve({text:JSON.stringify({cards:prompt.cards})});
+  return Promise.resolve({text:JSON.stringify({cards:prompt.inputs.map(input=>({temporal:{kind:'event',dates:[]},category:'Progress',title:input.text,why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.key}],uncertainty:'',actions:[],refs:[input.key]}))})});
+ }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
  assert.equal(result.cards.length,13);assert.ok(result.cards.some(card=>card.refs.includes('m200')))
  assert.equal(result.diagnostics?.screened_topics,13)
@@ -795,15 +795,15 @@ test('timeline composes every screened topic in batches and reports validation l
 
 test('a failed composition batch does not discard separately grounded updates',async()=>{
  const inputs=Array.from({length:201},(_,i)=>({id:'m'+i,version:'1',kind:'im',text:'Update '+i,observed_at:'2026-10-17T00:00:00Z'}))
- const gateway={complete:async(request:CompleteRequest)=>{
-  if(request.usage?.operation==='reconcile'){const body=JSON.parse(request.prompt) as {topics:{id:string}[]};return {text:JSON.stringify({groups:body.topics.map(topic=>({members:[topic.id]}))})}}
+ const gateway={complete:(request:CompleteRequest)=>{try{
+  if(request.usage?.operation==='reconcile'){const body=JSON.parse(request.prompt) as {topics:{id:string}[]};return Promise.resolve({text:JSON.stringify({groups:body.topics.map(topic=>({members:[topic.id]}))})});}
   const prompt=JSON.parse(request.prompt) as {output_schema?:unknown;inputs:{key:string;text:string}[];cards?:unknown[]}
-  if(prompt.output_schema)return {text:JSON.stringify({topics:prompt.inputs.slice(0,4).map(input=>({title:input.text,refs:[input.key]}))})}
+  if(prompt.output_schema)return Promise.resolve({text:JSON.stringify({topics:prompt.inputs.slice(0,4).map(input=>({title:input.text,refs:[input.key]}))})});
   if(prompt.inputs[0]!.text==='Update 0')throw Error('transport unavailable')
-  if(prompt.cards)return {text:JSON.stringify({cards:prompt.cards})}
+  if(prompt.cards)return Promise.resolve({text:JSON.stringify({cards:prompt.cards})});
   const input=prompt.inputs[0]!
-  return {text:JSON.stringify({cards:[{temporal:{kind:'event',dates:[]},category:'Progress',title:input.text,why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.key}],uncertainty:'',actions:[],refs:[input.key]}]})}
- }} as unknown as ModelGateway
+  return Promise.resolve({text:JSON.stringify({cards:[{temporal:{kind:'event',dates:[]},category:'Progress',title:input.text,why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.key}],uncertainty:'',actions:[],refs:[input.key]}]})});
+ }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
  assert.equal(result.cards.length,1);assert.deepEqual(result.cards[0]!.refs,['m200'])
  assert.deepEqual(result.diagnostics?.failed_batches,[{batch:0,reason:'generation_failed'}])
@@ -821,13 +821,13 @@ test('timeline review keeps viewer identity even when selected evidence has only
  const inputs=Array.from({length:201},(_,i)=>({id:'m'+i,version:'1',kind:'im',text:i===200?'我叫许明':i===0?'林舟将在2026-10-20把我需要的复现结果交给我。':'系统收到例行通知',observed_at:'2026-10-17T01:00:00Z',relation:i===200?'self' as const:'participant' as const,author:{key:i===200?'self':'peer',name:i===200?'许明':'林舟',is_user:i===200,kind:'person' as const}}))
  const card={category:'协作',title:'复现结果将在10月20日交付',why_now:'你的复现依赖这份结果',facts:[{text:inputs[0]!.text,quote:inputs[0]!.text,ref:'e0'}],uncertainty:'',actions:[],refs:['e0']}
  let composition=0
- const gateway={complete:async(request:CompleteRequest)=>{
-  const body=JSON.parse(request.prompt)
+ const gateway={complete:(request:CompleteRequest)=>{try{
+  const body=JSON.parse(request.prompt) as {context:{viewer_names:string[]};output_schema?:unknown;inputs:{text:string;author:{name:string;is_user:boolean}}[]}
   assert.deepEqual(body.context.viewer_names,['许明'])
-  if(body.output_schema)return {text:JSON.stringify({topics:body.inputs.some((i:{text:string})=>i.text===inputs[0]!.text)?[{title:'复现交付',refs:['e0']}]:[]})}
-  assert.equal(body.inputs[0].author.name,'林舟');assert.equal(body.inputs[0].author.is_user,false)
-  composition++;return {text:JSON.stringify({cards:[card]})}
- }} as unknown as ModelGateway
+  if(body.output_schema)return Promise.resolve({text:JSON.stringify({topics:body.inputs.some((i:{text:string})=>i.text===inputs[0]!.text)?[{title:'复现交付',refs:['e0']}]:[]})});
+  assert.equal(body.inputs[0]!.author.name,'林舟');assert.equal(body.inputs[0]!.author.is_user,false)
+  composition++;return Promise.resolve({text:JSON.stringify({cards:[card]})});
+ }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal)
  assert.equal(composition,2);assert.equal(result.cards.length,1)
 })
@@ -836,11 +836,11 @@ test('timeline review retains the user request even when the draft cites only th
  const inputs=[{id:'request',version:'1',kind:'im',text:'请帮我复现 Windows 上的语音问题。',observed_at:'2026-10-16T01:00:00Z',group:'thread',author:{key:'self',name:'许明',kind:'person' as const,is_user:true}},{id:'reply',version:'1',kind:'im',text:'我已完成复现，正在整理结果。',observed_at:'2026-10-17T01:00:00Z',group:'thread',author:{key:'peer',name:'林舟',kind:'person' as const,is_user:false}}]
  const card={temporal:{kind:'event',dates:[]},category:'协作',title:'林舟已完成语音问题复现',why_now:'你提出的复现请求有了结果',facts:[{text:'林舟已完成复现，正在整理结果。',quote:inputs[1]!.text,ref:'e1'}],uncertainty:'',actions:[],refs:['e1']}
  let reviewed=false
- const gateway={complete:async(request:CompleteRequest)=>{
-  const body=JSON.parse(request.prompt)
-  if(body.cards){reviewed=true;assert.equal(request.reasoning,'disabled');assert.equal(body.inputs.length,2);assert.equal(body.inputs[0].author.is_user,true);assert.equal(body.inputs[0].text,inputs[0]!.text)}
-  return {text:JSON.stringify({cards:[card]})}
- }} as unknown as ModelGateway
+ const gateway={complete:(request:CompleteRequest)=>{try{
+  const body=JSON.parse(request.prompt) as {cards?:unknown[];inputs:{text:string;author:{is_user:boolean}}[]}
+  if(body.cards){reviewed=true;assert.equal(request.reasoning,'disabled');assert.equal(body.inputs.length,2);assert.equal(body.inputs[0]!.author.is_user,true);assert.equal(body.inputs[0]!.text,inputs[0]!.text)}
+  return Promise.resolve({text:JSON.stringify({cards:[card]})});
+ }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal)
  assert.equal(reviewed,true);assert.equal(result.cards.length,1)
 })

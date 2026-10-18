@@ -485,7 +485,9 @@ export class PersonalAgentHost {
         const c=this.#state.conversations,selected=c.items.find(item=>item.id===c.selected_id),home=c.items.filter(item=>['chat:main','chat:proactive'].includes(item.id)).flatMap(item=>item.messages);
         const receipts=this.#state.feed.filter(feed=>feed.task_ref&&!home.some(message=>message.id==='feed:'+feed.id||message.turn_id==='task:'+feed.task_ref!.work_id)).map(feed=>({id:'feed:'+feed.id,conversation_id:c.work_owners[feed.task_ref!.work_id]??'chat:main',role:'assistant' as const,text:feed.title,created_at:feed.updated_at}));
         const result={selected_id:c.selected_id,voice_id:c.voice_id,unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.filter(item=>item.kind!=='schedule').map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(selected?.messages??[]),home_messages:[] as typeof home,home_truncated:false};
-        const selectedIds=new Set(result.messages.map(message=>message.id)),candidates=[...home,...receipts].filter(message=>!selectedIds.has(message.id)).sort((a,b)=>a.created_at.localeCompare(b.created_at));
+        // Schedule cleanup can remove a conversation while its work-owner mapping remains.
+        const visibleIds=new Set(c.items.filter(item=>item.kind!=='schedule').map(item=>item.id));
+        const selectedIds=new Set(result.messages.map(message=>message.id)),candidates=[...home,...receipts].filter(message=>visibleIds.has(message.conversation_id)&&!selectedIds.has(message.id)).sort((a,b)=>a.created_at.localeCompare(b.created_at));
         const budget=Math.max(0,Math.min(maxHomeBytes,1024*1024-Buffer.byteLength(JSON.stringify(result))-4096));let bytes=2;
         for(const message of candidates.slice(-512).reverse()){
             const size=Buffer.byteLength(JSON.stringify(message))+1;if(bytes+size>budget)break;

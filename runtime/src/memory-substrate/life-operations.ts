@@ -155,7 +155,7 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
   if(!q.sourcePolicy)throw Error('suggestion_authorization_required')
   const current=sourceProcessingOperation(db,{...q.sourcePolicy,prefix:q.namespace.slice(0,-5),action:'products'}) as UnderstandingSnapshot
   const input=q.input,item=current.suggestions.find(item=>item.id===input.suggestion_id)
-  const anchor=item?.anchor,ref=anchor&&item?.refs.find(ref=>ref.entry_id===anchor.entry_id),expectedSource=anchor?.quote&&ref?{candidate_id:item!.id,refs:[{...ref,version:String(ref.version),quote:anchor.quote}]}:undefined
+  const anchor=item?.anchor,ref=anchor&&item?.refs.find(ref=>ref.entry_id===anchor.entry_id),expectedSource=anchor?.quote&&ref?{candidate_id:item.id,refs:[{...ref,version:String(ref.version),quote:anchor.quote}]}:undefined
   if(canonicalJson(input.source??null)!==canonicalJson(expectedSource??null))throw Error('STORE_STALE_REVISION')
   if(!item||(item.kind==='goal'?'goal':item.kind==='idea'?'idea':'todo')!==q.input.kind||item.title!==q.input.title||item.body!==q.input.note||item.due!==q.input.due||item.todo_id!==q.input.todo_id||canonicalJson(item.refs.map(ref=>ref.entry_id))!==canonicalJson(q.input.provenance_refs))throw Error('STORE_STALE_REVISION')
  }

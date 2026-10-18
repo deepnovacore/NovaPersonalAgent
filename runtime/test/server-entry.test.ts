@@ -172,8 +172,11 @@ test('AOQ entry starts without loading the desktop/provider graph and closes on 
   assert.match('./desktop-entry.js', forbiddenGraph)
   assert.match('./cascaded-realtime-assembly.js', forbiddenGraph)
   assert.doesNotMatch('/repo/.codex/worktrees/task/runtime/src/server-entry.js', forbiddenGraph)
+  assert.doesNotMatch('file:///Volumes/codex-builds/build/runtime/dist/src/server-entry.js'.replace(/^file:.*\/runtime\//u, ''), forbiddenGraph)
+  assert.match('file:///Volumes/codex-builds/build/runtime/dist/src/executors/codex/adapter.js'.replace(/^file:.*\/runtime\//u, ''), forbiddenGraph)
   const loader = `export function resolve(specifier, context, nextResolve) {
-    if (${forbiddenGraph}.test(specifier)) throw new Error('forbidden graph import');
+    const scoped = specifier.replace(/^file:.*\\/runtime\\//u, '');
+    if (${forbiddenGraph}.test(scoped)) throw new Error('forbidden graph import');
     return nextResolve(specifier, context);
   }`
   const script = `

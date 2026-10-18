@@ -565,7 +565,7 @@ test('interrupted native Nova playback is not delivered evidence',async()=>{
 })
 
 test('verified completion publication is idempotent and does not repopulate a cleared transcript',async()=>{
- const dir=await mkdtemp(join(await realpath(tmpdir()),'task-publish-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-publish-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null,now:()=>new Date(2026,0,15,12)})
  try{await host.open();const task=await host.tasks.delegate('task',{conversation_id:'chat:main',goal:'Write a plan',acceptance:[],origin_ref:'conversation:1'});await host.tasks.recordDelivery({task_id:task.id,control_revision:0,goal_revision:0},'reply','The plan');host.attachTaskRuntime('chat:main',0,{input:async()=> 'accepted',cancel:()=>{},dispatch:async()=>assert.fail('already delivered'),evaluate:async()=>({kind:'complete',evidence_refs:['task-delivery:reply']})});await host.wakeTask(task.id)
  assert.equal(host.snapshot().feed.filter(item=>item.kind==='task_result').length,1);assert.equal(host.conversationSnapshot().messages.filter(item=>item.turn_id?.startsWith('task:verified:')).length,1);await host.wakeTask(task.id);assert.equal(host.snapshot().feed.filter(item=>item.kind==='task_result').length,1)
  await host.command({type:'personal.command',request_id:'clear',method:'conversations.clear',params:{id:'chat:main',expected_generation:0}});await host.wakeTask(task.id);assert.equal(host.conversationSnapshot().messages.length,0)

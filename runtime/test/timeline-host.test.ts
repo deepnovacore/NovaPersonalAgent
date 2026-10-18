@@ -40,7 +40,7 @@ test('host forwards checked batch progress only after reauthorizing original sou
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-host-progress-'))
  let allowed=true,finished=false,release!:()=>void
  const input={id:'personal:batch',version:'1',kind:'im',text:'Release passed',observed_at:new Date().toISOString()}
- const memory={timelineEvidence:async()=>allowed?[input]:[]} as unknown as PersonalMemoryResource
+ const memory={timelineEvidence:()=>{try{return Promise.resolve(allowed?[input]:[])}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateTimeline:async(_inputs,_context,_signal,progress)=>{
   const reply={cards:[{category:'Release',title:'Release passed',why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.id}],uncertainty:'',actions:[],refs:[input.id]}]}
   await progress?.(reply);finished=true;await new Promise<void>(resolve=>{release=resolve});allowed=false
