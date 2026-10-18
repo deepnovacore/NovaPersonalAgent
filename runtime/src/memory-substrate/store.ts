@@ -24,7 +24,7 @@ export const EvidenceRecordSchema = z.object({
   consent:z.object({provider_fingerprint:id}).optional(),
   source_metadata:imMetadataSchema.optional(),
   locator:z.string().max(4096), cursor:z.string().max(4096).nullable().default(null),
-  observed_at:date, recorded_at:date, raw_text:z.string().max(100_000).nullable(),
+  observed_at:date, recorded_at:date, raw_text:z.string().max(2_000_000).nullable(),
   extracted:object.default({}), hash:z.string().min(1).max(128),
   sensitivity:z.object({policy_version:z.string(),redactions:z.array(z.string())}).default({policy_version:'1',redactions:[]}),
   retention_until:date.nullable().default(null), trust:trustSchema,
@@ -273,9 +273,13 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         const safe=EvidenceRecordSchema.parse({...parsed,raw_text:scrub(parsed.raw_text,redactions,'raw_text'),locator:scrub(parsed.locator,redactions,'locator')??'[redacted]',extracted:scrub(parsed.extracted,redactions,'extracted'),sensitivity:{policy_version:'1',redactions},retention_until:parsed.retention_until??(parsed.source_kind==='im'?new Date(Date.parse(parsed.recorded_at)+30*86400000).toISOString():null)})
         const existing=evidence(db,safe.id)
         if(existing && (existing.hash!==safe.hash || existing.source_id!==safe.source_id || existing.locator!==safe.locator))throw new Error('STORE_IDEMPOTENCY_CONFLICT')
+        const refreshed=existing?.retention_until!=null&&safe.retention_until!==null
+          && Date.parse(safe.retention_until)>Date.parse(existing.retention_until)
+          ? {...existing,retention_until:safe.retention_until}:existing
         if(!existing)db.prepare('INSERT INTO memory_evidence VALUES(?,?,?,?)').run(safe.id,safe.source_id,safe.hash,canonicalJson(safe))
+        else if(refreshed!==existing)db.prepare('UPDATE memory_evidence SET payload_json=? WHERE id=?').run(canonicalJson(refreshed),safe.id)
         if(['im','mail'].includes(safe.source_kind))db.prepare('INSERT INTO memory_message_heads VALUES(?,?) ON CONFLICT(key) DO UPDATE SET evidence_id=excluded.evidence_id').run(createHash('sha256').update(canonicalJson([safe.source_id,safe.locator])).digest('hex'),safe.id)
-        result=existing??safe;break
+        result=refreshed??safe;break
       }
       case 'commit_consolidation': {
         const q=z.object({entry_prefix:id,provider:id,candidate:CandidateSchema,contexts:z.array(z.object({entry_id:id,revision:z.number().int().positive(),stamp:z.string().min(1)}).strict()).min(1).max(32)}).strict().parse(value)

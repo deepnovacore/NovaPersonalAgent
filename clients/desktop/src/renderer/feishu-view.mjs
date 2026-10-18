@@ -3,16 +3,17 @@ import {t} from './locale.mjs'
 export function renderFeishu({state={},notifications,local,card,el,button,command,refresh,api}) {
  state??={}
  const accountKey=state.account_id??state.account_name??null
- if(local.accountKey!==accountKey){local.accountKey=accountKey;local.chats=null;local.verification_url=null;local.editScope=false}
+ if(local.accountKey!==accountKey){local.accountKey=accountKey;local.chats=null;local.chatDiscoveryComplete=null;local.verification_url=null;local.editScope=false}
  if(!['ready','connected','paused'].includes(state.state))local.chats=null
  const a=card(t('飞书'),t('记录选定会话里的约定和进展。'))
  a.classList.add('im-guide')
  let guideActions
  const originalButton=button
- const primaryLabels=new Set([t('创建飞书应用'),t('继续在飞书中配置'),t('绑定并继续'),t('登录飞书'),t('重新授权飞书'),t('打开飞书授权页面'),t('选择会话'),t('完成配置')])
+ const primaryLabels=new Set([t('创建飞书应用'),t('继续在飞书中配置'),t('绑定并继续'),t('登录飞书'),t('重新授权飞书'),t('打开飞书授权页面'),t('选择会话'),t('继续加载会话'),t('完成配置')])
  button=(label,action,parent)=>{const b=originalButton(label,action,parent===a&&guideActions?guideActions:parent);if(primaryLabels.has(label))b.classList.add('im-guide-primary');return b}
  const note=text=>a.append(el('p',text,'personal-hint'))
  const call=async(method,params={})=>{const result=await command(`feishu.${method}`,params);refresh();return result}
+ const loadChats=async()=>{const result=await call('chats');local.chats=result?.chats??[];local.chatDiscoveryComplete=result?.chat_discovery_complete!==false;local.editScope=true;refresh()}
  const check=(text,checked,parent=a,switchControl=true)=>{const label=el('label',undefined,'personal-consent toggle-row'),input=el('input');input.type='checkbox';if(switchControl)input.setAttribute('role','switch');else label.className='selection-row';input.checked=checked;label.append(input,document.createTextNode(text));parent.append(label);return input}
  if(!state.available){note(state.error||t('当前运行环境尚未启用飞书连接。'));note(t('需要安装 lark-cli 1.0.69 或更高版本，再重新打开 Nova。'));return}
  const connected=['ready','connected','paused'].includes(state.state)
@@ -70,14 +71,16 @@ export function renderFeishu({state={},notifications,local,card,el,button,comman
   if(local.verification_url){
    if(api.personal.openFeishuVerification)button(t('打开飞书授权页面'),()=>api.personal.openFeishuVerification(local.verification_url),a)
    else {const link=el('input');link.value=local.verification_url;link.readOnly=true;link.setAttribute('aria-label',t('飞书授权链接'));a.append(link)}
-   button(t('我已完成授权'),async()=>{await call('complete');local.verification_url=null;const result=await call('chats');local.chats=result?.chats??result;refresh()},a)
+   button(t('我已完成授权'),async()=>{await call('complete');local.verification_url=null;await loadChats()},a)
   }
  } else {
   local.verification_url=null
-  note(t('消息保留 30 天；已形成的记忆可单独管理。'))
-  button(completed?t('调整会话'):t('选择会话'),async()=>{const result=await call('chats');local.chats=result?.chats??result;local.editScope=true;refresh()},a)
+  note(t('消息最多保留 30 天；较早历史从导入时计时。'))
+  const discoveryComplete=local.chatDiscoveryComplete??state.chat_discovery_complete!==false
+  button(!discoveryComplete?t('继续加载会话'):completed?t('调整会话'):t('选择会话'),loadChats,a)
   const chats=local.chats??state.chats??[]
-  if(chats.length&&(!completed||local.editScope)){
+  if(!discoveryComplete)note(t('会话列表尚未完整加载，请继续加载后选择。'))
+  if(chats.length&&discoveryComplete&&(!completed||local.editScope)){
    const group=el('fieldset');group.append(el('legend',t('选择要同步的会话')));a.append(group)
    const selected=new Set(chats.filter(chat=>chat.selected).map(chat=>chat.id))
    const bulk=el('div',undefined,'im-chat-bulk'),list=el('div',undefined,'im-chat-list');list.setAttribute('role','group');list.setAttribute('aria-label',t('可同步的飞书会话'));list.tabIndex=0;group.append(bulk,list)
@@ -86,10 +89,19 @@ export function renderFeishu({state={},notifications,local,card,el,button,comman
    button(t('全选'),()=>setAll(true),bulk);button(t('取消全选'),()=>setAll(false),bulk)
    group.append(el('p',t('最近活跃优先'),'personal-hint'))
    for(const chat of chats){const input=check(chat.name||t('未命名会话'),selected.has(chat.id),list,false);choices.push({chat,input});input.addEventListener('change',()=>input.checked?selected.add(chat.id):selected.delete(chat.id))}
+   const history=check(t('读取所选会话的全部历史消息'),state.all_history===true,a,false)
    const consent=check(t('允许读取所选会话并保存在本机'),false,a,false)
-   const save=button(t('完成配置'),async()=>{await call('configure',{chat_ids:[...selected],consent:true});local.chats=null;local.editScope=false;refresh()},a);save.disabled=true
+   const save=button(t('完成配置'),async()=>{await call('configure',{chat_ids:[...selected],consent:true,all_history:history.checked});local.chats=null;local.editScope=false;refresh()},a);save.disabled=true
    consent.addEventListener('change',()=>{save.disabled=!consent.checked})
-  }else if(local.chats)note(t('没有可选会话。请确认账号权限后重新加载。'))
+  }else if(local.chats&&discoveryComplete)note(t('没有可选会话。请确认账号权限后重新加载。'))
+  if(completed&&state.history_complete===false)note(t('历史消息仍在同步，稍后继续。'))
+  if(completed&&state.history_complete===true&&state.chats?.some(chat=>chat.selected))note(t('历史读取已完成。'))
+  const issueLabels={unsupported_type:t('不支持的消息格式'),missing_body:t('正文为空'),malformed_body:t('正文格式错误'),invalid_identity:t('消息身份无效'),invalid_time:t('消息时间无效'),body_too_large:t('正文超过大小限制')}
+  const issues=Object.entries(issueLabels).flatMap(([reason,label])=>{
+   const count=state.unsupported_messages?.[reason]
+   return Number.isSafeInteger(count)&&count>0?[{count,label}]:[]
+  })
+  if(issues.length)note(t('未提取正文：{0} 条。{1}',issues.reduce((sum,item)=>sum+item.count,0),issues.map(item=>`${item.label} ${item.count}`).join(' · ')))
   const processing=check(t('允许设置中的模型服务处理飞书内容'),state.processing_consent_required===false)
   processing.disabled=!completed
   note(t('读取与模型处理分别授权。调整会话后需重新开启。'))

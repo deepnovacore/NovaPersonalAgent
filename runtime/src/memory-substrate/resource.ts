@@ -35,7 +35,7 @@ const extractionSchema=z.object({entries:z.array(z.object({
 }).strict()).max(8)}).strict()
 const purgeResultSchema=z.object({status:z.enum(['complete','incomplete']),operation_id:z.string().min(1),removed_entries:z.number().int().nonnegative(),removed_evidence:z.number().int().nonnegative(),removed_entry_ids:z.array(z.string().min(1)).max(4096).default([]),removed_evidence_ids:z.array(z.string().min(1)).max(4096).default([]),index_evidence_ids:z.array(z.string().min(1)).max(4096).default([]),backup_cleanup:z.object({status:z.enum(['complete','incomplete']),unresolved:z.array(z.string())}).strict()}).strict()
 const pendingPurgeSchema=purgeResultSchema.extend({entry_id:z.string().min(1),expected_revision:z.number().int().positive()})
-const evidenceInputSchema=z.object({sourceId:z.string().min(1).max(256),locator:z.string().min(1).max(4096),text:z.string().min(1).max(100000),observedAt:z.iso.datetime({offset:true}),kind:z.enum(['file','im']),embeddingConsent:z.boolean(),processingConsent:processingGrantSchema.optional(),retentionUntil:z.string().datetime().optional(),im:EvidenceRecordSchema.shape.source_metadata.optional()}).strict()
+const evidenceInputSchema=z.object({sourceId:z.string().min(1).max(256),locator:z.string().min(1).max(4096),text:z.string().min(1).max(2_000_000),observedAt:z.iso.datetime({offset:true}),kind:z.enum(['file','im']),embeddingConsent:z.boolean(),processingConsent:processingGrantSchema.optional(),retentionUntil:z.string().datetime().optional(),im:EvidenceRecordSchema.shape.source_metadata.optional()}).strict()
 const displayText=(value:unknown)=>typeof value==='string'?value:''
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex')
 

@@ -25,13 +25,22 @@ export interface FeishuSnapshot {
   scope_configured?: boolean;
   auth_issue?: 'expired' | 'missing_scopes' | 'login_required';
   processing_consent_required?: boolean;
+  all_history?: boolean;
+  chat_discovery_complete?: boolean;
+  history_complete?: boolean;
+  unsupported_messages?: Partial<Record<UnsupportedReason, number>>;
   app_setup?: {state: 'idle' | 'waiting' | 'ready' | 'error'; verification_url?: string; error?: string};
 }
+type UnsupportedReason = 'unsupported_type' | 'missing_body' | 'malformed_body' | 'invalid_identity' | 'invalid_time' | 'body_too_large';
+const unsupportedReasons = new Set<UnsupportedReason>(['unsupported_type','missing_body','malformed_body','invalid_identity','invalid_time','body_too_large']);
 interface Cursor { start: string; end?: string; page?: string; order?: 'asc'|'desc' }
 interface Saved {
   account?: string; openId?: string; name?: string; paused: boolean; connected: boolean;
   scopeConfigured?: boolean;
+  allHistory?: boolean;
+  chatDiscovery?: {page: string; chats: {id: string; name: string}[]};
   backfills?: Record<string, Cursor>;
+  unsupportedMessageKeys?: Record<string, UnsupportedReason>;
   processingConsent?: ProcessingGrant;
   outbound?: boolean;
   outboundIdentity?: {account:string;openId:string;generation:number;valid:boolean};
@@ -135,6 +144,12 @@ function readSaved(value: unknown): Saved {
     if (!str(row.nonce) || ['message', 'chat'].some((key) => row[key] !== undefined && typeof row[key] !== 'string')) throw new Error('Invalid Feishu delivery');
   }
   if (data.scopeConfigured !== undefined && typeof data.scopeConfigured !== 'boolean') throw new Error('Invalid Feishu scope state');
+  if (data.allHistory !== undefined && typeof data.allHistory !== 'boolean') throw new Error('Invalid Feishu history mode');
+  for(const [key,reason] of Object.entries(object(data.unsupportedMessageKeys ?? {})))if(!/^[a-f0-9]{64}$/.test(key)||!unsupportedReasons.has(reason as UnsupportedReason))throw new Error('Invalid Feishu unsupported message');
+  if (data.chatDiscovery !== undefined) {
+    const discovery=object(data.chatDiscovery);
+    if (!str(discovery.page) || !Array.isArray(discovery.chats) || discovery.chats.some(chat=>!str(object(chat).id)||typeof object(chat).name!=='string')) throw new Error('Invalid Feishu chat discovery');
+  }
   if (data.consentSince !== undefined && !Number.isFinite(Date.parse(str(data.consentSince)))) throw new Error('Invalid Feishu consent state');
   for (const from of Object.values(object(data.captureFrom ?? {}))) if (!Number.isFinite(Date.parse(str(from)))) throw new Error('Invalid Feishu capture state');
   if(data.outbound!==undefined&&typeof data.outbound!=='boolean')throw Error('Invalid outbound state');
@@ -170,7 +185,7 @@ export class FeishuConnector {
     if (!options.bootstrapOnly && (!(options.ingest || options.ingestBatch) || !options.deleteSource || !options.onAction)) throw new Error('Feishu collection callbacks required');
     this.run = options.run ?? createFeishuRunner(options.executable, options.credentialRoot);
   }
-  snapshot(): FeishuSnapshot { const view = structuredClone(this.view),expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider||JSON.stringify([...(this.saved.processingConsent.conversation_providers??[])].sort())!==JSON.stringify([...(expected?.conversation_providers??[])].sort()); view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; if (view.app_setup) delete view.app_setup.verification_url; return view; }
+  snapshot(): FeishuSnapshot { const view = structuredClone(this.view),expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider||JSON.stringify([...(this.saved.processingConsent.conversation_providers??[])].sort())!==JSON.stringify([...(expected?.conversation_providers??[])].sort()); view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; view.all_history=this.saved.allHistory===true; view.chat_discovery_complete=!this.saved.chatDiscovery; view.history_complete=this.saved.selected.every(id=>!this.saved.backfills?.[id]); const counts:Partial<Record<UnsupportedReason,number>>={}; for(const reason of Object.values(this.saved.unsupportedMessageKeys??{}))counts[reason]=(counts[reason]??0)+1; view.unsupported_messages=counts; if (view.app_setup) delete view.app_setup.verification_url; return view; }
   private setupSnapshot(): FeishuSnapshot {const view=this.snapshot();if(this.view.app_setup)view.app_setup=structuredClone(this.view.app_setup);return view;}
   private publish(): void {
     if (this.closed) return;
@@ -204,6 +219,7 @@ export class FeishuConnector {
     this.closed = false;
     try { this.saved = readSaved(JSON.parse(await readFile(this.options.statePath, 'utf8'))); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Cannot read Feishu state'); }
+    if (this.saved.chatDiscovery) this.view.chats=this.saved.chatDiscovery.chats.map(chat=>({...chat,selected:this.saved.selected.includes(chat.id)}));
     try {
       const version = await this.run(['--version']);
       const match = /(\d+)\.(\d+)\.(\d+)/.exec(version);
@@ -364,8 +380,8 @@ export class FeishuConnector {
   async listChats(): Promise<FeishuSnapshot> {
     await this.status();
     if (!this.saved.openId || this.view.state === 'unauthorized') throw new Error('请先登录飞书');
-    const chats: FeishuSnapshot['chats'] = [];
-    let page = '';
+    const chats: FeishuSnapshot['chats'] = this.saved.chatDiscovery?.chats.map(chat=>({...chat,selected:this.saved.selected.includes(chat.id)}))??[];
+    let page = this.saved.chatDiscovery?.page??'';
     for (let count = 0; count < 20; count++) {
       const data = await this.json(['im', '+chat-list', '--as', 'user', '--types', 'p2p,group', '--sort', 'active_time', '--format', 'json', '--page-size', '50', ...(page ? ['--page-token', page] : [])]);
       const items = pageItems(data, 'chats');
@@ -374,24 +390,28 @@ export class FeishuConnector {
         if (!id) throw new Error('Missing Feishu chat ID');
         if (!chats.some((chat) => chat.id === id)) chats.push({ id, name: str(row.name) || '未命名会话', selected: this.saved.selected.includes(id) });
       }
-      if (data.has_more !== true) { this.view.chats = chats; return this.snapshot(); }
+      if (data.has_more !== true) { this.view.chats = chats; delete this.saved.chatDiscovery; await this.save(); return this.snapshot(); }
       const next = str(data.page_token);
       if (!next || next === page) throw new Error('Invalid Feishu chat cursor');
       page = next;
+      this.saved.chatDiscovery={page,chats:chats.map(({id,name})=>({id,name}))};
+      this.view.chats=chats;
+      await this.save();
     }
-    this.view.chats = chats;
-    throw new Error('会话列表超过本次读取上限，未完整加载');
+    return this.snapshot();
   }
-  async configure(chatIds: string[], consent: boolean): Promise<void> {
+  async configure(chatIds: string[], consent: boolean, allHistory=this.saved.allHistory===true): Promise<void> {
+    if (this.saved.chatDiscovery) throw new Error('会话列表尚未完整加载');
     if (!consent || this.view.state === 'unauthorized' || !this.saved.account || chatIds.some((id) => !this.view.chats.some((chat) => chat.id === id))) throw new Error('请选择已授权的飞书会话');
     await this.pause();
     await this.setProcessingConsent(false,true);
-    const previous = new Set(this.saved.selected), since = this.now().toISOString();
+    const previous = new Set(this.saved.selected), since = this.now().toISOString(), modeChanged=allHistory!==this.saved.allHistory;
     this.saved.scopeConfigured = true; this.saved.selected = [...new Set(chatIds)]; this.saved.connected = true; this.saved.paused = false;
+    this.saved.allHistory=allHistory;
     // A newly authorized scope gets a complete two-week window, including previously selected chats.
-    if(chatIds.some(id=>!previous.has(id))){
+    if(modeChanged||chatIds.some(id=>!previous.has(id))){
       const backfills=this.saved.backfills??={};
-      for(const id of this.saved.selected)backfills[id]??={start:new Date(this.now().getTime()-14*86400_000).toISOString(),end:since,order:'desc'};
+      for(const id of this.saved.selected)if(modeChanged||!backfills[id])backfills[id]={start:allHistory?'1970-01-01T00:00:00.000Z':new Date(this.now().getTime()-14*86400_000).toISOString(),end:since,order:'desc'};
     }
     this.saved.captureFrom = Object.fromEntries(this.saved.selected.map((id) => [id, previous.has(id) ? this.saved.captureFrom?.[id] ?? this.saved.mentionCaptureSince ?? since : since]));
     this.view.chats = this.view.chats.map((chat) => ({ ...chat, selected: chatIds.includes(chat.id) }));
@@ -420,19 +440,20 @@ export class FeishuConnector {
     try {
       await this.status();
       if (this.view.state !== 'ready') return;
-      const chats = [...this.saved.selected]; let next = 0; let unsupported = 0;
+      const chats = [...this.saved.selected]; let next = 0;
       const errors: unknown[] = [];
       // Independent chats get four workers; a failed or capped chat cannot starve the rest.
       await Promise.all(Array.from({length: Math.min(4, chats.length)}, async () => {
         while (next < chats.length && !this.active!.signal.aborted) {
           const chat = chats[next++]!;
-          try { unsupported += await this.syncChat(chat); } catch (error) { errors.push(error); }
+          try { await this.syncChat(chat); } catch (error) { errors.push(error); }
         }
       }));
       if (this.active.signal.aborted) return;
       if (errors.length) throw errors[0];
       this.saved.lastSync = this.now().toISOString(); this.view.last_sync = this.saved.lastSync;
-      if (unsupported) this.view.error = `已读取文字消息，${unsupported} 条附件或其他格式未提取正文`;
+      const total=Object.keys(this.saved.unsupportedMessageKeys??{}).length;
+      if (total) this.view.error = `已读取文字消息，${total} 条消息未提取正文`;
       else delete this.view.error;
       await this.save();
     } finally { this.busy = false; this.active = undefined; }
@@ -444,7 +465,7 @@ export class FeishuConnector {
     let cursor = this.saved.cursors[chat];
     if (!cursor || cursor.end && cursor.order === undefined) {
       // Legacy page tokens keep their ascending order; only new windows are descending.
-      backfills[chat] ??= cursor ?? {start: new Date(this.now().getTime() - 14 * 86400_000).toISOString(), end: this.now().toISOString(), order: 'desc'};
+      backfills[chat] ??= cursor ?? {start: this.saved.allHistory?'1970-01-01T00:00:00.000Z':new Date(this.now().getTime() - 14 * 86400_000).toISOString(), end: this.now().toISOString(), order: 'desc'};
       cursor = this.saved.cursors[chat] = {start: new Date(Date.parse(backfills[chat].end!) - 60_000).toISOString(), order: 'desc'};
     }
     cursor.order ??= 'desc';
@@ -478,11 +499,19 @@ export class FeishuConnector {
     for (let count = 0; count < pages; count++) {
       const data = await this.json(['im', '+chat-messages-list', '--as', 'user', '--chat-id', chat, '--start', cursor.start, '--end', cursor.end, '--order', cursor.order ?? 'asc', '--page-size', '50', '--format', 'json', '--no-reactions', ...(cursor.page ? ['--page-token', cursor.page] : [])]);
       if (this.active!.signal.aborted) return {complete: false, unsupported};
+      const pageIssues=new Map<string,UnsupportedReason>();
+      const resolvedKeys=new Set<string>();
+      const skip=(reason:UnsupportedReason,item:unknown):undefined=>{
+        const id=item&&typeof item==='object'&&!Array.isArray(item)?str((item as Record<string,unknown>).message_id):'';
+        pageIssues.set(hash(`${chat}:${id||hash(JSON.stringify(item))}`),reason);return undefined;
+      };
       const parsed=await Promise.allSettled(pageItems(data,'messages').map(async(item):Promise<FeishuMessage|undefined>=>{
-      const row = object(item); const id = str(row.message_id);
-      if (!id || (row.chat_id && row.chat_id !== chat)) throw new Error('Invalid Feishu message identity');
+      if(!item||typeof item!=='object'||Array.isArray(item))return skip('invalid_identity',item);
+      const row = item as Record<string,unknown>; const id = str(row.message_id);
+      if (!id || (row.chat_id && row.chat_id !== chat)) return skip('invalid_identity',item);
       if (row.deleted === true) {await this.options.deleteMessage?.(sourceId, `feishu://message/${encodeURIComponent(id)}`); return undefined;}
-      const sender = row.sender ? object(row.sender) : {};
+      if(row.sender&& (typeof row.sender!=='object'||Array.isArray(row.sender)))return skip('invalid_identity',item);
+      const sender = (row.sender as Record<string,unknown>|undefined) ?? {};
       const senderId = str(sender.open_id ?? sender.openId ?? sender.id);
       const senderType = str(sender.sender_type ?? sender.type);
       const human=(!senderType||senderType==='user')&&senderId.startsWith('ou_');
@@ -490,11 +519,13 @@ export class FeishuConnector {
       if(!human&&!app)return undefined;
       // Our own notification cards must not become fresh observations of the world.
       if(app&&(senderId===this.view.app_id||Object.values(this.saved.deliveries).some(item=>item.message===id)||Object.values(this.saved.outboundReceipts??{}).some(item=>item.message===id)))return undefined;
-      const text = messageText(row);
-      if (text === null) { unsupported++; return undefined; }
-      if (!text) throw new Error('Missing Feishu message body');
+      let text:string|null;
+      try{text=messageText(row);}catch{return skip('malformed_body',item);}
+      if (text === null) return skip('unsupported_type',item);
+      if (!text.trim()) return skip('missing_body',item);
+      if (text.length>2_000_000) return skip('body_too_large',item);
       let mention = structuredMention(row, this.saved.openId!);
-      let mentionIds = Array.isArray(row.mentions) ? row.mentions.map(item => str(object(item).id)).filter(id => id.startsWith('ou_')).slice(0,50) : [];
+      let mentionIds = Array.isArray(row.mentions) ? row.mentions.map(item => item&&typeof item==='object'?str((item as Record<string,unknown>).id):'').filter(id => id.startsWith('ou_')).slice(0,50) : [];
       if (human && senderId !== this.saved.openId && mention === 'unknown' && (text.includes('@') || (row.msg_type ?? row.message_type) === 'post')) {
         try {
           const raw = await this.originalMessage(id);
@@ -507,8 +538,9 @@ export class FeishuConnector {
       const rawTime = row.create_time_iso ?? row.create_time;
       const numeric = Number(rawTime);
       const time = Number.isFinite(numeric) ? numeric < 1e12 ? numeric * 1000 : numeric : Date.parse(str(rawTime));
-      if (!Number.isFinite(time) || time <= 0) throw new Error('Invalid Feishu message time');
-      return { sender_type:human?'user':'app', ...(this.saved.processingConsent?{processing_consent:this.saved.processingConsent}:{}), id: hash(`${sourceId}:${id}:${hash(text)}`), source_id: sourceId, source_kind: 'im', ...(typeof row.message_app_link==='string'&&row.message_app_link.length<=4096&&row.message_app_link.startsWith('https://')?{source_url:row.message_app_link}:{}), message_id: id, ...Object.fromEntries(['thread_id','parent_id','root_id','upper_message_id'].flatMap(key=>{const value=row[key]??(key==='parent_id'?row.reply_to:undefined);return typeof value==='string'&&value.length>0&&value.length<=256?[[key,value]]:[]})), chat_id: chat, recipient_id: this.saved.openId!, sender_name: str(sender.name ?? row.sender_name ?? (senderId === this.saved.openId ? this.saved.name : '')).slice(0, 120), mention_ids: mentionIds, mention, auto_capture: human && mention === 'direct' && time >= Math.max(Date.parse(this.saved.captureFrom?.[chat] ?? this.saved.mentionCaptureSince!), Date.parse(this.saved.consentSince ?? '')), locator: `feishu://message/${encodeURIComponent(id)}`, raw_text: text, observed_at: new Date(time).toISOString(), retention_until: new Date(time + 30 * 86400_000).toISOString(), sender_id: senderId, account_id: this.saved.account! };
+      if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(new Date(time).getTime())) return skip('invalid_time',item);
+      resolvedKeys.add(hash(`${chat}:${id}`));
+      return { sender_type:human?'user':'app', ...(this.saved.processingConsent?{processing_consent:this.saved.processingConsent}:{}), id: hash(`${sourceId}:${id}:${hash(text)}`), source_id: sourceId, source_kind: 'im', ...(typeof row.message_app_link==='string'&&row.message_app_link.length<=4096&&row.message_app_link.startsWith('https://')?{source_url:row.message_app_link}:{}), message_id: id, ...Object.fromEntries(['thread_id','parent_id','root_id','upper_message_id'].flatMap(key=>{const value=row[key]??(key==='parent_id'?row.reply_to:undefined);return typeof value==='string'&&value.length>0&&value.length<=256?[[key,value]]:[]})), chat_id: chat, recipient_id: this.saved.openId!, sender_name: str(sender.name ?? row.sender_name ?? (senderId === this.saved.openId ? this.saved.name : '')).slice(0, 120), mention_ids: mentionIds, mention, auto_capture: human && mention === 'direct' && time >= Math.max(Date.parse(this.saved.captureFrom?.[chat] ?? this.saved.mentionCaptureSince!), Date.parse(this.saved.consentSince ?? '')), locator: `feishu://message/${encodeURIComponent(id)}`, raw_text: text, observed_at: new Date(time).toISOString(), retention_until: new Date(this.now().getTime() + 30 * 86400_000).toISOString(), sender_id: senderId, account_id: this.saved.account! };
 
        }));
       const messages:FeishuMessage[]=[];
@@ -516,6 +548,12 @@ export class FeishuConnector {
       if (this.options.ingestBatch) {if (messages.length) await this.options.ingestBatch(messages, this.active!.signal);}
       else for (const message of messages) {if (this.active!.signal.aborted) return {complete: false, unsupported}; await this.options.ingest!(message);}
       if (this.active!.signal.aborted) return {complete: false, unsupported};
+      const issues=this.saved.unsupportedMessageKeys??={};
+      for(const key of resolvedKeys)delete issues[key];
+      for(const [key,reason] of pageIssues)if(!resolvedKeys.has(key)&&issues[key]===undefined){issues[key]=reason;unsupported++;}
+      const issueTotal=Object.keys(issues).length;
+      if(issueTotal)this.view.error=`已读取文字消息，${issueTotal} 条消息未提取正文`;
+      else delete this.view.error;
       if (data.has_more !== true) {
         cursor.start = new Date(Date.parse(cursor.end) - 60_000).toISOString();
         delete cursor.end; delete cursor.page; cursor.order = 'desc';
@@ -544,7 +582,7 @@ export class FeishuConnector {
     const sources = [...this.saved.sources];
     // Persist the new generation before deletion so a crash cannot resume into a fenced source.
     this.saved.generation++;
-    this.saved.cursors = {}; this.saved.backfills = {}; this.saved.outboundReceipts = {}; this.saved.deliveries = {}; this.saved.actions = []; delete this.saved.lastSync; delete this.view.last_sync; await this.save();
+    this.saved.cursors = {}; this.saved.backfills = {}; this.saved.unsupportedMessageKeys = {}; this.saved.outboundReceipts = {}; this.saved.deliveries = {}; this.saved.actions = []; delete this.saved.lastSync; delete this.view.last_sync; delete this.view.error; await this.save();
     for (const source of sources) {
       await this.options.deleteSource!(source);
       this.saved.sources = this.saved.sources.filter((item) => item !== source); await this.save();
@@ -655,7 +693,8 @@ export class FeishuConnector {
       }
       case 'feishu.configure': {
         if (!Array.isArray(params.chat_ids) || !params.chat_ids.every((id) => typeof id === 'string')) throw new Error('Invalid chat selection');
-        await this.configure(params.chat_ids, params.consent === true); break;
+        if (params.all_history !== undefined && typeof params.all_history !== 'boolean') throw new Error('Invalid history mode');
+        await this.configure(params.chat_ids, params.consent === true, params.all_history ?? (this.saved.allHistory===true)); break;
       }
       case 'feishu.sync': await this.sync(); break;
       case 'feishu.pause': await this.pause(); break;

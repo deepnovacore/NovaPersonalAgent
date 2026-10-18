@@ -246,7 +246,8 @@ test('selected chat ingestion, pagination, delete generations, private bot and d
     assert.equal(messages[0]!.sender_id, 'ou_other'); assert.equal(messages[1]!.sender_id, 'ou_fixture');
     assert.equal(messages[1]!.recipient_id,'ou_fixture');assert.equal(messages[1]!.chat_id,'oc_selected');assert.equal(messages[1]!.auto_capture,false);
     assert.equal(messages[0]!.source_kind, 'im');assert.equal(messages[0]!.parent_id,'om_parent');assert.equal(messages[0]!.thread_id,'omt_fixture');assert.equal(messages[0]!.root_id,'om_root');assert.equal(messages[0]!.upper_message_id,'om_container');
-    assert.equal(Date.parse(messages[0]!.retention_until) - Date.parse(messages[0]!.observed_at), 30 * 86400_000);
+    assert.equal(messages[0]!.observed_at, '2026-09-12T08:00:00.000Z');
+    assert.equal(messages[0]!.retention_until, '2026-10-12T12:00:00.000Z');
     await connector.command('feishu.bot.configure', { enabled: true });
     assert(await connector.sendReminder({ id: 'proposal', title: '评审意见', body: '周五前回复' }));
     assert(await connector.sendReminder({ id: 'proposal', title: '评审意见', body: '周五前回复' }));
@@ -547,6 +548,147 @@ test('saved Feishu state accepts absent captureFrom and rejects malformed captur
     } finally { await connector.close(); }
   }
   await rm(directory, {recursive: true, force: true});
+});
+
+test('all-history selection persists and keeps old imported messages for 30 days', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-all-history-'));
+  const statePath=join(directory,'state.json');
+  const now=new Date('2026-10-18T00:00:00Z');
+  const messages:FeishuMessage[]=[];
+  const starts:string[]=[];
+  const make=()=>new FeishuConnector({executable:'fixture',credentialRoot:directory,statePath,now:()=>now,
+    ingest:message=>{messages.push(message);return Promise.resolve()},deleteSource:()=>Promise.resolve(),onAction:()=>Promise.resolve(),run: args=>{try{
+      if(args[0]==='--version')return Promise.resolve('1.0.97');
+      if(args[1]==='status')return Promise.resolve(JSON.stringify({appId:'fixture',identities:{user:{openId:'ou_self',status:'authenticated',scopes:FEISHU_SCOPES}}}));
+      if(args[1]==='+chat-list')return Promise.resolve(JSON.stringify({chats:[{chat_id:'oc_a'},{chat_id:'oc_b'}],has_more:false}));
+      if(args[1]==='+chat-messages-list'){
+        starts.push(args[args.indexOf('--start')+1]!);
+        return Promise.resolve(JSON.stringify({messages:[{message_id:'om_old',msg_type:'text',content:'old agreement',create_time:'2020-01-01T00:00:00Z',sender:{id:'ou_self'},mentions:[]}],has_more:false}));
+      }
+      return Promise.resolve('{}');
+    }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}});
+  let connector=make();
+  try {
+    await connector.open();await connector.listChats();
+    await connector.command('feishu.configure',{chat_ids:['oc_a'],consent:true,all_history:true});
+    assert.equal(connector.snapshot().all_history,true);
+    assert.equal(connector.snapshot().history_complete,false);
+    await connector.sync();
+    assert(starts.includes('1970-01-01T00:00:00.000Z'));
+    assert(messages.every(message=>message.chat_id==='oc_a'));
+    assert.equal(messages[0]!.retention_until,'2026-11-17T00:00:00.000Z');
+    assert.equal(connector.snapshot().history_complete,true);
+    await connector.close();connector=make();await connector.open();
+    assert.equal(connector.snapshot().all_history,true);
+    await connector.listChats();
+    await assert.rejects(connector.command('feishu.configure',{chat_ids:['oc_a'],consent:true,all_history:'yes'}),/Invalid history mode/);
+    await connector.command('feishu.configure',{chat_ids:['oc_a'],consent:true});
+    assert.equal(connector.snapshot().all_history,true);
+    await connector.command('feishu.configure',{chat_ids:['oc_a'],consent:true,all_history:false});
+    assert.equal(connector.snapshot().all_history,false);
+  } finally {await connector.close();await rm(directory,{recursive:true,force:true});}
+});
+
+test('unsupported rows do not block accessible messages or history completion', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-unsupported-'));
+  const statePath=join(directory,'state.json');
+  let now=new Date('2026-10-18T00:00:00Z');
+  const messages:FeishuMessage[]=[];
+  const longText='x'.repeat(100_001);
+  const oversizedText='x'.repeat(2_000_001);
+  let repaired=false;
+  const make=()=>new FeishuConnector({executable:'fixture',credentialRoot:directory,statePath,now:()=>now,
+    ingest:message=>{messages.push(message);return Promise.resolve()},deleteSource:()=>Promise.resolve(),onAction:()=>Promise.resolve(),run: args=>{try{
+      if(args[0]==='--version')return Promise.resolve('1.0.97');
+      if(args[1]==='status')return Promise.resolve(JSON.stringify({appId:'fixture',identities:{user:{openId:'ou_self',status:'authenticated',scopes:FEISHU_SCOPES}}}));
+      if(args[1]==='+chat-list')return Promise.resolve(JSON.stringify({chats:[{chat_id:'oc_a'}],has_more:false}));
+      if(args[1]==='+chat-messages-list')return Promise.resolve(JSON.stringify({messages:['1970-01-01T00:00:00.000Z','2026-10-17T23:59:00.000Z','2026-10-18T00:01:00.000Z'].includes(args[args.indexOf('--start')+1]!)?[
+        {message_id:'om_good',msg_type:'text',content:'keep this',create_time:'2026-10-04T00:00:00Z',sender:{id:'ou_self'},mentions:['malformed']},
+        {message_id:'om_image',msg_type:'post',body:{content:JSON.stringify({zh_cn:{title:'',content:[[{tag:'img'}]]}})},create_time:'2026-10-04T00:00:00Z',sender:{id:'ou_self'}},
+        {message_id:'om_malformed',msg_type:'post',body:{content:repaired?JSON.stringify({zh_cn:{title:'',content:[[{tag:'text',text:'recovered'}]]}}):'{broken'},create_time:'2026-10-04T00:00:00Z',sender:{id:'ou_self'}},
+        {message_id:'om_long',msg_type:'text',content:longText,create_time:'2026-10-04T00:00:00Z',sender:{id:'ou_self'}},
+        {message_id:'om_oversized',msg_type:'text',content:oversizedText,create_time:'2026-10-04T00:00:00Z',sender:{id:'ou_self'}},
+        {message_id:'om_invalid_sender',msg_type:'text',content:'skip',create_time:'2026-10-04T00:00:00Z',sender:'invalid'},
+        {message_id:'om_invalid_time',msg_type:'text',content:'skip',create_time:1e30,sender:{id:'ou_self'}},
+      ]:[],has_more:false}));
+      return Promise.resolve('{}');
+    }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}});
+  let connector=make();
+  try{
+    await connector.open();await connector.listChats();await connector.configure(['oc_a'],true,true);
+    await connector.sync();
+    assert.equal(connector.snapshot().history_complete,true);
+    assert.deepEqual(messages.map(message=>message.message_id),['om_good','om_long']);
+    assert.equal(messages[1]!.raw_text,longText);
+    assert.equal(messages[0]!.retention_until,'2026-11-17T00:00:00.000Z');
+    assert.deepEqual(connector.snapshot().unsupported_messages,{missing_body:1,malformed_body:1,body_too_large:1,invalid_identity:1,invalid_time:1});
+    await connector.close();connector=make();await connector.open();
+    assert.deepEqual(connector.snapshot().unsupported_messages,{missing_body:1,malformed_body:1,body_too_large:1,invalid_identity:1,invalid_time:1});
+    now=new Date('2026-10-18T00:02:00Z');await connector.sync();
+    assert.deepEqual(connector.snapshot().unsupported_messages,{missing_body:1,malformed_body:1,body_too_large:1,invalid_identity:1,invalid_time:1});
+    repaired=true;now=new Date('2026-10-18T00:04:00Z');await connector.sync();
+    assert.deepEqual(connector.snapshot().unsupported_messages,{missing_body:1,body_too_large:1,invalid_identity:1,invalid_time:1});
+  }finally{await connector.close();await rm(directory,{recursive:true,force:true});}
+});
+
+test('chat discovery resumes after its page limit and restart before allowing selection', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-chat-pages-'));
+  const statePath=join(directory,'state.json');
+  const tokens:string[]=[];
+  const make=()=>new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath,run: args=>{try{
+    if(args[0]==='--version')return Promise.resolve('1.0.97');
+    if(args[1]==='status')return Promise.resolve(JSON.stringify({appId:'fixture',identities:{user:{openId:'ou_self',status:'authenticated',scopes:FEISHU_SCOPES}}}));
+    if(args[1]==='+chat-list'){
+      const token=args.includes('--page-token')?args[args.indexOf('--page-token')+1]! : '';
+      tokens.push(token);
+      const page=token?Number(token.slice(5)):0;
+      return Promise.resolve(JSON.stringify({chats:[{chat_id:`oc_${page}`}],has_more:page<20,page_token:`page-${page+1}`}));
+    }
+    return Promise.resolve('{}');
+  }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}});
+  let connector=make();
+  try {
+    await connector.open();
+    const partial=await connector.listChats();
+    assert.equal(partial.chat_discovery_complete,false);
+    assert.equal(partial.chats.length,20);
+    await assert.rejects(connector.configure(['oc_0'],true),/完整加载/);
+    await connector.close();connector=make();await connector.open();
+    assert.equal(connector.snapshot().chat_discovery_complete,false);
+    const complete=await connector.listChats();
+    assert.equal(tokens.at(-1),'page-20');
+    assert.equal(complete.chat_discovery_complete,true);
+    assert.equal(complete.chats.length,21);
+    await connector.configure(['oc_20'],true);
+  } finally {await connector.close();await rm(directory,{recursive:true,force:true});}
+});
+
+test('chat discovery retries the failed page after restart', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-chat-retry-'));
+  const statePath=join(directory,'state.json');
+  let failed=false;
+  const tokens:string[]=[];
+  const make=()=>new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath,run: args=>{try{
+    if(args[0]==='--version')return Promise.resolve('1.0.97');
+    if(args[1]==='status')return Promise.resolve(JSON.stringify({appId:'fixture',identities:{user:{openId:'ou_self',status:'authenticated',scopes:FEISHU_SCOPES}}}));
+    if(args[1]==='+chat-list'){
+      const token=args.includes('--page-token')?args[args.indexOf('--page-token')+1]! : '';
+      tokens.push(token);
+      if(token==='next'&&!failed){failed=true;throw Error('temporary page failure');}
+      return Promise.resolve(JSON.stringify({chats:[{chat_id:token?'oc_second':'oc_first'}],has_more:!token,page_token:'next'}));
+    }
+    return Promise.resolve('{}');
+  }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}});
+  let connector=make();
+  try {
+    await connector.open();await assert.rejects(connector.listChats(),/temporary page failure/);
+    assert.equal(connector.snapshot().chat_discovery_complete,false);
+    await connector.close();connector=make();await connector.open();
+    const result=await connector.listChats();
+    assert.deepEqual(tokens,['','next','next']);
+    assert.deepEqual(result.chats.map(chat=>chat.id),['oc_first','oc_second']);
+    assert.equal(result.chat_discovery_complete,true);
+  } finally {await connector.close();await rm(directory,{recursive:true,force:true});}
 });
 
 

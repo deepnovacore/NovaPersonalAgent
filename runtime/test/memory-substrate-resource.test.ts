@@ -433,6 +433,28 @@ for(const method of ['flush','close'] as const)test(`${method} waits for direct 
  }finally{await memory.close();await rm(root,{recursive:true,force:true})}
  })
 
+test('large Feishu evidence is retained and re-fetch extends its retention deadline',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-im-retention-'));
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'));
+ const memory=new SubstrateMemoryResource({client,userId:'retention',gateway:{async *stream(){/* No streaming output is used by this fixture. */},complete:()=>Promise.resolve({text:'{"entries":[]}'})},model:'fixture',personalMemoryEnabled:false});
+ const grant=memory.processingGrant(true);
+ const input={sourceId:'feishu:fixture',locator:'feishu://message/om_long',text:'x'.repeat(100_001),observedAt:'2020-01-01T00:00:00.000Z',kind:'im' as const,processingConsent:grant};
+ const firstUntil=new Date(Date.now()+86400_000).toISOString();
+ const laterUntil=new Date(Date.now()+30*86400_000).toISOString();
+ try{
+  await memory.open();
+  assert.equal(await memory.ingestEvidenceBatch([{...input,retentionUntil:firstUntil}]),true);
+  const rows=await client.memory('pending_evidence',{source_prefix:memory.prefix,provider:grant.extraction_provider,limit:10}) as {id:string;raw_text:string}[];
+  assert.equal(rows.length,1);assert.equal(rows[0]!.raw_text,input.text);
+  assert.equal(await memory.ingestEvidenceBatch([{...input,retentionUntil:laterUntil}]),false);
+  const refreshed=await client.memory('evidence',{id:rows[0]!.id}) as {retention_until:string};
+  assert.equal(refreshed.retention_until,laterUntil);
+  assert.equal(await memory.ingestEvidenceBatch([{...input,retentionUntil:firstUntil}]),false);
+  const protectedRow=await client.memory('evidence',{id:rows[0]!.id}) as {retention_until:string};
+  assert.equal(protectedRow.retention_until,laterUntil);
+ }finally{await memory.close();await rm(root,{recursive:true,force:true});}
+});
+
 
 test('Profile evidence preserves timestamp and author, admits only direct mentions, and redacts before projection',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-profile-attribution-'));const gateway:ModelGateway={async *stream(){/* unused by this read-only fixture */},complete:()=>Promise.resolve({text:'{"entries":[]}'})};const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'attribution',gateway,model:'fixture',personalMemoryEnabled:false});
