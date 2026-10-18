@@ -443,6 +443,8 @@ test('large Feishu evidence is retained and re-fetch extends its retention deadl
  const laterUntil=new Date(Date.now()+30*86400_000).toISOString();
  try{
   await memory.open();
+  await memory.feishuProcessingConsent('apply',[input.sourceId],grant);
+  await memory.feishuProcessingConsent('activate',[input.sourceId],grant);
   assert.equal(await memory.ingestEvidenceBatch([{...input,retentionUntil:firstUntil}]),true);
   const rows=await client.memory('pending_evidence',{source_prefix:memory.prefix,provider:grant.extraction_provider,limit:10}) as {id:string;raw_text:string}[];
   assert.equal(rows.length,1);assert.equal(rows[0]!.raw_text,input.text);

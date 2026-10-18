@@ -121,6 +121,7 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly canReadConversationEvidence?: (id:string,consumer:string)=>Promise<boolean>
   readonly processingStamp?: (ids:string[])=>Promise<string|null>
   readonly processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant
+  readonly feishuProcessingConsent?: (mode:'suspend'|'reconcile'|'apply'|'activate',sources:string[],grant:ProcessingGrant,pending?:boolean)=>Promise<ProcessingGrant>
   readonly setProcessingConsent?: (sourceId:string,grant:ProcessingGrant)=>Promise<void>
   readonly recordEvidence?: (input:{sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}) => Promise<{evidence_id:string}>
   readonly recordEvidenceBatch?: (inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}[]) => Promise<{evidence_id:string}[]>

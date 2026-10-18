@@ -1,3 +1,4 @@
+import {feishuConsentOperation} from './feishu-consent.js'
 import {resolutionContextSchema} from './resolution.js'
 import {syncStatusSchema} from './source-state.js'
 import {z} from 'zod'
@@ -83,6 +84,7 @@ export function sourceOperation(db:LedgerDatabase,operation:string,input:unknown
  }
  if(operation==='source_revision')return sourceRevision(db)
  if(operation==='source_grant'){
+  if(v.action==='feishu_consent')return feishuConsentOperation(db,v,run)
   const q=z.object({source_id:z.string().min(1).max(512),action:z.literal('get').optional(),expected_revision:revisionSchema.optional(),grant:processingGrantSchema.optional()}).strict().parse(v)
   const old=readProcessingGrant(db,q.source_id)
   if(q.action==='get')return old

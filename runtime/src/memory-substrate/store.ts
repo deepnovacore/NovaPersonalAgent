@@ -320,7 +320,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
           AND NOT EXISTS (SELECT 1 FROM memory_extractions x WHERE x.evidence_id=e.id)
           AND NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND
             (o.generation<>json_extract(c.payload_json,'$.fence.generation') OR NOT EXISTS (SELECT 1 FROM json_each(o.payload_json,'$.current_evidence_ids') r WHERE r.value=e.id)))
-          ORDER BY CASE WHEN json_extract(e.payload_json,'$.source_metadata.mention')='direct' THEN 0 ELSE 1 END, json_extract(e.payload_json,'$.observed_at') DESC, e.id LIMIT ?`,prefix,prefix,provider,provider,provider,provider,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
+          ORDER BY CASE WHEN json_extract(e.payload_json,'$.source_metadata.mention')='direct' THEN 0 ELSE 1 END, json_extract(e.payload_json,'$.observed_at') DESC, e.id LIMIT ?`,prefix,prefix,provider,provider,provider,provider,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null&&(!provider||allowsProcessing(db,row.source_id,'extraction',provider)));break
       }
       case 'append_evidence_batch': {
         const q=z.object({items:z.array(EvidenceRecordSchema).min(1).max(256)}).strict().parse(value)

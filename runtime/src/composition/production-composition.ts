@@ -16,7 +16,7 @@ import {scopeApprovalController} from '../personal-agent/approval-scope.js'
 import type {PersonalAgentHost} from '../personal-agent/host.js'
 import {conversationRuntimeFactory} from '../personal-agent/conversation-runtime.js'
 import {join} from 'node:path'
-import {FeishuConnector} from '../connectors/feishu/index.js'
+import {FeishuConnector,type FeishuOptions} from '../connectors/feishu/index.js'
 import {SubstrateMemoryResource} from '../memory-substrate/resource.js'
 import {z} from 'zod'
 import {LocalDirectorySources} from '../personal-agent/sources.js'
@@ -287,7 +287,10 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     statePath: join(host.path + '.feishu', 'state.json'),
     onChange:()=>host.connectionChanged(),
     processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
-    onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
+    get processingConsentTransition():FeishuOptions['processingConsentTransition']{
+      const memory=composition.realtime.personalMemory;
+      return memory?.feishuProcessingConsent?memory.feishuProcessingConsent.bind(memory):undefined;
+    },
     ingestBatch: async (messages, signal) => {
       const memory = composition.realtime.personalMemory
       if (!(memory instanceof SubstrateMemoryResource)) throw Error('请先启用本地记忆')

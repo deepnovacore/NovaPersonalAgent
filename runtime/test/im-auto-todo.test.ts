@@ -17,6 +17,8 @@ test('direct actionable IM becomes one sourced durable Todo without external exe
   await memory.open();await life.open()
   const im={sender_id:'ou_sender',account_id:'account',provider:'feishu',source_url:'https://applink.feishu.cn/client/chat/open?messageId=synthetic',message_id:'om_request',chat_id:'oc_test',recipient_id:'ou_me',mention:'direct' as const,auto_capture:true}
   const input={sourceId:'feishu:account:0:oc_test',locator:'feishu://message/om_request',text:'@我 请提交材料',observedAt:new Date().toISOString(),kind:'im' as const,im,processingConsent:memory.processingGrant(true)}
+  await memory.feishuProcessingConsent('apply',[input.sourceId],input.processingConsent)
+  await memory.feishuProcessingConsent('activate',[input.sourceId],input.processingConsent)
   await memory.ingestEvidence(input);await memory.flush();await life.refresh()
   let todo=life.snapshot().todos[0];assert.ok(todo);assert.equal(todo.title,'提交材料');assert.equal(todo.sources?.[0]?.type,'im');assert.equal(todo.sources?.[0]?.mentioned_me,true);assert.equal(todo.auto_recorded,true);assert.equal(todo.sources?.[0]?.url,im.source_url)
   const entries=(await memory.list()).entries;assert.equal(entries.find(e=>e.kind==='todo')?.origin,'inferred')

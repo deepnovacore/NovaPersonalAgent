@@ -42,6 +42,7 @@ interface Saved {
   backfills?: Record<string, Cursor>;
   unsupportedMessageKeys?: Record<string, UnsupportedReason>;
   processingConsent?: ProcessingGrant;
+  processingConsentPending?: boolean;
   outbound?: boolean;
   outboundIdentity?: {account:string;openId:string;generation:number;valid:boolean};
   outboundReceipts?: Record<string,{proposal:string;nonce:string;message:string;chat:string;generation:number;revision?:string;occurrence?:string;feedback?:string[]}>;
@@ -58,6 +59,7 @@ export interface FeishuOptions {
   bootstrapOnly?: boolean;
   processingGrant?: (consent:boolean,revision:number,scopeRevision:number)=>ProcessingGrant | undefined;
   onProcessingConsent?: (sources:string[],grant:ProcessingGrant)=>Promise<void>;
+  processingConsentTransition?: ((mode:'suspend'|'reconcile'|'apply'|'activate',sources:string[],grant:ProcessingGrant,pending?:boolean)=>Promise<ProcessingGrant>) | undefined;
   ingest?: (message: FeishuMessage) => Promise<void>;
   ingestBatch?: (messages: readonly FeishuMessage[], signal: AbortSignal) => Promise<void>;
   deleteMessage?: (sourceId: string, locator: string) => Promise<void>;
@@ -155,6 +157,7 @@ function readSaved(value: unknown): Saved {
   if(data.outbound!==undefined&&typeof data.outbound!=='boolean')throw Error('Invalid outbound state');
   if(data.outboundIdentity!==undefined){const row=object(data.outboundIdentity);if(!str(row.account)||!str(row.openId)||!Number.isSafeInteger(row.generation)||Number(row.generation)<0||typeof row.valid!=='boolean')throw Error('Invalid outbound identity');}
   for(const value of Object.values(object(data.outboundReceipts ?? {}))){const row=object(value);if(['proposal','nonce','message','chat'].some(key=>!str(row[key]))||!Number.isSafeInteger(row.generation))throw Error('Invalid outbound receipt');}
+  if(data.processingConsentPending!==undefined&&typeof data.processingConsentPending!=='boolean')throw Error('Invalid Feishu consent state');
   if(data.processingConsent!==undefined)processingGrantSchema.parse(data.processingConsent);
   return data as unknown as Saved;
 }
@@ -185,7 +188,7 @@ export class FeishuConnector {
     if (!options.bootstrapOnly && (!(options.ingest || options.ingestBatch) || !options.deleteSource || !options.onAction)) throw new Error('Feishu collection callbacks required');
     this.run = options.run ?? createFeishuRunner(options.executable, options.credentialRoot);
   }
-  snapshot(): FeishuSnapshot { const view = structuredClone(this.view),expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider||JSON.stringify([...(this.saved.processingConsent.conversation_providers??[])].sort())!==JSON.stringify([...(expected?.conversation_providers??[])].sort()); view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; view.all_history=this.saved.allHistory===true; view.chat_discovery_complete=!this.saved.chatDiscovery; view.history_complete=this.saved.selected.every(id=>!this.saved.backfills?.[id]); const counts:Partial<Record<UnsupportedReason,number>>={}; for(const reason of Object.values(this.saved.unsupportedMessageKeys??{}))counts[reason]=(counts[reason]??0)+1; view.unsupported_messages=counts; if (view.app_setup) delete view.app_setup.verification_url; return view; }
+  snapshot(): FeishuSnapshot { const view = structuredClone(this.view),expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=this.saved.processingConsentPending===true||!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider||JSON.stringify([...(this.saved.processingConsent.conversation_providers??[])].sort())!==JSON.stringify([...(expected?.conversation_providers??[])].sort()); view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; view.all_history=this.saved.allHistory===true; view.chat_discovery_complete=!this.saved.chatDiscovery; view.history_complete=this.saved.selected.every(id=>!this.saved.backfills?.[id]); const counts:Partial<Record<UnsupportedReason,number>>={}; for(const reason of Object.values(this.saved.unsupportedMessageKeys??{}))counts[reason]=(counts[reason]??0)+1; view.unsupported_messages=counts; if (view.app_setup) delete view.app_setup.verification_url; return view; }
   private setupSnapshot(): FeishuSnapshot {const view=this.snapshot();if(this.view.app_setup)view.app_setup=structuredClone(this.view.app_setup);return view;}
   private publish(): void {
     if (this.closed) return;
@@ -217,8 +220,11 @@ export class FeishuConnector {
   }
   async open(): Promise<void> {
     this.closed = false;
-    try { this.saved = readSaved(JSON.parse(await readFile(this.options.statePath, 'utf8'))); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Cannot read Feishu state'); }
+    await this.serializeConsent(async()=>{
+      try { this.saved = readSaved(JSON.parse(await readFile(this.options.statePath, 'utf8'))); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Cannot read Feishu state'); }
+      await this.recoverProcessingConsent();
+    });
     if (this.saved.chatDiscovery) this.view.chats=this.saved.chatDiscovery.chats.map(chat=>({...chat,selected:this.saved.selected.includes(chat.id)}));
     try {
       const version = await this.run(['--version']);
@@ -417,16 +423,37 @@ export class FeishuConnector {
     this.view.chats = this.view.chats.map((chat) => ({ ...chat, selected: chatIds.includes(chat.id) }));
     this.view.state = 'ready'; await this.save();
   }
-  async setProcessingConsent(consent:boolean,scopeChanged=false):Promise<void>{
+  private consentTail:Promise<void>=Promise.resolve();
+  private consentSources():string[]{return this.saved.sources.filter(id=>this.saved.selected.some(chat=>id===`feishu:${this.saved.account}:${this.saved.generation}:${chat}`));}
+  private async recoverProcessingConsent():Promise<void>{
+    const transition=this.options.processingConsentTransition;if(!transition)return;
+    const expected=this.saved.processingConsent??{revision:0,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:[]};
+    const grant=await transition('reconcile',this.consentSources(),expected,this.saved.processingConsentPending===true);
+    this.saved.processingConsent=grant;delete this.saved.processingConsentPending;
+    if(!grant.extraction_provider)delete this.saved.consentSince;
+    await this.save();await transition('activate',this.consentSources(),grant);
+  }
+  private serializeConsent(work:()=>Promise<void>):Promise<void>{
+    const run=this.consentTail.then(work);
+    this.consentTail=run.catch(()=>{ /* The caller receives the failure; queued recovery remains available. */ });return run;
+  }
+  setProcessingConsent(consent:boolean,scopeChanged=false):Promise<void>{return this.serializeConsent(()=>this.applyProcessingConsent(consent,scopeChanged));}
+  private async applyProcessingConsent(consent:boolean,scopeChanged:boolean):Promise<void>{
     const prior=this.saved.processingConsent;
-    const grant=this.options.processingGrant?.(consent,(prior?.revision??0)+1,(prior?.scope_revision??0)+Number(scopeChanged));
+    let grant=this.options.processingGrant?.(consent,(prior?.revision??0)+1,(prior?.scope_revision??0)+Number(scopeChanged));
     if(!grant)return;
-    const sources=consent?this.saved.sources.filter(id=>this.saved.selected.some(chat=>id===`feishu:${this.saved.account}:${this.saved.generation}:${chat}`)):this.saved.sources;
-    await this.options.onProcessingConsent?.(sources,grant);
+    const sources=consent?this.consentSources():this.saved.sources,transition=this.options.processingConsentTransition;
+    if(transition){
+      await transition('suspend',sources,grant);
+      this.saved.processingConsentPending=true;await this.save();
+      grant=await transition('apply',consent?sources:[],grant);
+    }else await this.options.onProcessingConsent?.(sources,grant);
     this.saved.processingConsent=grant;
-    // Automatic capture needs live consent and starts at the grant, never at older history.
     if(grant.extraction_provider)this.saved.consentSince=this.now().toISOString();else delete this.saved.consentSince;
-    await this.save();this.publish();
+    delete this.saved.processingConsentPending;
+    try{await this.save();if(transition)await transition('activate',consent?sources:[],grant)}
+    catch(error){if(transition)this.saved.processingConsentPending=true;throw error}
+    this.publish();
   }
   async sync(): Promise<void> {
     if (this.options.bootstrapOnly) throw new Error('Feishu collection unavailable during setup');

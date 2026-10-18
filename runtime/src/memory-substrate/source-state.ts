@@ -15,6 +15,12 @@ export function readProcessingGrant(db:LedgerDatabase,sourceId:string):Processin
 export function allowsProcessing(db:LedgerDatabase,sourceId:string,purpose:'extraction'|'embedding'|'conversation',provider:string):boolean{
  const permitted=(grant:ProcessingGrant|null)=>purpose==='conversation'?(grant?.conversation_providers??[]).includes(provider):grant?.[purpose==='extraction'?'extraction_provider':'embedding_provider']===provider
  const grant=readProcessingGrant(db,sourceId);if(!grant||!permitted(grant))return false
+ const scope=/^(personal:[^:]+:feishu:)/u.exec(sourceId)?.[1]
+ if(scope){
+  const row=db.prepare('SELECT payload_json FROM source_session_consents WHERE scope=?').get(scope)
+  const admitted=row?processingGrantSchema.parse(JSON.parse(String(row.payload_json))):null
+  if(admitted?.revision!==grant.revision||admitted.scope_revision!==grant.scope_revision||!permitted(admitted))return false
+ }
  const object=sourceObjectFor(db,sourceId)
  if(!object)return true
  const c=readConnection(db,object.connection_id),connectionGrant=readProcessingGrant(db,object.connection_id)
@@ -54,6 +60,7 @@ export function connectorSourceId(namespace:string,generation:number,objectKey:s
 
 /** Called by the graph schema migration; also supports isolated in-memory memory tests. */
 export function initializeSourceState(db:LedgerDatabase):void{
+ db.exec('CREATE TEMP TABLE IF NOT EXISTS source_session_consents(scope TEXT PRIMARY KEY,payload_json TEXT NOT NULL) STRICT')
  db.exec(`
  CREATE TABLE IF NOT EXISTS source_connections(id TEXT PRIMARY KEY,payload_json TEXT NOT NULL) STRICT;
  CREATE TABLE IF NOT EXISTS source_objects(connection_id TEXT NOT NULL,generation INTEGER NOT NULL,object_key TEXT NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(connection_id,generation,object_key)) STRICT;

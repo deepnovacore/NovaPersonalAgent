@@ -345,6 +345,11 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async canProcessEvidence(id:string,purpose:'extraction'|'embedding'):Promise<boolean>{return await this.options.client.memory('processing_evidence',{id,purpose,provider:purpose==='extraction'?this.#extractionFingerprint():this.#fingerprint()})!==null}
   async processingStamp(ids:string[]):Promise<string|null>{return await this.options.client.memory('processing_stamp',{ids,purpose:'embedding',provider:this.#fingerprint()}) as string|null}
   processingGrant(consent:boolean,revision=1,scopeRevision=0):ProcessingGrant{return processingGrantSchema.parse({revision,scope_revision:scopeRevision,extraction_provider:consent?this.#extractionFingerprint():null,embedding_provider:consent&&this.options.embedding?this.#fingerprint():null,conversation_providers:consent?[...new Set(this.options.conversationProviders??[])]:[]})}
+  async feishuProcessingConsent(mode:'suspend'|'reconcile'|'apply'|'activate',sources:string[],grant:ProcessingGrant,pending=false):Promise<ProcessingGrant>{
+    const result=processingGrantSchema.parse(await this.options.client.memory('source_grant',{action:'feishu_consent',scope:this.prefix+'feishu:',mode,sources:sources.map(id=>id.startsWith(this.prefix)?id:this.prefix+id),grant,pending}));
+    if(mode==='activate')await this.#refresh();
+    return result
+  }
   async setProcessingConsent(sourceId:string,grant:ProcessingGrant):Promise<void>{await this.#applyProcessingConsent(sourceId,grant)}
   async #applyProcessingConsent(sourceId:string,grant:ProcessingGrant):Promise<boolean>{
     const source_id=sourceId.startsWith(this.prefix)?sourceId:this.prefix+sourceId
