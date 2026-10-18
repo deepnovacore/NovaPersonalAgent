@@ -7,6 +7,7 @@ import 'local_schedules_page.dart';
 import '../agent_core/scheduled_agent_runner.dart';
 import '../agent_core/schedule_wake.dart';
 import '../voice/audio_owner.dart';
+import '../voice/voice_companion.dart';
 import '../voice/phone_voice_session.dart';
 import '../voice/phone_voice_panel.dart';
 import '../voice/voice_delegate.dart';
@@ -275,6 +276,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         agentCore = host;
         phoneVoice = PhoneVoiceSession(
           audio: phoneAudio,
+          companion: audio is ChannelAudio ? NativeVoiceCompanion() : null,
           requestMicrophone: requestMicrophone,
           store: host.store,
         )..addListener(_lifeChanged);

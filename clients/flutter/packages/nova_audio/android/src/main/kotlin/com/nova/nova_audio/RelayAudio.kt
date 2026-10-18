@@ -34,6 +34,7 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
  private var attack=0.0; private var silence=0.0; private var speaking=false
  private var timestamp=AudioTimestamp()
  private var routeReady=false
+ private var ownsRouting=false
  private var focus:AudioFocusRequest?=null
  private var terminalAt:Long?=null
  private val posted=AtomicBoolean(false)
@@ -47,6 +48,7 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
  fun start(capture:Boolean,threshold:Double){
   stop();this.capture=capture;this.threshold=threshold
   try {
+   ownsRouting=true
    manager.mode=if(capture)AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
    val attrs=AudioAttributes.Builder().setUsage(if(capture)AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
    val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT)
@@ -162,10 +164,14 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
   reader?.join(200);reader=null;recorder?.release();recorder=null;aec?.release();aec=null
   try{clearCurrent("playback.stopped");player?.stop()}catch(_:Exception){}
   player?.release();player=null;queue.clear();posted.set(false)
-  manager.unregisterAudioDeviceCallback(routes)
-  if(Build.VERSION.SDK_INT>=26){focus?.let{manager.abandonAudioFocusRequest(it)};focus=null}else{manager.abandonAudioFocus(focusListener)}
-  if(Build.VERSION.SDK_INT>=31)manager.clearCommunicationDevice()
-  manager.mode=AudioManager.MODE_NORMAL;muted=false
+  if(ownsRouting){
+   ownsRouting=false
+   manager.unregisterAudioDeviceCallback(routes)
+   if(Build.VERSION.SDK_INT>=26){focus?.let{manager.abandonAudioFocusRequest(it)};focus=null}else{manager.abandonAudioFocus(focusListener)}
+   if(Build.VERSION.SDK_INT>=31)manager.clearCommunicationDevice()
+   manager.mode=AudioManager.MODE_NORMAL
+  }
+  muted=false
  }
  fun disconnect(){stop();ledger.disconnect()}
  private fun fail(reason:String){if(!live.get())return;disconnect();emit("stopped",mapOf("reason" to reason))}

@@ -17,6 +17,70 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAware,PluginRegistry.RequestPermissionsResultListener,Application.ActivityLifecycleCallbacks {
+ private lateinit var companion:MethodChannel
+ private var backgroundCall=false
+ private var companionStart:MethodChannel.Result?=null
+ private var companionId:String?=null
+ private fun stopCompanion(onStopped:(()->Unit)?=null){
+  backgroundCall=false
+  companionStart?.error("call_stopped","Call stopped before background service was ready",null);companionStart=null
+  val id=companionId
+  if(!VoiceCallService.ownership.owns(id)){onStopped?.invoke();return}
+  VoiceCallService.onReady=null;VoiceCallService.onAction=null
+  val completed={
+   VoiceCallService.ownership.release(id)
+   if(companionId==id)companionId=null
+   onStopped?.invoke()
+   Unit
+  }
+  val service=VoiceCallService.current
+  if(service!=null)service.finish(completed) else {
+   context.stopService(android.content.Intent(context,VoiceCallService::class.java))
+   completed()
+  }
+ }
+ private fun companionCall(call:MethodCall,result:MethodChannel.Result){
+  try {
+   when(call.method){
+    "start"->{
+     val host=activity ?: error("Application is not active")
+     check(host.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
+     check(!backgroundCall && companionStart==null){"Call already started"}
+     val callId=java.util.UUID.randomUUID().toString()
+     check(VoiceCallService.ownership.claim(callId)){"Another engine owns the call"}
+     companionId=callId;companionStart=result;backgroundCall=true
+     VoiceCallService.onReady={companionStart?.success(null);companionStart=null}
+     VoiceCallService.onAction={action->
+      if(action=="end")fail("Call ended")
+      companion.invokeMethod("action",action)
+     }
+     val intent=android.content.Intent(context,VoiceCallService::class.java).setAction(VoiceCallService.START).putExtra("call_id",callId)
+     if(android.os.Build.VERSION.SDK_INT>=26)context.startForegroundService(intent) else context.startService(intent)
+     main.postDelayed({if(companionStart===result){stopCompanion();companion.invokeMethod("action","end")}},4500)
+    }
+    "update"->{check(VoiceCallService.ownership.owns(companionId));VoiceCallService.current?.update(call.argument<Boolean>("muted")==true);result.success(null)}
+    "minimize"->{
+     check(backgroundCall && VoiceCallService.ownership.owns(companionId)){"No active background call"}
+     val host=activity ?: error("Application is not active")
+     if(!android.provider.Settings.canDrawOverlays(context)){
+      host.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,android.net.Uri.parse("package:${context.packageName}")))
+      result.success(false)
+     }else{
+      val shown=VoiceCallService.current?.showOrb()==true
+      if(shown)host.moveTaskToBack(true)
+      result.success(shown)
+     }
+    }
+    "stop"->{stopCompanion{result.success(null)}}
+    else->result.notImplemented()
+   }
+  }catch(e:Exception){
+   if(call.method=="start"){
+    companionStart=null;stopCompanion()
+   }
+   result.error("call_controls_failed",e.message,null)
+  }
+ }
  private lateinit var channel:MethodChannel
  private lateinit var pcm:BasicMessageChannel<ByteBuffer>
  private lateinit var audio:RelayAudio
@@ -33,6 +97,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
  private val requestCode=19743
  override fun onAttachedToEngine(engine:FlutterPlugin.FlutterPluginBinding){
   channel=MethodChannel(engine.binaryMessenger,"nova/audio");channel.setMethodCallHandler(this)
+  companion=MethodChannel(engine.binaryMessenger,"nova/voice_companion");companion.setMethodCallHandler(::companionCall)
   pcm=BasicMessageChannel(engine.binaryMessenger,"nova/audio/pcm",BinaryCodec.INSTANCE)
   context=engine.applicationContext
   audio=RelayAudio(context,::event,::deliver)
@@ -51,7 +116,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
   pcm.send(buffer){main.post{if(generation==id && pending==ticket)pending=null}}
   main.postDelayed({if(generation==id && pending==ticket)fail("Capture handoff stalled")},1100)
  }
- private fun fail(reason:String){aoq?.stop();aoq=null;audio.disconnect();resetHandoff();event("stopped",mapOf("reason" to reason));generation=null}
+ private fun fail(reason:String){aoq?.stop();aoq=null;audio.disconnect();stopCompanion();resetHandoff();event("stopped",mapOf("reason" to reason));generation=null}
  override fun onMethodCall(call:MethodCall,result:MethodChannel.Result){
   try {
    when(call.method){
@@ -107,12 +172,16 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
  override fun onDetachedFromActivityForConfigChanges(){detachActivity()}
  override fun onReattachedToActivityForConfigChanges(value:ActivityPluginBinding){onAttachedToActivity(value)}
  override fun onDetachedFromActivity(){detachActivity()}
- private fun detachActivity(){binding?.removeRequestPermissionsResultListener(this);activity?.application?.unregisterActivityLifecycleCallbacks(this);binding=null;activity=null;permission?.success(false);permission=null;if(audio.running || aoq?.running==true)fail("Activity detached")}
- override fun onDetachedFromEngine(engine:FlutterPlugin.FlutterPluginBinding){detachActivity();audio.disconnect();channel.setMethodCallHandler(null);generation=null;resetHandoff()}
- override fun onActivityStopped(value:Activity){if(value==activity && (audio.running || aoq?.running==true))fail("Application backgrounded")}
+ private fun detachActivity(){if(backgroundCall)fail("Activity detached");binding?.removeRequestPermissionsResultListener(this);activity?.application?.unregisterActivityLifecycleCallbacks(this);binding=null;activity=null;permission?.success(false);permission=null;if(audio.running || aoq?.running==true)fail("Activity detached")}
+ override fun onDetachedFromEngine(engine:FlutterPlugin.FlutterPluginBinding){stopCompanion();companion.setMethodCallHandler(null);detachActivity();audio.disconnect();channel.setMethodCallHandler(null);generation=null;resetHandoff()}
+ override fun onActivityStopped(value:Activity){
+  if(value!=activity)return
+  if(backgroundCall && audio.running)VoiceCallService.current?.showOrb()
+  else if(!backgroundCall && (audio.running || aoq?.running==true))fail("Application backgrounded")
+ }
  override fun onActivityCreated(a:Activity,state:Bundle?){}
  override fun onActivityStarted(a:Activity){}
- override fun onActivityResumed(a:Activity){}
+ override fun onActivityResumed(a:Activity){if(a==activity && VoiceCallService.ownership.owns(companionId))VoiceCallService.current?.hideOrb()}
  override fun onActivityPaused(a:Activity){}
  override fun onActivitySaveInstanceState(a:Activity,state:Bundle){}
  override fun onActivityDestroyed(a:Activity){}

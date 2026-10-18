@@ -5,7 +5,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array><string>com.nova.mobile.schedule.refresh</string></array>
 	<key>UIBackgroundModes</key>
-	<array><string>fetch</string></array>
+	<array><string>fetch</string><string>audio</string></array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Nova reads and updates your calendar for requests you make in the conversation.</string>
 	<key>NSCalendarsUsageDescription</key>
