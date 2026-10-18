@@ -131,10 +131,12 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
   queue.add(Chunk(frame.pcm));player?.play()
  }
  fun terminal(identity:PlaybackIdentity){ledger.terminal(identity);terminalAt=SystemClock.elapsedRealtime();updateRendered()}
+ private var lastProgressMS = 0L
  private fun updateRendered(){
   val id=ledger.current ?: return;val track=player ?: return
   if(track.getTimestamp(timestamp) && timestamp.nanoTime<=System.nanoTime())ledger.rendered(timestamp.framePosition,ledger.ticket)
   if(!started && ledger.renderedSamples>0){started=true;report("playback.started",id)}
+  if(ledger.playedMS-lastProgressMS>=100){lastProgressMS=ledger.playedMS;report("playback.progress",id,ledger.playedMS)}
   if(ledger.finished && queue.isEmpty()){report("playback.done",id,ledger.playedMS);ledger.clear(id);resetPlayer()}
  }
  fun clear(identity:PlaybackIdentity){
@@ -142,7 +144,7 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
   if(ledger.current!=null)clearCurrent("playback.cleared") else {ledger.clear(identity);report("playback.cleared",identity,0)}
  }
  private fun clearCurrent(type:String){updateRendered();val id=ledger.current ?: return;val played=ledger.playedMS;ledger.clear(id);resetPlayer();report(type,id,played)}
- private fun resetPlayer(){player?.pause();player?.flush();queue.clear();started=false;terminalAt=null;timestamp=AudioTimestamp()}
+ private fun resetPlayer(){player?.pause();player?.flush();queue.clear();started=false;lastProgressMS=0L;terminalAt=null;timestamp=AudioTimestamp()}
  private fun report(type:String,id:PlaybackIdentity,played:Long?=null){val event=mutableMapOf<String,Any>("type" to type,"utterance_id" to id.utteranceId,"generation_epoch" to id.epoch,"t_render_ms" to renderMS());if(played!=null)event["played_ms"]=played;control(event)}
  private fun control(value:Map<String,Any>)=emit("control",mapOf("control" to value))
  private fun renderMS()=SystemClock.elapsedRealtimeNanos()/1e6

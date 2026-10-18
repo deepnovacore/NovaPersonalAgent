@@ -30,19 +30,20 @@ class LocalModelSettings(context: Context) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0,12)))
         val value = JSONObject(String(cipher.doFinal(bytes.copyOfRange(12,bytes.size)), Charsets.UTF_8))
-        return ModelConfiguration(value.getString("endpoint"),value.getString("model"),value.getString("key"))
+        return ModelConfiguration(value.getString("endpoint"),value.getString("model"),value.getString("key"),value.optString("protocol","chatCompletions"),value.optLong("expires_at",0))
     }
     @Synchronized fun save(value: JSONObject) {
         val old = read()
         val configuration = ModelConfiguration(value.getString("endpoint").trim(),value.getString("model").trim(),value.optString("key").ifBlank {
             require(old?.endpoint == value.getString("endpoint").trim()) { "key_required_for_new_endpoint" };old!!.key
-        })
-        val payload = JSONObject().put("endpoint",configuration.endpoint).put("model",configuration.model).put("key",configuration.key).toString()
+        },value.optString("protocol","chatCompletions"),value.optLong("expires_at",0))
+        val payload = JSONObject().put("endpoint",configuration.endpoint).put("model",configuration.model).put("key",configuration.key).put("protocol",configuration.protocol).put("expires_at",configuration.expiresAt).toString()
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE,key()) }
         val bytes = cipher.iv + cipher.doFinal(payload.toByteArray(Charsets.UTF_8))
         val stream = file.startWrite()
         try { stream.write(bytes);file.finishWrite(stream) } catch(error: Exception) { file.failWrite(stream);throw error }
     }
+    @Synchronized fun clearChatGpt() { if(read()?.protocol == "chatgptResponses") file.delete() }
     fun status(): JSONObject {
         val value = read()
         return JSONObject().put("configured",value != null)

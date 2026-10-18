@@ -1,0 +1,104 @@
+import 'dart:convert';
+import 'profile_text.dart';
+
+/// Short run-local references keep storage identifiers out of model context.
+class ProfileEvidence {
+  ProfileEvidence(
+    List<Map<String, dynamic>> originals, {
+    DateTime? validThrough,
+  }) {
+    final chats = <String, String>{}, speakers = <String, String>{};
+    String body(Map<String, dynamic> item) => (item['text'] as String)
+        .replaceAll(RegExp(r'!\[[^\]]*\]\([^)]*\)'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final others = <String, int>{};
+    for (final item in originals.where((e) => e['relation'] == 'participant')) {
+      final text = body(item), time = item['created_at'] as int;
+      if (text.length >= 120 &&
+          (others[text] == null || time < others[text]!)) {
+        others[text] = time;
+      }
+    }
+    for (final item in originals) {
+      final prior = others[body(item)];
+      if (item['relation'] == 'self' &&
+          prior != null &&
+          prior <= (item['created_at'] as int)) {
+        continue;
+      }
+      final safeText = profileSafeText(item['text'] as String);
+      if (safeText.replaceAll('[redacted]', '').trim().isEmpty) continue;
+      final expiry = DateTime.fromMillisecondsSinceEpoch(
+        item['created_at'] as int,
+        isUtc: true,
+      ).add(const Duration(days: 30));
+      if (validThrough != null && !expiry.isAfter(validThrough)) {
+        expiringCount++;
+        continue;
+      }
+      if (_expiresAt == null || expiry.isBefore(_expiresAt!)) {
+        _expiresAt = expiry;
+      }
+      final ref = 'e${records.length + 1}';
+      _ids[ref] = item['evidence_id'] as String;
+      records.add({
+        'evidence_id': ref,
+        'chat': chats.putIfAbsent(
+          item['chat_id'] as String,
+          () => 'c${chats.length + 1}',
+        ),
+        'speaker': item['sender_id'] == null
+            ? 'unknown'
+            : speakers.putIfAbsent(
+                item['sender_id'] as String,
+                () => 'p${speakers.length + 1}',
+              ),
+        'relation': item['relation'],
+        'body_authorship': 'unverified',
+        'created_at': DateTime.fromMillisecondsSinceEpoch(
+          item['created_at'] as int,
+          isUtc: true,
+        ).toIso8601String(),
+        'text': safeText,
+      });
+    }
+  }
+  final records = <Map<String, dynamic>>[];
+  int expiringCount = 0;
+  final _ids = <String, String>{};
+  DateTime? _expiresAt;
+  bool expired(DateTime now) =>
+      _expiresAt != null && !now.isBefore(_expiresAt!);
+
+  List<Map<String, dynamic>> page(int offset) {
+    if (offset < 0 || offset > records.length) {
+      throw StateError('invalid_offset');
+    }
+    final result = <Map<String, dynamic>>[];
+    var characters = 0;
+    for (final item in records.skip(offset).take(200)) {
+      final size = jsonEncode(item).length;
+      if (result.isNotEmpty && characters + size > 40000) break;
+      result.add(item);
+      characters += size;
+    }
+    return result;
+  }
+
+  String restoreCitations(String encoded) {
+    final entries = jsonDecode(encoded);
+    if (entries is! List) throw StateError('invalid_projection');
+    for (final entry in entries) {
+      if (entry is! Map || entry['evidence_ids'] is! List) {
+        throw StateError('ungrounded_projection');
+      }
+      entry['evidence_ids'] = (entry['evidence_ids'] as List).map((ref) {
+        final id = _ids[ref];
+        if (id == null) throw StateError('ungrounded_projection');
+        return id;
+      }).toList();
+    }
+    return jsonEncode(entries);
+  }
+}

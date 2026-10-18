@@ -15,6 +15,80 @@ class ObservedPersistence extends MemoryPersistence {
 }
 
 void main() {
+  test(
+    'unpublished profile may retry identical entries but success is cached',
+    () async {
+      var publications = 0;
+      final registry = ToolRegistry(
+        snapshot: emptyLife,
+        hasConflict: () => false,
+        mutate: (_, {required operationId}) async => {},
+        fetch: (_) async => {},
+        publishProfile: (_) async {
+          publications++;
+          return publications == 1
+              ? {'status': 'needs_correction', 'error': 'unread_context'}
+              : {'status': 'completed'};
+        },
+      );
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      final runner = ToolRunner(registry: registry, journal: journal);
+      Future<Map<String, dynamic>> run() => runner.run(
+        turnId: 'profile',
+        callId: 'publish',
+        name: 'profile_publish',
+        arguments: {'entries': '[]'},
+        approve: (_) async => true,
+      );
+      expect((await run())['data']['status'], 'needs_correction');
+      expect((await run())['data']['status'], 'completed');
+      expect((await run())['data']['status'], 'completed');
+      expect(publications, 2);
+    },
+  );
+  test(
+    'source page zero executes while negative offsets and version zero are rejected',
+    () async {
+      var reads = 0;
+      final registry = ToolRegistry(
+        snapshot: emptyLife,
+        hasConflict: () => false,
+        mutate: (_, {required operationId}) async => {},
+        fetch: (_) async => {},
+        readEvidence: (args) async {
+          expect(args['offset'], 0);
+          reads++;
+          return {'evidence': [], 'next_offset': null};
+        },
+      );
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      final result = await ToolRunner(registry: registry, journal: journal).run(
+        turnId: 'read',
+        callId: 'first',
+        name: 'source_read',
+        arguments: {'offset': 0},
+        approve: (_) async => true,
+      );
+      expect(result['status'], 'completed');
+      expect(reads, 1);
+      for (final offset in [-1, 0.5, '0']) {
+        expect(
+          () => registry.resolve('source_read', {'offset': offset}),
+          throwsA(isA<AgentFailure>()),
+        );
+      }
+      expect(
+        () => registry.resolve('life_update', {
+          'kind': 'todo',
+          'id': 'fixture',
+          'expected_version': 0,
+        }),
+        throwsA(isA<AgentFailure>()),
+      );
+    },
+  );
   test('approval binds canonical args, expires and is single use', () {
     var now = DateTime.utc(2026);
     final gate = ApprovalGate(now: () => now);

@@ -24,12 +24,9 @@ Future<Map<String, dynamic>?> requestLocalTask(
   final apps = replies[0] as List;
   final settings = replies[1] as Map;
   final capabilities = replies[2] as Map;
-  final todos =
-      (life?.life['todos'] ?? lifeSnapshot?['todos'] ?? const []) as List;
   final goalController = TextEditingController(text: goal ?? '');
   final acceptanceController = TextEditingController();
   String? package;
-  Map? todo;
   var consent = false;
   try {
     return await showLocalDialog<Map<String, dynamic>>(
@@ -63,28 +60,6 @@ Future<Map<String, dynamic>?> requestLocalTask(
                   decoration: const InputDecoration(labelText: '希望完成什么'),
                   maxLines: 2,
                 ),
-                if (todos.isNotEmpty)
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: '关联待办（可选）'),
-                    items: [
-                      const DropdownMenuItem(value: '', child: Text('不关联')),
-                      for (final row in todos)
-                        if (!['done', 'cancelled'].contains(row['status']))
-                          DropdownMenuItem(
-                            value: row['id'] as String,
-                            child: Text(
-                              row['title'] as String,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                    ],
-                    onChanged: (id) => setDialog(
-                      () => todo =
-                          todos.where((row) => row['id'] == id).firstOrNull
-                              as Map?,
-                    ),
-                  ),
                 TextField(
                   controller: acceptanceController,
                   maxLength: 2000,
@@ -126,11 +101,6 @@ Future<Map<String, dynamic>?> requestLocalTask(
                         'goal': goalController.text.trim(),
                         'acceptance': acceptanceController.text.trim(),
                         'target_package': package,
-                        if (todo != null)
-                          'todo_ref': {
-                            'id': todo!['id'],
-                            'version': todo!['version'],
-                          },
                       });
                     },
               child: const Text('开始任务'),

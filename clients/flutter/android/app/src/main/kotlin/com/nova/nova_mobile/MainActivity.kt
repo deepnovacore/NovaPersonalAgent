@@ -12,6 +12,20 @@ import android.content.pm.ApplicationInfo
 import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
+    private var artifactHost: ArtifactWebHost? = null
+    override fun onResume() {
+        super.onResume()
+        artifactHost?.resume()
+    }
+    override fun onPause() {
+        artifactHost?.pause()
+        super.onPause()
+    }
+    override fun onDestroy() {
+        artifactHost?.dispose()
+        artifactHost = null
+        super.onDestroy()
+    }
     override fun onCreate(savedInstanceState:android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         // The isolated acceptance package stays visible while waiting for consent.
@@ -26,6 +40,9 @@ class MainActivity : FlutterActivity() {
     }
     override fun configureFlutterEngine(flutterEngine:FlutterEngine){
         super.configureFlutterEngine(flutterEngine)
+        NovaScheduleBridge.install(this, flutterEngine)
+        artifactHost?.dispose()
+        artifactHost = ArtifactWebHost(this, flutterEngine.dartExecutor.binaryMessenger)
         if(controller==null)controller=LocalAgentController(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"nova/local_agent/v1").setMethodCallHandler { call,result ->
             try {
@@ -33,6 +50,7 @@ class MainActivity : FlutterActivity() {
                 when(call.method){
                     "capabilities" -> result.success(JSONObject().put("schema_version",1).put("platform","android").put("host_package",packageName).put("android_api",Build.VERSION.SDK_INT).put("accessibility",LocalGuiService.current!=null).put("screenshots",Build.VERSION.SDK_INT>=30).put("model_runtime",true).put("model_configured",controller!!.modelSettings().getBoolean("configured")).toString())
                     "modelSettings" -> result.success(controller!!.modelSettings().toString())
+                    "clearChatGptSettings" -> result.success(controller!!.clearChatGptSettings().toString())
                     "saveModelSettings" -> result.success(controller!!.saveModelSettings(args).toString())
                     "run" -> result.success(controller!!.runModel(args).toString())
                     "approve" -> result.success(JSONObject().put("accepted",controller!!.approve(args.getString("id"),args.getString("proposal_id"),args.getBoolean("allow"))).toString())

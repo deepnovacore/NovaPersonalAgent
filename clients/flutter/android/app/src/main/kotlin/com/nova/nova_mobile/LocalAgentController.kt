@@ -44,6 +44,11 @@ class LocalAgentController(context: Context) {
         return record
     }
     fun modelSettings() = settings.status()
+    @Synchronized fun clearChatGptSettings():JSONObject {
+        active?.let { stop(it.id) }
+        settings.clearChatGpt()
+        return settings.status()
+    }
     @Synchronized fun saveModelSettings(value:JSONObject):JSONObject {
         check(active==null){"stop_task_before_changing_model"}
         settings.save(value)

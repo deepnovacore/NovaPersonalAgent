@@ -30,13 +30,15 @@ final class HttpLifeSync implements LifeSyncTransport {
   Future<dynamic> request(
     String method,
     String path, [
-    Map<String, dynamic>? body,
+    Object? body,
   ]) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
     try {
+      final relative = Uri.parse(path);
       final url = base.replace(
-        path: '${base.path.replaceFirst(RegExp(r'/$'), '')}/hub/v1/$path',
+        path: '${base.path.replaceFirst(RegExp(r'/$'), '')}/hub/v1/${relative.path}',
+        query: relative.hasQuery ? relative.query : null,
       );
       final request = await client
           .openUrl(method, url)

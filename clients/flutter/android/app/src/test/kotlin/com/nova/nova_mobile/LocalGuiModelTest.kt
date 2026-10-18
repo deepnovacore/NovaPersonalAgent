@@ -5,6 +5,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalGuiModelTest {
+    @Test fun responsesPreservesScreenAndExplicitToolContract() {
+        val task = JSONObject().put("goal", "Toggle once").put("acceptance", "Count is 1")
+        val screen = JSONObject().put("image","YWJj").put("package","test.app").put("tree","Counter 0").put("width",100).put("height",200)
+        val body = LocalGuiModel.requestBody("m", task, screen, 0, "responses")
+        assertFalse(body.getBoolean("store"))
+        assertFalse(body.has("messages"))
+        assertEquals("input_image",body.getJSONArray("input").getJSONObject(1).getJSONArray("content").getJSONObject(1).getString("type"))
+        assertEquals("next_step",body.getJSONObject("tool_choice").getString("name"))
+        assertEquals("https://example.com/v1/responses",ModelConfiguration("https://example.com/v1","m","k","responses").requestEndpoint)
+        val response = JSONObject().put("status","completed").put("output",org.json.JSONArray().put(JSONObject().put("type","function_call").put("name","next_step").put("arguments","{\"kind\":\"wait\",\"summary\":\"need input\"}")))
+        LocalGuiModel.parseResponse(response,"responses")
+        response.put("status","incomplete")
+        try { LocalGuiModel.parseResponse(response,"responses"); fail("incomplete accepted") } catch(_: IllegalArgumentException) { }
+    }
+
     @Test fun plainTextCannotBecomeAnExecutableAction() {
         val value = JSONObject("""{"choices":[{"message":{"content":"tap(10,20)"}}]}""")
         try { LocalGuiModel.parseResponse(value); fail("free text was executed") } catch(_: Exception) { }

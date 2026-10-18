@@ -1,36 +1,29 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-/// Colours follow the original SwiftUI client: ink background, grouped cells
-/// one step lighter, mint only for actions and selection.
+/// Quiet surfaces, readable ink and a restrained green accent.
 abstract final class Nova {
-  static const ink = Color(0xff090e14),
-      inkTop = Color(0xff111a20),
-      cell = Color(0xff161c22),
-      cellPressed = Color(0xff1f262d),
-      sheet = Color(0xff1c1c1e),
-      sheetCell = Color(0xff2c2c2e),
-      separator = Color(0x1fffffff),
-      text = Color(0xffeef1f3),
-      secondary = Color(0x99ebebf5),
-      tertiary = Color(0x4debebf5),
-      mint = Color(0xff94ebd9),
-      amber = Color(0xffe9b95f),
-      red = Color(0xffe0605f);
+  static const ink = Color(0xffffffff),
+      inkTop = Color(0xffffffff),
+      cell = Color(0xfff6f7f8),
+      cellPressed = Color(0xffebeeef),
+      sheet = Color(0xfff2f3f5),
+      sheetCell = Color(0xffffffff),
+      separator = Color(0xffe7e9ec),
+      text = Color(0xff202529),
+      secondary = Color(0xff6e767c),
+      tertiary = Color(0xff9ba2a8),
+      mint = Color(0xff237c68),
+      amber = Color(0xff956516),
+      red = Color(0xffbd4545);
 }
 
-const novaBackground = BoxDecoration(
-  gradient: LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment(0, -.2),
-    colors: [Nova.inkTop, Nova.ink],
-  ),
-);
+const novaBackground = BoxDecoration(color: Nova.ink);
 
 ThemeData novaTheme() {
   final scheme = ColorScheme.fromSeed(
     seedColor: Nova.mint,
-    brightness: Brightness.dark,
+    brightness: Brightness.light,
     primary: Nova.mint,
     onPrimary: Nova.ink,
     surface: Nova.ink,
@@ -39,22 +32,22 @@ ThemeData novaTheme() {
   );
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
+    brightness: Brightness.light,
     colorScheme: scheme,
     scaffoldBackgroundColor: Colors.transparent,
     canvasColor: Nova.ink,
     splashFactory: NoSplash.splashFactory,
-    highlightColor: Colors.white.withValues(alpha: .04),
+    highlightColor: Colors.black.withValues(alpha: .03),
     dividerColor: Nova.separator,
-    textTheme: Typography.whiteCupertino.apply(
+    textTheme: Typography.blackCupertino.apply(
       bodyColor: Nova.text,
       displayColor: Nova.text,
     ),
     cupertinoOverrideTheme: const CupertinoThemeData(
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       primaryColor: Nova.mint,
       scaffoldBackgroundColor: Nova.ink,
-      barBackgroundColor: Color(0xe6090e14),
+      barBackgroundColor: Color(0xfaffffff),
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.transparent,
@@ -69,7 +62,7 @@ ThemeData novaTheme() {
       surfaceTintColor: Colors.transparent,
       showDragHandle: false,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
     ),
     snackBarTheme: SnackBarThemeData(
@@ -79,12 +72,12 @@ ThemeData novaTheme() {
       actionTextColor: Nova.mint,
       elevation: 0,
       insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: Nova.sheet,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -99,7 +92,11 @@ ThemeData novaTheme() {
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: Nova.mint,
-        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+        textStyle: const TextStyle(
+          fontFamily: 'CupertinoSystemText',
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -109,7 +106,11 @@ ThemeData novaTheme() {
         disabledBackgroundColor: Nova.mint.withValues(alpha: .18),
         disabledForegroundColor: Nova.mint.withValues(alpha: .4),
         shape: const StadiumBorder(),
-        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        textStyle: const TextStyle(
+          fontFamily: 'CupertinoSystemText',
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     ),
     floatingActionButtonTheme: const FloatingActionButtonThemeData(

@@ -437,35 +437,43 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
         Wrap(
           spacing: 8,
           children: [
-            _button('Edit', () async {
-              final fresh = await widget.store.command('schedules.get', {
-                'id': selected,
-              });
-              await _editor(Map<String, dynamic>.from(fresh));
-            }, icon: Icons.edit_outlined),
-            _button(
-              current['enabled'] == true ? 'Pause schedule' : 'Resume schedule',
-              () async {
-                await _mutation(
-                  current['enabled'] == true ? 'pause' : 'resume',
-                  {'id': selected, 'expected_revision': current['revision']},
-                );
-                await _load(selected!);
-              },
-              icon: current['enabled'] == true ? Icons.pause : Icons.play_arrow,
-            ),
-            _button(
-              'Run now',
-              () async {
-                await _mutation('run_now', {
+            if (current['shared'] != null)
+              const Text('共享规则由主电脑负责；暂停、恢复和交接请在 Hub 管理端操作。首版不支持编辑或手动重跑共享规则。'),
+            if (current['shared'] == null) ...[
+              _button('Edit', () async {
+                final fresh = await widget.store.command('schedules.get', {
                   'id': selected,
-                  'expected_revision': current['revision'],
                 });
-                await _history();
-              },
-              enabled: run == null,
-              icon: Icons.play_circle_outline,
-            ),
+                await _editor(Map<String, dynamic>.from(fresh));
+              }, icon: Icons.edit_outlined),
+              _button(
+                current['enabled'] == true
+                    ? 'Pause schedule'
+                    : 'Resume schedule',
+                () async {
+                  await _mutation(
+                    current['enabled'] == true ? 'pause' : 'resume',
+                    {'id': selected, 'expected_revision': current['revision']},
+                  );
+                  await _load(selected!);
+                },
+                icon: current['enabled'] == true
+                    ? Icons.pause
+                    : Icons.play_arrow,
+              ),
+              _button(
+                'Run now',
+                () async {
+                  await _mutation('run_now', {
+                    'id': selected,
+                    'expected_revision': current['revision'],
+                  });
+                  await _history();
+                },
+                enabled: run == null,
+                icon: Icons.play_circle_outline,
+              ),
+            ],
             if (run?['task_id'] != null)
               _button('View active task', () async {
                 await widget.onOpenTask?.call(run!['task_id']);

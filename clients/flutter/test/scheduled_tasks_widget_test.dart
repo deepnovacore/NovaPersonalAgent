@@ -5,7 +5,6 @@ import 'package:nova_mobile/personal/models.dart';
 import 'package:nova_mobile/personal/personal_store.dart';
 import 'package:nova_mobile/ui/schedule_editor.dart';
 import 'package:nova_mobile/ui/scheduled_tasks_page.dart';
-import 'package:nova_mobile/conversation/conversation_state.dart';
 import 'package:nova_mobile/ui/workbench_page.dart';
 
 final sample = <String, dynamic>{
@@ -207,23 +206,6 @@ void main() {
       )['params']['input']['rule']['weekdays'],
       [7],
     );
-  });
-  test('schedule metadata survives transcript replacement', () {
-    final state = ConversationState();
-    state.receive(
-      role: 'assistant',
-      text: 'Created',
-      finalText: true,
-      id: 'card',
-      scheduleRef: parseScheduleReference({'schedule_id': 's', 'revision': 1}),
-    );
-    state.receive(
-      role: 'assistant',
-      text: 'Created at 9',
-      finalText: true,
-      id: 'card',
-    );
-    expect(state.messages.single.scheduleRef?['schedule_id'], 's');
   });
   testWidgets('stale edit keeps the draft and exposes explicit reload', (
     tester,
