@@ -1,12 +1,14 @@
+import {normalizeUsageReport,parseUsageSnapshot} from '@nova-personal-agent/runtime/usage'
 import {mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync} from 'node:fs'
 import {dirname} from 'node:path'
 import {randomUUID} from 'node:crypto'
 
 export const USAGE_FIELDS = ['inputTokens', 'outputTokens', 'inputTextTokens', 'inputAudioTokens', 'outputTextTokens', 'outputAudioTokens', 'cachedTokens', 'reasoningTokens', 'audioDurationMs', 'characters']
-export const PRICE_DATE = '2026-09-08'
+export {PRICE_DATE,priceUsage} from '@nova-personal-agent/runtime/usage'
+import {PRICE_DATE,priceUsage} from '@nova-personal-agent/runtime/usage'
 export function publicUsageReport(value) {
-  if (!value || !['qwen', 'stepfun', 'ark', 'deepseek', 'volcengine', 'openai', 'gemini'].includes(value.provider)
-    || !['realtime', 'llm', 'asr', 'tts'].includes(value.service) || !['complete', 'missing'].includes(value.status)
+  if (!value || !['qwen', 'stepfun', 'ark', 'deepseek', 'volcengine', 'openai', 'gemini', 'openrouter', 'custom', 'codex', 'acp'].includes(value.provider)
+    || !['realtime', 'llm', 'asr', 'tts', 'embedding', 'agent'].includes(value.service) || !['complete', 'missing'].includes(value.status)
     || typeof value.id !== 'string' || !value.id || value.id.length > 256
     || typeof value.model !== 'string' || !value.model || value.model.length > 256) return null
   const result = {id:value.id, provider:value.provider, service:value.service, model:value.model, status:value.status,
@@ -17,47 +19,10 @@ export function publicUsageReport(value) {
     if (!Number.isSafeInteger(value[field]) || value[field] < 0) return null
     result[field] = value[field]
   }
-  return result
+  return normalizeUsageReport({...value,...result})
 }
 // Official CNY list prices (including Singapore), checked 2026-09-08; no FX conversion.
 // No credits, negotiated discounts or explicit-cache storage charges.
-export function priceUsage(report) {
-  const unknown = {costCny:null, source:null}
-  const {provider, service, model, pricingRegion:region} = report
-  if (report.status !== 'complete' || !['cn-beijing', 'singapore'].includes(region)) return unknown
-  const known = fields => fields.every(field => Number.isSafeInteger(report[field]) && report[field] >= 0)
-  if (provider === 'volcengine' && region === 'cn-beijing') {
-    const source = 'https://docs.volcengine.com/docs/6561/1359370'
-    if (service === 'asr' && model === 'volc.seedasr.sauc.duration' && known(['audioDurationMs'])) return {costCny:report.audioDurationMs/3600000, source}
-    if (service === 'tts' && model === 'seed-tts-2.0' && known(['characters'])) return {costCny:report.characters*3/10000, source}
-  }
-  if (provider === 'ark' && service === 'llm' && region === 'cn-beijing' && model === 'doubao-seed-2-0-pro-260215') {
-    if (!known(['inputTokens','outputTokens']) || report.inputTokens > 256000 || (report.cachedTokens ?? 0) > report.inputTokens) return unknown
-    const tier = report.inputTokens <= 32000 ? [3.2,16,.64] : report.inputTokens <= 128000 ? [4.8,24,.96] : [9.6,48,1.92]
-    const cached = report.cachedTokens ?? 0
-    return {costCny:((report.inputTokens-cached)*tier[0]+report.outputTokens*tier[1]+cached*tier[2])/1e6, source:'https://docs.volcengine.com/docs/82379/1544106'}
-  }
-  if (provider === 'qwen' && service === 'llm' && ['qwen-flash', 'qwen-flash-2025-07-28'].includes(model)) {
-    if (!known(['inputTokens', 'outputTokens']) || report.inputTokens > 1e6 || (report.cachedTokens ?? 0) > report.inputTokens) return unknown
-    const tier = region === 'singapore'
-      ? (report.inputTokens <= 256000 ? [.367,2.936,.073] : [1.835,14.678,.367])
-      : report.inputTokens <= 128000 ? [.15,1.5,.03] : report.inputTokens <= 256000 ? [.6,6,.12] : [1.2,12,.24]
-    const cached = report.cachedTokens ?? 0
-    return {costCny:((report.inputTokens-cached)*tier[0]+report.outputTokens*tier[1]+cached*tier[2])/1e6,
-      source:'https://help.aliyun.com/zh/model-studio/qwen-flash'}
-  }
-  if (provider === 'qwen' && service === 'realtime' && ['qwen-audio-3.0-realtime-plus', 'qwen-audio-3.0-realtime-flash'].includes(model)) {
-    // These models publish no cache rate and list context caching as unsupported. Never invent a discount.
-    if (!known(['inputTextTokens','inputAudioTokens','outputTextTokens','outputAudioTokens']) || (report.cachedTokens ?? 0) > 0) return unknown
-    const plus = model.endsWith('plus')
-    const rates = region === 'singapore' ? (plus ? [5.995,47.963,47.963,179.861] : [3.372,33.724,33.724,112.413]) : (plus ? [5,40,40,150] : [3,30,30,100])
-    const audio = report.outputModality === 'audio' || report.outputAudioTokens > 0
-    return {costCny:(report.inputTextTokens*rates[0]+report.inputAudioTokens*rates[1]+(audio ? report.outputAudioTokens*rates[3] : report.outputTextTokens*rates[2]))/1e6,
-      source:`https://help.aliyun.com/zh/model-studio/qwen-audio-3-0-realtime-${plus ? 'plus' : 'flash'}`}
-  }
-  return unknown
-}
-
 /** Main-process lifetime; backend restarts only change the deduplication namespace. */
 function createUsageAccumulator(initial) {
   const seen = new Set(), rows = new Map((initial?.rows ?? []).map(row => [JSON.stringify([row.provider, row.service, row.model, row.pricingRegion]), {...row}]))
@@ -119,6 +84,7 @@ function readHistory(file) {
 
 export function createFrontendUsage({file, now = () => new Date().toISOString()} = {}) {
   const startedAt = now()
+  let runtimeSnapshot
   let initial, persistenceError = null, unreadable = false
   if (file) {
     try { initial = readHistory(file) }
@@ -142,6 +108,7 @@ export function createFrontendUsage({file, now = () => new Date().toISOString()}
     finally { try { unlinkSync(temporary) } catch {} }
   }
   return {
+    setRuntimeSnapshot(value) {const parsed=parseUsageSnapshot(value);if(!parsed)return false;runtimeSnapshot=parsed;return true},
     add(generation, report) {
       const changed = session.add(generation, report)
       if (!changed) return false
@@ -150,8 +117,30 @@ export function createFrontendUsage({file, now = () => new Date().toISOString()}
       return true
     },
     snapshot() {
+      if(runtimeSnapshot)return {...runtimeSnapshot,persistenceError:runtimeSnapshot.persistenceError??persistenceError,history:mergeRuntimeHistory(runtimeSnapshot.history,{...history.snapshot(),startedAt:historyStartedAt,unavailable:unreadable})}
       return {...session.snapshot(), startedAt, persistenceError,
         history: {...history.snapshot(), startedAt: historyStartedAt, unavailable: unreadable}}
     },
   }
+}
+
+/** Frozen pre-ledger history is included once, never fed back into the runtime ledger. */
+function mergeRuntimeHistory(current,legacy) {
+ const result={...current,rows:current.rows.map(r=>({...r})),features:current.features.map(r=>({...r})),unavailable:legacy.unavailable}
+ if(!legacy.requests)return result
+ const totals=['requests','missingReports','unpricedReports','pricedReports','costCny']
+ for(const key of totals)result[key]=(current[key]??0)+(legacy[key]??0)
+ result.estimatedCostReports=(current.estimatedCostReports??0)+legacy.pricedReports
+ result.startedAt=legacy.startedAt<current.startedAt?legacy.startedAt:current.startedAt
+ result.truncated=current.truncated||legacy.truncated
+ const rows=new Map(result.rows.map(row=>[JSON.stringify([row.provider,row.service,row.model,row.pricingRegion]),row]))
+ const legacyRow={provider:'custom',service:'llm',model:'*',pricingRegion:'unknown',feature:'legacy',source:null,costUsd:0,failedRequests:0,cancelledRequests:0,reportedCostReports:0,estimatedCostReports:legacy.pricedReports,...Object.fromEntries(totals.map(key=>[key,legacy[key]??0]))}
+ for(const row of legacy.rows){
+  const key=JSON.stringify([row.provider,row.service,row.model,row.pricingRegion]),target=rows.get(key)
+  if(target){for(const field of [...totals,...USAGE_FIELDS])if(row[field]!==undefined)target[field]=(target[field]??0)+row[field];target.estimatedCostReports=(target.estimatedCostReports??0)+row.pricedReports}
+  else rows.set(key,{...row,feature:'legacy'})
+  for(const field of USAGE_FIELDS)if(row[field]!==undefined){legacyRow[field]=(legacyRow[field]??0)+row[field];result[field]=(result[field]??0)+row[field]}
+ }
+ result.rows=[...rows.values()];result.features.push(legacyRow)
+ return result
 }
