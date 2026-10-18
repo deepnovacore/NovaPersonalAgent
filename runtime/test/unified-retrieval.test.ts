@@ -1,3 +1,4 @@
+import {currentUsageContext,type UsageContext} from '../src/usage/context.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {UnifiedRetrieval} from '../src/memory/retrieval.js'
@@ -114,4 +115,19 @@ test('model-facing recall and evidence require the actual consumer while local r
  assert.equal((await engine.evidence('e:m1')).state,'ok')
  granted=false
  const revoked=await engine.revalidate(permitted,new AbortController().signal);assert.equal(revoked.entries.length,0);assert.equal(revoked.snippets.length,0)
+})
+
+test('shared retrieval work inherits its caller task without cross-conversation leakage',async()=>{
+ const observed:UsageContext[]=[]
+ const personal=memory([])
+ personal.recall=async()=>{await Promise.resolve();observed.push(currentUsageContext());return {source:'personal',state:'empty',scope:'any',hits:[],degraded:false}}
+ const rawRecall=async()=>{await Promise.resolve();observed.push(currentUsageContext());return []}
+ const engines=['a','b'].map(id=>new UnifiedRetrieval({memory:()=>personal,rawRecall,usageContext:{conversationId:id,taskId:'task-'+id,runId:'run-'+id,trigger:'scheduled'}}))
+ await Promise.all(engines.map(engine=>engine.recall('question')))
+ for(const id of ['a','b']){
+  const calls=observed.filter(value=>value.conversationId===id)
+  assert.equal(calls.length,2)
+  assert(calls.every(value=>value.runId==='run-'+id&&value.taskId==='task-'+id&&value.feature==='recall'))
+ }
+ assert.deepEqual(currentUsageContext(),{})
 })

@@ -465,3 +465,58 @@ test('other people\'s messages reach the profile only when that switch is on, an
   assert.deepEqual(await memory.profileSources(),[],'the switch never widens what the model-processing consent allows')
  }finally{await memory.close();await rm(root,{recursive:true,force:true})}
 })
+
+
+test('bulk memory lookup preserves ordering and fresh revisions with one scan',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-memory-bulk-'))
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
+ const gateway:ModelGateway={async *stream(){/* Extraction uses complete. */},complete:()=>Promise.resolve({text:'{"entries":[]}'})}
+ const resource=new SubstrateMemoryResource({client,userId:'bulk',gateway,model:'fixture',personalMemoryEnabled:false})
+ try{
+  await resource.open()
+  const id=resource.prefix+'fixture',at=new Date().toISOString(),evidence=resource.prefix+'e:fixture'
+  await client.memory('append_evidence',{id:evidence,source_id:resource.prefix+'chat',source_kind:'conversation',locator:'fixture',observed_at:at,recorded_at:at,raw_text:'中文 🚀',hash:'fixture',trust:'trusted_user'})
+  await client.memory('merge',{entry_id:id,expected_revision:0,kind:'preference',origin:'stated',written_by:'merge',evidence_refs:[evidence],content:{text:'中文 🚀'},recorded_at:at})
+  const expected=await resource.get(id),call=client.memory.bind(client);let scans=0
+  const spy=t.mock.method(client,'memory',async(...args:Parameters<typeof client.memory>)=>{if(args[0]==='list')scans++;return call(...args)})
+  assert.deepEqual(await resource.getMany([id,'missing',id]),[expected,null,expected]);assert.equal(scans,1)
+  scans=0;assert.deepEqual(await resource.getMany([]),[]);assert.equal(scans,0)
+  spy.mock.restore()
+  await client.memory('merge',{entry_id:id,expected_revision:1,kind:'preference',origin:'stated',written_by:'merge',evidence_refs:[evidence],content:{text:'Updated'},recorded_at:at})
+  assert.deepEqual(await resource.getMany([id]),[await resource.get(id)])
+  assert.equal((await resource.getMany([id]))[0]?.version,2)
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('deferred memory startup serves authorized snapshots before optional maintenance',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-memory-startup-')),client=new MemoryLedgerClient(join(root,'memory.sqlite'))
+ const memory=new SubstrateMemoryResource({client,userId:'startup',gateway:{async *stream(){/* unused */},complete:()=>Promise.resolve({text:'{"entries":[]}'})},model:'fixture'})
+ const operations:string[]=[],call=client.memory.bind(client)
+ t.mock.method(client,'memory',async(...args:Parameters<typeof client.memory>)=>{operations.push(args[0]);return call(...args)})
+ try{await memory.open({deferBackground:true});await memory.prepareResponseAdaptation('fixture')
+  assert.ok(operations.includes('conversation_snapshot'));assert.ok(!operations.includes('pending_evidence'));assert.ok(!operations.includes('expire'))
+  memory.startBackgroundWork();await memory.close();assert.ok(operations.includes('expire'))
+ }finally{await memory.close();await rm(root,{recursive:true,force:true})}
+})
+
+test('Timeline carries pseudonymous authorship separately from the actor described in a message',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-timeline-attribution-'))
+ const gateway:ModelGateway={async *stream(){},complete:async()=>({text:'{"entries":[]}'})}
+ const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'attribution',gateway,model:'fixture',personalMemoryEnabled:false})
+ try{
+  await memory.open();const at=new Date(Date.now()-1000).toISOString(),grant=memory.processingGrant(true)
+  await memory.ingestEvidenceBatch([
+   {locator:'self',text:'陈雨已经替林舟完成权限配置。',sender_id:'ou_self',sender_name:'许明',sender_type:'user' as const},
+   {locator:'peer',text:'我会在周五把复现结果发给你。',sender_id:'ou_peer',sender_name:'林舟',sender_type:'user' as const},
+   {locator:'bot',text:'文档权限已开通。',sender_id:'bot_opaque',sender_name:'通知助手',sender_type:'app' as const},
+  ].map(({text,locator,...author})=>({sourceId:'im',locator,text,observedAt:at,kind:'im' as const,processingConsent:grant,im:{...author,recipient_id:'ou_self',account_id:'opaque',chat_id:'chat',mention:'none' as const}})))
+  const rows=await memory.timelineEvidence()
+  const own=rows.find(row=>row.relation==='self')!,peer=rows.find(row=>row.author?.name==='林舟')!,bot=rows.find(row=>row.relation==='system')!
+  assert.deepEqual(own.author,{key:'self',name:'许明',kind:'person',is_user:true})
+  assert.equal(peer.author?.is_user,false);assert.equal(peer.author?.kind,'person')
+  assert.equal(bot.author?.kind,'system');assert.equal(bot.author?.is_user,false)
+  assert(!JSON.stringify(rows.map(row=>row.author)).includes('ou_peer'))
+  assert.equal(own.text,'陈雨已经替林舟完成权限配置。','authorship does not rewrite the reported actor')
+ }finally{await memory.close();await rm(root,{recursive:true,force:true})}
+})

@@ -217,3 +217,14 @@ test('recovery refuses an outbox with the same operation ID but a different targ
  assert.equal(repo.pendingOperationId(),operation)
  repo.recover(operation,[first,next]);assert.deepEqual(repo.read().revisions,[first,next])
 })
+
+
+test('reading many Unicode documents uses a bounded number of Git processes',t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root)
+ const entries=Array.from({length:12},(_,i)=>({...first,entry_id:`personal:unicode:${i}`,content:{text:`中文画像 🚀 ${i}\n第二行`}}))
+ repo.open(entries)
+ const calls:string[][]=[],original=Reflect.get(repo,'git') as (...args:unknown[])=>string
+ t.mock.method(repo as unknown as {git:(...args:unknown[])=>string},'git',function(...args:unknown[]){calls.push(args[0] as string[]);return original.apply(repo,args)})
+ assert.deepEqual(repo.read().revisions,[...entries].sort((a,b)=>a.entry_id.localeCompare(b.entry_id)))
+ assert.ok(calls.length<=3,`a scan must not spawn Git per file: ${calls.length} processes`)
+})

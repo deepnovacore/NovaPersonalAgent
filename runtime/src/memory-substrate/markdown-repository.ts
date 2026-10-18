@@ -146,6 +146,7 @@ export class MarkdownRepository {
   const head=this.head()
   const tracked=head?this.git(['ls-tree','-r','--name-only',head,'--','entries']).split('\n').filter(Boolean):[]
   for(const path of tracked)if(!names.includes(path.slice('entries/'.length)))throw failure('CONFLICT')
+  const committedFiles=head?this.committedFiles(head,tracked):new Map<string,string>()
   let bytes=0
   for(const name of names){
    const path=`entries/${name}`
@@ -156,7 +157,7 @@ export class MarkdownRepository {
    if(path!==entryPath(current.entry_id))throw failure('FORMAT')
    if(head){
     if(!tracked.includes(path))throw failure('UNADMITTED_EDIT')
-    const committed=decode(this.git(['show',`${head}:${path}`]))
+    const committed=decode(committedFiles.get(path)!)
     if(canonicalJson(parsed.revisions)!==canonicalJson(committed.revisions))throw failure('HISTORY_EDIT')
    }
    revisions.push(...parsed.revisions);baselines[path]=digest(text)
@@ -321,8 +322,30 @@ export class MarkdownRepository {
   if(paths.length!==journal.files.length)return false
   return journal.files.every(file=>paths.includes(file.path)&&digest(this.git(['show',`${head}:${file.path}`]))===digest(file.after))
  }
+ private committedFiles(head:string,paths:readonly string[]):Map<string,string> {
+  const files=new Map<string,string>()
+  if(!paths.length)return files
+  for(const path of paths)if(!/^entries\/[a-f0-9]{64}\.md$/.test(path))throw failure('UNSAFE_PATH')
+  const output=this.git(['cat-file','--batch'],paths.map(path=>`${head}:${path}\n`).join(''),false,true)
+  let offset=0,bytes=0
+  for(const path of paths){
+   const newline=output.indexOf(10,offset)
+   if(newline<0)throw failure('FORMAT')
+   const header=/^[a-f0-9]{40,64} blob ([0-9]+)$/.exec(output.subarray(offset,newline).toString('ascii'))
+   if(!header)throw failure('FORMAT')
+   const size=Number(header[1]);bytes+=size
+   if(!Number.isSafeInteger(size)||size>MAX_FILE||bytes>MAX_BATCH)throw failure('LIMIT')
+   const start=newline+1,end=start+size
+   if(end>=output.length||output[end]!==10)throw failure('FORMAT')
+   files.set(path,output.subarray(start,end).toString('utf8'));offset=end+1
+  }
+  if(offset!==output.length)throw failure('FORMAT')
+  return files
+ }
  private head():string|null {const value=this.git(['rev-parse','--verify','HEAD'],undefined,true).trim();return /^[a-f0-9]{40,64}$/.test(value)?value:null}
- private git(args:string[],input?:string,optional=false):string {
+ private git(args:string[],input?:string,optional?:boolean):string
+ private git(args:string[],input:string|undefined,optional:boolean,binary:true):Buffer
+ private git(args:string[],input?:string,optional=false,binary=false):string|Buffer {
   const gitDir=join(this.root,'.git')
   if(hasPath(gitDir)){
    this.assertSafe(gitDir,true)
@@ -337,8 +360,8 @@ export class MarkdownRepository {
   const env:NodeJS.ProcessEnv={...process.env}
   for(const key of Object.keys(env))if(key.startsWith('GIT_'))delete env[key]
   Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_AUTHOR_NAME:'Nova',GIT_AUTHOR_EMAIL:'nova@localhost',GIT_COMMITTER_NAME:'Nova',GIT_COMMITTER_EMAIL:'nova@localhost'})
-  try{return execFileSync('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','commit.gpgSign=false','-C',this.root,...args],{input,encoding:'utf8',env,timeout:15_000,maxBuffer:MAX_BATCH,stdio:['pipe','pipe','pipe']})}
-  catch(error){if(optional)return '';throw new Error('MEMORY_MARKDOWN_GIT',{cause:error})}
+  try{const output=execFileSync('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','commit.gpgSign=false','-C',this.root,...args],{input,env,timeout:15_000,maxBuffer:MAX_BATCH,stdio:['pipe','pipe','pipe']});return binary?output:output.toString('utf8')}
+  catch(error){if(optional)return binary?Buffer.alloc(0):'';throw new Error('MEMORY_MARKDOWN_GIT',{cause:error})}
  }
  private ensureRoot():void {
   this.assertAncestors()
