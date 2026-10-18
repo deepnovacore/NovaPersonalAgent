@@ -23,6 +23,7 @@ String? profileRepairReason(Object error) {
     'invalid_profile_time',
     'unread_context',
     'missing_timeline',
+    'partial_profile_todo_unsupported',
   };
   return error is StateError && correctable.contains(error.message)
       ? error.message
@@ -149,6 +150,31 @@ class ProfileRepository {
     if (raw != null) _value = jsonDecode(raw) as Map<String, dynamic>?;
   }
 
+  /// A useful published result must not regress when reusing a smaller checkpoint.
+  /// `value` excludes obsolete source, consent and authority generations.
+  void validatePartialCoverage(Map<String, int>? coverage) {
+    final previous = value;
+    if (previous == null) return;
+    final oldCoverage = previous['coverage'];
+    final oldVerified = oldCoverage is Map
+        ? oldCoverage['validated_observation_records']
+        : null;
+    final oldOriginals = oldCoverage is Map
+        ? oldCoverage['final_original_records']
+        : null;
+    final verified = coverage?['validated_observation_records'];
+    final originals = coverage?['final_original_records'];
+    if (previous['partial'] != true ||
+        oldVerified is! int ||
+        oldOriginals is! int ||
+        verified == null ||
+        originals == null ||
+        verified < oldVerified ||
+        (verified == oldVerified && originals < oldOriginals)) {
+      throw StateError('profile_result_more_complete');
+    }
+  }
+
   Future<Map<String, dynamic>> publish(
     String encoded, {
     required int epoch,
@@ -156,18 +182,25 @@ class ProfileRepository {
     required int consentRevision,
     required String provider,
     int incompleteBatches = 0,
+    bool partial = false,
+    Map<String, int>? coverage,
   }) {
     final result = _tail.then((_) async {
       final generation = authority.publicationGeneration;
       authority.validatePublish(epoch);
       sources.validateProcessing(provider, 'profile', consentRevision);
       if (sources.revision != sourceRevision) throw StateError('stale_inputs');
+      if (partial) validatePartialCoverage(coverage);
       final entries = jsonDecode(encoded);
       final originals = {
         for (final e in sources.readAuthorizedEvidence(provider, 'profile'))
           e['evidence_id']: e,
       };
       validateProfileEntries(entries, originals);
+      if (partial &&
+          (entries as List).any((entry) => entry['kind'] == 'todo_candidate')) {
+        throw StateError('partial_profile_todo_unsupported');
+      }
       final next = {
         'version': 1,
         'space_id': authority.record['space_id'],
@@ -179,6 +212,8 @@ class ProfileRepository {
         'consent_revision': consentRevision,
         'entries': entries,
         'incomplete_batches': incompleteBatches,
+        'partial': partial,
+        if (coverage != null) 'coverage': Map<String, int>.from(coverage),
       };
       await persistence.write(jsonEncode(next));
       try {

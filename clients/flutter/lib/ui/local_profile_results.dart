@@ -71,6 +71,16 @@ class LocalProfileResults extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (value['partial'] == true)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                t(
+                  '部分结果 · 已核对 ${value['coverage']?['validated_observation_records'] ?? 0} / ${value['coverage']?['eligible_records'] ?? 0} 条消息，正文依据 ${value['coverage']?['final_original_records'] ?? 0} 条原文。还有 ${value['coverage']?['unobserved_records'] ?? 0} 条未整理；后续消息可能更新其中状态。',
+                  'Partial results · ${value['coverage']?['validated_observation_records'] ?? 0} / ${value['coverage']?['eligible_records'] ?? 0} messages verified; ${value['coverage']?['final_original_records'] ?? 0} originals used. ${value['coverage']?['unobserved_records'] ?? 0} messages remain; later messages may change these statuses.',
+                ),
+              ),
+            ),
           if ((value['incomplete_batches'] as int? ?? 0) > 0)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),

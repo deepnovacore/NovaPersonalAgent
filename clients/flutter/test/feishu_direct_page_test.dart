@@ -122,6 +122,7 @@ void main() {
       await tester.scrollUntilVisible(find.text('近况与个人信息'), 200);
       expect(find.text('近况与个人信息'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, '生成近况'), findsOneWidget);
+      expect(find.text('先生成已整理部分'), findsOneWidget);
       await tester.scrollUntilVisible(find.text('模型与隐私'), 150);
       expect(find.text('允许模型使用消息'), findsNothing);
       await tester.tap(find.text('模型与隐私'));
@@ -191,6 +192,11 @@ void main() {
       );
       await tester.tap(find.text('继续生成'));
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('本轮整理已到时，已暂停。点击“继续生成”，可在资料和授权不变时接着已保存的进度整理。'),
+        -100,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(
         find.text('本轮整理已到时，已暂停。点击“继续生成”，可在资料和授权不变时接着已保存的进度整理。'),
         findsOneWidget,
@@ -207,6 +213,11 @@ void main() {
       expect(find.text('继续生成').hitTestable(), findsOneWidget);
       await tester.tap(find.text('继续生成'));
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('部分消息已超过保存期限。请重新同步消息，再生成近况。'),
+        -100,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('部分消息已超过保存期限。请重新同步消息，再生成近况。'), findsOneWidget);
       expect(find.textContaining('source_expired'), findsNothing);
       models.failure = null;

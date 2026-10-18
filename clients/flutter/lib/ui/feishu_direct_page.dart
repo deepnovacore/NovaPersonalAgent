@@ -12,6 +12,7 @@ import '../context/profile_agent.dart';
 import '../context/context_sync.dart';
 import '../context/profile_corrections.dart';
 import 'local_profile_results.dart';
+import 'theme.dart';
 import '../personal/life_reducer.dart';
 
 /// Short display copy only; detailed agent diagnostics never become progress UI.
@@ -296,6 +297,14 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
       '本次未能生成完整近况，消息仍保存在手机。',
       'Could not generate complete updates. Messages remain on this phone.',
     ),
+    StateError(message: 'profile_result_more_complete') => t(
+      '已保留先前更完整的结果。可继续生成，补充尚未整理的消息。',
+      'Your more complete results were kept. Resume generation to process the remaining messages.',
+    ),
+    StateError(message: 'profile_no_saved_observations') => t(
+      '没有可复用的已整理内容。请先生成近况；资料、授权或模型变更后，需要重新整理。',
+      'No saved observations are available. Generate updates first; changes to sources, permissions or model require processing again.',
+    ),
     AgentFailure(code: 'profile_not_published') => t(
       '本次没有生成可用内容，消息仍保存在手机。',
       'No usable content was generated. Messages remain on this phone.',
@@ -450,7 +459,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
     }
   }
 
-  Future<void> _organize() async {
+  Future<void> _organize({bool savedObservationsOnly = false}) async {
     if (busy) return;
     setState(() {
       _busy = true;
@@ -459,7 +468,9 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
     });
     try {
       if (!processingAllowed) await _processing();
-      if (processingAllowed) await profile.run();
+      if (processingAllowed) {
+        await profile.run(savedObservationsOnly: savedObservationsOnly);
+      }
     } catch (failure) {
       if (mounted) setState(() => processingError = _message(failure));
     } finally {
@@ -746,6 +757,21 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
               TextButton(
                 onPressed: _showResults,
                 child: Text(t('个人信息', 'Personal info')),
+              ),
+            ],
+            if (widget.authority.canPublish && !profile.busy) ...[
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => _organize(savedObservationsOnly: true),
+                child: Text(t('先生成已整理部分', 'Generate from saved progress')),
+              ),
+              Text(
+                t(
+                  '仅使用已核对的消息生成部分结果，不新增整理；其他消息可稍后继续。',
+                  'Generate partial results from verified messages without processing new ones. Continue the remaining messages later.',
+                ),
+                style: const TextStyle(color: Nova.secondary, fontSize: 12),
               ),
             ],
             ExpansionTile(

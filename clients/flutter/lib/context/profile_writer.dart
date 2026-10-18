@@ -43,6 +43,8 @@ class ProfileWriter {
   final ProfileCompletion complete;
   final void Function(String)? onProgress;
   int incompleteBatches = 0;
+  int deferredBatches = 0;
+  bool get isPartial => validatedObservationRecordCount < sourceRecordCount;
   // A recurring pattern can need several messages; final selection still keeps
   // the complete reference group within the original-message capacity.
   static const maxObservationRefs = 24;
@@ -64,6 +66,8 @@ class ProfileWriter {
     'final_observations': selectedObservationCount,
     'observations_not_in_final': observationCount - selectedObservationCount,
     'incomplete_batches': incompleteBatches,
+    'deferred_batches': deferredBatches,
+    'unobserved_records': sourceRecordCount - validatedObservationRecordCount,
   };
 
   Future<Map<String, dynamic>> _completeFinal(
@@ -82,8 +86,10 @@ class ProfileWriter {
   Future<String> generate(
     List<Map<String, dynamic>> records, {
     String corrections = '',
+    bool savedObservationsOnly = false,
   }) async {
     incompleteBatches = 0;
+    deferredBatches = 0;
     sourceRecordCount = records.length;
     observedRecordCount = validatedObservationRecordCount =
         reusedObservationRecordCount = 0;
@@ -129,6 +135,10 @@ class ProfileWriter {
               onProgress?.call(
                 '已核对 $validatedObservationRecordCount / ${records.length} 条消息；本轮新处理 $observedRecordCount 条，复用 $reusedObservationRecordCount 条。',
               );
+              continue;
+            }
+            if (savedObservationsOnly) {
+              deferredBatches++;
               continue;
             }
             final allowed = messages.map((m) => m['evidence_id']).toSet();
@@ -221,6 +231,9 @@ class ProfileWriter {
     final facts = summaries.expand((e) => e).toList();
     observationCount = facts.length;
     if (facts.isEmpty) {
+      if (savedObservationsOnly) {
+        throw StateError('profile_no_saved_observations');
+      }
       throw observationFailure ?? StateError('insufficient_profile_evidence');
     }
     final selected = selectOriginals(records, facts);
@@ -243,19 +256,23 @@ class ProfileWriter {
       'messages': selected,
       'observations': selectedFacts,
       'explicit_corrections': corrections,
+      if (savedObservationsOnly || isPartial) 'coverage': coverage,
     };
     onProgress?.call(
       '${observedRecordCount + reusedObservationRecordCount} 条合格文本已完成分批观察（本轮 $observedRecordCount 条、复用 $reusedObservationRecordCount 条）；最终撰写选用 $selectedOriginalCount 条完整原文和 $selectedObservationCount 条观察，其余未进入最终上下文（按相关性与容量筛选）。',
     );
+    final partialInstructions = isPartial
+        ? '本次仅基于已核对的部分资料；coverage说明未观察和未选入原文的数量。Timeline写来源时间发生的请求、决定和进展，不把当时计划表述为当前仍未完成，不声称已覆盖全部历史。画像只写现有依据支持的认识，避免把局部样本概括为稳定长期职责。未阅读的后续消息可能更新状态，本轮todos必须为空数组。'
+        : '';
     final draft = await _completeFinal(
       'draft',
-      profileGrounding + _entryInstructions,
+      profileGrounding + _entryInstructions + partialInstructions,
       material,
     );
     onProgress?.call('正在独立核对实际主体、计划与完成状态…');
     final review = await _completeFinal(
       'review',
-      '$profileGrounding独立审查草稿，不重写正文。对照原消息检查具体行为、执行者、名称、角色、状态、引用与时间锚点。检查画像各主题一致，Timeline是否漏掉有依据的重要进展。只有sender=self不够证明本人执行。多条消息支持的有分寸风格判断应保留，不要求逐字原文。不要因谨慎要求删成泛泛工作概况；指出实质问题即可。返回JSON对象 {"review_notes":["必要修正"]}，无实质问题返回空数组。',
+      '$profileGrounding$partialInstructions独立审查草稿，不重写正文。对照原消息检查具体行为、执行者、名称、角色、状态、引用与时间锚点。检查画像各主题一致，Timeline是否漏掉有依据的重要进展。只有sender=self不够证明本人执行。多条消息支持的有分寸风格判断应保留，不要求逐字原文。不要因谨慎要求删成泛泛工作概况；指出实质问题即可。返回JSON对象 {"review_notes":["必要修正"]}，无实质问题返回空数组。',
       {...material, 'draft': draft},
     );
     final notes = review['review_notes'];
@@ -265,11 +282,20 @@ class ProfileWriter {
     onProgress?.call('正在修订结果，保留有依据的主题和细节…');
     var edited = await _completeFinal(
       'edit',
-      '$profileGrounding$_entryInstructions这是修订，不是压缩重写。落实review_notes，保留其余有依据的段落、分工、风格判断和篇幅；不删成一句职业概述，不因引用格式错误而删除整段或全部Timeline。对事实层逐句复核，无法支持的具体行为才省略。',
+      '$profileGrounding$_entryInstructions$partialInstructions这是修订，不是压缩重写。落实review_notes，保留其余有依据的段落、分工、风格判断和篇幅；不删成一句职业概述，不因引用格式错误而删除整段或全部Timeline。对事实层逐句复核，无法支持的具体行为才省略。',
       {...material, 'draft': draft, 'review_notes': notes},
     );
     for (var attempt = 0; ; attempt++) {
       try {
+        if (isPartial) {
+          final entries = _projectionEntries(edited);
+          if (entries is List &&
+              entries.any(
+                (entry) => entry is Map && entry['kind'] == 'todo_candidate',
+              )) {
+            throw StateError('partial_profile_todo_unsupported');
+          }
+        }
         return encodeEntries(
           edited,
           selected,
@@ -283,7 +309,7 @@ class ProfileWriter {
         onProgress?.call('正在修正引用格式，保留完整结果…');
         edited = await _completeFinal(
           'repair',
-          '$profileGrounding$_entryInstructions若提供validation_detail，按path定位出错字段并严格使用allowed_values；最终只填写规定的timeline、profile与todos区域。只修正校验错误，不压缩或删去其余有依据的内容。若画像引用了participant，回看本人self原文支撑该判断；找不到才删除对应句子。',
+          '$profileGrounding$_entryInstructions$partialInstructions若提供validation_detail，按path定位出错字段并严格使用allowed_values；最终只填写规定的timeline、profile与todos区域。只修正校验错误，不压缩或删去其余有依据的内容。若画像引用了participant，回看本人self原文支撑该判断；找不到才删除对应句子。',
           {
             ...material,
             'previous_result': edited,

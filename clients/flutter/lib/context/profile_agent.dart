@@ -46,6 +46,9 @@ String profileRunErrorCode(Object error) {
     'unsupported_model_output',
     'invalid_profile_json',
     'profile_not_published',
+    'profile_no_saved_observations',
+    'profile_result_more_complete',
+    'partial_profile_todo_unsupported',
     'profile_budget_exhausted',
     'profile_budget_model_unsupported',
     'profile_budget_request_unsupported',
@@ -132,7 +135,7 @@ class ProfileAgent {
   bool _cancelled = false;
   static bool _running = false;
   bool get busy => _running;
-  Future<void> run() async {
+  Future<void> run({bool savedObservationsOnly = false}) async {
     if (busy) throw StateError('profile_running');
     _running = true;
     _cancelled = false;
@@ -156,7 +159,7 @@ class ProfileAgent {
         }),
       );
       receiptStarted = true;
-      await _run();
+      await _run(savedObservationsOnly: savedObservationsOnly);
     } catch (error, stack) {
       final failure = _pauseFailure(error);
       final code = profileRunErrorCode(failure);
@@ -203,7 +206,7 @@ class ProfileAgent {
     return error;
   }
 
-  Future<void> _run() async {
+  Future<void> _run({required bool savedObservationsOnly}) async {
     final model = await models.read();
     if (model == null) throw const AgentFailure('model_required');
     if (!connector.ready) throw const AgentFailure('connector_unavailable');
@@ -300,6 +303,13 @@ class ProfileAgent {
       String instructions,
       Map<String, dynamic> input,
     ) async {
+      if (stage == 'draft' && savedObservationsOnly) {
+        final coverage = Map<String, int>.from(input['coverage'] as Map);
+        if (coverage['validated_observation_records']! <
+            coverage['eligible_records']!) {
+          repository.validatePartialCoverage(coverage);
+        }
+      }
       for (var attempt = 0; attempt < 2; attempt++) {
         await validate();
         checkRun();
@@ -411,6 +421,7 @@ class ProfileAgent {
       final entries = await writer.generate(
         evidence.records,
         corrections: correctionContext,
+        savedObservationsOnly: savedObservationsOnly,
       );
       await validate();
       checkRun();
@@ -421,15 +432,19 @@ class ProfileAgent {
         consentRevision: consentRevision,
         provider: provider,
         incompleteBatches: writer.incompleteBatches,
+        partial: writer.isPartial,
+        coverage: writer.coverage,
       );
       await validate();
       if (repository.value == null) {
         throw const AgentFailure('profile_not_published');
       }
-      outcome = 'completed';
-      if (writer.incompleteBatches == 0) await checkpoint?.clear();
+      outcome = writer.isPartial ? 'partial' : 'completed';
+      if (!writer.isPartial && writer.incompleteBatches == 0) {
+        await checkpoint?.clear();
+      }
       _report(
-        '整理完成：缓存中 ${cachedCounts['available'] ?? 0} 条可用文本，${writer.observedRecordCount + writer.reusedObservationRecordCount} 条合格文本完成分批观察（本轮 ${writer.observedRecordCount} 条、复用 ${writer.reusedObservationRecordCount} 条）；最终撰写与审查使用 ${writer.selectedOriginalCount} 条完整原文和 ${writer.selectedObservationCount} 条观察。'
+        '${writer.isPartial ? '已生成部分结果，未整理的消息可继续补充；' : ''}整理完成：缓存中 ${cachedCounts['available'] ?? 0} 条可用文本，${writer.observedRecordCount + writer.reusedObservationRecordCount} 条合格文本完成分批观察（本轮 ${writer.observedRecordCount} 条、复用 ${writer.reusedObservationRecordCount} 条）；最终撰写与审查使用 ${writer.selectedOriginalCount} 条完整原文和 ${writer.selectedObservationCount} 条观察。'
         '未进入最终上下文：${writer.sourceRecordCount - writer.selectedOriginalCount} 条原文、${writer.observationCount - writer.selectedObservationCount} 条观察（按相关性与容量筛选）。'
         '${skippedSources.isEmpty ? '' : '未送入模型：$skippedSources。'}'
         '${excludedEvidence.values.every((n) => n == 0) ? '' : '观察前排除：${evidence.expiringCount} 条即将到期、${evidence.copiedCount} 条重复转贴他人正文、${evidence.emptyOrRedactedCount} 条空白或脱敏后无内容。'}'

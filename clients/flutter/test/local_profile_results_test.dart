@@ -78,8 +78,41 @@ void main() {
           consentRevision: sources.processingRevision,
           provider: 'p',
           incompleteBatches: 1,
+          partial: true,
+          coverage: {
+            'eligible_records': 10,
+            'validated_observation_records': 2,
+            'final_original_records': 1,
+            'unobserved_records': 8,
+          },
         );
         final saved = disk.value;
+        final priorRevision = profile.value!['revision'];
+        await expectLater(
+          profile.publish(
+            jsonEncode(profile.value!['entries']),
+            epoch: authority.epoch,
+            sourceRevision: sources.revision,
+            consentRevision: sources.processingRevision,
+            provider: 'p',
+            partial: true,
+            coverage: {
+              'eligible_records': 10,
+              'validated_observation_records': 1,
+              'final_original_records': 1,
+              'unobserved_records': 9,
+            },
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'code',
+              'profile_result_more_complete',
+            ),
+          ),
+        );
+        expect(disk.value, saved);
+        expect(profile.value!['revision'], priorRevision);
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -97,6 +130,12 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Grounded profile'), findsOneWidget);
         expect(find.textContaining('近况可能不完整'), findsOneWidget);
+        expect(find.textContaining('已核对 2 / 10 条消息'), findsOneWidget);
+        expect(find.textContaining('还有 8 条未整理'), findsOneWidget);
+        final reopened = ProfileRepository(disk, authority, sources);
+        await reopened.open();
+        expect(reopened.value?['partial'], true);
+        expect(reopened.value?['coverage']['final_original_records'], 1);
         expect(disk.value, saved);
         await tester.tap(find.text('Grounded plan'));
         await tester.pumpAndSettle();
