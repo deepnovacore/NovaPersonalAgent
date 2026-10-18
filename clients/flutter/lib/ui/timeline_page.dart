@@ -83,7 +83,7 @@ class TimelinePage extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 22),
             child: Text(
-              t('安排与进展', 'Plans and progress'),
+              t('我的安排', 'My plans'),
               style: const TextStyle(color: Nova.secondary, fontSize: 15),
             ),
           ),
@@ -94,13 +94,13 @@ class TimelinePage extends StatelessWidget {
               padding: const EdgeInsets.only(top: 12, bottom: 10),
               child: Text(
                 switch (group['id']) {
-                  'overdue' => t('已过截止', 'Past due'),
+                  'overdue' => t('已逾期', 'Past due'),
                   'current' => t('今天', 'Today'),
                   'soon' => t('接下来 7 天', 'Next 7 days'),
                   'later' => t('之后', 'Later'),
                   'waiting' => t('等待中', 'Waiting'),
                   'completed' => t('已完成', 'Completed'),
-                  _ => t('尚未安排', 'Unscheduled'),
+                  _ => t('未定日期', 'Unscheduled'),
                 },
                 style: const TextStyle(
                   color: Nova.secondary,
@@ -189,7 +189,7 @@ class TimelinePage extends StatelessWidget {
                                   ),
                                   style: TextStyle(
                                     color: color,
-                                    fontSize: 12,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                     height: 1.6,
                                   ),
@@ -248,10 +248,9 @@ class TimelinePage extends StatelessWidget {
     Map<String, dynamic> row, {
     bool showDate = true,
   }) => Material(
-    color: Nova.cell,
-    borderRadius: BorderRadius.circular(18),
+    color: Nova.ink,
     child: ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      contentPadding: const EdgeInsets.symmetric(vertical: 8),
       leading: Icon(
         row['status'] == 'done'
             ? CupertinoIcons.checkmark_circle_fill
@@ -273,37 +272,42 @@ class TimelinePage extends StatelessWidget {
         context: context,
         useSafeArea: true,
         isScrollControlled: true,
-        builder: (sheet) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                row['title'] as String? ?? '',
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if ((row['note'] as String? ?? '').isNotEmpty)
-                SelectableText(row['note'] as String),
-              if (onDiscuss != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 20),
-                  child: TextButton(
-                    onPressed: () {
-                      Navigator.pop(sheet);
-                      onDiscuss!(
-                        t('一起看看这个安排：', 'Let’s discuss this plan: ') +
-                            (row['title'] as String? ?? ''),
-                      );
-                    },
-                    child: Text(t('在对话中讨论', 'Discuss in chat')),
+        builder: (sheet) => ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheet).height * .85,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  row['title'] as String? ?? '',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-            ],
+                const SizedBox(height: 12),
+                if ((row['note'] as String? ?? '').isNotEmpty)
+                  SelectableText(row['note'] as String),
+                if (onDiscuss != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 20),
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.pop(sheet);
+                        onDiscuss!(
+                          t('一起看看这个安排：', 'Let’s discuss this plan: ') +
+                              (row['title'] as String? ?? ''),
+                        );
+                      },
+                      child: Text(t('在对话中讨论', 'Discuss in chat')),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

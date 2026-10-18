@@ -236,4 +236,48 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+  testWidgets('long plan details scroll to discussion at 320dp and 2x text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = timelineStore([
+      {
+        'id': 'long',
+        'title': '长安排',
+        'note': List.filled(30, '需要保留的详细说明。').join(),
+        'status': 'open',
+      },
+    ]);
+    String? discussed;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: novaTheme(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: TimelinePage(
+            store: store,
+            language: 'zh',
+            onDiscuss: (value) => discussed = value,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('长安排'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('在对话中讨论'));
+    await tester.tap(find.text('在对话中讨论'));
+    await tester.pumpAndSettle();
+    expect(discussed, '一起看看这个安排：长安排');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    store.dispose();
+  });
 }

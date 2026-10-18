@@ -603,9 +603,12 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             MaterialPageRoute(
               builder: (_) => FeishuDirectPage(
                 host: connector,
+                language: language,
                 models: agentCore?.settings ?? ModelSettings(),
                 authority: lifeHost.authority,
                 contextSync: lifeHost.getContextSync,
+                adoptTodo: (input, operation) =>
+                    lifeHost.mutate(input, operationId: operation),
               ),
             ),
           );
@@ -629,6 +632,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           await showLocalModelSettings(
             context,
             agentCore?.settings ?? ModelSettings(),
+            language: language,
           );
           if (mounted) setState(() => _modelRevision++);
         } catch (_) {
@@ -1125,6 +1129,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     host: feishu!,
                                     authority: lifeHost.authority,
                                     kind: 'timeline',
+                                    language: language,
                                     revision: _profileRevision,
                                   ),
                             onDiscuss: (text) => unawaited(_delegate(text)),

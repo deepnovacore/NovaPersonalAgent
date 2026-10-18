@@ -96,20 +96,20 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Grounded profile'), findsOneWidget);
-        expect(find.textContaining('可能有遗漏'), findsOneWidget);
+        expect(find.textContaining('近况可能不完整'), findsOneWidget);
         expect(disk.value, saved);
         await tester.tap(find.text('Grounded plan'));
         await tester.pumpAndSettle();
         expect(find.text('synthetic original plan'), findsOneWidget);
         if (expire) {
-          now = now.add(const Duration(seconds: 3));
-          await tester.pump(const Duration(seconds: 3));
+          now = now.add(const Duration(days: 30, seconds: 3));
+          await tester.pump(const Duration(days: 30, seconds: 3));
         } else {
           await sources.grantProcessing('p', 'profile', false);
         }
         await tester.pumpAndSettle();
         expect(find.text('synthetic original plan'), findsNothing);
-        expect(find.textContaining('当前依据不再可用'), findsOneWidget);
+        expect(find.textContaining('原文已过期，或当前已无权访问'), findsOneWidget);
         await tester.tap(find.text('关闭'));
         await tester.pumpAndSettle();
         expect(find.text('Grounded profile'), findsNothing);

@@ -20,8 +20,10 @@ import 'dart:convert';
 /// Also used by native task settings: one Dart source, projected to the host.
 Future<void> showLocalModelSettings(
   BuildContext context,
-  ModelSettings settings,
-) async {
+  ModelSettings settings, {
+  String language = 'zh',
+}) async {
+  String t(String zh, String en) => language == 'zh' ? zh : en;
   if (await settings.chatGpt.active() != null) {
     if (context.mounted) await showChatGptSettings(context, settings);
     return;
@@ -44,12 +46,17 @@ Future<void> showLocalModelSettings(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          title: const Text('模型服务'),
+          title: Text(t('模型服务', 'Model provider')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('对话和任务所需数据将发给此服务。密钥仅保存在本机，不通过 Hub 同步。'),
+                Text(
+                  t(
+                    '对话和任务所需内容会发送给所选模型服务。API 密钥仅保存在这台设备，不会同步到 Hub。',
+                    'Content needed for conversations and tasks is sent to the selected model provider. Your API key stays on this device and is not synced to Hub.',
+                  ),
+                ),
                 TextButton(
                   onPressed: saving
                       ? null
@@ -60,12 +67,19 @@ Future<void> showLocalModelSettings(
                             if (context.mounted) Navigator.pop(context);
                           }
                         },
-                  child: const Text('Continue with ChatGPT'),
+                  child: Text(t('使用 ChatGPT 登录', 'Continue with ChatGPT')),
+                ),
+                Text(
+                  t('或使用 API', 'Or use an API'),
+                  style: const TextStyle(color: Nova.secondary, fontSize: 13),
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<ModelProtocol>(
                   initialValue: protocol,
-                  decoration: const InputDecoration(labelText: '接口协议'),
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: t('API 协议', 'API protocol'),
+                  ),
                   items: const [
                     DropdownMenuItem(
                       value: ModelProtocol.chatCompletions,
@@ -82,18 +96,27 @@ Future<void> showLocalModelSettings(
                           if (value != null) setState(() => protocol = value);
                         },
                 ),
+                const SizedBox(height: 16),
                 TextField(
                   controller: endpoint,
+                  keyboardType: TextInputType.url,
                   autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Base URL 或完整接口地址',
+                  decoration: InputDecoration(
+                    labelText: t('接口地址', 'API URL'),
+                    helperText: t(
+                      '支持 Base URL 或完整接口地址',
+                      'Base URL or full endpoint URL',
+                    ),
+                    helperMaxLines: 3,
                   ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: model,
                   autocorrect: false,
-                  decoration: const InputDecoration(labelText: '模型'),
+                  decoration: InputDecoration(
+                    labelText: t('模型名称', 'Model name'),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -102,17 +125,31 @@ Future<void> showLocalModelSettings(
                   autocorrect: false,
                   enableSuggestions: false,
                   decoration: InputDecoration(
-                    labelText: current == null ? 'API Key' : '密钥（留空保留）',
+                    labelText: t('API 密钥', 'API key'),
+                    helperText: current == null
+                        ? null
+                        : t(
+                            '不修改接口地址时，留空可保留现有密钥',
+                            'Leave blank to keep your current key if the API URL is unchanged',
+                          ),
+                    helperMaxLines: 3,
                   ),
                 ),
-                if (error != null) Text(error!),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      error!,
+                      style: const TextStyle(color: Nova.red),
+                    ),
+                  ),
               ],
             ),
           ),
           actions: [
             TextButton(
               onPressed: saving ? null : () => Navigator.pop(context),
-              child: const Text('取消'),
+              child: Text(t('取消', 'Cancel')),
             ),
             FilledButton(
               onPressed: saving
@@ -133,15 +170,24 @@ Future<void> showLocalModelSettings(
                       } catch (failure) {
                         if (context.mounted) {
                           setState(() {
-                            error = failure is AgentFailure
-                                ? failure.code
-                                : 'model_settings_failed';
+                            error =
+                                failure is AgentFailure &&
+                                    failure.code ==
+                                        'model_settings_projection_failed'
+                                ? t(
+                                    '设置未能生效，请重试。',
+                                    'Could not apply these settings. Please retry.',
+                                  )
+                                : t(
+                                    '未能保存，请检查接口地址、模型名称和密钥后重试。',
+                                    'Could not save. Check the API URL, model name and key, then retry.',
+                                  );
                             saving = false;
                           });
                         }
                       }
                     },
-              child: const Text('保存'),
+              child: Text(saving ? t('正在保存…', 'Saving…') : t('保存', 'Save')),
             ),
           ],
         ),
@@ -320,7 +366,11 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       return;
     }
     try {
-      await showLocalModelSettings(context, widget.host.settings);
+      await showLocalModelSettings(
+        context,
+        widget.host.settings,
+        language: widget.language,
+      );
       await _readModel();
     } catch (_) {
       if (mounted) {
