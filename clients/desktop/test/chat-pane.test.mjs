@@ -628,3 +628,10 @@ test('an unchanged Feed keeps its open evidence and focus when another message a
  assert.equal(m.view.controller.error,'Send failed; draft kept')
  const error=m.all().find(n=>n.className==='page-error');assert.equal(error.textContent,'Send failed; draft kept');assert.equal(error.parentElement.className,'nova-column')
  })
+
+test('internal source tasks disappear from main chat while user tasks remain',()=>{
+ const m=mount(),task={id:'internal',goal:'Use source__process internal prompt',phase:'waiting',trigger:{schedule_id:'builtin-source-test'},work_ids:[],conversation_id:'schedule:builtin-source-test'}
+ m.view.receive(feedState(1,'chat:main',{feed:[],tasks:[task,{id:'user',goal:'整理我的报告',phase:'completed',conversation_id:'chat:main',work_ids:[]}],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat',title:'主对话'}],messages:[]}}))
+ const cards=m.all().filter(n=>n.className==='task-card');assert.equal(cards.length,1);assert.match(cards[0].textContent,/整理我的报告/)
+ assert.ok(m.all().some(n=>n.textContent==='运行中 · 0 个后台任务'))
+})

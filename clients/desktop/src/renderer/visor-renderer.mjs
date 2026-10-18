@@ -1,3 +1,4 @@
+import {usageCostText} from './frontend-usage.mjs'
 import {t,setLanguage,localizeDocument} from './locale.mjs'
 setLanguage(window.visor.language)
 localizeDocument(document)
@@ -46,7 +47,7 @@ function update(data){
  if(h){text('cpu',percent(h.cpu));text('ram',`${(h.memoryUsed/2**30).toFixed(1)} / ${(h.memoryTotal/2**30).toFixed(0)} GB`);text('disk',percent(h.disk));text('battery',h.battery?percent(h.battery.percent):'—');text('battery-detail',h.battery?(h.battery.charging?t('接通电源'):t('使用电池')):t('无电池或暂不可用'));$('ram-bar').style.width=`${100*h.memoryUsed/h.memoryTotal}%`;$('disk-bar').style.width=`${h.disk??0}%`;text('hardware-status',Date.now()-h.updatedAt<6000?'LIVE · 2s':'DATA DELAYED');if(h.updatedAt!==lastSample){lastSample=h.updatedAt;if(Number.isFinite(h.cpu))history.push(h.cpu);if(history.length>40)history.shift();$('cpu-graph').setAttribute('d',history.map((v,i)=>`${i?'L':'M'} ${i*180/39} ${30-v*.28}`).join(' '))}}
  const usage=ai.usage,rows=usage?.rows??[]
  text('requests',count(usage?.requests));text('input',rows.some(r=>Number.isFinite(r.inputTokens))?count(rows.reduce((s,r)=>s+(r.inputTokens??0),0)):'—');text('output',rows.some(r=>Number.isFinite(r.outputTokens))?count(rows.reduce((s,r)=>s+(r.outputTokens??0),0)):'—')
- text('cost',usage?.pricedReports>0?`¥${usage.costCny.toFixed(3)}`:'—');text('cost-detail',usage?.unpricedReports||usage?.missingReports?t('部分用量未计价 · 已知部分估算'):t('接口报告用量 · 费用估算'))
+ text('cost',usage?.pricedReports>0?usageCostText(usage):'—');text('cost-detail',usage?.unpricedReports||usage?.missingReports?t('部分用量未计价 · 已知部分估算'):t('接口报告用量 · 费用估算'))
  const status=ai.backend!=='connected'?t('未连接'):ai.muted?t('已闭麦'):stateNames[ai.state]??compactOrbLabel(ai.state)
  text('ai-state',status);text('core-state',status);text('microphone',`MIC · ${ai.muted?'MUTED':ai.activated?'ACTIVE':'OFF'}`);text('model',ai.model||t('未选择'));text('clock',new Date().toLocaleTimeString('en-GB',{hour12:false}))
  draw(performance.now());if(preferences.enabled&&preferences.motion&&!raf)raf=requestAnimationFrame(loop)

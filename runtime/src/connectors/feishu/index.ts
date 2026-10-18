@@ -7,6 +7,7 @@ import { createFeishuRunner, FeishuAppNotConfigured, object, parseFeishuJson, ty
 
 export const FEISHU_SCOPES = ['offline_access', 'im:chat:read', 'im:message:readonly', 'im:message.reactions:read'];
 export interface FeishuMessage {
+  sender_type?:'user'|'app';
   processing_consent?: ProcessingGrant;
   message_id?: string; chat_id?: string; recipient_id?: string; sender_name?: string;
   thread_id?: string; parent_id?: string; root_id?: string; upper_message_id?: string;
@@ -69,12 +70,25 @@ function pageItems(data: Record<string, unknown>, alternative: string): unknown[
 }
 function messageText(row: Record<string, unknown>): string | null {
   const kind = row.msg_type ?? row.message_type;
-  if (kind !== 'text' && kind !== 'post') return null;
+  if (kind !== 'text' && kind !== 'post' && kind !== 'interactive') return null;
   // CLI 1.0.69 returns rendered top-level content; raw API records have body.content JSON.
-  if (typeof row.content === 'string') return row.content;
+  if (typeof row.content === 'string' && (kind !== 'interactive' || !row.content.trim().startsWith('{'))) return row.content;
   const raw = row.content ?? object(row.body).content;
   const content = typeof raw === 'string' ? jsonObject(raw) : object(raw);
   if (kind === 'text') return str(content.text);
+  if (kind === 'interactive') {
+    const lines:string[]=[];let visited=0;
+    const walk=(value:unknown,depth=0):void=>{
+      if(depth>12||++visited>1000)return;
+      if(typeof value==='string'){if(value.trim())lines.push(value);return}
+      if(Array.isArray(value)){for(const item of value)walk(item,depth+1);return}
+      if(!value||typeof value!=='object')return;
+      const node=value as Record<string,unknown>;
+      if(['button','action','select_static','input'].includes(str(node.tag)))return;
+      for(const key of ['header','title','text','content','elements','fields','body','columns','column_set'])if(node[key]!==undefined)walk(node[key],depth+1);
+    };
+    walk(content);return lines.join('\n').slice(0,16000)||null;
+  }
   const post = Array.isArray(content.content) ? content : object(content.zh_cn ?? content.en_us ?? Object.values(content)[0]);
   if (!Array.isArray(post.content)) throw new Error('Invalid Feishu post');
   return [str(post.title), ...post.content.map((line: unknown) => {
@@ -374,6 +388,11 @@ export class FeishuConnector {
     await this.setProcessingConsent(false,true);
     const previous = new Set(this.saved.selected), since = this.now().toISOString();
     this.saved.scopeConfigured = true; this.saved.selected = [...new Set(chatIds)]; this.saved.connected = true; this.saved.paused = false;
+    // A newly authorized scope gets a complete two-week window, including previously selected chats.
+    if(chatIds.some(id=>!previous.has(id))){
+      const backfills=this.saved.backfills??={};
+      for(const id of this.saved.selected)backfills[id]??={start:new Date(this.now().getTime()-14*86400_000).toISOString(),end:since,order:'desc'};
+    }
     this.saved.captureFrom = Object.fromEntries(this.saved.selected.map((id) => [id, previous.has(id) ? this.saved.captureFrom?.[id] ?? this.saved.mentionCaptureSince ?? since : since]));
     this.view.chats = this.view.chats.map((chat) => ({ ...chat, selected: chatIds.includes(chat.id) }));
     this.view.state = 'ready'; await this.save();
@@ -425,7 +444,7 @@ export class FeishuConnector {
     let cursor = this.saved.cursors[chat];
     if (!cursor || cursor.end && cursor.order === undefined) {
       // Legacy page tokens keep their ascending order; only new windows are descending.
-      backfills[chat] ??= cursor ?? {start: new Date(this.now().getTime() - 7 * 86400_000).toISOString(), end: this.now().toISOString(), order: 'desc'};
+      backfills[chat] ??= cursor ?? {start: new Date(this.now().getTime() - 14 * 86400_000).toISOString(), end: this.now().toISOString(), order: 'desc'};
       cursor = this.saved.cursors[chat] = {start: new Date(Date.parse(backfills[chat].end!) - 60_000).toISOString(), order: 'desc'};
     }
     cursor.order ??= 'desc';
@@ -466,13 +485,17 @@ export class FeishuConnector {
       const sender = row.sender ? object(row.sender) : {};
       const senderId = str(sender.open_id ?? sender.openId ?? sender.id);
       const senderType = str(sender.sender_type ?? sender.type);
-      if ((senderType && senderType !== 'user') || !senderId.startsWith('ou_')) return undefined;
+      const human=(!senderType||senderType==='user')&&senderId.startsWith('ou_');
+      const app=senderType==='app'&&senderId.length>0&&senderId.length<=512;
+      if(!human&&!app)return undefined;
+      // Our own notification cards must not become fresh observations of the world.
+      if(app&&(senderId===this.view.app_id||Object.values(this.saved.deliveries).some(item=>item.message===id)||Object.values(this.saved.outboundReceipts??{}).some(item=>item.message===id)))return undefined;
       const text = messageText(row);
       if (text === null) { unsupported++; return undefined; }
       if (!text) throw new Error('Missing Feishu message body');
       let mention = structuredMention(row, this.saved.openId!);
       let mentionIds = Array.isArray(row.mentions) ? row.mentions.map(item => str(object(item).id)).filter(id => id.startsWith('ou_')).slice(0,50) : [];
-      if (senderId !== this.saved.openId && mention === 'unknown' && (text.includes('@') || (row.msg_type ?? row.message_type) === 'post')) {
+      if (human && senderId !== this.saved.openId && mention === 'unknown' && (text.includes('@') || (row.msg_type ?? row.message_type) === 'post')) {
         try {
           const raw = await this.originalMessage(id);
           const original = Array.isArray(raw.items) ? raw.items.map(object).find(item => item.message_id === id) : undefined;
@@ -485,7 +508,7 @@ export class FeishuConnector {
       const numeric = Number(rawTime);
       const time = Number.isFinite(numeric) ? numeric < 1e12 ? numeric * 1000 : numeric : Date.parse(str(rawTime));
       if (!Number.isFinite(time) || time <= 0) throw new Error('Invalid Feishu message time');
-      return { ...(this.saved.processingConsent?{processing_consent:this.saved.processingConsent}:{}), id: hash(`${sourceId}:${id}:${hash(text)}`), source_id: sourceId, source_kind: 'im', ...(typeof row.message_app_link==='string'&&row.message_app_link.length<=4096&&row.message_app_link.startsWith('https://')?{source_url:row.message_app_link}:{}), message_id: id, ...Object.fromEntries(['thread_id','parent_id','root_id','upper_message_id'].flatMap(key=>{const value=row[key]??(key==='parent_id'?row.reply_to:undefined);return typeof value==='string'&&value.length>0&&value.length<=256?[[key,value]]:[]})), chat_id: chat, recipient_id: this.saved.openId!, sender_name: str(sender.name ?? row.sender_name ?? (senderId === this.saved.openId ? this.saved.name : '')).slice(0, 120), mention_ids: mentionIds, mention, auto_capture: mention === 'direct' && time >= Math.max(Date.parse(this.saved.captureFrom?.[chat] ?? this.saved.mentionCaptureSince!), Date.parse(this.saved.consentSince ?? '')), locator: `feishu://message/${encodeURIComponent(id)}`, raw_text: text, observed_at: new Date(time).toISOString(), retention_until: new Date(time + 30 * 86400_000).toISOString(), sender_id: senderId, account_id: this.saved.account! };
+      return { sender_type:human?'user':'app', ...(this.saved.processingConsent?{processing_consent:this.saved.processingConsent}:{}), id: hash(`${sourceId}:${id}:${hash(text)}`), source_id: sourceId, source_kind: 'im', ...(typeof row.message_app_link==='string'&&row.message_app_link.length<=4096&&row.message_app_link.startsWith('https://')?{source_url:row.message_app_link}:{}), message_id: id, ...Object.fromEntries(['thread_id','parent_id','root_id','upper_message_id'].flatMap(key=>{const value=row[key]??(key==='parent_id'?row.reply_to:undefined);return typeof value==='string'&&value.length>0&&value.length<=256?[[key,value]]:[]})), chat_id: chat, recipient_id: this.saved.openId!, sender_name: str(sender.name ?? row.sender_name ?? (senderId === this.saved.openId ? this.saved.name : '')).slice(0, 120), mention_ids: mentionIds, mention, auto_capture: human && mention === 'direct' && time >= Math.max(Date.parse(this.saved.captureFrom?.[chat] ?? this.saved.mentionCaptureSince!), Date.parse(this.saved.consentSince ?? '')), locator: `feishu://message/${encodeURIComponent(id)}`, raw_text: text, observed_at: new Date(time).toISOString(), retention_until: new Date(time + 30 * 86400_000).toISOString(), sender_id: senderId, account_id: this.saved.account! };
 
        }));
       const messages:FeishuMessage[]=[];

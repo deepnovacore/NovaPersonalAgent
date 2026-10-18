@@ -1,3 +1,6 @@
+import {ResponsesModelGateway} from '../model/responses-model-gateway.js'
+import {createCompatibleAsrFactory,createCompatibleTtsFactory} from '../realtime/cascaded/openai-compatible-speech.js'
+import type {CompatibleSpeechConfig} from '../config/cascaded-realtime-config.js'
 import {SelfHostedAsrClient} from '../realtime/cascaded/self-hosted-asr.js'
 import {SelfHostedTtsClient} from '../realtime/cascaded/self-hosted-tts.js'
 import type {SelfHostedSpeechConfig} from '../config/cascaded-realtime-config.js'
@@ -179,12 +182,12 @@ export interface CascadedProviderRegistries {
     CascadedEndpointingProviderName,
     (input: AutoEndpointingFactoryInput) => EndpointingFactory
   >>
-  readonly asr: Readonly<{volcengine:(input:VolcengineAsrFactoryInput)=>AsrFactory; gemini:(input:GeminiSpeechFactoryInput)=>AsrFactory; 'self-hosted':(input:{config:SelfHostedSpeechConfig})=>AsrFactory}>
+  readonly asr: Readonly<{'openai-compatible'?:(input:CompatibleSpeechFactoryInput)=>AsrFactory;volcengine:(input:VolcengineAsrFactoryInput)=>AsrFactory; gemini:(input:GeminiSpeechFactoryInput)=>AsrFactory; 'self-hosted':(input:{config:SelfHostedSpeechConfig})=>AsrFactory}>
   readonly llm: Readonly<{
     readonly qwen: (input: QwenLlmFactoryInput) => CascadedLlmFactory
     readonly ark: (input: ArkLlmFactoryInput) => CascadedLlmFactory
   }>
-  readonly tts: Readonly<{volcengine:(input:VolcengineTtsFactoryInput)=>TtsFactory; gemini:(input:GeminiSpeechFactoryInput)=>TtsFactory; 'self-hosted':(input:{config:SelfHostedSpeechConfig})=>TtsFactory}>
+  readonly tts: Readonly<{'openai-compatible'?:(input:CompatibleSpeechFactoryInput)=>TtsFactory;volcengine:(input:VolcengineTtsFactoryInput)=>TtsFactory; gemini:(input:GeminiSpeechFactoryInput)=>TtsFactory; 'self-hosted':(input:{config:SelfHostedSpeechConfig})=>TtsFactory}>
 }
 
 export const cascadedProviderRegistries: CascadedProviderRegistries = Object.freeze({
@@ -205,6 +208,7 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
     },
   }),
   asr: Object.freeze({
+    'openai-compatible':(input:CompatibleSpeechFactoryInput)=>createCompatibleAsrFactory({...input.config,...(input.onUsage?{onUsage:input.onUsage}:{})}),
     'self-hosted':(input:{config:SelfHostedSpeechConfig})=>({openClient:()=>new SelfHostedAsrClient(input.config)}),
     gemini:(input:GeminiSpeechFactoryInput)=>createGeminiAsrFactory({...input.config,...(input.onUsage?{onUsage:input.onUsage}:{})}),
     volcengine: (input: VolcengineAsrFactoryInput) => ({
@@ -234,6 +238,7 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
     }),
   }),
   tts: Object.freeze({
+    'openai-compatible':(input:CompatibleSpeechFactoryInput)=>createCompatibleTtsFactory({...input.config,...(input.onUsage?{onUsage:input.onUsage}:{})}),
     'self-hosted':(input:{config:SelfHostedSpeechConfig})=>({openClient:()=>new SelfHostedTtsClient(input.config)}),
     gemini:(input:GeminiSpeechFactoryInput)=>createGeminiTtsFactory({...input.config,...(input.onUsage?{onUsage:input.onUsage}:{})}),
     volcengine: (input: VolcengineTtsFactoryInput) => ({
@@ -403,11 +408,14 @@ function supportComposition(
     baseUrl: selectedBaseUrl,
     apiKey: llmApiKey,
   })
-  const gateway = new OpenAIModelGateway({
+  const gateway = provider === 'openai-compatible' && connection.source === 'selected_provider' && options.settings.openai_compatible_protocol === 'responses'
+    ? new ResponsesModelGateway({...connection,...(options.onUsage?{onUsage:options.onUsage}:{})})
+    : new OpenAIModelGateway({
+    ...(options.onUsage?{onUsage:options.onUsage}:{}),
     baseUrl: connection.baseUrl,
     apiKey: connection.apiKey,
     allowAnonymous: provider === 'self-hosted' && connection.source === 'selected_provider',
-    redirect: provider === 'self-hosted' && connection.source === 'selected_provider' ? 'error' : 'follow',
+    redirect: ['self-hosted','openai-compatible'].includes(provider) && connection.source === 'selected_provider' ? 'error' : 'follow',
     ...(connection.source !== 'generic' && (provider === 'deepseek'||provider === 'openai'||provider === 'qwen') ? {thinkingControl: provider} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
@@ -465,7 +473,9 @@ const defaultTtsClient: CascadedTtsClientFactory = input => new DoubaoTtsClient(
   idFactory: input.idFactory,
 })
 
-const defaultQwenLlmFactory: QwenCascadedFactory = input => createQwenCascadedLlmFactory({
+const defaultQwenLlmFactory: QwenCascadedFactory = input => input.config.provider==='openai-compatible' && input.config.protocol==='responses'
+  ? createArkCascadedLlmFactory({baseUrl:input.config.baseUrl,apiKey:input.config.apiKey,model:input.config.model,instructions:input.instructions,protocol:'openai-compatible',...(input.onUsage?{onUsage:input.onUsage}:{})})
+  : createQwenCascadedLlmFactory({
   ...(input.onUsage === undefined ? {} : {onUsage: input.onUsage}),
   ...input.config,
   instructions: input.instructions,
@@ -565,6 +575,7 @@ export function buildQwenRealtimeAssembly(
     apiKey: qwen.apiKey,
   })
   const gateway = new OpenAIModelGateway({
+    ...(options.onUsage?{onUsage:options.onUsage}:{}),
     baseUrl: support.baseUrl,
     apiKey: support.apiKey,
     ...(support.source === 'selected_provider' && (options.settings.integrated_provider === 'openai' || options.settings.integrated_provider === 'qwen') ? {thinkingControl: options.settings.integrated_provider} : {}),
@@ -719,10 +730,17 @@ function productionCodingComposition(
   }
 }
 
+interface CompatibleSpeechFactoryInput {readonly config:CompatibleSpeechConfig;readonly onUsage?:UsageReporter}
 interface GeminiSpeechFactoryInput {readonly config:GeminiSpeechConfig;readonly onUsage?:UsageReporter}
-export function selectedAsrFactory(registry:CascadedProviderRegistries,input:Omit<VolcengineAsrFactoryInput,'config'>&{config:VolcengineAsrConfig|GeminiSpeechConfig|SelfHostedSpeechConfig}):AsrFactory {
+export function selectedAsrFactory(registry:CascadedProviderRegistries,input:Omit<VolcengineAsrFactoryInput,'config'>&{config:VolcengineAsrConfig|GeminiSpeechConfig|SelfHostedSpeechConfig|CompatibleSpeechConfig}):AsrFactory {
+  if(input.config.provider==='openai-compatible') {
+    const factory=registry.asr['openai-compatible'];if(!factory)throw new ConfigurationError('CASCADE_ASR_PROVIDER 无效');return factory({...input,config:input.config})
+  }
   return input.config.provider==='self-hosted'?registry.asr['self-hosted']({config:input.config}):input.config.provider==='gemini'?registry.asr.gemini({...input,config:input.config}):registry.asr.volcengine({...input,config:input.config})
 }
-export function selectedTtsFactory(registry:CascadedProviderRegistries,input:Omit<VolcengineTtsFactoryInput,'config'>&{config:VolcengineTtsConfig|GeminiSpeechConfig|SelfHostedSpeechConfig}):TtsFactory {
+export function selectedTtsFactory(registry:CascadedProviderRegistries,input:Omit<VolcengineTtsFactoryInput,'config'>&{config:VolcengineTtsConfig|GeminiSpeechConfig|SelfHostedSpeechConfig|CompatibleSpeechConfig}):TtsFactory {
+  if(input.config.provider==='openai-compatible') {
+    const factory=registry.tts['openai-compatible'];if(!factory)throw new ConfigurationError('CASCADE_TTS_PROVIDER 无效');return factory({...input,config:input.config})
+  }
   return input.config.provider==='self-hosted'?registry.tts['self-hosted']({config:input.config}):input.config.provider==='gemini'?registry.tts.gemini({...input,config:input.config}):registry.tts.volcengine({...input,config:input.config})
 }

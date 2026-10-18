@@ -1,3 +1,6 @@
+import {ChatGptAccounts} from './chatgpt-auth.mjs'
+import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
+import {isEndpointSecret} from '../renderer/compatible-providers.mjs'
 import {createVisor} from './visor.mjs'
 import {parseVoicePreset, exportVoicePreset, MAX_PRESET_BYTES} from '../renderer/voice-preset.mjs'
 import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
@@ -242,6 +245,22 @@ let releaseSmokeChannel = null
 // Settings and debug boards are main-owned IPC surfaces. Neither relays through
 // the orb renderer or shares the realtime voice socket.
 const frontendUsage = createFrontendUsage({file: resolve(app.getPath('userData'), 'frontend-usage.json')})
+let usageRefreshTimer
+let usageRefreshInFlight=false
+let usageRefreshAgain=false
+function refreshRuntimeUsage() {
+ if(usageRefreshInFlight){usageRefreshAgain=true;return}
+ if(usageRefreshTimer)return
+ usageRefreshTimer=setTimeout(async()=>{
+  usageRefreshTimer=undefined
+  const control=backendControl
+  if(!control)return
+  usageRefreshInFlight=true
+  try{const snapshot=await control.request('usage.snapshot',{});if(control===backendControl&&frontendUsage.setRuntimeSnapshot(snapshot))sendToSettings('nova:settings:changed',settingsView())}catch{/* Retain the last known projection while the backend starts or stops. */}
+  finally{usageRefreshInFlight=false;if(usageRefreshAgain){usageRefreshAgain=false;refreshRuntimeUsage()}}
+ },250)
+}
+
 let startup = Object.freeze({stage: 'configuration', code: null})
 // "Connection lost" is only true after a connection existed; a backend that keeps failing to start is still starting.
 let backendEverConnected = false
@@ -349,8 +368,8 @@ function settingsView() {
   const {secretsPresent: effectivePresence, secretSources} = resolveSecretConfiguration(
     {}, process.env, developmentEnv)
   for (const [key, present] of Object.entries(secretsPresent(currentSettings))) {
-    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && currentSettings.secrets?.[key]?.enc === 'cleared') { effectivePresence[key]=false; secretSources[key]='cleared'; continue }
-    if (present && (key === 'composioApiKey' || key.startsWith('selfHosted') || secretSources[key] !== 'dotenv')) {
+    if ((key === 'composioApiKey' || isEndpointSecret(key)) && currentSettings.secrets?.[key]?.enc === 'cleared') { effectivePresence[key]=false; secretSources[key]='cleared'; continue }
+    if (present && (key === 'composioApiKey' || isEndpointSecret(key) || secretSources[key] !== 'dotenv')) {
       effectivePresence[key] = true
       secretSources[key] = 'settings'
     }
@@ -851,7 +870,7 @@ async function applyDesktopSettings(payload, restart = false) {
 
 function visorUsage() {
   const usage = frontendUsage.snapshot()
-  return {requests:usage.requests,costCny:usage.costCny,pricedReports:usage.pricedReports,
+  return {requests:usage.requests,costCny:usage.costCny,costUsd:usage.costUsd,reportedCostReports:usage.reportedCostReports,estimatedCostReports:usage.estimatedCostReports,pricedReports:usage.pricedReports,
     unpricedReports:usage.unpricedReports,missingReports:usage.missingReports,
     rows:usage.rows.map(row=>({inputTokens:row.inputTokens,outputTokens:row.outputTokens}))}
 }
@@ -984,7 +1003,7 @@ function decryptSecretsForSpawn(settings, codec) {
   const present = secretsPresent(settings)
   const decrypted = {}
   for (const key of SECRET_KEYS) {
-    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && settings.secrets?.[key]?.enc === 'cleared') { decrypted[key]=''; continue }
+    if ((key === 'composioApiKey' || isEndpointSecret(key)) && settings.secrets?.[key]?.enc === 'cleared') { decrypted[key]=''; continue }
     if (!present[key]) continue
     const plaintext = readSecret(settings, key, codec)
     if (typeof plaintext !== 'string' || !plaintext) {
@@ -1000,10 +1019,18 @@ function decryptSecretsForSpawn(settings, codec) {
   return resolveSecretConfiguration(decrypted, process.env, developmentEnv).secrets
 }
 
+let chatGptAccounts, chatGptBroker
+const chatGptFile = () => resolve(app.getPath('userData'), 'chatgpt-accounts.enc')
+async function getChatGptAccounts() {
+  chatGptAccounts ??= new ChatGptAccounts({file:chatGptFile(),codec:secretCodec,openBrowser:url=>shell.openExternal(url),onAccountChanged:()=>chatGptBroker?.cancel(),fetcher:(...args)=>net.fetch(...args)})
+  await chatGptAccounts.load()
+  return chatGptAccounts
+}
+
 async function prepareDesktopConfiguration() {
   if (projectNativeHost === undefined) {
     const projectNativeLoad = inspectProjectNativeHostFromResources({
-      resourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
+      resourcesPath: app.isPackaged ? process.resourcesPath : realpathSync(resolve(packageRoot, 'build')),
       platform: process.platform,
       arch: process.arch,
       electronAbi: process.versions.modules,
@@ -1212,7 +1239,7 @@ async function launchBackend(smokeChannel, onExit) {
       }),
       nodeResourcesPath: app.isPackaged
         ? process.resourcesPath
-        : resolve(packageRoot, 'build'),
+        : realpathSync(resolve(packageRoot, 'build')),
       workspace,
       token,
       readyEndpoint: await listener.endpoint,
@@ -1223,6 +1250,14 @@ async function launchBackend(smokeChannel, onExit) {
       resolvedConfig: desktopConfig,
       searchProxyUrl,
     })
+    if (!acceptance && existsSync(chatGptFile())) {
+      const accounts = await getChatGptAccounts()
+      const view = accounts.view()
+      if (view.useModels || view.useCodex) {
+        chatGptBroker ??= await createChatGptBroker({accounts,fetcher:(...args)=>net.fetch(...args)})
+        applyChatGptEnvironment(spec.env,view,chatGptBroker)
+      }
+    }
     if (codingUnavailable) spec.env.CODING_MODULE_ENABLED = 'false'
     const blocking = describeMissingBlockingEnvironment(spec.env, true)
     if (blocking && blocking.missing.length > 0) {
@@ -1242,11 +1277,12 @@ async function launchBackend(smokeChannel, onExit) {
     const acceptanceProof=acceptance?waitForAcceptanceRuntimeGate(spawnedBackend,{buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(spec.entry)}):Promise.resolve()
     backend = spawnedBackend
     backendControl?.close()
-    backendControl = createBackendControl(spawnedBackend, {onUsage: report => {
+    backendControl = createBackendControl(spawnedBackend, {onUsage: () => {
       if (backend !== spawnedBackend || launchGeneration !== generation) return
-      if (frontendUsage.add(generation, report) && settingsWindow) sendToSettings('nova:settings:changed', settingsView())
+      refreshRuntimeUsage()
     }, onStatus: status => {
       if (backend !== spawnedBackend || launchGeneration !== generation) return
+      refreshRuntimeUsage()
       diagnostic.pushCapabilityStatus(status)
       runtimeCapabilities = {...status, generation, diskGeneration, state: backendStatus.state === 'connected' ? 'running' : status.state}
       sendToSettings('nova:settings:changed', settingsView())
@@ -1750,6 +1786,24 @@ async function startSelectedCamera(camera, smokeChannel) {
     pendingSettingsCategory = null
     return settingsFocusView(category)
   })
+  ipcMain.handle('nova:chatgpt:action', async (event, action, value) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents) throw Error('ChatGPT request rejected')
+    const accounts = await getChatGptAccounts()
+    if (action === 'status') return accounts.view()
+    if (action === 'login') return accounts.login(typeof value === 'string' ? value : null)
+    if (action === 'cancel') { accounts.cancel(); return accounts.view() }
+    if (action === 'models') return accounts.models()
+    if (action === 'usage') { await shell.openExternal('https://chatgpt.com/settings/usage'); return accounts.view() }
+    if (action === 'logout') {chatGptBroker?.cancel();return accounts.logout()}
+    if (action === 'configure') {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k=>!['active','useModels','useCodex','model'].includes(k))) throw Error('ChatGPT configuration rejected')
+      chatGptBroker?.cancel()
+      const result = await accounts.configure(value)
+      const recovery = await managedWorkspaceBackendRecovery.restart()
+      return {...result,restartRequired:recovery.status !== 'restarted'}
+    }
+    throw Error('ChatGPT action rejected')
+  })
   ipcMain.handle('nova:codex:rescan', async event => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
       throw new Error('Codex rescan rejected')
@@ -1805,7 +1859,7 @@ async function startSelectedCamera(camera, smokeChannel) {
         credentialFailure = null
         try {
           if (!configurationReady) {
-            await paintStartup('configuration')
+      await paintStartup('configuration')
             await refreshDesktopConfiguration()
           }
           return await managedWorkspaceBackendRecovery.retry()
@@ -2358,6 +2412,8 @@ app.on('will-quit', () => sourceSmokeStage('will_quit'))
 app.on('quit', () => sourceSmokeStage('quit'))
 
 app.on('before-quit', event => {
+  chatGptAccounts?.cancel()
+  chatGptBroker?.close()
   sourceSmokeStage('before_quit')
   if (quitDrained) return
   app.isQuitting = true

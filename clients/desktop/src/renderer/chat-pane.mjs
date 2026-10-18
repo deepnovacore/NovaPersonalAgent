@@ -1,4 +1,4 @@
-import {TASK_PHASE_LABEL,taskNextStep} from './tasks-page.mjs'
+import {TASK_PHASE_LABEL,taskNextStep,isSourceProcessingTask} from './tasks-page.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {disposeSources} from './source-popover.mjs'
 import {renderFeedCard,sendPresented} from './feed-card.mjs'
@@ -97,7 +97,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(failed){recovery.append(el('summary',t('未发送的卡片请求')),el('p',failed.text));const restore=button(t('放入空草稿'),()=>{c.draft=failed.text;c.state().references=failed.references??[];c.state().failed_card=null;update();draft.focus()},recovery);restore.disabled=Boolean(c.draft.trim()||c.submittedRequestId||c.isVoiceConversation);button(t('关闭'),()=>{c.state().failed_card=null;renderSource()},recovery)}
   referenceChips.replaceChildren()
   for(const ref of c.state().references??[]){
-   const list=ref.kind==='todo'?c.snapshot?.life?.todos:ref.kind==='goal'?c.snapshot?.life?.goals:ref.kind==='feed'?c.snapshot?.feed:[...(c.snapshot?.news?.items??[]),...(c.snapshot?.news?.saved??[])]
+   const list=ref.kind==='todo'?c.snapshot?.life?.todos:ref.kind==='goal'?c.snapshot?.life?.goals:ref.kind==='feed'?c.snapshot?.feed:ref.kind==='timeline'?c.snapshot?.timeline?.cards:[...(c.snapshot?.news?.items??[]),...(c.snapshot?.news?.saved??[])]
    const title=list?.find(item=>item.id===ref.id)?.title??ref.id
    const chip=button(t('引用 · {0} ×',title),()=>{c.state().references=c.state().references.filter(item=>item!==ref);renderSource()},referenceChips);chip.className='reference-chip';chip.setAttribute('aria-label',t('移除引用：{0}',title))
   }
@@ -212,7 +212,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  }
  function update(){
   renderSource()
-  const tasks=(c.snapshot?.tasks??[]).filter(t=>c.selectedId==='chat:main'||t.conversation_id===c.selectedId)
+  const tasks=(c.snapshot?.tasks??[]).filter(t=>!isSourceProcessingTask(t)&&(c.selectedId==='chat:main'||t.conversation_id===c.selectedId))
   for(const [id,node]of cardNodes)if(!tasks.some(t=>t.id===id)){node.remove?.();cardNodes.delete(id)}
   for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}const criteria=task.acceptance??[];node.title=[task.goal,...(criteria.length?[t('验收条件'),...criteria.map(item=>'• '+item)]:[])].join('\n');node.textContent=`${task.goal.length>60?task.goal.slice(0,59)+'…':task.goal} · ${t(TASK_PHASE_LABEL[task.phase]??task.phase)} · ${taskNextStep(task)}${criteria.length?' · '+t('验收 {0} 条',criteria.length):''}`}
   if(draft.value!==c.draft)draft.value=c.draft

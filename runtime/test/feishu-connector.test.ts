@@ -59,7 +59,7 @@ test('capped history resumes after restart while another chat and new messages k
       if(args[1]==='+chat-list')return JSON.stringify({chats:[{chat_id:'oc_a'},{chat_id:'oc_b'}],has_more:false});
       if(args[1]==='+chat-messages-list'){
         const chat=args[args.indexOf('--chat-id')+1]!;fetched.push(chat);windows.push({chat,start:args[args.indexOf('--start')+1]!,end:args[args.indexOf('--end')+1]!});
-        if(chat==='oc_a'&&args[args.indexOf('--start')+1]==='2026-10-04T00:00:00.000Z'){
+        if(chat==='oc_a'&&args[args.indexOf('--start')+1]==='2026-09-27T00:00:00.000Z'){
           historyPages++;if(historyPages===21)assert.equal(args[args.indexOf('--page-token')+1],'history-20');
           return JSON.stringify({messages:[],has_more:historyPages<21,page_token:'history-'+historyPages});
         }
@@ -217,7 +217,7 @@ test('selected chat ingestion, pagination, delete generations, private bot and d
         const message = second
           ? { message_id: 'om_2', msg_type: 'post', body: { content: '{"zh_cn":{"title":"评审","content":[[{"tag":"text","text":"周五前回复"}]]}}' }, create_time: '1789200000000', sender: { id: account, sender_type: 'user' } }
           : { message_id: 'om_1', reply_to:'om_parent',thread_id:'omt_fixture',root_id:'om_root',upper_message_id:'om_container', msg_type: 'text', content: '周五前把评审意见发我', create_time: '2026-09-12T08:00:00Z', sender: { open_id: 'ou_other', sender_type: 'user' } };
-        return JSON.stringify({ data: { messages: [message, { message_id: 'om_bot', msg_type: 'text', content: 'Nova 已完成工作', create_time: '1789200000000', sender: { id: 'cli_fixture', sender_type: 'app' } }], has_more: !second, ...(second ? {} : { page_token: 'next' }) } });
+        return JSON.stringify({ data: { messages: [message, ...(second?[{message_id:'om_alert',msg_type:'interactive',body:{content:JSON.stringify({header:{title:{tag:'plain_text',content:'Synthetic approval'}},elements:[{tag:'div',text:{tag:'lark_md',content:'Four requests still pending'}},{tag:'action',actions:[{tag:'button',text:{content:'EXECUTE'},value:{instruction:'SECRET_CALLBACK'}}]}]})},create_time:'1789200000000',sender:{id:'cli_monitor',sender_type:'app'},mentions:[{id:'ou_fixture'}]}]:[]), { message_id: 'om_bot', msg_type: 'text', content: 'Nova 已完成工作', create_time: '1789200000000', sender: { id: 'cli_fixture', sender_type: 'app' } }], has_more: !second, ...(second ? {} : { page_token: 'next' }) } });
       }
       if (args[1] === '+messages-send') {
         nonce = args[args.indexOf('--idempotency-key') + 1]!;
@@ -239,7 +239,8 @@ test('selected chat ingestion, pagination, delete generations, private bot and d
     assert.equal(connector.snapshot().scope_configured, true);
     assert.equal((JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')) as {scopeConfigured: boolean}).scopeConfigured, true);
     await connector.sync();
-    assert.equal(pageCalls, 2); assert.equal(messages.length, 2);
+    assert.equal(pageCalls, 2); assert.equal(messages.length, 3);
+    assert.equal(messages[2]!.sender_type,'app');assert.equal(messages[2]!.auto_capture,false);assert.equal(messages[2]!.raw_text,'Synthetic approval\nFour requests still pending');
     assert(changes.length > 0);
     assert.equal(messages[1]!.raw_text, '评审\n周五前回复');
     assert.equal(messages[0]!.sender_id, 'ou_other'); assert.equal(messages[1]!.sender_id, 'ou_fixture');
@@ -257,12 +258,12 @@ test('selected chat ingestion, pagination, delete generations, private bot and d
     const source = messages[0]!.source_id;
     await connector.deleteHistory(); assert.deepEqual(deleted, [source]);
     await connector.command('feishu.resume'); await connector.sync();
-    assert.notEqual(messages[2]!.source_id, source); assert.notEqual(messages[2]!.id, messages[0]!.id);
+    assert.notEqual(messages[3]!.source_id, source); assert.notEqual(messages[3]!.id, messages[0]!.id);
     await connector.disconnect(); assert.equal(connector.snapshot().bot_enabled, false);
     assert(calls.some((args) => args[1] === 'logout')); assert(!calls.some((args) => args[1] === 'remove'));
     const stored = await readFile(join(directory, 'state.json'), 'utf8'); assert(!stored.includes('周五前')); assert(!stored.includes('PRIVATE_DEVICE'));
     account = 'ou_new'; await connector.status(); assert.deepEqual(connector.snapshot().chats, []);
-    await connector.deleteHistory(); assert(deleted.includes(messages[2]!.source_id));
+    await connector.deleteHistory(); assert(deleted.includes(messages[3]!.source_id));
   } finally { await connector.close(); await rm(directory, { recursive: true, force: true }); }
 });
 

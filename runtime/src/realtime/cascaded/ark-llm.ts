@@ -92,10 +92,13 @@ class Session implements CascadedLlmSession {
   #pendingToolContinuation = false
   #closed = false
   #visualHistory = false
+  #pendingCallId: string | null = null
+  readonly #stateless: boolean
   #history: JsonObject[][] = []
   #turnItems: JsonObject[] = []
 
-  constructor(gateway: ArkResponsesGateway,history?:readonly CommittedConversationPair[]) {
+  constructor(gateway: ArkResponsesGateway,history?:readonly CommittedConversationPair[],stateless=false) {
+    this.#stateless=stateless
     this.#gateway = gateway
     if(history!==undefined)this.#seed(history)
   }
@@ -120,13 +123,18 @@ class Session implements CascadedLlmSession {
     if (this.#closed) throw fail('closed')
     if (input.signal.aborted) throw fail('aborted')
     this.#started=true
+    if(this.#stateless) {
+      const results=input.inputs.filter(item=>item.kind==='tool_result')
+      if(this.#pendingCallId!==null ? results.length!==1 || results[0]!.call_id!==this.#pendingCallId || input.inputs.length!==1 : results.length>0)throw fail('protocol')
+    }
     const current = input.inputs.map(inputItem)
     const factOnly = input.inputs.some(item => item.kind === 'host_activation')
     if (input.inputs.some(item => item.kind === 'user_text' && item.image)) this.#visualHistory = true
     const continuing = this.#pendingToolContinuation
-    const localHistory = (this.#visualHistory || (this.#previousResponseId === null && this.#history.length > 0)) && !continuing
+    const localHistory = this.#stateless || (this.#visualHistory || (this.#previousResponseId === null && this.#history.length > 0)) && !continuing
     if (!continuing) this.#turnItems = []
     this.#turnItems.push(...input.inputs.map(item => item.kind === 'user_text' ? {role: 'user', content: item.text} : inputItem(item)))
+    if(this.#stateless && (this.#turnItems.length>MAX_CASCADED_LLM_HISTORY_ITEMS || codePointLengthLikePython(JSON.stringify(this.#turnItems))>MAX_CASCADED_LLM_HISTORY_CODEPOINTS))throw fail('overflow')
     let outputText = ''
     let responseId: string | null = null
     let terminal = false
@@ -136,7 +144,7 @@ class Session implements CascadedLlmSession {
       for await (const event of this.#gateway.stream({
         ...(input.language === undefined ? {} : {language: input.language}),
         inputItems: factOnly ? input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result').map(inputItem)
-          : localHistory ? [...this.#history.flat(), ...current] : current,
+          : localHistory ? [...this.#history.flat(), ...(this.#stateless && continuing ? this.#turnItems : current)] : current,
         tools: input.tools.map(toolSchema),
         previousResponseId: localHistory || (factOnly && !continuing) ? null : this.#previousResponseId,
         workspaceContext: factOnly ? null : input.workspaceContext ?? null,
@@ -149,33 +157,36 @@ class Session implements CascadedLlmSession {
           yield event
         } else if (event.kind === 'text_delta') {
           if (responseId === null) throw fail('protocol')
-          if (pendingTool !== null) throw fail('protocol')
+          if (pendingTool !== null && !this.#stateless) throw fail('protocol')
           textSeen = true
           outputText += event.text
           yield event
         } else if (event.kind === 'tool_call') {
-          if (responseId === null || textSeen || pendingTool !== null) throw fail('protocol')
+          if (responseId === null || (textSeen && !this.#stateless) || pendingTool !== null) throw fail('protocol')
           pendingTool = structuredClone(event)
         } else if (event.kind === 'response_completed') {
           if (responseId === null || event.response_id !== responseId) throw fail('protocol')
           terminal = true
+          if(this.#stateless && event.outputItems) this.#turnItems.push(...structuredClone(event.outputItems))
           if (pendingTool !== null) {
-            this.#turnItems.push({type: 'function_call', call_id: pendingTool.call_id, name: pendingTool.name, arguments: JSON.stringify(pendingTool.arguments)})
+            if(!this.#stateless) this.#turnItems.push({type: 'function_call', call_id: pendingTool.call_id, name: pendingTool.name, arguments: JSON.stringify(pendingTool.arguments)})
             yield pendingTool
           }
           if (pendingTool === null) {
-            this.#history.push([...this.#turnItems, {role: 'assistant', content: outputText}])
+            this.#history.push(this.#stateless ? [...this.#turnItems] : [...this.#turnItems, {role: 'assistant', content: outputText}])
             this.#turnItems = []
             while (this.#history.length && (this.#history.flat().length > MAX_CASCADED_LLM_HISTORY_ITEMS || codePointLengthLikePython(JSON.stringify(this.#history)) > MAX_CASCADED_LLM_HISTORY_CODEPOINTS)) this.#history.shift()
           }
           this.#previousResponseId = factOnly && pendingTool === null ? null : event.response_id
           this.#pendingToolContinuation = pendingTool !== null
-          yield event
+          this.#pendingCallId=pendingTool?.call_id??null
+          yield {kind:'response_completed',response_id:event.response_id}
           return
         } else {
           if (responseId !== null && event.response_id !== responseId) throw fail('protocol')
           this.#previousResponseId = null
           this.#pendingToolContinuation = false
+          this.#pendingCallId = null
           terminal = true
           yield event
           return
@@ -190,6 +201,7 @@ class Session implements CascadedLlmSession {
           : fail(this.#closed ? 'closed' : input.signal.aborted ? 'aborted' : 'network')
       this.#previousResponseId = null
       this.#pendingToolContinuation = false
+      this.#pendingCallId = null
       if (responseId !== null && !terminal) {
         yield {kind: 'response_failed', response_id: responseId, code: stable.code}
         return
@@ -202,6 +214,7 @@ class Session implements CascadedLlmSession {
     if (this.#closed) return Promise.reject(fail('closed'))
     if (this.#pendingToolContinuation) this.#previousResponseId = null
     this.#pendingToolContinuation = false
+    this.#pendingCallId = null
     return Promise.resolve()
   }
 
@@ -210,6 +223,7 @@ class Session implements CascadedLlmSession {
     this.#history = []; this.#turnItems = []
     this.#previousResponseId = null
     this.#pendingToolContinuation = false
+    this.#pendingCallId = null
     await this.#gateway.close()
   }
 }
@@ -223,5 +237,5 @@ export function createArkCascadedLlmSession(
 export function createArkCascadedLlmFactory(
   options: ArkCascadedLlmFactoryOptions,
 ): CascadedLlmFactory {
-  return {open: input => new Session(createFetchArkResponsesGateway(options),input?.history)}
+  return {open: input => new Session(createFetchArkResponsesGateway(options),input?.history,options.protocol==='openai-compatible')}
 }

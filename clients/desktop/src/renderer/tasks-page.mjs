@@ -4,11 +4,13 @@ const WAITING_LABEL={task_check_unavailable:'暂时无法验证任务结果，�
 export const taskWaitingLabel=reason=>reason?t(Object.hasOwn(WAITING_LABEL,reason)?WAITING_LABEL[reason]:'任务需要你处理'):''
 /** Who acts next on a delegated task, in one short phrase for cards. */
 export const taskNextStep=task=>task.phase==='waiting'?t('需要你：{0}',taskWaitingLabel(task.waiting_reason)||t('任务需要你处理')):task.controller?.kind==='user'?t('你在控制'):['completed','cancelled'].includes(task.phase)?t('无需操作'):t('Nova 在推进')
+// Built-in source maintenance keeps its recovery ledger without becoming a user task.
+export const isSourceProcessingTask=task=>task.trigger?.schedule_id?.startsWith('builtin-source-')===true
 const DURABLE_ACTIVE=['queued','running','verifying','waiting'],WORK_ACTIVE=['started','working']
 /** Counts delegated tasks plus executor work that no delegated task owns. */
 export const activeTaskCount=(durable,work)=>{
  const records=durable?.tasks??[],owned=new Set(records.flatMap(task=>task.work_ids??[]))
- return records.filter(task=>DURABLE_ACTIVE.includes(task.phase)).length+(work?.tasks??[]).filter(item=>!owned.has(item.work_id)&&WORK_ACTIVE.includes(item.phase)).length
+ return records.filter(task=>!isSourceProcessingTask(task)&&DURABLE_ACTIVE.includes(task.phase)).length+(work?.tasks??[]).filter(item=>!owned.has(item.work_id)&&WORK_ACTIVE.includes(item.phase)).length
 }
 /**
  * Two levels: a delegated task is the user's intent; each executor work under it is one run.
@@ -20,10 +22,11 @@ export function renderTasksPage(panel,{tasks,durableTasks,openTask,taskAction,re
  if(state?.error){const notice=card('任务列表暂时不可用',state.error);notice.classList.add('warn');notice.setAttribute('role','alert')}
  const owned=new Set(records.flatMap(task=>task.work_ids??[]))
  const unowned=works.filter(work=>!owned.has(work.work_id))
- if(!records.length&&!unowned.length){const empty=document.createElement('section');empty.className='empty-state';for(const [tag,text]of [['h3','暂无任务'],['p','开始对话后可在这里查看任务进展。']]){const node=document.createElement(tag);node.textContent=text;empty.append(node)}panel.append(empty)}
- for(const task of records){
+ const visible=records.filter(task=>!isSourceProcessingTask(task))
+ if(!visible.length&&!unowned.length){const empty=document.createElement('section');empty.className='empty-state';for(const [tag,text]of [['h3','暂无任务'],['p','开始对话后可在这里查看任务进展。']]){const node=document.createElement(tag);node.textContent=text;empty.append(node)}panel.append(empty)}
+ for(const task of visible){
   const a=card(task.goal,task.waiting_reason?taskWaitingLabel(task.waiting_reason):task.summary);a.dataset.phase=task.phase;a.dataset.taskId=task.id
-  chips(a,[TASK_PHASE_LABEL[task.phase]||task.phase,task.phase==='waiting'?t('需要你处理'):task.controller?.kind==='user'?t('你在控制'):t('Nova 在推进')])
+  chips(a,[TASK_PHASE_LABEL[task.phase]||task.phase,taskNextStep(task)])
   button(t('查看任务与结果'),()=>openTask(task.id),a)
   const runs=works.filter(work=>(task.work_ids??[]).includes(work.work_id))
   if(runs.length){const list=document.createElement('div');list.className='task-runs';list.setAttribute('aria-label',t('本任务的执行记录'));a.append(list);runs.forEach((work,index)=>renderWork(list,work,{index,state,taskAction,results,chips,button,askProgress:null,local,rerender}))}

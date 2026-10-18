@@ -1,3 +1,5 @@
+import {beginModelUsage} from '../usage/model-call.js'
+import type {UsageReporter} from '../realtime/usage.js'
 import {SensitiveContentPolicy, SensitivePathPolicy} from '../memory/sensitivity.js'
 
 const MAX_BATCH = 10
@@ -17,6 +19,7 @@ export interface EmbeddingProvider {
 }
 
 export interface DashScopeEmbeddingProviderOptions {
+  readonly onUsage?: UsageReporter
   readonly baseUrl: string
   readonly apiKey: string
   readonly model?: string
@@ -35,6 +38,7 @@ export class EmbeddingProviderFailure extends Error {
 export class DashScopeEmbeddingProvider implements EmbeddingProvider {
   readonly id: string
   readonly dims: number
+  readonly #onUsage: UsageReporter | undefined
   readonly #apiKey: string
   readonly #model: string
   readonly #endpoint: string
@@ -56,6 +60,7 @@ export class DashScopeEmbeddingProvider implements EmbeddingProvider {
       || base.password !== '' || base.search !== '' || base.hash !== '') {
       throw new EmbeddingProviderFailure('configuration')
     }
+    this.#onUsage=options.onUsage
     this.#apiKey = options.apiKey
     this.#model = model
     this.dims = dims
@@ -88,6 +93,10 @@ export class DashScopeEmbeddingProvider implements EmbeddingProvider {
     }
     const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout])
+    const finishUsage=beginModelUsage(this.#onUsage,this.#endpoint,this.#model,'embedding')
+    let rawUsage:unknown
+    let succeeded=false
+    try {
     let response: Response
     try {
       response = await this.#fetch(this.#endpoint, {
@@ -116,12 +125,16 @@ export class DashScopeEmbeddingProvider implements EmbeddingProvider {
       try { parsed = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)) } catch {
         throw new EmbeddingProviderFailure('malformed_response')
       }
-      return parseVectors(parsed, texts.length, this.dims, this.#model)
+      if(plainObject(parsed))rawUsage=parsed.usage
+      const vectors=parseVectors(parsed, texts.length, this.dims, this.#model)
+      succeeded=true
+      return vectors
     } catch (cause) {
       if (signal?.aborted === true) signal.throwIfAborted()
       if (cause instanceof EmbeddingProviderFailure) throw cause
       throw new EmbeddingProviderFailure(timeout.aborted ? 'timeout' : 'transport')
     }
+    } finally { finishUsage(rawUsage,signal?.aborted?'cancelled':succeeded?'success':'error') }
   }
 }
 

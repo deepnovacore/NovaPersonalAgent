@@ -114,13 +114,13 @@ test('generated work is readable and its sources stay hidden until asked for',t=
  assert.equal(nodes.filter(n=>n.className==='source-info'&&n['aria-label']==='查看来源').length,2)
  assert.equal(h.buttons.some(b=>b.textContent==='确认介绍'),false)
 })
-test('a background profile refresh keeps the draft on screen without a status box or skeleton',t=>{
+test('a background profile refresh keeps the draft and shows a nonblocking hint without a skeleton',t=>{
  const h=harness(t),flatten=node=>[node,...node.children.flatMap(flatten)]
  const draft={about:{text:'Builds audio software',refs:[{entry_id:'s',version:'v'}]},work:[],interests:[]},base={...h,state:{profile:{version:0,about:''}},news:{enabled:false,explore:true,profile_version:0,interests:[]}}
  renderProfile(h.panel,{...base,warmup:{status:'working',draft,sources:[{id:'s',version:'v',label:'Nova/README.md'}]}})
  let nodes=flatten(h.panel)
  assert.ok(nodes.some(n=>n.textContent==='Builds audio software'))
- assert.ok(!nodes.some(n=>n.className==='warmup-status'||n.className==='warmup-skeleton'))
+ assert.ok(nodes.some(n=>n.className==='warmup-status'));assert.ok(!nodes.some(n=>n.className==='warmup-skeleton'));assert.ok(nodes.some(n=>n.textContent?.includes('不影响对话')))
  const first=harness(t);renderProfile(first.panel,{...base,...first,warmup:{status:'working',draft:null,sources:[]}});nodes=flatten(first.panel)
  assert.ok(nodes.some(n=>n.className==='warmup-status'));assert.ok(nodes.some(n=>n.className==='warmup-skeleton'))
 })
@@ -166,7 +166,22 @@ test('the profile draft can be updated on demand, and the button is disabled whi
  h.panel.children.length=0;h.buttons.length=0;renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},warmup:{status:'working',draft,sources:[]}})
  const busy=h.buttons.find(b=>b.textContent==='正在更新…');assert.ok(busy);assert.equal(busy.disabled,true);assert.ok(!h.buttons.some(b=>b.textContent==='立即更新'))
  h.panel.children.length=0;h.buttons.length=0;renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},warmup:{status:'working',draft:null,sources:[]}})
- assert.ok(!h.buttons.some(b=>b.textContent==='立即更新'||b.textContent==='正在更新…'),'a first draft still being written has its own status box')
+ assert.equal(h.buttons.find(b=>b.textContent==='正在更新…').disabled,true)
  h.buttons.length=0;h.panel.children.length=0;renderProfile(h.panel,{...h,state:{profile:{version:2,about:'Mine'}},warmup:{status:'ready',draft,sources:[]}})
- assert.ok(!h.buttons.some(b=>b.textContent==='立即更新'),'a profile the user wrote is not replaced by a draft')
+ assert.ok(h.buttons.some(b=>b.textContent==='立即更新'),'manual generation remains available without replacing the confirmed introduction')
+})
+
+test('failed profile refresh keeps the draft visible and offers retry',async t=>{
+ const h=harness(t),flatten=node=>[node,...node.children.flatMap(flatten)]
+ renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},warmup:{status:'failed',draft:{about:{text:'Existing profile',refs:[]},work:[],interests:[]},sources:[]}})
+ assert.ok(flatten(h.panel).some(n=>n.textContent==='Existing profile'))
+ assert.ok(flatten(h.panel).some(n=>n.textContent?.includes('未能更新')))
+ await h.buttons.find(b=>b.textContent==='重试').action();assert.deepEqual(h.calls,[['profile.refresh',{}]])
+})
+
+test('profile explains the persisted daily quota without disabling manual refresh',t=>{
+ const h=harness(t),flatten=node=>[node,...node.children.flatMap(flatten)]
+ renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},warmup:{status:'ready',draft:null,sources:[],automatic_available:false}})
+ assert.ok(flatten(h.panel).some(n=>n.textContent?.includes('今日自动更新次数已用完')))
+ assert.notEqual(h.buttons.find(b=>b.textContent==='立即更新').disabled,true)
 })

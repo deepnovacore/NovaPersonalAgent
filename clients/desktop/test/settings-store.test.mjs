@@ -22,6 +22,7 @@ import {
 } from '../src/main/settings-store.mjs'
 
 const ALL_SECRET_KEYS = Object.freeze([
+  'openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey',
   'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey',
   'composioApiKey',
   'dashscopeApiKey',
@@ -104,13 +105,16 @@ test('the default settings are the documented schema', () => {
     integratedProvider: 'qwen',
     integratedModel: 'qwen-audio-3.0-realtime-plus',
     integratedVoice: 'longanqian',
+    openaiCompatibleBaseUrl:'https://api.openai.com/v1', openaiCompatibleProtocol:'chat-completions',
+    compatibleAsrBaseUrl:'https://api.openai.com/v1', compatibleAsrModel:'whisper-1',
+    compatibleTtsBaseUrl:'https://api.openai.com/v1', compatibleTtsModel:'tts-1', compatibleTtsVoice:'alloy', compatibleTtsSendSampleRate:false,
     selfHostedAsrUrl: '', selfHostedLlmBaseUrl: '', selfHostedTtsUrl: '',
     geminiAsrModel: 'gemini-3.5-flash', geminiTtsModel: 'gemini-3.8-flash-tts', geminiTtsVoice: 'Kore',
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
     voiceprintEnabled: false, voiceprintId: '', voiceprintName: '', voiceprintUploadUrl: '',
     cascadedLlmProvider: 'deepseek',
-    cascadedLlmModels: { 'self-hosted': '', qwen: 'qwen-plus', ark: 'doubao-seed-2-0-pro-260215', deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite' },
+    cascadedLlmModels: { 'self-hosted': '', 'openai-compatible': '', qwen: 'qwen-plus', ark: 'doubao-seed-2-0-pro-260215', deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite' },
     cascadedTtsProvider: 'volcengine',
     cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
     codexApprovalMode: 'ask',
@@ -292,13 +296,16 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     integratedProvider: 'qwen',
     integratedModel: 'qwen-realtime-custom',
     integratedVoice: 'longxiaochun',
+    openaiCompatibleBaseUrl:'https://api.openai.com/v1', openaiCompatibleProtocol:'chat-completions',
+    compatibleAsrBaseUrl:'https://api.openai.com/v1', compatibleAsrModel:'whisper-1',
+    compatibleTtsBaseUrl:'https://api.openai.com/v1', compatibleTtsModel:'tts-1', compatibleTtsVoice:'alloy', compatibleTtsSendSampleRate:false,
     selfHostedAsrUrl: '', selfHostedLlmBaseUrl: '', selfHostedTtsUrl: '',
     geminiAsrModel: 'gemini-3.5-flash', geminiTtsModel: 'gemini-3.8-flash-tts', geminiTtsVoice: 'Kore',
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
     voiceprintEnabled: false, voiceprintId: '', voiceprintName: '', voiceprintUploadUrl: '',
     cascadedLlmProvider: 'ark',
-    cascadedLlmModels: { 'self-hosted': '', qwen: 'qwen-plus', ark: 'doubao-custom', deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite' },
+    cascadedLlmModels: { 'self-hosted': '', 'openai-compatible': '', qwen: 'qwen-plus', ark: 'doubao-custom', deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite' },
     cascadedTtsProvider: 'volcengine',
     cascadedTtsVoice: 'zh_female_custom',
     codexApprovalMode: 'ask',
@@ -378,6 +385,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'codingBackendPaths',
     'codingBackendProfiles',
     'codingProgressNarration',
+    'compatibleAsrBaseUrl', 'compatibleAsrModel', 'compatibleTtsBaseUrl', 'compatibleTtsModel', 'compatibleTtsSendSampleRate', 'compatibleTtsVoice',
     'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
@@ -393,6 +401,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'memoryPrerecallEnabled',
     'modelBaseUrl',
     'monitorCameraDeviceId',
+    'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
     'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
@@ -420,7 +429,7 @@ test('JSON settings rebuild only declared fields and keep invalid nested values 
   assert.equal(normalized.codexHeartbeatSeconds, 45)
   assert.equal(Object.hasOwn(normalized, '__proto__'), false)
   assert.equal(Object.hasOwn(normalized, 'unknown'), false)
-  assert.deepEqual(normalized.cascadedLlmModels, {'self-hosted': '', qwen: 'qwen-plus', deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite', ark: 'custom-ark'})
+  assert.deepEqual(normalized.cascadedLlmModels, {'self-hosted': '', 'openai-compatible': '', qwen: 'qwen-plus', deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite', ark: 'custom-ark'})
   assert.deepEqual(normalized.secrets, {tavilyApiKey: {enc: 'none', data: 'dGF2aWx5'}})
 })
 
@@ -460,13 +469,13 @@ test('normalizeSettings rejects leading and trailing controls before trimming mo
 
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: '\nqwen-custom', ark: 'ark-valid' },
-  }).cascadedLlmModels, {'self-hosted': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite',
+  }).cascadedLlmModels, {'self-hosted': '', 'openai-compatible': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite',
     qwen: 'qwen-plus',
     ark: 'ark-valid',
   })
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-valid', ark: 'ark-custom\r' },
-  }).cascadedLlmModels, {'self-hosted': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite',
+  }).cascadedLlmModels, {'self-hosted': '', 'openai-compatible': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite',
     qwen: 'qwen-valid',
     ark: 'doubao-seed-2-0-pro-260215',
   })
@@ -475,22 +484,22 @@ test('normalizeSettings rejects leading and trailing controls before trimming mo
 test('normalizeSettings treats cascadedLlmModels as a strict independent provider map', () => {
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-max', ark: 'ark-custom', extra: 'drop-me' },
-  }).cascadedLlmModels, {'self-hosted': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite', qwen: 'qwen-max', ark: 'ark-custom' })
+  }).cascadedLlmModels, {'self-hosted': '', 'openai-compatible': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite', qwen: 'qwen-max', ark: 'ark-custom' })
 
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-max' },
-  }).cascadedLlmModels, {'self-hosted': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite',
+  }).cascadedLlmModels, {'self-hosted': '', 'openai-compatible': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite',
     qwen: 'qwen-max',
     ark: DEFAULT_SETTINGS.cascadedLlmModels.ark,
   })
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'bad\nmodel', ark: 'ark-custom' },
-  }).cascadedLlmModels, {'self-hosted': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite',
+  }).cascadedLlmModels, {'self-hosted': '', 'openai-compatible': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite',
     qwen: DEFAULT_SETTINGS.cascadedLlmModels.qwen,
     ark: 'ark-custom',
   })
   for (const bad of [null, [], 'qwen-flash']) {
-    assert.deepEqual(normalizeSettings({ cascadedLlmModels: bad }).cascadedLlmModels, {'self-hosted': '',
+    assert.deepEqual(normalizeSettings({ cascadedLlmModels: bad }).cascadedLlmModels, {'self-hosted': '', 'openai-compatible': '',
       ...DEFAULT_SETTINGS.cascadedLlmModels,
     })
   }
@@ -521,7 +530,7 @@ test('normalizeSettings falls back per field to a caller-supplied base', () => {
   assert.equal(merged.pipelineMode, 'cascaded')
   assert.equal(merged.integratedModel, 'integrated-kept')
   assert.equal(merged.cascadedLlmProvider, 'ark')
-  assert.deepEqual(merged.cascadedLlmModels, {'self-hosted': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite', qwen: 'qwen-next', ark: 'ark-kept' })
+  assert.deepEqual(merged.cascadedLlmModels, {'self-hosted': '', 'openai-compatible': '',  deepseek: 'deepseek-flash', openai: 'gpt-6-luna', gemini: 'gemini-3.5-flash-lite', qwen: 'qwen-next', ark: 'ark-kept' })
 })
 
 test('normalizeSettings keeps only well-formed secret entries', () => {
@@ -590,6 +599,7 @@ test('publicSettings never carries the secrets object', () => {
     'codingBackend',
     'codingBackendPaths',
     'codingProgressNarration',
+    'compatibleAsrBaseUrl', 'compatibleAsrModel', 'compatibleTtsBaseUrl', 'compatibleTtsModel', 'compatibleTtsSendSampleRate', 'compatibleTtsVoice',
     'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
@@ -604,6 +614,7 @@ test('publicSettings never carries the secrets object', () => {
     'memoryPrerecallEnabled',
     'modelBaseUrl',
     'monitorCameraDeviceId',
+    'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
     'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
@@ -642,6 +653,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   )
 
   assert.deepEqual(secretsPresent(settings), {
+    openaiCompatibleApiKey:false, compatibleAsrApiKey:false, compatibleTtsApiKey:false,
     selfHostedAsrApiKey: false, selfHostedLlmApiKey: false, selfHostedTtsApiKey: false,
     composioApiKey: false,
     dashscopeApiKey: true,
@@ -659,6 +671,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   })
   assert.doesNotMatch(JSON.stringify(secretsPresent(settings)), /sk-dash|sk-codex|sealed/)
   assert.deepEqual(secretsPresent(undefined), {
+    openaiCompatibleApiKey:false, compatibleAsrApiKey:false, compatibleTtsApiKey:false,
     selfHostedAsrApiKey: false, selfHostedLlmApiKey: false, selfHostedTtsApiKey: false,
     composioApiKey: false,
     dashscopeApiKey: false,
@@ -692,7 +705,7 @@ test('all secret fields seal, report presence, round-trip, and clear independent
     { secrets: Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, ''])) },
     codec,
   )
-  assert.deepEqual(cleared.secrets, Object.fromEntries(['composioApiKey', 'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey'].map(key => [key, {enc:'cleared',data:''}])))
+  assert.deepEqual(cleared.secrets, Object.fromEntries(['openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey', 'composioApiKey', 'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey'].map(key => [key, {enc:'cleared',data:''}])))
   assert.deepEqual(secretsPresent(cleared), Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, false])))
 })
 

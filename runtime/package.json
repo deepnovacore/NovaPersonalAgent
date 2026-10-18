@@ -18,6 +18,10 @@
     "./desktop": {
       "types": "./dist/src/desktop.d.ts",
       "default": "./dist/src/desktop.js"
+    },
+    "./usage": {
+      "types": "./dist/src/usage/index.d.ts",
+      "default": "./dist/src/usage/index.js"
     }
   },
   "bin": {
@@ -39,7 +43,7 @@
     "server:pair": "node scripts/pair-device.mjs",
     "test:pair": "node --test scripts/pair-device.test.mjs",
     "server:token-init": "node dist/src/server-entry.js token-init",
-    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "clean": "node scripts/clean-dist.mjs",
     "demo": "npm run build && node dist/src/cli.js demo",
     "fixtures:check": "npm run build && node dist/src/cli.js fixture check",
     "lint": "eslint src eval test",

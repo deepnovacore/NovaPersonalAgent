@@ -1,3 +1,4 @@
+import {withUsageContext} from '../usage/context.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {sourceAgentArguments} from '../core/source-processing-tools.js'
 import {profileSourceInput} from '../memory-substrate/profile-source-input.js'
@@ -67,7 +68,8 @@ export class SourceProcessingAgent{
    const original=originalSchema.parse(await this.operation({action:'evidence',refs:args.refs,...owner}))
    const previous=await this.operation({action:'profile'}) as {revision:number}
    const entries:ProfileInput[]=original.items.map(item=>item.source_kind==='file'?{id:item.evidence_id,version:item.version,content:item.text,origin:'inferred',observed_at:item.observed_at,source:{project:'资料',document:item.locator}}:profileSourceInput({id:item.evidence_id,hash:item.version,raw_text:item.text,observed_at:item.observed_at,source_kind:item.source_kind as 'im'|'mail',source_id:item.locator,source_metadata:item.source_metadata as EvidenceRecord['source_metadata']},4000))
-   const draft=await generate(entries,AbortSignal.any([this.host.scheduledAuthority.signal(grant),AbortSignal.timeout(180000)]),async()=>{this.host.scheduledAuthority.assert(grant,grant.fence);if(!await this.validate(grant))throw Error('processing_context_unavailable')})
+   if(!await this.host.profileWarmup.claimAutomaticUpdate())return {status:'daily_limit',message:'今日自动画像更新次数已用完；可继续整理资料，额外更新请在关于我页面手动触发。'}
+   const draft=await withUsageContext({feature:'profile',runId:grant.run_id,taskId:grant.fence.task_id,trigger:'scheduled'},()=>generate(entries,AbortSignal.any([this.host.scheduledAuthority.signal(grant),AbortSignal.timeout(180000)]),async()=>{this.host.scheduledAuthority.assert(grant,grant.fence);if(!await this.validate(grant))throw Error('processing_context_unavailable')}))
    this.host.scheduledAuthority.assert(grant,grant.fence)
    if(!await this.validate(grant))throw Error('processing_context_unavailable')
    return this.operation({action:'publish',...owner,expected_revision:previous.revision,draft,refs:args.refs})

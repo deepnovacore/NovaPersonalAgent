@@ -79,7 +79,7 @@ test('retired report focus and message references do not break ordinary conversa
  try{await host.open();const {run}=await complete(host);await host.publishScheduledResult(run.run_id);await host.openScheduledResult(run.run_id);await host.close()
   const saved=JSON.parse(await readFile(path+'.schedules.json','utf8')) as {runs:ScheduleRun[]}
   for(let i=0;i<2000;i++){const row=structuredClone(saved.runs[0]!);row.run_id='history-'+i;row.input.origin_ref='schedule-run:'+row.run_id;row.input.trigger!.run_id=row.run_id;row.prepared_namespace='schedule-run:'+row.run_id;saved.runs.push(row)}
-  await writeFile(path+'.schedules.json',JSON.stringify(saved));host=make();await host.open();assert.equal(host.schedules.terminalRuns().length,2000)
+  await writeFile(path+'.schedules.json',JSON.stringify(saved));host=make();await host.open();await host.scheduledTaskTick();assert.equal(host.schedules.terminalRuns().length,2000)
   const result=await host.scheduledConversationContext('chat:main',0,null);assert.match(result??'',/unavailable/);assert.ok(!result?.includes('Original source report'))
   const state=JSON.parse(await readFile(path,'utf8')) as {conversations:{items:{id:string;scheduled_result_focus?:string}[]}}
   assert.equal(state.conversations.items.find(c=>c.id==='chat:main')?.scheduled_result_focus,undefined)

@@ -37,6 +37,7 @@ export const projectKey=(root:string)=>createHash('sha256').update(root).digest(
  * Only projects whose documents changed are sent again, batched and in the background.
  */
 export class ProjectDigests{
+ #deferGeneration=false
  #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#disk:z.infer<typeof diskSchema>={projects:{}};#opened=false
  /** Every document id currently eligible for a digest; a digest that read anything outside it is withheld until regenerated. */
  #eligible=new Set<string>();#projects=new Map<string,Project>();#failures=new Map<string,{key:string;count:number;at:number}>();#blocked=new Map<string,string>();#spent:number[]=[]
@@ -46,11 +47,12 @@ export class ProjectDigests{
   this.#store=new BoundedJsonStore(path,diskSchema);this.#idleMs=options.idleMs??30_000;this.#batch=options.batch??4
   this.#hourly=options.hourlyProjects??24;this.#timeoutMs=options.timeoutMs??60_000;this.#now=options.now??Date.now
  }
- async open(){
+ async open({deferGeneration=false}:{deferGeneration?:boolean}={}){this.#deferGeneration=deferGeneration;
   const disk=await this.#store.read(this.#disk)
   // A record that does not list what it read cannot be retired on withdrawal; recompute it instead.
   this.#disk={projects:Object.fromEntries(Object.entries(disk.projects).filter(([,hit])=>hit.inputs.length))};this.#opened=true
  }
+ startGeneration(){if(!this.#opened)return;this.#deferGeneration=false;this.#schedule()}
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#abort.abort();await this.#run;await this.#writes}
  async clear(){clearTimeout(this.#timer);this.#abort.abort();await this.#run;this.#projects.clear();this.#failures.clear();this.#blocked.clear();this.#disk={projects:{}};await this.#persist()}
  #persist(){const snapshot=structuredClone(this.#disk),write=this.#writes.then(()=>this.#store.write(snapshot));this.#writes=write.catch(()=>{/* The next change writes again. */});return write}
@@ -111,7 +113,7 @@ export class ProjectDigests{
  }
  #schedule(){
   clearTimeout(this.#timer);this.#timer=undefined
-  if(!this.#opened||!this.generate||this.#run)return
+  if(this.#deferGeneration||!this.#opened||!this.generate||this.#run)return
   const due=this.#due();if(!due.length)return
   const now=this.#now();this.#spent=this.#spent.filter(at=>now-at<3_600_000)
   let at=Math.min(...due.map(item=>item.at))
@@ -121,7 +123,7 @@ export class ProjectDigests{
  refresh():Promise<void>{
   clearTimeout(this.#timer);this.#timer=undefined
   if(this.#run)return this.#run
-  if(!this.#opened||!this.generate)return Promise.resolve()
+  if(this.#deferGeneration||!this.#opened||!this.generate)return Promise.resolve()
   const now=this.#now();this.#spent=this.#spent.filter(at=>now-at<3_600_000)
   const room=Math.min(this.#batch,this.#hourly-this.#spent.length)
   const batch=this.#due().filter(item=>item.at<=now).slice(0,room).map(item=>item.project)
