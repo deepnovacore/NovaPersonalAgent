@@ -280,7 +280,7 @@ export function buildTextRealtimeAssembly(
   })
   const intake=options.intake??defaultIntake(core,support.gateway,support.settings)
   const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
-  const composition=composeRealtime(core,provider,{...options,memoryReadMode:'voice',...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
+  const composition=composeRealtime(core,provider,{...options,memoryReadMode:'text',...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
   return composition
 }
 

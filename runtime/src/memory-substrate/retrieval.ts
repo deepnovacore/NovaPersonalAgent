@@ -41,7 +41,7 @@ export function memoryRetrieval(db:LedgerDatabase,operation:'pending_vectors'|'w
  if(operation==='pending_vectors')return usable.filter(row=>consented(db,row.entry,provider)).map(row=>row.entry)
  const query=z.string().min(1).max(4000).parse(value.query);const k=z.number().int().min(1).max(20).parse(value.limit??8)
  const queryVector=value.vector===null?null:vectorSchema.parse(value.vector)
- const scores=bm25(query,usable.map(row=>Object.values(row.entry.content).filter(value=>typeof value==='string').join(' ')))
+ const scores=bm25(query,usable.map(row=>[...Object.values(row.entry.content).filter(value=>typeof value==='string'),row.entry.content.memory_slot==='preferred_name'?'称呼 姓名 名字 name preferred name':row.entry.content.memory_slot==='reply_style'?'回答 风格 偏好 reply style':''].join(' ')))
  const lexical=usable.map((row,index)=>({row,score:scores[index]!})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score).slice(0,50)
  const semantic=queryVector?usable.flatMap(row=>row.vector?.length===queryVector.length&&consented(db,row.entry,provider)?[{row,score:cosine(queryVector,row.vector)}]:[]).filter(item=>item.score>0).sort((a,b)=>b.score-a.score).slice(0,50):[]
  const fused=new Map<string,{entry:EntryRevision;score:number;extraction_stamp?:string}>()

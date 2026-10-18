@@ -78,7 +78,7 @@ export function explicitMemoryOperation(db:LedgerDatabase,operation:'explicit_be
   const admitted=EvidenceRecordSchema.parse(run('append_evidence',evidence))
   if(admitted.raw_text!==args.quote)throw Error('STORE_INVALID_OPERATION')
   run('source_grant',{source_id:evidence.source_id,expected_revision:0,grant})
-  const candidate=CandidateSchema.parse({entry_id:id,expected_revision:versions[id]??0,kind:old?.kind??args.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidence.id],entity_refs:old?.entity_refs??[],content:{text:args.text??'',...(args.slot?{memory_slot:args.slot}:old?.content.memory_slot?{memory_slot:old.content.memory_slot}:{}),explicit_source_seq:Number(snapshot.seq)},valid_until:null,recorded_at:evidence.recorded_at,...(args.action==='forget'?{op:'tombstone'}:{})})
+  const candidate=CandidateSchema.parse({entry_id:id,expected_revision:versions[id]??0,kind:old?.kind??args.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidence.id],entity_refs:old?.entity_refs??[],content:{text:args.text??'',...((args.scope??old?.content.memory_scope)?{memory_scope:args.scope??old?.content.memory_scope}:{}),...(args.slot?{memory_slot:args.slot}:old?.content.memory_slot?{memory_slot:old.content.memory_slot}:{}),explicit_source_seq:Number(snapshot.seq)},valid_until:null,recorded_at:evidence.recorded_at,...(args.action==='forget'?{op:'tombstone'}:{})})
   const committed=EntryRevisionSchema.parse(run(args.action==='forget'?'forget':'merge',args.action==='forget'?{entry_id:id,candidate}:candidate))
   // shortcut: this turn uses only explicit entries; add selective extraction before retaining its other implicit facts.
   db.prepare('INSERT OR IGNORE INTO memory_suppressed VALUES(?)').run(key.parse(raw.automaticHash))

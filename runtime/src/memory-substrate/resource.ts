@@ -124,8 +124,8 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(!this.options.conversationProviders?.includes(consumer))throw Error('memory_consumer_denied')
     const sourceId='explicit:'+digest(turn.sourceId+':'+requestId)
     const evidence=this.#evidenceRecord({type:'conversation',ref:sourceId,observed_at:turn.occurredAt},args.quote,'user_correction',sourceId,undefined,true,undefined,this.options.inputConsent===true)
-    // shortcut: identical quotes share suppression; overlapping quotes need provenance grouping for broader erasure.
-    const receipt=await this.options.client.memory('explicit_write',{prefix:this.prefix,turn,requestId,arguments:args,consumer,evidence:{...evidence,hash:digest(this.options.userId+':'+turn.sourceId+':'+args.quote)},automaticHash:contentHash(this.options.userId+':'+turn.text),grant:this.processingGrant(true)}) as ExplicitMemoryReceipt
+    // Distinct explicit operations keep distinct evidence even when the user quoted the same sentence.
+    const receipt=await this.options.client.memory('explicit_write',{prefix:this.prefix,turn,requestId,arguments:args,consumer,evidence:{...evidence,hash:digest(this.options.userId+':'+sourceId)},automaticHash:contentHash(this.options.userId+':'+turn.text),grant:this.processingGrant(true)}) as ExplicitMemoryReceipt
     await this.#refresh()
     return receipt
   }

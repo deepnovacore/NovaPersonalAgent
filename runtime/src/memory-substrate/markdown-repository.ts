@@ -1,3 +1,4 @@
+import {memoryDocuments,memoryDocumentEdits,semanticPath,EMPTY_MEMORY_DOCUMENT,MAX_MEMORY_DOCUMENT_BYTES} from './memory-documents.js'
 import {createHash,randomUUID} from 'node:crypto'
 import {execFileSync} from 'node:child_process'
 import {chmodSync,closeSync,constants,fstatSync,fsyncSync,linkSync,lstatSync,mkdirSync,openSync,readFileSync,readdirSync,renameSync,unlinkSync,writeFileSync} from 'node:fs'
@@ -6,19 +7,20 @@ import {z} from 'zod'
 import {EntryRevisionSchema,type EntryRevision} from './store.js'
 import {canonicalJson} from '../text/canonical-json.js'
 
-const MAX_FILE=8*1024*1024
+const MAX_FILE=MAX_MEMORY_DOCUMENT_BYTES
 const MAX_BATCH=64*1024*1024
 const MAX_ENTRIES=10_000
 const MARKER='.nova-memory.json'
 const LOCK_POLL_MS=25
 const LOCK_SLEEP=new Int32Array(new SharedArrayBuffer(4))
 const JOURNAL='.nova-memory-batch.json'
-const markerText='{"format":"nova-understanding","version":1}\n'
+const legacyMarkerText='{"format":"nova-understanding","version":1}\n'
+const markerText='{"format":"nova-understanding","version":2}\n'
 const hasPath=(path:string)=>lstatSync(path,{throwIfNoEntry:false})!==undefined
 const digest=(text:string)=>createHash('sha256').update(text).digest('hex')
 const entryPath=(id:string)=>`entries/${digest(id)}.md`
 const failure=(code:string)=>new Error(`MEMORY_MARKDOWN_${code}`)
-const journalSchema=z.object({version:z.literal(1),operationId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),baseCommit:z.string().regex(/^[a-f0-9]{40,64}$/).nullable(),files:z.array(z.object({path:z.string().regex(/^(entries\/[a-f0-9]{64}\.md|\.nova-memory\.json)$/),beforeHash:z.string().regex(/^[a-f0-9]{64}$/).nullable(),after:z.string().max(MAX_FILE)}).strict()).max(MAX_ENTRIES+1)}).strict()
+const journalSchema=z.object({version:z.literal(1),operationId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),baseCommit:z.string().regex(/^[a-f0-9]{40,64}$/).nullable(),files:z.array(z.object({path:z.string().refine(path=>path===MARKER||/^entries\/[a-f0-9]{64}\.md$/u.test(path)||semanticPath.test(path)),beforeHash:z.string().regex(/^[a-f0-9]{64}$/).nullable(),after:z.string().refine(text=>Buffer.byteLength(text)<=MAX_FILE)}).strict()).max(MAX_ENTRIES*3+3)}).strict()
 type Journal=z.infer<typeof journalSchema>
 interface LockOwner {owner:{pid:number;token:string};bytes:string;ino:number;dev:number}
 export interface MarkdownEdit {entry_id:string;expected_revision:number;content:EntryRevision['content'];path:string;hash:string}
@@ -66,7 +68,7 @@ export class MarkdownRepository {
 
  /** Initializes an independent, local-only Git repository; never recovers an operation implicitly. */
  initialize():void {
-  if(this.initialized){this.ensureRoot();this.assertSafe(join(this.root,'entries'),true);return}
+  if(this.initialized){this.ensureRoot();for(const name of ['entries','goals','todos','ideas','memory','entities'])this.assertSafe(join(this.root,name),true);return}
   this.ensureRoot()
   const gitPath=join(this.root,'.git')
   if(hasPath(gitPath)){
@@ -77,9 +79,7 @@ export class MarkdownRepository {
     if(tracked)throw failure('UNOWNED_REPOSITORY')
    }
   }else this.git(['init','--quiet','--template='])
-  const entries=join(this.root,'entries')
-  if(!hasPath(entries))mkdirSync(entries,{mode:0o700})
-  this.assertSafe(entries,true);chmodSync(entries,0o700)
+  for(const name of ['entries','goals','todos','ideas','memory','entities']){const directory=join(this.root,name);if(!hasPath(directory))mkdirSync(directory,{mode:0o700});this.assertSafe(directory,true);chmodSync(directory,0o700)}
   this.initialized=true
  }
 
@@ -133,37 +133,58 @@ export class MarkdownRepository {
    if(readdirSync(join(this.root,'entries')).length)throw failure('UNOWNED_REPOSITORY')
    this.publish(initialRevisions)
   }
-  return this.read()
+  const snapshot=this.read()
+  if(this.needsDocumentMigration()&&!snapshot.edits.length){this.publish(snapshot.revisions);return this.read()}
+  return snapshot
  }
+
+ needsDocumentMigration():boolean {return hasPath(join(this.root,MARKER))&&this.readFile(MARKER)===legacyMarkerText}
 
  read():MarkdownSnapshot {
   this.initialize()
   if(this.pendingOperationId())throw failure('PENDING_OPERATION')
   const revisions:EntryRevision[]=[];const edits:MarkdownEdit[]=[];const baselines:Record<string,string>={}
-  if(hasPath(join(this.root,MARKER))){if(this.readFile(MARKER)!==markerText)throw failure('FORMAT');baselines[MARKER]=digest(markerText)}
+  let documents=false
+  if(hasPath(join(this.root,MARKER))){const marker=this.readFile(MARKER);if(marker!==markerText&&marker!==legacyMarkerText)throw failure('FORMAT');documents=marker===markerText;baselines[MARKER]=digest(marker)}
   const names=readdirSync(join(this.root,'entries')).sort()
   if(names.length>MAX_ENTRIES)throw failure('LIMIT')
-  const head=this.head()
-  const tracked=head?this.git(['ls-tree','-r','--name-only',head,'--','entries']).split('\n').filter(Boolean):[]
-  for(const path of tracked)if(!names.includes(path.slice('entries/'.length)))throw failure('CONFLICT')
-  const committedFiles=head?this.committedFiles(head,tracked):new Map<string,string>()
+  const head=this.head(),tracked=head?this.git(['ls-tree','-r','--name-only',head]).split('\n').filter(Boolean):[]
+  const recordPaths=tracked.filter(path=>path.startsWith('entries/'))
+  for(const path of recordPaths)if(!names.includes(path.slice('entries/'.length)))throw failure('CONFLICT')
+  const committedFiles=head?this.committedFiles(head,[...recordPaths,...(tracked.includes(MARKER)?[MARKER]:[])]):new Map<string,string>()
+  if(head&&(!committedFiles.has(MARKER)||digest(committedFiles.get(MARKER)!)!==baselines[MARKER]))throw failure('CONFLICT')
   let bytes=0
   for(const name of names){
    const path=`entries/${name}`
    this.assertSafe(join(this.root,path),false)
    if(!/^[a-f0-9]{64}\.md$/.test(name))throw failure('UNSAFE_PATH')
    const text=this.readFile(path);bytes+=Buffer.byteLength(text);if(bytes>MAX_BATCH)throw failure('LIMIT')
-   const parsed=decode(text);const current=parsed.revisions.at(-1)!
+   const parsed=decode(text),current=parsed.revisions.at(-1)!
    if(path!==entryPath(current.entry_id))throw failure('FORMAT')
    if(head){
-    if(!tracked.includes(path))throw failure('UNADMITTED_EDIT')
+    if(!recordPaths.includes(path))throw failure('UNADMITTED_EDIT')
     const committed=decode(committedFiles.get(path)!)
     if(canonicalJson(parsed.revisions)!==canonicalJson(committed.revisions))throw failure('HISTORY_EDIT')
    }
    revisions.push(...parsed.revisions);baselines[path]=digest(text)
+   // Legacy body edits still enter the same merge path; conflicting document edits are rejected below.
    if(canonicalJson(parsed.content)!==canonicalJson(current.content))edits.push({entry_id:current.entry_id,expected_revision:current.revision,content:parsed.content,path,hash:digest(text)})
   }
   revisions.sort((a,b)=>a.entry_id<b.entry_id?-1:a.entry_id>b.entry_id?1:a.revision-b.revision)
+  if(documents){
+   const expected=memoryDocuments(revisions),paths=new Set([...expected.keys(),...tracked.filter(path=>semanticPath.test(path))])
+   for(const path of paths){
+    if(!tracked.includes(path)||!hasPath(join(this.root,path)))throw failure('CONFLICT')
+    const text=this.readFile(path);bytes+=Buffer.byteLength(text);if(bytes>MAX_BATCH)throw failure('LIMIT')
+    baselines[path]=digest(text)
+    if(text===(expected.get(path)??EMPTY_MEMORY_DOCUMENT))continue
+    for(const edit of memoryDocumentEdits(path,text,revisions)){
+     const prior=edits.find(value=>value.entry_id===edit.entry.entry_id)
+     if(prior){if(canonicalJson(prior.content)!==canonicalJson(edit.content))throw failure('CONFLICT');continue}
+     edits.push({entry_id:edit.entry.entry_id,expected_revision:edit.entry.revision,content:edit.content,path,hash:digest(text)})
+    }
+   }
+  }
   this.baseline={...baselines}
   return {revisions,edits,baselines}
  }
@@ -187,8 +208,11 @@ export class MarkdownRepository {
   }
   const files:Journal['files']=[{path:MARKER,beforeHash:current.baselines[MARKER]??null,after:markerText}]
   for(const [id,list] of [...grouped].sort(([a],[b])=>a.localeCompare(b)))files.push({path:entryPath(id),beforeHash:current.baselines[entryPath(id)]??null,after:render(list)})
+  const documents=memoryDocuments(revisions)
+  for(const path of Object.keys(current.baselines))if(semanticPath.test(path)&&!documents.has(path))documents.set(path,EMPTY_MEMORY_DOCUMENT)
+  for(const [path,after] of documents)files.push({path,beforeHash:current.baselines[path]??null,after})
   const journal:Journal={version:1,operationId,baseCommit:this.head(),files}
-  const text=JSON.stringify(journal)
+  const text=JSON.stringify(journalSchema.parse(journal))
   if(Buffer.byteLength(text)>MAX_BATCH)throw failure('LIMIT')
   // Exclusive creation is the inter-process batch lock. No stale lock is ever removed implicitly.
   const stagedJournal=`.nova-batch-${operationId}.tmp`
@@ -218,10 +242,7 @@ export class MarkdownRepository {
    if(!this.isOperationCommit(head,journal))throw failure('CONFLICT')
   }else {
    // Build exactly the owned understanding tree. Untracked files and the batch journal never enter Git.
-   const entries:string[]=[];let marker=''
-   for(const file of journal.files){const blob=this.git(['hash-object','-w','--stdin'],file.after).trim();if(file.path===MARKER)marker=blob;else entries.push(`100644 blob ${blob}\t${file.path.slice('entries/'.length)}\n`)}
-   const treeEntries=this.git(['mktree'],entries.sort().join('')).trim()
-   const tree=this.git(['mktree'],`100644 blob ${marker}\t${MARKER}\n040000 tree ${treeEntries}\tentries\n`).trim()
+   const tree=this.documentTree(new Map(journal.files.map(file=>[file.path,file.after])))
    const previousTree=head?this.git(['rev-parse',`${head}^{tree}`]).trim():null
    if(tree!==previousTree){
     const commit=this.git(['commit-tree',tree,...(head?['-p',head]:[])],`Nova understanding ${operationId}\n`).trim()
@@ -248,9 +269,11 @@ export class MarkdownRepository {
  recover(operationId:string,expectedRevisions?:readonly EntryRevision[]):void {
   this.initialize()
   if(expectedRevisions){
-   const journal=this.journal(),expected=history(expectedRevisions)
-   if(journal.operationId!==operationId||journal.files.length!==expected.size+1)throw failure('CONFLICT')
-   for(const [id,revisions] of expected){const file=journal.files.find(item=>item.path===entryPath(id));if(file?.after!==render(revisions))throw failure('CONFLICT')}
+   const journal=this.journal(),expected=new Map<string,string>()
+   expected.set(MARKER,journal.files.find(file=>file.path===MARKER)!.after)
+   for(const [id,rows] of history(expectedRevisions))expected.set(entryPath(id),render(rows))
+   if(expected.get(MARKER)===markerText){for(const [path,text] of memoryDocuments(expectedRevisions))expected.set(path,text);for(const file of journal.files)if(semanticPath.test(file.path)&&!expected.has(file.path))expected.set(file.path,EMPTY_MEMORY_DOCUMENT)}
+   if(journal.operationId!==operationId||journal.files.length!==expected.size||journal.files.some(file=>file.after!==expected.get(file.path)))throw failure('CONFLICT')
   }
   this.publishPrepared(operationId);this.finalize(operationId)
  }
@@ -262,10 +285,11 @@ export class MarkdownRepository {
   if(!/^[A-Za-z0-9_-]{1,128}$/.test(operationId))throw failure('OPERATION_ID')
   const files=new Map<string,string>([[MARKER,markerText]])
   for(const [id,list] of history(revisions))files.set(entryPath(id),render(list))
-  const check=()=>{
-   for(const [path,expected] of files)if(this.fileHash(path)!==digest(expected))throw failure('CONFLICT')
+  for(const [path,text] of memoryDocuments(revisions))files.set(path,text)
+  const check=(published=false)=>{
+   for(const [path,expected] of files){const actual=this.fileHash(path);if(actual!==digest(expected)&&(published||!semanticPath.test(path)||actual!==baselines[path]))throw failure('CONFLICT')}
    for(const name of readdirSync(join(this.root,'entries'))){const path=`entries/${name}`;if(!files.has(path)&&(!Object.hasOwn(baselines,path)||this.fileHash(path)!==baselines[path]))throw failure('CONFLICT')}
-   for(const path of Object.keys(baselines))if(path!==MARKER&&!/^entries\/[a-f0-9]{64}\.md$/.test(path))throw failure('UNSAFE_PATH')
+   for(const path of Object.keys(baselines)){if(path!==MARKER&&!/^entries\/[a-f0-9]{64}\.md$/.test(path)&&!semanticPath.test(path))throw failure('UNSAFE_PATH');if(!files.has(path)&&this.fileHash(path)!==null&&this.fileHash(path)!==baselines[path])throw failure('CONFLICT')}
   }
   check()
   // Other refs or a staged user change require explicit reconciliation, never silent removal.
@@ -274,10 +298,9 @@ export class MarkdownRepository {
   // No path outside the known Git directory may participate in object cleanup.
   this.assertGitRefs(join(this.root,'.git'))
   if(hasPath(join(this.root,'.git','objects','info','alternates')))throw failure('UNSAFE_PATH')
-  const entries:string[]=[];let marker=''
-  for(const [path,text] of files){const blob=this.git(['hash-object','-w','--stdin'],text).trim();if(path===MARKER)marker=blob;else entries.push(`100644 blob ${blob}\t${path.slice('entries/'.length)}\n`)}
-  const treeEntries=this.git(['mktree'],entries.sort().join('')).trim()
-  const tree=this.git(['mktree'],`100644 blob ${marker}\t${MARKER}\n040000 tree ${treeEntries}\tentries\n`).trim()
+  for(const [path,after] of files)if(semanticPath.test(path)&&this.fileHash(path)!==digest(after))this.atomicWrite({path,after,beforeHash:baselines[path]??null},operationId)
+  check(true)
+  const tree=this.documentTree(files)
   const head=this.head(),parents=head?this.git(['rev-list','--parents','-n','1',head]).trim().split(' '):[]
   if(!head||this.git(['rev-parse',`${head}^{tree}`]).trim()!==tree||parents.length!==1){
    const commit=this.git(['commit-tree',tree],`Nova permanent purge ${operationId}\n`).trim()
@@ -285,6 +308,7 @@ export class MarkdownRepository {
   }
   check()
   for(const name of readdirSync(join(this.root,'entries'))){const path=`entries/${name}`;if(!files.has(path)){if(this.fileHash(path)!==baselines[path])throw failure('CONFLICT');unlinkSync(join(this.root,path))}}
+  for(const path of Object.keys(baselines))if(semanticPath.test(path)&&!files.has(path)&&hasPath(join(this.root,path))){if(this.fileHash(path)!==baselines[path])throw failure('CONFLICT');unlinkSync(join(this.root,path));this.syncDirectory(dirname(join(this.root,path)))}
   this.syncDirectory(join(this.root,'entries'))
   this.git(['reflog','expire','--expire=now','--all'])
   this.git(['-c','gc.auto=0','gc','--prune=now','--quiet'])
@@ -302,8 +326,14 @@ export class MarkdownRepository {
    const original=lstatSync(staged)
    if(original.isSymbolicLink()||original.ino!==active.ino||original.dev!==active.dev)throw failure('UNSAFE_PATH')
   }
-  if(new Set(value.files.map(file=>file.path)).size!==value.files.length||value.files.filter(file=>file.path===MARKER&&file.after===markerText).length!==1)throw failure('FORMAT')
-  for(const file of value.files)if(file.path!==MARKER){const entry=decode(file.after);if(entryPath(entry.revisions.at(-1)!.entry_id)!==file.path)throw failure('FORMAT')}
+  if(new Set(value.files.map(file=>file.path)).size!==value.files.length||value.files.filter(file=>file.path===MARKER&&(file.after===markerText||file.after===legacyMarkerText)).length!==1)throw failure('FORMAT')
+  const revisions:EntryRevision[]=[]
+  for(const file of value.files)if(file.path.startsWith('entries/')){const entry=decode(file.after);if(entryPath(entry.revisions.at(-1)!.entry_id)!==file.path)throw failure('FORMAT');revisions.push(...entry.revisions)}
+  if(value.files.find(file=>file.path===MARKER)!.after===markerText){
+   const documents=memoryDocuments(revisions)
+   for(const [path,text] of documents)if(value.files.find(file=>file.path===path)?.after!==text)throw failure('FORMAT')
+   for(const file of value.files)if(semanticPath.test(file.path)&&file.after!==(documents.get(file.path)??EMPTY_MEMORY_DOCUMENT))throw failure('FORMAT')
+  }
   return value
  }
  private checkFile(file:Journal['files'][number],published=false):void {
@@ -320,12 +350,23 @@ export class MarkdownRepository {
   // Also handles a no-op batch whose tree already matched its base commit.
   const paths=this.git(['ls-tree','-r','--name-only',head]).trim().split('\n').filter(Boolean)
   if(paths.length!==journal.files.length)return false
-  return journal.files.every(file=>paths.includes(file.path)&&digest(this.git(['show',`${head}:${file.path}`]))===digest(file.after))
+  const committed=this.committedFiles(head,paths)
+  return journal.files.every(file=>committed.has(file.path)&&digest(committed.get(file.path)!)===digest(file.after))
+ }
+ private documentTree(files:ReadonlyMap<string,string>):string {
+  const directories=new Map<string,string[]>(),top:string[]=[]
+  for(const [path,text] of files){
+   const blob=this.git(['hash-object','-w','--stdin'],text).trim(),slash=path.indexOf('/')
+   if(slash<0)top.push(`100644 blob ${blob}\t${path}\n`)
+   else{const folder=path.slice(0,slash),rows=directories.get(folder)??[];rows.push(`100644 blob ${blob}\t${path.slice(slash+1)}\n`);directories.set(folder,rows)}
+  }
+  for(const [folder,rows] of directories){const tree=this.git(['mktree'],rows.sort().join('')).trim();top.push(`040000 tree ${tree}\t${folder}\n`)}
+  return this.git(['mktree'],top.sort().join('')).trim()
  }
  private committedFiles(head:string,paths:readonly string[]):Map<string,string> {
   const files=new Map<string,string>()
   if(!paths.length)return files
-  for(const path of paths)if(!/^entries\/[a-f0-9]{64}\.md$/.test(path))throw failure('UNSAFE_PATH')
+  for(const path of paths)if(path!==MARKER&&!/^entries\/[a-f0-9]{64}\.md$/.test(path)&&!semanticPath.test(path))throw failure('UNSAFE_PATH')
   const output=this.git(['cat-file','--batch'],paths.map(path=>`${head}:${path}\n`).join(''),false,true)
   let offset=0,bytes=0
   for(const path of paths){

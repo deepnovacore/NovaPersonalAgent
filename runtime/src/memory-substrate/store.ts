@@ -4,7 +4,7 @@ import {searchSourceEvidence} from './source-retrieval.js'
 import {initializePurge,isPermanentlyPurged} from './purge.js'
 import {normalizeWorkspaceContent,projectWorkspaceRevision} from './workspace-projections.js'
 import {initializeLife,lifeOperation,normalizeLifeContent} from './life-operations.js'
-import {queueMemoryFiles,flushMemoryFiles,readMemoryFiles} from './file-authority.js'
+import {queueMemoryFiles,flushMemoryFiles,readMemoryFiles,validateMemoryFiles} from './file-authority.js'
 import {initializeRetrieval,memoryRetrieval} from './retrieval.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
@@ -367,7 +367,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
       }
       default:throw new Error('STORE_INVALID_OPERATION')
     }
-    if(transaction){db.exec('COMMIT');committed=true;if(!ledgerOnly)flushMemoryFiles(db)}
+    if(transaction){validateMemoryFiles(db);db.exec('COMMIT');committed=true;if(!ledgerOnly)flushMemoryFiles(db)}
     return result
   }catch(error){if(transaction&&!committed)db.exec('ROLLBACK');throw error}
 }
@@ -389,7 +389,7 @@ export function reconcileMemoryFiles(db:LedgerDatabase):void {
    if(inheritedGrant){const sourceId=prefix+'manual:'+contentHash(edit.entry_id),revision=readProcessingGrant(db,sourceId)?.revision??0;memoryOperation(db,'source_grant',{source_id:sourceId,expected_revision:revision,grant:{...inheritedGrant,revision:revision+1}},false)}
    write(db,CandidateSchema.parse({entry_id:edit.entry_id,expected_revision:edit.expected_revision,kind:previous.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidenceId],entity_refs:previous.entity_refs,content:edit.content,valid_until:previous.valid_until,recorded_at:now}))
   }
-  db.exec('COMMIT');committed=true;flushMemoryFiles(db)
+  validateMemoryFiles(db);db.exec('COMMIT');committed=true;flushMemoryFiles(db)
  }catch(error){if(!committed)db.exec('ROLLBACK');throw error}
 }
 

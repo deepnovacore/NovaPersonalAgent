@@ -160,7 +160,7 @@ test('two facts from one turn retain separate evidence after one is forgotten',a
  }finally{await f.close()}
 })
 
-test('forgetting suppresses duplicate copies of the same quote from one turn',async()=>{
+test('forgetting one fact does not suppress a distinct fact merely sharing its quoted sentence',async()=>{
  const f=await fixture()
  try{
   const t=await f.memory.beginExplicitTurn(turn('both','记住叫我 kant，我住 Berlin'))
@@ -168,8 +168,9 @@ test('forgetting suppresses duplicate copies of the same quote from one turn',as
   const home=await f.memory.writeExplicit(t,'home',{action:'set',kind:'fact',text:'用户住在 Berlin',quote:t.text},'chat')
   const forget=await f.memory.beginExplicitTurn(turn('forget','忘记我的称呼'))
   await f.memory.writeExplicit(forget,'forget',{action:'forget',slot:'preferred_name',quote:forget.text},'chat')
-  assert.deepEqual(await f.memory.evidenceFor(home.id,home.version),[])
-  assert.deepEqual((await f.memory.lookupExplicit({},'chat')).entries,[])
+  assert.equal((await f.memory.evidenceFor(home.id,home.version)).length,1)
+  assert.equal((await f.memory.lookupExplicit({},'chat')).entries[0]?.id,home.id)
+  assert.doesNotMatch(JSON.stringify(await f.memory.prepareResponseAdaptation('chat')),/kant/)
  }finally{await f.close()}
 })
 
@@ -185,7 +186,7 @@ test('purge also fences pending turns captured before the slot was first created
  }finally{await f.close()}
 })
 
-test('a fresh name can replace a suppressed sibling only while its source grant permits the consumer',async()=>{
+test('a fresh name can replace an existing name only while its source grant permits the consumer',async()=>{
  const f=await fixture()
  try{
   const t=await f.memory.beginExplicitTurn(turn('both','记住叫我 kant，我住 Berlin'))
