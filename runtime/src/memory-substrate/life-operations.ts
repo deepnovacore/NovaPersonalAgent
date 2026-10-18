@@ -5,7 +5,7 @@ import type {LedgerDatabase} from '../memory-ledger/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {applyLifeMutation,emptyLifeState,lifeInputSchema,lifeStateSchema,type LifeState} from '../personal-agent/life.js'
 import {assertAcceptable,decisionSchema,sourceSchema,validateCandidate,type EvaluatedCandidate} from '../understanding/candidates.js'
-import {CandidateSchema,EntryRevisionSchema,EvidenceRecordSchema,type EntryRevision,type MemoryOperation} from './store.js'
+import {timelineEvidenceVersion,CandidateSchema,EntryRevisionSchema,EvidenceRecordSchema,type EntryRevision,type EvidenceRecord,type MemoryOperation} from './store.js'
 import {lifeResolutionSchema,validateResolution,type LifeResolution} from './resolution.js'
 import {processingGrantSchema,type ProcessingGrant} from './source-state.js'
 
@@ -65,7 +65,7 @@ function objects(state:LifeState):LifeObject[]{return [
  {kind:'profile',id:'profile',data:state.profile},
 ]}
 const entryId=(namespace:string,object:LifeObject)=>namespace+object.kind+':'+object.id
-function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState,evidenceId:string,now:string,legacy=false,processingGrant?:ProcessingGrant):void{
+function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState,evidenceId:string,now:string,legacy=false,processingGrant?:ProcessingGrant,automatic=false):void{
  const profile=before.find(row=>row.kind==='profile'&&row.op!=='tombstone')
  const storageId=(item:LifeObject)=>item.kind==='profile'?(profile?.entry_id??(legacy?entryId(namespace,item):namespace+'profile:'+hash(evidenceId))):entryId(namespace,item)
  const current=new Map(before.map(row=>[row.entry_id,row])),next=objects(state).filter(item=>item.kind!=='profile'||profile!==undefined||item.data.about!==''||item.data.version!==0),ids=new Set(next.map(storageId))
@@ -79,7 +79,7 @@ function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState
   if(legacy)run('append_evidence',EvidenceRecordSchema.parse({id:objectEvidenceId,source_id:namespace+'migration:'+hash(id),source_kind:'task_result',locator:'legacy-life-json:'+item.kind,observed_at:now,recorded_at:now,raw_text:null,hash:hash(canonicalJson({entry_id:id,legacy:item.data})),trust:'trusted_system',extracted:{event:'legacy_import',legacy:true,original_evidence_available:false}}))
   if(legacy&&processingGrant)run('source_grant',{source_id:namespace+'migration:'+hash(id),expected_revision:0,grant:processingGrant})
   const order=typeof old?.content.life_order==='number'?old.content.life_order:nextOrder.get(item.kind)??0;nextOrder.set(item.kind,Math.max(nextOrder.get(item.kind)??0,order+1))
-  run('merge',CandidateSchema.parse({entry_id:id,expected_revision:old?.revision??0,kind:item.kind,origin:legacy?'inferred':'stated',written_by:legacy?'merge':'user_correction',evidence_refs:[...new Set([objectEvidenceId,...(Array.isArray(item.data.provenance_refs)?item.data.provenance_refs.filter((ref):ref is string=>typeof ref==='string'&&run('retrieval_evidence',{id:ref})!==null):[])])],content:{life_id:item.id,life_data:item.data,life_order:order,text,...(item.kind==='profile'?{section:'explicit'}:{}),legacy},recorded_at:now}))
+  run('merge',CandidateSchema.parse({entry_id:id,expected_revision:old?.revision??0,kind:item.kind,origin:legacy||automatic?'inferred':'stated',written_by:legacy||automatic?'merge':'user_correction',evidence_refs:[...new Set([objectEvidenceId,...(Array.isArray(item.data.provenance_refs)?item.data.provenance_refs.filter((ref):ref is string=>typeof ref==='string'&&run('retrieval_evidence',{id:ref})!==null):[])])],content:{life_id:item.id,life_data:item.data,life_order:order,text,...(item.kind==='profile'?{section:'explicit'}:{}),legacy},recorded_at:now}))
  }
  for(const old of before)if(old.op!=='tombstone'&&!ids.has(old.entry_id))run('merge',CandidateSchema.parse({entry_id:old.entry_id,expected_revision:old.revision,kind:old.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidenceId],content:{life_id:old.content.life_id,reason:'undo_create'},op:'tombstone',recorded_at:now}))
 }
@@ -118,7 +118,7 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
   if((meta.profile_version??0)<state.profile.version){meta={...meta,profile_version:state.profile.version};saveMeta(db,q.namespace,meta)}
   return {state,revision:meta.revision}
  }
- const q=z.object({namespace:namespaceSchema,input:lifeInputSchema,requestId:z.string().min(1).max(512),expectedRevision:z.number().int().nonnegative(),provenance:provenanceSchema.optional(),processingGrant:processingGrantSchema.optional()}).strict().parse(value)
+ const q=z.object({namespace:namespaceSchema,input:lifeInputSchema,requestId:z.string().min(1).max(512),expectedRevision:z.number().int().nonnegative(),provenance:provenanceSchema.optional(),workbench_provider:z.string().min(1).max(512).optional(),processingGrant:processingGrantSchema.optional()}).strict().parse(value)
  const meta=readMeta(db,q.namespace);if(!meta)throw Error('life_not_initialized')
  const entries=rows(run,q.namespace),state=stateFrom(entries,meta.receipts)
  // A durable idempotency receipt takes precedence over a stale client's aggregate revision.
@@ -155,12 +155,23 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
   }
 
  }
+ if(q.input.op==='from_workbench'){
+  if(!q.workbench_provider)throw Error('workbench_provider_required')
+  for(const original of q.input.evidence??[]){
+   if(original.kind==='file'||original.kind==='memory')continue
+   const evidence=run('processing_evidence',{id:original.id,purpose:'extraction',provider:q.workbench_provider}) as EvidenceRecord|null
+   const version=evidence&&timelineEvidenceVersion(evidence,run('processing_stamp',{ids:[original.id],purpose:'extraction',provider:q.workbench_provider}))
+   if(!evidence||(evidence.hash!==original.version&&version!==original.version)||evidence.raw_text!==original.text)throw Error('workbench_source_changed')
+  }
+ }
+ const automaticWorkbench=q.input.op==='from_workbench'&&q.input.automatic
+ const command=q.input.op==='from_workbench'?Object.fromEntries(Object.entries(q.input).filter(([key])=>key!=='evidence')):q.input
  const now=new Date().toISOString(),next=applyLifeMutation(state,q.input,q.requestId,now),evidenceId=q.namespace+'e:'+hash(q.requestId)
  // Empty UI state remains version zero; a new incarnation cannot reuse an old editor's version.
  if(q.input.op==='profile'){const version=Math.max(next.state.profile.version,(meta.profile_version??0)+1);next.state.profile.version=version;next.result.version=version;next.state.receipts[q.requestId]!.result.version=version}
- run('append_evidence',EvidenceRecordSchema.parse({id:evidenceId,source_id:q.namespace+'event:'+hash(q.requestId),source_kind:'user_correction',locator:evaluated?'host-source:'+evaluated.source.id:'life-command:'+q.requestId,observed_at:evaluated?.source.observed_at??now,recorded_at:now,raw_text:evaluated?.source.text??canonicalJson(q.input),hash:hash(canonicalJson({namespace:q.namespace,input:q.input,requestId:q.requestId,provenance:q.provenance??null})),trust:'trusted_user',extracted:{event:q.provenance?.type??'life_command',command:q.input,...(evaluated?{source:evaluated.source,candidate:evaluated.candidate,decision:evaluated.decision}: {})}}))
+ run('append_evidence',EvidenceRecordSchema.parse({id:evidenceId,source_id:q.namespace+'event:'+hash(q.requestId),source_kind:automaticWorkbench?'task_result':'user_correction',locator:evaluated?'host-source:'+evaluated.source.id:'life-command:'+q.requestId,observed_at:evaluated?.source.observed_at??now,recorded_at:now,raw_text:evaluated?.source.text??canonicalJson(command),hash:hash(canonicalJson({namespace:q.namespace,input:q.input,requestId:q.requestId,provenance:q.provenance??null})),trust:automaticWorkbench?'trusted_system':'trusted_user',extracted:{event:automaticWorkbench?'workbench_capture':q.provenance?.type??'life_command',command,...(evaluated?{source:evaluated.source,candidate:evaluated.candidate,decision:evaluated.decision}: {})}}))
  if(q.processingGrant)run('source_grant',{source_id:q.namespace+'event:'+hash(q.requestId),expected_revision:0,grant:q.processingGrant})
- persist(run,q.namespace,entries,next.state,evidenceId,now)
+ persist(run,q.namespace,entries,next.state,evidenceId,now,false,undefined,automaticWorkbench)
  const updated=rows(run,q.namespace),updatedMeta:Meta={...meta,profile_version:Math.max(meta.profile_version??0,next.state.profile.version),revision:meta.revision+1,receipts:next.state.receipts,signature:signature(updated),migrated:true}
  saveMeta(db,q.namespace,updatedMeta)
  return {state:stateFrom(updated,updatedMeta.receipts),revision:updatedMeta.revision,result:next.result}

@@ -1,3 +1,4 @@
+import {initializeExplicitMemory,explicitMemoryOperation} from './explicit-memory.js'
 import {imMetadataSchema} from '../memory/provenance.js'
 import {searchSourceEvidence} from './source-retrieval.js'
 import {initializePurge,isPermanentlyPurged} from './purge.js'
@@ -29,6 +30,7 @@ export const EvidenceRecordSchema = z.object({
   retention_until:date.nullable().default(null), trust:trustSchema,
 }).strict()
 export type EvidenceRecord = z.infer<typeof EvidenceRecordSchema>
+export const timelineEvidenceVersion=(record:EvidenceRecord,stamp:unknown):string=>sha256(canonicalJson({hash:record.hash,metadata:record.source_metadata??null,stamp}))
 export const CandidateSchema = z.object({
   entry_id:id, expected_revision:z.number().int().nonnegative().optional(),
   kind:z.enum(['fact','preference','plan','concern','commitment','entity','topic','LogicalWorkspace','WorkspaceInstance','RelationCard','todo','idea','goal','profile','memory_summary']),
@@ -72,6 +74,7 @@ export function merge(current:EntryRevision|null,candidate:Candidate,policy:{sup
 }
 
 export function initializeMemory(database:LedgerDatabase):void {
+  initializeExplicitMemory(database)
   initializePurge(database)
   initializeLife(database)
   initializeSourceState(database)
@@ -144,7 +147,7 @@ function write(db:LedgerDatabase,candidate:Candidate,deleted=false):EntryRevisio
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
+export type MemoryOperation = 'explicit_begin'|'explicit_write'|'explicit_lookup'|'timeline_evidence'|'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   const ledgerOnly=isLedgerOnlyOperation(operation,value)
@@ -154,6 +157,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
   try {
     let result:unknown=null
     switch(operation){
+      case 'explicit_begin':case 'explicit_write':case 'explicit_lookup':result=explicitMemoryOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
       case 'source_search':result=searchSourceEvidence(db,input);break;
       case 'source_processing':result=sourceProcessingOperation(db,input);break;
       case 'life_load':case 'life_mutate':case 'life_capture_im':result=lifeOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
@@ -164,7 +168,11 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         result=all(db).filter(row=>row.entry_id.startsWith(q.entry_prefix)&&row.op!=='tombstone'&&!fileDerivedInference(db,row)&&(row.valid_until===null||Date.parse(row.valid_until)>now)&&row.evidence_refs.every(ref=>effectiveEvidence(db,ref,{purpose:'conversation',provider:q.consumer})!==null))
         break
       }
-      case 'processing_stamp':result=processingStamp(db,z.array(id).min(1).max(256).parse(value.ids),z.enum(['extraction','embedding','conversation']).parse(value.purpose),id.parse(value.provider));break
+      case 'processing_stamp':{
+        const purpose=z.enum(['extraction','embedding','conversation']).parse(value.purpose),provider=id.parse(value.provider),refs=z.array(id).min(1).max(256)
+        result=value.groups===undefined?processingStamp(db,refs.parse(value.ids),purpose,provider):z.array(refs).max(256).parse(value.groups).map(ids=>processingStamp(db,ids,purpose,provider))
+        break
+      }
       case 'profile_evidence':{
         const q=z.object({source_prefix:z.string().min(1).startsWith('personal:').endsWith(':'),provider:id,ids:z.array(id).max(256).optional(),participants:z.boolean().optional()}).strict().parse(input)
         const records:EvidenceRecord[]=[],counts=new Map<string,number>()
@@ -200,6 +208,24 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         }
         result=context;break
       }
+      case 'timeline_evidence':{
+        const q=z.object({source_prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,limit:z.number().int().min(1).max(5000).default(5000),since:z.string().datetime().optional()}).strict().parse(input)
+        const resultRows:EvidenceRecord[]=[]
+        const since=q.since??new Date(Date.now()-14*86400000).toISOString()
+        const candidates=db.prepare(`SELECT id FROM (SELECT id,json_extract(payload_json,'$.observed_at') at,
+          row_number() OVER (PARTITION BY coalesce(json_extract(payload_json,'$.source_metadata.chat_id'),source_id) ORDER BY json_extract(payload_json,'$.observed_at') DESC,rowid DESC) rank
+          FROM memory_evidence WHERE substr(source_id,1,?)=? AND json_extract(payload_json,'$.source_kind') IN ('calendar','im','mail') AND json_extract(payload_json,'$.observed_at')>=?)
+          ORDER BY rank,at DESC LIMIT 20000`).all(q.source_prefix.length,q.source_prefix,since)
+        for(const candidate of candidates){
+          const record=effectiveEvidence(db,String(candidate.id),{purpose:'extraction',provider:q.provider})
+          if(!record?.raw_text||Date.parse(record.observed_at)>Date.now())continue
+          const head=db.prepare('SELECT evidence_id FROM memory_message_heads WHERE key=?').get(sha256(canonicalJson([record.source_id,record.locator])))
+          if(head&&head.evidence_id!==record.id)continue
+          if(!head&&db.prepare("SELECT 1 FROM memory_evidence WHERE source_id=? AND json_extract(payload_json,'$.locator')=? AND rowid>(SELECT rowid FROM memory_evidence WHERE id=?) LIMIT 1").get(record.source_id,record.locator,record.id))continue
+          resultRows.push({...record,hash:timelineEvidenceVersion(record,processingStamp(db,[record.id],'extraction',q.provider))});if(resultRows.length>=q.limit)break
+        }
+        result=resultRows;break
+      }
       case 'daily_evidence':{
         const q=z.object({source_prefix:z.string().min(1).startsWith('personal:').endsWith(':'),provider:id}).strict().parse(input)
         result=db.prepare("SELECT id FROM memory_evidence WHERE substr(source_id,1,?)=? AND json_extract(payload_json,'$.source_kind') IN ('calendar','im')").all(q.source_prefix.length,q.source_prefix).flatMap(row=>{
@@ -216,7 +242,11 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
           return [{...ref,...(calendar?{extracted:{...ref.extracted,calendar}}:{})}]
         });break
       }
-      case 'processing_evidence':result=effectiveEvidence(db,id.parse(value.id),{purpose:z.enum(['extraction','embedding','conversation']).parse(value.purpose),provider:id.parse(value.provider)});break
+      case 'processing_evidence':{
+        const access={purpose:z.enum(['extraction','embedding','conversation']).parse(value.purpose),provider:id.parse(value.provider)}
+        result=value.ids===undefined?effectiveEvidence(db,id.parse(value.id),access):[...new Set(z.array(id).max(256).parse(value.ids))].flatMap(ref=>{const evidence=effectiveEvidence(db,ref,access);return evidence?[evidence]:[]})
+        break
+      }
       case 'invalidate_message': {
         const q=z.object({source_id:id,locator:z.string().min(1).max(4096)}).strict().parse(input)
         const records=rows(db,"SELECT payload_json FROM memory_evidence WHERE source_id=? AND json_extract(payload_json,'$.source_kind')='im' AND json_extract(payload_json,'$.locator')=?",q.source_id,q.locator).map(row=>EvidenceRecordSchema.parse(row))
@@ -271,7 +301,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         result=all(db).filter(entry=>(includeHistory || (entry.op!=='tombstone' && (entry.valid_until===null || Date.parse(entry.valid_until)>Date.parse(now))))&&(!excludeFileInferences||!fileDerivedInference(db,entry)));break
       }
       case 'history':result=rows(db,'SELECT payload_json FROM memory_revisions WHERE entry_id=? ORDER BY revision',id.parse(value.entry_id));break
-      case 'evidence':result=evidence(db,id.parse(value.id));break
+      case 'evidence':result=value.ids===undefined?evidence(db,id.parse(value.id)):[...new Set(z.array(id).max(256).parse(value.ids))].flatMap(ref=>{const row=evidence(db,ref);return row?[row]:[]});break
       case 'retrieval_evidence':result=retrievalEvidence(db,id.parse(value.id));break
       case 'extraction_done':result=db.prepare('SELECT 1 FROM memory_extractions WHERE evidence_id=? LIMIT 1').get(id.parse(value.id))!==undefined;break
       case 'pending_evidence': {
@@ -365,7 +395,7 @@ export function reconcileMemoryFiles(db:LedgerDatabase):void {
 
 /** Raw admission and permission fences remain usable when editable documents need repair. */
 export function isLedgerOnlyOperation(operation:MemoryOperation,value:Record<string,unknown>):boolean {
- if(['source_search','source_processing','append_evidence_batch','profile_evidence','append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
+ if(['timeline_evidence','source_search','source_processing','append_evidence_batch','profile_evidence','append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
  // An extraction marker only records that an attempt ran; it never writes entries.
  if(operation==='record_extraction'||operation==='record_evidence_batch')return true
  return operation==='source_connection'&&['get','list','create','fence','sync_status','reset_sync'].includes(String(value.action))
