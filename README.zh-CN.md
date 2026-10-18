@@ -2,17 +2,23 @@
 
 <div align="center">
 
-[English](README.md) · **简体中文**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
+  <img src="assets/brand/npa-header-light.svg" alt="NovaPersonalAgent — Understands you. Interacts in real time." width="100%">
+</picture>
 
-# Nova Personal Agent: Your Personal Agent and Voice Assistant
-
-**你的个人 Agent 与常驻语音助手：理解上下文，前后双脑协作，主动有分寸。**
+<a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
 
 [![CI](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
+[![npm downloads](https://img.shields.io/npm/d18m/nova-audio-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-audio-agent)
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
+
+**开源个人 Agent：私有记忆、智能主动性与实时交互。**
+
+Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如何、何时澄清意图、征求批准，再推进工作。前后双脑协作，让后台 Agent 执行长任务时，前台依然能流畅交流。你可以边聊边调整目标，随时回看结果，始终掌握主动权。
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [视频演示](https://youtu.be/t1c-2O-QsxE)**
 
@@ -21,8 +27,6 @@
 </div>
 
 ---
-
-> **分支预览 · Nova Visor：** 已增加主显示器透明 HUD 和“主题”设置。[使用说明与架构扩展](docs/VISOR_GUIDE.zh-CN.md) · [验证结果与限制](docs/VISOR_V1.md) · [视觉参考](docs/DESKTOP_VISOR_DEMO.md)。当前为本地 macOS 预览，安装版最终 GUI 验收及跨平台认证尚未完成。
 
 ## News
 
@@ -153,6 +157,14 @@
 ## 3. 快速开始
 
 ### 3.1 安装与启动
+
+**快捷下载 · v0.4.0** — [发布说明与 SHA-256 校验文件](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0) · [最新版本](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+
+| 平台 | 下载 |
+| --- | --- |
+| macOS · Apple Silicon（arm64） | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-macos-arm64-app.zip) |
+| Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-windows-x64.exe) · [便携版 ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-windows-x64-portable.zip) |
+| Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0/nova-personal-agent-0.4.0-linux-x64.deb) |
 
 环境要求：Node.js 22.13+ 与 npm。编码任务需安装并登录所选编码后端；Codex 使用 app-server。
 
