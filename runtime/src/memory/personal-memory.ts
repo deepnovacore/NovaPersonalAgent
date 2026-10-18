@@ -68,6 +68,7 @@ export interface PersonalMemoryReplyPreference {
  * resource instance; callers must not compare it across providers or identities.
  */
 export interface PersonalMemoryResponseAdaptation {
+  readonly explicitUserContext?: string
   /** Authorized, bounded derived understanding; reference data only, never action authority. */
   readonly memoryContext?: {readonly text: string; readonly voice: string}
   readonly revision: number
@@ -98,6 +99,7 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly sourceProcessingLlm?: ()=>{baseUrl:string;apiKey:string;model:string}|undefined
   readonly sourceProcessingProfile?: (entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>)=>ReturnType<ProfileGenerator>
   readonly sourceProcessingConsumer?: ()=>string
+  readonly syncSharedContext?: ()=>Promise<void>
   readonly sourceProcessing?: (request:ProcessingRequest)=>Promise<unknown>
   readonly profileSources?: (ids?:readonly string[]) => Promise<ProfileInput[]>
   readonly resolveLifeCandidate?: (row:EvaluatedCandidate,signal:AbortSignal,guard:()=>void)=>Promise<ResolvedLifeCandidate>

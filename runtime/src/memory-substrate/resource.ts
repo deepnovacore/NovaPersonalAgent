@@ -1,7 +1,8 @@
 import {SOURCE_PROCESSING_GOAL,SOURCE_PROCESSING_INSTRUCTIONS} from '../core/source-processing-instructions.js'
+import type {HubContextBridge} from '../hub/context-bridge.js'
 import {profileSourceInput} from './profile-source-input.js'
 import {GatewayPersonalWriter} from '../model/personal-writer.js'
-import type {ProfileInput} from '../personal-agent/profile-warmup.js'
+import {profileDraftSchema,type ProfileInput} from '../personal-agent/profile-warmup.js'
 import {processingRequestSchema,SOURCE_PROCESSING_VERSION,type ProcessingRequest} from './source-processing.js'
 import {type SourceTag,type ImMetadata} from '../memory/provenance.js'
 import {assertAcceptable,type EvaluatedCandidate} from '../understanding/candidates.js'
@@ -29,12 +30,15 @@ const extractionSchema=z.object({entries:z.array(z.object({
 }).strict()).max(8)}).strict()
 const purgeResultSchema=z.object({status:z.enum(['complete','incomplete']),operation_id:z.string().min(1),removed_entries:z.number().int().nonnegative(),removed_evidence:z.number().int().nonnegative(),removed_entry_ids:z.array(z.string().min(1)).max(4096).default([]),removed_evidence_ids:z.array(z.string().min(1)).max(4096).default([]),index_evidence_ids:z.array(z.string().min(1)).max(4096).default([]),backup_cleanup:z.object({status:z.enum(['complete','incomplete']),unresolved:z.array(z.string())}).strict()}).strict()
 const pendingPurgeSchema=purgeResultSchema.extend({entry_id:z.string().min(1),expected_revision:z.number().int().positive()})
-const evidenceInputSchema=z.object({sourceId:z.string().min(1).max(256),locator:z.string().min(1).max(4096),text:z.string().min(1).max(100000),observedAt:z.iso.datetime({offset:true}),kind:z.enum(['file','im']),embeddingConsent:z.boolean(),processingConsent:processingGrantSchema.optional()}).strict()
+const evidenceInputSchema=z.object({sourceId:z.string().min(1).max(256),locator:z.string().min(1).max(4096),text:z.string().min(1).max(100000),observedAt:z.iso.datetime({offset:true}),kind:z.enum(['file','im']),embeddingConsent:z.boolean(),processingConsent:processingGrantSchema.optional(),retentionUntil:z.string().datetime().optional(),im:EvidenceRecordSchema.shape.source_metadata.optional()}).strict()
 const displayText=(value:unknown)=>typeof value==='string'?value:''
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex')
 
 /** Personal projections over the same worker-owned database as Workspace Graph. */
 export class SubstrateMemoryResource implements PersonalMemoryResource {
+  #sharedContext:HubContextBridge|undefined
+  setSharedContext(bridge:HubContextBridge){this.#sharedContext=bridge}
+  async syncSharedContext(){await this.#sharedContext?.prepare()}
   readonly prefix:string
   #onChange:(()=>void)|undefined
   setOnChange(listener:()=>void):void{this.#onChange=listener}
@@ -92,7 +96,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #preparedSignatures=new Map<string,{signature:string;revision:number}>()
   #consolidating:Promise<void>|null=null
   #adaptation:PersonalMemoryResponseAdaptation={revision:0,replyPreferences:[]}
-  constructor(readonly options:{sourceProcessingLlm?:{baseUrl:string;apiKey:string};sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;profileParticipantMessages?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
+  constructor(readonly options:{sourceProcessingLlm?:{baseUrl:string;apiKey:string};sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];conversationRecipients?:Record<string,string>;personalMemoryEnabled?:boolean;profileParticipantMessages?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
     this.prefix='personal:'+digest(options.userId)+':'
   }
   async open():Promise<void>{if(this.#opened)return;await this.options.client.open();await this.options.migrate?.();await this.options.client.memory('enable_files',{});this.#opened=true;this.#abort=new AbortController();await this.#maintain();this.#maintenance=setInterval(()=>{void this.#maintain().catch(()=>{ /* retry on the next maintenance tick */ })},60000);this.#maintenance.unref();await this.#refresh()}
@@ -103,16 +107,22 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async profileSources(ids?:readonly string[]):Promise<ProfileInput[]>{
     this.#ready()
     const records=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('profile_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),...(ids?{ids:ids.filter(id=>id.startsWith(this.prefix))}: {}),...(this.options.profileParticipantMessages?{participants:true}:{})}))
-    return records.map(record=>profileSourceInput(record))
+    return records.filter(record=>!record.source_id.startsWith(this.prefix+'hub-context:')).map(record=>profileSourceInput(record))
   }
 
   sourceProcessingLlm(){return this.options.sourceProcessingLlm?{...this.options.sourceProcessingLlm,model:this.options.model}:undefined}
-  sourceProcessingProfile(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await authorize();signal.throwIfAborted();const reply=await this.options.gateway.complete(request);await authorize();signal.throwIfAborted();return reply}};return new GatewayPersonalWriter({gateway,model:this.options.model}).generateProfile(entries,signal)}
+  sourceProcessingProfile(entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>){const gateway:ModelGateway={stream:request=>this.options.gateway.stream(request),complete:async request=>{await this.#sharedContext?.authorize();await authorize();signal.throwIfAborted();const context=this.#sharedContext?.correctionContext()??'';const reply=await this.options.gateway.complete({...request,system:request.system+(context?'\n'+context:'')});await this.#sharedContext?.authorize();await authorize();signal.throwIfAborted();return reply}};return new GatewayPersonalWriter({gateway,model:this.options.model}).generateProfile(entries,signal)}
   sourceProcessingConsumer():string{return this.#extractionFingerprint()}
   async sourceProcessing(request:ProcessingRequest):Promise<unknown>{
     this.#ready()
     const parsed=processingRequestSchema.parse(request)
-    return this.options.client.memory('source_processing',{...parsed,prefix:this.prefix,provider:this.#extractionFingerprint(),recipe:digest(JSON.stringify({recipe:this.options.sourceProcessingRecipe??SOURCE_PROCESSING_VERSION,agent:SOURCE_PROCESSING_GOAL,instructions:SOURCE_PROCESSING_INSTRUCTIONS,profile:'sender-grounded-prose-v4',model:this.options.model}))})
+    // Cleanup/status remain available when authority or consent is invalidated.
+    if(!['status','retire'].includes(parsed.action))await this.#sharedContext?.authorize()
+    const effective=parsed.action==='publish'&&this.#sharedContext?{...parsed,draft:this.#sharedContext.suppressCorrected(parsed.draft)}:parsed
+    const result=await this.options.client.memory('source_processing',{...effective,prefix:this.prefix,provider:this.#extractionFingerprint(),recipe:digest(JSON.stringify({recipe:this.options.sourceProcessingRecipe??SOURCE_PROCESSING_VERSION,agent:SOURCE_PROCESSING_GOAL,instructions:SOURCE_PROCESSING_INSTRUCTIONS,profile:'sender-grounded-prose-v4',model:this.options.model}))})
+    if(parsed.action==='publish'&&z.object({applied:z.boolean()}).parse(result).applied)await this.#sharedContext?.publish(parsed.draft)
+    if(parsed.action==='profile'&&this.#sharedContext){const profile=z.object({revision:z.number(),draft:profileDraftSchema.nullable()}).parse(result);return {...profile,draft:profile.draft?this.#sharedContext.suppressCorrected(profile.draft):null,explicit_corrections:this.#sharedContext.explicitCorrections()}}
+    return result
   }
   async invalidateMessage(sourceId:string,locator:string):Promise<void>{
     this.#ready()
@@ -130,12 +140,20 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(workEpoch!==this.#memoryWorkEpoch)return {revision:++this.#preparedRevision,replyPreferences:[],memoryContext:{text:'',voice:''}}
     const summary=rows.find(row=>row.entry_id===this.prefix+'summary:daily')??null,now=new Date()
     const projection={replyPreferences:rows.filter(row=>row.kind==='preference'&&row.origin==='stated').slice(0,16).map(row=>({id:row.entry_id,text:displayText(row.content.text),evidenceIds:row.evidence_refs})),memoryContext:{text:memoryReadContext(rows,summary,{now,mode:'text'}),voice:memoryReadContext(rows,summary,{now,mode:'voice'})}}
-    const signature=JSON.stringify(projection),old=this.#preparedSignatures.get(consumer)
+    let explicitUserContext:string|undefined
+    const recipient=this.options.conversationRecipients?.[consumer]
+    if(this.#sharedContext&&recipient&&this.options.conversationProviders?.includes(consumer)){
+      // Refresh explicit statements without launching synthesis. An unavailable
+      // Hub hides shared context, but does not disable unrelated local chat.
+      try{await this.#sharedContext.prepare();explicitUserContext=this.#sharedContext.correctionContext(recipient)}catch{signal?.throwIfAborted()}
+    }
+    const enriched={...projection,...(explicitUserContext?{explicitUserContext}:{})}
+    const signature=JSON.stringify(enriched),old=this.#preparedSignatures.get(consumer)
     const revision=old?.signature===signature?old.revision:Math.max(++this.#preparedRevision,this.#adaptation.revision+1)
     this.#preparedRevision=Math.max(this.#preparedRevision,revision)
     // Only configured recipients need a stable cache key; arbitrary denied recipients must not grow this map.
     if(this.options.conversationProviders?.includes(consumer))this.#preparedSignatures.set(consumer,{signature,revision})
-    return {revision,...projection}
+    return {revision,...enriched}
   }
   async #rows(history=false,workspace=false,personalView=false):Promise<EntryRevision[]>{
     this.#ready()
@@ -265,11 +283,11 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return results
   }
   /** All chunks of one document in a single ledger transaction; the source grant is stated once. */
-  async recordEvidenceBatch(inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}[]):Promise<{evidence_id:string}[]>{
+  async recordEvidenceBatch(inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant;retentionUntil?:string;im?:ImMetadata}[]):Promise<{evidence_id:string}[]>{
     this.#ready()
     const items=inputs.map(input=>evidenceInputSchema.parse(input))
     if(!items.length)return []
-    const records=items.map(q=>this.#evidenceRecord({type:q.kind,ref:q.locator,observed_at:q.observedAt},q.text,q.kind,q.sourceId,undefined,false,undefined,q.embeddingConsent))
+    const records=items.map(q=>this.#evidenceRecord({type:q.kind,ref:q.locator,observed_at:q.observedAt},q.text,q.kind,q.sourceId,q.retentionUntil,false,q.im??undefined,q.embeddingConsent))
     const saved=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('record_evidence_batch',{items:records.map(evidence=>({evidence,attempt_id:'knowledge-index'}))}))
     const granted=new Set<string>()
     for(const q of items)if(q.processingConsent&&!granted.has(q.sourceId)){granted.add(q.sourceId);await this.setProcessingConsent(q.sourceId,q.processingConsent)}

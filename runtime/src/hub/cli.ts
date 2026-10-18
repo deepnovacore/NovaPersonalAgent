@@ -3,9 +3,10 @@ import {dirname,resolve} from 'node:path'
 import {HubStore} from './store.js'
 import {createHubServer} from './server.js'
 import {runHubClient} from './client-cli.js'
+import {deviceKind} from '../device/space-authority.js'
 
 const [command,path,account,device]=process.argv.slice(2)
-if(!['serve','enroll','revoke'].includes(command??'')){
+if(!['serve','enroll','revoke','recover'].includes(command??'')){
  try{process.exitCode=await runHubClient(process.argv.slice(2))}
  catch(error){console.error(error instanceof Error?error.message:'hub_request_failed');process.exitCode=1}
 }else if(!path){
@@ -23,7 +24,8 @@ if(!['serve','enroll','revoke'].includes(command??'')){
  }else{
   try{
    if(!account||!device)throw Error('account and device required')
-   if(command==='enroll')console.log(JSON.stringify(store.enroll(account,device)))
+   if(command==='recover')console.log(JSON.stringify(store.authority.recover(account,{retired_device_id:device,target_device_id:process.argv[6],expected_epoch:Number(process.argv[7]),transition_id:process.argv[8]})))
+   else if(command==='enroll')console.log(JSON.stringify(store.enroll(account,device,deviceKind.parse(process.argv[6]??'unknown'))))
    else store.revoke(account,device)
   }finally{store.close()}
  }

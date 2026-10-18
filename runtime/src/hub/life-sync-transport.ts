@@ -71,6 +71,10 @@ export class LifeSyncTransport{
   }
  }
  async snapshot(){return checked(hubSnapshotSchema,await this.#request('state'))}
+ async contextRequest(path:string,body?:unknown):Promise<unknown>{
+  if(!['identity','authority','context','context/publish','context/ack','schedule-owners','schedule-owners/register','schedule-owners/claim','schedule-owners/checkpoint'].includes(path))throw Error('hub_path_invalid')
+  return this.#request(path,body)
+ }
  async changes(after:number){counter.parse(after);return checked(hubChangesSchema,await this.#request('changes?after='+after))}
  async mutate(command:unknown){
   return checked(z.object({result:z.object({id:z.string(),version:counter}),snapshot:hubSnapshotSchema}).strict(),await this.#request('mutations',command))

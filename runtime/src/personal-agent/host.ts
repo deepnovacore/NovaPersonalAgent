@@ -284,6 +284,7 @@ export class PersonalAgentHost {
     scheduledTaskTick():Promise<void>{
         const operation=this.#scheduledTail.then(async()=>{
             if(!this.#opened||this.#recovering)return
+            try{await this.schedules.syncShared()}catch{/* Shared claims fail closed; unrelated local rules remain available. */}
             await this.sourceProcessingAgent.tick();await this.schedules.claimDue();await this.#reconcileScheduledRuns()
             for(const run of this.schedules.activeRuns()){
                 const task=run.task_id?this.tasks.get(run.task_id):null

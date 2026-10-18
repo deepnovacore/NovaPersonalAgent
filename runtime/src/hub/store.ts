@@ -4,6 +4,10 @@ import {z} from 'zod'
 import {applyLifeMutation, emptyLifeState, lifeInputSchema, lifeStateSchema} from '../personal-agent/life.js'
 import type {LifeState} from '../personal-agent/life.js'
 import {HubRouting} from './routing.js'
+import {HubSpaceAuthority} from './space-authority.js'
+import {HubContextSync} from './context-sync.js'
+import {ScheduleOwnership} from '../device/schedule-ownership.js'
+import {deviceKind,type DeviceKind} from '../device/space-authority.js'
 import {hubImportSchema,importLifeEntity} from './life-projection.js'
 
 const id=z.string().min(1).max(200).regex(/^[a-zA-Z0-9_-]+$/)
@@ -24,6 +28,9 @@ export class HubStore {
  readonly #db:DatabaseSync
  readonly #identity:string
  readonly routing:HubRouting
+ readonly authority:HubSpaceAuthority
+ readonly context:HubContextSync
+ readonly scheduleOwnership:ScheduleOwnership
  constructor(path:string){
   this.#db=new DatabaseSync(path,{allowExtension:false})
   this.#db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
@@ -34,15 +41,20 @@ export class HubStore {
    CREATE TABLE IF NOT EXISTS hub_log(account_id TEXT NOT NULL,seq INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(account_id,seq));`)
   this.#db.prepare('INSERT OR IGNORE INTO hub_identity VALUES(1,?)').run(randomUUID())
   this.#identity=String(this.#db.prepare('SELECT id FROM hub_identity WHERE singleton=1').get()!.id)
+  if(!this.#db.prepare('PRAGMA table_info(hub_devices)').all().some(row=>row.name==='kind'))this.#db.exec("ALTER TABLE hub_devices ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown'")
   this.routing=new HubRouting(this.#db,token=>this.#device(token))
+  this.authority=new HubSpaceAuthority(this.#db,token=>this.#device(token))
+  this.context=new HubContextSync(this.#db,token=>this.#device(token),this.authority)
+  this.scheduleOwnership=new ScheduleOwnership(this.#db,token=>this.#device(token),this.authority)
  }
  close(){this.#db.close()}
- enroll(accountId:string,label:string){
+ enroll(accountId:string,label:string,kind:DeviceKind='unknown'){
+  deviceKind.parse(kind)
   id.parse(accountId);z.string().trim().min(1).max(100).parse(label)
   const token=randomBytes(32).toString('base64url'),device_id=randomUUID()
   this.#transaction(()=>{
    this.#db.prepare('INSERT OR IGNORE INTO hub_accounts VALUES(?,?,0,?)').run(accountId,JSON.stringify(emptyLifeState()),'{}')
-   this.#db.prepare('INSERT INTO hub_devices(token_hash,account_id,device_id,epoch) VALUES(?,?,?,1)').run(digest(token),accountId,device_id)
+   this.#db.prepare('INSERT INTO hub_devices(token_hash,account_id,device_id,epoch,kind) VALUES(?,?,?,1,?)').run(digest(token),accountId,device_id,kind)
   })
   return {account_id:accountId,device_id,device_name:label,device_epoch:1,token}
  }

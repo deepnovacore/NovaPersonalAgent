@@ -1,5 +1,6 @@
 import {createServer} from 'node:http'
-import {ZodError} from 'zod'
+import {z,ZodError} from 'zod'
+import {spaceId} from '../device/space-authority.js'
 import type {HubStore} from './store.js'
 
 export function createHubServer(store:HubStore){
@@ -16,7 +17,29 @@ export function createHubServer(store:HubStore){
    if(req.method==='GET'&&url.pathname==='/hub/v1/devices'){reply(200,store.routing.devices(token));return}
    if(req.method==='GET'&&url.pathname==='/hub/v1/commands'){reply(200,store.routing.inbox(token));return}
    if(req.method==='GET'&&url.pathname==='/hub/v1/tasks'){reply(200,store.routing.tasks(token));return}
+   if(req.method==='GET'&&url.pathname==='/hub/v1/authority'){reply(200,store.authority.snapshot(token));return}
+   if(req.method==='GET'&&url.pathname==='/hub/v1/authority/members'){reply(200,store.authority.members(token));return}
+   if(req.method==='GET'&&url.pathname==='/hub/v1/context'){reply(200,store.context.snapshot(token));return}
+   if(req.method==='GET'&&url.pathname==='/hub/v1/schedule-owners'){reply(200,store.scheduleOwnership.list(token));return}
+   if(req.method==='GET'&&url.pathname==='/hub/v1/context/changes'){reply(200,store.context.pull(token,Number(url.searchParams.get('after')??0)));return}
+   if(req.method==='GET'&&url.pathname==='/hub/v1/context/deletions'){reply(200,store.context.deletionStatus(token));return}
+   const transition=(value:unknown)=>z.object({transition_id:spaceId}).strict().parse(value).transition_id
    const routes:Record<string,(value:unknown)=>unknown>={
+    '/hub/v1/schedule-owners/register':value=>store.scheduleOwnership.register(token,value),
+    '/hub/v1/schedule-owners/claim':value=>store.scheduleOwnership.claim(token,value),
+    '/hub/v1/schedule-owners/checkpoint':value=>store.scheduleOwnership.checkpoint(token,value),
+    '/hub/v1/schedule-owners/handoff':value=>store.scheduleOwnership.handoff(token,value),
+    '/hub/v1/schedule-owners/control':value=>store.scheduleOwnership.control(token,value),
+    '/hub/v1/authority/initialize':value=>{z.object({}).strict().parse(value);return store.authority.initialize(token)},
+    '/hub/v1/context/events':value=>store.context.append(token,value),
+    '/hub/v1/context/delete':value=>store.context.deleteSource(token,value),
+    '/hub/v1/context/discard':value=>store.context.discard(token,value),
+    '/hub/v1/context/publish':value=>store.context.publish(token,value),
+    '/hub/v1/context/ack':value=>store.context.acknowledge(token,z.object({cursor:z.number().int().nonnegative()}).strict().parse(value).cursor),
+    '/hub/v1/authority/prepare':value=>store.authority.prepare(token,value),
+    '/hub/v1/authority/ack':value=>store.authority.acknowledge(token,transition(value)),
+    '/hub/v1/authority/commit':value=>store.authority.commit(token,transition(value)),
+    '/hub/v1/authority/cancel':value=>store.authority.cancel(token,transition(value)),
     '/hub/v1/mutations':value=>store.mutate(token,value),
     '/hub/v1/devices/heartbeat':value=>store.routing.heartbeat(token,value),
     '/hub/v1/commands':value=>store.routing.submit(token,value),
@@ -32,6 +55,12 @@ export function createHubServer(store:HubStore){
   }catch(error){
    const message=error instanceof Error?error.message:'internal_error'
    if(message==='unauthorized'){reply(401,{error:message});return}
+   if(['schedule_owner_required','schedule_recipient_required'].includes(message)){reply(403,{error:message});return}
+   if(['shared_schedule_missing','shared_schedule_conflict','stale_schedule_owner','occurrence_conflict','schedule_unresolved','stale_schedule_frontier','occurrence_missing','occurrence_terminal','schedule_handoff_conflict','schedule_handoff_missing','invalid_schedule_target','schedule_capacity'].includes(message)){reply(409,{error:message});return}
+   if(['primary_required','publisher_required'].includes(message)){reply(403,{error:message});return}
+   if(['space_mismatch','producer_mismatch','source_owner_required','upload_consent_required','processing_consent_required'].includes(message)){reply(403,{error:message});return}
+   if(['producer_sequence_gap','source_deleted','stale_consent','evidence_conflict','context_capacity','derived_revision_conflict','stale_inputs','duplicate_projection_key'].includes(message)){reply(409,{error:message});return}
+   if(['stale_authority','authority_transition','authority_uninitialized','transition_not_found','transition_id_conflict','already_primary','handoff_incomplete','recovery_required','pc_primary_required','device_kind_required','device_unavailable'].includes(message)){reply(409,{error:message});return}
    if(['recipient_required','owner_required','task_control_denied','sender_revoked'].includes(message)){reply(403,{error:message});return}
    if(['command_id_conflict','task_id_conflict','command_already_decided','event_id_conflict','sequence_gap','terminal_task','verification_required','task_not_accepted'].includes(message)){reply(409,{error:message});return}
    if(['target_unavailable','command_expired','deadline_invalid','invalid_target'].includes(message)){reply(400,{error:message});return}

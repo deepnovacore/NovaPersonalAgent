@@ -7,15 +7,20 @@ type Task=ReturnType<HubRouting['tasks']>[number]
 
 /** Remote commands never open the local database or execute a task. */
 export async function runHubClient(args:string[]):Promise<number>{
- const command=args.shift(),subcommand=command==='todo'?args.shift():undefined
+ const command=args.shift(),subcommand=['todo','authority','schedules'].includes(command??'')?args.shift():undefined
  const options=new Map<string,string>()
  const allowed:Record<string,string[]>={
   devices:[],tasks:[],watch:['task','timeout-seconds'],
   send:['to','goal','acceptance','capability','target','ttl-seconds','command-id','task-id','expires-at'],
   cancel:['task','to','ttl-seconds','command-id','expires-at'],
   'todo add':['title','note','op-id'],'todo list':[],
+  'authority show':[],'authority initialize':[],'authority members':[],
+  'authority prepare':['to','epoch','transition'],
+  'authority ack':['transition'],'authority commit':['transition'],'authority cancel':['transition'],
+  'schedules list':[],'schedules pause':['id','revision'],'schedules resume':['id','revision'],
+  'schedules prepare':['id','revision','transition','to'],'schedules ack':['id','revision','transition'],'schedules commit':['id','revision','transition'],'schedules cancel':['id','revision','transition'],
  }
- const flags=allowed[command==='todo'?`todo ${subcommand}`:command??'']
+ const flags=allowed[['todo','authority','schedules'].includes(command??'')?`${command} ${subcommand}`:command??'']
  if(!flags)throw Error('Usage: hub devices | send --to ID --goal TEXT --acceptance TEXT [--target PACKAGE] | cancel --task ID --to ID | tasks | watch --task ID | todo add --title TEXT | todo list; --url URL --token TOKEN (or NOVA_HUB_URL/NOVA_HUB_TOKEN)')
  for(let i=0;i<args.length;i+=2){
   const key=args[i]?.replace(/^--/,''),value=args[i+1]
@@ -35,6 +40,19 @@ export async function runHubClient(args:string[]):Promise<number>{
   return value
  }
  const print=(value:unknown)=>console.log(JSON.stringify(value))
+ if(command==='schedules'){
+  if(subcommand==='list')print(await request('schedule-owners'))
+  else if(subcommand==='pause'||subcommand==='resume')print(await request('schedule-owners/control',{id:required('id'),owner_revision:positive('revision',0),enabled:subcommand==='resume'}))
+  else print(await request('schedule-owners/handoff',{id:required('id'),owner_revision:positive('revision',0),transition_id:required('transition'),action:subcommand,...(subcommand==='prepare'?{target:required('to')}:{})}))
+  return 0
+ }
+ if(command==='authority'){
+  if(subcommand==='show'||subcommand==='members')print(await request(subcommand==='show'?'authority':'authority/members'))
+  else if(subcommand==='initialize')print(await request('authority/initialize',{}))
+  else if(subcommand==='prepare')print(await request('authority/prepare',{transition_id:required('transition'),target_device_id:required('to'),expected_epoch:positive('epoch',0)}))
+  else print(await request(`authority/${subcommand}`,{transition_id:required('transition')}))
+  return 0
+ }
  if(command==='devices'||command==='tasks'){print(await request(command));return 0}
  if(command==='todo'){
   if(subcommand==='list')print((await request('state') as HubSnapshot).state.todos)

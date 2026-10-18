@@ -222,7 +222,9 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const originals=readRefs(db,prefix,consumer,q.refs,recipe);if(!originals)return {applied:false,revision}
   if(q.refs.some(ref=>!db.prepare('SELECT 1 FROM processing_reads WHERE batch_id=? AND ref_key=?').get(batch.id,sha256(canonicalJson(ref)))))throw Error('STORE_INVALID_OPERATION')
   const cited=[...(q.draft.about?.refs??[]),...q.draft.work.flatMap(item=>item.refs),...q.draft.interests.flatMap(item=>item.refs)]
-  if(!cited.length||cited.some(ref=>!originals.items.some(item=>item.evidence_id===ref.entry_id&&item.version===ref.version)))throw Error('STORE_INVALID_OPERATION')
+  // A completely corrected profile may intentionally contain no inferred clauses.
+  // The request still needs current, read, authorized originals and the owner fence.
+  if(cited.some(ref=>!originals.items.some(item=>item.evidence_id===ref.entry_id&&item.version===ref.version)))throw Error('STORE_INVALID_OPERATION')
   db.prepare('INSERT INTO processing_profiles VALUES(?,?,?,?) ON CONFLICT(prefix,provider) DO UPDATE SET revision=excluded.revision,payload_json=excluded.payload_json').run(prefix,provider,revision+1,payload)
   return {applied:true,revision:revision+1}
  }
