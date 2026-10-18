@@ -176,10 +176,13 @@ class ProfileAgent {
           },
           {'role': 'user', 'content': jsonEncode(input)},
         ];
-        await budget?.reserve(model, messages);
+        final reservation = await budget?.reserve(model, messages);
         await validate();
         checkRun();
-        final client = ModelClient(timeout: const Duration(minutes: 3));
+        final client = ModelClient(
+          timeout: const Duration(minutes: 3),
+          collectUsage: budget != null,
+        );
         _clients.add(client);
         var content = '';
         try {
@@ -191,6 +194,9 @@ class ProfileAgent {
           final value = jsonDecode(content);
           if (value is! Map<String, dynamic>) {
             throw const FormatException('json_object_required');
+          }
+          if (reservation != null && client.completedUsage != null) {
+            await budget!.settle(reservation, client.completedUsage!);
           }
           return value;
         } on FormatException {

@@ -90,7 +90,10 @@ class ModelClient {
     this.maxDuration = const Duration(minutes: 10),
     this.maxBytes = 16 * 1024 * 1024,
     this.maxOutputBytes = 512 * 1024,
+    this.collectUsage = false,
   });
+  final bool collectUsage;
+  CompletedModelUsage? completedUsage;
   final Duration timeout, maxDuration;
   final int maxBytes, maxOutputBytes;
   HttpClient? _http;
@@ -106,6 +109,11 @@ class ModelClient {
     List<Map<String, dynamic>> tools = const [],
   }) async* {
     if (_cancelled) throw const AgentFailure('cancelled');
+    completedUsage = null;
+    final usage =
+        collectUsage && configuration.protocol == ModelProtocol.chatCompletions
+        ? ChatCompletionUsage(configuration.model)
+        : null;
     final accountChanges =
         configuration.protocol == ModelProtocol.chatgptResponses
         ? ChatGptAccounts.changes.stream.listen((_) => cancel())
@@ -132,7 +140,10 @@ class ModelClient {
       request.headers.set('Authorization', 'Bearer ${configuration.key}');
       request.headers.set('Accept', 'text/event-stream');
       request.write(
-        jsonEncode(modelRequestBody(configuration, messages, tools)),
+        jsonEncode({
+          ...modelRequestBody(configuration, messages, tools),
+          if (usage != null) 'stream_options': {'include_usage': true},
+        }),
       );
       final response = await request.close();
       if (response.statusCode != 200) {
@@ -192,12 +203,14 @@ class ModelClient {
                 !responses.finished) {
               throw const AgentFailure('model_stream_interrupted');
             }
+            completedUsage = usage?.finish();
             return;
           }
           final root = jsonDecode(event) as Map<String, dynamic>;
           if (root['error'] != null) {
             throw responseFailure(root);
           }
+          usage?.add(root);
           final Map<String, dynamic> delta;
           if (configuration.protocol != ModelProtocol.chatCompletions) {
             delta = responses.add(root);
@@ -280,7 +293,7 @@ Map<String, dynamic> modelRequestBody(
       'model': config.model,
       'stream': true,
       'max_tokens': 12000,
-      if (config.model == 'qwen-flash' &&
+      if (['qwen-flash', 'qwen3-vl-plus'].contains(config.model) &&
           config.requestUri.host == 'dashscope.aliyuncs.com')
         'enable_thinking': false,
       'messages': [
@@ -421,4 +434,85 @@ class ResponsesStream {
         return {};
     }
   }
+}
+
+/// Billing evidence is exposed only after a complete, consistent SSE response.
+class CompletedModelUsage {
+  const CompletedModelUsage({
+    required this.responseId,
+    required this.model,
+    required this.promptTokens,
+    required this.completionTokens,
+  });
+  final String responseId, model;
+  final int promptTokens, completionTokens;
+}
+
+class ChatCompletionUsage {
+  ChatCompletionUsage(this.model);
+  final String model;
+  String? _id;
+  bool _invalid = false, _stopped = false;
+  CompletedModelUsage? _usage;
+
+  void add(Map<String, dynamic> event) {
+    final id = event['id'];
+    if (id is! String ||
+        id.isEmpty ||
+        id.length > 256 ||
+        event['model'] != model ||
+        (_id != null && _id != id)) {
+      _invalid = true;
+      return;
+    }
+    _id = id;
+    final choices = event['choices'];
+    if (choices is! List || choices.length > 1 || _usage != null) {
+      _invalid = true;
+      return;
+    }
+    if (choices.isNotEmpty) {
+      final choice = choices.single;
+      if (choice is! Map || choice['index'] != 0 || _stopped) {
+        _invalid = true;
+        return;
+      }
+      final reason = choice['finish_reason'];
+      if (reason != null) {
+        if (reason == 'stop') {
+          _stopped = true;
+        } else {
+          _invalid = true;
+        }
+      }
+    }
+    final usage = event['usage'];
+    if (usage == null) return;
+    if (usage is! Map || !_stopped || choices.isNotEmpty) {
+      _invalid = true;
+      return;
+    }
+    final input = usage['prompt_tokens'],
+        output = usage['completion_tokens'],
+        total = usage['total_tokens'];
+    if (input is! int ||
+        output is! int ||
+        total is! int ||
+        input < 1 ||
+        output < 1 ||
+        input > 1000000 ||
+        output > 32768 ||
+        total != input + output) {
+      _invalid = true;
+      return;
+    }
+    _usage = CompletedModelUsage(
+      responseId: id,
+      model: model,
+      promptTokens: input,
+      completionTokens: output,
+    );
+  }
+
+  CompletedModelUsage? finish() => !_invalid && _stopped ? _usage : null;
 }
