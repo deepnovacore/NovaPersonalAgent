@@ -4,6 +4,14 @@ import { snapshotJsonRecord } from './safe-json.js'
 export const NOVA_API_PROVIDER = 'nova_api_key'
 export const NOVA_API_KEY_ENV = 'NOVA_CODEX_API_KEY'
 const endpoint = 'https://api.openai.com/v1'
+export const NOVA_RESPONSES_PROXY_ENV = 'NOVA_CODEX_RESPONSES_PROXY'
+export function codexProviderEndpoint(value?: string): string {
+  if(value === undefined) return endpoint
+  if(!/^http:\/\/127\.0\.0\.1:[0-9]{1,5}\/v1$/u.test(value)) throw new CodexCredentialError()
+  const url = new URL(value)
+  if(!url.port || Number(url.port) < 1) throw new CodexCredentialError()
+  return value
+}
 
 const ENVIRONMENT_ALLOWLIST: ReadonlySet<string> = new Set([
   'PATH',
@@ -91,13 +99,17 @@ export function createCodexEnvironment(
   }
   result.CODEX_HOME = home
   result.CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED = '1'
-  if (validateApiKey(apiKey) !== null) result[NOVA_API_KEY_ENV] = apiKey!
+  if (validateApiKey(apiKey) !== null) {
+    result[NOVA_API_KEY_ENV] = apiKey!
+    const proxy = environmentValue(source,NOVA_RESPONSES_PROXY_ENV,platform)
+    if(proxy !== undefined) result[NOVA_RESPONSES_PROXY_ENV] = codexProviderEndpoint(proxy)
+  }
   if (Object.keys(managedEnvironment).some(key => CHILD_ENVIRONMENT_KEYS.has(key))) throw new CodexCredentialError()
   return validateCodexEnvironment({...result, ...managedEnvironment}, home, managedEnvironment)
 }
 
 const CHILD_ENVIRONMENT_KEYS = new Set([...ENVIRONMENT_ALLOWLIST, 'CODEX_HOME',
-  'CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED', NOVA_API_KEY_ENV])
+  'CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED', NOVA_API_KEY_ENV,NOVA_RESPONSES_PROXY_ENV])
 
 export function validateCodexEnvironment(
   value: Readonly<Record<string, string>>,
@@ -130,6 +142,8 @@ export function validateCodexEnvironment(
     || result.CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED !== '1'
     || result[NOVA_API_KEY_ENV] === ''
   ) throw new CodexCredentialError()
+  codexProviderEndpoint(result[NOVA_RESPONSES_PROXY_ENV])
+  if(result[NOVA_RESPONSES_PROXY_ENV] !== undefined && !result[NOVA_API_KEY_ENV]) throw new CodexCredentialError()
   return Object.freeze(result)
 }
 
@@ -146,22 +160,25 @@ function defineString(target: Record<string, string>, key: string, value: string
 
 
 /** CLI tables merge with user config; verify the effective table before using it. */
-export function apiKeyProviderOverrides(): readonly string[] {
+export function apiKeyProviderOverrides(proxy?: string): readonly string[] {
+  const baseUrl = codexProviderEndpoint(proxy)
   return [
     `model_provider="${NOVA_API_PROVIDER}"`,
     `model_providers.${NOVA_API_PROVIDER}.name="Nova API key"`,
-    `model_providers.${NOVA_API_PROVIDER}.base_url="${endpoint}"`,
+    `model_providers.${NOVA_API_PROVIDER}.base_url="${baseUrl}"`,
     `model_providers.${NOVA_API_PROVIDER}.env_key="${NOVA_API_KEY_ENV}"`,
     `model_providers.${NOVA_API_PROVIDER}.wire_api="responses"`,
     `model_providers.${NOVA_API_PROVIDER}.requires_openai_auth=false`,
+    ...(proxy === undefined ? [] : [`model_providers.${NOVA_API_PROVIDER}.supports_websockets=false`]),
   ].flatMap(value => ['-c', value])
 }
 
-export function assertApiKeyProvider(response: unknown): void {
+export function assertApiKeyProvider(response: unknown, proxy?: string): void {
   const config = snapshotJsonRecord(snapshotJsonRecord(response).config)
   const provider = snapshotJsonRecord(snapshotJsonRecord(config.model_providers)[NOVA_API_PROVIDER])
   if (config.model_provider !== NOVA_API_PROVIDER
-    || provider.base_url !== endpoint || provider.env_key !== NOVA_API_KEY_ENV
+    || provider.base_url !== codexProviderEndpoint(proxy)
+    || proxy !== undefined && provider.supports_websockets !== false || provider.env_key !== NOVA_API_KEY_ENV
     || provider.wire_api !== 'responses' || provider.requires_openai_auth !== false) {
     throw new TypeError('API key provider configuration mismatch')
   }

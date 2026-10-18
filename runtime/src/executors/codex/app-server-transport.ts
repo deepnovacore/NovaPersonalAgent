@@ -3,7 +3,7 @@ import { Readable,Writable } from 'node:stream'
 import { managedMcpEnvironment,recordManagedMcpVisibility,type ManagedCodexMcp } from './managed-mcp.js'
 import { generateSessionTitle } from './session-title.js'
 import { sharedHomeOverrides } from './shared-home.js'
-import { assertApiKeyProvider,assertApiKeyThread,NOVA_API_PROVIDER } from './spawn-env.js'
+import { assertApiKeyProvider,assertApiKeyThread,NOVA_RESPONSES_PROXY_ENV,NOVA_API_PROVIDER } from './spawn-env.js'
 
 import type { ExecutorProgress, ExecutorActivity } from '../../core/causal-runtime.js'
 import type { Clock } from '../../core/clock.js'
@@ -303,6 +303,7 @@ export class CodexTransportError extends Error {
 export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
   #config: ValidatedCodexAppServerLaunchConfig
   readonly #processFactory: CodexProcessOwnerFactory
+  #responsesProxy: string | undefined
   readonly #credentials: CredentialProvider
   readonly #preflightRunner: CodexHostPreflightRunner
   readonly #schemaProbe: CodexLiveSchemaProbe
@@ -474,7 +475,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
           ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
           launchProfile: this.#config.launchProfile,
         })
-        if (this.#config.apiKey !== null) assertApiKeyProvider(configResponse)
+        if (this.#config.apiKey !== null) assertApiKeyProvider(configResponse,this.#responsesProxy)
         await this.#openThread(session, deadline)
         this.#connectionOnly = false
       }
@@ -553,7 +554,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
             if (method !== 'thread/start' || this.#config.apiKey === null) return await this.#requestWithin(target, method, params, titleDeadline)
             assertApiKeyProvider(await this.#requestWithin(target, 'config/read', {
               includeLayers: true, cwd: hostWorkspacePath(this.#config.workspace),
-            }, titleDeadline))
+            }, titleDeadline),this.#responsesProxy)
             const response = await this.#requestWithin(target, method, {...params, modelProvider: NOVA_API_PROVIDER}, titleDeadline)
             assertApiKeyThread(response)
             return response
@@ -881,6 +882,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     let owner: OwnedCodexProcess
     try {
       const environment = this.#credentials.environment(credentialSnapshot)
+      this.#responsesProxy = environment[NOVA_RESPONSES_PROXY_ENV]
       if (identity !== nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])) throw new CodexTransportError('unsupported_protocol')
       const spec = createCodexSpawnSpec({
         binary: this.#config.binary,
@@ -998,7 +1000,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         launchProfile: this.#config.launchProfile,
       })
       if (this.#config.apiKey !== null) {
-        try { assertApiKeyProvider(configResponse) }
+        try { assertApiKeyProvider(configResponse,this.#responsesProxy) }
         catch { throw new CodexTransportError('config_not_isolated') }
       }
       if (!this.#connectionOnly) await this.#openThread(session, deadline)
