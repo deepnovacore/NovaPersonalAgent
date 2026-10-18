@@ -146,3 +146,40 @@ test('global provider usage reaches desktop totals without invented prices',()=>
  assert.equal(usage.snapshot().requests,2)
  assert.equal(usage.snapshot().unpricedReports,2)
 })
+
+test('Qwen3 VL Plus uses per-request tiers and cache pricing',()=>{
+ const vl={...report,model:'qwen3-vl-plus',inputTokens:32000,outputTokens:1000,cachedTokens:2000}
+ assert.equal(priceUsage(vl).costCny,(30000+400+10000)/1e6)
+ assert.equal(priceUsage({...vl,inputTokens:32001}).costCny,(30001*1.5+2000*.3+1000*15)/1e6)
+ assert.equal(priceUsage({...vl,inputTokens:128001}).costCny,(126001*3+2000*.6+1000*30)/1e6)
+ assert.equal(priceUsage({...vl,inputTokens:256001}).costCny,null)
+})
+
+test('runtime snapshots replace live projection and preserve legacy history exactly once',()=>{
+ const usage=createFrontendUsage();usage.add(1,report)
+ const counters={requests:2,missingReports:0,unpricedReports:0,pricedReports:2,reportedCostReports:1,estimatedCostReports:1,failedRequests:1,cancelledRequests:0,costCny:.1,costUsd:.2}
+ const row={...counters,provider:'qwen',service:'llm',model:'qwen3-vl-plus',pricingRegion:'cn-beijing',feature:'profile',source:null}
+ const summary={...counters,rows:[row],features:[row],runs:[{...row,runId:'profile-run'}],recent:[],startedAt:'2026-10-18T00:00:00.000Z',truncated:false,priceDate:'2026-10-18'}
+ const value={...summary,history:summary,persistenceError:null,coverage:['nova_models','external_agent_tokens_unavailable']}
+ assert.equal(usage.setRuntimeSnapshot(value),true)
+ assert.equal(usage.setRuntimeSnapshot(value),true)
+ const snapshot=usage.snapshot()
+ assert.equal(snapshot.requests,2)
+ assert.equal(snapshot.history.requests,3)
+ assert.equal(snapshot.history.features.find(r=>r.feature==='legacy').requests,1)
+ assert.equal(snapshot.history.costUsd,.2)
+ assert.equal(usage.setRuntimeSnapshot({...value,history:{...summary,costUsd:-1}}),false)
+})
+test('UI preserves USD charges and shows feature/task/outcome attribution',async()=>{
+ const {frontendUsageText}=await import('../src/renderer/frontend-usage.mjs')
+ const view={requests:1,pricedReports:1,reportedCostReports:1,estimatedCostReports:0,costCny:0,costUsd:.02,missingReports:0,unpricedReports:0,rows:[],features:[],runs:[],recent:[]}
+ assert.match(frontendUsageText(view),/\$0.0200/)
+ assert.doesNotMatch(frontendUsageText(view),/¥0/)
+})
+test('Qwen Plus thinking pricing is explicit and embedding requires only input',()=>{
+ const plus={...report,model:'qwen-plus',inputTokens:1000,outputTokens:100,reasoningMode:'enabled'}
+ assert.equal(priceUsage(plus).costCny,.0016)
+ assert.equal(priceUsage({...plus,reasoningMode:'disabled'}).costCny,.001)
+ assert.equal(priceUsage({...plus,reasoningMode:undefined}).costCny,null)
+ assert.equal(priceUsage({...report,service:'embedding',model:'text-embedding-v4',inputTokens:1000,outputTokens:undefined}).costCny,.0005)
+})
