@@ -43,5 +43,6 @@
     "eslint": "9.39.5",
     "typescript": "5.9.3",
     "typescript-eslint": "8.67.0"
-  }
+  },
+  "license": "GPL-3.0-or-later"
 }
