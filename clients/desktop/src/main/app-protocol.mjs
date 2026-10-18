@@ -39,7 +39,7 @@ function relativeRendererRoute(from, specifier) {
   if (!route.startsWith('/') || route.includes('/../')) {
     throw new Error('renderer asset graph escapes its root')
   }
-  if (!/\.(?:css|html|mjs)$/u.test(route)) {
+  if (!/\.(?:css|html|mjs|mp4)$/u.test(route)) {
     throw new Error('renderer asset graph contains an unsupported file type')
   }
   return route
@@ -77,6 +77,7 @@ export async function buildRendererAssetGraph(
     const route = pending.shift()
     if (visited.has(route)) continue
     visited.add(route)
+    if(route.endsWith('.mp4'))continue
     const source = await readText(resolve(rendererRoot, route.slice(1)))
     for (const dependency of staticDependencies(route, source)) {
       if (!visited.has(dependency)) pending.push(dependency)
@@ -111,7 +112,7 @@ export function installAppProtocol(targetProtocol, {
     ) {
       return new Response('Not found', { status: 404 })
     }
-    return fetchFile(resolve(rendererRoot, url.pathname.slice(1)))
+    return fetchFile(resolve(rendererRoot, url.pathname.slice(1)), url.pathname.endsWith('.mp4') ? {headers: request.headers} : undefined)
   })
 }
 

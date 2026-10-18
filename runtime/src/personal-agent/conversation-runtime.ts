@@ -3,6 +3,7 @@ import {gatewayWithUsage} from '../model/model-gateway.js'
 import type {UsageContext} from '../usage/context.js'
 import {MAX_PACKED_RECOVERY_CONTENT} from '../realtime/history.js'
 import type {PreparedContent} from './contracts.js'
+import {createIdentityContextSync} from './identity-context.js'
 import {ScheduledResponseScope} from './scheduled-response-scope.js'
 import {ScheduledToolRuntime} from './scheduled-tool-runtime.js'
 import {ScheduleAgentController} from './schedule-agent.js'
@@ -116,6 +117,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   let pending:{resolve:(result:{assistant:string;turn_id?:string})=>void;reject:(error:unknown)=>void}|undefined
   const textOnly=mode==='text'
   let voiceEnabled=!textOnly
+  let audioGeneration=0
   let assistant=''
   let assistantTurnId:string|undefined
   const captionIds=new Map<string,string>()
@@ -204,9 +206,12 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(mode==='background')projectConfirmation?.setBackground(true)
    else if(!seen)projectConfirmation?.setBackground(false,{awaitPresentation:true})
    else if(seen?.proposal_id&&seen.conversation_id===conversation.id&&projectConfirmation?.view.pending_confirmation_id===seen.proposal_id)projectConfirmation.setBackground(false)
-   if(!seen){const paused=!execution&&(!textOnly&&!voiceEnabled||mode==='background'||mode==='workbench'&&conversation.id==='chat:proactive'&&options.host.conversationSnapshot().voice_id!==conversation.id);if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
+   if(!seen){audioGeneration++;const paused=!execution&&(!textOnly&&!voiceEnabled||mode==='background'||mode==='workbench'&&conversation.id==='chat:proactive'&&options.host.conversationSnapshot().voice_id!==conversation.id);if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   })
-  try{await graph.start();if(conversation.prepared&&await (conversation.subject_key?.startsWith('scheduled-result:')?options.host.scheduledResultAuthorized(conversation.subject_key.slice(17),memoryConsumerFingerprint??null):maySendPreparedMemory(options.memory(),memoryConsumerFingerprint,conversation.prepared.evidence_refs)))await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({trust:'untrusted_external',purpose:'read_only_topic_background',text:conversation.prepared.text.slice(0,2000),evidence_refs:conversation.prepared.evidence_refs.slice(0,2)})},{confirmationTimeout:null,asUserActivation:false,signal:AbortSignal.timeout(10000)})}catch(error){unsubscribeTarget?.();unsubscribePresentation();unsubscribeProgress();unsubscribeApproval?.();await graph.stop();await core.stop();throw error}
+  const syncIdentityContext=createIdentityContextSync({identity:()=>options.host.identity(),epoch:()=>graph.service.session.sessionEpoch,
+   inject:(content,signal)=>provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content},{confirmationTimeout:null,asUserActivation:false,signal})})
+  const syncIdentity=(signal:AbortSignal)=>execution?Promise.resolve():syncIdentityContext(signal)
+  try{await graph.start();await syncIdentity(AbortSignal.timeout(10000));if(conversation.prepared&&await (conversation.subject_key?.startsWith('scheduled-result:')?options.host.scheduledResultAuthorized(conversation.subject_key.slice(17),memoryConsumerFingerprint??null):maySendPreparedMemory(options.memory(),memoryConsumerFingerprint,conversation.prepared.evidence_refs)))await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({trust:'untrusted_external',purpose:'read_only_topic_background',text:conversation.prepared.text.slice(0,2000),evidence_refs:conversation.prepared.evidence_refs.slice(0,2)})},{confirmationTimeout:null,asUserActivation:false,signal:AbortSignal.timeout(10000)})}catch(error){unsubscribeTarget?.();unsubscribePresentation();unsubscribeProgress();unsubscribeApproval?.();await graph.stop();await core.stop();throw error}
   const detachForeground=()=>{if(ownsTask()){graph.service.detachTaskConversation();voiceEnabled=false;void graph.service.playbackDisconnected({resumeDelivery:false})}}
   lifetime.addEventListener('abort',detachForeground,{once:true})
   const adapter=options.codexResource?.mode==='project'?options.codexResource.adapter as ProjectExecutorAdapter:undefined
@@ -273,10 +278,16 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {
    retainTasks:ownsTask,
-   parkVoice:async()=>{voiceEnabled=false;await graph.service.playbackDisconnected({resumeDelivery:false})},
+   parkVoice:async()=>{audioGeneration++;voiceEnabled=false;await graph.service.playbackDisconnected({resumeDelivery:false})},
    canSwitch:()=>!pending&&!approval?.pending&&!projectConfirmation?.pending&&core.runtime.core.activeDelegates().length===0&&(voiceEnabled?graph.service.pendingHostItemCount===0:true)&&graph.playback.current===null,
    deliverSuggestion:(suggestion,reason)=>graph.service.onSuggestionSelected(suggestion,reason),
-   ownsWork:id=>core.runtime.inFlightDelegate(id)!==undefined,bridgeService:graph.service,sendAudio:(pcm)=>graph.service.sendAudio(pcm),
+   ownsWork:id=>core.runtime.inFlightDelegate(id)!==undefined,bridgeService:graph.service,sendAudio:async(pcm)=>{
+    const generation=audioGeneration,epoch=graph.service.session.sessionEpoch
+    const current=()=>!closed&&!lifetime.aborted&&voiceEnabled&&generation===audioGeneration&&epoch===graph.service.session.sessionEpoch&&options.host.presentationMode!=='background'&&options.host.conversationSnapshot().voice_id===conversation.id
+    if(!current())return
+    await syncIdentity(AbortSignal.any([lifetime,AbortSignal.timeout(10000)]))
+    if(current())await graph.service.sendAudio(pcm)
+   },
    runTurn:async(text,callerSignal,context)=>{
     const deadline=createTurnDeadline({clock:core.runtime.clock,parent:callerSignal,isWaiting:()=>(approval?.pending===true||projectConfirmation?.pending===true),subscribe:listener=>{waitingListeners.add(listener);return()=>waitingListeners.delete(listener)}})
     const signal=deadline.signal;signal.throwIfAborted();if(context?.source_todo){sourceTodo={...context.source_todo};sourceTodoTurns=SOURCE_TODO_TURNS}else if(context?.references?.length){sourceTodo=undefined;sourceTodoTurns=0}else if(sourceTodoTurns>1)sourceTodoTurns--;else sourceTodo=undefined;if(sourceTodo&&!sourceTodoCurrent())sourceTodo=undefined;sourceOrigin=undefined;assistant='';assistantTurnId=undefined
@@ -291,6 +302,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     }
     signal.addEventListener('abort',abort,{once:true})
     try{
+     await syncIdentity(signal)
      if(context?.prepared){
       for(const ref of context.references??[])if(ref.kind==='timeline'&&!await options.host.timelineAuthorized(ref.id,ref.version,memoryConsumerFingerprint))throw Error('reference_not_authorized');
       const material=context.prepared;

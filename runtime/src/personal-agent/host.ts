@@ -39,7 +39,7 @@ import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
-import { personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
+import { identityNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
@@ -987,6 +987,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
+    identity(){return {assistant_name:this.#state.settings.assistant_name??'nova',user_name:this.#state.settings.user_name??''}}
     async #timelineInputs():Promise<TimelineInput[]>{
         const messages=await this.options.memory()?.timelineEvidence?.()??[];
         const retained=await this.options.memory()?.profileSources?.(this.#profileExternal.map(input=>input.id))??[];
@@ -1269,6 +1270,10 @@ export class PersonalAgentHost {
             });
         }
         if(scheduleCommand){data=await executeScheduleCommand(this,command.method,p,receiptId,{user_scope:this.options.userScope,source:'ui',origin_ref:'ui:'+client+':'+command.request_id,source_refs:[]})}
+        else if(command.method==='identity.configure'){
+            const q=z.object({assistant_name:identityNameSchema.min(1),user_name:identityNameSchema}).strict().parse(p);
+            await this.#serial(async()=>{const next=structuredClone(this.#state);Object.assign(next.settings,q);await this.#commit(next)});this.#notify();data=this.identity();
+        }
         else if(command.method.startsWith('notifications.')){/* Handled above; never forward notification commands to source connectors. */}
         else if(taskCommand){
             if(command.method==='tasks.list'){z.object({}).strict().parse(p);data=this.tasks.list()}

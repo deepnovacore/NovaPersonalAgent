@@ -650,3 +650,19 @@ test('a source todo suggestion is adopted explicitly without inventing a deadlin
   assert.equal((await adopt('stale')).ok,false)
  }finally{await f.close()}
 })
+
+test('assistant identity is durable user preference, rejects control characters and leaves chat history untouched',async()=>{
+ const f=await fixture()
+ try{
+  const before=f.host.conversationSnapshot().messages
+  const result=await f.host.command({type:'personal.command',request_id:'identity-1',method:'identity.configure',params:{assistant_name:'小星',user_name:'小林'}}) as {ok:boolean}
+  assert.equal(result.ok,true)
+  const state=f.host.snapshot() as {settings:Record<string,unknown>}
+  assert.equal(state.settings.assistant_name,'小星');assert.equal(state.settings.user_name,'小林')
+  assert.deepEqual(f.host.conversationSnapshot().messages,before)
+  const invalid=await f.host.command({type:'personal.command',request_id:'identity-2',method:'identity.configure',params:{assistant_name:'bad\nname',user_name:''}}) as {ok:boolean}
+  assert.equal(invalid.ok,false)
+  await f.host.close();await f.host.open()
+  assert.equal((f.host.snapshot() as {settings:Record<string,unknown>}).settings.assistant_name,'小星')
+ }finally{await f.close()}
+})

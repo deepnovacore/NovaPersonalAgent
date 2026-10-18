@@ -1,0 +1,65 @@
+/* Startup and first-run surfaces share the workbench's quiet, warm palette. */
+.welcome-screen{position:fixed;inset:0;z-index:50;box-sizing:border-box;overflow:auto;background:#faf9f6;color:#27283b;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 28px 32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-app-region:no-drag}
+.welcome-screen[hidden],.welcome-screen [hidden],.assistant-welcome [hidden]{display:none!important}
+.welcome-screen:before{content:"";position:absolute;inset:0 0 auto;height:44px;-webkit-app-region:drag}
+.welcome-loading{text-align:center;max-width:480px}
+.welcome-portrait{position:relative;width:132px;height:132px;margin:0 auto 26px;padding:10px;box-sizing:border-box}
+.welcome-portrait img{width:100%;height:100%;border-radius:30px;object-fit:cover;background:#fff9ed}
+.welcome-spinner{position:absolute;inset:0;border:2px solid #e3e2ed;border-top-color:#68649c;border-right-color:#68649c;border-radius:50%;animation:welcome-spin 1.4s linear infinite}
+@keyframes welcome-spin{to{transform:rotate(360deg)}}
+.welcome-screen h1{font-size:28px;letter-spacing:-.7px;margin:0 0 12px;font-weight:650}
+.welcome-loading p{font-size:14px;line-height:1.8;color:#777889}
+.welcome-screen button,.assistant-welcome button,.avatar-actions button,.identity-name-choices button{border:1px solid #dedde7;border-radius:10px;background:#fff;color:#4c4969;padding:10px 17px;font:inherit;font-size:13px;cursor:pointer}
+.welcome-screen button:hover,.assistant-welcome button:hover{background:#f0eff7}
+.welcome-screen button:focus-visible,.assistant-welcome button:focus-visible,.identity-fields input:focus-visible{outline:3px solid #b7b0df;outline-offset:3px}
+.welcome-screen button:disabled,.assistant-welcome button:disabled{opacity:.5;cursor:default}
+.welcome-permissions{width:min(620px,100%)}
+.welcome-eyebrow{font-size:11px;letter-spacing:.14em;color:#8d86ae;margin:0 0 14px}
+.welcome-lead,.welcome-footnote,.permission-note{font-size:13px;line-height:1.8;color:#797989}
+.welcome-footnote{font-size:11px;margin:18px 0}
+.permission-row{display:flex;align-items:center;justify-content:space-between;gap:24px;border:1px solid #e6e3ed;background:#fff;border-radius:14px;padding:17px 20px;margin:12px 0}
+.permission-row h3{font-size:14px;margin:0 0 5px;color:#353249}
+.permission-row p{font-size:12px;color:#7f7b90;line-height:1.7;margin:0 0 7px}
+.permission-row button{white-space:nowrap;flex-shrink:0}
+.permission-state{font-size:11px;color:#9c8465}
+.permission-state[data-status=granted]{color:#4f876e}
+.permission-state[data-status=not_required]{color:#898592}
+button.welcome-primary{background:#645b8b;color:white;border-color:#645b8b;border-radius:11px;padding:12px 22px}
+button.welcome-primary:hover{background:#554b7a}
+.welcome-permissions>.welcome-primary{width:100%;margin:4px 0 0}
+.welcome-reload{margin-top:25px;opacity:.65;font-size:11px!important}
+.welcome-error{color:#ac4e49;font-size:12px;line-height:1.6;max-width:600px}
+.chat-intro.assistant-welcome{padding:22px 4px 12px;text-align:left;margin:0;max-width:100%}
+.assistant-greeting{text-align:center;margin-bottom:24px}
+.assistant-greeting img{width:78px;height:78px;border-radius:23px;object-fit:cover;background:#fff9ed}
+.assistant-greeting h1{font-size:20px!important;margin:10px 0 0!important;color:var(--ink,#343145)}
+.welcome-bubble{padding:15px 18px;background:#f2f0f7;border-radius:5px 18px 18px 18px;font-size:13px!important;line-height:1.9!important;color:#605a70!important;margin:12px 0!important}
+.welcome-name-card{padding:18px;border:1px solid #e8e4ed;border-radius:16px;background:var(--surface-raised,#fff);margin-top:18px}
+.assistant-portrait img{width:72px;height:72px;border-radius:21px;object-fit:cover;background:#fff9ed}
+.avatar-actions,.identity-name-choices{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 18px}
+.avatar-actions button,.identity-name-choices button{font-size:11px;padding:7px 12px}
+.identity-fields{display:grid;gap:14px;margin:16px 0}
+.identity-fields label{display:grid;gap:7px;font-size:12px;color:var(--ink-muted,#82798d)}
+.identity-fields input{box-sizing:border-box;width:100%;min-width:0;border:1px solid #e2dce9;border-radius:9px;padding:11px 12px;background:var(--surface,#faf9fc);color:var(--ink,#343145);font:inherit;font-size:14px}
+.chat-brand{display:flex;align-items:center;gap:8px}
+.chat-brand-avatar{width:28px;height:28px;border-radius:9px;object-fit:cover}
+.computer-configuration pre{white-space:pre-wrap;font-size:11px;line-height:1.8}
+body[data-personal-collapsed=true] .welcome-screen{display:none}
+@media(max-height:740px){.welcome-screen[data-phase=permissions]{justify-content:flex-start;padding-top:45px}.permission-row{padding:12px 16px;margin:8px 0}.welcome-footnote{margin:10px 0}}
+@media(prefers-reduced-motion:reduce){.welcome-spinner{animation:none;border-top-color:#68649c}}
+@media(prefers-color-scheme:dark){.welcome-screen{background:#1b1b23;color:#ece8f6}.welcome-screen button,.permission-row,.welcome-name-card{background:#25242e;border-color:#3e3a4b;color:#ddd5ec}.permission-row h3{color:#ddd5ec}.welcome-bubble{background:#292631;color:#c4bbd4!important}.identity-fields input{background:#211f28;border-color:#45404e;color:#ede7f5}.welcome-screen button:hover{background:#363140}button.welcome-primary{background:#786ba8}.welcome-spinner{border-color:#393544;border-top-color:#b0a0df}}
+
+.welcome-screen .window-grip{position:absolute;top:4px;left:80px;right:12px;height:36px;margin:0;flex:none}
+
+.idle-avatar{display:inline-block;position:relative;vertical-align:middle;flex-shrink:0;line-height:0}
+.idle-avatar img{display:block}
+.idle-avatar video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:24%;pointer-events:none}
+.idle-avatar [hidden]{display:none!important}
+.orb-idle-avatar{position:absolute;inset:0;pointer-events:none;border-radius:inherit;overflow:hidden}
+.orb-idle-avatar img,.orb-idle-avatar video{width:100%;height:100%;object-fit:contain;background:#fff9ed;pointer-events:none}
+.orb-idle-avatar[hidden],.orb-idle-avatar [hidden]{display:none!important}
+
+.orb-idle-avatar video{position:absolute;inset:0}
+
+.orb-idle-avatar{z-index:0}
+#orb .capture-indicator,#orb .unread-indicator{z-index:1}

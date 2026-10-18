@@ -1,6 +1,7 @@
 import {ChatGptAccounts} from './chatgpt-auth.mjs'
 import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
 import {isEndpointSecret} from '../renderer/compatible-providers.mjs'
+import {installWelcomeIpc} from './welcome-ipc.mjs'
 import {createVisor} from './visor.mjs'
 import {parseVoicePreset, exportVoicePreset, MAX_PRESET_BYTES} from '../renderer/voice-preset.mjs'
 import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
@@ -27,6 +28,7 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
+  desktopCapturer,
   globalShortcut,
   ipcMain,
   Menu,
@@ -182,6 +184,7 @@ const RELEASE_CAMERA_PASSED_EXIT_CODE = 76
 const RELEASE_CAMERA_PENDING_EXIT_CODE = 75
 const opaque = process.env.NOVA_ORB_OPAQUE === '1'
 
+let computerLaunchEnvironment = {}
 let backend = null
 let backendSupervisor = null
 let backendStatus = Object.freeze({
@@ -1258,6 +1261,7 @@ async function launchBackend(smokeChannel, onExit) {
         applyChatGptEnvironment(spec.env,view,chatGptBroker)
       }
     }
+    computerLaunchEnvironment = spec.env
     if (codingUnavailable) spec.env.CODING_MODULE_ENABLED = 'false'
     const blocking = describeMissingBlockingEnvironment(spec.env, true)
     if (blocking && blocking.missing.length > 0) {
@@ -1935,7 +1939,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   ipcMain.handle('nova:settings:personal', async (event, payload) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('connections request rejected')
-    const allowed = ['state', 'sources.add', 'sources.authorize_computer', 'sources.priority.add', 'sources.priority.remove', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure']
+    const allowed = ['state', 'identity.configure', 'sources.add', 'sources.authorize_computer', 'sources.priority.add', 'sources.priority.remove', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure']
     if (!payload || Object.getPrototypeOf(payload) !== Object.prototype || Object.keys(payload).sort().join(',') !== 'method,params'
       || !allowed.includes(payload.method) || !payload.params || Object.getPrototypeOf(payload.params) !== Object.prototype
       || JSON.stringify(payload.params).length > 16384) throw new Error('connections request rejected')
@@ -2026,6 +2030,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     }
     return applyDesktopSettings(payload, restart)
   })
+  installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
   ipcMain.handle('nova:bootstrap', event => {
     // The renderer binds its backend-exit listener only after this reply lands, so a push
     // sent before then has nobody to reach. Riding the verdict on the very payload the
@@ -2162,7 +2167,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   const rendererLoaded = loadAppWindow(mainWindow, {
     rendererRoot,
-    fetchFile: file => net.fetch(pathToFileURL(file).href),
+    fetchFile: (file, options) => net.fetch(pathToFileURL(file).href, options),
     cameraFile: camera.source === 'file' ? camera.file : undefined,
     fetchCameraFile: (url, init) => net.fetch(url, init),
   })
@@ -2308,7 +2313,7 @@ async function runInstalledFileCameraSmoke() {
             '/release-camera-contract.mjs',
             '/camera.mjs',
           ],
-          fetchFile: file => net.fetch(pathToFileURL(file).href),
+          fetchFile: (file, options) => net.fetch(pathToFileURL(file).href, options),
           cameraFile: camera.file,
           fetchCameraFile: (url, init) => net.fetch(url, init),
         })
