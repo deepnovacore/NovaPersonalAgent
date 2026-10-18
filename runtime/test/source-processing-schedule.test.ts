@@ -84,7 +84,7 @@ for(const bound of [true,false])test(`recipe change across restart retires its T
   const at=new Date().toISOString();memoryOperation(db,'append_evidence',{id:prefix+'e',source_id:prefix+'s',source_kind:'file',locator:'x',raw_text:'synthetic',hash:'x',observed_at:at,recorded_at:at,trust:'untrusted_external'});memoryOperation(db,'source_grant',{source_id:prefix+'s',expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
   await host.open();const schedule=await host.schedules.ensureSourceProcessing('test'),batch=await op({action:'claim'}) as ProcessingBatch,run=await host.schedules.claimSourceProcessing(schedule.id,batch.id,batch.provider),task=await host.tasks.delegate('scheduled:'+run.run_id,run.input)
   await host.schedules.bindTask(run.run_id,task.id);if(bound)await op({action:'bind',batch_id:batch.id,task_id:task.id,run_id:run.run_id});await host.close()
-  recipe='two';memory={sourceProcessing:op,sourceProcessingConsumer:()=>provider} as unknown as PersonalMemoryResource;host=make();await host.open()
+  recipe='two';memory={sourceProcessing:op,sourceProcessingConsumer:()=>provider} as unknown as PersonalMemoryResource;host=make();await host.open();await host.scheduledTaskTick()
   assert.equal(host.tasks.get(task.id).phase,'cancelled');assert.equal(host.schedules.getRun(run.run_id).stage,'terminal');assert.equal((await op({action:'status'}) as {active_batch:unknown}).active_batch,null)
  }finally{await host.close();db.close();await rm(dir,{recursive:true,force:true})}
 })

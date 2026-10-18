@@ -10,6 +10,23 @@ const all=node=>[node,...node.children.flatMap(all)]
 function harness(t){const previous=globalThis.document;t.after(()=>{globalThis.document=previous});globalThis.document={createElement:tag=>new Node(tag)};const panel=new Node('main');const button=(label,action,parent)=>{const node=new Node('button');node.textContent=label;node.action=action;parent.append(node);return node};return {panel,button,command:async()=>{},local:{},rerender(){},delegate(){}}}
 const text=panel=>all(panel).map(node=>node.textContent).filter(Boolean).join('\n')
 
+test('daily workbench offers one refresh route on all tabs and saves inspiration',t=>{
+ for(const tab of ['todos','ideas','goals']){const h=harness(t),commands=[]
+  renderSourceSuggestions(h.panel,{tab,context:{daily:true,status:'ready',automatic_available:false,candidate_count:1,cards:tab==='ideas'?[{id:'i',tab,title:'做一张预检清单',body:'可以先把重复操作记下来。',refs:[]}]:[]},sources:[],connected:true,button:h.button,command:(...args)=>commands.push(args),continueChat:()=>{}})
+  assert.match(text(h.panel),/重新整理/u);assert.doesNotMatch(text(h.panel),/还没给我看过资料/u)
+  all(h.panel).find(n=>n.textContent==='重新整理').action();assert.deepEqual(commands[0],['context.refresh',{}])
+  if(tab==='ideas'){all(h.panel).find(n=>n.textContent==='保存想法').action();assert.deepEqual(commands[1],['context.adopt',{id:'i'}])}
+ }
+})
+
+test('automatic goal can be undone but edited goal cannot',t=>{
+ const h=harness(t),commands=[]
+ const goal={id:'g',kind:'goal',title:'每天使用助手',note:'',status:'active',version:1,auto_recorded:true,workbench_source:{candidate_id:'c',refs:[]},progress:{done:0,total:0}}
+ renderLife(h.panel,{...h,command:(...args)=>commands.push(args),kind:'goal',state:{todos:[],ideas:[],goals:[goal]}})
+ all(h.panel).find(n=>n.textContent==='撤销自动记录').action();assert.deepEqual(commands[0],['context.undo',{id:'g'}])
+ const edited=harness(t);renderLife(edited.panel,{...edited,kind:'goal',state:{todos:[],ideas:[],goals:[{...goal,version:2}]}});assert.doesNotMatch(text(edited.panel),/撤销自动记录/u)
+})
+
 test('populated saved Todos have no saved-empty copy beside suggestions',t=>{
  const h=harness(t)
  renderSourceSuggestions(h.panel,{tab:'todos',context:{status:'ready',candidate_count:1,cards:[{id:'c',tab:'todos',title:'Compare flows',body:'The note lists a next step.',refs:[]}]},sources:[{state:'connected'}],button:h.button,command:h.command,continueChat:()=>{}})
@@ -45,10 +62,10 @@ test('the Todo top shows a recap and action cards that hand a prepared request t
  assert.doesNotMatch(output,/需要你自行判断/u)
  const [first,second]=section.children.filter(node=>node.tag==='article')
  const row=card=>card.children.find(node=>node.className==='card-actions')
- const firstButtons=row(first).children;assert.deepEqual(firstButtons.map(node=>node.textContent),['帮我做','隐藏'],'actions share one row')
- assert.equal(firstButtons[1].className,'quiet')
- firstButtons[0].action();assert.deepEqual(drafts,['请帮我推进「完成摘要层」：跑一次原生验收']);assert.deepEqual(chats,[])
- assert.equal(row(second).children[0].textContent,'聊聊这个')
+ const firstButtons=row(first).children;assert.deepEqual(firstButtons.map(node=>node.textContent),['加入待办','帮我做','隐藏'],'actions share one row')
+ assert.equal(firstButtons[2].className,'quiet')
+ firstButtons[1].action();assert.deepEqual(drafts,['请帮我推进「完成摘要层」：跑一次原生验收']);assert.deepEqual(chats,[])
+ assert.equal(row(second).children[1].textContent,'聊聊这个')
  const popover=first.children.find(node=>node.className==='source-popover');assert.equal(popover.hidden,true);assert.match(text(popover),/notes\.md/u)
  assert.equal(first.dataset.sources,'true');assert.ok(!first.children.some(node=>node.tag==='details'))
  assert.ok(!second.children.some(node=>node.className==='source-info'),'no sources, no icon')
@@ -190,4 +207,13 @@ test('Life and suggestion cards show only supplied source badges; old reference 
  assert.equal(nodes.filter(n=>n.className==='source-tags').length,1)
  assert.match(text(suggestions.panel),/旧笔记/u)
  assert.doesNotMatch(text(suggestions.panel),/opaque|private-id/u)
+})
+
+test('status changes offer updating the original record rather than adding another one',t=>{
+ for(const tab of ['todos','goals']){
+  const h=harness(t),calls=[]
+  renderSourceSuggestions(h.panel,{tab,context:{daily:true,cards:[{id:'u',tab,title:'交付事项',body:'后续资料显示已完成',refs:[],update:{id:'existing',version:1,status:'done'}}]},sources:[],button:h.button,command:(...args)=>calls.push(args),continueChat:()=>{}})
+  assert.doesNotMatch(text(h.panel),/加入待办|设为目标/)
+  all(h.panel).find(n=>n.textContent==='更新原记录').action();assert.deepEqual(calls,[['context.adopt',{id:'u'}]])
+ }
 })

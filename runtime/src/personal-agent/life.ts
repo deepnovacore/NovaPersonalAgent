@@ -7,10 +7,13 @@ import {open} from 'node:fs/promises'
 import type {LifeResolution} from '../memory-substrate/resolution.js'
 import type {EvaluatedCandidate} from '../understanding/candidates.js'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
+import {automaticWorkbenchMatter,workbenchMatterSchema,workbenchEvidenceSchema,workbenchRefSchema} from './workbench-evidence.js'
 export const newsArticleSchema=z.object({article_id:z.string().min(1).max(512),source_id:z.string().min(1).max(256),url:z.string().url().max(4096).refine(value=>['https:','http:'].includes(new URL(value).protocol),'news_web_url_required'),content_hash:z.string().min(1).max(256),title:z.string().max(300),summary:z.string().max(1500),published_at:z.string().nullable()}).strict()
 const newsSourceSchema=newsArticleSchema.extend({action:z.literal('user_conversion'),converted_at:z.string().datetime()})
 const importanceSchema=z.enum(['normal','high'])
-const fields={importance:importanceSchema.optional(),sources:z.array(sourceTagSchema).max(256).optional(),provenance_refs:z.array(z.string().max(600)).max(256).optional(),auto_recorded:z.boolean().optional(),source_changed:z.boolean().optional(),news_source:newsSourceSchema.optional(),id:z.string(),version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200),note:z.string().max(4000),created_at:z.string(),updated_at:z.string()}
+const contextSourceSchema=z.object({candidate_id:z.string().min(1).max(128),refs:z.array(z.object({entry_id:z.string().min(1).max(600),version:z.union([z.string(),z.number()])}).strict()).min(1).max(8)}).strict()
+const workbenchSourceSchema=z.object({candidate_id:z.string().min(1).max(128),refs:z.array(workbenchRefSchema).min(1).max(8)}).strict()
+const fields={workbench_source:contextSourceSchema.optional(),context_source:contextSourceSchema.optional(),importance:importanceSchema.optional(),sources:z.array(sourceTagSchema).max(256).optional(),provenance_refs:z.array(z.string().max(600)).max(256).optional(),auto_recorded:z.boolean().optional(),source_changed:z.boolean().optional(),news_source:newsSourceSchema.optional(),id:z.string(),version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200),note:z.string().max(4000),created_at:z.string(),updated_at:z.string()}
 const todoSchema=z.object({...fields,status:z.enum(['open','doing','waiting','done','cancelled']),due:z.string().date().nullable(),goal_id:z.string().nullable(),idea_id:z.string().nullable()})
 const ideaSchema=z.object({...fields,status:z.enum(['active','archived']),goal_id:z.string().nullable()})
 const goalSchema=z.object({...fields,status:z.enum(['active','paused','completed','archived']),success_criteria:z.string().max(2000),idea_id:z.string().nullable()})
@@ -27,11 +30,13 @@ export type LifeBackendSource=LifeBackend|(()=>LifeBackend|undefined)
 export const emptyLifeState=():LifeState=>({todos:[],ideas:[],goals:[],profile:{about:'',version:0},receipts:{}})
 const kind=z.enum(['todo','idea','goal'])
 export const lifeInputSchema=z.discriminatedUnion('op',[
+ z.object({op:z.literal('from_workbench'),kind,title:z.string().trim().min(1).max(200),note:z.string().max(4000),due:z.string().date().nullable(),success_criteria:z.string().max(2000),automatic:z.boolean(),source:workbenchSourceSchema,sources:z.array(sourceTagSchema).max(8),proof:workbenchMatterSchema.optional(),evidence:z.array(workbenchEvidenceSchema).min(1).max(8)}).strict(),
+ z.object({op:z.literal('from_context'),title:z.string().trim().min(1).max(200),note:z.string().max(4000),source:contextSourceSchema}).strict(),
  z.object({op:z.literal('from_news'),kind,title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),article:newsArticleSchema}).strict(),
  z.object({op:z.literal('create'),kind,importance:importanceSchema.optional(),title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
  z.object({op:z.literal('update'),kind,id:z.string(),expected_version:z.number().int().nonnegative(),importance:importanceSchema.optional(),title:z.string().trim().min(1).max(200).optional(),note:z.string().max(4000).optional(),status:z.string().optional(),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
  z.object({op:z.literal('convert'),id:z.string(),target:z.enum(['todo','goal']),expected_version:z.number().int().nonnegative()}).strict(),
- z.object({op:z.literal('undo_create'),id:z.string(),expected_version:z.literal(1)}).strict(),
+ z.object({op:z.literal('undo_create'),id:z.string(),kind:z.enum(['todo','goal']).optional(),expected_version:z.literal(1)}).strict(),
  z.object({op:z.literal('profile'),about:z.string().max(5000),expected_version:z.number().int().nonnegative()}).strict(),
 ])
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex')
@@ -49,8 +54,27 @@ export function applyLifeMutation(state:LifeState,raw:unknown,requestId:string,n
   if('goal_id'in p&&p.goal_id){const previous=p.op==='update'?(p.kind==='todo'?next.todos:next.ideas).find(r=>r.id===p.id)?.goal_id:null
    if(!next.goals.some(g=>g.id===p.goal_id&&(g.status!=='archived'||previous===p.goal_id)))throw Error('goal_not_found')
   }
-  if(p.op==='undo_create'){const old=next.todos.find(r=>r.id===p.id);if(!old)throw Error('item_not_found');if(old.version!==p.expected_version)throw Error('version_conflict');next.todos=next.todos.filter(r=>r.id!==p.id);result={id:p.id,version:old.version}}
+  if(p.op==='undo_create'){const rows=p.kind==='goal'?next.goals:next.todos,old=rows.find(r=>r.id===p.id);if(!old)throw Error('item_not_found');if(old.version!==p.expected_version)throw Error('version_conflict');if(p.kind==='goal'){if(next.todos.some(r=>r.goal_id===p.id)||next.ideas.some(r=>r.goal_id===p.id))throw Error('goal_has_links');next.goals=next.goals.filter(r=>r.id!==p.id)}else next.todos=next.todos.filter(r=>r.id!==p.id);result={id:p.id,version:old.version}}
   else if(p.op==='profile'){if(next.profile.version!==p.expected_version)throw Error('version_conflict');next.profile={about:p.about,version:p.expected_version+1};result={id:'profile',version:next.profile.version}}
+  else if(p.op==='from_context'){
+   // The object retains its adoption identity after bounded request receipts are evicted.
+   const existing=next.todos.find(todo=>todo.context_source?.candidate_id===p.source.candidate_id)
+   if(existing)result=existing
+   else{const b={...base(p.title,p.note),context_source:p.source};next.todos.push({...b,status:'open',due:null,goal_id:null,idea_id:null});result=b}
+  }
+  else if(p.op==='from_workbench'){
+   if(!p.source.refs.every(ref=>p.evidence.some(input=>input.id===ref.entry_id&&input.version===ref.version&&input.text.includes(ref.quote))))throw Error('workbench_invalid_evidence')
+   if(p.automatic&&(!p.proof||!p.evidence||p.proof.kind!==p.kind||p.proof.title!==p.title||p.proof.summary!==p.note||p.proof.due!==p.due||JSON.stringify(p.proof.refs)!==JSON.stringify(p.source.refs)||!automaticWorkbenchMatter({...p.proof,id:p.source.candidate_id,group:''},p.evidence)))throw Error('workbench_capture_not_explicit')
+   const rows=p.kind==='todo'?next.todos:p.kind==='idea'?next.ideas:next.goals
+   const existing=rows.find(row=>row.workbench_source?.candidate_id===p.source.candidate_id)
+   if(existing)result=existing
+   else{const b={...base(p.title,p.note),workbench_source:{candidate_id:p.source.candidate_id,refs:p.source.refs.map(({entry_id,version})=>({entry_id,version}))},sources:p.sources,provenance_refs:p.source.refs.map(ref=>ref.entry_id),auto_recorded:p.automatic}
+    if(p.kind==='todo')next.todos.push({...b,status:'open',due:p.due,goal_id:null,idea_id:null})
+    if(p.kind==='idea')next.ideas.push({...b,status:'active',goal_id:null})
+    if(p.kind==='goal')next.goals.push({...b,status:'active',success_criteria:p.success_criteria,idea_id:null})
+    result=b
+   }
+  }
   else if(p.op==='from_news'){
    const rows=p.kind==='todo'?next.todos:p.kind==='idea'?next.ideas:next.goals
    const existing=rows.find(row=>row.news_source?.article_id===p.article.article_id)

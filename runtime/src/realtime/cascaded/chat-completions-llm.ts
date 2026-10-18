@@ -3,8 +3,8 @@ import {committedConversationPairsSchema,type CommittedConversationPair} from '.
 import {translateSystemPrompt, type PromptLanguage} from '../prompt-language.js'
 import {cascadedNarrationInstructions} from './llm.js'
 import {originalImageUrl} from './llm.js'
-import {randomUUID} from 'node:crypto'
-import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
+import {beginModelUsage,mergeModelUsage} from '../../usage/model-call.js'
+import type {UsageReporter} from '../usage.js'
 import type { Clock } from '../../core/clock.js'
 import type { JsonObject } from '../protocol.js'
 import { codePointLengthLikePython } from '../../text/python-text.js'
@@ -34,7 +34,7 @@ export class ChatCompletionsLlmFailure extends Error {
 }
 
 export interface ChatCompletionsLlmFactoryOptions {
-  readonly provider: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted'
+  readonly provider: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted' | 'openai-compatible'
   readonly baseUrl: string; readonly apiKey: string; readonly model: string; readonly instructions: string
   readonly fetchImpl?: typeof globalThis.fetch; readonly idFactory?: () => string; readonly clock?: Clock
   readonly onUsage?: UsageReporter
@@ -56,7 +56,7 @@ function schema(tool: CascadedLlmTool): JsonObject { return {type: 'function', f
 function size(units: readonly (readonly Message[])[]): {items: number; codepoints: number} { const all = units.flat(); return {items: all.length, codepoints: all.reduce((sum, item) => sum + codePointLengthLikePython(JSON.stringify(withoutImage(item))), 0)} }
 
 class Session implements CascadedLlmSession {
-  readonly #provider: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted'
+  readonly #provider: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted' | 'openai-compatible'
   readonly #onUsage: UsageReporter | undefined
   readonly #endpoint: string; readonly #apiKey: string; readonly #model: string; readonly #instructions: string; readonly #fetch: typeof fetch
   readonly #idleTimeoutMs: number; readonly #closeTimeoutMs: number; readonly #active = new Set<Active>()
@@ -64,9 +64,9 @@ class Session implements CascadedLlmSession {
   #history: Message[][] = []; #unresolved: Message[] | null = null; #closed = false; #closePromise: Promise<void> | null = null
   constructor(options: ChatCompletionsLlmFactoryOptions,history?:readonly CommittedConversationPair[]) {
     this.#provider = options.provider
-    this.#onUsage = options.provider === 'self-hosted' ? undefined : options.onUsage
+    this.#onUsage = options.onUsage
     if ((!options.apiKey && options.provider !== 'self-hosted') || !options.model || !options.instructions) throw fail('configuration')
-    this.#endpoint = endpoint(options.provider === 'self-hosted' ? selfHostedEndpoint(options.baseUrl, 'http', 'SELF_HOSTED_LLM_BASE_URL') : options.baseUrl); this.#apiKey = options.apiKey; this.#model = options.model; this.#instructions = options.instructions; this.#fetch = options.fetchImpl ?? globalThis.fetch
+    this.#endpoint = endpoint(['self-hosted','openai-compatible'].includes(options.provider) ? selfHostedEndpoint(options.baseUrl, 'http', options.provider === 'self-hosted' ? 'SELF_HOSTED_LLM_BASE_URL' : 'OPENAI_COMPATIBLE_BASE_URL') : options.baseUrl); this.#apiKey = options.apiKey; this.#model = options.model; this.#instructions = options.instructions; this.#fetch = options.fetchImpl ?? globalThis.fetch
     this.#idleTimeoutMs = options.idleTimeoutMs ?? 30_000; this.#closeTimeoutMs = options.closeTimeoutMs ?? 1_000
     if(history!==undefined)this.#seed(history)
     if (!Number.isFinite(this.#idleTimeoutMs) || this.#idleTimeoutMs <= 0 || !Number.isFinite(this.#closeTimeoutMs) || this.#closeTimeoutMs <= 0) throw fail('configuration')
@@ -102,15 +102,15 @@ class Session implements CascadedLlmSession {
     const stop = (): void => { active.failureCode ??= 'aborted'; active.controller.abort(); void this.#cancel(active.reader) }
     input.signal.addEventListener('abort', stop, {once: true}); this.#active.add(active)
     let responseId: string | null = null, terminal = false
-    const usageId = randomUUID()
+    const finishUsage=beginModelUsage(this.#onUsage,this.#endpoint,this.#model,'llm',this.#provider==='self-hosted'||this.#provider==='openai-compatible'?'custom':this.#provider,this.#provider==='qwen'?'disabled':undefined)
     let usage: Record<string, unknown> | undefined
     let events: AsyncIterator<Record<string, unknown>> | undefined
     const captureUsage = (event: Record<string, unknown>): void => {
-      if (object(event.usage)) usage = event.usage
+      if (object(event.usage)) usage = mergeModelUsage(usage,event.usage)
     }
     try {
       let response: Response
-      try { response = await this.#timed(this.#fetch(this.#endpoint, {method: 'POST', redirect: this.#provider === 'self-hosted' ? 'error' : 'follow', headers: {...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}), 'content-type': 'application/json', accept: 'text/event-stream'}, body: JSON.stringify(body), signal: active.controller.signal}), active) }
+      try { response = await this.#timed(this.#fetch(this.#endpoint, {method: 'POST', redirect: ['self-hosted','openai-compatible'].includes(this.#provider) ? 'error' : 'follow', headers: {...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}), 'content-type': 'application/json', accept: 'text/event-stream'}, body: JSON.stringify(body), signal: active.controller.signal}), active) }
       catch (error) { if (error instanceof ChatCompletionsLlmFailure) throw error; throw fail(input.signal.aborted ? 'aborted' : this.#closed ? 'closed' : 'network') }
       if (!response.ok) { await this.#cancel(response.body?.getReader() ?? null); throw fail('http', response.status) }
       if (response.body === null || !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) { await this.#cancel(response.body?.getReader() ?? null); throw fail('protocol') }
@@ -177,16 +177,7 @@ class Session implements CascadedLlmSession {
           active.usageDeadline = Date.now() + Math.min(this.#closeTimeoutMs, 1000)
           try { while (true) { const next = await events.next(); if (next.done) break; captureUsage(next.value) } } catch { /* Metering cannot change a completed response. */ }
         }
-        const details = object(usage?.prompt_tokens_details) ? usage.prompt_tokens_details : {}
-        const outputDetails = object(usage?.completion_tokens_details) ? usage.completion_tokens_details : {}
-        reportUsage(this.#onUsage, {
-          id: usageId, service: 'llm', provider: this.#provider, model: this.#model,
-          status: terminal && usage !== undefined ? 'complete' : 'missing',
-          ...(terminal && usage !== undefined ? {
-            inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens,
-            cachedTokens: this.#provider === 'deepseek' ? usage.prompt_cache_hit_tokens : details.cached_tokens, reasoningTokens: outputDetails.reasoning_tokens,
-          } : {}),
-        } as UsageReport)
+        finishUsage(usage,terminal?'success':input.signal.aborted?'cancelled':'error',responseId)
         input.signal.removeEventListener('abort', stop); await this.#cancel(active.reader); this.#active.delete(active)
       }
       if (terminal && this.#onUsage !== undefined) active.completion = finish()

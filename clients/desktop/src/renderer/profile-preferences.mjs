@@ -8,13 +8,13 @@ export function initialInterests(news,warmup){
 /** Interests guessed from the profile rank nothing until the user keeps them; this keeps them as they are. */
 export function confirmedInterests(news){return {enabled:news?.enabled??false,explore:news?.explore??true,interests:(news?.interests??[]).map(i=>i.text),expected_version:news?.profile_version??0}}
 export function renderWarmup(parent,{warmup,command,button}){
- // A draft on screen is refreshed silently; the status box is only for the first draft.
- if(warmup?.status!=='working'&&warmup?.status!=='failed'||warmup.draft)return
+ // Background work never hides the previous draft or disables unrelated controls.
+ if(warmup?.status!=='working'&&warmup?.status!=='failed')return
  const busy=warmup.status==='working',box=el('section',undefined,'warmup-status');box.setAttribute('role','status');box.setAttribute('aria-live','polite');box.setAttribute('aria-busy',String(busy));parent.append(box)
  if(busy){const spinner=el('span',undefined,'warmup-spinner');spinner.setAttribute('aria-hidden','true');box.append(spinner)}
- box.append(el('p',busy?'正在根据近期工作整理…':'初稿暂未生成，你仍可使用现有内容和通用主题。'))
- if(busy){const skeleton=el('div',undefined,'warmup-skeleton');skeleton.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)skeleton.append(el('span'));box.append(skeleton)}
- if(!busy)button('重新生成',()=>command('profile.refresh',{}),box)
+ box.append(el('p',busy?'正在后台更新画像，不影响对话和其他功能。':warmup.draft?'画像暂时未能更新，现有内容仍可使用。':'画像暂未生成，不影响对话和其他功能。'))
+ if(busy&&!warmup.draft){const skeleton=el('div',undefined,'warmup-skeleton');skeleton.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)skeleton.append(el('span'));box.append(skeleton)}
+ if(!busy)button('重试',()=>command('profile.refresh',{}),box)
 }
 export function renderInterests(parent,{news,warmup,command,button,local,rerender,delegate}){
  const texts=initialInterests(news,warmup),seeded=Boolean(news?.interests_seeded&&news.interests?.length),configured=!seeded&&Boolean(news?.interests?.length||news?.profile_version>0)

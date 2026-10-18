@@ -793,7 +793,12 @@ export class TaskService {
         task.phase = 'waiting'
       else if (task.phase === 'waiting')
         task.phase = task.work_ids.length ? 'verifying' : 'queued'
-    })
+    }, { when: state => {
+      const task = state.tasks.find(task => task.id === taskId)
+      if (!task) return false
+      if (task.phase === 'completed' || task.phase === 'cancelled') return true
+      return task.waiting_reason === reason && (reason ? task.phase === 'waiting' : task.phase !== 'waiting')
+    }, value: undefined })
   }
   resourceState(taskId: string, reason: string | null): Promise<void> {
     return this.#mutate(next => {
@@ -966,8 +971,10 @@ export class TaskService {
       return false
     })
   }
-  #mutate<T>(change: (next: TaskState) => Promise<T> | T): Promise<T> {
+  #mutate<T>(change: (next: TaskState) => Promise<T> | T, unchanged?: { when: (state: Readonly<TaskState>) => boolean; value: T }): Promise<T> {
     const run = this.#tail.then(async () => {
+      // Test under the mutation queue so earlier transitions cannot be skipped.
+      if (unchanged?.when(this.#state)) return unchanged.value
       const next = structuredClone(this.#state), result = await change(next)
       for (const taskId of this.#incompleteReplay)
         if (!next.replay_incomplete.includes(taskId))

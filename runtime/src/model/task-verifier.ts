@@ -54,7 +54,7 @@ export class GatewayTaskVerifier {
     const ask=async(feedback?:Readonly<Record<string,unknown>>):Promise<TaskDecision>=>{
       try{
         const selected = images.length && this.#vision ? this.#vision : {gateway: this.#gateway, model: this.#model}
-        lastReply=(await selected.gateway.complete({model:selected.model,signal,system:SYSTEM,jsonSchema:outputSchema,...(images.length?{images}:{}),
+        lastReply=(await selected.gateway.complete({usage:{feature:'verification',operation:feedback?'repair':'evaluate',taskId:task.id,...(task.trigger?{runId:task.trigger.run_id}:{})},model:selected.model,signal,system:SYSTEM,jsonSchema:outputSchema,...(images.length?{images}:{}),
           prompt:JSON.stringify({task,accepted_user_inputs:accepted,unreconciled_input_refs:pending,evidence:currentEvidence,valid_evidence_refs:valid,image_evidence:Object.fromEntries(imageEvidence),output_schema:outputSchema,...(feedback?{validation_feedback:feedback}:{})})})).text
       }catch(error){
         throw new TaskCheckError('model_call',shortCode(error instanceof GatewayError?error.classification:undefined))

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 let lastVisorState = null
 
 contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
+  chatgpt: Object.freeze({action:(action,value)=>ipcRenderer.invoke('nova:chatgpt:action',action,value)}),
   visor: Object.freeze({
     snapshot:()=>ipcRenderer.invoke('nova:visor:get'),
     configure:patch=>ipcRenderer.invoke('nova:visor:configure',patch),

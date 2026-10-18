@@ -1,3 +1,4 @@
+import * as compatibleProviders from '../src/renderer/compatible-providers.mjs'
 import * as voicePreset from '../src/renderer/voice-preset.mjs'
 import {onButton} from '../src/renderer/button-action.mjs'
 import {createStartupNotice, startupMessage} from '../src/renderer/startup-notice.mjs'
@@ -75,13 +76,14 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createPhonePanel, ...voicePreset, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createSkinPanel: () => ({render() {}, destroy() {}}),
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
     createKnowledgePanel: () => ({render() {}}),
     createVoiceprintPanel: () => ({render() {}}),
+    createChatGptPanel: () => {},
     document: {
       documentElement: {}, createTreeWalker: () => ({nextNode: () => null}),
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),
@@ -538,7 +540,7 @@ test('settings allows only inline QR images while keeping network and scripts lo
   const meta = html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)">/)
   assert.ok(meta, 'the settings page declares a CSP')
   for (const directive of board) assert.ok(meta[1].includes(directive), `CSP keeps ${directive}`)
-  assert.doesNotMatch(html.replace(/<a class="key-link"[^>]+>获取密钥 ↗<\/a>/g, '').replace(/placeholder="https:\/\/host\/(?:v1|tts)"/g, ''), /https?:\/\//)
+  assert.doesNotMatch(html.replace(/<a class="key-link"[^>]+>获取密钥 ↗<\/a>/g, '').replace(/placeholder="https:\/\/(?:host\/(?:v1|tts)|api\.openai\.com\/v1)"/g, ''), /https?:\/\//)
   assert.match(html, /<html lang="zh-CN">/)
 })
 
@@ -615,7 +617,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
   assert.match(html, /火山语音/)
-  assert.equal((html.match(/type="password"/g) || []).length, 13)
+  assert.equal((html.match(/type="password"/g) || []).length, 16)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {
@@ -1327,7 +1329,7 @@ test('empty usage has quiet card values, one hint, and no empty details disclosu
   const panel = await mountSettingsPanel(publicView({frontendUsage:{requests:0,rows:[],history:{requests:0,rows:[]}}}))
   assert.equal(panel.node('#usage-history-cost').textContent,'—')
   assert.equal(panel.node('#usage-session-cost').textContent,'—')
-  assert.equal(panel.node('#frontend-usage').textContent,'开始对话后显示用量')
+  assert.equal(panel.node('#frontend-usage').textContent,'模型调用后显示用量')
   assert.equal(panel.node('#usage-breakdown').hidden,true)
   panel.push(publicView({frontendUsage:{requests:1,pricedReports:1,costCny:0.01,rows:[],history:{requests:1,pricedReports:1,costCny:0.01,rows:[]}}}))
   assert.equal(panel.node('#usage-breakdown').hidden,false)
@@ -1521,4 +1523,71 @@ test('the privacy switch for reading other people\'s messages renders the saved 
   assert.equal(patches[0].profileParticipantMessages, true)
   panel.push(publicView({profileParticipantMessages: false}))
   assert.equal(panel.node('#profileParticipantMessages').checked, false)
+})
+
+test('usage grouping renders feature costs, task identity and call outcomes',async()=>{
+ const row={provider:'openrouter',service:'llm',model:'test-model',feature:'profile',requests:1,pricedReports:1,reportedCostReports:1,costUsd:.002,costCny:0,inputTokens:100,outputTokens:20,durationMs:500,runId:'run-one',taskId:'task-one'}
+ const usage={...row,rows:[row],features:[row],runs:[row],recent:[{...row,operation:'draft',outcome:'cancelled',status:'complete'}]}
+ const panel=await mountSettingsPanel(publicView({frontendUsage:{...usage,history:usage}}))
+ const contents=()=>JSON.stringify(panel.node('#frontend-usage-details').children)
+ assert.match(contents(),/画像生成/)
+ assert.match(contents(),/\$0.0020/)
+ assert.match(contents(),/已取消/)
+ panel.node('#usage-group').value='runs'
+ panel.node('#usage-group').listeners.change({target:panel.node('#usage-group')})
+ assert.match(contents(),/任务 task-one/)
+ panel.node('#usage-group').value='models'
+ panel.node('#usage-group').listeners.change({target:panel.node('#usage-group')})
+ assert.match(contents(),/test-model/)
+})
+
+
+test('compatible presets stage independent settings and clear endpoint-bound secret drafts before Save', async () => {
+  const calls = []
+  const panel = await mountSettingsPanel(publicView({pipelineMode:'cascaded', cascadedLlmProvider:'openai-compatible', cascadedAsrProvider:'openai-compatible', cascadedTtsProvider:'openai-compatible', openaiCompatibleBaseUrl:'https://old.example/v1', compatibleTtsBaseUrl:'https://api.openai.com/v1'}), {
+    set: async commit => {calls.push(commit); return publicView({...commit.settingsPatch, saved:true})},
+  })
+  assert.equal(panel.node('#compatible-llm-settings').hidden, false)
+  panel.node('#openaiCompatibleApiKey').value='old-draft'
+  panel.node('#openaiCompatibleApiKey').listeners.input()
+  panel.node('#compatible-llm-preset').value='openrouter'
+  panel.node('#compatible-llm-preset').listeners.change()
+  assert.equal(panel.node('#openaiCompatibleApiKey').value,'')
+  assert.equal(calls.length,0)
+  panel.node('#compatible-tts-preset').value='siliconflow'
+  panel.node('#compatible-tts-preset').listeners.change()
+  panel.node('#openaiCompatibleProtocol').value='responses'
+  panel.node('#openaiCompatibleProtocol').listeners.change()
+  panel.node('#cascadedLlmModel').value='vendor/model'
+  panel.node('#cascadedLlmModel').listeners.input()
+  panel.node('#openaiCompatibleApiKey').value='new-draft'
+  panel.node('#openaiCompatibleApiKey').listeners.input()
+  await panel.click('#settings-save')
+  const patch=calls[0].settingsPatch
+  assert.equal(patch.openaiCompatibleBaseUrl,'https://openrouter.ai/api/v1')
+  assert.equal(patch.openaiCompatibleProtocol,'responses')
+  assert.equal(patch.cascadedLlmModels['openai-compatible'],'vendor/model')
+  assert.equal(patch.secrets.openaiCompatibleApiKey,'new-draft')
+  assert.equal(patch.compatibleTtsBaseUrl,'https://api.siliconflow.cn/v1')
+  assert.equal(patch.compatibleTtsSendSampleRate,true)
+  assert.equal(patch.compatibleTtsVoice,'FunAudioLLM/CosyVoice2-0.5B:alex')
+  assert.equal(Object.hasOwn(patch,'compatibleAsrBaseUrl'),false)
+})
+
+test('compatible speech presets save vendor path prefixes and reset sampling extensions', async () => {
+  const calls=[]
+  const panel=await mountSettingsPanel(publicView({pipelineMode:'cascaded',cascadedAsrProvider:'openai-compatible',cascadedTtsProvider:'openai-compatible',compatibleTtsSendSampleRate:true}),{
+    set:async commit=>{calls.push(commit);return publicView({...commit.settingsPatch,saved:true})},
+  })
+  panel.node('#compatible-asr-preset').value='groq'
+  panel.node('#compatible-asr-preset').listeners.change()
+  panel.node('#compatible-tts-preset').value='zhipu'
+  panel.node('#compatible-tts-preset').listeners.change()
+  await panel.click('#settings-save')
+  const patch=calls[0].settingsPatch
+  assert.equal(patch.compatibleAsrBaseUrl,'https://api.groq.com/openai/v1')
+  assert.equal(patch.compatibleAsrModel,'whisper-large-v3-turbo')
+  assert.equal(patch.compatibleTtsBaseUrl,'https://open.bigmodel.cn/api/paas/v4')
+  assert.equal(patch.compatibleTtsVoice,'tongtong')
+  assert.equal(patch.compatibleTtsSendSampleRate,false)
 })

@@ -1,9 +1,10 @@
+import {safeUsageContext, type UsageContext} from '../usage/context.js'
 /** Out-of-band metering; reporting must never interrupt a voice response. */
-export type UsageService = 'realtime' | 'llm' | 'asr' | 'tts'
-export interface UsageReport {
+export type UsageService = 'realtime' | 'llm' | 'asr' | 'tts' | 'embedding' | 'agent'
+export interface UsageReport extends UsageContext {
   readonly id: string
   readonly service: UsageService
-  readonly provider: 'qwen' | 'stepfun' | 'ark' | 'deepseek' | 'volcengine' | 'openai' | 'gemini'
+  readonly provider: 'qwen' | 'stepfun' | 'ark' | 'deepseek' | 'volcengine' | 'openai' | 'gemini' | 'openrouter' | 'custom' | 'codex' | 'acp'
   readonly model: string
   readonly status: 'complete' | 'missing'
   readonly pricingRegion?: 'cn-beijing' | 'singapore' | 'unknown'
@@ -17,19 +18,26 @@ export interface UsageReport {
   readonly cachedTokens?: number
   readonly reasoningTokens?: number
   readonly audioDurationMs?: number
+  readonly timestamp?: string
+  readonly durationMs?: number
+  readonly outcome?: 'success' | 'error' | 'cancelled'
+  readonly providerRequestId?: string
+  readonly reportedCostUsd?: number
+  readonly reasoningMode?: 'enabled' | 'disabled'
   readonly characters?: number
 }
 export type UsageReporter = (report: UsageReport) => void
 const meters = ['inputTokens', 'outputTokens', 'inputTextTokens', 'inputAudioTokens',
   'outputTextTokens', 'outputAudioTokens', 'cachedTokens', 'reasoningTokens',
-  'audioDurationMs', 'characters'] as const
+  'audioDurationMs', 'characters', 'durationMs'] as const
 
-export function reportUsage(reporter: UsageReporter | undefined, report: UsageReport): void {
-  if (reporter === undefined) return
-  if (!['qwen', 'stepfun', 'ark', 'deepseek', 'volcengine', 'openai', 'gemini'].includes(report.provider)
-    || !['llm', 'realtime', 'asr', 'tts'].includes(report.service)
+export function normalizeUsageReport(value: unknown): UsageReport | null {
+  if (!value || typeof value !== 'object') return null
+  const report = value as UsageReport
+  if (!['qwen', 'stepfun', 'ark', 'deepseek', 'volcengine', 'openai', 'gemini', 'openrouter', 'custom', 'codex', 'acp'].includes(report.provider)
+    || !['llm', 'realtime', 'asr', 'tts', 'embedding', 'agent'].includes(report.service)
     || typeof report.id !== 'string' || !report.id || report.id.length > 256
-    || typeof report.model !== 'string' || !report.model || report.model.length > 256) return
+    || typeof report.model !== 'string' || !report.model || report.model.length > 256 || !['complete','missing'].includes(report.status)) return null
   const counts: Partial<Record<typeof meters[number], number>> = {}
   let complete = report.status === 'complete'
   for (const key of meters) {
@@ -38,16 +46,27 @@ export function reportUsage(reporter: UsageReporter | undefined, report: UsageRe
     if (!Number.isSafeInteger(value) || value < 0) complete = false
     else counts[key] = value
   }
-  const required = report.service === 'asr' ? ['audioDurationMs'] as const
+  const required = report.service === 'embedding' ? ['inputTokens'] as const : report.service === 'asr' ? ['audioDurationMs'] as const
     : report.service === 'tts' ? ['characters'] as const : ['inputTokens', 'outputTokens'] as const
   if (required.some(key => counts[key] === undefined)) complete = false
-  try {
-    reporter(Object.freeze({id: report.id, service: report.service, provider: report.provider,
-      model: report.model, status: complete ? 'complete' : 'missing', ...counts,
-      ...(report.pricingRegion === undefined ? {} : {pricingRegion: report.pricingRegion}),
-      ...(report.outputModality === undefined ? {} : {outputModality: report.outputModality}),
-    }))
-  } catch { /* A closed UI/IPC channel cannot change generation or cancellation. */ }
+  return Object.freeze({id:report.id,service:report.service,provider:report.provider,model:report.model,
+    status:complete?'complete':'missing',...counts,...safeUsageContext(report),
+    ...(['cn-beijing','singapore','unknown'].includes(report.pricingRegion!)?{pricingRegion:report.pricingRegion!}:{}),
+    ...(['audio','text'].includes(report.outputModality!)?{outputModality:report.outputModality!}:{}),
+    ...(typeof report.timestamp==='string'&&Number.isFinite(Date.parse(report.timestamp))?{timestamp:new Date(report.timestamp).toISOString()}:{}),
+    ...(['success','error','cancelled'].includes(report.outcome!)?{outcome:report.outcome!}:{}),
+    ...(typeof report.providerRequestId==='string'&&/^[\w.:/-]{1,256}$/u.test(report.providerRequestId)?{providerRequestId:report.providerRequestId}:{}),
+    ...(['enabled','disabled'].includes(report.reasoningMode!)?{reasoningMode:report.reasoningMode!}:{}),
+    ...(report.provider==='openrouter'&&typeof report.reportedCostUsd==='number'&&Number.isFinite(report.reportedCostUsd)&&report.reportedCostUsd>=0?{reportedCostUsd:report.reportedCostUsd}:{}),
+  })
+}
+export function reportUsage(reporter:UsageReporter|undefined,report:UsageReport):void {
+ if(!reporter)return
+ const value=normalizeUsageReport(report)
+ if(value)try{reporter(value)}catch{/* Observability never changes generation or cancellation. */}
+}
+export function bindUsageReporter(reporter:UsageReporter|undefined,context:UsageContext):UsageReporter|undefined {
+ return reporter?report=>reportUsage(reporter,{...context,...report,feature:report.feature&&report.feature!=='other'?report.feature:context.feature??'other'}):undefined
 }
 
 /** Pricing is tied to the selected host endpoint, never inferred from a model name alone. */

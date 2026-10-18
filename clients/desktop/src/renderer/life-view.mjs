@@ -36,6 +36,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
   if(row.goal_id)meta.append(el('span',`目标：${state.goals.find(g=>g.id===row.goal_id)?.title??'不可用'}`))
   if(row.idea_id)meta.append(el('span',`来自想法：${state.ideas.find(i=>i.id===row.idea_id)?.title??'不可用'}`))
   const footer=el('div',undefined,'card-footer'),actions=el('div',undefined,'card-actions')
+  if(row.auto_recorded&&row.workbench_source&&row.version===1&&['todo','goal'].includes(kind))button('撤销自动记录',()=>command('context.undo',{id:row.id}),actions,`life:${row.id}`).className='quiet'
   if(row.news_source){card.append(el('p',`由你从公开资讯保存：${row.news_source.title}`),el('p',row.news_source.url));if(openArticle)button('查看资讯原文',()=>openArticle(row.news_source.url),actions).className='ghost'}
   if(kind==='goal'){card.append(el('p',`达成标准：${row.success_criteria||'尚未填写'}`),el('p',row.progress.total?`行动进度：${row.progress.done}/${row.progress.total}（不含已取消待办；目标是否达成由你确认）`:'尚未关联待办；不代表目标已达成'))}
   const select=el('select');select.setAttribute('aria-label',`${row.title}状态`);for(const [value,label]of Object.entries(statuses[kind])){const opt=el('option',label);opt.value=value;select.append(opt)}select.value=row.status;const saving=el('span','正在保存…','action-progress');saving.setAttribute('role','status');saving.hidden=true;const change=async()=>{const value=select.value;try{await command('life.mutate',{op:'update',kind,id:row.id,expected_version:row.version,status:value})}finally{select.value=row.status}};if(bindPending)bindPending(select,`life:${row.id}`,change,'change',saving);else select.addEventListener('change',()=>run(change));footer.append(select,saving,actions)
@@ -48,6 +49,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
 export function renderProfile(panel,{state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate}){
  panel.append(el('h2','Profile · 关于我'))
  renderWarmup(panel,{warmup,command,button})
+ if(warmup)panel.append(el('p',warmup.automatic_available===false?'今日自动更新次数已用完，如需再次更新可手动触发。':'每天最多自动更新一次，额外更新可手动触发。'))
  const card=el('section');card.className='preference-card';panel.append(card)
  const confirmed=state?.profile?.about??'',suggested=state?.profile?.version>0?'':warmup?.draft?.about?.text??'',about=confirmed||suggested
  const work=state?.profile?.version>0?[]:warmup?.draft?.work??[]
@@ -67,7 +69,7 @@ export function renderProfile(panel,{state,news,warmup,command,button,local,pref
   button(about||work.length?'编辑概览':'自己写一段',()=>{local.profile={about:confirmed||[suggested,...work.map(item=>`${item.title}：${item.text}`)].filter(Boolean).join('\n\n'),version:state?.profile?.version??0};rerender()},actions)
   if(delegate)button('和 Nova 聊聊',()=>delegate('我想完善个人介绍，请根据已有资料和我一起调整。'),actions)
   // The draft is only on screen until the user writes their own; a first draft that is still working or has failed shows its own status box above.
-  if(!confirmed&&!(state?.profile?.version>0)&&warmup&&(warmup.draft||warmup.status==='idle')){const working=warmup.status==='working',update=button(working?'正在更新…':'立即更新',()=>command('profile.refresh',{}),actions);update.disabled=working;if(working)update.setAttribute('aria-busy','true')}
+  if(warmup){const working=warmup.status==='working',update=button(working?'正在更新…':'立即更新',()=>command('profile.refresh',{}),actions);update.disabled=working;if(working)update.setAttribute('aria-busy','true')}
  }
  renderInterests(panel,{news,warmup,command,button,local:preferencesLocal,rerender,delegate})
 }

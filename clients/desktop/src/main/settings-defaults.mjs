@@ -11,6 +11,15 @@ export const RUNTIME_DEFAULTS = Object.freeze({
   integratedVoice: 'longanqian',
   cascadedEndpointingProvider: 'auto',
   cascadedAsrProvider: 'volcengine',
+  openaiCompatibleBaseUrl: 'https://api.openai.com/v1',
+  openaiCompatibleProtocol: 'chat-completions',
+  compatibleAsrBaseUrl: 'https://api.openai.com/v1',
+  compatibleAsrModel: 'whisper-1',
+  compatibleTtsBaseUrl: 'https://api.openai.com/v1',
+  compatibleTtsModel: 'tts-1',
+  compatibleTtsVoice: 'alloy',
+  compatibleAsrOmitResponseFormat: false,
+  compatibleTtsSendSampleRate: false,
   selfHostedAsrUrl: '',
   selfHostedLlmBaseUrl: '',
   selfHostedTtsUrl: '',
@@ -20,6 +29,7 @@ export const RUNTIME_DEFAULTS = Object.freeze({
   cascadedLlmProvider: 'deepseek',
   cascadedLlmModels: Object.freeze({
     'self-hosted': '',
+    'openai-compatible': '',
     qwen: 'qwen-plus',
     ark: 'doubao-seed-2-0-pro-260215',
     deepseek: 'deepseek-flash',
@@ -51,6 +61,6 @@ export const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 export function selectedTextLlmProvider(settings, secretsPresent = {}) {
   const provider = settings?.cascadedLlmProvider ?? RUNTIME_DEFAULTS.cascadedLlmProvider
   const configured = provider === 'self-hosted' ? Boolean(settings?.selfHostedLlmBaseUrl)
-    : secretsPresent[provider === 'qwen' ? 'dashscopeApiKey' : `${provider}ApiKey`] === true
+    : secretsPresent[provider === 'openai-compatible' ? 'openaiCompatibleApiKey' : provider === 'qwen' ? 'dashscopeApiKey' : `${provider}ApiKey`] === true
   return settings?.pipelineMode === 'integrated' && !configured ? 'qwen' : provider
 }

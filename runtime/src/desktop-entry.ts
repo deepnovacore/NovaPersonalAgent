@@ -22,6 +22,7 @@ const parentPort = (process as UtilityProcess).parentPort
 const acceptanceProbe=acceptance?await probeAcceptanceGate():undefined
 if(acceptance&&acceptanceProbe)parentPort?.postMessage({type:'nova:acceptance:gate-ready',buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(fileURLToPath(import.meta.url)),...acceptanceProbe})
 
+let usageSnapshot:(()=>Promise<unknown>)|undefined
 let capabilityView: (() => DesktopCapabilityState | undefined) = () => undefined
 let knowledgeHandle: ((method: string, params: unknown) => Promise<unknown>) | undefined
 let feishuHandle: ((method: string, params: unknown) => Promise<unknown>) | undefined
@@ -35,6 +36,7 @@ const control = installDesktopControl({...(parentPort === undefined ? {} : {pare
     updateCodingBackend(backend)
   },
   status: () => capabilityView(), handle: async (method, params) => {
+    if(method==='usage.snapshot')return usageSnapshot?.()
     if (['phone.start','phone.stop','phone.status'].includes(method)) return phoneHandle?.(method,params)
     if (method.startsWith('feishu.') || method.startsWith('notifications.')) return feishuHandle?.(method, params)
     if (PERSONAL_SETTINGS_METHODS.includes(method)) return personalSettingsHandle?.(method, params)
@@ -78,6 +80,7 @@ const exitCode = await runDesktopEntryWithStopSources({
       onKnowledge: knowledge => { knowledgeHandle = (method, params) => knowledge.service.handle(method, params) },
       onCoding: coding => { if (coding.updateDefaultBackend) updateCodingBackend = backend => coding.updateDefaultBackend!(backend) },
     })
+    usageSnapshot=()=>composition.usage.snapshot()
     phoneHandle = composition.phoneControl
     capabilityView = () => ({...composition.realtime.capabilityStatus, state: 'running'})
     clearConversation = () => composition.realtime.clearConversation()

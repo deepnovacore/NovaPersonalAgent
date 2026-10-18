@@ -158,3 +158,18 @@ test('only a lost delivery can be explicitly reconciled after restart',async()=>
   assert.equal((await tasks.continue('continue',{...f,control_revision:settled.control_revision},{kind:'user',client_id:'test'})).phase,'queued')
  }finally{await tasks.close();await rm(root,{recursive:true,force:true})}
 })
+
+
+test('recovery skips unchanged writes while preserving queued state transitions',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'task-recovery-')),path=join(root,'tasks.json');let changes=0
+ const tasks=new TaskService(path,()=>{changes++})
+ try{
+  await tasks.open();const task=await tasks.delegate('first',input);await tasks.recoveryWait(task.id,'offline');changes=0
+  const before=await readFile(path,'utf8')
+  await Promise.all([tasks.recoveryWait(task.id,'offline'),tasks.recoveryWait(task.id,'offline')])
+  assert.equal(changes,0);assert.equal(await readFile(path,'utf8'),before)
+  await Promise.all([tasks.recoveryWait(task.id,null),tasks.recoveryWait(task.id,'offline')])
+  assert.equal(changes,2);assert.equal(tasks.get(task.id).phase,'waiting');assert.equal(tasks.get(task.id).waiting_reason,'offline')
+  await tasks.recoveryWait(task.id,null);assert.equal(tasks.get(task.id).phase,'queued')
+ }finally{await tasks.close();await rm(root,{recursive:true,force:true})}
+})

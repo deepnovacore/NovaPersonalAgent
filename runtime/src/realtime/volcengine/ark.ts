@@ -1,3 +1,5 @@
+import {selfHostedEndpoint} from '../../config/self-hosted.js'
+import {abortable} from '../../core/camera-session.js'
 import {translateSystemPrompt, type PromptLanguage} from '../prompt-language.js'
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
@@ -54,6 +56,7 @@ export interface ArkToolCall {
 }
 
 export interface ArkResponseCompleted {
+  readonly outputItems?: readonly JsonObject[]
   readonly kind: 'response_completed'
   readonly response_id: string
 }
@@ -79,6 +82,8 @@ export interface ArkStreamInput {
   readonly workspaceContext?: string | null
   readonly responseAdaptation?: string | null
   readonly signal?: AbortSignal
+  readonly textFormat?: JsonObject
+  readonly maxOutputTokens?: number
 }
 
 export interface ArkResponsesGateway {
@@ -87,6 +92,7 @@ export interface ArkResponsesGateway {
 }
 
 export interface FetchArkResponsesGatewayOptions {
+  readonly protocol?: 'ark' | 'openai-compatible'
   readonly baseUrl: string
   readonly apiKey: string
   readonly model: string
@@ -165,7 +171,7 @@ async function boundedWait<T>(
         reject(new ArkResponsesFailure('timeout'))
       }, timeoutMs)
     })
-    const value = await Promise.race([promise, timed])
+    const value = await abortable(Promise.race([promise, timed]), active.controller.signal)
     if (active.failureCode !== null) throw new ArkResponsesFailure(active.failureCode)
     return value
   } finally {
@@ -248,6 +254,7 @@ function normalizeProviderEvent(value: JsonObject): ArkEvent | null {
 }
 
 class FetchArkResponsesGateway implements ArkResponsesGateway {
+  readonly #compatible: boolean
   readonly #onUsage: UsageReporter | undefined
   readonly #endpoint: string
   readonly #apiKey: string
@@ -261,8 +268,9 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
   #closePromise: Promise<void> | null = null
 
   constructor(options: FetchArkResponsesGatewayOptions) {
+    this.#compatible = options.protocol === 'openai-compatible'
     this.#onUsage = options.onUsage
-    this.#endpoint = resolveResponsesEndpoint(options.baseUrl)
+    this.#endpoint = resolveResponsesEndpoint(this.#compatible ? selfHostedEndpoint(options.baseUrl,'http','OPENAI_COMPATIBLE_BASE_URL') : options.baseUrl)
     this.#apiKey = options.apiKey
     this.#model = options.model
     this.#instructions = options.instructions
@@ -291,10 +299,12 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
       input: inputItems,
       tools,
       parallel_tool_calls: false,
-      store: true,
+      store: !this.#compatible,
       stream: true,
-      thinking: {type: 'disabled'},
-      ...(input.previousResponseId === null
+      ...(this.#compatible ? {include:['reasoning.encrypted_content']} : {thinking: {type:'disabled'}}),
+      ...(input.textFormat ? {text:{format:input.textFormat}} : {}),
+      ...(input.maxOutputTokens === undefined ? {} : {max_output_tokens:input.maxOutputTokens}),
+      ...(this.#compatible || input.previousResponseId === null
         ? {}
         : {previous_response_id: input.previousResponseId}),
     })
@@ -321,6 +331,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
       try {
         response = await boundedWait(this.#fetch(this.#endpoint, {
           method: 'POST',
+          ...(this.#compatible ? {redirect:'error' as const} : {}),
           headers: {
             authorization: `Bearer ${this.#apiKey}`,
             'content-type': 'application/json',
@@ -398,14 +409,19 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
           throw new ArkResponsesFailure('protocol')
         }
         if (!isJsonObject(parsed)) throw new ArkResponsesFailure('protocol')
-        const event = normalizeProviderEvent(parsed)
+        let event = normalizeProviderEvent(parsed)
+        if(this.#compatible && event?.kind==='response_completed') {
+          const output=isJsonObject(parsed.response)?parsed.response.output:undefined
+          if(!Array.isArray(output)||!output.every(isJsonObject))throw new ArkResponsesFailure('protocol')
+          event={...event,outputItems:copyJsonObjects(output)}
+        }
         if (event?.kind === 'response_completed' || event?.kind === 'response_failed') {
           const response = isJsonObject(parsed.response) ? parsed.response : {}
           const usage = event.kind === 'response_completed' && isJsonObject(response.usage) ? response.usage : undefined
           const details = isJsonObject(usage?.input_tokens_details) ? usage.input_tokens_details : {}
           const outputDetails = isJsonObject(usage?.output_tokens_details) ? usage.output_tokens_details : {}
           reportUsage(this.#onUsage, {
-            id: usageId, service: 'llm', provider: 'ark', model: this.#model,
+            id: usageId, service: 'llm', provider: this.#compatible ? 'custom' : 'ark', model: this.#model,
             status: usage === undefined ? 'missing' : 'complete',
             ...(usage === undefined ? {} : {inputTokens: usage.input_tokens, outputTokens: usage.output_tokens,
               cachedTokens: details.cached_tokens, reasoningTokens: outputDetails.reasoning_tokens}),
@@ -466,7 +482,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
       throw new ArkResponsesFailure('protocol')
     } finally {
       if (!usageReported) reportUsage(this.#onUsage, {
-        id: usageId, service: 'llm', provider: 'ark', model: this.#model, status: 'missing',
+        id: usageId, service: 'llm', provider: this.#compatible ? 'custom' : 'ark', model: this.#model, status: 'missing',
       })
       input.signal?.removeEventListener('abort', onCallerAbort)
       try {
