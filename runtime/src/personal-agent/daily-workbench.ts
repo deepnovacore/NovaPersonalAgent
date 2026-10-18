@@ -20,9 +20,13 @@ type State=z.infer<typeof stateSchema>
 const diagnostics=()=>({inputs:0,cache_hits:0,extraction_calls:0,composition_calls:0,received:0,rejected:0,recorded:0})
 const empty=():State=>({version:1,failure:null,temporal:null,legacy_imported:false,legacy_dismissed:[],automatic_day:'',key:'',updated_at:null,cache:[],compositions:[],cards:[],dismissed:[],recorded:[],diagnostics:diagnostics()})
 const RECIPE='workbench-daily-v1'
+function unresolvedWorkbenchReference(card:{title:string;body:string;why:string|null;next:string|null;refs:readonly {quote:string}[]}):boolean{
+ const references=(text:string)=>text.match(/\b[me]\d+\b/gu)??[];const quoted=new Set(card.refs.flatMap(ref=>references(ref.quote)));
+ return references([card.title,card.body,card.why,card.next].join(' ')).some(id=>!quoted.has(id));
+}
 interface DailyWorkbenchOptions {
  path:string;legacyPath?:string;generate:WorkbenchGenerator;life:()=>LifeService;changed:()=>void;
- inputs:()=>Promise<TimelineInput[]>;timezone:()=>string;now?:()=>Date;ready:()=>boolean;
+ inputs:()=>Promise<TimelineInput[]>;inputsReady?:()=>boolean;timezone:()=>string;now?:()=>Date;ready:()=>boolean;
 }
 /** One daily interpretation shared by three tabs; this service never dispatches agent tasks. */
 export class DailyWorkbench {
@@ -45,7 +49,9 @@ export class DailyWorkbench {
  // Host document updates only wake the shared source read; there is no second file-only model path.
  update(entries:readonly ContextEntry[],digests?:{items:readonly ProjectDigest[];pending:number}){void entries;void digests;void this.sync().catch(()=>undefined)}
  sync():Promise<void>{
-  if(this.#error==='cache_invalid')return Promise.resolve()
+  // An incomplete startup projection is not a source withdrawal. Keep durable caches
+  // until the host can supply its full first snapshot; current cards still have no inputs.
+  if(this.#error==='cache_invalid'||this.options.inputsReady?.()===false)return Promise.resolve()
   if(this.#sync)return this.#sync
   const run=(async()=>{try{let revision:number,inputs:TimelineInput[]
    do{revision=this.#inputRevision;inputs=await this.options.inputs()}while(revision!==this.#inputRevision&&this.#opened)
@@ -66,7 +72,7 @@ export class DailyWorkbench {
  #temporalCurrent(){return this.#state.temporal?.source_key===workbenchHash(this.#inputs.map(i=>[i.id,i.version]))}
  snapshot(){
   const life=this.options.life().snapshot()
-  const cards=this.#state.cards.filter(card=>(card.tab==='ideas'||this.#temporalCurrent())&&(!card.update||[...life.todos,...life.goals].some(row=>row.id===card.update!.id&&row.version===card.update!.version&&row.status!==card.update!.status))&&!this.#pendingValidation&&!this.#state.dismissed.includes(card.id)&&this.#grounded(card.refs)).map(card=>({...card,refs:card.refs.map(ref=>({...ref,label:ref.quote}))}))
+  const cards=this.#state.cards.filter(card=>(card.tab==='ideas'||this.#temporalCurrent())&&(!card.update||[...life.todos,...life.goals].some(row=>row.id===card.update!.id&&row.version===card.update!.version&&row.status!==card.update!.status))&&!this.#pendingValidation&&!this.#state.dismissed.includes(card.id)&&this.#grounded(card.refs)&&!unresolvedWorkbenchReference(card)).map(card=>({...card,refs:card.refs.map(ref=>({...ref,label:ref.quote}))}))
   const count=this.#state.cache.flatMap(c=>c.matters).filter(m=>this.#grounded(m.refs)).length
   const reason=this.#error?'generation_failed':!this.#inputs.length?'no_eligible_sources':this.#state.updated_at?this.#state.diagnostics.rejected&&!count?'validation_filtered':'model_abstained':null
   return {status:this.#status,candidate_count:count,recap:{text:null,projects:[] as {name:string;line:string}[]},cards,empty_reason:cards.length?null:reason,
@@ -88,7 +94,8 @@ export class DailyWorkbench {
   if(automatic&&this.#state.automatic_day>=this.#day())return
   const key=this.#key();if(key===this.#state.key){this.#status='ready';return}
   clearTimeout(this.#timer);this.#status='working';this.#error=null;this.#state.failure=null
-  const cancel=this.#abort.signal,signal=AbortSignal.any([cancel,AbortSignal.timeout(600000)]),inputs=structuredClone(this.#inputs),day=this.#day(),timezone=this.options.timezone()
+  // A full run includes bounded extraction, global review and multiple sequential composition batches.
+  const cancel=this.#abort.signal,signal=AbortSignal.any([cancel,AbortSignal.timeout(1800000)]),inputs=structuredClone(this.#inputs),day=this.#day(),timezone=this.options.timezone()
   const guard=()=>{signal.throwIfAborted();if(!this.#opened)throw Error('workbench_closed')}
   this.#state.diagnostics={...diagnostics(),inputs:inputs.length}
   try{
@@ -189,13 +196,16 @@ export class DailyWorkbench {
      this.#state.recorded.push({matter:{id:matter.id,kind:matter.kind,title:matter.title,summary:matter.summary},id:saved.id,version:saved.version,undone:false});await this.#save();this.#state.diagnostics.recorded++
      capturedGroups.add(temporalGroup.id)
      existing.splice(0,existing.length,...this.#existing())
+     // Persisting an inferred Life object may notify the host of a source change.
+     // Recheck it before judging subsequent records or suggestions from this batch.
+     if(this.#pendingValidation){await this.sync();guard()}
     }
     for(const suggestion of result.suggestions){
      const basis=suggestion.matter_ids.map(id=>batch.find(m=>m.id===id))
      if(basis.some(m=>!m||!this.#matterCurrent(m))||workbenchSensitive(JSON.stringify(suggestion))){this.#state.diagnostics.rejected++;continue}
      if(suggestion.tab!=='ideas'&&basis.some(m=>m!.state!=='open'||capturedGroups.has(groupFor.get(m!.id)!.id)||this.#state.recorded.some(r=>r.matter.id===m!.id)||result.matches.some(match=>match.matter_id===m!.id&&(match.target_id!==null||match.same_as!==null||match.capture!=='suggest')))){this.#state.diagnostics.rejected++;continue}
      const refs=[...new Map(basis.flatMap(m=>m!.refs).map(ref=>[ref.entry_id,ref])).values()]
-     if(refs.length>8){this.#state.diagnostics.rejected++;continue}
+     if(refs.length>8||unresolvedWorkbenchReference({...suggestion,refs})){this.#state.diagnostics.rejected++;continue}
      if(this.#state.legacy_dismissed.some(old=>old.tab===suggestion.tab&&old.refs.every(ref=>refs.some(current=>current.entry_id===ref.entry_id))))continue
      const id=workbenchHash([TEMPORAL_RECIPE,suggestion.tab,[...new Set(suggestion.matter_ids.map(id=>groupFor.get(id)!.id))].sort()])
      if(cards.some(card=>card.id===id))continue

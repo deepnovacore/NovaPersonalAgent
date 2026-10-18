@@ -238,3 +238,43 @@ test('shared generation waits for the first complete memory projection after def
   release();await host.refreshMemory();await host.workbenchContext.refresh();assert.ok(calls>0)
  }finally{release();await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('incomplete startup input does not erase cached generation, but ready withdrawals still invalidate it',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-startup-cache-'))
+ const life=new LifeService(join(dir,'life.json'));await life.open()
+ let ready=true,inputs=[input()],calls=0
+ const options={path:join(dir,'daily.json'),life:()=>life,inputs:()=>Promise.resolve(inputs),timezone:()=>'Asia/Shanghai',now:()=>new Date('2026-10-18T03:00:00Z'),ready:()=>ready,inputsReady:()=>ready,changed:()=>undefined,generate:((r,s)=>{calls++;return generate(r,s)}) as WorkbenchGenerator}
+ let daily=new DailyWorkbench(options)
+ try{
+  await daily.open();await daily.refresh();assert.equal(daily.snapshot().status,'ready');await daily.close()
+  const previousCalls=calls;ready=false;inputs=[];daily=new DailyWorkbench(options);await daily.open({deferGeneration:true});daily.startGeneration();await daily.sync();await daily.refresh()
+  assert.equal(daily.snapshot().cards.length,0,'unloaded sources cannot expose cached cards')
+  ready=true;inputs=[input()];await daily.refresh()
+  assert.equal(calls,previousCalls,'loading the unchanged full source set must reuse the completed cache')
+  assert.equal(daily.snapshot().status,'ready');assert.ok(daily.snapshot().cards.length)
+  inputs=[];await daily.sync();assert.equal(daily.snapshot().cards.length,0,'a real withdrawal after startup must still hide stale cards')
+ }finally{await daily.close();await life.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('automatic recording waits for its source revalidation before keeping batch suggestions',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-record-revalidate-'))
+ const life=new LifeService(join(dir,'life.json'),()=>daily.suspend());await life.open()
+ const daily=new DailyWorkbench({path:join(dir,'daily.json'),life:()=>life,inputs:()=>Promise.resolve([input()]),timezone:()=>'Asia/Shanghai',now:()=>new Date('2026-10-18T03:00:00Z'),ready:()=>true,changed:()=>undefined,generate})
+ try{await daily.open();await daily.refresh();assert.equal(life.snapshot().todos.length,1);assert.equal(daily.snapshot().status,'ready');assert.equal(daily.snapshot().cards.filter(c=>c.tab==='ideas').length,1,'own record notification must not discard otherwise grounded inspiration')}
+ finally{await daily.close();await life.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('inferred records pushing stated memory to a later UI page do not change shared generation inputs',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-stated-pages-'))
+ let paginated=false,calls=0
+ const entry={id:'stated-memory',version:1,content:input().text,kind:'fact',origin:'stated',source_refs:[{type:'conversation',ref:'own',observed_at:input().observed_at}],evidence_refs:['own-evidence'],observed_at:input().observed_at,recorded_at:input().observed_at,topic:'',status:'active',corrected_to:null,confidence_note:null}
+ const memory={timelineEvidence:()=>Promise.resolve([input()]),canProcessEvidence:()=>Promise.resolve(true),getMany:(ids:readonly string[])=>Promise.resolve(ids.map(id=>id===entry.id?entry:null)),list:(options?:{cursor?:string})=>Promise.resolve(!paginated||options?.cursor==='next'?{entries:[entry],cursor:null}:{entries:[],cursor:'next'})} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
+ try{await host.open();await host.workbenchContext.refresh();assert.equal(host.workbenchContext.snapshot().status,'ready');const previous=calls;paginated=true;await host.refreshMemory();await host.workbenchContext.refresh();assert.equal(calls,previous,'UI pagination must not cause a paid re-extraction or recomposition')}
+ finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('suggestions cannot expose compact model references unless the source actually uses that identifier',()=>fixture(async({daily,setInputs})=>{
+ await daily.refresh();assert.equal(daily.snapshot().cards.length,0,'model-only compact identifiers must not leak into product copy')
+ setInputs([{...input(),version:'2',text:'我会整理发布材料，接口型号为 m0。'}]);await daily.refresh();assert.equal(daily.snapshot().cards.length,1,'real source identifiers remain usable')
+},r=>Promise.resolve(r.phase==='extract'?{matters:[matter(r.inputs[0]!,'topic')]}:{matches:[],suggestions:[{tab:'ideas',title:'整理接口说明',body:'参考 m0 的资料编写说明。',why:null,next:null,matter_ids:[r.matters[0]!.id]}]})))
