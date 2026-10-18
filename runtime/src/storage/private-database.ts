@@ -1,4 +1,4 @@
-import {closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, realpathSync} from 'node:fs'
+import {closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, realpathSync} from 'node:fs'
 import {basename, dirname, isAbsolute, join, resolve} from 'node:path'
 import {hostProjectRootFromConfig} from '../projects/project-store-files.js'
 
@@ -69,15 +69,16 @@ function ensurePrivateDatabaseFile(path: string): void {
 
 export function secureSidecar(databasePath: string, suffix: '-wal' | '-shm'): void {
   const path = `${databasePath}${suffix}`
-  let descriptor: number | undefined
   try {
-    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
-    const info = fstatSync(descriptor)
-    if (!info.isFile() || !ownedByCurrentUser(info.uid)) throw new PrivateDatabaseError('STORE_WRITE_FAILED')
-    fchmodSync(descriptor, 0o600)
+    // Never open/close another descriptor for a live SQLite sidecar. On POSIX,
+    // closing any descriptor releases this process's fcntl locks on that file;
+    // another reader can then truncate SHM that SQLite still has mapped.
+    // SQLite inherits the admitted database's private mode for new sidecars.
+    const info = lstatSync(path)
+    if (info.isSymbolicLink() || !privateFile(info)) throw new PrivateDatabaseError('STORE_WRITE_FAILED')
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  } finally { if (descriptor !== undefined) closeSync(descriptor) }
+  }
 }
 
 function privateFile(info: {readonly isFile: () => boolean; readonly mode: number; readonly uid: number}): boolean {
