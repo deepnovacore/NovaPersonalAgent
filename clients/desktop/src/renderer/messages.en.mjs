@@ -1,4 +1,9 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "个人资料": "Profile",
+  "今天": "Today",
+  "记录待办和需要跟进的事。": "Keep track of to-dos and follow-ups.",
+  "记下想法，需要时转为待办或目标。": "Capture ideas and turn them into to-dos or goals when ready.",
+  "写下目标和完成标准，添加待办来跟进进度。": "Define your goals and success criteria, then add to-dos to track progress.",
   "OpenAI 兼容 API": "OpenAI-compatible API",
   "服务预设": "Service preset",
   "预设仅填写接口参数；请确认账号可用的模型。更改地址会清除本阶段密钥，请重新填写。": "Presets only fill API parameters; check model availability for your account. Changing the URL clears this stage’s key. Enter a new key before saving.",

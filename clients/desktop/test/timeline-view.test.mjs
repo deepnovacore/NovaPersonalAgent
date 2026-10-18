@@ -61,7 +61,7 @@ test('Today uses the configured local date and remains present without any due i
  const {parent}=render(state),dates=parent.querySelectorAll('.timeline-date-group')
  assert.equal(dates.length,1)
  assert.equal(dates[0].dataset.date,'2026-10-12')
- assert.equal(parent.querySelectorAll('.timeline-current-label')[0]?.textContent,'Today')
+ assert.equal(parent.querySelectorAll('.timeline-current-label')[0]?.textContent,'今天')
  assert.equal(parent.querySelectorAll('time')[0]?.dateTime,'2026-10-12')
  assert.equal(parent.querySelectorAll('article').length,0)
 })

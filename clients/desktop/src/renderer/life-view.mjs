@@ -7,9 +7,9 @@ const labels={todo:'待办',idea:'想法',goal:'目标'}
 const statuses={todo:{open:'待办',doing:'进行中',waiting:'等待他人',done:'已完成',cancelled:'已取消'},idea:{active:'保留',archived:'已归档'},goal:{active:'推进中',paused:'已暂停',completed:'已达成',archived:'已归档'}}
 export function renderLife(panel,{kind,state,command,button,local,rerender,delegate,openArticle,suggested=0,clampable,bindPending,run=action=>action()}){
  const rows=state?.[kind==='todo'?'todos':kind==='idea'?'ideas':'goals']??[]
- panel.append(el('h2',`${{todo:'Todos',idea:'Ideas',goal:'Goals'}[kind]} · ${labels[kind]}`))
+ panel.append(el('h2',t(labels[kind])))
  const toolbar=el('div',undefined,'page-toolbar'),toolbarActions=el('div',undefined,'page-toolbar-actions');panel.append(toolbar)
- toolbar.append(el('p',{todo:'你要做的、在等别人回的，都放这里。要帮忙就叫我。',idea:'想到什么先放这里，想动手了再转成待办或目标。',goal:'写下想去的方向和怎样算到了，再挂几件待办一步步走。'}[kind],'page-intro'),toolbarActions)
+ toolbar.append(el('p',t({todo:'记录待办和需要跟进的事。',idea:'记下想法，需要时转为待办或目标。',goal:'写下目标和完成标准，添加待办来跟进进度。'}[kind]),'page-intro'),toolbarActions)
  const formKey=kind+':form';const draft=local[formKey]??={title:'',note:'',goal_id:'',due:'',success_criteria:''}
  const field=(parent,key,label,multiline=false)=>{const wrapper=el('label',label),input=el(multiline?'textarea':'input');input.pendingKey=`life:${draft.id??kind+':new'}`;input.value=draft[key]??'';input.maxLength=key==='title'?200:key==='success_criteria'?2000:4000;input.setAttribute('aria-label',label);if(key==='due')input.type='date';input.addEventListener('input',()=>{draft[key]=input.value});wrapper.append(input);parent.append(wrapper);return input}
  const openKey=kind+':formOpen',formOpen=Boolean(local[openKey])||Boolean(draft.id)
@@ -47,7 +47,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
  }
 }
 export function renderProfile(panel,{products,state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate}){
- panel.append(el('h2','Profile'))
+ panel.append(el('h2',t('个人资料')))
  renderWarmup(panel,{warmup,command,button})
  if(warmup)panel.append(el('p',warmup.automatic_available===false?'今日自动更新次数已用完，如需再次更新可手动触发。':'每天最多自动更新一次，额外更新可手动触发。'))
  const card=el('section');card.className='preference-card';panel.append(card)

@@ -11,7 +11,7 @@ test('workspace tabs wrap horizontally and leave vertical arrow keys to the pane
 test('the right tablist exposes visible labels, one active page, keyboard focus and task counts',()=>{
  const root=new Node('body'),selected=[],tabs=mountWorkspaceTabs(root,{document:dom,onSelect:id=>{selected.push(id);tabs.select(id)}})
  const nodes=all(root),buttons=nodes.filter(n=>n.tag==='button')
- assert.deepEqual(buttons.map(b=>b.children.find(n=>n.className==='workspace-tab-label').textContent),['时间线','待办','想法','目标','资讯','任务','Profile'])
+ assert.deepEqual(buttons.map(b=>b.children.find(n=>n.className==='workspace-tab-label').textContent),['时间线','待办','想法','目标','资讯','任务','个人资料'])
  assert.equal(nodes.find(n=>n.attrs.role==='tablist').attrs['aria-orientation'],'horizontal')
  tabs.select('timeline');assert.equal(buttons[0].scrolled,1);tabs.select('timeline');assert.equal(buttons[0].scrolled,1);assert.equal(buttons[0].tabIndex,0);assert.equal(buttons[1].tabIndex,-1);assert.equal(buttons[0].attrs['aria-controls'],'workbench-panel')
  let prevented=0;buttons[0].listeners.keydown({key:'ArrowRight',preventDefault:()=>prevented++})

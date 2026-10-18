@@ -110,7 +110,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
   if(group.date){
    section.dataset.date=group.date
    const marker=el('h3',undefined,'timeline-date-marker'),time=el('time',formatDate(group.date));time.dateTime=group.date
-   if(group.id==='current')marker.append(el('span','Today','timeline-current-label'))
+   if(group.id==='current')marker.append(el('span',t('今天'),'timeline-current-label'))
    marker.append(time,el('span',new Date(group.date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{weekday:'short',timeZone:'UTC'}),'timeline-weekday'))
    cards=el('div',undefined,`timeline-day-cards${group.items.length>1?' timeline-shared-date':''}`);if(group.items.length>1)cards.append(el('p',t('{0} 项在同一天到期',group.items.length),'timeline-day-summary'));section.append(marker,cards);axis.append(section)
    if(group.briefs?.length)cards.append(...group.briefs)
