@@ -405,10 +405,10 @@ test('task progress accepts the command owner snapshot before a later state broa
   assert.equal(m.sent.some(f=>f.type==='input.text'||['conversations.select','conversations.create'].includes(f.method)),false)
  }finally{c.disconnect();await tick()}
 })
-test('startup progress reads as loading; only a failed start shows an error with settings',()=>{
+test('routine startup keeps the text notice hidden; failed start exposes settings',()=>{
  const m=mount(),notice=m.all().find(n=>n.id==='startup-notice'),settings=notice.children[1]
  m.view.startup({stage:'backend'})
- assert.equal(notice.className,'page-notice');assert.equal(notice.attrs.role,'status');assert.equal(notice.hidden,false);assert.equal(settings.hidden,true)
+ assert.equal(notice.className,'page-notice');assert.equal(notice.attrs.role,'status');assert.equal(notice.hidden,true);assert.equal(settings.hidden,true)
  m.view.startup({stage:'failed',code:'workspace_not_found'})
  assert.equal(notice.className,'page-error');assert.equal(notice.attrs.role,'alert');assert.equal(settings.hidden,false)
  m.view.startup({stage:'ready'})

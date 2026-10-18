@@ -8,6 +8,29 @@ import {classifyBackendFailure, createBackendSupervisor, createBackendDiagnostic
 import {codingBackendStatus} from '../src/main/coding-settings.mjs'
 const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 
+test('the first paint fence accepts a visible same-stage spinner and requires credential prose',async()=>{
+  const body=source.slice(source.indexOf('async function paintStartup('),source.indexOf('async function accessCredentials('))
+  const node=(stage,visible)=>({dataset:{stage},visible,getClientRects(){return this.visible?[{}]:[]}})
+  const notice=node('configuration',false),spinner=node('configuration',true),welcome=node('configuration',false)
+  const nodes={'#startup-notice':notice,'#welcome-screen .welcome-spinner':spinner,'#welcome-screen [data-welcome-status]':welcome}
+  let frames=0
+  const renderer=vm.createContext({document:{visibilityState:'visible',querySelector:selector=>nodes[selector],querySelectorAll:selector=>selector.split(',').map(part=>nodes[part.trim()]).filter(Boolean)},requestAnimationFrame:fn=>{frames++;fn()}})
+  const window={isDestroyed:()=>false,isVisible:()=>true,isMinimized:()=>false,webContents:{executeJavaScript:code=>vm.runInContext(code,renderer)}}
+  const context=vm.createContext({publishStartup:()=>{},presentationMode:'workbench',mainWindow:window,settingsWindow:null,classifyBackendFailure,setTimeout,clearTimeout})
+  vm.runInContext(body,context)
+  await context.paintStartup('configuration');assert.equal(frames,2)
+  spinner.visible=false
+  await assert.rejects(context.paintStartup('configuration'),error=>error.code==='startup_presentation_required')
+  spinner.visible=true;spinner.dataset.stage='backend'
+  await assert.rejects(context.paintStartup('configuration'),error=>error.code==='startup_presentation_required')
+  spinner.dataset.stage='credentials'
+  await assert.rejects(context.paintStartup('credentials'),error=>error.code==='startup_presentation_required')
+  welcome.dataset.stage='credentials';welcome.visible=true
+  await context.paintStartup('credentials')
+  renderer.document.visibilityState='hidden'
+  await assert.rejects(context.paintStartup('credentials'),error=>error.code==='startup_presentation_required')
+})
+
 test('settings public projection never opens the keychain or capability files', () => {
   const body = source.slice(source.indexOf('function settingsView()'), source.indexOf('async function loadMemoryBoardExport()'))
   const touched = () => {throw Error('keychain/file access')}

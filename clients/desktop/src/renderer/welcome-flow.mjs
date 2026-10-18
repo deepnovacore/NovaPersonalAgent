@@ -25,9 +25,10 @@ export function mountWelcomeFlow({api,onProfile}){
   document.querySelector('#personal-workspace')?.toggleAttribute('inert',!entered)
   document.querySelector('#shell')?.toggleAttribute('inert',!entered&&document.body.dataset.personalCollapsed!=='true')
   loading.hidden=phase==='permissions';permission.hidden=phase!=='permissions'
-  status.textContent=startupMessage(startup)||t('正在准备你的工作台…')
+  status.dataset.stage=startup?.stage??''
+  status.textContent=startupMessage(startup);status.hidden=!status.textContent
   retry.hidden=phase!=='failed';skip.hidden=phase!=='failed'
-  root.querySelector('.welcome-spinner').hidden=phase==='failed'
+  const spinner=root.querySelector('.welcome-spinner');spinner.dataset.stage=startup?.stage??'';spinner.hidden=phase==='failed'
   if(view){root.querySelector('[data-welcome-avatar]').src=view.profile.avatar??view.defaultAvatar;root.querySelector('[data-welcome-name]').textContent=view.profile.assistantName;cards.update(view.permissions)}
  }
  const accept=value=>{view=value;error.hidden=true;bypass.hidden=true;root.querySelector('[data-welcome-reload]').hidden=true;onProfile(value);render()}

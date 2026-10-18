@@ -1042,3 +1042,7 @@ button[aria-busy="true"]::before { content: ""; display: inline-block; width: 12
 .usage-call { padding: 12px 0; border-bottom: 1px solid var(--border-color, #8883); overflow-wrap: anywhere; }
 .usage-call p { margin: 4px 0; }
 .usage-recent { margin-top: 16px; }
+
+/* Keep routine startup visible without status prose, including settings retries. */
+#startup-status:empty:is([data-stage="configuration"],[data-stage="backend"])::before { content: ""; display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line-strong); border-top-color: var(--ink-dim); border-radius: 50%; animation: refresh-icon .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { #startup-status::before { animation: none !important; } }

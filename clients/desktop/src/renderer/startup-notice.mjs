@@ -2,9 +2,7 @@ import {t} from './locale.mjs'
 
 export function startupMessage(value) {
   if (value?.stage === 'credentials') return t('正在读取凭据，请查看系统授权弹窗。')
-  if (value?.stage === 'configuration') return t('正在检查工作区和启动配置。')
   if (value?.stage === 'reconnecting') return t('后台连接已断开，正在自动重连。')
-  if (value?.stage === 'backend') return t('正在启动后台。')
   if (value?.stage !== 'failed') return ''
   if (value.code === 'startup_presentation_required') return t('请打开工作台或设置后重试，以便显示凭据授权提示。')
   if (value.code === 'credential_invalid') return t('已保存的凭据格式无效。请在设置中更新对应密钥后重试。')

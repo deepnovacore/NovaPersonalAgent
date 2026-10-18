@@ -418,14 +418,17 @@ async function paintStartup(stage) {
   const window = visible(settingsWindow) ? settingsWindow
     : presentationMode === 'workbench' && visible(mainWindow) ? mainWindow : null
   if (!window) throw classifyBackendFailure('startup_presentation_required')
-  const selector = window === settingsWindow ? '#startup-status' : '#startup-notice'
+  // Routine startup may paint only progress; credential access still requires its notice.
+  const selector = window === settingsWindow ? '#startup-status'
+    : ['configuration', 'backend'].includes(stage) ? '#startup-notice, #welcome-screen .welcome-spinner'
+    : '#startup-notice, #welcome-screen [data-welcome-status]'
   // Bound only the asynchronous paint fence, never the synchronous OS credential call.
   let timer
   try {
     const painted = await Promise.race([
       window.webContents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
-        const notice = document.querySelector(${JSON.stringify(selector)})
-        resolve(document.visibilityState === 'visible' && notice?.dataset.stage === ${JSON.stringify(stage)} && notice.getClientRects().length > 0)
+        const notices = [...document.querySelectorAll(${JSON.stringify(selector)})]
+        resolve(document.visibilityState === 'visible' && notices.some(notice => notice.dataset.stage === ${JSON.stringify(stage)} && notice.getClientRects().length > 0))
       })))`),
       new Promise((_, reject) => { timer = setTimeout(() => reject(classifyBackendFailure('startup_presentation_required')), 1500) }),
     ])

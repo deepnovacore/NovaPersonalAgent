@@ -13,9 +13,9 @@
   <body>
     <section id="welcome-screen" class="welcome-screen" hidden aria-label="开始使用 nova">
       <div class="welcome-loading">
-        <div class="welcome-portrait"><span class="welcome-spinner" aria-hidden="true"></span><img data-welcome-avatar alt="助手头像"></div>
+        <div class="welcome-portrait"><span class="welcome-spinner" role="progressbar" aria-label="正在准备工作台"></span><img data-welcome-avatar alt="助手头像"></div>
         <h1 data-welcome-name>nova</h1>
-        <p data-welcome-status role="status" aria-live="polite">正在准备你的工作台…</p>
+        <p data-welcome-status role="status" aria-live="polite" hidden></p>
         <button data-welcome-settings type="button" hidden>打开设置并重试</button>
         <button data-welcome-skip type="button" hidden>先完成欢迎设置</button>
       </div>
