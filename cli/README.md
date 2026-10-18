@@ -53,4 +53,4 @@ npm install --global nova-personal-agent@latest
 
 Downloads remain under `~/.nova-audio-agent/cli/releases/`; the product rename does not move user data.
 
-[Release notes](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0) · [Report an issue](https://github.com/deepnovacore/NovaPersonalAgent/issues) · [Apache-2.0 license](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/LICENSE)
+[Release notes](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0) · [Report an issue](https://github.com/deepnovacore/NovaPersonalAgent/issues) · [GPL-3.0-or-later license](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/LICENSE)
