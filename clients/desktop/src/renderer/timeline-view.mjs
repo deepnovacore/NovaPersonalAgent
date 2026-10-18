@@ -1,4 +1,4 @@
-import {attachSources,attachSourceTags} from './source-popover.mjs'
+import {attachSources,attachSourceTags,disposeSources} from './source-popover.mjs'
 import {t,currentLanguage} from './locale.mjs'
 import {renderCardTags} from './card-tags.mjs'
 const LABEL={overdue:'已过截止',current:'今天到期',soon:'接下来 7 天',later:'之后',waiting:'等待中 · 未设期限',unscheduled:'尚未安排',completed:'已完成'}
@@ -15,33 +15,78 @@ export function timelineGroups(snapshot,now=new Date()){
  return [...grouped].filter(([,items])=>items.length).map(([id,items])=>({id,label:LABEL[id],items:items.sort((a,b)=>(a.date??'').localeCompare(b.date??'')||a.title.localeCompare(b.title))}))
 }
 export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,openArticle,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
- const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}`);parent.append(root)
- const groups=timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),currentDate=timelineDate(snapshot,now)
+ const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}${snapshot?.timeline?' timeline-briefing':''}`);parent.append(root)
+ const groups=snapshot?.timeline?[]:timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),currentDate=timelineDate(snapshot,now)
  const formatDate=date=>new Date(date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{...(date.slice(0,4)!==currentDate.slice(0,4)?{year:'numeric'}:{}),month:'short',day:'numeric',timeZone:'UTC'})
  if(!snapshot?.life){const status=el('p',t(connected?'正在读取事项…':'连接后可查看安排。'),'hint');status.setAttribute('role','status');root.append(status);return}
  if(!compact){
   const active=groups.flatMap(group=>group.items).filter(item=>item.status!=='done'),overview=el('header',undefined,'timeline-overview')
-  overview.append(el('p',t('安排与进展'),'timeline-overline'),el('h2',new Date(currentDate+'T12:00:00Z').toLocaleDateString(currentLanguage(),{month:'long',day:'numeric',weekday:'short',timeZone:'UTC'})))
+  overview.append(el('p',t(snapshot.timeline?'近期简报':'安排与进展'),'timeline-overline'),el('h2',new Date(currentDate+'T12:00:00Z').toLocaleDateString(currentLanguage(),{month:'long',day:'numeric',weekday:'short',timeZone:'UTC'})))
   const summary=el('div',undefined,'timeline-overview-summary');summary.append(el('span',t('{0} 项有截止日期',active.filter(item=>item.date).length)))
   const waiting=active.filter(item=>item.status==='waiting').length;if(waiting)summary.append(el('span',t('{0} 项等待回复',waiting)))
-  overview.append(summary);root.append(overview)
+  if(!snapshot.timeline)overview.append(summary);root.append(overview)
  }
- if(!groups.length&&compact){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,empty);root.append(empty)}
- let displayGroups=groups,axis,pastAxis
+ const attention=snapshot.timeline
+ const briefCards=[]
+ const pageKey=`timeline:page:${attention?.generation_id??attention?.updated_at??'pending'}:`
+ let pages=1;while(expanded.has(pageKey+pages))pages++
+ const visibleCount=compact?3:pages*8
+ if(attention){
+  const section=el('section',undefined,'timeline-attention');section.setAttribute('aria-label',t('近期简报'));root.append(section)
+  const header=el('div',undefined,'timeline-attention-header');header.append(el('p',t(attention.status==='working'?'正在整理近期进展…':'近期进展与值得关注的事'),'timeline-briefing-caption'));section.append(header)
+  if(attention.updated_at&&Number.isFinite(Date.parse(attention.updated_at)))section.append(el('p',t('整理于 {0} · 卡片按事项时间排列',new Date(attention.updated_at).toLocaleString(currentLanguage(),{timeZone:snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})),'timeline-generated-at'))
+  if(attention.input_count&&attention.coverage)section.append(el('p',attention.coverage,'hint timeline-coverage'))
+  if((attention.diagnostics?.failed_batches?.length||attention.diagnostics?.pending_batches)&&attention.status!=='working')section.append(el('p',t('部分资料尚未完成整理，以下保留已核对的进展；可刷新补充。'),'hint timeline-partial'))
+  if(attention.cards?.length&&attention.status==='failed')section.append(el('p',t('本次更新未完成，以下保留上次结果。'),'hint'))
+  if(command){const refresh=button(t(attention.status==='working'?'正在整理…':'刷新'),()=>command('timeline.refresh',{}),header,'timeline:refresh');refresh.className='quiet';refresh.disabled=attention.status==='working'||attention.available===false}
+  const latestReport=item=>Math.max(0,...(item.sources??[]).map(source=>Date.parse(source.observed_at??'')||0))
+  const orderedBriefs=[...(attention.cards??[])].sort((a,b)=>(b.time?.anchor_date??'').localeCompare(a.time?.anchor_date??'')||latestReport(b)-latestReport(a))
+  if(orderedBriefs.length)section.append(el('p',t('共 {0} 条进展 · 已展示 {1} 条',orderedBriefs.length,Math.min(visibleCount,orderedBriefs.length)),'hint timeline-brief-count'))
+  for(const item of orderedBriefs.slice(0,visibleCount)){
+   const kind=['attention','deadline','progress','insight'].includes(item.kind)?item.kind:'insight'
+   const card=el('article',undefined,'timeline-attention-card');card.tabIndex=-1;card.dataset.kind=kind;card.dataset.objectId=item.id;briefCards.push({item,card});if(compact)section.append(card)
+   const meta=el('div',undefined,'timeline-brief-meta'),topic=el('span',undefined,'timeline-topic')
+   const glyph=el('span',{attention:'!',deadline:'◷',progress:'✓',insight:'◇'}[kind],'timeline-topic-icon');glyph.setAttribute('aria-hidden','true');topic.append(glyph,el('span',item.category));meta.append(topic)
+   if(item.status_label)meta.append(el('span',item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
+   if(item.people?.length){const people=renderCardTags(card,item.people.map(person=>({label:person.name,tone:'person'})),{el});people.className+=' timeline-people';people.setAttribute('aria-label',t('相关同事'))}
+   const timeMeta=el('div',undefined,'timeline-card-time'),time=item.time,label=text=>timeMeta.append(el('span',text,'timeline-time-label'))
+   if(time?.anchor_date){
+    label(t({occurred:'发生于 {0}',deadline:'截止 {0}',scheduled:'安排于 {0}',reported:'最近记录 {0}'}[time.anchor_basis]??'记录于 {0}',formatDate(time.anchor_date)))
+    if(time.last_reported_on&&time.anchor_basis!=='reported')label(t('最近记录 {0}',formatDate(time.last_reported_on)))
+    if(time.evidence_from&&time.evidence_to&&time.evidence_from!==time.evidence_to)label(t('依据 {0}—{1}',formatDate(time.evidence_from),formatDate(time.evidence_to)))
+    if(time.started_on){label(t('始于 {0}',formatDate(time.started_on)));if(time.last_reported_on)label(t('记录跨度 {0} 天',Math.max(0,Math.round((Date.parse(time.last_reported_on)-Date.parse(time.started_on))/86400000))))}
+    if(time.due_on){const days=Math.round((Date.parse(time.due_on)-Date.parse(currentDate))/86400000);label(t(days>0?'距截止 {0} 天':days===0?'今天截止':'原截止已过 {0} 天，结果以最新记录为准',Math.abs(days)))}
+    if(time.kind==='ongoing'&&time.last_reported_on<currentDate)label(t('当前状态待更新'))
+    if(time.anchor_basis==='reported'&&time.kind==='event')label(t('发生日期未明确'))
+   }else label(t('时间待明确'))
+   card.append(timeMeta)
+   const facts=el('div',undefined,'timeline-attention-facts');facts.dataset.count=String(item.facts?.length??0);for(const fact of item.facts??[]){const panel=el('div',undefined,'timeline-fact');panel.dataset.tone=['risk','warning','positive'].includes(fact.tone)?fact.tone:'neutral';if(fact.label)panel.append(el('h4',fact.label));panel.append(el('p',fact.text));facts.append(panel)}card.append(facts)
+   const reason=el('div',undefined,'timeline-attention-reason');reason.append(el('span',t({attention:'影响',deadline:'时间窗口',progress:'进展',insight:'判断'}[kind])),el('p',item.why_now));card.append(reason)
+   if(item.next_steps?.length){
+    const followups=el('section',undefined,'timeline-followups');followups.append(el('h4',t('接下来可以推进')))
+    const steps=el('ol',undefined,'timeline-next-steps');for(const [index,step] of item.next_steps.entries()){const tile=el('li');tile.append(el('span',String(index+1).padStart(2,'0'),'timeline-step-number'),el('h5',step.title),el('p',step.detail));steps.append(tile)}followups.append(steps);card.append(followups)
+   }
+   if(item.uncertainty){const caution=el('p',undefined,'timeline-caution');caution.append(el('span',t('尚不确定：')),el('span',item.uncertainty));card.append(caution)}
+   attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
+   const actions=el('div',undefined,'timeline-actions');card.append(actions)
+   for(const action of item.actions??[])button(action.label,()=>discuss([{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],action.kind==='draft'?t('请直接在当前对话中根据引用事项写出草稿，并标明事实缺口。只展示文字，不创建待办或任务，不发送消息或执行操作。'):t('请在当前对话中分析引用事项，说明已知事实、判断和下一步。只讨论，不创建待办或任务，不执行操作。')),actions).className=action===item.actions[0]?'timeline-primary':'soft'
+   if(command)button(t('隐藏'),()=>command('timeline.dismiss',{id:item.id}),actions).className='quiet timeline-dismiss'
+  }
+  if(!attention.cards?.length)section.append(el('p',t(attention.status==='working'?'正在结合近期信息整理…':attention.status==='queued'?'即将整理近期信息…':attention.status==='failed'?(attention.error==='timeline_generation_timeout'?'整理用时较长，尚未完成，可点击刷新重试。':'这次整理未完成，可稍后刷新。'):attention.input_count?'暂时没有足够明确的关注事项。':'已授权来源中暂时没有可整理的近期内容。'),'hint'))
+ }
+ if(!groups.length&&compact&&!attention){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,empty);root.append(empty)}
+ let displayGroups=groups,axis
  if(!compact){
   const dates=new Map([[currentDate,{id:'current',date:currentDate,items:[]}]])
   for(const group of groups)if(['overdue','current','soon','later'].includes(group.id))for(const item of group.items){
    if(!dates.has(item.date))dates.set(item.date,{id:group.id,date:item.date,items:[]})
    dates.get(item.date).items.push(item)
   }
-  const dateGroups=[...dates.values()].sort((a,b)=>a.date.localeCompare(b.date))
+  for(const entry of briefCards){const date=entry.item.time?.anchor_date;if(!date)continue;if(!dates.has(date))dates.set(date,{id:date===currentDate?'current':date<currentDate?'history':'future',date,items:[]});const group=dates.get(date);(group.briefs??=[]).push(entry.card)}
+  if(briefCards.some(entry=>entry.item.time?.anchor_date)&&!dates.get(currentDate).items.length&&!dates.get(currentDate).briefs?.length)dates.delete(currentDate)
+  const dateGroups=[...dates.values()].sort((a,b)=>b.date.localeCompare(a.date))
   displayGroups=[...dateGroups,...groups.filter(group=>['waiting','unscheduled','completed'].includes(group.id))]
-  const overdue=groups.find(group=>group.id==='overdue')
-  if(overdue){
-   const past=el('details',undefined,'timeline-past');past.open=expanded.has('timeline:past-due');past.addEventListener('toggle',()=>{past.open?expanded.add('timeline:past-due'):expanded.delete('timeline:past-due')})
-   past.append(el('summary',`${t(overdue.label)} · ${overdue.items.length}`,'timeline-past-title'));pastAxis=el('div',undefined,'timeline-axis');past.append(pastAxis);root.append(past)
-  }
-  axis=el('div',undefined,'timeline-axis');axis.setAttribute('aria-label',t('待办截止日期'));root.append(axis)
+  axis=el('div',undefined,'timeline-axis');axis.setAttribute('aria-label',t(attention?'近期简报':'待办截止日期'));root.append(axis)
  }
  for(const group of displayGroups){
   const section=el('section',undefined,`timeline-group${group.date?' timeline-date-group'+(group.id==='current'?' timeline-current':''):compact?'':' timeline-undated'}`);section.dataset.group=group.id
@@ -51,10 +96,11 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    const marker=el('h3',undefined,'timeline-date-marker'),time=el('time',formatDate(group.date));time.dateTime=group.date
    if(group.id==='current')marker.append(el('span','Today','timeline-current-label'))
    marker.append(time,el('span',new Date(group.date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{weekday:'short',timeZone:'UTC'}),'timeline-weekday'))
-   cards=el('div',undefined,`timeline-day-cards${group.items.length>1?' timeline-shared-date':''}`);if(group.items.length>1)cards.append(el('p',t('{0} 项在同一天到期',group.items.length),'timeline-day-summary'));section.append(marker,cards);(group.id==='overdue'?pastAxis:axis).append(section)
-   if(!group.items.length){
-    cards.append(el('p',t('今天没有到期事项'),'timeline-day-empty'))
-    if(!groups.length){cards.append(el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,cards)}
+   cards=el('div',undefined,`timeline-day-cards${group.items.length>1?' timeline-shared-date':''}`);if(group.items.length>1)cards.append(el('p',t('{0} 项在同一天到期',group.items.length),'timeline-day-summary'));section.append(marker,cards);axis.append(section)
+   if(group.briefs?.length)cards.append(...group.briefs)
+   if(!group.items.length&&!group.briefs?.length){
+    cards.append(el('p',t(attention?'今天暂无新的事项记录或到期安排':'今天没有到期事项'),'timeline-day-empty'))
+    if(!groups.length&&!attention){cards.append(el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,cards)}
    }
   }else{section.append(el('h3',`${t(group.label)} · ${group.items.length}`,'timeline-group-title'));root.append(section)}
   for(const item of group.items){
@@ -92,6 +138,14 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    }
   }
  }
- root.append(el('p',t('这里只展示已记录的事项，不代表完整日程。'),'timeline-source-note'))
+ if(!compact){const unplaced=briefCards.filter(entry=>!entry.item.time?.anchor_date);if(unplaced.length){const section=el('section',undefined,'timeline-unplaced');section.append(el('h3',t('时间待明确'),'timeline-group-title'),el('p',t('以下事项尚无可用于排序的日期。'),'hint'),...unplaced.map(entry=>entry.card));root.append(section)}}
+ if(!compact&&(attention?.cards?.length??0)>visibleCount){
+  const more=button(t('继续查看进展（还有 {0} 条）',attention.cards.length-visibleCount),()=>{
+   expanded.add(pageKey+pages);disposeSources(root)
+   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,openTodos,openArticle,command,expanded,compact,connected,now})
+   const replacement=holder.children[0];root.replaceWith(replacement)
+   replacement.querySelectorAll('.timeline-attention-card')[visibleCount]?.focus?.({preventScroll:true})
+  },root,'timeline:more');more.className='soft timeline-load-more'
+ }
  for(const node of root.querySelectorAll('button'))if(!connected&&node.className!=='source-info')node.disabled=true
 }
