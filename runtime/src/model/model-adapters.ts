@@ -39,7 +39,7 @@ export class GatewayCompressor {
 
   async compress(items: readonly MemoryItem[], signal?: AbortSignal): Promise<string> {
     if (items.length === 0) return ''
-    const response = await this.#gateway.complete({
+    const response = await this.#gateway.complete({usage:{feature:'compression',operation:'select'},
       model: this.#model,
       system: SELECTION_SYSTEM,
       jsonSchema: z.toJSONSchema(selectionSchema) as Readonly<Record<string, JsonValue>>,

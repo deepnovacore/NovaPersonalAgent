@@ -694,3 +694,151 @@ test('a configured independent Profile editor receives originals and does not re
  const result=await new GatewayPersonalWriter({gateway,model:'composer',profileReviewer:{gateway:editor,model:'editor'}}).generateProfile([{id:'plan',version:1,origin:'stated',content:'我计划采购服务器'}],new AbortController().signal)
  assert.equal(compositions,1);assert.equal(edits,2);assert.equal(result.about?.text,'你正在准备云资源，计划采购服务器。');assert.deepEqual(result.about?.refs,[{entry_id:'plan',version:1}])
 })
+
+test('timeline writer accepts ordinary signals and restores only supplied short evidence keys',async()=>{
+ const card={temporal:{kind:'deadline',dates:[{role:'deadline',date:'2026-10-20',ref:'e0',quote:'2026-10-20'}]},category:'Approval',title:'Check the pending approval',why_now:'Its current status needs checking',facts:[{text:'A request is pending',quote:'request is pending',ref:'e0'}],uncertainty:'No deadline supplied',actions:[{label:'Draft a question',kind:'draft'}],refs:['e0']}
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[card,{...card,refs:['outside']}]}))
+ const writer=new GatewayPersonalWriter({gateway,model:'same'})
+ const result=await writer.generateTimeline([{id:'ordinary-message',version:'v1',kind:'im',text:'The request is pending. Due 2026-10-20.',observed_at:'2026-10-17T01:00:00Z',relation:'participant'}],{local_date:'2026-10-17',timezone:'Asia/Shanghai'},new AbortController().signal)
+ assert.equal(result.cards.length,1);assert.deepEqual(result.cards[0]!.refs,['ordinary-message']);assert.equal(result.cards[0]!.facts[0]!.ref,'ordinary-message');assert.equal(result.cards[0]!.temporal?.dates[0]?.ref,'ordinary-message')
+})
+
+test('timeline repairs unsupported event dates once instead of silently losing grounded cards',async()=>{
+ let calls=0
+ const card={category:'Design',title:'Clarification design advanced',why_now:'A concrete design choice was recorded',facts:[{text:'Ask a question first',quote:'Ask first',ref:'e0'}],uncertainty:'',actions:[],refs:['e0']}
+ const gateway={complete:async()=>({text:JSON.stringify({cards:[{...card,temporal:calls++===0?{kind:'event',dates:[{role:'occurred',date:'2026-10-17',quote:'Ask first',ref:'e0'}]}:{kind:'synthesis',dates:[]}}]})})} as unknown as ModelGateway
+ const writer=new GatewayPersonalWriter({gateway,model:'same'})
+ const result=await writer.generateTimeline([{id:'m',version:'v1',kind:'im',text:'Ask first',observed_at:'2026-10-13T01:00:00Z'}],{local_date:'2026-10-17',timezone:'Asia/Shanghai'},new AbortController().signal)
+ assert.equal(calls,3);assert.equal(result.cards.length,1);assert.deepEqual(result.cards[0]!.temporal?.dates,[])
+})
+
+test('timeline can retain nine original references for a multi-day synthesis within conversation limits',async()=>{
+ const card={temporal:{kind:'synthesis',dates:[]},category:'Design',title:'Design decisions converged across discussions',why_now:'Several dated messages support the same decision',facts:[{text:'Ask first',quote:'Ask first',ref:'e0'}],uncertainty:'',actions:[],refs:Array.from({length:9},(_,i)=>'e'+i)}
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[card]})),writer=new GatewayPersonalWriter({gateway,model:'same'})
+ const result=await writer.generateTimeline(Array.from({length:9},(_,i)=>({id:'m'+i,version:'v1',kind:'im',text:'Ask first',observed_at:'2026-10-13T01:00:00Z'})),{local_date:'2026-10-17',timezone:'Asia/Shanghai'},new AbortController().signal)
+ assert.deepEqual(result.cards[0]!.refs,Array.from({length:9},(_,i)=>'m'+i))
+})
+
+test('timeline composition preserves conversation boundaries after screening',async()=>{
+ const gateway={complete:async(request:CompleteRequest)=>{
+  const prompt=JSON.parse(request.prompt) as {inputs:{group:string}[]}
+  assert.notEqual(prompt.inputs[0]!.group,prompt.inputs[1]!.group)
+  assert.match(request.system,/仅当原文明示指向同一事项才跨group合并/)
+  return {text:JSON.stringify({cards:[]})}
+ }} as unknown as ModelGateway
+ const writer=new GatewayPersonalWriter({gateway,model:'fixture'})
+ await writer.generateTimeline([{id:'a',version:'1',kind:'im',group:'project-a',text:'Windows UI is updated',observed_at:'2026-10-17T00:00:00Z'},{id:'b',version:'1',kind:'im',group:'project-b',text:'Deploy next week',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+})
+
+test('timeline reviews causal claims against bounded original context before publication',async()=>{
+ let calls=0
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered',why_now:'Cleanup freed capacity',facts:[{text:'The alert recovered',quote:'Alert recovered',ref:'e0'}],uncertainty:'Cause unknown',actions:[],refs:['e0']}
+ const gateway={complete:async(request:CompleteRequest)=>{
+  calls++
+  if(request.system.includes('现在是发布前的事实校对')){
+   const prompt=JSON.parse(request.prompt) as {inputs:{key:string}[]}
+   assert.deepEqual(prompt.inputs.map(x=>x.key),['e0','e1'])
+   return {text:JSON.stringify({cards:[{...card,why_now:'The alert recovered; its cause is not reported'}]})}
+  }
+  return {text:JSON.stringify({cards:[card]})}
+ }} as unknown as ModelGateway
+ const writer=new GatewayPersonalWriter({gateway,model:'fixture'})
+ const result=await writer.generateTimeline([{id:'alert',version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'},{id:'other',version:'1',kind:'im',text:'Unrelated data',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(calls,2);assert.equal(result.cards[0]!.why_now,'The alert recovered; its cause is not reported')
+})
+
+test('one malformed card after repair does not discard unrelated grounded cards',async()=>{
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered',why_now:'An update was reported',facts:[{text:'Alert recovered',quote:'Alert recovered',ref:'e0'}],uncertainty:'',actions:[],refs:['e0']}
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[card,{...card,title:'x'.repeat(200)}]}))
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline([{id:'alert',version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.cards.length,1);assert.equal(result.cards[0]!.title,'Alert recovered')
+})
+
+test('timeline accepts a complete fenced JSON response from a reasoning model',async()=>{
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered',why_now:'An update was reported',facts:[{text:'Alert recovered',quote:'Alert recovered',ref:'e0'}],uncertainty:'',actions:[],refs:['e0']}
+ const gateway=new ScriptedGateway([],'```json\n'+JSON.stringify({cards:[card]})+'\n```')
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline([{id:'alert',version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.cards.length,1);assert.equal(result.cards[0]!.facts[0]!.ref,'alert')
+})
+
+test('timeline normalizes array and double encoded wrappers without changing card evidence',async()=>{
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered',why_now:'An update was reported',facts:[{text:'Alert recovered',quote:'Alert recovered',ref:'e0'}],uncertainty:'',actions:[],refs:['e0']}
+ for(const body of [JSON.stringify([card]),JSON.stringify(JSON.stringify({cards:[card]}))]){
+  const result=await new GatewayPersonalWriter({gateway:new ScriptedGateway([],body),model:'fixture'}).generateTimeline([{id:'alert',version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+  assert.equal(result.cards.length,1);assert.equal(result.cards[0]!.facts[0]!.ref,'alert')
+ }
+})
+
+test('timeline prose does not expose evidence keys while exact quotes and references survive',async()=>{
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered (e0)',why_now:'The latest report (e0/e1) records recovery',facts:[{text:'Alert recovered (e0/e1)',quote:'Alert recovered',ref:'e0'}],uncertainty:'',actions:[],refs:['e0','e1']}
+ const result=await new GatewayPersonalWriter({gateway:new ScriptedGateway([],JSON.stringify({cards:[card]})),model:'fixture'}).generateTimeline(['a','b'].map(id=>({id,version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'})),{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.cards[0]!.title,'Alert recovered');assert.equal(result.cards[0]!.facts[0]!.text,'Alert recovered')
+ assert.equal(result.cards[0]!.facts[0]!.quote,'Alert recovered');assert.deepEqual(result.cards[0]!.refs,['a','b'])
+})
+
+test('timeline composes every screened topic in batches and reports validation losses',async()=>{
+ const inputs=Array.from({length:201},(_,i)=>({id:'m'+i,version:'1',kind:'im',text:'Update '+i,observed_at:'2026-10-17T00:00:00Z'}))
+ const gateway={complete:async(request:CompleteRequest)=>{
+  const prompt=JSON.parse(request.prompt) as {output_schema?:unknown;inputs:{key:string;text:string}[];cards?:unknown[]}
+  if(prompt.output_schema)return {text:JSON.stringify({topics:prompt.inputs.slice(0,12).map(input=>({title:input.text,refs:[input.key]}))})}
+  if(prompt.cards)return {text:JSON.stringify({cards:prompt.cards})}
+  return {text:JSON.stringify({cards:prompt.inputs.map(input=>({temporal:{kind:'event',dates:[]},category:'Progress',title:input.text,why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.key}],uncertainty:'',actions:[],refs:[input.key]}))})}
+ }} as unknown as ModelGateway
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.cards.length,13);assert.ok(result.cards.some(card=>card.refs.includes('m200')))
+ assert.equal(result.diagnostics?.screened_topics,13)
+ assert.equal(result.diagnostics?.selected_inputs,13)
+ assert.ok((result.diagnostics?.composition_batches??0)>1)
+ assert.equal(result.diagnostics?.stages.filter(stage=>stage.phase==='compose').reduce((sum,stage)=>sum+stage.accepted,0),13)
+})
+
+test('a failed composition batch does not discard separately grounded updates',async()=>{
+ const inputs=Array.from({length:201},(_,i)=>({id:'m'+i,version:'1',kind:'im',text:'Update '+i,observed_at:'2026-10-17T00:00:00Z'}))
+ const gateway={complete:async(request:CompleteRequest)=>{
+  const prompt=JSON.parse(request.prompt) as {output_schema?:unknown;inputs:{key:string;text:string}[];cards?:unknown[]}
+  if(prompt.output_schema)return {text:JSON.stringify({topics:prompt.inputs.slice(0,4).map(input=>({title:input.text,refs:[input.key]}))})}
+  if(prompt.inputs[0]!.text==='Update 0')throw Error('transport unavailable')
+  if(prompt.cards)return {text:JSON.stringify({cards:prompt.cards})}
+  const input=prompt.inputs[0]!
+  return {text:JSON.stringify({cards:[{temporal:{kind:'event',dates:[]},category:'Progress',title:input.text,why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.key}],uncertainty:'',actions:[],refs:[input.key]}]})}
+ }} as unknown as ModelGateway
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.cards.length,1);assert.deepEqual(result.cards[0]!.refs,['m200'])
+ assert.deepEqual(result.diagnostics?.failed_batches,[{batch:0,reason:'generation_failed'}])
+})
+
+test('timeline writer grounds name-only people tags and restores their evidence keys',async()=>{
+ const text='林舟负责 Windows 复现，陈雨提供测试素材。'
+ const card={category:'协作',title:'林舟与陈雨配合复现',why_now:'复现与素材准备有明确分工',facts:[{text,quote:text,ref:'e0'}],people:[{name:'林舟',quote:'林舟负责 Windows 复现',ref:'e0'},{name:'陈雨',quote:'陈雨提供测试素材',ref:'e0'},{name:'杜撰姓名',quote:text,ref:'e0'}],uncertainty:'',actions:[],refs:['e0']}
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[card]})),writer=new GatewayPersonalWriter({gateway,model:'same'})
+ const result=await writer.generateTimeline([{id:'original-message',version:'1',kind:'im',text,observed_at:'2026-10-17T01:00:00Z'}],{local_date:'2026-10-17',timezone:'Asia/Shanghai'},new AbortController().signal)
+ assert.deepEqual(result.cards[0]!.people?.map(person=>[person.name,person.ref]),[['林舟','original-message'],['陈雨','original-message']])
+})
+
+test('timeline review keeps viewer identity even when selected evidence has only other speakers',async()=>{
+ const inputs=Array.from({length:201},(_,i)=>({id:'m'+i,version:'1',kind:'im',text:i===200?'我叫许明':i===0?'林舟将在2026-10-20把我需要的复现结果交给我。':'系统收到例行通知',observed_at:'2026-10-17T01:00:00Z',relation:i===200?'self' as const:'participant' as const,author:{key:i===200?'self':'peer',name:i===200?'许明':'林舟',is_user:i===200,kind:'person' as const}}))
+ const card={category:'协作',title:'复现结果将在10月20日交付',why_now:'你的复现依赖这份结果',facts:[{text:inputs[0]!.text,quote:inputs[0]!.text,ref:'e0'}],uncertainty:'',actions:[],refs:['e0']}
+ let composition=0
+ const gateway={complete:async(request:CompleteRequest)=>{
+  const body=JSON.parse(request.prompt)
+  assert.deepEqual(body.context.viewer_names,['许明'])
+  if(body.output_schema)return {text:JSON.stringify({topics:body.inputs.some((i:{text:string})=>i.text===inputs[0]!.text)?[{title:'复现交付',refs:['e0']}]:[]})}
+  assert.equal(body.inputs[0].author.name,'林舟');assert.equal(body.inputs[0].author.is_user,false)
+  composition++;return {text:JSON.stringify({cards:[card]})}
+ }} as unknown as ModelGateway
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal)
+ assert.equal(composition,2);assert.equal(result.cards.length,1)
+})
+
+test('timeline review retains the user request even when the draft cites only the collaborator update',async()=>{
+ const inputs=[{id:'request',version:'1',kind:'im',text:'请帮我复现 Windows 上的语音问题。',observed_at:'2026-10-16T01:00:00Z',group:'thread',author:{key:'self',name:'许明',kind:'person' as const,is_user:true}},{id:'reply',version:'1',kind:'im',text:'我已完成复现，正在整理结果。',observed_at:'2026-10-17T01:00:00Z',group:'thread',author:{key:'peer',name:'林舟',kind:'person' as const,is_user:false}}]
+ const card={temporal:{kind:'event',dates:[]},category:'协作',title:'林舟已完成语音问题复现',why_now:'你提出的复现请求有了结果',facts:[{text:'林舟已完成复现，正在整理结果。',quote:inputs[1]!.text,ref:'e1'}],uncertainty:'',actions:[],refs:['e1']}
+ let reviewed=false
+ const gateway={complete:async(request:CompleteRequest)=>{
+  const body=JSON.parse(request.prompt)
+  if(body.cards){reviewed=true;assert.equal(request.reasoning,'disabled');assert.equal(body.inputs.length,2);assert.equal(body.inputs[0].author.is_user,true);assert.equal(body.inputs[0].text,inputs[0]!.text)}
+  return {text:JSON.stringify({cards:[card]})}
+ }} as unknown as ModelGateway
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal)
+ assert.equal(reviewed,true);assert.equal(result.cards.length,1)
+})
