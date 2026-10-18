@@ -1,3 +1,6 @@
+import {withUsageContext,type UsageContext} from '../usage/context.js'
+import {beginModelUsage,mergeModelUsage} from '../usage/model-call.js'
+import type {UsageReporter} from '../realtime/usage.js'
 /**
  * Provider-neutral model gateway plus the OpenAI-compatible implementation.
  *
@@ -53,6 +56,7 @@ export interface MetricsSink {
 }
 
 export interface StreamRequest {
+  readonly usage?: UsageContext
   readonly model: string
   readonly system: string
   readonly prompt: string
@@ -62,6 +66,7 @@ export interface StreamRequest {
 }
 
 export interface CompleteRequest {
+  readonly usage?: UsageContext
   readonly model: string
   readonly system: string
   readonly prompt: string
@@ -71,6 +76,8 @@ export interface CompleteRequest {
   readonly reasoningBudget?: number
   /** A ceiling on the reply, sent as max_tokens; callers size it well above a normal answer so it only stops runaway output. */
   readonly maxTokens?: number
+  /** Bounded per-completion deadline in seconds; caller cancellation still wins. */
+  readonly timeoutSeconds?: number
   readonly signal?: AbortSignal
 }
 
@@ -214,6 +221,7 @@ const completionSchema = z.object({
 }).loose()
 
 export interface OpenAIGatewayOptions {
+  readonly onUsage?: UsageReporter
   readonly allowAnonymous?: boolean
   readonly redirect?: 'error' | 'follow'
   readonly baseUrl: string
@@ -229,6 +237,7 @@ export interface OpenAIGatewayOptions {
 
 /** OpenAI-compatible transport. Prompts and outputs never enter metrics or logs. */
 export class OpenAIModelGateway implements ModelGateway {
+  readonly #onUsage: UsageReporter | undefined
   readonly #redirect: 'error' | 'follow'
   readonly #endpoint: string
   readonly #apiKey: string
@@ -240,6 +249,7 @@ export class OpenAIModelGateway implements ModelGateway {
   readonly #streamIdleTimeout: number
 
   constructor(options: OpenAIGatewayOptions) {
+    this.#onUsage = options.onUsage
     if (!options.baseUrl || (!options.apiKey && !options.allowAnonymous)) {
       throw new TypeError('baseUrl and apiKey are required')
     }
@@ -249,7 +259,8 @@ export class OpenAIModelGateway implements ModelGateway {
     this.#clock = options.clock
     this.#metrics = options.metrics ?? new LoggingMetrics()
     this.#fetch = options.fetch ?? globalThis.fetch
-    this.#thinkingControl = options.thinkingControl
+    // The official DashScope endpoint has a known protocol, even when selected through MODEL_BASE_URL.
+    this.#thinkingControl = options.thinkingControl ?? (new URL(this.#endpoint).hostname==='dashscope.aliyuncs.com'?'qwen':undefined)
     this.#requestTimeout = options.requestTimeout ?? 120
     this.#streamIdleTimeout = options.streamIdleTimeout ?? 600
     if (!Number.isFinite(this.#streamIdleTimeout) || this.#streamIdleTimeout <= 0) {
@@ -258,6 +269,8 @@ export class OpenAIModelGateway implements ModelGateway {
   }
 
   async *stream(request: StreamRequest): AsyncIterable<GatewayDelta> {
+    const finishUsage=withUsageContext(request.usage??{},()=>beginModelUsage(this.#onUsage,this.#endpoint,request.model))
+    let rawUsage:unknown
     const started = this.#clock.now()
     const images = request.images ?? []
     let requestId: string | null = null
@@ -277,6 +290,7 @@ export class OpenAIModelGateway implements ModelGateway {
         const chunk = parsed.data
         requestId = chunk.id ?? requestId
         if (chunk.usage != null) {
+          rawUsage=mergeModelUsage(rawUsage,chunk.usage)
           inputTokens = chunk.usage.prompt_tokens ?? inputTokens
           outputTokens = chunk.usage.completion_tokens ?? outputTokens
         }
@@ -301,6 +315,7 @@ export class OpenAIModelGateway implements ModelGateway {
       errorType = classify(error)
       throw new GatewayError(errorType)
     } finally {
+      finishUsage(rawUsage,request.signal?.aborted?'cancelled':errorType!==null?'error':finishReason===null?'cancelled':'success',requestId)
       this.#record(request.model, images.length, started, {
         requestId, inputTokens, outputTokens, finishReason, errorType,
       })
@@ -308,6 +323,8 @@ export class OpenAIModelGateway implements ModelGateway {
   }
 
   async complete(request: CompleteRequest): Promise<GatewayCompletion> {
+    const finishUsage=withUsageContext(request.usage??{},()=>beginModelUsage(this.#onUsage,this.#endpoint,request.model,'llm',undefined,request.reasoning))
+    let rawUsage:unknown
     const started = this.#clock.now()
     const images = request.images ?? []
     let requestId: string | null = null
@@ -318,13 +335,14 @@ export class OpenAIModelGateway implements ModelGateway {
     try {
       const body = completeRequestBody(request)
       const pending = await this.#post(this.#thinkingControl === 'deepseek' && request.reasoning === 'disabled'
-        ? {...body, thinking: {type: 'disabled'}} : this.#thinkingControl === 'openai' ? openAIBody(body) : this.#thinkingControl === 'qwen' ? qwenBody(body,request) : body, request.signal)
+        ? {...body, thinking: {type: 'disabled'}} : this.#thinkingControl === 'openai' ? openAIBody(body) : this.#thinkingControl === 'qwen' ? qwenBody(body,request) : body, request.signal, request.timeoutSeconds)
       let raw: unknown
       try {
         raw = await pending.response.json()
       } finally {
         pending.clearRequestTimeout()
       }
+      if(raw&&typeof raw==='object')rawUsage=(raw as {usage?:unknown}).usage
       const payload = completionSchema.parse(raw)
       requestId = payload.id ?? null
       if (payload.usage != null) {
@@ -338,6 +356,7 @@ export class OpenAIModelGateway implements ModelGateway {
       errorType = classify(error)
       throw new GatewayError(errorType)
     } finally {
+      finishUsage(rawUsage,request.signal?.aborted?'cancelled':errorType!==null?'error':'success',requestId)
       this.#record(request.model, images.length, started, {
         requestId, inputTokens, outputTokens, finishReason, errorType,
       })
@@ -347,11 +366,13 @@ export class OpenAIModelGateway implements ModelGateway {
   async #post(
     body: Readonly<Record<string, JsonValue>>,
     signal?: AbortSignal,
+    timeoutSeconds = this.#requestTimeout,
   ): Promise<{readonly response: Response; readonly clearRequestTimeout: () => void}> {
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 600) throw new TypeError('request timeout must be between 0 and 600 seconds')
     const timeout = new AbortController()
     const timer = setTimeout(() => {
       timeout.abort(new DOMException('The model request timed out', 'TimeoutError'))
-    }, this.#requestTimeout * 1000)
+    }, timeoutSeconds * 1000)
     const clearRequestTimeout = (): void => { clearTimeout(timer) }
     try {
       const response = await this.#fetch(this.#endpoint, {
@@ -390,7 +411,7 @@ export class OpenAIModelGateway implements ModelGateway {
       readonly errorType: string | null
     },
   ): void {
-    this.#metrics.record({
+    try { this.#metrics.record({
       model,
       image_count: imageCount,
       request_id: outcome.requestId,
@@ -399,7 +420,7 @@ export class OpenAIModelGateway implements ModelGateway {
       output_tokens: outcome.outputTokens,
       finish_reason: outcome.finishReason,
       error_type: outcome.errorType,
-    })
+    }) } catch { /* Diagnostics cannot break model work. */ }
   }
 }
 
@@ -498,12 +519,17 @@ function openAIBody(body: Readonly<Record<string,JsonValue>>):Record<string,Json
  return {...rest,reasoning_effort:'none',...(max_tokens === undefined ? {} : {max_completion_tokens:max_tokens})}
 }
 
-/** Qwen VL's legacy models do not accept the mixed-thinking controls. */
+/** Only documented hybrid models accept these controls; legacy VL models keep their own protocol. */
 function qwenBody(body: Readonly<Record<string, JsonValue>>, request: CompleteRequest): Readonly<Record<string, JsonValue>> {
-  const capable = ['qwen3-vl-plus','qwen3-vl-flash'].some(model => request.model === model || request.model.startsWith(model+'-'))
+  const capable = ['qwen-plus','qwen-plus-latest'].includes(request.model)||['qwen3-vl-plus','qwen3-vl-flash','qwen3.8-max'].some(model => request.model === model || request.model.startsWith(model+'-'))
   if (!capable || request.reasoning === undefined) return body
   const controlled:Record<string,JsonValue>={...body,enable_thinking:request.reasoning === 'enabled',...(request.reasoning === 'enabled' && request.reasoningBudget !== undefined ? {thinking_budget:request.reasoningBudget} : {})}
   // Qwen VL guarantees JSON mode only without thinking; mixed mode can emit scalar JSON instead of the requested object.
   if(request.reasoning === 'enabled')delete controlled.response_format
   return controlled
+}
+
+/** Bind durable task identity without changing shared gateway state. */
+export function gatewayWithUsage(gateway:ModelGateway,context:UsageContext):ModelGateway {
+ return {complete:request=>gateway.complete({...request,usage:{...context,...request.usage}}),stream:request=>gateway.stream({...request,usage:{...context,...request.usage}})}
 }

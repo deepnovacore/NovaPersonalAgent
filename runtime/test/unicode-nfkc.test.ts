@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
 import {
-  NFKC_HOLDBACK_CODE_POINTS,
+  transformedNfkcHoldbackCodePoints,
   PINNED_UNICODE_VERSION,
   normalizeAndLowerPinned,
   normalizeNfkcPinned,
@@ -112,8 +112,8 @@ test('a pair of newly-assigned code points cannot compose across the pin', () =>
   assert.equal(pair.normalize('NFKC'), '\u{16d6a}', 'the host still composes it')
   assert.equal(normalizeNfkcPinned(pair), pair, 'the pin leaves both characters alone')
   // Neither character is in the transformed list, which is exactly why the list cannot be the rule.
-  assert.equal(NFKC_HOLDBACK_CODE_POINTS.includes(0x16d63), false)
-  assert.equal(NFKC_HOLDBACK_CODE_POINTS.includes(0x16d68), false)
+  assert.equal(transformedNfkcHoldbackCodePoints().includes(0x16d63), false)
+  assert.equal(transformedNfkcHoldbackCodePoints().includes(0x16d68), false)
 })
 
 test('a newly-assigned uppercase letter is not lowercased', () => {
@@ -136,7 +136,7 @@ test('the holdback set is every code point the pin calls unassigned and the host
       shouldHold.push(codePoint)
     }
   }
-  assert.deepEqual([...NFKC_HOLDBACK_CODE_POINTS], shouldHold)
+  assert.deepEqual([...transformedNfkcHoldbackCodePoints()], shouldHold)
   const decomposing = shouldHold.filter(codePoint => {
     const character = String.fromCodePoint(codePoint)
     return character.normalize('NFKC') !== character

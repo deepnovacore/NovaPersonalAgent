@@ -341,3 +341,16 @@ test('configured Qwen VL thinking keeps its bounded budget and answer ceiling, w
  assert.equal(Object.hasOwn(bodies[0]!,'response_format'),false);assert.deepEqual(bodies[1]!.response_format,{type:'json_object'});assert.equal(bodies[1]!.enable_thinking,false);assert.equal(Object.hasOwn(bodies[1]!,'thinking_budget'),false)
  assert.equal(Object.hasOwn(bodies[2]!,'enable_thinking'),false)
 })
+
+test('official DashScope hybrid models receive explicit thinking controls while custom endpoints remain untouched',async()=>{
+ for(const host of ['dashscope.aliyuncs.com','custom.invalid']){
+  const bodies:Record<string,unknown>[]=[]
+  const gateway=new OpenAIModelGateway({baseUrl:'https://'+host+'/compatible-mode/v1',apiKey:'test',clock:new VirtualClock(),metrics:{record:()=>undefined},fetch:(_url,init)=>{bodies.push(JSON.parse(init!.body as string) as Record<string,unknown>);return Promise.resolve(Response.json({choices:[{message:{content:'{}'}}]}))}})
+  await gateway.complete({model:'qwen3.8-max',system:'s',prompt:'p',reasoning:'disabled',jsonSchema:{type:'object'}})
+  await gateway.complete({model:'qwen-plus',system:'s',prompt:'p',reasoning:'enabled',reasoningBudget:4096,maxTokens:10000,jsonSchema:{type:'object'}})
+  if(host==='dashscope.aliyuncs.com'){
+   assert.equal(bodies[0]!.enable_thinking,false);assert.deepEqual(bodies[0]!.response_format,{type:'json_object'})
+   assert.equal(bodies[1]!.enable_thinking,true);assert.equal(bodies[1]!.thinking_budget,4096);assert.equal(bodies[1]!.max_tokens,10000);assert.equal(Object.hasOwn(bodies[1]!,'response_format'),false)
+  }else assert.equal(Object.hasOwn(bodies[0]!,'enable_thinking'),false)
+ }
+})

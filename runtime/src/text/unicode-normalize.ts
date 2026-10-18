@@ -73,7 +73,11 @@ function deriveTransformedHoldback(): number[] {
  * the tests assert its exact membership. Sixty-three today: thirty-six with a compatibility
  * decomposition, twenty-seven with a case mapping.
  */
-export const NFKC_HOLDBACK_CODE_POINTS: readonly number[] = deriveTransformedHoldback()
+let transformedHoldback:readonly number[]|undefined
+/** Diagnostic enumeration only. Runtime normalization uses the pinned category table directly. */
+export function transformedNfkcHoldbackCodePoints():readonly number[]{
+  return transformedHoldback??=Object.freeze(deriveTransformedHoldback())
+}
 
 function holdsAny(text: string): boolean {
   for (const character of text) {
