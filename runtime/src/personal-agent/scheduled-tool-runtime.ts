@@ -40,7 +40,10 @@ export class ScheduledToolRuntime{
    scope.acceptCall(call.session_epoch,responseId,call.call_id,active)
    if(!await this.validateContext())throw Error('context_authorization_changed')
    const run=host.schedules.getRun(grant.run_id),context=run.definition.context,binding=tools.bindings.get(call.name)
-   if(run.processing){if(call.name!=='source__process')throw Error('scheduled_tool_readonly');return scheduledToolResult(call,await host.sourceProcessingAgent.call(grant,call.call_id,call.arguments),'ok',true,131072,true)}
+   if(run.processing){
+    if(call.name!=='source__process')return scheduledToolResult(call,{state:'refused',code:'scheduled_tool_readonly',hint:'The only provided function name is source__process. read, topics, profile, evidence, compose, finish, projects and project_diff are action values, not function names. Call function source__process with arguments {"action":"read"} to read the current batch; use that same function name for every subsequent action.'},'scheduled_tool_readonly',false)
+    return scheduledToolResult(call,await host.sourceProcessingAgent.call(grant,call.call_id,call.arguments),'ok',true,131072,true)
+   }
    if(call.name==='app__context'){
     const args=appContextArguments.parse(call.arguments)
     return scheduledToolResult(call,await host.readAppContext(args.section,args.cursor,grant))

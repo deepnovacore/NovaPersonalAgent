@@ -32,6 +32,6 @@ test('refused source calls consume a durable bounded attempt budget without auth
   assert.equal(host.schedules.getRun(run.run_id).processing!.calls.length,0)
   assert.equal(await boundary.validateContext(),false,'exhaustion prevents the next provider continuation')
   const persisted=await import('node:fs/promises').then(fs=>fs.readFile(join(dir,'p.json.schedules.json'),'utf8'))
-  assert.equal(JSON.parse(persisted).runs[0].processing.attempts.length,24)
+  assert.equal((JSON.parse(persisted) as {runs:{processing:{attempts:string[]}}[]}).runs[0]!.processing.attempts.length,24)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
