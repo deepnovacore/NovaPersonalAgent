@@ -4446,7 +4446,7 @@ test('qwen rejects the final tool budget after evaluating the provider view once
   let views = 0
   assert.throws(() => buildQwenRealtimeAssembly({
     settings: configured, capabilities, providerToolView: tools => { views++; return tools },
-  }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 5, toolBudget: 1})
+  }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 6, toolBudget: 1})
   assert.equal(views, 1)
 })
 }
@@ -5314,7 +5314,7 @@ test('cascaded rejects the final tool budget after evaluating the provider view 
   let views = 0
   assert.throws(() => buildCascadedRealtimeAssembly({
     settings: configured, capabilities, providerToolView: tools => { views++; return tools },
-  }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 5, toolBudget: 1})
+  }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 6, toolBudget: 1})
   assert.equal(views, 1)
 })
 }

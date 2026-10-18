@@ -953,6 +953,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     return result.flatMap(hit=>'evidence_id' in hit&&typeof hit.evidence_id==='string'?[{evidence_id:hit.evidence_id,score:hit.score}]:[])
   }}:{})})
   const bridge = new RealtimeRuntimeBridge({
+    explicitMemory:()=>personalMemoryHolder.current,
     ...(options.memoryConsumerFingerprint ? {conversationConsumer: options.memoryConsumerFingerprint} : {}),
     runtime: core.runtime,
     retrieval,

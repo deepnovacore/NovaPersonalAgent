@@ -1,3 +1,4 @@
+import {memoryDocuments} from './memory-documents.js'
 import {rebuildWorkspaceProjections} from './workspace-projections.js'
 import {randomUUID} from 'node:crypto'
 import {lstatSync} from 'node:fs'
@@ -35,6 +36,11 @@ export function queueMemoryFiles(db:LedgerDatabase):void{
  const pending:Pending={operation_id:old?.operation_id??randomUUID(),revisions:storedRevisions(db),baselines:old?.baselines??state.snapshot.baselines,approved_edits:old?.approved_edits??state.snapshot.edits.map(({entry_id,expected_revision,path,hash})=>({entry_id,expected_revision,path,hash}))}
  db.prepare('INSERT INTO memory_file_outbox VALUES(1,?) ON CONFLICT(slot) DO UPDATE SET payload_json=excluded.payload_json').run(canonicalJson(pending))
 }
+/** Validate the complete transaction, not each intermediate correction in a batch. */
+export function validateMemoryFiles(db:LedgerDatabase):void{
+ if(!authorities.has(db)||!db.prepare('SELECT 1 FROM memory_file_outbox WHERE slot=1').get())return
+ memoryDocuments(storedRevisions(db))
+}
 /** Publication may fail after SQL commit. The durable outbox remains until Git is complete. */
 export function flushMemoryFiles(db:LedgerDatabase):void{
  const state=authorities.get(db);if(!state)return
@@ -42,7 +48,7 @@ export function flushMemoryFiles(db:LedgerDatabase):void{
  const pending=JSON.parse(String(raw.payload_json)) as Pending
  const repository=state.repository,journal=repository.pendingOperationId()
  if(journal!==null){if(journal!==pending.operation_id)throw Error('MEMORY_MARKDOWN_CONFLICT');repository.recover(journal,pending.revisions)}
- else if(!repository.hasSnapshot()||canonicalJson(repository.read().revisions)!==canonicalJson(pending.revisions)){
+ else if(!repository.hasSnapshot()||repository.needsDocumentMigration()||canonicalJson(repository.read().revisions)!==canonicalJson(pending.revisions)){
   const operation=repository.prepare(pending.revisions,pending.operation_id,pending.baselines,pending.approved_edits)
   repository.publishPrepared(operation);repository.finalize(operation)
  }
@@ -62,10 +68,12 @@ export function enableMemoryFiles(db:LedgerDatabase,path:string,options:{already
   // Register before replay: the outbox belongs to the ledger, never an inferred Git state.
   authorities.set(db,{repository,snapshot:{revisions:[],edits:[],baselines:{}}})
   try{
-   if(!repository.hasSnapshot()&&!db.prepare('SELECT 1 FROM memory_file_outbox WHERE slot=1').get())queueMemoryFiles(db)
+   if(!repository.hasSnapshot()&&!db.prepare('SELECT 1 FROM memory_file_outbox WHERE slot=1').get()){memoryDocuments(storedRevisions(db));queueMemoryFiles(db)}
    flushMemoryFiles(db)
    const snapshot=repository.read();replaceIndex(db,snapshot.revisions,true)
-   authorities.get(db)!.snapshot=snapshot;return snapshot
+   authorities.get(db)!.snapshot=snapshot
+   if(repository.needsDocumentMigration()&&!snapshot.edits.length){memoryDocuments(snapshot.revisions);queueMemoryFiles(db);flushMemoryFiles(db);return authorities.get(db)!.snapshot}
+   return snapshot
   }catch(error){authorities.delete(db);throw error}
  }
  return options.alreadyLocked?enable():repository.withLock(enable)

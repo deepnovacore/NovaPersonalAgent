@@ -17,7 +17,9 @@ import {sourceFilterSchema,type SourceFilter} from '../memory/source-retrieval.j
  * stalls: a refused call still gets an item and an intent.
  */
 
-import { createHmac, randomBytes } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID } from 'node:crypto'
+import {explicitMemoryArguments,type ExplicitMemoryTurn} from '../memory/explicit-memory.js'
+import type {PersonalMemoryResource} from '../memory/personal-memory.js'
 import {toUSVString} from 'node:util'
 import { canonicalJson } from '../text/canonical-json.js'
 import type {ExecutorAdmission, UserTurnAuthority} from '../core/causal-runtime.js'
@@ -134,12 +136,16 @@ export class RealtimeRuntimeBridge {
    */
   readonly #queryDigestKey: Buffer
   #latestUserOriginRef: string | null = null
+  readonly #explicitMemory:(()=>PersonalMemoryResource|undefined)|undefined
+  readonly #explicitSession=randomUUID()
+  readonly #explicitTurns=new Map<string,{resource:PersonalMemoryResource;turn:Promise<ExplicitMemoryTurn|null>}>()
 
   constructor(options: {
     readonly runtime: BridgeRuntime
     readonly retrieval?:UnifiedRetrieval
     readonly conversationConsumer?:string
     readonly personalMemory?: PersonalMemoryRecallPort
+    readonly explicitMemory?:()=>PersonalMemoryResource|undefined
     readonly tools: CompiledTools
     readonly idFactory: () => string
     /** Test seam only. Production leaves it unset so the key is random. */
@@ -147,6 +153,7 @@ export class RealtimeRuntimeBridge {
   }) {
     this.#runtime = options.runtime
     this.#personalMemory = options.personalMemory
+    this.#explicitMemory=options.explicitMemory
     this.#retrieval=options.retrieval
     this.#conversationConsumer=options.conversationConsumer??''
     this.#tools = options.tools
@@ -168,6 +175,12 @@ export class RealtimeRuntimeBridge {
   async acceptUserTranscript(text: string): Promise<string> {
     const originRef = await this.#runtime.ingestUserInput({text})
     this.#latestUserOriginRef = originRef
+    const resource=this.#explicitMemory?.()
+    if(resource?.beginExplicitTurn){
+      const turn=resource.beginExplicitTurn({sourceId:this.#explicitSession+':'+originRef,text,occurredAt:new Date().toISOString()}).catch(()=>null)
+      this.#explicitTurns.set(originRef,{resource,turn})
+      if(this.#explicitTurns.size>64)this.#explicitTurns.delete(this.#explicitTurns.keys().next().value!)
+    }
     return originRef
   }
 
@@ -185,6 +198,7 @@ export class RealtimeRuntimeBridge {
     const binding = this.#tools.bindings.get(call.name)
     if (binding === undefined) return this.#refused(call, 'unknown_tool')
     if (this.#tools.hidden.has(call.name)) return this.#refused(call, 'hidden_executor')
+    if(binding.logical_name==='memory.remember')return this.#acceptExplicitMemory(call,options)
     let reason: WakeReason = {
       kind: 'realtime_tool',
       priority: USER_PRIORITY,
@@ -281,6 +295,28 @@ export class RealtimeRuntimeBridge {
       executor: binding.executor,
       op: binding.op,
     })
+  }
+
+  async #acceptExplicitMemory(call:ToolCallReady,options:{readonly originRef?:string|null;readonly userTurn?:UserTurnAuthority}):Promise<ToolAcceptance>{
+    const origin=options.originRef,resource=this.#explicitMemory?.()
+    if(!origin||!trustedUserOrigin(this.#runtime.memory,origin))return this.#refused(call,'missing_origin_ref')
+    if(!resource)return this.#refused(call,'memory_unavailable')
+    try{
+      if(!resource.writeExplicit)return this.#refused(call,'memory_unsupported')
+      if(options.userTurn?.originRef!==origin||origin!==this.#latestUserOriginRef||!currentUserTurn(options.userTurn))return this.#refused(call,'superseded')
+      const args=explicitMemoryArguments.safeParse(call.arguments),captured=this.#explicitTurns.get(origin)
+      if(!args.success)return this.#refused(call,'invalid_params')
+      if(captured?.resource!==resource)return this.#refused(call,'memory_unavailable')
+      const turn=await captured.turn
+      if(!turn)return this.#refused(call,'memory_unavailable')
+      if(!turn.text.includes(args.data.quote))return this.#refused(call,'invalid_source_quote')
+      if(!currentUserTurn(options.userTurn)||origin!==this.#latestUserOriginRef)return this.#refused(call,'superseded')
+      const result=await resource.writeExplicit(turn,call.call_id,args.data,this.#conversationConsumer)
+      return this.#inlineToolResult(call,JSON.stringify(result),result.state,{})
+    }catch(error){
+      const code=error instanceof Error&&'code' in error?String(error.code):error instanceof Error?error.message:''
+      return this.#refused(call,code==='STORE_STALE_REVISION'?'memory_conflict':code==='STORE_IDEMPOTENCY_CONFLICT'?'idempotency_conflict':code==='personal_memory_disabled'?'memory_disabled':'memory_write_or_read_failed')
+    }
   }
 
   /** Personal recall runs through the service-owned cancellable read path. */

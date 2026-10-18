@@ -40,7 +40,7 @@ test('real final compilation failure preserves exact N/B over private startup st
       },
     })
     assert.equal(result, 2)
-    assert.deepEqual(parentPort.sent, [{type: 'nova.capabilities', status: {state: 'startup_failed', toolCount: 3, toolBudget: 1}}])
+    assert.deepEqual(parentPort.sent, [{type: 'nova.capabilities', status: {state: 'startup_failed', toolCount: 4, toolBudget: 1}}])
     assert.equal(desktopBudgetFailure({code: 'frontbrain_tool_budget_exceeded', toolCount: Infinity, toolBudget: 24}), undefined)
   } finally {control.dispose(); stop.abort()}
   assert.equal(parentPort.listenerCount('message'), 0)

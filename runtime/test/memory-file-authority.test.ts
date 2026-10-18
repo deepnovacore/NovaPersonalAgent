@@ -1,3 +1,6 @@
+import {execFileSync} from 'node:child_process'
+import {createHash} from 'node:crypto'
+import {MarkdownRepository} from '../src/memory-substrate/markdown-repository.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,readdir,readFile,writeFile} from 'node:fs/promises'
@@ -149,4 +152,30 @@ test('first file enable respects a live path lock before migrating any documents
   await rm(lock);await enable(client)
   assert.equal((await client.memory('list',{}) as EntryRevision[])[0]?.content.text,candidate.content.text)
  }finally{await rm(lock,{force:true});await client.close();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('oversized legacy USER migration leaves no outbox and admits smaller body edits on retry',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-large-legacy-')),path=join(root,'ledger.sqlite'),directory=path+'.memory'
+ let client=new MemoryLedgerClient(path)
+ try{
+  await client.open();await client.memory('append_evidence',evidence)
+  new MarkdownRepository(directory).initialize()
+  const documents=Array.from({length:7},(_,i)=>{
+   const row:EntryRevision={...candidate,entry_id:`personal:test:large:${i}`,kind:'preference',origin:'stated',written_by:'merge',revision:1,supersedes:null,entity_refs:[],valid_until:null,op:'add',content:{text:'x'.repeat(1_800_000)}}
+   const prefix=`<!-- nova-memory-v1\n${JSON.stringify({format:1,revisions:[row]})}\n-->\n# preference\n\n<!-- editable-current -->\n`
+   return {file:join(directory,'entries',createHash('sha256').update(row.entry_id).digest('hex')+'.md'),prefix,text:'x'.repeat(1_800_000)}
+  })
+  for(const item of documents)await writeFile(item.file,item.prefix+item.text+'\n')
+  await writeFile(join(directory,'.nova-memory.json'),' {"format":"nova-understanding","version":1}\n'.trimStart())
+  const git=(args:string[])=>execFileSync('git',['-c','core.hooksPath=/dev/null','-c','user.name=Fixture','-c','user.email=fixture@localhost','-C',directory,...args],{stdio:'pipe'})
+  git(['add','entries','.nova-memory.json']);git(['commit','-m','Synthetic legacy records'])
+  await assert.rejects(enable(client),/documents conflict/);await client.close()
+  const db=new DatabaseSync(path);try{assert.equal(db.prepare('SELECT 1 FROM memory_file_outbox').get(),undefined)}finally{db.close()}
+  for(const item of documents)await writeFile(item.file,item.prefix+'shortened preference\n')
+  client=new MemoryLedgerClient(path);await client.open();await enable(client)
+  const rows=await client.memory('list',{}) as EntryRevision[]
+  assert.equal(rows.length,7);assert.ok(rows.every(row=>row.content.text==='shortened preference'&&row.revision===2))
+  assert.match(await readFile(join(directory,'USER.md'),'utf8'),/shortened preference/)
+ }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })

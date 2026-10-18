@@ -1,3 +1,4 @@
+import {validateMemoryFiles} from './file-authority.js'
 import {isPermanentlyPurged} from './purge.js'
 import {existsSync,lstatSync} from 'node:fs'
 import {z} from 'zod'
@@ -49,7 +50,7 @@ export function migrateLegacyMemory(db:LedgerDatabase,input:unknown,openLegacy:(
     let key:unknown;try{key=JSON.parse(String(row.key))}catch{continue}
     if(Array.isArray(key)&&key[0]==='nova-entry'&&key[1]===user_id&&key[3]==='suppressed'&&typeof key[4]==='string'&&row.value==='true')db.prepare('INSERT OR IGNORE INTO memory_legacy_suppressed VALUES(?,?)').run(source_prefix,key[4])
    }
-   db.prepare('INSERT INTO memory_migrations VALUES(?)').run(marker);db.exec('COMMIT')
+   db.prepare('INSERT INTO memory_migrations VALUES(?)').run(marker);validateMemoryFiles(db);db.exec('COMMIT')
   }catch(error){db.exec('ROLLBACK');throw error}
  }finally{legacy.close()}
  return count

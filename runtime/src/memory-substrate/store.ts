@@ -1,9 +1,10 @@
+import {initializeExplicitMemory,explicitMemoryOperation} from './explicit-memory.js'
 import {imMetadataSchema} from '../memory/provenance.js'
 import {searchSourceEvidence} from './source-retrieval.js'
 import {initializePurge,isPermanentlyPurged} from './purge.js'
 import {normalizeWorkspaceContent,projectWorkspaceRevision} from './workspace-projections.js'
 import {initializeLife,lifeOperation,normalizeLifeContent} from './life-operations.js'
-import {queueMemoryFiles,flushMemoryFiles,readMemoryFiles} from './file-authority.js'
+import {queueMemoryFiles,flushMemoryFiles,readMemoryFiles,validateMemoryFiles} from './file-authority.js'
 import {initializeRetrieval,memoryRetrieval} from './retrieval.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
@@ -72,6 +73,7 @@ export function merge(current:EntryRevision|null,candidate:Candidate,policy:{sup
 }
 
 export function initializeMemory(database:LedgerDatabase):void {
+  initializeExplicitMemory(database)
   initializePurge(database)
   initializeLife(database)
   initializeSourceState(database)
@@ -144,7 +146,7 @@ function write(db:LedgerDatabase,candidate:Candidate,deleted=false):EntryRevisio
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
+export type MemoryOperation = 'explicit_begin'|'explicit_write'|'explicit_lookup'|'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   const ledgerOnly=isLedgerOnlyOperation(operation,value)
@@ -154,6 +156,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
   try {
     let result:unknown=null
     switch(operation){
+      case 'explicit_begin':case 'explicit_write':case 'explicit_lookup':result=explicitMemoryOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
       case 'source_search':result=searchSourceEvidence(db,input);break;
       case 'source_processing':result=sourceProcessingOperation(db,input);break;
       case 'life_load':case 'life_mutate':case 'life_capture_im':result=lifeOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
@@ -337,7 +340,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
       }
       default:throw new Error('STORE_INVALID_OPERATION')
     }
-    if(transaction){db.exec('COMMIT');committed=true;if(!ledgerOnly)flushMemoryFiles(db)}
+    if(transaction){validateMemoryFiles(db);db.exec('COMMIT');committed=true;if(!ledgerOnly)flushMemoryFiles(db)}
     return result
   }catch(error){if(transaction&&!committed)db.exec('ROLLBACK');throw error}
 }
@@ -359,7 +362,7 @@ export function reconcileMemoryFiles(db:LedgerDatabase):void {
    if(inheritedGrant){const sourceId=prefix+'manual:'+contentHash(edit.entry_id),revision=readProcessingGrant(db,sourceId)?.revision??0;memoryOperation(db,'source_grant',{source_id:sourceId,expected_revision:revision,grant:{...inheritedGrant,revision:revision+1}},false)}
    write(db,CandidateSchema.parse({entry_id:edit.entry_id,expected_revision:edit.expected_revision,kind:previous.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidenceId],entity_refs:previous.entity_refs,content:edit.content,valid_until:previous.valid_until,recorded_at:now}))
   }
-  db.exec('COMMIT');committed=true;flushMemoryFiles(db)
+  validateMemoryFiles(db);db.exec('COMMIT');committed=true;flushMemoryFiles(db)
  }catch(error){if(!committed)db.exec('ROLLBACK');throw error}
 }
 

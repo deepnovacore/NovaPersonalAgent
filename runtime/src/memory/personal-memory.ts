@@ -1,3 +1,4 @@
+import type {ExplicitMemoryTurn,ExplicitMemoryArguments,ExplicitMemoryLookup,ExplicitMemoryReceipt,ExplicitMemoryPage} from './explicit-memory.js'
 import type {ProcessingRequest} from '../memory-substrate/source-processing.js'
 import type {SourceFilter,SourceRecallResult} from './source-retrieval.js'
 import type {ProfileInput,ProfileGenerator} from '../personal-agent/profile-warmup.js'
@@ -93,6 +94,9 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  readonly beginExplicitTurn?: (turn:ExplicitMemoryTurn)=>Promise<ExplicitMemoryTurn>
+  readonly writeExplicit?: (turn:ExplicitMemoryTurn,requestId:string,args:ExplicitMemoryArguments,consumer:string)=>Promise<ExplicitMemoryReceipt>
+  readonly lookupExplicit?: (query:ExplicitMemoryLookup,consumer:string)=>Promise<ExplicitMemoryPage>
   readonly recallSources?: (query:string,options:{consumer:string;scope:'recent'|'any';limit:number;filter?:SourceFilter;signal?:AbortSignal})=>Promise<SourceRecallResult>
   /** Internal built-in maintenance port; identity and provider are supplied by the host. */
   readonly sourceProcessingLlm?: ()=>{baseUrl:string;apiKey:string;model:string}|undefined
@@ -128,7 +132,8 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly forgetSources?: (refs: readonly string[]) => Promise<void>
   /** Read-only host inspection; never exposed as an LLM tool. */
   readonly inspect?: (query: MemoryInspectionQuery) => Promise<MemoryInspection>
-  open(): Promise<void>
+  open(options?:{deferBackground?:boolean}): Promise<void>
+  readonly startBackgroundWork?: () => void
   close(): Promise<void>
   /** Absent for read-only providers. Resolve only after durable admission, or reject. */
   readonly remember?: (turn: PersonalMemoryRememberTurn) => Promise<PersonalMemoryAdmissionReceipt>

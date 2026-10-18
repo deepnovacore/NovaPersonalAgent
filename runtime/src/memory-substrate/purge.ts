@@ -173,6 +173,7 @@ export function purgeEntry(db:LedgerDatabase,path:string,input:unknown):PurgeRes
  const intent:Intent={selected:selectedMapping,operation_id:randomUUID(),entry_id:current.entry_id,expected_revision:current.revision,request_ids:[q.request_id],revisions:snapshot.revisions.filter(row=>!selectedIds.has(row.entry_id)),baselines:snapshot.baselines,removed_entries:selectedIds.size,removed_evidence:evidence.length,removed_entry_ids:[...selectedIds],removed_evidence_ids:evidence.map(row=>row.id),pending_index_evidence_ids:pendingIndex,...backup,repository_done:false}
  db.exec('PRAGMA secure_delete=ON; BEGIN IMMEDIATE')
  try{
+  db.prepare('DELETE FROM memory_explicit_turns WHERE prefix=?').run(q.entry_prefix)
   for(const id of selectedIds){db.prepare('INSERT OR IGNORE INTO memory_purged_ids VALUES(?)').run(hash(id));db.prepare('DELETE FROM memory_revisions WHERE entry_id=?').run(id);db.prepare('DELETE FROM memory_vectors WHERE entry_id=?').run(id)}
   for(const record of evidence){db.prepare('INSERT OR IGNORE INTO memory_purged_ids VALUES(?)').run(hash(record.id));db.prepare('INSERT OR IGNORE INTO memory_suppressed VALUES(?)').run(record.hash);db.prepare('DELETE FROM memory_evidence WHERE id=?').run(record.id);db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(record.id);db.prepare("DELETE FROM source_extractions WHERE json_extract(payload_json,'$.ticket.evidence_id')=?").run(record.id)}
   for(const row of db.prepare('SELECT namespace,payload_json FROM memory_life_meta').all()){

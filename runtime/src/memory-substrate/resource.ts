@@ -1,3 +1,4 @@
+import {explicitMemoryTurn,type ExplicitMemoryTurn,type ExplicitMemoryArguments,type ExplicitMemoryLookup,type ExplicitMemoryReceipt,type ExplicitMemoryPage} from '../memory/explicit-memory.js'
 import {SOURCE_PROCESSING_GOAL,SOURCE_PROCESSING_INSTRUCTIONS} from '../core/source-processing-instructions.js'
 import {profileSourceInput} from './profile-source-input.js'
 import {GatewayPersonalWriter} from '../model/personal-writer.js'
@@ -49,7 +50,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     await this.#refresh();await this.#notifySources();this.#wakeSources();return result
   }
   #wakeSources():void{
-    if(this.#sourceWork||!this.#opened)return
+    if(this.#sourceWork||!this.#opened||!this.#backgroundStarted)return
     this.#sourceWork=(async()=>{
       await this.#notifySources()
       for(let n=0;n<10&&this.#opened;n++){
@@ -78,6 +79,8 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     })().finally(()=>{this.#sourceEvents=null})
     return this.#sourceEvents
   }
+  #backgroundStarted=false
+  #maintenanceRun:Promise<void>|undefined
   #maintenance:ReturnType<typeof setInterval>|undefined
   #queued=new Set<string>()
   #extracting=new Map<string,Promise<void>>()
@@ -95,10 +98,41 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   constructor(readonly options:{sourceProcessingLlm?:{baseUrl:string;apiKey:string};sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;profileParticipantMessages?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
     this.prefix='personal:'+digest(options.userId)+':'
   }
-  async open():Promise<void>{if(this.#opened)return;await this.options.client.open();await this.options.migrate?.();await this.options.client.memory('enable_files',{});this.#opened=true;this.#abort=new AbortController();await this.#maintain();this.#maintenance=setInterval(()=>{void this.#maintain().catch(()=>{ /* retry on the next maintenance tick */ })},60000);this.#maintenance.unref();await this.#refresh()}
-  async close():Promise<void>{this.#opened=false;this.#preparedSignatures.clear();this.#snapshotSignature='';clearInterval(this.#maintenance);this.#abort.abort();await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;await this.#consolidating;this.#adaptation={revision:0,replyPreferences:[]};if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}}
+  async open({deferBackground=false}:{deferBackground?:boolean}={}):Promise<void>{
+    if(this.#opened)return
+    await this.options.client.open();await this.options.migrate?.();await this.options.client.memory('enable_files',{})
+    this.#opened=true;this.#abort=new AbortController()
+    if(!deferBackground){this.startBackgroundWork();await this.#maintenanceRun;await this.#refresh()}
+  }
+  startBackgroundWork():void{
+    if(!this.#opened||this.#backgroundStarted)return
+    this.#backgroundStarted=true
+    const maintain=()=>{if(!this.#opened||this.#maintenanceRun)return;this.#maintenanceRun=this.#maintain().catch(()=>{/* Durable work retries at the next tick. */}).finally(()=>{this.#maintenanceRun=undefined})}
+    maintain();this.#maintenance=setInterval(maintain,60000);this.#maintenance.unref()
+  }
+  async close():Promise<void>{this.#opened=false;this.#backgroundStarted=false;this.#preparedSignatures.clear();this.#snapshotSignature='';clearInterval(this.#maintenance);this.#abort.abort();await this.#maintenanceRun;await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;await this.#consolidating;this.#adaptation={revision:0,replyPreferences:[]};if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}}
   async #maintain():Promise<void>{this.#wakeSources();await this.options.client.memory('expire',{});if(this.options.personalMemoryEnabled===false)return;await this.#refresh();this.#queueIndex();const pending=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('pending_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),limit:20}));for(const e of pending)this.#queue(e);this.#queueConsolidation()}
   #ready():void{if(!this.#opened)throw Error('personal_memory_unavailable')}
+  async beginExplicitTurn(input:ExplicitMemoryTurn):Promise<ExplicitMemoryTurn>{
+    this.#ready();if(this.options.personalMemoryEnabled===false||this.options.inputConsent!==true)throw Error('personal_memory_disabled')
+    const turn=explicitMemoryTurn.parse(input)
+    await this.options.client.memory('explicit_begin',{prefix:this.prefix,turn})
+    return turn
+  }
+  async writeExplicit(turn:ExplicitMemoryTurn,requestId:string,args:ExplicitMemoryArguments,consumer:string):Promise<ExplicitMemoryReceipt>{
+    this.#ready();if(this.options.personalMemoryEnabled===false||this.options.inputConsent!==true)throw Error('personal_memory_disabled')
+    if(!this.options.conversationProviders?.includes(consumer))throw Error('memory_consumer_denied')
+    const sourceId='explicit:'+digest(turn.sourceId+':'+requestId)
+    const evidence=this.#evidenceRecord({type:'conversation',ref:sourceId,observed_at:turn.occurredAt},args.quote,'user_correction',sourceId,undefined,true,undefined,this.options.inputConsent===true)
+    // Distinct explicit operations keep distinct evidence even when the user quoted the same sentence.
+    const receipt=await this.options.client.memory('explicit_write',{prefix:this.prefix,turn,requestId,arguments:args,consumer,evidence:{...evidence,hash:digest(this.options.userId+':'+sourceId)},automaticHash:contentHash(this.options.userId+':'+turn.text),grant:this.processingGrant(true)}) as ExplicitMemoryReceipt
+    await this.#refresh()
+    return receipt
+  }
+  async lookupExplicit(query:ExplicitMemoryLookup,consumer:string):Promise<ExplicitMemoryPage>{
+    this.#ready();if(this.options.personalMemoryEnabled===false)throw Error('personal_memory_disabled')
+    return await this.options.client.memory('explicit_lookup',{prefix:this.prefix,query,consumer}) as ExplicitMemoryPage
+  }
   capabilities(){return {list:true,get:true,correct:true,forgetEntry:true,forgetSource:true,observeSource:true}}
   async profileSources(ids?:readonly string[]):Promise<ProfileInput[]>{
     this.#ready()

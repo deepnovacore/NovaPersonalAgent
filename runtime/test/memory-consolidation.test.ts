@@ -40,7 +40,7 @@ test('changed, deleted, expired or newly admitted facts immediately invalidate t
  const stored=summary();assert.equal(consolidationCurrent(stored,[fact()],now),true)
  const staleSets=[[fact('spicy',2,'最近可以吃一点辣')],[],[{...fact(),op:'tombstone' as const}],[{...fact(),valid_until:'2026-09-20T00:00:00Z'}],[fact(),fact('coffee',1,'喜欢咖啡')]]
  for(const rows of staleSets){assert.equal(consolidationCurrent(stored,rows,now),false);const text=memoryReadContext(rows,stored,{now,mode:'voice'});assert.ok(!text.includes('派生：饮食倾向清淡'));assert.ok(!text.includes('当前情况：不吃辣'))}
- const fresh=memoryReadContext([fact('spicy',2,'最近可以吃一点辣')],stored,{now,mode:'voice'});assert.ok(fresh.includes('最近可以吃一点辣'));assert.ok(fresh.includes('spicy@2'))
+ const fresh=memoryReadContext([fact('spicy',2,'最近可以吃一点辣')],stored,{now,mode:'voice'});assert.ok(fresh.includes('最近可以吃一点辣'));assert.ok(fresh.includes('entry_id="spicy"; revision=2'))
  const valid=memoryReadContext([fact()],stored,{now,mode:'voice'});assert.ok(valid.includes('我不吃辣'));assert.ok(valid.includes('派生：饮食倾向清淡'));assert.ok(valid.includes('当前情况：不吃辣'))
 })
 
