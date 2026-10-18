@@ -70,7 +70,8 @@ export const feedItemSchema: z.ZodType<FeedItem> = z.object({
 const wallClockSchema=z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u);
 const timezoneSchema=z.string().min(1).max(80).refine(value=>{try{new Intl.DateTimeFormat('en',{timeZone:value});return true}catch{return false}},'invalid timezone');
 export const identityNameSchema=z.string().trim().max(40).refine(value=>!/[\p{Cc}\p{Cf}]/u.test(value),'invalid_name');
-export const personalSettingsSchema = z.object({ assistant_name:identityNameSchema.min(1).optional(),user_name:identityNameSchema.optional(), discovery_enabled: z.boolean(), discovery_interval_minutes: z.number().int().min(5).max(1440),
+export const userNameSchema=z.string().trim().max(64).refine(value=>!/[\p{Cc}\p{Cf}]/u.test(value),'invalid_name');
+export const personalSettingsSchema = z.object({ assistant_name:identityNameSchema.min(1).optional(),user_name:userNameSchema.optional(), discovery_enabled: z.boolean(), discovery_interval_minutes: z.number().int().min(5).max(1440),
     timezone:timezoneSchema.optional(),briefing_outlook_enabled:z.boolean().optional(),briefing_review_enabled:z.boolean().optional(),
     briefing_outlook_time:wallClockSchema.optional(),briefing_review_time:wallClockSchema.optional(),
     briefing_weekdays:z.array(z.number().int().min(1).max(7)).max(7).refine(days=>new Set(days).size===days.length).optional(),

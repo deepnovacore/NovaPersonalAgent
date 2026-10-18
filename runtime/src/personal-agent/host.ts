@@ -1,3 +1,5 @@
+import {createPreferredNameSync} from './preferred-name-sync.js'
+import {explicitMemoryTurn,type ExplicitMemoryTurn} from '../memory/explicit-memory.js'
 import {DailyWorkbench} from './daily-workbench.js'
 import type {WorkbenchGenerator} from './workbench-evidence.js'
 import {timelineContextInputs} from './timeline-inputs.js'
@@ -40,7 +42,7 @@ import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
-import { identityNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
+import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
@@ -92,6 +94,7 @@ export interface PersonalFeishu {
     close(): Promise<void>;
 }
 export interface HostOptions {
+    explicitMemoryConsumer?:()=>string|undefined;
     stopRevoker?: StopRevoker;
     onDiagnostic?: (code: string) => void;
     notificationAdapters?:NotificationChannelAdapter[];
@@ -698,6 +701,7 @@ export class PersonalAgentHost {
             this.#abort = new AbortController();
             this.#loaded = true;
             this.#opened = true;
+            await this.synchronizePreferredName();
             this.understanding.reopen();
             await this.workbenchContext.open({deferGeneration:true});
             await this.timeline.open();
@@ -993,6 +997,51 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
+    readonly #preferredNameSync=createPreferredNameSync({
+        readMemory:async()=>{
+            const memory=this.options.memory();if(!memory?.lookupExplicit)return undefined;
+            const consumer=this.options.explicitMemoryConsumer?.();if(!consumer)return undefined;
+            try{const page=await memory.lookupExplicit({slot:'preferred_name'},consumer);return page.entries[0]?.text??(page.forgotten===true?null:undefined)}
+            catch(error){if(error instanceof Error&&error.message==='personal_memory_disabled')return undefined;throw error}
+        },
+        readSettings:()=>this.#state.settings.user_name??'',
+        saveSettings:name=>this.#serial(async()=>{const next=structuredClone(this.#state);next.settings.user_name=userNameSchema.parse(name);await this.#commit(next)}),
+    });
+    synchronizePreferredName():Promise<void>{return this.#preferredNameSync.synchronize()}
+    async #configureIdentity(requestId:string,payload:string,q:{assistant_name:string;user_name:string}):Promise<void>{
+        const memory=this.options.memory();
+        if(memory?.lookupExplicit||memory?.beginExplicitTurn||memory?.writeExplicit){
+            if(!memory.lookupExplicit||!memory.beginExplicitTurn||!memory.writeExplicit)throw Error('memory_unsupported');
+            await this.synchronizePreferredName();
+            const pending=(this.#state.receipts[requestId]?.result as {identity_pending?:boolean}|undefined)?.identity_pending;
+            if(!pending&&q.user_name===(this.#state.settings.user_name??'')){await this.#serial(async()=>{const next=structuredClone(this.#state);next.settings.assistant_name=q.assistant_name;await this.#commit(next)});return}
+            const consumer=this.options.explicitMemoryConsumer?.();if(!consumer)throw Error('memory_consumer_unavailable');
+            // The existing command receipt retains the exact UI turn until its
+            // memory write and settings mirror finish, including across restart.
+            let turn:ExplicitMemoryTurn;
+            await this.#serial(async()=>{
+                const prior=this.#state.receipts[requestId]?.result as {identity_pending?:boolean;turn?:unknown}|undefined;
+                if(prior?.identity_pending){turn=explicitMemoryTurn.parse(prior.turn);return}
+                turn={sourceId:'identity:'+hash({scope:this.options.userScope,requestId,payload}),text:q.user_name||'user_name: (empty)',occurredAt:this.#now().toISOString()};
+                const next=structuredClone(this.#state);next.receipts[requestId]={payload,result:{identity_pending:true,turn}};
+                for(const key of Object.keys(next.receipts).slice(0,-256))delete next.receipts[key];
+                await this.#commit(next);
+            });
+            await this.#preferredNameSync.commitMemory(async()=>{
+                await memory.beginExplicitTurn!(turn!);
+                if(q.user_name)return memory.writeExplicit!(turn!,requestId,{action:'set',kind:'preference',scope:'user',slot:'preferred_name',text:q.user_name,quote:turn!.text},consumer);
+                try{return await memory.writeExplicit!(turn!,requestId,{action:'forget',slot:'preferred_name',quote:turn!.text},consumer)}
+                catch(error){
+                    const code=error instanceof Error&&'code' in error?String(error.code):error instanceof Error?error.message:'';
+                    if(code!=='STORE_NOT_FOUND')throw error;
+                    // An explicit UI clear may precede the first durable memory slot.
+                    await this.#serial(async()=>{const next=structuredClone(this.#state);next.settings.user_name='';await this.#commit(next)});
+                    return undefined;
+                }
+            });
+            await this.#serial(async()=>{const next=structuredClone(this.#state);next.settings.assistant_name=q.assistant_name;await this.#commit(next)});
+        }else await this.#serial(async()=>{const next=structuredClone(this.#state);Object.assign(next.settings,q);await this.#commit(next)});
+    }
     identity(){return {assistant_name:this.#state.settings.assistant_name??'nova',user_name:this.#state.settings.user_name??''}}
     async #timelineInputs():Promise<TimelineInput[]>{
         const messages=await this.options.memory()?.timelineEvidence?.()??[];
@@ -1260,7 +1309,9 @@ export class PersonalAgentHost {
         if((scheduleCommand||taskCommand||command.method==='conversations.approve')&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
         const receiptId=scoped?hash({client:client??null,request:command.request_id}):command.request_id;
         const taskRead=command.method==='tasks.get'||command.method==='tasks.list'||['schedules.list','schedules.get','schedules.history','schedules.presets','schedules.preview'].includes(command.method);
-        const payload=scoped?hash(canonicalJson(command)):hash(command),prior=taskRead?undefined:this.#state.receipts[receiptId];if(prior)
+        const payload=scoped?hash(canonicalJson(command)):hash(command),prior=taskRead?undefined:this.#state.receipts[receiptId];
+        if(prior&&command.method==='identity.configure'&&prior.payload===payload&&!(prior.result as {identity_pending?:boolean})?.identity_pending){try{await this.synchronizePreferredName();return prior.result}catch(error){return {type:'personal.result',request_id:command.request_id,ok:false,error:error instanceof Error?error.message:'unavailable'}}}
+        if(prior&&!(command.method==='identity.configure'&&prior.payload===payload&&(prior.result as {identity_pending?:boolean})?.identity_pending))
         return prior.payload === payload ? prior.result : { type: 'personal.result', request_id: command.request_id, ok: false, error: scoped?'request_conflict':'request_id_conflict' }; let result: unknown,inputStatus:'failed'|'unknown'='failed'; try {
         let data: unknown;
         const m = this.options.memory(), p = command.params;
@@ -1277,8 +1328,8 @@ export class PersonalAgentHost {
         }
         if(scheduleCommand){data=await executeScheduleCommand(this,command.method,p,receiptId,{user_scope:this.options.userScope,source:'ui',origin_ref:'ui:'+client+':'+command.request_id,source_refs:[]})}
         else if(command.method==='identity.configure'){
-            const q=z.object({assistant_name:identityNameSchema.min(1),user_name:identityNameSchema}).strict().parse(p);
-            await this.#serial(async()=>{const next=structuredClone(this.#state);Object.assign(next.settings,q);await this.#commit(next)});this.#notify();data=this.identity();
+            const q=z.object({assistant_name:identityNameSchema.min(1),user_name:userNameSchema}).strict().parse(p);
+            await this.#configureIdentity(command.request_id,payload,q);this.#notify();data=this.identity();
         }
         else if(command.method.startsWith('notifications.')){/* Handled above; never forward notification commands to source connectors. */}
         else if(taskCommand){
@@ -1481,7 +1532,7 @@ export class PersonalAgentHost {
             await this.refreshMemory();
         }
         else if (command.method === 'discovery.configure') {
-            const q = personalSettingsSchema.partial().extend({ enabled: z.boolean().optional(), interval_minutes: z.number().int().min(5).max(1440).optional() }).strict().parse(p);
+            const q = personalSettingsSchema.omit({assistant_name:true,user_name:true}).partial().extend({ enabled: z.boolean().optional(), interval_minutes: z.number().int().min(5).max(1440).optional() }).strict().parse(p);
             await this.#serial(async () => { const next = structuredClone(this.#state);const settings={...q};delete settings.enabled;delete settings.interval_minutes;Object.assign(next.settings,settings); if (q.enabled !== undefined)
                 next.settings.discovery_enabled = q.enabled; if (q.interval_minutes !== undefined)
                 next.settings.discovery_interval_minutes = q.interval_minutes; await this.#commit(next); });
@@ -1499,7 +1550,7 @@ export class PersonalAgentHost {
     catch (e) {
         result = { type: 'personal.result', request_id: command.request_id, ok: false, error: e instanceof Error ? e.message : 'unavailable',...(command.method==='tasks.input'?{input_status:inputStatus,input_task_id:command.params.task_id}:{}) };
     } if(taskRead)return result;
-    if(command.method==='presentation.set'&&(result as {ok:boolean}).ok===false)return result;
+    if((command.method==='presentation.set'||command.method==='identity.configure')&&(result as {ok:boolean}).ok===false)return result;
     await this.#serial(async () => { const next = structuredClone(this.#state); const receipt={...result as Record<string,unknown>}; if(Object.hasOwn(receipt,'data')&&command.method!=='memory.purge'&&!scoped){delete receipt.data;receipt.reload_required=true;} next.receipts[receiptId] = { payload, result:receipt }; const keys = Object.keys(next.receipts); for (const key of keys.slice(0, Math.max(0, keys.length - 256)))
         delete next.receipts[key]; await this.#commit(next); }); return result; }
 }

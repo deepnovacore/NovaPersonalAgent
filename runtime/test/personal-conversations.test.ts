@@ -177,6 +177,20 @@ test('production scoped graph completes a real text adapter turn without closing
   service.submitText=submit
   assert.equal((await runtime.runTurn('retry after timeout',AbortSignal.timeout(5000))).assistant,'scoped reply')
 
+  // Abort while identity synchronization is awaiting, before the turn joins `done`.
+  const synchronize=host.synchronizePreferredName.bind(host)
+  let releaseIdentity!:()=>void
+  host.synchronizePreferredName=()=>new Promise<void>(resolve=>{releaseIdentity=resolve})
+  const controller=new AbortController()
+  try{
+   const cancelled=assert.rejects(runtime.runTurn('cancel during identity sync',controller.signal),/cancelled_during_identity_sync/)
+   controller.abort(Error('cancelled_during_identity_sync'))
+   // Cross an event-loop boundary so an orphaned rejection is observable by node:test.
+   await new Promise<void>(resolve=>setImmediate(resolve))
+   releaseIdentity();await cancelled;await clearing
+  }finally{releaseIdentity();host.synchronizePreferredName=synchronize}
+  assert.equal((await runtime.runTurn('retry after identity cancellation',AbortSignal.timeout(5000))).assistant,'scoped reply')
+
  }finally{await runtime.close()}
  const result=await host.command({type:'personal.command',request_id:'still-open',method:'state',params:{}}) as {ok:boolean};assert.equal(result.ok,true)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}

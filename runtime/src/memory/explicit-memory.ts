@@ -1,5 +1,6 @@
 import {z} from 'zod'
 
+export const preferredNameTextSchema=z.string().trim().min(1).max(64).refine(value=>!/[\p{Cc}\p{Cf}]/u.test(value),'invalid_name')
 export const memorySlotSchema=z.enum(['preferred_name','reply_style'])
 export const explicitMemoryArguments=z.object({
   action:z.enum(['set','forget']),
@@ -11,7 +12,7 @@ export const explicitMemoryArguments=z.object({
   id:z.string().min(1).max(512).optional().describe('Exact entry_id from memory__lookup or memory__recall, including its personal: prefix and excluding any revision suffix. Use slot instead for preferred_name or reply_style.'),
 }).strict().superRefine((v,ctx)=>{
   if(v.slot&&v.scope==='general'||v.action==='forget'&&v.scope||v.slot&&v.id||v.action==='set'&&(!v.kind||!v.text)||v.action==='forget'&&(!v.slot&&!v.id||v.text||v.kind)||v.slot&&v.action==='set'&&v.kind!=='preference')ctx.addIssue({code:'custom',message:'invalid memory operation'})
-  if(v.slot==='preferred_name'&&v.text&&v.text.length>64)ctx.addIssue({code:'custom',message:'name too long'})
+  if(v.slot==='preferred_name'&&v.text&&!preferredNameTextSchema.safeParse(v.text).success)ctx.addIssue({code:'custom',message:'invalid_name'})
 })
 export const explicitMemoryLookup=z.object({id:z.string().min(1).max(512).optional(),slot:memorySlotSchema.optional().describe('Use preferred_name for saving, correcting or forgetting the preferred form of address; reply_style for response style. Do not also pass id.'),cursor:z.string().min(1).max(512).optional()}).strict()
 export const explicitMemoryTurn=z.object({sourceId:z.string().min(1).max(300),text:z.string().min(1).max(40000),occurredAt:z.iso.datetime({offset:true})}).strict()
@@ -20,4 +21,5 @@ export type ExplicitMemoryArguments=z.infer<typeof explicitMemoryArguments>
 export type ExplicitMemoryLookup=z.infer<typeof explicitMemoryLookup>
 export interface ExplicitMemoryEntry {id:string;version:number;kind:string;text:string;slot:string|null;status:'active'}
 export interface ExplicitMemoryReceipt {state:'committed';id:string;version:number;replayed:boolean;current:ExplicitMemoryEntry|null}
-export interface ExplicitMemoryPage {entries:ExplicitMemoryEntry[];next_cursor:string|null}
+/** A forgotten slot is reported only when its explicit tombstone is authorized for this consumer. */
+export interface ExplicitMemoryPage {entries:ExplicitMemoryEntry[];next_cursor:string|null;forgotten?:boolean}

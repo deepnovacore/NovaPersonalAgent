@@ -10,7 +10,7 @@ function editor(root,{api,save,onUpdate}){
  action('更换头像',actions,()=>perform(async()=>onUpdate(await api.avatar())))
  action('恢复默认头像',actions,()=>perform(async()=>onUpdate(await api.avatar(true))))
  const fields=el('div',undefined,'identity-fields')
- const field=(label,placeholder)=>{const wrap=el('label',label),input=el('input');input.type='text';input.maxLength=40;input.placeholder=t(placeholder);input.setAttribute('aria-label',t(label));input.addEventListener('input',()=>{dirty=true});wrap.append(input);fields.append(wrap);return input}
+ const field=(label,placeholder)=>{const wrap=el('label',label),input=el('input');input.type='text';input.maxLength=label==='我该怎么称呼你？'?64:40;input.placeholder=t(placeholder);input.setAttribute('aria-label',t(label));input.addEventListener('input',()=>{dirty=true});wrap.append(input);fields.append(wrap);return input}
  const user=field('我该怎么称呼你？','可以先不填'),assistant=field('给我起个名字吧','nova');assistant.value='nova';root.append(fields)
  const choices=el('div',undefined,'identity-name-choices');for(const name of ['nova','小星'])action(name,choices,()=>{assistant.value=name;dirty=true;assistant.focus()});root.append(choices)
  const submit=action('保存',root,()=>perform(async()=>{await save({assistantName:assistant.value,userName:user.value});dirty=false;if(view){user.value=view.profile.userName;assistant.value=view.profile.assistantName}}))
@@ -23,20 +23,26 @@ export function mountAssistantWelcome(root,{api,c,onIdentity}){
  const heading=el('div',undefined,'assistant-greeting'),portrait=el('img');portrait.alt='';heading.append(portrait);const title=el('h1');heading.append(title);root.append(heading)
  const hello=el('p','','welcome-bubble'),explain=el('p','你可以和我聊想法，也可以把事情交给我。需要访问文件或操作电脑时，我会根据已配置的能力请求相应授权。','welcome-bubble');root.append(hello,explain)
  const form=el('div',undefined,'welcome-name-card');root.append(form)
- let view=null,synced=null,syncing=false,syncFailed=false,wasConnected=false
- const configure=async profile=>{const result=await c.command('identity.configure',{assistant_name:profile.assistantName.trim()||'nova',user_name:profile.userName.trim()});if(result?.error)throw Error(result.error);synced=JSON.stringify([profile.assistantName.trim()||'nova',profile.userName.trim()]);syncFailed=false}
+ let view=null,syncing=false,syncFailed=false,wasConnected=false
+ const configure=async profile=>{const result=await c.command('identity.configure',{assistant_name:profile.assistantName.trim()||'nova',user_name:profile.userName.trim()});if(result?.error)throw Error(result.error);syncFailed=false}
  const edit=editor(form,{api,onUpdate:onIdentity,save:async patch=>{if(!c.connected)throw Error('not_connected');await configure(patch);onIdentity(await api.save({...patch,introduced:true}))}})
  edit.submit.textContent=t('就这样，开始吧')
  const status=el('p','','hint');status.setAttribute('role','status');root.append(status)
  const retry=action('重试同步名字',root,()=>{syncFailed=false;sync()});retry.hidden=true
  const sync=()=>{
-  if(!c.connected){wasConnected=false;syncFailed=false;synced=null}
+  if(!c.connected){wasConnected=false;syncFailed=false}
   else if(!wasConnected){wasConnected=true;syncFailed=false}
   edit.submit.disabled=!c.connected||c.presentationReady===false||edit.busy
   if(!view?.profile.introduced||!c.connected||c.presentationReady===false||syncing||syncFailed)return
-  const key=JSON.stringify([view.profile.assistantName,view.profile.userName]);if(key===synced)return
+  const settings=c.snapshot?.settings
+  if(typeof settings?.assistant_name!=='string'||typeof settings?.user_name!=='string')return
+  if(settings.assistant_name===view.profile.assistantName&&settings.user_name===view.profile.userName)return
   syncing=true;status.textContent=t('正在记住我们的称呼…')
-  void configure(view.profile).then(()=>{status.textContent='';retry.hidden=true},()=>{syncFailed=true;retry.hidden=false;status.textContent=t('名字尚未同步到对话，请重试。')}).finally(()=>{syncing=false})
+  // After onboarding, runtime settings reflect current admitted memory. Never push
+  // a stale local welcome profile back into runtime after reconnect or chat rename.
+  void api.save({assistantName:settings.assistant_name,userName:settings.user_name}).then(value=>{
+   status.textContent='';retry.hidden=true;onIdentity(value)
+  },()=>{syncFailed=true;retry.hidden=false;status.textContent=t('名字尚未同步到对话，请重试。')}).finally(()=>{syncing=false;if(!syncFailed)sync()})
  }
  return {sync,update(value){view=value;const p=view.profile;portrait.src=p.avatar??view.defaultAvatar;title.textContent=p.assistantName;hello.textContent=p.introduced?t('你好{0}，我是 {1}。今天想一起做点什么？',p.userName?'，'+p.userName:'',p.assistantName):t('你好，我是 {0}，住在你电脑里的私人助理。很高兴认识你。',p.assistantName);form.hidden=p.introduced;explain.hidden=p.introduced;edit.update(value);sync()}}
 }

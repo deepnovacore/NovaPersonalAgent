@@ -1,7 +1,7 @@
 import {z} from 'zod'
 import {createHash} from 'node:crypto'
 import {canonicalJson} from '../text/canonical-json.js'
-import {explicitMemoryArguments,explicitMemoryLookup,explicitMemoryTurn,type ExplicitMemoryEntry,type ExplicitMemoryReceipt} from '../memory/explicit-memory.js'
+import {explicitMemoryArguments,explicitMemoryLookup,explicitMemoryTurn,preferredNameTextSchema,type ExplicitMemoryEntry,type ExplicitMemoryReceipt} from '../memory/explicit-memory.js'
 import type {LedgerDatabase} from '../memory-ledger/store.js'
 import {CandidateSchema,EntryRevisionSchema,EvidenceRecordSchema,type EntryRevision,type MemoryOperation} from './store.js'
 import {allowsProcessing,processingGrantSchema} from './source-state.js'
@@ -42,7 +42,13 @@ export function explicitMemoryOperation(db:LedgerDatabase,operation:'explicit_be
       if(JSON.stringify({entries:[...page,entry],next_cursor:entry.id}).length>3500)break
       page.push(entry)
     }
-    return {entries:page,next_cursor:entries.length>page.length?page.at(-1)!.id:null}
+    // Empty authorized results also mean never set or not visible to this provider.
+    // Expose only an authorized explicit tombstone, never unauthorized slot metadata.
+    const forgotten=query.slot&&!query.cursor&&entries.length===0&&rows(run,prefix).some(row=>
+      row.content.memory_slot===query.slot&&(!query.id||row.entry_id===query.id)&&row.op==='tombstone'
+      &&row.written_by==='user_correction'&&row.evidence_refs.length>0
+      &&z.array(EvidenceRecordSchema).parse(run('processing_evidence',{ids:row.evidence_refs,purpose:'conversation',provider:consumer})).length===new Set(row.evidence_refs).size)
+    return {entries:page,next_cursor:entries.length>page.length?page.at(-1)!.id:null,...(forgotten?{forgotten:true}:{})}
   }
   const turn=explicitMemoryTurn.parse(raw.turn),args=explicitMemoryArguments.parse(raw.arguments),requestId=key.parse(raw.requestId)
   if(!turn.text.includes(args.quote))throw Error('STORE_INVALID_OPERATION')
@@ -63,6 +69,8 @@ export function explicitMemoryOperation(db:LedgerDatabase,operation:'explicit_be
   const id=args.slot?slot?.entry_id??slotRoot+':'+receiptKey:args.id??prefix+'explicit:'+receiptKey
   if(!id.startsWith(prefix))throw Error('STORE_INVALID_OPERATION')
   const old=current.find(row=>row.entry_id===id)
+  // ID-based corrections inherit the stored slot and must obey the same name boundary.
+  if(args.action==='set'&&(args.slot==='preferred_name'||old?.content.memory_slot==='preferred_name'))preferredNameTextSchema.parse(args.text)
   if((old?.revision??0)!==(versions[id]??0)||Number(old?.content.explicit_source_seq??0)>Number(snapshot.seq))throw Error('STORE_STALE_REVISION')
   if(args.id&&(!old||!['fact','preference'].includes(old.kind))||args.action==='forget'&&!old)throw Error('STORE_NOT_FOUND')
   if(old&&old.op!=='tombstone'&&!authorized().some(row=>row.entry_id===id)){

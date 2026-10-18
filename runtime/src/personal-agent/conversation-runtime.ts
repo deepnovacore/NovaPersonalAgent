@@ -210,7 +210,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   })
   const syncIdentityContext=createIdentityContextSync({identity:()=>options.host.identity(),epoch:()=>graph.service.session.sessionEpoch,
    inject:(content,signal)=>provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content},{confirmationTimeout:null,asUserActivation:false,signal})})
-  const syncIdentity=(signal:AbortSignal)=>execution?Promise.resolve():syncIdentityContext(signal)
+  const syncIdentity=async(signal:AbortSignal)=>{if(execution)return;await options.host.synchronizePreferredName();signal.throwIfAborted();await syncIdentityContext(signal)}
   try{await graph.start();await syncIdentity(AbortSignal.timeout(10000));if(conversation.prepared&&await (conversation.subject_key?.startsWith('scheduled-result:')?options.host.scheduledResultAuthorized(conversation.subject_key.slice(17),memoryConsumerFingerprint??null):maySendPreparedMemory(options.memory(),memoryConsumerFingerprint,conversation.prepared.evidence_refs)))await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({trust:'untrusted_external',purpose:'read_only_topic_background',text:conversation.prepared.text.slice(0,2000),evidence_refs:conversation.prepared.evidence_refs.slice(0,2)})},{confirmationTimeout:null,asUserActivation:false,signal:AbortSignal.timeout(10000)})}catch(error){unsubscribeTarget?.();unsubscribePresentation();unsubscribeProgress();unsubscribeApproval?.();await graph.stop();await core.stop();throw error}
   const detachForeground=()=>{if(ownsTask()){graph.service.detachTaskConversation();voiceEnabled=false;void graph.service.playbackDisconnected({resumeDelivery:false})}}
   lifetime.addEventListener('abort',detachForeground,{once:true})
@@ -292,6 +292,9 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     const deadline=createTurnDeadline({clock:core.runtime.clock,parent:callerSignal,isWaiting:()=>(approval?.pending===true||projectConfirmation?.pending===true),subscribe:listener=>{waitingListeners.add(listener);return()=>waitingListeners.delete(listener)}})
     const signal=deadline.signal;signal.throwIfAborted();if(context?.source_todo){sourceTodo={...context.source_todo};sourceTodoTurns=SOURCE_TODO_TURNS}else if(context?.references?.length){sourceTodo=undefined;sourceTodoTurns=0}else if(sourceTodoTurns>1)sourceTodoTurns--;else sourceTodo=undefined;if(sourceTodo&&!sourceTodoCurrent())sourceTodo=undefined;sourceOrigin=undefined;assistant='';assistantTurnId=undefined
     const done=new Promise<{assistant:string;turn_id?:string}>((resolve,reject)=>{pending={resolve,reject}}),current=pending
+    // Cancellation can reject while identity/context preparation is still awaiting.
+    // Observe immediately; Promise.all below still propagates the original rejection.
+    void done.catch(()=>{ /* the original promise still owns the turn outcome */ })
     const abort=()=>{
      pending?.reject(signal.reason??Error('conversation_cleared'));pending=undefined
      if(ownsTask()){

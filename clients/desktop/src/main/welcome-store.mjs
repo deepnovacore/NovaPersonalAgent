@@ -7,7 +7,7 @@ export function validateWelcomePatch(patch){
  const result={}
  for(const [key,value]of Object.entries(patch)){
   if(['assistantName','userName'].includes(key)){
-   if(typeof value!=='string'||value.trim().length>40||/[\p{Cc}\p{Cf}]/u.test(value))throw Error('invalid_name')
+   if(typeof value!=='string'||value.trim().length>(key==='userName'?64:40)||/[\p{Cc}\p{Cf}]/u.test(value))throw Error('invalid_name')
    result[key]=value.trim()||(key==='assistantName'?'nova':'')
   }else if(key==='avatar'){
    if(value!==null&&(typeof value!=='string'||value.length>1_500_000||!/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)))throw Error('invalid_avatar')

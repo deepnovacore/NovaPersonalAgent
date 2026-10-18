@@ -137,6 +137,7 @@ export class RealtimeRuntimeBridge {
   readonly #queryDigestKey: Buffer
   #latestUserOriginRef: string | null = null
   readonly #explicitMemory:(()=>PersonalMemoryResource|undefined)|undefined
+  readonly #onExplicitMemoryCommitted:(()=>Promise<void>)|undefined
   readonly #explicitSession=randomUUID()
   readonly #explicitTurns=new Map<string,{resource:PersonalMemoryResource;turn:Promise<ExplicitMemoryTurn|null>}>()
 
@@ -146,6 +147,7 @@ export class RealtimeRuntimeBridge {
     readonly conversationConsumer?:string
     readonly personalMemory?: PersonalMemoryRecallPort
     readonly explicitMemory?:()=>PersonalMemoryResource|undefined
+    readonly onExplicitMemoryCommitted?:()=>Promise<void>
     readonly tools: CompiledTools
     readonly idFactory: () => string
     /** Test seam only. Production leaves it unset so the key is random. */
@@ -154,6 +156,7 @@ export class RealtimeRuntimeBridge {
     this.#runtime = options.runtime
     this.#personalMemory = options.personalMemory
     this.#explicitMemory=options.explicitMemory
+    this.#onExplicitMemoryCommitted=options.onExplicitMemoryCommitted
     this.#retrieval=options.retrieval
     this.#conversationConsumer=options.conversationConsumer??''
     this.#tools = options.tools
@@ -319,6 +322,7 @@ export class RealtimeRuntimeBridge {
       if(!turn.text.includes(args.data.quote))return this.#refused(call,'invalid_source_quote')
       if(!currentUserTurn(options.userTurn)||origin!==this.#latestUserOriginRef)return this.#refused(call,'superseded')
       const result=await resource.writeExplicit(turn,call.call_id,args.data,this.#conversationConsumer)
+      if(result.state==='committed')await this.#onExplicitMemoryCommitted?.()
       return this.#inlineToolResult(call,JSON.stringify(result),result.state,{})
     }catch(error){
       const code=error instanceof Error&&'code' in error?String(error.code):error instanceof Error?error.message:''

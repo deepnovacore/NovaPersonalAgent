@@ -360,6 +360,7 @@ export class RealtimeAssembly {
   readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
     readonly personalMemory?: PersonalMemoryResource
     readonly createPersonalMemory?: () => PersonalMemoryResource
+    readonly memoryConsumerFingerprint?:string
     readonly personalMemoryTurnTracker: PersonalMemoryTurnTracker
   }) {
     const lifecycleProjectAdapter = input.sharedPersonal ? undefined : input.projectAdapter
@@ -385,6 +386,7 @@ export class RealtimeAssembly {
       profileParticipantMessages: input.core.personalAgentConfig?.profileParticipantMessages === true,
       path: input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),
       userScope: input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
+      explicitMemoryConsumer:()=>input.memoryConsumerFingerprint,
       pool: input.core.runtime.core.suggestions,
       evidence: ref => { try {const [channel,seq]=parseMemoryRef(ref);const item=input.core.runtime.memory.channels.get(channel)?.items.find(item=>item.seq===seq);if(!item)return null;const work=item.content.work_id??item.content.delegate_id;return {subject_key:typeof work==='string'?'task:'+work:ref,source:{type:typeof work==='string'?'task':'conversation',ref},...(typeof work==='string'?{task_ref:{work_id:work}}:{})}}catch{return null}},
       context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
@@ -981,6 +983,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   }}:{})})
   const bridge = new RealtimeRuntimeBridge({
     explicitMemory:()=>personalMemoryHolder.current,
+    onExplicitMemoryCommitted:async()=>{const host=options.sharedPersonal?.host??assemblyHolder.current?.personalAgent;if(!host)throw Error('personal_store_not_ready');await host.synchronizePreferredName()},
     ...(options.memoryConsumerFingerprint ? {conversationConsumer: options.memoryConsumerFingerprint} : {}),
     runtime: core.runtime,
     retrieval,
@@ -1218,6 +1221,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       },
     }),
     personalMemoryTurnTracker,
+    ...(options.memoryConsumerFingerprint?{memoryConsumerFingerprint:options.memoryConsumerFingerprint}:{}),
     ...(options.sharedPersonal === undefined ? {} : {sharedPersonal:options.sharedPersonal}),
     ...(projectAdapter === undefined ? {} : {projectAdapter}),
     ...(options.onProjectView === undefined ? {} : {onProjectView: options.onProjectView}),
