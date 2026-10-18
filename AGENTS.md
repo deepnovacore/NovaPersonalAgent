@@ -7,3 +7,9 @@
 - Character/IP assets require publication review separately from generic character-system code. New or unreviewed characters and derived media are confidential by default; only explicitly approved public assets may appear in public source, defaults, examples, documentation, screenshots or packages.
 - Do not publish internal character catalogues or identifiers. Removing a card from the UI or deleting a file in the latest commit does not remove it from Git history. Start public changes from public ancestry and audit the exact outgoing commits before pushing.
 - Keep approved public asset versions and review evidence recorded; an approval does not automatically extend to new outfits, animations, references or other derivatives. See `docs/ASSET_PUBLICATION.md` for the release checklist.
+
+# Build isolation
+
+- Place build outputs and compiler caches on the user-selected external disk. Verify it is mounted before building; do not silently fall back to the internal disk.
+- Namespace output directories by canonical worktree path and chat ID. Concurrent chats in the same checkout must not share mutable build outputs.
+- Clean only the current chat's output directory. Avoid build commands that clean shared `runtime/dist` or desktop build directories while other chats are using them.
