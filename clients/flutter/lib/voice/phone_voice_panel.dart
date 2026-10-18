@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../ui/theme.dart';
 import 'phone_voice_session.dart';
@@ -150,6 +151,23 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                     color: Nova.secondary,
                   ),
                 ),
+                if (defaultTargetPlatform == TargetPlatform.android &&
+                    session.active)
+                  IconButton(
+                    tooltip: t('悬浮通话', 'Float call'),
+                    icon: const Icon(Icons.picture_in_picture_alt),
+                    onPressed: () => _action(() async {
+                      final shown = await session.minimizeToFloating();
+                      if (!shown && mounted) {
+                        setState(
+                          () => _actionError = t(
+                            '请允许 Nova 显示在其他应用上层，然后返回点击悬浮通话。',
+                            'Allow Nova to display over other apps, then return and tap Float call.',
+                          ),
+                        );
+                      }
+                    }),
+                  ),
                 const Expanded(
                   child: Text(
                     'Nova',

@@ -6,6 +6,20 @@ import org.junit.Test
 import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class RelayLifecycleTest {
+ @Test fun unusedHeadlessAudioCannotResetCommunicationRouting() {
+  val instrumentation=InstrumentationRegistry.getInstrumentation()
+  instrumentation.runOnMainSync {
+   val manager=instrumentation.targetContext.getSystemService(android.media.AudioManager::class.java)
+   val previous=manager.mode
+   try {
+    manager.mode=android.media.AudioManager.MODE_IN_COMMUNICATION
+    val unrelated=RelayAudio(instrumentation.targetContext,{_,_->},{})
+    unrelated.disconnect()
+    assertEquals(android.media.AudioManager.MODE_IN_COMMUNICATION,manager.mode)
+   } finally {manager.mode=previous}
+  }
+ }
+
  @Test fun playbackOnlyCanStopAndRestartWithoutMicrophone() {
   val instrumentation=InstrumentationRegistry.getInstrumentation()
   instrumentation.runOnMainSync {

@@ -4,6 +4,8 @@ import UIKit
 
 @MainActor public final class NovaAudioPlugin: NSObject, FlutterPlugin {
     private let control: FlutterMethodChannel
+    private let companion: FlutterMethodChannel
+    private var backgroundCall = false
     private let pcm: FlutterBasicMessageChannel
     private let audio = VoiceAudio()
     private var aoq: AOQAudio?
@@ -17,18 +19,23 @@ import UIKit
     private static func registerOnMain(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "nova/audio", binaryMessenger: registrar.messenger())
         let pcm = FlutterBasicMessageChannel(name: "nova/audio/pcm", binaryMessenger: registrar.messenger(), codec: FlutterBinaryCodec.sharedInstance())
-        let instance = NovaAudioPlugin(control: channel, pcm: pcm)
+        let companion = FlutterMethodChannel(name: "nova/voice_companion", binaryMessenger: registrar.messenger())
+        let instance = NovaAudioPlugin(control: channel, pcm: pcm, companion: companion)
+        companion.setMethodCallHandler { [weak instance] call, result in
+            guard let instance else { result(FlutterError(code: "unavailable", message: "Audio engine unavailable", details: nil)); return }
+            MainActor.assumeIsolated { instance.handleCompanion(call, result: result) }
+        }
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
-    private init(control: FlutterMethodChannel, pcm: FlutterBasicMessageChannel) {
-        self.control = control; self.pcm = pcm
+    private init(control: FlutterMethodChannel, pcm: FlutterBasicMessageChannel, companion: FlutterMethodChannel) {
+        self.control = control; self.pcm = pcm; self.companion = companion
         super.init()
         audio.onPCM = { [weak self] data in self?.deliver(data) }
         audio.onLevel = { [weak self] level in self?.event("level", ["level": level]) }
         audio.onControl = { [weak self] value in self?.event("control", ["control": value]) }
         audio.onStopped = { [weak self] reason in self?.fail(reason) }
         observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in guard let self, (self.audio.running || self.aoq != nil) else { return }; self.fail("Application backgrounded") }
+            Task { @MainActor in guard let self, !self.backgroundCall, (self.audio.running || self.aoq != nil) else { return }; self.fail("Application backgrounded") }
         })
     }
     deinit { for observer in observers { NotificationCenter.default.removeObserver(observer) } }
@@ -38,7 +45,23 @@ import UIKit
         control.invokeMethod("event", arguments: value)
     }
     private func fail(_ reason: String) {
+        if backgroundCall { backgroundCall = false; companion.invokeMethod("action", arguments: "end") }
         aoq?.stop(); aoq = nil; audio.disconnect(); handoff.reset(); event("stopped", ["reason": reason]); generation = nil
+    }
+    private func handleCompanion(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        switch call.method {
+        case "start":
+            guard UIApplication.shared.applicationState == .active,
+                  AVAudioApplication.shared.recordPermission == .granted,
+                  (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])?.contains("audio") == true else {
+                result(FlutterError(code: "background_unavailable", message: "Start a call in the foreground with microphone permission", details: nil)); return
+            }
+            backgroundCall = true; result(nil)
+        case "update": result(nil)
+        case "minimize": result(false)
+        case "stop": backgroundCall = false; result(nil)
+        default: result(FlutterMethodNotImplemented)
+        }
     }
     private func deliver(_ data: Data) {
         guard let current = generation else { return }

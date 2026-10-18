@@ -47,4 +47,4 @@ app.*.map.json
 # External output symlink as well as regular build directories.
 /build
 
-/android/.kotlin/
+/android/.kotlin

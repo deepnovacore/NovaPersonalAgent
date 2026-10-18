@@ -10,6 +10,7 @@ import '../protocol/wire.dart';
 import 'voice_provider.dart';
 import 'voice_media.dart';
 import 'voice_delegate.dart';
+import 'voice_companion.dart';
 
 const voiceDelegateTools = <Map<String, dynamic>>[
   {
@@ -72,6 +73,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     required this.requestMicrophone,
     required this.store,
     this.delegates,
+    this.companion,
   }) {
     WidgetsBinding.instance.addObserver(this);
     _audioEvents = audio.events.listen(
@@ -79,7 +81,23 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       onError: (Object _) => _fail('audio_failed'),
     );
     _delegateEvents = delegates?.updates.listen(_onDelegate);
+    _companionEvents = companion?.actions.listen((action) {
+      if (action == 'end') unawaited(stop());
+      if (action == 'mute') {
+        unawaited(toggleMute().catchError((Object _) => _fail('audio_failed')));
+      }
+    });
   }
+  final VoiceCompanion? companion;
+  StreamSubscription<String>? _companionEvents;
+  Future<void>? _startingCompanion;
+  bool _companionAttempted = false, _backgroundReady = false;
+  bool? _publishedMute;
+  Future<bool> minimizeToFloating() async {
+    if (!active || !_backgroundReady) return false;
+    return await companion?.minimize() ?? false;
+  }
+
   final AudioPort audio;
   final Future<bool> Function() requestMicrophone;
   final ConversationStore store;
@@ -215,6 +233,15 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _changed() {
+    if (active && _backgroundReady && _publishedMute != muted) {
+      _publishedMute = muted;
+      final epoch = _epoch;
+      unawaited(
+        companion!.update(muted: muted).catchError((Object _) {
+          if (epoch == _epoch && active) return _fail('call_controls_failed');
+        }),
+      );
+    }
     if (!_disposed) notifyListeners();
   }
 
@@ -260,6 +287,12 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     try {
       if (!await requestMicrophone()) throw StateError('microphone_denied');
       if (epoch != _epoch || _disposed) return;
+      if (companion != null) {
+        _companionAttempted = true;
+        await (_startingCompanion = companion!.start());
+        _startingCompanion = null;
+        if (epoch != _epoch || _disposed) return;
+      }
       _providerEvents = provider.events.listen(
         (event) => _queueEvent(event),
         onError: (Object _) => _fail('provider_failed'),
@@ -322,6 +355,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       if (epoch != _epoch || _disposed) {
         return;
       }
+      _backgroundReady = companion != null;
       connecting = false;
       active = true;
       muted = speaker = false;
@@ -1099,6 +1133,20 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       error ??= 'audio_stop_failed';
     }
     try {
+      await _startingCompanion;
+    } catch (_) {}
+    _startingCompanion = null;
+    _backgroundReady = false;
+    _publishedMute = null;
+    if (_companionAttempted) {
+      _companionAttempted = false;
+      try {
+        await companion?.stop();
+      } catch (_) {
+        error ??= 'call_stop_failed';
+      }
+    }
+    try {
       await provider?.close().timeout(const Duration(seconds: 3));
     } catch (_) {}
     _currentResponse = null;
@@ -1113,7 +1161,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
+    if ((state == AppLifecycleState.paused && !_backgroundReady) ||
         state == AppLifecycleState.detached) {
       error = 'call_paused_by_system';
       unawaited(stop());
@@ -1129,6 +1177,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     unawaited(stop());
     unawaited(_audioEvents.cancel());
     unawaited(_delegateEvents?.cancel());
+    unawaited(_companionEvents?.cancel());
     super.dispose();
   }
 }
