@@ -156,11 +156,10 @@ export class SourceProcessingAgent{
    const identities=(await this.operation({action:'identities',...owner,refs:processingRefs}) as {items:ProductGenerationContext['identities']}).items
    const previousProducts=await this.operation({action:'products',include_dismissed:true}) as UnderstandingSnapshot
    const products=!batch?.profile_only&&memory?.sourceProcessingProducts?await memory.sourceProcessingProducts(entries,{projects,identities:identities??[],previous:previousProducts,corrections:this.#products.corrections,timezone:this.host.snapshot().settings.timezone??'UTC',todos:todoContext?.todos??[]},signal,authorizeWithProjects,modelCall):undefined
-   const annotated=entries.map(entry=>{const project=products?.projects.find(p=>p.refs.some(ref=>ref.entry_id===entry.id));return project?{...entry,content:`项目判断（不是用户自述）：${project.name}；参与=${project.relation}；状态=${project.status}；资料时间=${project.as_of??'未知'}。参考或历史项目不可写成当前工作。\n原文：${entry.content}`} : entry})
-   let profileEntries=annotated,observations:ProfileObservation[]|undefined,profileContextKey:string|undefined,profileRefs=processingRefs,deferProfile=false,unchangedProfile=false
+   let profileEntries=entries,observations:ProfileObservation[]|undefined,profileContextKey:string|undefined,profileRefs=processingRefs,deferProfile=false,unchangedProfile=false
    if(memory?.sourceProcessingObserve){
     if(!batch?.profile_only){
-    const observed=await memory.sourceProcessingObserve(annotated,signal,authorizeWithProjects,modelCall)
+    const observed=await memory.sourceProcessingObserve(entries,signal,authorizeWithProjects,modelCall)
     const indexed:ProcessingObservation[]=observed.map(item=>({...item,refs:[...new Map(item.refs.flatMap(ref=>processingRefs.filter(original=>original.evidence_id===ref.entry_id)).map(ref=>[canonicalJson(ref),ref])).values()]}))
     await authorizeWithProjects()
     await this.operation({action:'observe',...owner,refs:processingRefs,observations:indexed})
@@ -170,8 +169,6 @@ export class SourceProcessingAgent{
     profileEntries=[...grouped.values()];profileRefs=[...new Map([...processingRefs,...context.refs].map(ref=>[canonicalJson(ref),ref])).values()];profileContextKey=context.key;deferProfile=!context.ready;unchangedProfile=context.unchanged
     // Rehydrate current original slices; cached observations are never used as factual text.
     observations=context.observations.map(item=>({...item,refs:item.refs.map(ref=>({entry_id:ref.evidence_id,version:context.items.find(original=>original.evidence_id===ref.evidence_id)!.version}))}))
-    const knownProjects=[...(products?.projects??[]),...previousProducts.projects]
-    profileEntries=profileEntries.map(entry=>{const project=knownProjects.find(project=>project.refs.some(ref=>ref.entry_id===entry.id));return project?{...entry,content:`项目判断（不是用户自述）：${project.name}；参与=${project.relation}；状态=${project.status}；资料时间=${project.as_of??'未知'}。参考或历史项目不可写成当前工作。\n原文：${entry.content}`}:entry})
    }
    const draft=deferProfile||unchangedProfile?(previous.draft??{about:null,work:[],interests:[]}):await generate(profileEntries,signal,authorizeWithProjects,modelCall,observations)
 
