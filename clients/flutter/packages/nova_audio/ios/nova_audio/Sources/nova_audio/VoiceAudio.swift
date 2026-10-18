@@ -31,6 +31,7 @@ private final class CaptureGate: @unchecked Sendable {
     private var captureID = UUID()
     private var tapping = false
     private var completedSamples = 0
+    private var lastProgressMS = 0
     private var scheduledEnd: AVAudioFramePosition = 0
     private var segments: [(id: UUID, start: Int64, count: Int)] = []
     private var started = false
@@ -250,6 +251,10 @@ private final class CaptureGate: @unchecked Sendable {
         if !started && ledger.renderedSamples > 0 {
             started = true; report("playback.started", identity)
         }
+        if ledger.playedMS - lastProgressMS >= 100 {
+            lastProgressMS = ledger.playedMS
+            report("playback.progress", identity, played: ledger.playedMS)
+        }
         // A terminal is complete only once all scheduled buffers have actually played back.
         if ledger.finished && segments.isEmpty {
             report("playback.done", identity, played: ledger.playedMS)
@@ -268,7 +273,7 @@ private final class CaptureGate: @unchecked Sendable {
         report(type, identity, played: played)
     }
     private func resetPlayer() {
-        player.stop(); segments.removeAll(); completedSamples = 0; scheduledEnd = 0; started = false
+        player.stop(); segments.removeAll(); completedSamples = 0; scheduledEnd = 0; started = false; lastProgressMS = 0
     }
     private func report(_ type: String, _ identity: PlaybackIdentity, played: Int? = nil) {
         var value = identity.fields

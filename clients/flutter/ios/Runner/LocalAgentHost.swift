@@ -2,8 +2,7 @@ import Flutter
 import Foundation
 import UIKit
 
-/// Main-actor single writer. iOS runs while Nova is foreground; backgrounding
-/// cancels the model and invalidates approvals rather than promising a daemon.
+/// Main-actor single writer. User-started work shares the chat background lease.
 @available(iOS 15.0, *)
 @MainActor final class LocalAgentHost {
   private let channel: FlutterMethodChannel
@@ -17,12 +16,15 @@ import UIKit
   private var approval: CheckedContinuation<Bool, Never>?
   private var approvalID: String?
   private var backgroundObserver: NSObjectProtocol?
+  private var expiryObserver: NSObjectProtocol?
+  private var cachedConfiguration: NativeModelConfiguration?
   init(messenger: FlutterBinaryMessenger) throws {
     let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     var folder = root.appendingPathComponent("NativeTasks", isDirectory: true)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     var attributes = URLResourceValues(); attributes.isExcludedFromBackup = true
     try folder.setResourceValues(attributes)
+    cachedConfiguration = try? settings.read()
     journal = try LocalTaskJournal(file: folder.appendingPathComponent("tasks-v1.json"))
     channel = FlutterMethodChannel(name: "nova/local_agent/v1", binaryMessenger: messenger)
     lifeChannel = FlutterMethodChannel(name: "nova/local_life/v1", binaryMessenger: messenger)
@@ -40,22 +42,55 @@ import UIKit
     }
     backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
       Task { @MainActor in
-        guard let self = self, let id = self.active else { return }
+        guard let self = self, let id = self.active, !NovaBackgroundExecution.hasExecutionTime() else { return }
         try? self.stop(id, phase: "interrupted", summary: "Nova 已进入后台，任务暂停；请核对结果后重新委托。")
       }
     }
+    expiryObserver = NotificationCenter.default.addObserver(forName: NSNotification.Name("NovaAgentExecutionExpired"), object: nil, queue: .main) { [weak self] _ in
+      Task { @MainActor in
+        guard let self = self, let id = self.active else { return }
+        try? self.stop(id, phase: "interrupted", summary: "iOS 已结束后台执行；已保存结果，未完成的操作不会自动重试。")
+      }
+    }
   }
-  deinit { if let observer = backgroundObserver { NotificationCenter.default.removeObserver(observer) } }
+  deinit {
+    if let observer = backgroundObserver { NotificationCenter.default.removeObserver(observer) }
+    if let observer = expiryObserver { NotificationCenter.default.removeObserver(observer) }
+  }
   private func command(_ method: String, _ input: [String: Any]) async throws -> Any {
     switch method {
     case "capabilities": return ["platform": "ios", "model_runtime": true, "model_configured": try settings.read() != nil,
-      "native_tools": ["nova", "calendar", "reminders"], "foreground_only": true]
+      "native_tools": ["nova", "calendar", "reminders"], "foreground_only": false, "background_execution": "system_managed"]
     case "apps": return [["package": "nova", "label": "Nova 待办与目标"], ["package": "calendar", "label": "系统日历"], ["package": "reminders", "label": "系统提醒事项"]]
+    case "preparePermissions":
+      guard UIApplication.shared.applicationState != .background else { return ["deferred": true] }
+      let key = "nova.native-permissions-prompted.v1"
+      var statuses: [String:String] = [:]
+      if !UserDefaults.standard.bool(forKey:key) {
+        UserDefaults.standard.set(true,forKey:key)
+        for scope in ["calendar","reminders"] {
+          do { try await tools.permission(scope); statuses[scope]="available" }
+          catch { statuses[scope]=(error as? LocalAgentError)?.code ?? "unavailable" }
+        }
+      }
+      return statuses
+
+    case "query":
+      guard let scope = input["scope"] as? String, ["calendar", "reminders"].contains(scope) else { throw LocalAgentError("invalid_native_scope") }
+      do {
+        try await tools.permission(scope, requestIfNeeded: false)
+        return try await tools.observe(scope, input: input)
+      } catch {
+        return ["scope": scope, "available": false, "error": (error as? LocalAgentError)?.code ?? "native_query_failed"]
+      }
     case "tasks": return journal.tasks
     case "modelSettings": return try settings.status()
+    case "clearChatGptSettings":
+      if let id = active { try stop(id, phase:"cancelled", summary:"ChatGPT account changed; verify any dispatched action.") }
+      try settings.clearChatGpt(); cachedConfiguration = try settings.read(); return try settings.status()
     case "saveModelSettings":
       guard active == nil else { throw LocalAgentError("stop_task_before_changing_model") }
-      try settings.save(input); return try settings.status()
+      try settings.save(input); cachedConfiguration = try settings.read(); return try settings.status()
     case "run": return try start(input)
     case "stop":
       let id = input["id"] as? String ?? ""
@@ -81,14 +116,17 @@ import UIKit
   }
   private func start(_ input: [String: Any]) throws -> [String: Any] {
     if let id = input["id"] as? String, journal.task(id) != nil { return try journal.start(input) }
-    guard active == nil, UIApplication.shared.applicationState != .background else { throw LocalAgentError("foreground_required") }
-    guard let config = try settings.read() else { throw LocalAgentError("model_settings_required") }
+    guard active == nil, UIApplication.shared.applicationState != .background || NovaBackgroundExecution.hasExecutionTime() else { throw LocalAgentError("foreground_required") }
+    let configuration = try cachedConfiguration ?? settings.read()
+    guard let config = configuration else { throw LocalAgentError("model_settings_required") }
     let task = try journal.start(input), id = task["id"] as! String, scope = task["target_package"] as! String
+    let chat = task["interaction_mode"] as? String == "chat"
+    _ = NovaBackgroundExecution.beginLease("native-" + id)
     active = id; let client = LocalNativeModel(config); model = client
     worker = Task { [weak self] in
       guard let self = self else { return }
       do {
-        if scope != "nova" { try await tools.permission(scope) }
+        if scope != "nova" { try await tools.permission(scope, requestIfNeeded: !chat) }
         try check(id)
         for _ in 0..<30 {
           let observation = try await observe(scope)
@@ -100,23 +138,31 @@ import UIKit
           case "complete":
             let evidence = try await observe(scope); try check(id)
             try journal.edit(id) { $0["evidence"] = evidence }
-            try journal.end(id, phase: "verifying", summary: summary); end(id); return
+            if chat { try journal.edit(id) { $0["completed_by"] = "agent" } }
+            try journal.end(id, phase: chat ? "completed" : "verifying", summary: summary); end(id); return
           case "wait": try stop(id, phase: "interrupted", summary: summary); return
           default:
             let action = decision["action"] as! [String: Any]
             try await validate(action, scope: scope); try check(id)
-            let proposal = try journal.propose(id, action: action, summary: summary, now: Date().timeIntervalSince1970)
-            let allow = await waitApproval(id, proposal: proposal)
-            try check(id)
-            guard allow else { try stop(id, phase: "interrupted", summary: "操作未获批准。请调整任务后重新委托。"); return }
-            try await validate(action, scope: scope); try check(id)
-            let operation = try journal.consume(id, proposal: proposal, now: Date().timeIntervalSince1970)
+            let operation: String
+            if chat {
+              try check(id)
+              operation = try journal.chatIntent(id, action: action, summary: summary)
+            } else {
+              let proposal = try journal.propose(id, action: action, summary: summary, now: Date().timeIntervalSince1970)
+              let allow = await waitApproval(id, proposal: proposal)
+              try check(id)
+              guard allow else { try stop(id, phase: "interrupted", summary: "操作未获批准。请调整任务后重新委托。"); return }
+              try await validate(action, scope: scope); try check(id)
+              operation = try journal.consume(id, proposal: proposal, now: Date().timeIntervalSince1970)
+            }
             // No suspension between final authority check and EventKit dispatch.
             let result: [String: Any]
             if scope == "nova" {
               result = try await life("mutate", ["input": action["input"]!, "operation_id": operation])
             } else { result = try tools.execute(action, scope: scope) }
             try journal.receipt(id, operation: operation, result: result)
+            NovaBackgroundExecution.progressLease("native-" + id, units: Int64((journal.task(id)?["operations"] as? [Any])?.count ?? 0), phase: "device_run_task")
             try check(id)
           }
         }
@@ -137,10 +183,11 @@ import UIKit
   }
   private func check(_ id: String) throws {
     try Task.checkCancellation()
-    guard active == id, UIApplication.shared.applicationState != .background else { throw LocalAgentError("task_stopped") }
+    guard active == id, UIApplication.shared.applicationState != .background || NovaBackgroundExecution.hasExecutionTime() else { throw LocalAgentError("task_stopped") }
   }
   private func end(_ id: String) {
     guard active == id else { return }
+    NovaBackgroundExecution.endLease("native-" + id, success: journal.task(id)?["phase"] as? String == "completed")
     active = nil; worker?.cancel(); worker = nil; model?.cancel(); model = nil
     approval?.resume(returning: false); approval = nil; approvalID = nil
   }

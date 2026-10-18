@@ -164,7 +164,7 @@ void main() {
         clientFactory: () => model,
       );
       addTearDown(host.dispose);
-      final id = await store.create(computerConnected: false);
+      final id = await store.create();
       await host.send(
         id,
         'Read this webpage',
@@ -189,7 +189,7 @@ void main() {
       final persistence = MemoryPersistence();
       final store = ConversationStore(persistence);
       await store.open();
-      final id = await store.create(computerConnected: false);
+      final id = await store.create();
       final settings = ModelSettings(native: FakeNative());
       await settings.save(
         endpoint: 'https://example.com/v1',
@@ -208,16 +208,19 @@ void main() {
             body: LocalChatPanel(
               host: host,
               conversationId: id,
-              computerConnected: false,
+
             ),
           ),
         ),
       );
       await tester.enterText(find.byType(TextField), 'hello');
+      await tester.pump();
       await tester.tap(find.byTooltip('发送'));
       await tester.pumpAndSettle();
-      expect(find.text('Hello there'), findsOneWidget);
-      await tester.tap(find.byTooltip('本机模型设置'));
+      expect(find.text('Hello there', findRichText: true), findsOneWidget);
+      await tester.tap(find.byTooltip('对话方式'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('模型设置'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();

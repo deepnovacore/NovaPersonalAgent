@@ -36,7 +36,7 @@ final class LocalTaskJournal {
     try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
     let data = try JSONSerialization.data(withJSONObject: next, options: [.sortedKeys])
     #if os(iOS)
-    try data.write(to: file, options: [.atomic, .completeFileProtection])
+    try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     #else
     try data.write(to: file, options: .atomic)
     #endif
@@ -52,7 +52,10 @@ final class LocalTaskJournal {
           let goal = input["goal"] as? String, !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, goal.count <= 4000,
           let acceptance = input["acceptance"] as? String, !acceptance.isEmpty, acceptance.count <= 2000,
           let target = input["target_package"] as? String, ["nova", "calendar", "reminders"].contains(target) else { throw LocalAgentError("invalid_task") }
+    let mode = input["interaction_mode"] as? String ?? "manual"
+    guard ["manual", "chat"].contains(mode) else { throw LocalAgentError("invalid_interaction_mode") }
     if let previous = task(id) {
+      guard (previous["interaction_mode"] as? String ?? "manual") == mode else { throw LocalAgentError("task_id_conflict") }
       let priorRef = try JSONSerialization.data(withJSONObject: previous["todo_ref"] ?? [:], options: .sortedKeys)
       let nextRef = try JSONSerialization.data(withJSONObject: input["todo_ref"] ?? [:], options: .sortedKeys)
       guard priorRef == nextRef else { throw LocalAgentError("task_id_conflict") }
@@ -63,7 +66,7 @@ final class LocalTaskJournal {
     guard !records.contains(where: { ["running", "waiting_approval"].contains($0["phase"] as? String ?? "") }) else { throw LocalAgentError("another_task_is_active") }
     guard records.count < 1000 else { throw LocalAgentError("task_store_capacity") }
     var record: [String: Any] = ["id": id, "goal": goal, "acceptance": acceptance, "target_package": target,
-      "phase": "running", "created_at": Date().timeIntervalSince1970 * 1000, "operations": [[String: Any]]()]
+      "interaction_mode": mode, "phase": "running", "created_at": Date().timeIntervalSince1970 * 1000, "operations": [[String: Any]]()]
     if let todo = input["todo_ref"] {
       guard let ref = todo as? [String: Any], Set(ref.keys) == ["id", "version"], let id = ref["id"] as? String, !id.isEmpty, id.count <= 200,
         let version = ref["version"] as? Int, version > 0 else { throw LocalAgentError("invalid_todo_reference") }
@@ -88,6 +91,16 @@ final class LocalTaskJournal {
       var operations = task["operations"] as? [[String: Any]] ?? []
       operations.append(["id": operation, "action": pending["action"]!, "state": "intent"])
       task["operations"] = operations; task["phase"] = "running"; task.removeValue(forKey: "proposal")
+    }
+    return operation
+  }
+  func chatIntent(_ id: String, action: [String: Any], summary: String) throws -> String {
+    let operation = UUID().uuidString
+    try edit(id) { task in
+      guard task["phase"] as? String == "running", task["interaction_mode"] as? String == "chat" else { throw LocalAgentError("chat_task_not_running") }
+      var operations = task["operations"] as? [[String: Any]] ?? []
+      operations.append(["id": operation, "action": action, "state": "intent"])
+      task["operations"] = operations; task["summary"] = summary
     }
     return operation
   }

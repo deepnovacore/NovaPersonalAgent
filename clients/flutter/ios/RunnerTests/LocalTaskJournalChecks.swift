@@ -30,6 +30,20 @@ import Foundation
     // A late result is evidence, never permission to restart a stopped task.
     try journal.receipt("t", operation: operation, result: ["id": "fixture"])
     assert(journal.task("t")!["phase"] as? String == "interrupted")
+    var invalidMode = task; invalidMode["id"] = "bad-mode"; invalidMode["interaction_mode"] = "unknown"
+    do { _ = try journal.start(invalidMode); fatalError("invalid interaction mode accepted") } catch {}
+    var changedMode = task; changedMode["interaction_mode"] = "chat"
+    do { _ = try journal.start(changedMode); fatalError("existing task mode upgraded") } catch {}
+    let automatic: [String: Any] = ["id": "chat-one", "goal": "fixture", "acceptance": "one item", "target_package": "nova", "interaction_mode": "chat"]
+    _ = try journal.start(automatic)
+    let autoOp = try journal.chatIntent("chat-one", action: ["tool":"nova", "input":["op":"create"]], summary: "creating")
+    assert(journal.task("chat-one")!["phase"] as? String == "running")
+    assert(journal.task("chat-one")!["proposal"] == nil)
+    journal = try LocalTaskJournal(file: file)
+    assert((journal.task("chat-one")!["operations"] as! [[String:Any]]).first?["state"] as? String == "unknown")
+    do { _ = try journal.chatIntent("chat-one", action: [:], summary: "retry"); fatalError("interrupted task dispatched") } catch {}
+    try journal.receipt("chat-one", operation: autoOp, result: ["id":"fixture"])
+    assert(journal.task("chat-one")!["phase"] as? String == "interrupted")
     print("LocalTaskJournal: restart, conflict, approval, expiry, stop and late-receipt checks passed")
   }
 }

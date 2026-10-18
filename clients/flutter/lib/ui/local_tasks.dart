@@ -1,3 +1,5 @@
+import '../conversation/local_chat_panel.dart';
+import '../agent_core/model_settings.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'local_dialog.dart';
@@ -298,79 +300,13 @@ class _LocalTasksPageState extends State<LocalTasksPage>
 
   Future<void> _settings() async {
     try {
-      final settings = await widget.agent.call('modelSettings') as Map;
-      if (!mounted) return;
-      final endpoint = TextEditingController(
-        text: settings['endpoint'] as String? ?? '',
+      await showLocalModelSettings(
+        context,
+        ModelSettings(native: widget.agent),
       );
-      final model = TextEditingController(
-        text: settings['model'] as String? ?? '',
-      );
-      final key = TextEditingController();
-      try {
-        final accepted = await showLocalDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('本机模型服务'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    '任务目标及你选择的数据会发送到此服务。Android GUI 任务还会发送界面和截图。密钥仅保存在这台设备，不通过 Hub 同步。',
-                  ),
-                  TextField(
-                    controller: endpoint,
-                    decoration: const InputDecoration(
-                      labelText: 'HTTPS Chat Completions 地址',
-                    ),
-                    autocorrect: false,
-                  ),
-                  TextField(
-                    controller: model,
-                    decoration: const InputDecoration(labelText: '模型'),
-                    autocorrect: false,
-                  ),
-                  TextField(
-                    controller: key,
-                    obscureText: true,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    decoration: InputDecoration(
-                      labelText: settings['configured'] == true
-                          ? '密钥（留空保持现有密钥）'
-                          : 'API Key',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('保存'),
-              ),
-            ],
-          ),
-        );
-        if (accepted == true) {
-          await _command('saveModelSettings', {
-            'endpoint': endpoint.text.trim(),
-            'model': model.text.trim(),
-            'key': key.text,
-          });
-        }
-      } finally {
-        endpoint.dispose();
-        model.dispose();
-        key.dispose();
-      }
-    } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      await _refresh();
+    } catch (_) {
+      if (mounted) setState(() => error = '无法读取模型设置');
     }
   }
 

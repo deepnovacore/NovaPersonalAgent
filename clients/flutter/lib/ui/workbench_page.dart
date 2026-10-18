@@ -56,8 +56,10 @@ class WorkbenchPage extends StatefulWidget {
     this.onDelegate,
     this.showHeading = true,
     this.language = 'en',
+    this.localProfile,
   });
   final PersonalStore store;
+  final Widget Function(bool excludeAbout)? localProfile;
 
   /// 0 reminders, 1 feeds, 2 todos, 3 ideas, 4 goals, 5 profile.
   final int page;
@@ -903,24 +905,30 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     return [
       NovaSection(
         header: t('About me'),
-        footer: t(
-          confirmed.isNotEmpty
-              ? 'Written by you'
-              : version > 0
-              ? 'You cleared your introduction. Write a new one any time.'
-              : suggested.isNotEmpty || work.isNotEmpty
-              ? 'Drafted by Nova from your recent work. Edit any time.'
-              : 'Nova will draft one after reading your sources, or write your own.',
-        ),
+        footer:
+            widget.localProfile != null &&
+                version == 0 &&
+                confirmed.isEmpty &&
+                suggested.isEmpty
+            ? '可在这里补充自己的介绍；飞书整理的画像显示在下方。'
+            : t(
+                confirmed.isNotEmpty
+                    ? 'Written by you'
+                    : version > 0
+                    ? 'You cleared your introduction. Write a new one any time.'
+                    : suggested.isNotEmpty || work.isNotEmpty
+                    ? 'Drafted by Nova from your recent work. Edit any time.'
+                    : 'Nova will draft one after reading your sources, or write your own.',
+              ),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
           minimumSize: const Size(0, 22),
-          onPressed: store.connected ? editAbout : null,
+          onPressed: store.available ? editAbout : null,
           child: Text(
             t(about.isEmpty ? 'Write' : 'Edit'),
             style: TextStyle(
               fontSize: 15,
-              color: store.connected ? Nova.mint : Nova.tertiary,
+              color: store.available ? Nova.mint : Nova.tertiary,
             ),
           ),
         ),
@@ -939,6 +947,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           ),
         ],
       ),
+      if (widget.localProfile != null)
+        widget.localProfile!(version > 0 || confirmed.isNotEmpty),
       if (work.isNotEmpty)
         NovaSection(
           header: t('Recently working on'),
@@ -1006,24 +1016,6 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                     )
                   : null,
             ),
-        ],
-      ),
-      NovaSection(
-        header: t('Device & connection'),
-        children: [
-          NovaTile(
-            title: t(store.connected ? 'Mac connected' : 'Offline'),
-            leading: Icon(
-              store.connected
-                  ? CupertinoIcons.desktopcomputer
-                  : CupertinoIcons.wifi_slash,
-              size: 22,
-              color: store.connected ? Nova.mint : Nova.tertiary,
-            ),
-            subtitle: Text(t('Tailscale · one phone at a time')),
-            trailing: const CupertinoListTileChevron(),
-            onTap: widget.onSettings,
-          ),
         ],
       ),
     ];

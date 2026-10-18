@@ -2,12 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array><string>com.nova.mobile.schedule.refresh</string></array>
+	<key>UIBackgroundModes</key>
+	<array><string>fetch</string></array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Nova reads calendar details for your selected task and changes events only after you approve each action.</string>
+	<string>Nova reads and updates your calendar for requests you make in the conversation.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Nova reads and changes calendar events for tasks you explicitly approve.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Nova reads reminders for your selected task and changes them only after you approve each action.</string>
+	<string>Nova reads and updates your reminders for requests you make in the conversation.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Nova reads and changes reminders for tasks you explicitly approve.</string>
 	<key>NSMicrophoneUsageDescription</key>

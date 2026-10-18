@@ -20,9 +20,8 @@ void main() {
     final persistence = MemoryPersistence();
     final store = ConversationStore(persistence);
     await store.open();
-    final id = await store.create(computerConnected: true);
-    expect(store.conversation(id)['backend'], 'computer');
-    await store.selectBackend(id, 'local');
+    final id = await store.create();
+    expect(store.conversation(id)['backend'], 'local');
     await Future.wait([
       store.append(id, {'role': 'user', 'content': 'hello'}),
       store.append(id, {
@@ -44,14 +43,14 @@ void main() {
       ..value = '{"schema_version":99,"conversations":[]}';
     final store = ConversationStore(persistence);
     await expectLater(store.open(), throwsFormatException);
-    await expectLater(store.create(computerConnected: false), throwsStateError);
+    await expectLater(store.create(), throwsStateError);
     expect(persistence.value, '{"schema_version":99,"conversations":[]}');
   });
   test('restart closes interrupted tool exchange without replay', () async {
     final persistence = MemoryPersistence();
     final store = ConversationStore(persistence);
     await store.open();
-    final id = await store.create(computerConnected: false);
+    final id = await store.create();
     await store.append(id, {
       'role': 'assistant',
       'content': '',

@@ -1,3 +1,5 @@
+import 'package:nova_mobile/agent_core/model_settings.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent/local_agent.dart';
@@ -6,7 +8,7 @@ import 'package:nova_mobile/ui/local_tasks.dart';
 class TestAgent implements LocalAgent {
   String phase = 'verifying';
   int verifications = 0, runs = 0;
-  Map<String, dynamic>? lastRun;
+  Map<String, dynamic>? lastRun, savedModel;
   String platform = 'android';
   String target = 'com.nova.nova_mobile';
   @override
@@ -15,6 +17,9 @@ class TestAgent implements LocalAgent {
     Map<String, dynamic> input = const {},
   ]) async {
     switch (method) {
+      case 'saveModelSettings':
+        savedModel = Map<String, dynamic>.from(input);
+        return {};
       case 'capabilities':
         return {
           'platform': platform,
@@ -65,6 +70,7 @@ class TestAgent implements LocalAgent {
 }
 
 void main() {
+  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
   testWidgets('self GUI approval does not change the observed task card', (
     tester,
   ) async {
@@ -112,6 +118,31 @@ void main() {
     expect(find.text('本机任务'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets('task model form shares its configuration with chat', (
+    tester,
+  ) async {
+    final agent = TestAgent();
+    await tester.pumpWidget(MaterialApp(home: LocalTasksPage(agent: agent)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('模型设置'));
+    await tester.pumpAndSettle();
+    final fields = find.byType(TextField);
+    await tester.enterText(
+      fields.at(0),
+      'https://example.com/v1/chat/completions',
+    );
+    await tester.enterText(fields.at(1), 'test-model');
+    await tester.enterText(fields.at(2), 'test-only-key');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    final shared = await ModelSettings(native: agent).read();
+    expect(shared!.model, 'test-model');
+    expect(shared.key, 'test-only-key');
+    expect(agent.savedModel!['model'], shared.model);
+    expect(agent.savedModel!['key'], shared.key);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('cancelled local task request does not dispatch run', (
     tester,
   ) async {
@@ -148,6 +179,7 @@ void main() {
     expect(agent.runs, 1);
     expect(agent.lastRun!['id'], isNotEmpty);
     expect(agent.lastRun!['goal'], 'Open the fixture');
+    expect(agent.lastRun!.containsKey('todo_ref'), isFalse);
     await tester.pumpWidget(const SizedBox());
   });
 

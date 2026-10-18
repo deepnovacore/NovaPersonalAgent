@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'authority_controls.dart';
 import '../personal/life_host.dart';
 import '../personal/local_life.dart';
 import '../agent/hub_tasks.dart';
@@ -200,6 +201,7 @@ class _LifeControlsState extends State<LifeControls> {
     listenable: widget.host,
     builder: (context, _) => Column(
       children: [
+        AuthorityControls(host: widget.host),
         Row(
           children: [
             Expanded(

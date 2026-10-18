@@ -361,7 +361,7 @@ Future<String?> showNovaActions(
   context: context,
   builder: (context) => CupertinoTheme(
     data: const CupertinoThemeData(
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       primaryColor: Nova.mint,
     ),
     child: CupertinoActionSheet(

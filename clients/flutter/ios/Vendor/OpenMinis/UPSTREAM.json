@@ -1,0 +1,37 @@
+{
+  "repository": "https://github.com/OpenMinis/OpenMinis",
+  "revision": "b4c0661d5631ebab4d1a2e6f3fd4c805d4030a6c",
+  "license": "GPL-3.0",
+  "files": {
+    "ISHKernel.h": {
+      "upstream_path": "src/ios/iSH/ISHKernel.h",
+      "upstream_sha256": "b263c648c400992bbf20086040d2efa60f3c1642003b026223c2dc8c63db449f",
+      "modified_for_nova": false
+    },
+    "ISHKernel.m": {
+      "upstream_path": "src/ios/iSH/ISHKernel.m",
+      "upstream_sha256": "0c42b60ef89f685b40e3ef933092faf23ddad6d2902ea52ef3f7b4a96d23e701",
+      "modified_for_nova": true
+    },
+    "ISHShellExecutor.h": {
+      "upstream_path": "src/ios/iSH/ISHShellExecutor.h",
+      "upstream_sha256": "96148e6cc44c24c6b9a100803ba4831c5a37593155596425b18d0ced42eea022",
+      "modified_for_nova": false
+    },
+    "ISHShellExecutor.m": {
+      "upstream_path": "src/ios/iSH/ISHShellExecutor.m",
+      "upstream_sha256": "44225b55b9834bb70bf63485f3b830522321f3a1873fa4e6e53f2c5329c1b67d",
+      "modified_for_nova": true
+    },
+    "CurrentRoot.h": {
+      "upstream_path": "src/ios/iSH/CurrentRoot.h",
+      "upstream_sha256": "6bd62a7dcf8ed1b7680273d40a2f0789010c612188d0842698beeb2af73a105e",
+      "modified_for_nova": false
+    },
+    "CurrentRoot.m": {
+      "upstream_path": "src/ios/iSH/CurrentRoot.m",
+      "upstream_sha256": "6481488e9bd52197e7ef919289c16a98c3b20b380fb33b055c828ab56ff62918",
+      "modified_for_nova": false
+    }
+  }
+}

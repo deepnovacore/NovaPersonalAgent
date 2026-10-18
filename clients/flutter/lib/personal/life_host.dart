@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import '../device/space_authority.dart';
+import '../context/secure_persistence.dart';
+import '../context/context_sync.dart';
+import '../protocol/request_id.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
@@ -26,8 +30,17 @@ abstract interface class LifeAccess {
 class LifeHost extends ChangeNotifier
     with WidgetsBindingObserver
     implements LifeAccess {
-  LifeHost({LocalLife? repository}) : _provided = repository;
+  LifeHost({LocalLife? repository, this.backgroundReader = false})
+    : _provided = repository;
+  final bool backgroundReader;
   final LocalLife? _provided;
+  final authority = SpaceAuthorityRepository(
+    const SecureContextPersistence('nova.space.authority.v1'),
+  );
+  bool authorityReady = false;
+  ContextSync? contextSync;
+  Future<void> Function(Set<String>)? applyContextTombstones;
+  Future<ContextSync>? _contextOpening;
   final _secrets = const FlutterSecureStorage(
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.unlocked_this_device,
@@ -81,8 +94,13 @@ class LifeHost extends ChangeNotifier
       if (!local.ready) await local.open();
       _checkActive();
       store = PersonalStore(send: (_) => false, local: local);
+      await authority.open();
+      authorityReady = true;
+      authority.addListener(_notify);
       local.addListener(_changed);
-      if (Platform.isIOS) _bridge = LifeToolBridge(local)..attach();
+      if (Platform.isIOS && !backgroundReader) {
+        _bridge = LifeToolBridge(local)..attach();
+      }
       WidgetsBinding.instance.addObserver(this);
       final credentials = await _secrets.read(
         key: 'nova.local.hub.credentials',
@@ -96,6 +114,10 @@ class LifeHost extends ChangeNotifier
         _token = await _secrets.read(key: 'nova.local.hub.token');
       }
       _checkActive();
+      if (backgroundReader) {
+        _notify();
+        return;
+      }
       _scheduler = LifeSyncScheduler(sync: sync, onError: (_) {});
       _scheduler!.setForeground(
         WidgetsBinding.instance.lifecycleState == null ||
@@ -145,7 +167,10 @@ class LifeHost extends ChangeNotifier
   Future<Map<String, dynamic>> mutate(
     Map<String, dynamic> input, {
     required String operationId,
-  }) async => _ready.mutate(input, operationId: operationId);
+  }) async {
+    if (backgroundReader) throw StateError('foreground_required');
+    return _ready.mutate(input, operationId: operationId);
+  }
 
   Future<T> _serial<T>(Future<T> Function() work) {
     final future = _tail.then((_) async {
@@ -201,7 +226,108 @@ class LifeHost extends ChangeNotifier
     final local = _ready;
     if (!hubConfigured) return;
     await local.sync(HttpLifeSync(_url!, _token!));
+    if (authority.hubId != null) await _refreshAuthority();
+    if (authority.hubId != null) await (await getContextSync()).sync();
     lastSync = DateTime.now();
+  });
+
+  Future<ContextSync> getContextSync() async {
+    if (!hubConfigured || authority.hubId == null) {
+      throw StateError('authority_not_joined');
+    }
+    if (contextSync != null) return contextSync!;
+    return _contextOpening ??= _openContextSync().catchError((
+      Object error,
+      StackTrace stack,
+    ) {
+      _contextOpening = null;
+      Error.throwWithStackTrace(error, stack);
+    });
+  }
+
+  Future<ContextSync> _openContextSync() async {
+    final repository = ContextSync(
+      const SecureContextPersistence('nova.context.sync.v1'),
+      (method, path, [body]) =>
+          HttpLifeSync(_url!, _token!).request(method, path, body),
+      applyTombstones: (ids) async {
+        if (applyContextTombstones == null) {
+          throw StateError('deletion_handler_required');
+        }
+        await applyContextTombstones!(ids);
+      },
+    );
+    await repository.open();
+    await repository.bind(
+      hub: authority.hubId!,
+      space: authority.record['space_id'],
+      device: authority.deviceId,
+    );
+    _checkActive();
+    contextSync = repository..addListener(_notify);
+    return repository;
+  }
+
+  Future<void> _refreshAuthority() async {
+    final transport = HttpLifeSync(_url!, _token!);
+    final identity = await transport.request('GET', 'identity') as Map;
+    if (identity['hub_id'] != authority.hubId ||
+        identity['device_id'] != authority.deviceId) {
+      throw StateError('authority_identity_mismatch');
+    }
+    final record = await transport.request('GET', 'authority');
+    if (record is! Map) throw StateError('authority_uninitialized');
+    await authority.accept(Map<String, dynamic>.from(record));
+  }
+
+  /// Separate explicit opt-in from existing Life sync, which remains compatible
+  /// with older Hub servers and does not imply accepting a primary computer.
+  Future<void> joinAuthority() => _serial(() async {
+    if (!hubConfigured) throw StateError('hub_required');
+    await authority.freezePublication();
+    final transport = HttpLifeSync(_url!, _token!);
+    final identity = await transport.request('GET', 'identity') as Map;
+    final record =
+        await transport.request('POST', 'authority/initialize', {}) as Map;
+    await authority.bind(
+      hubId: identity['hub_id'],
+      deviceId: identity['device_id'],
+      record: Map<String, dynamic>.from(record),
+    );
+  });
+  Future<List<Map<String, dynamic>>> authorityMembers() => _serial(() async {
+    if (!hubConfigured) throw StateError('hub_required');
+    final values =
+        await HttpLifeSync(_url!, _token!).request('GET', 'authority/members')
+            as List;
+    return values.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  });
+  Future<void> transferAuthority(String target) => _serial(() async {
+    if (!hubConfigured || authority.hubId == null) {
+      throw StateError('authority_not_joined');
+    }
+    await authority.freezePublication();
+    final record = await HttpLifeSync(_url!, _token!)
+        .request('POST', 'authority/prepare', {
+          'transition_id': requestId(),
+          'target_device_id': target,
+          'expected_epoch': authority.epoch,
+        });
+    await authority.accept(Map<String, dynamic>.from(record as Map));
+  });
+  Future<void> authorityTransition(String action) => _serial(() async {
+    if (!['ack', 'commit', 'cancel'].contains(action) || !hubConfigured) {
+      throw StateError('invalid_transition');
+    }
+    await _refreshAuthority();
+    final pending = authority.record['pending'];
+    if (pending == null) throw StateError('transition_not_found');
+    final record = await HttpLifeSync(_url!, _token!).request(
+      'POST',
+      'authority/$action',
+      {'transition_id': pending['transition_id']},
+    );
+    await authority.accept(Map<String, dynamic>.from(record as Map));
   });
 
   Future<HubTasks?> getTasks() => _serial(() async {
@@ -242,6 +368,9 @@ class LifeHost extends ChangeNotifier
     _tasks?.dispose();
     repo?.removeListener(_changed);
     store?.dispose();
+    authority.removeListener(_notify);
+    authority.dispose();
+    contextSync?.dispose();
     repo?.dispose();
     super.dispose();
   }

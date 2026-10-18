@@ -1,38 +1,64 @@
+import 'support/mobile_navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:nova_mobile/personal/local_life.dart';
 import 'package:nova_mobile/ui/app.dart';
 import 'package:nova_mobile/personal/life_host.dart';
-import 'package:nova_mobile/connection/session.dart';
 import 'package:nova_mobile/services/preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'support/fake_audio.dart';
-import 'conversation_widget_test.dart' show MemoryCredentials;
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 Future<void> mount(WidgetTester tester, LocalLife repo) async {
   FlutterSecureStorage.setMockInitialValues({});
   SharedPreferences.setMockInitialValues({});
-  final session = Session(
+  final audioConfig = (
     audio: FakeAudio(),
     requestMicrophone: () async => false,
   );
-  addTearDown(session.dispose);
+
   await tester.pumpWidget(
     NovaApp(
-      session: session,
-      store: MemoryCredentials(),
+      audio: audioConfig.audio,
+      requestMicrophone: audioConfig.requestMicrophone,
+
       preferences: Preferences(await SharedPreferences.getInstance()),
       lifeHost: LifeHost(repository: repo),
     ),
   );
   await tester.pump(const Duration(milliseconds: 100));
-  await tester.tap(find.text("Todos").last);
-  await tester.pumpAndSettle();
 }
 
 void main() {
+  testWidgets('profile reads and edits phone data without a computer', (
+    tester,
+  ) async {
+    final repo = LocalLife(MemoryLifePersistence());
+    await repo.open();
+    await repo.mutate({
+      'op': 'profile',
+      'about': 'A phone-owned profile',
+      'expected_version': 0,
+    });
+    await mount(tester, repo);
+    await tester.tap(find.byTooltip('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('A phone-owned profile'), findsOneWidget);
+    expect(find.textContaining('Reconnect to make changes'), findsNothing);
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextField).last,
+      'Updated on this phone',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(repo.life['profile']['about'], 'Updated on this phone');
+    expect(find.text('Updated on this phone'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('dismissing focused Hub settings keeps the workspace usable', (
     tester,
   ) async {
@@ -40,20 +66,26 @@ void main() {
     final repo = LocalLife(MemoryLifePersistence());
     await repo.open();
     await mount(tester, repo);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await openSettingsItem(tester, 'Data sync');
     await tester.tap(find.byTooltip('同步设置'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.enterText(find.byType(TextField).first, 'https://hub.example');
     await tester.tap(find.text('取消'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(tester.takeException(), isNull);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.byTooltip('同步设置'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('连接同步 Hub'), findsOneWidget);
     await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
   });
   testWidgets(
     'local workspace shows editable todos without connecting a host',
@@ -66,13 +98,14 @@ void main() {
         'title': 'Read locally',
       });
       await mount(tester, repo);
-      await tester.tap(find.text("Todos").last);
-      await tester.pumpAndSettle();
+      await openLibrary(tester, 'Todos');
       expect(find.text('Read locally'), findsOneWidget);
       expect(find.byTooltip('本机空间'), findsNothing);
-      expect(find.textContaining('1 项待同步'), findsOneWidget);
-      await tester.tap(find.text('Goals'));
-      await tester.pumpAndSettle();
+      expect(find.textContaining('1 项待同步'), findsNothing);
+      await tester.pageBack();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await openLibrary(tester, 'Goals');
       expect(find.byTooltip('New goal'), findsOneWidget);
     },
   );
@@ -96,18 +129,24 @@ void main() {
         'Ideas': 'idea',
         'Goals': 'goal',
       }.entries) {
-        await tester.tap(find.text(entry.key).last);
-        await tester.pumpAndSettle();
+        await openLibrary(tester, entry.key);
         expect(find.text('Local ${entry.value}'), findsOneWidget);
         expect(identical(host.store, store), isTrue);
+        await tester.pageBack();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
       }
+      await openSettingsItem(tester, 'Data sync');
       await tester.tap(find.byTooltip('同步设置'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       await tester.tap(find.text('取消'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       expect(identical(host.store, store), isTrue);
       expect(host.snapshot()['todos'], hasLength(1));
       await tester.pumpWidget(const SizedBox());

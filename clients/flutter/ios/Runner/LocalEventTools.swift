@@ -4,8 +4,13 @@ import CryptoKit
 
 @MainActor final class LocalEventTools {
   private let store = EKEventStore()
-  func permission(_ scope: String) async throws {
+  func permission(_ scope: String, requestIfNeeded: Bool = true) async throws {
     let entity: EKEntityType = scope == "calendar" ? .event : .reminder
+    let status = EKEventStore.authorizationStatus(for: entity)
+    if #available(iOS 17.0, *) { if status == .fullAccess { return } }
+    else if status == .authorized { return }
+    if status == .denied || status == .restricted { throw LocalAgentError("permission_denied") }
+    guard requestIfNeeded else { throw LocalAgentError("permission_required_in_settings") }
     let allowed: Bool
     if #available(iOS 17.0, *) {
       allowed = try await (entity == .event ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())
@@ -38,13 +43,18 @@ import CryptoKit
       "due": value.dueDateComponents.flatMap { ($0.calendar ?? Calendar.current).date(from: $0) }.map { ISO8601DateFormatter().string(from: $0) } ?? ""]
     row["version"] = fingerprint(row); return row
   }
-  func observe(_ scope: String) async throws -> [String: Any] {
+  func observe(_ scope: String, input: [String: Any] = [:]) async throws -> [String: Any] {
+    let limit = input["limit"] as? Int ?? 50
+    guard (1...200).contains(limit) else { throw LocalAgentError("invalid_query_limit") }
+    let includeCompleted = input["include_completed"] as? Bool ?? false
     let type: EKEntityType = scope == "calendar" ? .event : .reminder
-    let calendars = store.calendars(for: type).filter { $0.allowsContentModifications }
+    let calendars = store.calendars(for: type)
     let rows: [[String: Any]]
     if type == .event {
-      let from = Date(), to = from.addingTimeInterval(30 * 86400)
-      rows = store.events(matching: store.predicateForEvents(withStart: from, end: to, calendars: calendars)).prefix(50).map(event)
+      let from = input["start"] == nil ? Calendar.current.startOfDay(for: Date()) : date(input["start"])
+      let to = input["end"] == nil ? from?.addingTimeInterval(30 * 86400) : date(input["end"])
+      guard let from, let to, to > from, to.timeIntervalSince(from) <= 366 * 86400 else { throw LocalAgentError("invalid_query_dates") }
+      rows = store.events(matching: store.predicateForEvents(withStart: from, end: to, calendars: calendars)).sorted { $0.startDate < $1.startDate }.prefix(limit).map(event)
     } else {
       let found: [EKReminder] = try await withCheckedThrowingContinuation { continuation in
         store.fetchReminders(matching: store.predicateForReminders(in: calendars)) { values in
@@ -52,10 +62,10 @@ import CryptoKit
           continuation.resume(returning: values)
         }
       }
-      rows = found.filter { !$0.isCompleted }.prefix(50).map(reminder)
+      rows = found.filter { includeCompleted || !$0.isCompleted }.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }.prefix(limit).map(reminder)
     }
-    return ["scope": scope, "items": rows, "limit": 50, "window": scope == "calendar" ? "next_30_days" : "incomplete",
-      "calendars": calendars.map { ["id": $0.calendarIdentifier, "title": $0.title] }]
+    return ["scope": scope, "available": true, "items": rows, "limit": limit, "window": scope == "calendar" ? "requested_range_or_next_30_days" : (includeCompleted ? "all" : "incomplete"),
+      "calendars": calendars.map { ["id": $0.calendarIdentifier, "title": $0.title, "editable": $0.allowsContentModifications] as [String: Any] }]
   }
   // Validation runs before approval and immediately before committing the write.
   func validate(_ action: [String: Any], scope: String) throws {
