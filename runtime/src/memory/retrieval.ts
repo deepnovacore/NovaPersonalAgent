@@ -1,3 +1,4 @@
+import {withUsageContext,type UsageContext} from '../usage/context.js'
 import {abortable} from '../core/camera-session.js'
 import {sourceFilterSchema,type SourceFilter} from './source-retrieval.js'
 import type {JsonValue} from '../core/events.js'
@@ -36,6 +37,7 @@ export class UnifiedRetrieval {
   private readonly consumers = new WeakMap<UnifiedRetrievalResult,string>();
   constructor(private readonly options: {
     memory: () => PersonalMemoryResource | undefined;
+    usageContext?: UsageContext;
     rawPurgeEvidence?: (ids: readonly string[]) => Promise<void>;
     rawRecall?: (query: string, limit: number, signal: AbortSignal) => Promise<readonly {evidence_id: string; score?: number}[]>;
   }) {}
@@ -117,7 +119,7 @@ export class UnifiedRetrieval {
     if (!resource) return {state: 'unavailable', scope, entries: [], snippets: [], degraded: true};
     const call = <T>(work: (abort: AbortSignal) => Promise<T>): Promise<T> => {
       const abort = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
-      return abortable(Promise.resolve().then(() => work(abort)), abort);
+      return withUsageContext({...this.options.usageContext,feature:'recall',operation:'retrieve'},()=>abortable(Promise.resolve().then(() => work(abort)), abort));
     };
     const [recalled, raw, sources] = await Promise.allSettled([
       filter?Promise.resolve({hits:[],degraded:false}):call(abort => resource.recall(query.trim(), {scope, limit: 8, signal: abort})),

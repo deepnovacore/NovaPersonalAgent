@@ -11,6 +11,33 @@ const empty=()=>({todos:[],ideas:[],goals:[],profile:{about:'',version:0},receip
 interface Loaded {revision:number;state:LifeState;result:{id:string;version:number}}
 function setup(){const db=new DatabaseSync(':memory:');initializeMemory(db);return {db,run:(op:string,input:unknown)=>memoryOperation(db,op as MemoryOperation,input) as Loaded}}
 
+test('workbench capture revalidates explicit evidence, preserves provenance and can undo a goal',()=>{
+ const {db,run}=setup()
+ try{
+  const initial=run('life_load',{namespace,legacy:empty()}),refs=[{entry_id:'source:plan',version:'v1',quote:'我的长期目标是每天使用自己的助手。'}]
+  const proof={kind:'goal',title:'每天使用自己的助手',summary:'持续改进日常使用体验',ownership:'user',assertion:'direct',state:'open',due:null,due_quote:null,refs}
+  const input={op:'from_workbench',kind:'goal',title:proof.title,note:proof.summary,due:null,success_criteria:'',automatic:true,source:{candidate_id:'daily-goal',refs},sources:[],proof,evidence:[{id:'source:plan',version:'v1',kind:'file',text:refs[0]!.quote,observed_at:'2026-10-18T00:00:00Z'}]}
+  const request={namespace,expectedRevision:initial.revision,requestId:'daily-goal',input,workbench_provider:'test-provider'}
+  assert.throws(()=>run('life_mutate',{...request,input:{...input,proof:{...proof,assertion:'inferred'}}}),/workbench_capture_not_explicit/)
+  assert.throws(()=>run('life_mutate',{...request,input:{...input,evidence:[{...input.evidence[0],text:'无关原文'}]}}),/workbench_invalid_evidence/)
+  const saved=run('life_mutate',request);assert.equal(saved.state.goals.length,1);assert.equal(saved.state.goals[0]!.auto_recorded,true)
+  const entry=(memoryOperation(db,'list',{}) as EntryRevision[]).find(r=>r.kind==='goal')!,event=memoryOperation(db,'evidence',{id:entry.evidence_refs[0]}) as EvidenceRecord
+  assert.equal(event.extracted.event,'workbench_capture');assert.equal(event.trust,'trusted_system')
+  const repeated=run('life_mutate',request);assert.equal(repeated.state.goals.length,1)
+  const undone=run('life_mutate',{namespace,expectedRevision:saved.revision,requestId:'undo-daily-goal',input:{op:'undo_create',kind:'goal',id:saved.result.id,expected_version:1}});assert.equal(undone.state.goals.length,0)
+ }finally{db.close()}
+})
+
+test('workbench message capture fails closed when original evidence is unavailable in storage',()=>{
+ const {db,run}=setup()
+ try{
+  const initial=run('life_load',{namespace,legacy:empty()}),refs=[{entry_id:'missing-message',version:'v1',quote:'我要完成报告'}],proof={kind:'todo',title:'完成报告',summary:'完成报告',ownership:'user',assertion:'direct',state:'open',due:null,due_quote:null,refs}
+  const input={op:'from_workbench',kind:'todo',title:proof.title,note:proof.summary,due:null,success_criteria:'',automatic:true,source:{candidate_id:'m',refs},sources:[],proof,evidence:[{id:'missing-message',version:'v1',kind:'im',text:refs[0]!.quote,observed_at:'2026-10-18T00:00:00Z',relation:'self',author:{key:'u',kind:'person',is_user:true}}]}
+  assert.throws(()=>run('life_mutate',{namespace,expectedRevision:initial.revision,requestId:'m',input,workbench_provider:'test'}),/workbench_source_changed/)
+  assert.equal(run('life_load',{namespace}).state.todos.length,0)
+ }finally{db.close()}
+})
+
 test('life migration preserves legacy text and version without inventing original evidence; empty cutover is durable',()=>{
  const {db,run}=setup()
  try{
@@ -155,5 +182,21 @@ test('failed Life revision insert rolls back evidence, processing grant and rece
   run('life_mutate',request);run('life_mutate',request)
   assert.equal((memoryOperation(db,'list',{}) as EntryRevision[]).filter(row=>row.kind==='profile').length,1)
   assert.equal(db.prepare('SELECT COUNT(*) n FROM memory_evidence').get()!.n,1)
+ }finally{db.close()}
+})
+
+test('workbench capture accepts Timeline authorization versions and rejects a changed grant',()=>{
+ const {db,run}=setup(),source_id='personal:test:message',provider='model',text='我会整理发布材料。',now=new Date().toISOString()
+ try{
+  memoryOperation(db,'append_evidence',{id:'timeline-source',source_id,source_kind:'im',locator:'message',observed_at:now,recorded_at:now,raw_text:text,hash:'raw-hash',trust:'untrusted_external'})
+  memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null}})
+  const [e]=memoryOperation(db,'timeline_evidence',{source_prefix:'personal:test:',provider}) as EvidenceRecord[]
+  assert.notEqual(e!.hash,'raw-hash')
+  const refs=[{entry_id:e!.id,version:e!.hash,quote:text}],proof={kind:'todo',title:'整理发布材料',summary:'整理材料',ownership:'user',assertion:'direct',state:'open',due:null,due_quote:null,refs}
+  const input={op:'from_workbench',kind:'todo',title:proof.title,note:proof.summary,due:null,success_criteria:'',automatic:true,source:{candidate_id:'timeline-candidate',refs},sources:[],proof,evidence:[{id:e!.id,version:e!.hash,kind:'im',text,observed_at:now,relation:'self',author:{key:'me',kind:'person',is_user:true}}]}
+  const loaded=run('life_load',{namespace,legacy:empty()})
+  const saved=run('life_mutate',{namespace,input,expectedRevision:loaded.revision,requestId:'timeline-create',workbench_provider:provider});assert.equal(saved.state.todos.length,1)
+  memoryOperation(db,'source_grant',{source_id,expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:provider,embedding_provider:null}})
+  assert.throws(()=>run('life_mutate',{namespace,input,expectedRevision:saved.revision,requestId:'stale-timeline-create',workbench_provider:provider}),/workbench_source_changed/)
  }finally{db.close()}
 })

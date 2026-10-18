@@ -1,3 +1,5 @@
+import type {TimelineInput} from '../personal-agent/timeline-brief.js'
+import type {ExplicitMemoryTurn,ExplicitMemoryArguments,ExplicitMemoryLookup,ExplicitMemoryReceipt,ExplicitMemoryPage} from './explicit-memory.js'
 import type {ProcessingRequest} from '../memory-substrate/source-processing.js'
 import type {SourceFilter,SourceRecallResult} from './source-retrieval.js'
 import type {ProfileInput,ProfileGenerator} from '../personal-agent/profile-warmup.js'
@@ -93,6 +95,9 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  readonly beginExplicitTurn?: (turn:ExplicitMemoryTurn)=>Promise<ExplicitMemoryTurn>
+  readonly writeExplicit?: (turn:ExplicitMemoryTurn,requestId:string,args:ExplicitMemoryArguments,consumer:string)=>Promise<ExplicitMemoryReceipt>
+  readonly lookupExplicit?: (query:ExplicitMemoryLookup,consumer:string)=>Promise<ExplicitMemoryPage>
   readonly recallSources?: (query:string,options:{consumer:string;scope:'recent'|'any';limit:number;filter?:SourceFilter;signal?:AbortSignal})=>Promise<SourceRecallResult>
   /** Internal built-in maintenance port; identity and provider are supplied by the host. */
   readonly sourceProcessingLlm?: ()=>{baseUrl:string;apiKey:string;model:string}|undefined
@@ -102,9 +107,11 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly profileSources?: (ids?:readonly string[]) => Promise<ProfileInput[]>
   readonly resolveLifeCandidate?: (row:EvaluatedCandidate,signal:AbortSignal,guard:()=>void)=>Promise<ResolvedLifeCandidate>
   readonly lifeBackend?: () => LifeBackend
+  readonly timelineEvidence?: ()=>Promise<TimelineInput[]>
   readonly dailyBriefEvidence?: (input:{localDate:string;timezone:string;signal?:AbortSignal})=>Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}[]>
   readonly readEvidence?: (id:string) => Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}|null>
   readonly canProcessEvidence?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>
+  readonly canProcessEvidenceMany?: (ids:readonly string[],purpose:'extraction'|'embedding')=>Promise<string[]>
   readonly canReadConversationEvidence?: (id:string,consumer:string)=>Promise<boolean>
   readonly processingStamp?: (ids:string[])=>Promise<string|null>
   readonly processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant
@@ -116,6 +123,8 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly observeSource?: (input:MemoryObservation) => Promise<MemoryEntry|null>
   readonly capabilities?: () => MemoryCapabilities
   readonly list?: (options?: MemoryListOptions) => Promise<MemoryPage>
+  /** Fresh lookup in input order, including null for missing ids. Shares get authorization semantics. */
+  readonly getMany?: (ids: readonly string[]) => Promise<(MemoryEntry | null)[]>
   readonly get?: (id: string) => Promise<MemoryEntry | null>
   readonly correct?: (id: string, expectedVersion: MemoryVersion, content: string, userSource: MemorySourceRef) => Promise<{previous: MemoryEntry; entry: MemoryEntry}>
   readonly forgetEntry?: (id: string, expectedVersion: MemoryVersion) => Promise<MemoryEntry>
@@ -128,7 +137,8 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly forgetSources?: (refs: readonly string[]) => Promise<void>
   /** Read-only host inspection; never exposed as an LLM tool. */
   readonly inspect?: (query: MemoryInspectionQuery) => Promise<MemoryInspection>
-  open(): Promise<void>
+  open(options?:{deferBackground?:boolean}): Promise<void>
+  readonly startBackgroundWork?: () => void
   close(): Promise<void>
   /** Absent for read-only providers. Resolve only after durable admission, or reject. */
   readonly remember?: (turn: PersonalMemoryRememberTurn) => Promise<PersonalMemoryAdmissionReceipt>
