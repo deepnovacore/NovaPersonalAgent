@@ -24,6 +24,7 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
   if(item.next)card.append(el('p',`${tab==='goals'?'先从':'下一步'}：${item.next}`,'workbench-next'))
   if(!attachSourceTags(card,item.sources,{openArticle}))attachSources(card,item.refs?.map(ref=>ref.label).filter(Boolean))
   const actions=el('div',undefined,'card-actions');card.append(actions)
+  if(tab==='todos')button('加入待办',()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
   if(tab==='goals')button('设为目标',()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
   else if(tab==='todos'&&item.next)button('帮我做',()=>delegate(`请帮我推进「${item.title}」：${item.next}`),actions,`suggestion:${item.id}`)
   else button('聊聊这个',()=>continueChat(`${item.title}：${item.body}`),actions,`suggestion:${item.id}`)
