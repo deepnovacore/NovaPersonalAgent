@@ -628,3 +628,30 @@ test('an unchanged Feed keeps its open evidence and focus when another message a
  assert.equal(m.view.controller.error,'Send failed; draft kept')
  const error=m.all().find(n=>n.className==='page-error');assert.equal(error.textContent,'Send failed; draft kept');assert.equal(error.parentElement.className,'nova-column')
  })
+
+test('the first main-conversation greeting starts at the top instead of hiding behind auto-scroll',()=>{
+ const m=mount({defaultHome:true,api:{orbMenu:{},personal:{setUnread(){},onPresentationRequest(){},onCollapsed(){}},welcome:{}}})
+ m.view.receive(feedState(1,'chat:main',{feed:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages:[]}}))
+ const history=m.all().find(n=>n.className==='chat-history')
+ history.scrollHeight=900;history.clientHeight=300;history.scrollTop=600
+ m.view.identity({profile:{assistantName:'nova',userName:'',avatar:null,introduced:false},defaultAvatar:''})
+ assert.equal(history.scrollTop,0)
+ history.scrollTop=200
+ m.view.identity({profile:{assistantName:'nova',userName:'',avatar:null,introduced:false},defaultAvatar:''})
+ assert.equal(history.scrollTop,200)
+ assert.equal(m.all().find(n=>n.className==='chat-new-messages').hidden,true)
+})
+
+test('main conversation keeps one companion outside the transcript through messages, sending and voice states',()=>{
+ const m=mount({defaultHome:true,api:{orbMenu:{},personal:{setUnread(){},onPresentationRequest(){},onCollapsed(){}},welcome:{}}})
+ const snapshot=(revision,messages=[])=>feedState(revision,'chat:main',{feed:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages}})
+ m.view.receive(snapshot(1));m.view.identity({profile:{assistantName:'nova',userName:'',avatar:null,introduced:true},defaultAvatar:''})
+ const companion=m.all().find(n=>n.className==='chat-companion'),history=m.all().find(n=>n.className==='chat-history')
+ assert.ok(companion);assert.equal(companion.hidden,false);assert.equal(history.contains(companion),false)
+ m.view.receive(snapshot(2,[{id:'u1',role:'user',text:'今天想聊聊',conversation_id:'chat:main'},{id:'a1',role:'assistant',text:'我在这里。',conversation_id:'chat:main'}]))
+ m.view.controller.state().submission={request_id:'waiting'};m.view.refresh();m.view.setOrb({name:'speaking',codexWorking:true})
+ assert.equal(m.all().find(n=>n.className==='chat-companion'),companion);assert.equal(companion.hidden,false)
+ m.view.controller.disconnect();m.view.refresh();assert.equal(companion.hidden,false)
+ m.view.receive(feedState(3,'other',{feed:[]}));assert.equal(companion.hidden,true)
+ m.view.receive(snapshot(4));assert.equal(companion.hidden,false)
+})

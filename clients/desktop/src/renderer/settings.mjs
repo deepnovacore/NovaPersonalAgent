@@ -1,3 +1,5 @@
+import {mountIdentitySettings} from './assistant-welcome.mjs'
+import {mountPermissionCards} from './welcome-permissions.mjs'
 import {createSkinPanel} from './skin-panel.mjs'
 import {SELF_HOSTED_STAGES, endpointOrigin} from './voice-preset.mjs'
 import {onButton} from './button-action.mjs'
@@ -35,6 +37,14 @@ import {
 } from './voice-choice.mjs'
 
 const api = window.novaPersonalAgentDesktop.settings
+const welcomeApi=window.novaPersonalAgentDesktop.welcome
+if(welcomeApi){
+ const identity=mountIdentitySettings(document.querySelector('#assistant-identity-panel'),{api:welcomeApi,command:(method,params)=>api.personalCommand(method,params)})
+ const permissions=mountPermissionCards(document.querySelector('#desktop-permissions-panel'),{api:welcomeApi})
+ const update=value=>{identity.update(value);permissions.update(value.permissions)}
+ const load=()=>welcomeApi.get().then(update).catch(()=>identity.error())
+ welcomeApi.onChanged(update);window.addEventListener('focus',()=>void load());void load()
+}
 const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
 const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})

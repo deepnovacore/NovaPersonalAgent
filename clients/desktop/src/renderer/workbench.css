@@ -59,13 +59,13 @@ body[data-opaque="1"] .workbench{border-radius:0}
 
 /* Window controls and workspace tabs */
 .window-controls{position:absolute;top:18px;left:14px;z-index:20;display:flex;gap:6px;-webkit-app-region:no-drag}
-.workbench .window-control{position:relative;width:12px;height:12px;padding:0;border:0;border-radius:50%;font-size:0;line-height:0;-webkit-app-region:no-drag}
-.workbench .window-control::before{content:'';position:absolute;inset:-4px -2px}
-.workbench .window-control::after{position:absolute;inset:0;display:grid;place-items:center;font:700 9px/1 var(--font);color:rgba(0,0,0,.55);opacity:0}
-.workbench .window-controls:hover .window-control::after,.workbench .window-control:focus-visible::after{opacity:1}
-.workbench .window-close{background:#ff5f57}.window-close::after{content:'×'}
-.workbench .window-minimize{background:#febc2e}.window-minimize::after{content:'−'}
-.workbench .window-control:hover:not(:disabled){filter:brightness(.92)}
+:is(.workbench,.welcome-screen) .window-control{position:relative;width:12px;height:12px;padding:0;border:0;border-radius:50%;font-size:0;line-height:0;-webkit-app-region:no-drag}
+:is(.workbench,.welcome-screen) .window-control::before{content:'';position:absolute;inset:-4px -2px}
+:is(.workbench,.welcome-screen) .window-control::after{position:absolute;inset:0;display:grid;place-items:center;font:700 9px/1 var(--font);color:rgba(0,0,0,.55);opacity:0}
+:is(.workbench,.welcome-screen) .window-controls:hover .window-control::after,:is(.workbench,.welcome-screen) .window-control:focus-visible::after{opacity:1}
+:is(.workbench,.welcome-screen) .window-close{background:#ff5f57}.window-close::after{content:'×'}
+:is(.workbench,.welcome-screen) .window-minimize{background:#febc2e}.window-minimize::after{content:'−'}
+:is(.workbench,.welcome-screen) .window-control:hover:not(:disabled){filter:brightness(.92)}
 .window-grip{flex:1 1 auto;align-self:stretch;min-width:24px;margin:-8px 0;-webkit-app-region:no-drag}
 .workspace-topbar{flex-shrink:0;min-width:0;border-bottom:1px solid var(--line);background:var(--surface-raised);padding:0 14px;min-height:49px;display:flex;align-items:center;-webkit-app-region:drag}
 .workspace-tabs{display:flex;align-items:center;gap:2px;overflow-x:auto;min-width:0;scrollbar-width:thin;-webkit-app-region:no-drag}
@@ -389,6 +389,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .message{width:min(100%,760px);align-self:center;font-size:14px;line-height:1.8}
 .workbench .message.user{width:auto;max-width:min(88%,680px);align-self:flex-end;border-radius:16px 16px 4px 16px;padding:12px 18px;background:var(--accent-wash)}
 .workbench .message.assistant{padding:0;background:transparent;border:0}
+.workbench .message.assistant:not(.message-feed)>.md{align-self:flex-start;min-width:0;max-width:100%;padding:14px 18px;border-radius:4px 18px 18px 18px;background:var(--surface-inset);border:1px solid var(--line)}
 .workbench .message-role{margin-bottom:8px;letter-spacing:.04em;color:var(--ink-dim)}
 .workbench .chat-intro{margin:auto 0;max-width:520px;padding:24px 0}
 .workbench .chat-intro h1{font-size:25px;line-height:1.4;font-weight:600;margin-bottom:12px}
@@ -540,3 +541,13 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .feed-evidence-row,.feed-memory-reference{border-top:1px solid var(--line);padding-top:9px;margin-top:9px}
 .feed-evidence-excerpt{white-space:pre-wrap;line-height:1.7}
 .workbench .feed-evidence-read{display:block;margin-top:5px;padding:3px 0;border:0;background:transparent;color:var(--accent);font-size:11px}
+
+/* A stable companion stays above the scrolling main transcript. */
+.workbench .chat-head{flex-shrink:0}
+.chat-companion{width:84px;height:84px;flex:0 0 84px;overflow:hidden;border-radius:24px}
+.chat-companion img{display:block;width:84px;height:84px;object-fit:cover}
+.chat-companion[hidden]{display:none}
+@media(max-height:700px),(max-width:600px){
+ .chat-companion{width:64px;height:64px;flex-basis:64px;border-radius:20px}
+ .chat-companion img{width:64px;height:64px}
+}

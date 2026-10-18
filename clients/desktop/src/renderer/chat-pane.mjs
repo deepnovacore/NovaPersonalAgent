@@ -1,3 +1,5 @@
+import {mountIdleAvatar} from './idle-avatar.mjs'
+import {mountAssistantWelcome} from './assistant-welcome.mjs'
 import {TASK_PHASE_LABEL,taskNextStep} from './tasks-page.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {disposeSources} from './source-popover.mjs'
@@ -62,6 +64,12 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const conversationList=el('nav');conversationList.setAttribute('aria-label',t('会话列表'));switcher.append(conversationList);head.append(switcher)
  const voiceLine=el('div',undefined,'chat-voice');const voiceStatus=el('span','','conversation-voice-status');voiceLine.append(voiceStatus);const resumeVoice=button(t('恢复语音'),()=>c.resumeVoice(),voiceLine);resumeVoice.hidden=true;const endVoice=button(t('结束语音'),()=>c.stopVoice(),voiceLine);endVoice.hidden=true;pane.append(voiceLine)
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
+ const emptyConversation=el('div',undefined,'chat-intro');emptyConversation.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
+ const companion=el('div',undefined,'chat-companion'),companionImage=el('img');companion.hidden=true;companionImage.alt='';companion.append(companionImage);head.append(companion)
+ const companionAnimation=mountIdleAvatar(companionImage)
+ let identityView=null
+ const assistantWelcome=api?.welcome?mountAssistantWelcome(intro,{api:api.welcome,c,onIdentity:value=>identity(value)}):null
+ function identity(value){const firstIntroduction=!identityView&&!value.profile.introduced;identityView=value;feedNodes.clear();assistantWelcome?.update(value);homeButton.replaceChildren();const avatar=el('img');avatar.src=value.profile.avatar??value.defaultAvatar;avatar.alt='';avatar.className='chat-brand-avatar';homeButton.append(avatar,el('span',value.profile.assistantName));companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true);if(firstIntroduction&&c.selectedId==='chat:main')history.scrollTop=0}
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
  const stage=el('div',undefined,'voice-stage');stage.hidden=true
  const stageCanvas=el('canvas',undefined,'voice-stage-orb');stageCanvas.setAttribute('aria-hidden','true')
@@ -113,6 +121,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(show&&!orb){orb=createOrbVisualSafe(stageCanvas,{size:STAGE_ORB_SIZE,palette:'ember',reducedMotion:media('(prefers-reduced-motion: reduce)'),highContrast:media('(prefers-contrast: more)'),...(speakingLevel?{getSpeakingLevel:speakingLevel}:{})});orb.setState(orbState.name,{codexWorking:orbState.codexWorking})}
   else if(!show&&orb){orb.destroy();orb=null}
  }
+ // Companionship follows the visible main conversation, independently of backend activity.
+ function syncCompanion(){const visible=Boolean(identityView)&&open&&!c.collapsed&&c.selectedId==='chat:main';companion.hidden=!visible;companionAnimation.setIdle(visible)}
  function setOrb({name,statusLine,codexWorking}={}){
   orbState={name:ORB_STATE_NAMES.includes(name)?name:'idle',statusLine:typeof statusLine==='string'?statusLine:'',codexWorking:codexWorking===true}
   stageLabel.textContent=orbState.statusLine
@@ -121,7 +131,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const setOrbLevel=level=>orb?.setLevel(level)
 
  let open=true
- function setOpen(value){open=value;pane.hidden=!value;onOpenChange(value);syncStage();if(value){renderHistory(true);deliverPresented();read()}}
+ function setOpen(value){open=value;pane.hidden=!value;onOpenChange(value);syncStage();syncCompanion();if(value){renderHistory(true);deliverPresented();read()}}
  const readMessages=new Set(),presented=new Set(),liveCaptions=new Map(),positions=new Map()
  const newMessages=button(t('查看新消息'),()=>{history.scrollTop=history.scrollHeight;newMessages.hidden=true;deliverPresented();read()},pane);newMessages.className='chat-new-messages';newMessages.hidden=true
  const read=()=>markVisibleRead({c,document,history,readMessages,chatOpen:open})
@@ -169,8 +179,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  function renderMessage(message){
   const feedId=typeof message.id==='string'&&message.id.startsWith('feed:')?message.id.slice(5):null
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
-  if(feed){const {delivery,...content}=feed,memory=c.snapshot?.memory?.entries?.filter(entry=>feed.memory_refs?.some(ref=>ref.entry_id===entry.id)),key=JSON.stringify([message,content,memory,c.connected,Boolean(feed.expires_at&&Date.parse(feed.expires_at)<=Date.now()),Boolean(feed.snooze_until&&Date.parse(feed.snooze_until)>Date.now())]),cached=feedNodes.get(message.id);if(cached?.key===key)return cached.node;const holder=el('article',undefined,'message assistant message-feed');holder.dataset.messageId=message.id;holder.append(el('small','Nova','message-role'));renderFeedCard(holder,feed,{el,button,chips,command:(m,p)=>c.command(m,p),openFeed:(id,label)=>run(async()=>{const feed=c.snapshot?.feed?.find(item=>item.id===id);if(feed?.task_ref){const work=feed.task_ref.work_id,task=c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work)||work.startsWith('verified:'+task.id+':'));if(!task)throw Error(t('任务记录暂不可用，请在任务页核对。'));await openTask?.(task.id);return}await onHome();await focusReference([{kind:'feed',id,updated_at:feed.updated_at}])}),visible:false,presented,memory:c.snapshot?.memory?.entries,connected:c.connected,currentItem:()=>c.snapshot?.feed?.find(item=>item.id===feed.id),body:text=>renderMarkdown(text,{openLink})});feedNodes.set(message.id,{key,node:holder});return holder}
-  const node=el('article',undefined,`message ${message.role==='user'?'user':'assistant'}`);node.dataset.messageId=message.id;node.append(el('small',message.role==='user'?'你':'Nova','message-role'))
+  if(feed){const {delivery,...content}=feed,memory=c.snapshot?.memory?.entries?.filter(entry=>feed.memory_refs?.some(ref=>ref.entry_id===entry.id)),key=JSON.stringify([message,content,memory,c.connected,Boolean(feed.expires_at&&Date.parse(feed.expires_at)<=Date.now()),Boolean(feed.snooze_until&&Date.parse(feed.snooze_until)>Date.now())]),cached=feedNodes.get(message.id);if(cached?.key===key)return cached.node;const holder=el('article',undefined,'message assistant message-feed');holder.dataset.messageId=message.id;holder.append(el('small',identityView?.profile.assistantName??'Nova','message-role'));renderFeedCard(holder,feed,{el,button,chips,command:(m,p)=>c.command(m,p),openFeed:(id,label)=>run(async()=>{const feed=c.snapshot?.feed?.find(item=>item.id===id);if(feed?.task_ref){const work=feed.task_ref.work_id,task=c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work)||work.startsWith('verified:'+task.id+':'));if(!task)throw Error(t('任务记录暂不可用，请在任务页核对。'));await openTask?.(task.id);return}await onHome();await focusReference([{kind:'feed',id,updated_at:feed.updated_at}])}),visible:false,presented,memory:c.snapshot?.memory?.entries,connected:c.connected,currentItem:()=>c.snapshot?.feed?.find(item=>item.id===feed.id),body:text=>renderMarkdown(text,{openLink})});feedNodes.set(message.id,{key,node:holder});return holder}
+  const node=el('article',undefined,`message ${message.role==='user'?'user':'assistant'}`);node.dataset.messageId=message.id;node.append(el('small',message.role==='user'?'你':identityView?.profile.assistantName??'Nova','message-role'))
   if(message.role==='user')node.append(el('p',message.text));else node.append(renderMarkdown(message.text,{openLink}))
   if(message.schedule_ref&&openSchedule){const ref=message.schedule_ref,card=el('div',undefined,'message-schedule');card.dataset.scheduleId=ref.schedule_id;const schedule=c.snapshot?.schedules?.items?.find(item=>item.id===ref.schedule_id);card.append(el('span','◷','schedule-emblem'));button(schedule?.title??t('查看定时任务'),()=>openSchedule(ref.schedule_id),card);if(ref.task_id)button(t('查看任务'),()=>openTask(ref.task_id),card);node.append(card)}
   if(message.references?.length)node.append(el('small',t('引用 {0} 个事项',message.references.length),'message-reference'));
@@ -188,7 +198,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const previousNodes=[...history.children],focused=history.contains(document.activeElement)?document.activeElement:null
   history.replaceChildren()
   if(c.selectedId==='chat:main'&&c.snapshot?.conversations?.home_truncated)history.append(el('p',t('部分提醒历史已收起，可从会话列表查看原对话。'),'hint'))
-  if(!persisted.length&&!live.length)history.append(intro)
+  if((c.selectedId==='chat:main'&&identityView&&!identityView.profile.introduced)||(!persisted.length&&!live.length))history.append(c.selectedId==='chat:main'?intro:emptyConversation)
   let day=null
   for(const message of [...persisted,...live]){
    if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
@@ -200,7 +210,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   renderedMessages=key;renderedConversation=c.selectedId
   const position=changedConversation?positions.get(c.selectedId):null
   history.scrollTop=changedConversation?(position&&!position.bottom?position.top:history.scrollHeight):nearBottom?history.scrollHeight:previousTop
-  newMessages.hidden=changedConversation||nearBottom
+  if(c.selectedId==='chat:main'&&identityView&&!identityView.profile.introduced&&(changedConversation||previousTop===0))history.scrollTop=0
+  newMessages.hidden=(!persisted.length&&!live.length)||changedConversation||nearBottom
  }
  /** Receipts follow visibility, not transcript rebuilds: expanding the workbench or reopening the pane re-checks every rendered card. */
  function deliverPresented(){
@@ -211,6 +222,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   }
  }
  function update(){
+  assistantWelcome?.sync()
+  syncCompanion()
   renderSource()
   const tasks=(c.snapshot?.tasks??[]).filter(t=>c.selectedId==='chat:main'||t.conversation_id===c.selectedId)
   for(const [id,node]of cardNodes)if(!tasks.some(t=>t.id===id)){node.remove?.();cardNodes.delete(id)}
@@ -250,5 +263,5 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   }
   if(frame.type==='personal.state')for(const message of frame.conversations?.messages??[])if(message.turn_id)liveCaptions.delete(`${message.conversation_id}:${message.turn_id}`)
  }
- return {element:pane,update,receive,focusDraft,focusReference,reveal,setOpen,setOrb,setOrbLevel,get open(){return open},history}
+ return {identity,element:pane,update,receive,focusDraft,focusReference,reveal,setOpen,setOrb,setOrbLevel,get open(){return open},history}
 }

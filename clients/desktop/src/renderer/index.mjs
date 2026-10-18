@@ -1,3 +1,5 @@
+import {mountOrbIdle} from './idle-avatar.mjs'
+import {mountWelcomeFlow} from './welcome-flow.mjs'
 import {mountPersonalView} from './personal-view.mjs'
 import {t} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
@@ -73,6 +75,7 @@ const retainedResults = new Map()
 let projectRoster = []
 let taskBanner = null
 let personalView = null
+let welcomeFlow = null
 let savedNarrationMode = 'smart'
 let bubbleMode = 'milestones'
 let pendingNarrationMode = null
@@ -165,6 +168,8 @@ const visual = createSkinVisual(document.querySelector('.orb-canvas'), {
   getSpeakingLevel: () => getPlaybackLevel(),
 })
 
+const idleOrb=mountOrbIdle(orb,document.querySelector('.orb-canvas'),document.querySelector('#orb-idle-video'))
+
 function setTextPalette(palette, durationMs) {
   shell.style.setProperty('--palette-transition-duration', `${durationMs}ms`)
   shell.dataset.palette = palette
@@ -182,6 +187,7 @@ let customSkinActive = false
 function applySkin(settings = {}) {
   customSkinActive = settings.skinId && settings.skinId !== 'nova'
   visual.setSkin(settings)
+  idleOrb.settings(settings)
   paletteHover.reset(settings.palette)
   syncPaletteAccessibility()
 }
@@ -410,6 +416,7 @@ function render() {
   cameraToggle.setAttribute('aria-label', t("视觉设置"))
   window.novaPersonalAgentDesktop?.visor?.report({state:state.name,muted:axes.muted,activated:axes.activated})
   visual.setState(state.name, { codexWorking: axes.codex === 'working' })
+  idleOrb.state(state.name,{codexWorking:axes.codex==='working'})
   personalView?.setOrb({ name: state.name, statusLine: sleeping ? t('已休眠 · 点击唤醒') : state.statusLine, codexWorking: axes.codex === 'working' })
   acknowledgeVisibleConfirmation(state)
 }
@@ -1259,6 +1266,7 @@ async function boot() {
     receivedStatus = true
     axes.backendState = status.state
     personalView.startup(status.startup)
+    welcomeFlow?.startup(status.startup)
     render()
   })
   try {
@@ -1273,7 +1281,7 @@ async function boot() {
     bubbleMode = bootstrap.settings?.progressBubbles ?? 'milestones'
     axes.platform = bootstrap.platform
     taskBanner.setPlatform(bootstrap.platform)
-    if (!receivedStatus) personalView.startup(bootstrap.startup)
+    if (!receivedStatus) {personalView.startup(bootstrap.startup);welcomeFlow?.startup(bootstrap.startup)}
     if (!receivedStatus) axes.backendState = typeof bootstrap.backendStatus === 'string'
       ? bootstrap.backendStatus
       : 'stopped'
@@ -1492,8 +1500,10 @@ window.addEventListener('beforeunload', () => {
   reducedMotionQuery.removeEventListener('change', syncPaletteAccessibility)
   highContrastQuery.removeEventListener('change', syncPaletteAccessibility)
   paletteHover.destroy()
+  idleOrb.destroy()
   visual.destroy()
   void deactivateCapture()
 })
 render()
+welcomeFlow = mountWelcomeFlow({api:window.novaPersonalAgentDesktop,onProfile:value=>{personalView.identity(value);idleOrb.profile(value)}})
 void boot()

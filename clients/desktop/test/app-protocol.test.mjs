@@ -308,3 +308,13 @@ test('WHATWG Request canonicalization makes dot aliases the canonical fixed came
   }
   assert.equal(cameraCalls.length, 3)
 })
+
+ test('bundled idle movie is allowlisted and forwards byte-range headers for native looping',async()=>{
+ const rendererFiles=await buildRendererAssetGraph(ACTUAL_RENDERER_ROOT)
+ assert.ok(rendererFiles.includes('/assets/nova-idle.mp4'))
+ let handler,range
+ installAppProtocol({handle:(_,fn)=>{handler=fn}},{rendererRoot:ACTUAL_RENDERER_ROOT,rendererFiles,fetchFile:(_file,options)=>{range=options.headers.get('range');return new Response('video',{status:206})}})
+ assert.equal((await handler(new Request('nova://orb/assets/nova-idle.mp4',{headers:{range:'bytes=100-200'}}))).status,206)
+ assert.equal(range,'bytes=100-200')
+ assert.equal((await handler(new Request('nova://orb/assets/other.mp4'))).status,404)
+ })

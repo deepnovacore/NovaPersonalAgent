@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     },
     onRefresh:callback=>{const listener=()=>{lastVisorState=null;callback()};ipcRenderer.on('nova:visor:refresh',listener);return ()=>ipcRenderer.removeListener('nova:visor:refresh',listener)},
   }),
+  welcome: Object.freeze({
+    get:()=>ipcRenderer.invoke('nova:welcome:get'),
+    save:patch=>ipcRenderer.invoke('nova:welcome:save',patch),
+    avatar:(reset=false)=>ipcRenderer.invoke('nova:welcome:avatar',reset),
+    permission:kind=>ipcRenderer.invoke('nova:welcome:permission',kind),
+    onChanged:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('nova:welcome:changed',listener);return()=>ipcRenderer.removeListener('nova:welcome:changed',listener)},
+  }),
   personal: Object.freeze({
     openArticle: url => ipcRenderer.invoke('nova:personal:article', url),
     setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),

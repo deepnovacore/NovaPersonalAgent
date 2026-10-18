@@ -3,13 +3,32 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:*; img-src 'none'; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:*; img-src data:; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>Nova Personal Agent Desktop</title>
     <link rel="stylesheet" href="./index.css">
     <link rel="stylesheet" href="./task-banner.css">
     <link rel="stylesheet" href="./workbench.css">
+    <link rel="stylesheet" href="./welcome.css">
   </head>
   <body>
+    <section id="welcome-screen" class="welcome-screen" hidden aria-label="开始使用 nova">
+      <div class="welcome-loading">
+        <div class="welcome-portrait"><span class="welcome-spinner" aria-hidden="true"></span><img data-welcome-avatar alt="助手头像"></div>
+        <h1 data-welcome-name>nova</h1>
+        <p data-welcome-status role="status" aria-live="polite">正在准备你的工作台…</p>
+        <button data-welcome-settings type="button" hidden>打开设置并重试</button>
+        <button data-welcome-skip type="button" hidden>先完成欢迎设置</button>
+      </div>
+      <div class="welcome-permissions" hidden>
+        <p class="welcome-eyebrow">开始之前</p><h1>让 nova 按你的选择工作</h1>
+        <p class="welcome-lead">选择要开放的权限。你可以随时在设置中调整，也可以稍后再说。</p>
+        <div data-permission-cards></div>
+        <p class="welcome-footnote">请在系统设置中选择当前运行的 Nova；源码开发时可能显示 Electron。授权屏幕录制后可能需要重启应用。</p>
+        <button type="button" class="welcome-primary" data-permission-continue>继续，认识 nova</button>
+      </div>
+      <div data-welcome-error class="welcome-error" role="alert" hidden>暂时无法读取或保存设置，请重试。</div>
+      <button type="button" data-welcome-reload class="welcome-reload" hidden>重新读取设置</button>
+    </section>
     <main id="shell" data-state="booting" data-confirmation-placement="below">
       <div id="bubble-stack" aria-label="任务进度" aria-live="polite"></div>
       <section id="task-banner" class="task-banner" aria-label="编程任务" hidden>
@@ -18,6 +37,7 @@
       </section>
       <div id="orb" role="img" aria-label="Nova Personal Agent 正在启动">
         <canvas class="orb-canvas" aria-hidden="true"></canvas>
+        <video id="orb-idle-video" src="./assets/nova-idle.mp4" muted loop playsinline preload="metadata" aria-hidden="true" hidden></video>
         <span id="capture-indicator" class="capture-indicator" aria-hidden="true"></span>
         <span id="unread-indicator" class="unread-indicator" aria-hidden="true" hidden></span>
       </div>
