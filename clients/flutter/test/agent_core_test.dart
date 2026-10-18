@@ -140,11 +140,10 @@ void main() {
     await expectLater(
       ModelClient().stream(config, []).toList(),
       throwsA(
-        isA<AgentFailure>().having(
-          (e) => e.code,
-          'code',
-          'model_request_failed',
-        ),
+        isA<ModelRequestFailure>()
+            .having((e) => e.code, 'code', 'model_http_302')
+            .having((e) => e.status, 'status', 302)
+            .having((e) => e.toString(), 'display', isNot(contains('secret'))),
       ),
     );
     expect(requests, 1);

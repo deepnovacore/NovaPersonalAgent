@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../../context/source_store.dart';
 import '../../context/secure_persistence.dart';
+import '../../context/profile_observation_checkpoint.dart';
 import '../../personal/life_reducer.dart';
 import 'api.dart';
 import 'auth.dart';
@@ -17,10 +18,15 @@ class FeishuHost extends ChangeNotifier {
           sources ??
           SourceStore(
             const SecureContextPersistence('nova.feishu.sources.v1'),
-            onInvalidated: () => const SecureContextPersistence(
-              'nova.profile.local.v1',
-            ).write('null'),
+            onInvalidated: invalidateDerivedProfile,
           );
+  static Future<void> invalidateDerivedProfile() async {
+    await const SecureContextPersistence('nova.profile.local.v1').write('null');
+    await ProfileObservationCheckpoint.invalidate(
+      const SecureContextPersistence(ProfileObservationCheckpoint.storageKey),
+    );
+  }
+
   final FeishuAuth auth;
   final SourceStore sources;
   late final ingest = FeishuIngest(auth, sources);
@@ -63,9 +69,7 @@ class FeishuHost extends ChangeNotifier {
       final identity = auth.identityKey, generation = auth.generation;
       if (sources.identity != identity || sources.generation != generation) {
         await sources.bind(identity, generation);
-        await const SecureContextPersistence(
-          'nova.profile.local.v1',
-        ).write('null');
+        await invalidateDerivedProfile();
       }
     });
     _identityTail = result.then<void>(
@@ -86,7 +90,7 @@ class FeishuHost extends ChangeNotifier {
     for (final chat in sources.sources) {
       if (ids.contains(remoteSource(hub, chat))) await sources.remove(chat);
     }
-    await const SecureContextPersistence('nova.profile.local.v1').write('null');
+    await invalidateDerivedProfile();
   }
 
   Future<void> disconnect({bool revoke = false}) async {

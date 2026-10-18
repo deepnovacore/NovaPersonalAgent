@@ -11,6 +11,7 @@ import 'profile_corrections.dart';
 import 'profile_evidence.dart';
 import 'profile_writer.dart';
 import 'profile_budget.dart';
+import 'profile_observation_checkpoint.dart';
 
 /// Phone-owned orchestration; desktop's observation/write/review recipe in Dart.
 class ProfileAgent {
@@ -81,6 +82,7 @@ class ProfileAgent {
                         'invalid_profile_observation_refs',
                         'invalid_profile_review',
                         'insufficient_profile_evidence',
+                        'profile_context_too_large',
                         'corrections_changed',
                         'authorization_changed',
                         'provider_changed',
@@ -91,7 +93,9 @@ class ProfileAgent {
                     message,
                   _ => null,
                 };
-      _report('整理未完成${reason == null ? '' : '：$reason'}，消息仍保存在手机。');
+      _report(
+        '整理未完成${reason == null ? '' : '：$reason'}，消息仍保存在手机。已保存的观察可在资料和授权未变化时继续使用。',
+      );
       rethrow;
     } finally {
       deadlineTimer.cancel();
@@ -120,18 +124,20 @@ class ProfileAgent {
       connector.sources.readAuthorizedEvidence(provider, 'profile'),
       validThrough: connector.sources.now().add(maxDuration),
     );
-    void checkRun() {
-      if (_cancelled) throw const AgentFailure('cancelled');
+    void checkRun({bool ignoreCancellation = false}) {
+      if (_cancelled && !ignoreCancellation) {
+        throw const AgentFailure('cancelled');
+      }
       if (evidence.expired(connector.sources.now())) {
         throw const AgentFailure('source_expired');
       }
     }
 
-    Future<void> validate() async {
-      checkRun();
+    Future<void> validate({bool ignoreCancellation = false}) async {
+      checkRun(ignoreCancellation: ignoreCancellation);
       await corrections.open();
       final current = await models.read();
-      checkRun();
+      checkRun(ignoreCancellation: ignoreCancellation);
       if (corrections.context(repository.correctionScope, provider) !=
           correctionContext) {
         throw StateError('corrections_changed');
@@ -140,7 +146,8 @@ class ProfileAgent {
         throw StateError('authorization_changed');
       }
       if (current == null ||
-          '${current.endpoint}|${current.model}' != provider) {
+          '${current.endpoint}|${current.model}' != provider ||
+          current.protocol != model.protocol) {
         throw StateError('provider_changed');
       }
       authority.validatePublish(epoch);
@@ -156,6 +163,33 @@ class ProfileAgent {
         throw StateError('stale_inputs');
       }
     }
+
+    final checkpoint = evidence.expiresAt == null
+        ? null
+        : ProfileObservationCheckpoint(
+            const SecureContextPersistence(
+              ProfileObservationCheckpoint.storageKey,
+            ),
+            scope: ProfileObservationCheckpoint.digest({
+              'algorithm': ProfileObservationCheckpoint.algorithm,
+              'provider': provider,
+              'protocol': model.protocol.name,
+              'account': connector.sources.identity,
+              'auth_generation': generation,
+              'source_generation': connector.sources.generation,
+              'space': authority.record['space_id'],
+              'device': authority.localDeviceId,
+              'epoch': epoch,
+              'authority_generation': authorityGeneration,
+              'source_revision': sourceRevision,
+              'consent_revision': consentRevision,
+              'corrections': correctionContext,
+              'evidence': evidence.checkpointDigest,
+            }),
+            expiresAt: evidence.expiresAt!,
+            now: connector.sources.now,
+            authorize: () => validate(ignoreCancellation: true),
+          );
 
     Future<Map<String, dynamic>> complete(
       String stage,
@@ -239,6 +273,32 @@ class ProfileAgent {
     connector.addListener(changed);
     authority.addListener(changed);
     var outcome = 'interrupted';
+    final writer = ProfileWriter(
+      complete: complete,
+      onProgress: _report,
+      loadValidatedBatch: checkpoint == null
+          ? null
+          : (messages) async {
+              await validate();
+              final value = await checkpoint.load(messages);
+              await validate();
+              return value;
+            },
+      saveValidatedBatch: checkpoint == null
+          ? null
+          : (messages, facts) async {
+              await validate();
+              await checkpoint.save(messages, facts);
+              await validate();
+            },
+    );
+    final cachedCounts = connector.sources.statusCounts;
+    final skippedSources = connector.sources.skippedSummary;
+    final excludedEvidence = {
+      'near_expiry': evidence.expiringCount,
+      'copied_participant_text': evidence.copiedCount,
+      'empty_or_redacted': evidence.emptyOrRedactedCount,
+    };
     try {
       await receipt.write(
         jsonEncode({
@@ -248,7 +308,6 @@ class ProfileAgent {
           'consent_revision': consentRevision,
         }),
       );
-      final writer = ProfileWriter(complete: complete, onProgress: _report);
       _report(
         '正在分批归纳飞书文本…${evidence.expiringCount == 0 ? '' : '已跳过 ${evidence.expiringCount} 条将在处理期间到期的消息。'}',
       );
@@ -271,9 +330,23 @@ class ProfileAgent {
         throw const AgentFailure('profile_not_published');
       }
       outcome = 'completed';
+      if (writer.incompleteBatches == 0) await checkpoint?.clear();
       _report(
-        '整理完成，读取 ${evidence.records.length} 条可用文本，已完成模型审查。${writer.incompleteBatches == 0 ? '' : '其中 ${writer.incompleteBatches} 批有观察未通过核对，已排除，结果不完整。'}',
+        '整理完成：缓存中 ${cachedCounts['available'] ?? 0} 条可用文本，${writer.observedRecordCount + writer.reusedObservationRecordCount} 条合格文本完成分批观察（本轮 ${writer.observedRecordCount} 条、复用 ${writer.reusedObservationRecordCount} 条）；最终撰写与审查使用 ${writer.selectedOriginalCount} 条完整原文和 ${writer.selectedObservationCount} 条观察。'
+        '未进入最终上下文：${writer.sourceRecordCount - writer.selectedOriginalCount} 条原文、${writer.observationCount - writer.selectedObservationCount} 条观察（按相关性与容量筛选）。'
+        '${skippedSources.isEmpty ? '' : '未送入模型：$skippedSources。'}'
+        '${excludedEvidence.values.every((n) => n == 0) ? '' : '观察前排除：${evidence.expiringCount} 条即将到期、${evidence.copiedCount} 条重复转贴他人正文、${evidence.emptyOrRedactedCount} 条空白或脱敏后无内容。'}'
+        '${writer.incompleteBatches == 0 ? '' : '${writer.incompleteBatches} 批观察未全部通过核对，仅使用已通过部分，结果不完整。'}',
       );
+    } catch (error) {
+      // Cancel/time limits keep valid completed work; permission or source
+      // changes erase it even when publication failed before a cache operation.
+      try {
+        await validate(ignoreCancellation: true);
+      } catch (_) {
+        await checkpoint?.clear();
+      }
+      rethrow;
     } finally {
       connector.removeListener(changed);
       authority.removeListener(changed);
@@ -285,6 +358,9 @@ class ProfileAgent {
           'source_revision': sourceRevision,
           'consent_revision': consentRevision,
           'finished_at': DateTime.now().toUtc().toIso8601String(),
+          'coverage': writer.coverage,
+          'cached_message_statuses': cachedCounts,
+          'excluded_before_observations': excludedEvidence,
         }),
       );
     }

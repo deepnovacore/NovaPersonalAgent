@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'profile_text.dart';
+import 'profile_observation_checkpoint.dart';
+import 'source_store.dart' show sourceAccessExpiry;
 
 /// Short run-local references keep storage identifiers out of model context.
 class ProfileEvidence {
@@ -25,14 +27,15 @@ class ProfileEvidence {
       if (item['relation'] == 'self' &&
           prior != null &&
           prior <= (item['created_at'] as int)) {
+        copiedCount++;
         continue;
       }
       final safeText = profileSafeText(item['text'] as String);
-      if (safeText.replaceAll('[redacted]', '').trim().isEmpty) continue;
-      final expiry = DateTime.fromMillisecondsSinceEpoch(
-        item['created_at'] as int,
-        isUtc: true,
-      ).add(const Duration(days: 30));
+      if (safeText.replaceAll('[redacted]', '').trim().isEmpty) {
+        emptyOrRedactedCount++;
+        continue;
+      }
+      final expiry = sourceAccessExpiry(item);
       if (validThrough != null && !expiry.isAfter(validThrough)) {
         expiringCount++;
         continue;
@@ -65,9 +68,14 @@ class ProfileEvidence {
     }
   }
   final records = <Map<String, dynamic>>[];
-  int expiringCount = 0;
+  int expiringCount = 0, copiedCount = 0, emptyOrRedactedCount = 0;
   final _ids = <String, String>{};
   DateTime? _expiresAt;
+  DateTime? get expiresAt => _expiresAt;
+  String get checkpointDigest => ProfileObservationCheckpoint.digest({
+    'mapping': _ids,
+    'records': records,
+  });
   bool expired(DateTime now) =>
       _expiresAt != null && !now.isBefore(_expiresAt!);
 

@@ -58,7 +58,7 @@ void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
       throw StateError('ungrounded_projection');
     }
     final kind = item['kind'] ?? 'profile';
-    if (!['profile', 'timeline'].contains(kind)) {
+    if (!['profile', 'timeline', 'todo_candidate'].contains(kind)) {
       throw StateError('invalid_projection_kind');
     }
     if (kind == 'profile' &&
@@ -69,10 +69,14 @@ void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
       });
     }
     final refs = (item['evidence_ids'] as List).map((id) => originals[id]!);
-    if (kind == 'profile' && refs.any((e) => e['relation'] != 'self')) {
+    if ((kind == 'profile' || kind == 'todo_candidate') &&
+        refs.any((e) => e['relation'] != 'self')) {
       throw StateError('profile_requires_self_evidence');
     }
-    if (kind == 'timeline') {
+    if (kind == 'todo_candidate' && (item['text'] as String).length > 200) {
+      throw StateError('ungrounded_projection');
+    }
+    if (kind == 'timeline' || kind == 'todo_candidate') {
       final date = item['observed_at'] is String
           ? DateTime.tryParse(item['observed_at'])
           : null;
@@ -194,6 +198,40 @@ class ProfileRepository {
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
+  }
+
+  /// Only an explicit user adoption calls this method. The existing Life mutation
+  /// owns persistence, synchronization and operation-id deduplication.
+  Future<Map<String, dynamic>> adoptTodo(
+    String key, {
+    required String expectedText,
+    required Future<Map<String, dynamic>> Function(Map<String, dynamic>, String)
+    mutate,
+  }) async {
+    final current = value;
+    final candidates = current == null
+        ? <dynamic>[]
+        : current['entries'] as List;
+    final matching = candidates.where(
+      (e) =>
+          e['kind'] == 'todo_candidate' &&
+          e['key'] == key &&
+          e['text'] == expectedText,
+    );
+    if (matching.length != 1) throw StateError('stale_todo_candidate');
+    final candidate = matching.single as Map;
+    final operation = lifeFingerprint({
+      'kind': 'adopt_feishu_todo',
+      'scope': correctionScope,
+      'text': candidate['text'],
+      'evidence': (candidate['evidence_ids'] as List).cast<String>().toList()
+        ..sort(),
+    });
+    return mutate({
+      'op': 'create',
+      'kind': 'todo',
+      'title': candidate['text'],
+    }, operation);
   }
 
   Future<void> clear() async {
