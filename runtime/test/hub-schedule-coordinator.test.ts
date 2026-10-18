@@ -10,15 +10,15 @@ test('shared definitions enter the ordinary scheduler only on the owner; reserve
  const dir=await realpath(await mkdtemp(join(tmpdir(),'nova-shared-schedule-'))),hub=new HubStore(':memory:')
  let now=new Date('2026-10-17T08:00:00.000Z')
  const a=hub.enroll('s','a','desktop'),b=hub.enroll('s','b','desktop');hub.authority.initialize(a.token)
- const request=(token:string)=>async(path:string,body?:unknown):Promise<unknown>=>{
-  if(path==='identity')return hub.identity(token)
-  if(path==='authority')return hub.authority.snapshot(token)
-  if(path==='schedule-owners')return hub.scheduleOwnership.list(token)
-  if(path==='schedule-owners/register')return hub.scheduleOwnership.register(token,body)
-  if(path==='schedule-owners/claim')return hub.scheduleOwnership.claim(token,body)
-  if(path==='schedule-owners/checkpoint')return hub.scheduleOwnership.checkpoint(token,body)
+ const request=(token:string)=>(path:string,body?:unknown):Promise<unknown>=>{try{
+  if(path==='identity')return Promise.resolve(hub.identity(token));
+  if(path==='authority')return Promise.resolve(hub.authority.snapshot(token));
+  if(path==='schedule-owners')return Promise.resolve(hub.scheduleOwnership.list(token));
+  if(path==='schedule-owners/register')return Promise.resolve(hub.scheduleOwnership.register(token,body));
+  if(path==='schedule-owners/claim')return Promise.resolve(hub.scheduleOwnership.claim(token,body));
+  if(path==='schedule-owners/checkpoint')return Promise.resolve(hub.scheduleOwnership.checkpoint(token,body));
   throw Error('unexpected_request')
- }
+ }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}
  const one=new ScheduleService(join(dir,'a.json'),undefined,()=>now),two=new ScheduleService(join(dir,'b.json'),undefined,()=>now)
  try{
   await one.open();await two.open();one.coordinator=new HubScheduleCoordinator(one,request(a.token));two.coordinator=new HubScheduleCoordinator(two,request(b.token))

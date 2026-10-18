@@ -5,7 +5,7 @@ import {spaceId} from '../device/space-authority.js'
 import type {HubSpaceAuthority} from './space-authority.js'
 
 const revision=z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-export const sourceFact=z.object({kind:z.literal('source_fact'),source_id:spaceId,grant_revision:revision,evidence_id:spaceId,resource_id:z.string().min(1).max(200),source_version:z.string().min(1).max(100),text:z.string().max(16000),relation:z.enum(['self','participant','unknown']).optional(),occurred_at:z.string().datetime()}).strict()
+export const sourceFact=z.object({kind:z.literal('source_fact'),source_id:spaceId,grant_revision:revision,evidence_id:spaceId,resource_id:z.string().min(1).max(200),source_version:z.string().min(1).max(100),text:z.string().max(16000),relation:z.enum(['self','participant','unknown']).optional(),occurred_at:z.string().datetime(),fetched_at:z.string().datetime().optional()}).strict()
 const payloadSchema=z.discriminatedUnion('kind',[
  sourceFact,
  z.object({kind:z.literal('grant'),source_id:spaceId,revision:revision,provider:z.string().min(1).max(2048),purpose:z.literal('profile'),allow_upload:z.boolean(),allow_processing:z.boolean()}).strict(),
@@ -15,9 +15,13 @@ const payloadSchema=z.discriminatedUnion('kind',[
 export const contextEventSchema=z.object({protocol_version:z.literal(1),space_id:spaceId,producer_device_id:spaceId,producer_seq:revision.refine(n=>n>0),event_id:spaceId,payload:payloadSchema}).strict()
 type Event=z.infer<typeof contextEventSchema>
 type Fact=z.infer<typeof sourceFact>
+// Access retention never changes the original event's date. Legacy clients keep
+// their former deadline; replaying an event does not grant fresh access.
+const accessTime=(fact:Fact)=>Date.parse(fact.fetched_at??fact.occurred_at)
+const factContent=(fact:Fact)=>{const content={...fact};delete content.fetched_at;return content}
 const entrySchema=z.object({key:spaceId,text:z.string().max(4000),evidence_ids:z.array(spaceId).min(1).max(100)}).strict()
 const projectionSchema=z.object({authority_epoch:revision,expected_revision:revision,input_cursor:revision,provider:z.string().min(1).max(2048),entries:z.array(entrySchema).max(200)}).strict()
-type Projection={revision:number;authority_epoch:number;publisher_device_id:string;input_cursor:number;entries:{key:string;text:string;evidence_ids:string[];explicit?:boolean}[]}
+interface Projection {revision:number;authority_epoch:number;publisher_device_id:string;input_cursor:number;entries:{key:string;text:string;evidence_ids:string[];explicit?:boolean}[]}
 interface ContextState {
  cursor:number;revision:number;facts:Record<string,Fact>;grants:Record<string,{owner:string;value:Extract<Event['payload'],{kind:'grant'}>}>;
  corrections:Record<string,{value:string;event_id:string;provider?:string;updated_at?:string}>;tombstones:Record<string,number>;derived:Projection|null;
@@ -42,7 +46,7 @@ export class HubContextSync {
  private read(account:string):ContextState {
   const row=this.db.prepare('SELECT value FROM hub_context WHERE account_id=?').get(account)
   const state:ContextState=row?JSON.parse(String(row.value)) as ContextState:{cursor:0,revision:0,facts:{},grants:{},corrections:{},tombstones:{},derived:null}
-  const expired=Object.values(state.facts).filter(f=>Date.parse(f.occurred_at)<=Date.now()-30*86400000)
+  const expired=Object.values(state.facts).filter(f=>accessTime(f)<=Date.now()-30*86400000)
   if(expired.length){
    const prune=()=>{
     for(const fact of expired){delete state.facts[fact.evidence_id];this.db.prepare("UPDATE hub_context_log SET value='null' WHERE account_id=? AND json_extract(value,'$.payload.evidence_id')=?").run(account,fact.evidence_id)}
@@ -83,11 +87,14 @@ export class HubContextSync {
      const grant=state.grants[payload.source_id]?.value
      if(!grant?.allow_upload||grant.revision!==payload.grant_revision)throw Error('upload_consent_required')
      const old=state.facts[payload.evidence_id]
-     if(old&&hash({...old,grant_revision:payload.grant_revision})!==hash(payload))throw Error('evidence_conflict')
+     if(old&&hash(factContent({...old,grant_revision:payload.grant_revision}))!==hash(factContent(payload)))throw Error('evidence_conflict')
      const duplicate=Object.values(state.facts).find(f=>f.source_id===payload.source_id&&f.resource_id===payload.resource_id&&f.source_version===payload.source_version)
-     if(duplicate&&hash({...duplicate,evidence_id:payload.evidence_id,grant_revision:payload.grant_revision})!==hash(payload))throw Error('evidence_conflict')
-     if(Date.parse(payload.occurred_at)>Date.now()+300000)throw Error('source_time_invalid')
-     if(Date.parse(payload.occurred_at)>Date.now()-30*86400000&&(!duplicate||old))state.facts[payload.evidence_id]=payload
+     if(duplicate&&hash(factContent({...duplicate,evidence_id:payload.evidence_id,grant_revision:payload.grant_revision}))!==hash(factContent(payload)))throw Error('evidence_conflict')
+     if(Date.parse(payload.occurred_at)>Date.now()+300000||accessTime(payload)>Date.now()+300000||accessTime(payload)<Date.parse(payload.occurred_at)-300000)throw Error('source_time_invalid')
+     if(payload.fetched_at!==undefined&&state.grants[payload.source_id]?.owner!==device.device_id&&(!duplicate||accessTime(payload)>accessTime(duplicate)))throw Error('source_owner_required')
+     if(accessTime(payload)>Date.now()-30*86400000&&(!duplicate||old)){
+      state.facts[payload.evidence_id]=old&&accessTime(old)>accessTime(payload)?{...payload,fetched_at:old.fetched_at??old.occurred_at}:payload
+     }
     }else if(payload.kind==='delete_source'){
      const minimum=Math.max(state.tombstones[payload.source_id]??0,state.grants[payload.source_id]?.value.revision??0)
      if(payload.revision<=minimum)throw Error('stale_consent')
@@ -96,7 +103,7 @@ export class HubContextSync {
     }else{state.corrections[payload.key]={value:payload.value,event_id:event.event_id,updated_at:payload.updated_at??new Date().toISOString(),...(payload.provider?{provider:payload.provider}:{})};state.derived=null}
     const cursor=++state.cursor
     this.db.prepare('INSERT INTO hub_context_receipts VALUES(?,?,?,?,?,?)').run(account,event.event_id,device.device_id,event.producer_seq,digest,cursor)
-    const expired=payload.kind==='source_fact'&&Date.parse(payload.occurred_at)<=Date.now()-30*86400000
+    const expired=payload.kind==='source_fact'&&accessTime(payload)<=Date.now()-30*86400000
     this.db.prepare('INSERT INTO hub_context_log VALUES(?,?,?,?)').run(account,cursor,'source_id' in payload?payload.source_id:null,expired?'null':JSON.stringify(event))
     receipts.push({event_id:event.event_id,cursor})
    }
@@ -165,7 +172,7 @@ export class HubContextSync {
     if(!fact||!grant?.allow_processing||!grant.allow_upload||grant.provider!==input.provider||grant.revision!==fact.grant_revision)throw Error('processing_consent_required')
    }
    const entries:Projection['entries']=input.entries.filter(e=>!Object.hasOwn(state.corrections,e.key))
-   for(const [key,correction]of Object.entries(state.corrections))entries.push({key,text:correction.value,evidence_ids:[correction.event_id],explicit:true})
+   for(const [key,correction]of Object.entries(state.corrections))entries.push({key,text:correction.value,evidence_ids:[],explicit:true})
    const projection={revision:++state.revision,authority_epoch:authority.authority_epoch,publisher_device_id:device.device_id,input_cursor:state.cursor,entries}
    state.derived=projection;this.save(device.account_id,state);return projection
   })

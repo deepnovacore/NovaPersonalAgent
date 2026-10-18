@@ -58,7 +58,7 @@ export class HubRouting {
     this.db.prepare('INSERT INTO hub_tasks VALUES(?,?,?,?,?,?)').run(account,command.task_id,command.target_device_id,sender.device_id,command.command_id,JSON.stringify(projection))
    }else{
     const task=this.db.prepare('SELECT owner,sender FROM hub_tasks WHERE account_id=? AND task_id=?').get(account,command.task_id)
-    if(!task||task.owner!==command.target_device_id||![task.owner,task.sender].includes(sender.device_id))throw Error('task_control_denied')
+    if(task?.owner!==command.target_device_id||![task.owner,task.sender].includes(sender.device_id))throw Error('task_control_denied')
    }
    this.db.prepare('INSERT INTO hub_commands VALUES(?,?,?,?,?,?,NULL)').run(account,command.command_id,sender.device_id,command.target_device_id,command.expires_at,payload)
    return {command_id:command.command_id,task_id:command.task_id}
@@ -72,7 +72,7 @@ export class HubRouting {
   const ack=ackSchema.parse(raw)
   return this.transaction(()=>{
    const device=this.authenticate(token),row=this.db.prepare('SELECT target,sender,payload,deadline,decision FROM hub_commands WHERE account_id=? AND command_id=?').get(device.account_id,ack.command_id)
-   if(!row||row.target!==device.device_id)throw Error('recipient_required')
+   if(row?.target!==device.device_id)throw Error('recipient_required')
    if(row.decision!==null){if(row.decision!==ack.decision)throw Error('command_already_decided');return {command_id:ack.command_id,decision:ack.decision}}
    if(!this.live(device.account_id,String(row.sender)))throw Error('sender_revoked')
    if(Number(row.deadline)<=Date.now())throw Error('command_expired')
@@ -86,7 +86,7 @@ export class HubRouting {
   return this.transaction(()=>{
    const device=this.authenticate(token),account=device.account_id
    const row=this.db.prepare('SELECT owner,start_command,projection FROM hub_tasks WHERE account_id=? AND task_id=?').get(account,event.task_id)
-   if(!row||row.owner!==device.device_id)throw Error('owner_required')
+   if(row?.owner!==device.device_id)throw Error('owner_required')
    const ack=this.db.prepare('SELECT decision FROM hub_commands WHERE account_id=? AND command_id=?').get(account,String(row.start_command))
    if(ack?.decision!=='accepted')throw Error('task_not_accepted')
    const encoded=canonicalJson(event),prior=this.db.prepare('SELECT payload FROM hub_task_events WHERE account_id=? AND task_id=? AND seq=?').get(account,event.task_id,event.seq)

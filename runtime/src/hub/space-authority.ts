@@ -65,7 +65,7 @@ export class HubSpaceAuthority {
   spaceId.parse(transitionId)
   return this.transaction(()=>{
    const device=this.authenticate(token),record=this.read(device.account_id),pending=record?.pending
-   if(!record||!pending||pending.transition_id!==transitionId)throw Error('transition_not_found')
+   if(!record||pending?.transition_id!==transitionId)throw Error('transition_not_found')
    if(device.device_id!==pending.target_device_id)throw Error('recipient_required')
    this.kind(device.account_id,pending.from_device_id)
    if(!pending.acknowledged.includes(device.device_id)){pending.acknowledged.push(device.device_id);record.membership_revision++}
@@ -79,7 +79,7 @@ export class HubSpaceAuthority {
    const receipt=this.db.prepare('SELECT initiator,value FROM hub_authority_receipts WHERE account_id=? AND transition_id=?').get(device.account_id,transitionId)
    if(receipt){if(receipt.initiator!==device.device_id)throw Error('primary_required');return authorityRecordSchema.parse(JSON.parse(String(receipt.value)))}
    const record=this.read(device.account_id),pending=record?.pending
-   if(!record||!pending||pending.transition_id!==transitionId)throw Error('transition_not_found')
+   if(!record||pending?.transition_id!==transitionId)throw Error('transition_not_found')
    if(pending.from_device_id!==device.device_id)throw Error('primary_required')
    if(!pending.acknowledged.includes(pending.target_device_id))throw Error('handoff_incomplete')
    const kind=this.kind(device.account_id,pending.target_device_id)
@@ -93,7 +93,7 @@ export class HubSpaceAuthority {
   spaceId.parse(transitionId)
   return this.transaction(()=>{
    const device=this.authenticate(token),record=this.read(device.account_id)
-   if(!record?.pending||record.pending.transition_id!==transitionId)throw Error('transition_not_found')
+   if(record?.pending?.transition_id!==transitionId)throw Error('transition_not_found')
    if(record.primary_device_id!==device.device_id)throw Error('primary_required')
    return this.save({...record,membership_revision:record.membership_revision+1,pending:null})
   })
@@ -113,7 +113,7 @@ export class HubSpaceAuthority {
    const initiator='retired:'+request.retired_device_id
    if(prior){if(prior.initiator!==initiator||prior.target!==request.target_device_id||Number(prior.expected_epoch)!==request.expected_epoch)throw Error('transition_id_conflict');return authorityRecordSchema.parse(JSON.parse(String(prior.value)))}
    const record=this.read(account)
-   if(!record||record.authority_epoch!==request.expected_epoch)throw Error('stale_authority')
+   if(record?.authority_epoch!==request.expected_epoch)throw Error('stale_authority')
    if(record.primary_device_id!==request.retired_device_id||request.retired_device_id===request.target_device_id)throw Error('retired_primary_required')
    const kind=this.kind(account,request.target_device_id)
    if(!['desktop','mobile'].includes(kind))throw Error('device_kind_required')

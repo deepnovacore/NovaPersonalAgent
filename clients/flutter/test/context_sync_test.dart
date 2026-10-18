@@ -107,4 +107,46 @@ void main() {
       expect(repo.pendingDeletes, ['source']);
     },
   );
+
+  test(
+    'historical outbox keeps occurrence date and expires from fetched access',
+    () async {
+      var now = DateTime.utc(2026, 10, 18);
+      final disk = MemoryLifePersistence();
+      final sync = ContextSync(
+        disk,
+        (m, p, [b]) async => throw StateError('offline'),
+        now: () => now,
+      );
+      await sync.open();
+      await sync.bind(hub: 'hub', space: 'space', device: 'phone');
+      final message = {
+        'message_id': 'old',
+        'text': 'historic synthetic text',
+        'created_at': DateTime.utc(2020).millisecondsSinceEpoch,
+        'fetched_at': now.millisecondsSinceEpoch,
+      };
+      await sync.exportSource('source', 'provider', [message]);
+      await sync.exportSource('source', 'provider', [message]);
+      expect(sync.pending, 2);
+      final reopened = ContextSync(
+        disk,
+        (m, p, [b]) async => throw StateError('offline'),
+        now: () => now,
+      );
+      await reopened.open();
+      final facts = (jsonDecode(disk.value!)['outbox'] as List)
+          .where((e) => e['payload']?['kind'] == 'source_fact')
+          .toList();
+      expect(facts, hasLength(1));
+      expect(
+        facts.single['payload']['occurred_at'],
+        DateTime.utc(2020).toIso8601String(),
+      );
+      expect(facts.single['payload']['fetched_at'], now.toIso8601String());
+      now = now.add(const Duration(days: 31));
+      await reopened.open();
+      expect(disk.value, isNot(contains('historic synthetic text')));
+    },
+  );
 }

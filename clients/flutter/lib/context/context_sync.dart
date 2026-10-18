@@ -61,7 +61,7 @@ class ContextSync extends ChangeNotifier {
       final event = data['outbox'][n], payload = event['payload'];
       if (payload is Map && payload['kind'] == 'source_fact') {
         final observed = DateTime.tryParse(
-          payload['occurred_at'] as String? ?? '',
+          (payload['fetched_at'] ?? payload['occurred_at']) as String? ?? '',
         );
         if (observed == null || !observed.isAfter(cutoff)) {
           data['outbox'][n] = {
@@ -199,7 +199,8 @@ class ContextSync extends ChangeNotifier {
         'message': message['message_id'],
         'version': version,
       });
-      if (grant['items'][evidence] == true) continue;
+      final accessVersion = message['fetched_at'] ?? true;
+      if (grant['items'][evidence] == accessVersion) continue;
       _enqueue(data, {
         'kind': 'source_fact',
         'source_id': source,
@@ -209,12 +210,17 @@ class ContextSync extends ChangeNotifier {
         'source_version': version,
         'text': message['text'],
         'relation': message['relation'] ?? 'unknown',
+        if (message['fetched_at'] is int)
+          'fetched_at': DateTime.fromMillisecondsSinceEpoch(
+            message['fetched_at'],
+            isUtc: true,
+          ).toIso8601String(),
         'occurred_at': DateTime.fromMillisecondsSinceEpoch(
           message['created_at'],
           isUtc: true,
         ).toIso8601String(),
       });
-      grant['items'][evidence] = true;
+      grant['items'][evidence] = accessVersion;
     }
   });
   Future<void> forget(String source) => _write((data) {
