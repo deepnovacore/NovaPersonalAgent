@@ -22,7 +22,7 @@ export const MemoryEntrySchema = z.object({
   sources:z.array(sourceTagSchema).max(256).optional(),
   editable:z.boolean().optional(),
   commitment:z.object({direction:z.enum(['owed_by_me','owed_to_me']),due:z.iso.datetime({offset:true}).nullable(),status:z.enum(['open','done','dropped']),counterparty:z.string().optional()}).strict().optional(), origin: z.enum(['stated', 'inferred']),
-  source_refs: z.array(MemorySourceRefSchema).min(1).max(256),
+  source_refs: z.array(MemorySourceRefSchema).max(256),
   evidence_refs: z.array(text(600)).max(256).optional(),
   observed_at: z.iso.datetime({offset: true}), recorded_at: z.iso.datetime({offset: true}),
   topic: z.string().max(256), status: z.enum(['active', 'corrected', 'forgotten', 'expired']),

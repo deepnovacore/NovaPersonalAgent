@@ -3,7 +3,8 @@ const text=(value,limit)=>typeof value==='string'&&value.trim().length>0&&value.
 export function memoryOverview(entries,provided) {
  const active=entries.filter(entry=>entry.status==='active')
  const sourceCount=new Set(active.flatMap(entry=>entry.source_refs??[]).map(source=>`${source.type}:${source.ref}`)).size
- const coverage=`本页 ${active.length} 条记忆 · ${sourceCount} 处来源`
+ const unavailable=active.filter(entry=>!entry.source_refs?.length).length
+ const coverage=`本页 ${active.length} 条记忆 · ${sourceCount} 处来源${unavailable?` · ${unavailable} 条记忆来源不可用`:''}`
  const byId=new Map(active.map(entry=>[entry.id,entry]))
  const valid=provided&&text(provided.summary,1200)&&Array.isArray(provided.sections)&&provided.sections.length>0&&provided.sections.length<=4&&provided.sections.every(section=>
   section&&text(section.title,80)&&text(section.summary,1200)&&Array.isArray(section.keywords)&&section.keywords.length<=5&&section.keywords.every(word=>text(word,80))&&Array.isArray(section.refs)&&section.refs.length>0&&section.refs.every(ref=>ref&&(typeof ref.version==='string'||typeof ref.version==='number')&&byId.has(ref.entry_id)&&byId.get(ref.entry_id).version===ref.version))

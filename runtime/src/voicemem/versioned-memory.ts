@@ -23,7 +23,7 @@ export class VersionedMemory {
     })
     const topic=record.evidenceIds.map(id=>this.read('topic',id)).find(value=>typeof value==='string')
     const replacement=record.supersededBy ? this.store.memory(this.userId,'personal',record.supersededBy):undefined
-    return MemoryEntrySchema.parse({id:record.id,version:record.revision,content:record.text.slice(0,500),kind:record.kind==='trait'?'preference':record.kind==='heartnote'?'concern':'fact',origin:record.authority==='explicit'?'stated':'inferred',source_refs:refs,observed_at:record.occurredAt??refs[0]?.observed_at,recorded_at:record.recordedAt,topic:topic??record.slots[0]??'',status:record.supersededBy?'corrected':'active',corrected_to:replacement?.record.text.slice(0,500)??null,confidence_note:null})
+    return MemoryEntrySchema.parse({id:record.id,version:record.revision,content:record.text.slice(0,500),kind:record.kind==='trait'?'preference':record.kind==='heartnote'?'concern':'fact',origin:record.authority==='explicit'?'stated':'inferred',source_refs:refs,observed_at:record.occurredAt??refs[0]?.observed_at??record.recordedAt,recorded_at:record.recordedAt,topic:topic??record.slots[0]??'',status:record.supersededBy?'corrected':'active',corrected_to:replacement?.record.text.slice(0,500)??null,confidence_note:null})
   }
   list(options:MemoryListOptions={}):MemoryPage {
     const parsed=MemoryListOptionsSchema.parse(options)

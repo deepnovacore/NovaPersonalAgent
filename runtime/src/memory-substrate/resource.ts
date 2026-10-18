@@ -8,7 +8,7 @@ import {explicitMemoryTurn,type ExplicitMemoryTurn,type ExplicitMemoryArguments,
 import {profileSourceInput} from './profile-source-input.js'
 import {GatewayPersonalWriter} from '../model/personal-writer.js'
 import {profileDraftSchema,type ProfileObservation,type ProfileInput} from '../personal-agent/profile-warmup.js'
-import {processingRequestSchema,SOURCE_PROCESSING_VERSION,type ProcessingRequest} from './source-processing.js'
+import {processingRequestSchema,processingRefSchema,SOURCE_PROCESSING_VERSION,type ProcessingRequest} from './source-processing.js'
 import {type SourceTag,type ImMetadata} from '../memory/provenance.js'
 import {assertAcceptable,type EvaluatedCandidate} from '../understanding/candidates.js'
 import type {LifeBackend,LifeSnapshot} from '../personal-agent/life.js'
@@ -168,10 +168,30 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const parsed=processingRequestSchema.parse(request)
     // Cleanup/status remain available when authority or consent is invalidated.
     if(!['status','retire'].includes(parsed.action))await this.#sharedContext?.authorize()
+    const operation=(input:ProcessingRequest)=>this.options.client.memory('source_processing',{...input,prefix:this.prefix,...this.#sourcePolicy()})
+    if(parsed.action==='commit'&&this.#sharedContext){
+      // Local compose is durable; a failed Hub write must leave finish retryable
+      // without rerunning a paid model stage or advancing the processing cursor.
+      const current=z.object({valid:z.boolean(),published:z.boolean(),batch:z.object({status:z.string(),task_id:z.string().nullable(),run_id:z.string().nullable(),items:z.array(processingRefSchema)})}).parse(await operation({action:'batch',batch_id:parsed.batch_id}))
+      if(current.batch.task_id!==parsed.task_id||current.batch.run_id!==parsed.run_id)throw Error('STORE_IDEMPOTENCY_CONFLICT')
+      if(current.batch.status!=='completed'){
+        if(current.batch.status!=='bound'||!current.valid||!current.published)throw Error('processing_publication_required')
+        const available=new Set(current.batch.items.map(ref=>JSON.stringify(ref)))
+        if(parsed.topics.some(topic=>topic.refs.some(ref=>!available.has(JSON.stringify(ref)))))throw Error('STORE_INVALID_OPERATION')
+        const projection=z.object({draft:profileDraftSchema.nullable(),profile_pending:z.boolean().default(false)}).parse(await operation({action:'products'}))
+        // Publish the complete merged projection, never a single batch's draft.
+        // A deferred portrait keeps the existing Hub portrait until synthesis.
+        if(!projection.profile_pending)await this.#sharedContext.publish(projection.draft??{about:null,work:[],interests:[]})
+        await this.#sharedContext.authorize()
+      }
+    }
     const effective=parsed.action==='publish'&&this.#sharedContext?{...parsed,draft:this.#sharedContext.suppressCorrected(parsed.draft)}:parsed
-    const result=await this.options.client.memory('source_processing',{...effective,prefix:this.prefix,...this.#sourcePolicy()})
-    if(parsed.action==='publish'&&z.object({applied:z.boolean()}).parse(result).applied)await this.#sharedContext?.publish(parsed.draft)
-    if(parsed.action==='profile'&&this.#sharedContext){const profile=z.object({revision:z.number(),draft:profileDraftSchema.nullable()}).passthrough().parse(result);return {...profile,draft:profile.draft?this.#sharedContext.suppressCorrected(profile.draft):null,explicit_corrections:this.#sharedContext.explicitCorrections()}}
+    const result=await operation(effective)
+    if(['profile','products'].includes(parsed.action)&&this.#sharedContext){
+      const profile=z.object({revision:z.number(),draft:profileDraftSchema.nullable()}).passthrough().parse(result)
+      const draft=profile.draft?this.#sharedContext.suppressCorrected(profile.draft):null
+      return {...profile,draft:draft&&(draft.about||draft.work.length||draft.interests.length)?draft:null,explicit_corrections:this.#sharedContext.explicitCorrections()}
+    }
     if(['read','evidence','profile_context'].includes(parsed.action)&&result&&typeof result==='object'&&'items' in result&&Array.isArray(result.items)){
       const scrubber=new SensitiveContentPolicy()
       return {...result,items:result.items.map((item:Record<string,unknown>)=>{if(typeof item.text!=='string')return item;const scrubbed=scrubber.scrub('source_processing',item.text);return {...item,text:scrubbed.kind==='clean'?item.text:scrubbed.kind==='redacted'?scrubbed.value:''}})}
@@ -224,14 +244,12 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async #entry(row:EntryRevision,evidence?:ReadonlyMap<string,EvidenceRecord>,tags?:ReadonlyMap<string,SourceTag>):Promise<MemoryEntry>{
     const refs:MemorySourceRef[]=[]
     for(const id of row.evidence_refs){const raw=evidence?(evidence.get(id)??null):await this.options.client.memory('evidence',{id});if(raw===null)continue;const e=EvidenceRecordSchema.parse(raw);refs.push({type:e.source_kind==='user_correction'?'conversation':e.source_kind==='task_result'?'task':e.source_kind,ref:e.source_id.startsWith(this.prefix)?e.source_id.slice(this.prefix.length):e.source_id,observed_at:e.observed_at})}
-    // Keep a non-locating reference for legacy/deleted evidence; it never exposes a removed path.
-    if(!refs.length)refs.push({type:'conversation',ref:'deleted:'+row.entry_id,observed_at:row.recorded_at})
     const workspace=row.entry_id.startsWith('workspace:')
     const text=displayText(row.content.text)||displayText(row.content.display_name)||displayText(row.content.reason)
     const data=row.content.life_data as Record<string,unknown>|undefined
     const life=['todo','idea','goal'].includes(row.kind)&&data?LifeMemorySchema.parse({id:data.id,version:data.version,status:data.status,due:data.due??null,goal_id:data.goal_id??null,idea_id:data.idea_id??null,success_criteria:data.success_criteria??null}):undefined
     const commitment=row.kind==='commitment'?z.object({direction:z.enum(['owed_by_me','owed_to_me']),due:z.iso.datetime({offset:true}).nullable(),status:z.enum(['open','done','dropped']),counterparty:z.string().optional()}).safeParse(row.content):null
-    return {id:row.entry_id,version:row.revision,content:text.slice(0,500),editable:!workspace,...(life?{life}:{}),...(commitment?.success?{commitment:commitment.data}:{}),kind:workspace?'entity':['fact','preference','plan','concern','commitment','entity','topic','todo','idea','goal','profile'].includes(row.kind)?row.kind as MemoryEntry['kind']:'fact',origin:row.origin,sources:tags?[...new Set(row.evidence_refs)].slice(0,256).flatMap(id=>{const tag=tags.get(id);return tag?[tag]:[]}):await this.sourceTags(row.evidence_refs),source_refs:refs,evidence_refs:row.evidence_refs,observed_at:refs[0]!.observed_at,recorded_at:row.recorded_at,topic:displayText(row.content.topic),status:row.op==='tombstone'?'forgotten':row.valid_until!==null&&Date.parse(row.valid_until)<=Date.now()?'expired':'active',corrected_to:null,confidence_note:null}
+    return {id:row.entry_id,version:row.revision,content:text.slice(0,500),editable:!workspace,...(life?{life}:{}),...(commitment?.success?{commitment:commitment.data}:{}),kind:workspace?'entity':['fact','preference','plan','concern','commitment','entity','topic','todo','idea','goal','profile'].includes(row.kind)?row.kind as MemoryEntry['kind']:'fact',origin:row.origin,sources:tags?[...new Set(row.evidence_refs)].slice(0,256).flatMap(id=>{const tag=tags.get(id);return tag?[tag]:[]}):await this.sourceTags(row.evidence_refs),source_refs:refs,evidence_refs:row.evidence_refs,observed_at:refs[0]?.observed_at??row.recorded_at,recorded_at:row.recorded_at,topic:displayText(row.content.topic),status:row.op==='tombstone'?'forgotten':row.valid_until!==null&&Date.parse(row.valid_until)<=Date.now()?'expired':'active',corrected_to:null,confidence_note:null}
   }
   async #entries(rows:EntryRevision[]):Promise<MemoryEntry[]>{
     const ids=[...new Set(rows.flatMap(row=>row.evidence_refs))],evidence=new Map<string,EvidenceRecord>(),tags=new Map<string,SourceTag>()
@@ -413,15 +431,19 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const q=MemoryObservationSchema.parse(input)
     if(q.source_ref.type==='file')return null
     if(q.evidence_ids){
+      const records:EvidenceRecord[]=[]
+      // Validate the entire selection before changing consent or processing any
+      // member; a later mismatched ID must not partially authorize this batch.
       for(const id of new Set(q.evidence_ids)){
         if(!await this.readEvidence(id))throw Error('memory_evidence_unavailable')
         const raw=await this.options.client.memory('evidence',{id})
         if(raw===null)throw Error('memory_evidence_unavailable')
         const evidence=EvidenceRecordSchema.parse(raw)
-        if(q.processing_consent)await this.setProcessingConsent(evidence.source_id,q.processing_consent)
         if(evidence.source_id!==this.prefix+q.source_ref.ref||evidence.source_kind!==q.source_ref.type)throw Error('memory_evidence_source_mismatch')
-        await this.#extract(evidence,q.topic,true)
+        records.push(evidence)
       }
+      if(q.processing_consent)await this.setProcessingConsent(q.source_ref.ref,q.processing_consent)
+      for(const evidence of records)await this.#extract(evidence,q.topic,true)
     }else{const evidence=await this.#admit(q.source_ref,q.content,undefined,undefined,undefined,false,undefined,q.embedding_consent===true,q.processing_consent);await this.#extract(evidence,q.topic)}
     return (await this.list()).entries.find(e=>e.source_refs.some(ref=>ref.ref===q.source_ref.ref))??null
   }

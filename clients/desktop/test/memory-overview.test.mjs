@@ -6,6 +6,13 @@ const entries=[
  {id:'bench',version:'v2',status:'active',content:'JuggleBench 用可重复的手机操作任务评估智能体。',source_refs:[{type:'file',ref:'/JuggleBench/README.md'}]},
 ]
 const overview={summary:'两个项目分别负责智能体交互和能力评估。',sections:[{title:'智能体开发',summary:'Nova 提供交互入口，JuggleBench 提供评估任务；资料尚未说明二者是否直接集成。',keywords:['语音对话','任务评估'],refs:[{entry_id:'voice',version:1},{entry_id:'bench',version:'v2'}]}]}
+test('coverage counts real sources and discloses unavailable source records',()=>{
+ const missing={...entries[1],source_refs:[]}
+ assert.equal(memoryOverview([entries[0],missing]).coverage,'本页 2 条记忆 · 1 处来源 · 1 条记忆来源不可用')
+ assert.equal(memoryOverview([missing]).coverage,'本页 1 条记忆 · 0 处来源 · 1 条记忆来源不可用')
+ assert.equal(memoryOverview(entries).coverage,'本页 2 条记忆 · 2 处来源')
+ assert.equal(memoryOverview([]).coverage,'本页 0 条记忆 · 0 处来源')
+})
 test('host synthesis connects multiple grounded records and retains references',()=>{
  const result=memoryOverview(entries,overview)
  assert.equal(result.generated,true);assert.equal(result.summary,overview.summary)

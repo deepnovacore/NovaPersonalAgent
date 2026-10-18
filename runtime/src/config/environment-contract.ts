@@ -46,6 +46,7 @@ const rows: readonly Row[] = [
 
   ['NOVA_WORKBENCH_ACCEPTANCE_REPORT', 'host_private', false, false, 'never', null, 'Workbench acceptance report path.', 'Workbench acceptance report path.'],
   ['NOVA_WORKBENCH_ACCEPTANCE_MANIFEST', 'host_private', false, false, 'never', null, 'Workbench acceptance manifest path.', 'Workbench acceptance manifest path.'],
+  ['NOVA_CONTEXT_HUB_CREDENTIALS', 'host_private', false, false, 'never', null, 'Private Context Hub credential file path.', '私有 Context Hub 凭据文件路径。'],
   ['XDG_CONFIG_HOME', 'host_private', false, false, 'never', null, 'Host configuration directory.', 'Host configuration directory.'],
   ['GIT_CONFIG_GLOBAL', 'host_private', false, false, 'never', null, 'Host Git configuration file.', 'Host Git configuration file.'],
   ['OPENROUTER_API_KEY', 'core', true, true, 'never', null, 'OpenRouter credential for Jev.', 'OpenRouter credential for Jev.'],

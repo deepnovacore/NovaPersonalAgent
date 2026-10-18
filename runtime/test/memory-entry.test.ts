@@ -13,6 +13,16 @@ function seed(memory:VoiceMem,id:string,text:string,sourceId=id,kind:'fact'|'tra
  const source=memory.store.admit({id:sourceId,userId:'user',scope:'personal',sessionId:'session',text,occurredAt:now,recordedAt:now,authority:'inferred',assistantReply:''})
  memory.store.commit(source,[{record:{id,userId:'user',scope:'personal',kind,text,subject:'user',attribute:kind==='trait'?'preference':'',slots:[],entities:[],emotion:'',authority:'inferred',occurredAt:now,recordedAt:now,revision:1,supersededBy:null,evidenceIds:[sourceId]},vector:[1,0],model:'test'}],[])
 }
+test('legacy entries without source dates retain their own recorded time',async()=>{
+ const memory=open(':memory:')
+ try{
+  seed(memory,'legacy','Retained legacy statement')
+  memory.store.db.prepare("UPDATE vm_memories SET payload=json_set(payload,'$.evidenceIds',json('[]'),'$.occurredAt',NULL) WHERE id=?").run('legacy')
+  const entry=new VersionedMemory(memory,'user',embeddings).get('legacy')!
+  assert.deepEqual(entry.source_refs,[])
+  assert.equal(entry.observed_at,now)
+ }finally{await memory.close()}
+})
 test('durable correction, stale versions, forgetting, suppression and user isolation',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'nova-entry-'));const path=join(dir,'memory.sqlite')
  let memory=open(path)
