@@ -9,7 +9,7 @@ import {SuggestionPool} from '../src/core/suggestions.js'
 import {compileToolSchema} from '../src/core/tool-schema.js'
 import {UnifiedRetrieval} from '../src/memory/retrieval.js'
 import {ScheduledResponseScope} from '../src/personal-agent/scheduled-response-scope.js'
-import {ScheduledToolRuntime} from '../src/personal-agent/scheduled-tool-runtime.js'
+import {ScheduledToolRuntime,scheduledToolResult} from '../src/personal-agent/scheduled-tool-runtime.js'
 import {schedulePresets} from '../src/personal-agent/schedule-presets.js'
 import {hostContextItemSchema} from '../src/realtime/protocol.js'
 test('the background tool boundary rejects writes and forged metadata even when tools bypass the offered schema',async()=>{
@@ -35,4 +35,16 @@ test('bounded structured read results preserve full pages without widening ordin
  assert.equal(hostContextItemSchema.safeParse({...item,context_read:true}).success,true)
  assert.equal(hostContextItemSchema.safeParse({...item,context_read:true,content:'x'.repeat(32769)}).success,false)
  assert.equal(hostContextItemSchema.safeParse({...item,kind:'recovery',call_id:null,context_read:true}).success,false)
+})
+
+test('only the host source-processing path marks larger structured originals',()=>{
+ const call={kind:'tool_call_ready' as const,session_epoch:1,call_id:'c',item_id:'i',response_id:'response',name:'source__process',arguments:{action:'read'}}
+ const data={text:'资料'.repeat(8000)},source=scheduledToolResult(call,data,'ok',true,131072,true)
+ assert.ok(Buffer.byteLength(JSON.stringify(data))>32768)
+ assert.equal(hostContextItemSchema.safeParse(source.host_item).success,true)
+ assert.throws(()=>scheduledToolResult(call,data),/context_capacity/)
+ assert.equal(hostContextItemSchema.safeParse({...source.host_item,source_processing_read:undefined}).success,false)
+ assert.equal(hostContextItemSchema.safeParse({...source.host_item,content:'x'.repeat(131073)}).success,false)
+ assert.equal(hostContextItemSchema.safeParse({...source.host_item,context_read:undefined}).success,false)
+ assert.equal(hostContextItemSchema.safeParse({...source.host_item,kind:'recovery',call_id:null}).success,false)
 })

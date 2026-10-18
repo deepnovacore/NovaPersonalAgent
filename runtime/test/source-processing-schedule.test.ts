@@ -11,7 +11,7 @@ test('built-in registration is durable, default on, and never claimed as an ordi
  const first=await service.ensureSourceProcessing('test');assert.equal(first.enabled,true)
  assert.equal((await service.ensureSourceProcessing('test')).id,first.id)
  now=new Date('2026-10-13T01:00:00Z');assert.deepEqual(await service.claimDue(),[])
- const run=await service.claimSourceProcessing(first.id,'batch','recipe');assert.equal((await service.claimSourceProcessing(first.id,'batch','recipe')).run_id,run.run_id)
+ const run=await service.claimSourceProcessing(first.id,'private-batch-sentinel','private-recipe-sentinel');assert.doesNotMatch(run.input.goal,/private-batch-sentinel|private-recipe-sentinel/);assert.match(run.input.goal,/exactly \{"action":"read"\}/);assert.equal(run.processing?.batch_id,'private-batch-sentinel');assert.equal(run.processing?.recipe,'private-recipe-sentinel');assert.equal((await service.claimSourceProcessing(first.id,'private-batch-sentinel','private-recipe-sentinel')).run_id,run.run_id)
  await assert.rejects(service.runNow('fake',first.id,first.revision),/builtin_schedule/)
  await service.reserveSourceProcessingCall(run.run_id,'one');await service.reserveSourceProcessingCall(run.run_id,'one')
  assert.equal(service.getRun(run.run_id).processing?.calls.length,1)
@@ -39,7 +39,7 @@ import type {ModelGateway} from '../src/model/model-gateway.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import type {ProcessingBatch,ProcessingRequest} from '../src/memory-substrate/source-processing.js'
 
-for(const finishCall of [2,3,24])test(`source-change callback completes a real Task quietly including budget boundary ${finishCall}`, async()=>{
+for(const finishCall of [2,3,4,24])test(`source-change callback completes a real Task quietly including budget boundary ${finishCall}`, async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'source-agent-')),db=new DatabaseSync(join(dir,'ledger.sqlite'));initializeMemory(db)
  const baseUrl='https://dashscope.aliyuncs.com/compatible-mode/v1',model='qwen3-vl-plus',consumer=createHash('sha256').update(baseUrl+'|'+model).digest('hex'),prefix='personal:test:',source_id=prefix+'source'
  const op=(request:ProcessingRequest)=>Promise.resolve(memoryOperation(db,'source_processing',{prefix,provider:consumer,...request}))
@@ -47,15 +47,15 @@ for(const finishCall of [2,3,24])test(`source-change callback completes a real T
  const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
  let host=make(),responses=0
  const gateway={complete:()=>Promise.reject(Error('unexpected_verifier_model'))} as unknown as ModelGateway
- const wire=()=>host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>memory,gateway,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),blackboard:{path:join(dir,'blackboard.sqlite'),ownerId:'test'},searchTransport:{search:()=>Promise.reject(Error('unexpected_search'))},createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(request){const n=responses++%(finishCall+1)+1;if(finishCall===3&&n===3)assert.match(JSON.stringify(request.inputs),/current batch read refs/);const r='source:'+responses;yield {kind:'response_started',response_id:r};if(finishCall===3&&n===2){const status=await op({action:'status'}) as {active_batch:ProcessingBatch};yield {kind:'tool_call',item_id:'bad:'+responses,call_id:'bad:'+responses,name:'source__process',arguments:{action:'finish',topics:[{title:'bad',summary:'bad',refs:status.active_batch.items.map(ref=>({...ref,evidence_id:'not-current-batch'}))}]}}}else if(n<finishCall)yield {kind:'tool_call',item_id:'read:'+responses,call_id:'read:'+responses,name:'source__process',arguments:{action:'read'}};else if(n===finishCall){const status=await op({action:'status'}) as {active_batch:ProcessingBatch};yield {kind:'tool_call',item_id:'finish:'+responses,call_id:'finish:'+responses,name:'source__process',arguments:{action:'finish',topics:[{title:'合成主题',summary:'合成摘要',refs:status.active_batch.items}]}}}else yield {kind:'text_delta',text:'资料批次整理完成。'};yield {kind:'response_completed',response_id:r}},restoreHistory:()=>Promise.resolve(),abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()})})}})}),()=>undefined)
+ const wire=()=>host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>memory,gateway,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),blackboard:{path:join(dir,'blackboard.sqlite'),ownerId:'test'},searchTransport:{search:()=>Promise.reject(Error('unexpected_search'))},createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(request){const n=responses++%(finishCall+1)+1;if(finishCall===3&&n===3)assert.match(JSON.stringify(request.inputs),/current batch read refs/);if(finishCall===4&&n===2){const receipt=JSON.stringify(request.inputs);assert.match(receipt,/invalid_params/);assert.match(receipt,/Correct the arguments and retry/);assert.doesNotMatch(receipt,/forged-batch-sentinel/)}const r='source:'+responses;yield {kind:'response_started',response_id:r};if(finishCall===4&&n===1){yield {kind:'tool_call',item_id:'invalid:'+responses,call_id:'invalid:'+responses,name:'source__process',arguments:{action:'read',batch_id:'forged-batch-sentinel'}}}else if(finishCall===3&&n===2){const status=await op({action:'status'}) as {active_batch:ProcessingBatch};yield {kind:'tool_call',item_id:'bad:'+responses,call_id:'bad:'+responses,name:'source__process',arguments:{action:'finish',topics:[{title:'bad',summary:'bad',refs:status.active_batch.items.map(ref=>({...ref,evidence_id:'not-current-batch'}))}]}}}else if(n<finishCall)yield {kind:'tool_call',item_id:'read:'+responses,call_id:'read:'+responses,name:'source__process',arguments:{action:'read'}};else if(n===finishCall){const status=await op({action:'status'}) as {active_batch:ProcessingBatch};yield {kind:'tool_call',item_id:'finish:'+responses,call_id:'finish:'+responses,name:'source__process',arguments:{action:'finish',topics:[{title:'合成主题',summary:'合成摘要',refs:status.active_batch.items}]}}}else yield {kind:'text_delta',text:'资料批次整理完成。'};yield {kind:'response_completed',response_id:r}},restoreHistory:()=>Promise.resolve(),abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()})})}})}),()=>undefined)
  try{
   wire();await host.open();assert.equal(responses,0);assert.equal(host.tasks.list().length,0)
-  const at=new Date().toISOString();memoryOperation(db,'append_evidence',{id:prefix+'e:one',source_id,source_kind:'im',locator:'one',raw_text:'合成资料',hash:'v1',observed_at:at,recorded_at:at,trust:'untrusted_external',source_metadata:{sender_id:'self',recipient_id:'self',account_id:'test'}})
+  const at=new Date().toISOString();for(let i=0;i<(finishCall===4?4:1);i++)memoryOperation(db,'append_evidence',{id:prefix+'e:one:'+i,source_id,source_kind:'im',locator:'one:'+i,raw_text:finishCall===4?'资料'.repeat(2000):'合成资料',hash:'v1',observed_at:at,recorded_at:at,trust:'untrusted_external',source_metadata:{sender_id:'self',recipient_id:'self',account_id:'test'}})
   memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:consumer,embedding_provider:null,conversation_providers:[]}})
   await host.sourceChanged({revision:1,phase:'ready'})
   const end=Date.now()+15000;while(Date.now()<end&&!host.schedules.terminalRuns().length)await new Promise(r=>setTimeout(r,10))
   if(!responses)await host.prepareScheduledRun(host.schedules.activeRuns()[0]!.run_id)
-  assert.equal(host.tasks.list().length,1);assert.equal(host.tasks.list()[0]!.phase,'completed',JSON.stringify({responses,tasks:host.tasks.list(),runs:host.schedules.activeRuns()}));assert.equal(responses,finishCall+1);assert.equal(host.schedules.terminalRuns()[0]!.processing!.calls.length,finishCall);assert.equal(host.snapshot().feed.length,0)
+  assert.equal(host.tasks.list().length,1);assert.equal(host.tasks.list()[0]!.phase,'completed',JSON.stringify({responses,tasks:host.tasks.list(),runs:host.schedules.activeRuns()}));assert.equal(responses,finishCall+1);assert.equal(host.schedules.terminalRuns()[0]!.processing!.calls.length,finishCall===4?finishCall-1:finishCall);assert.equal(host.snapshot().feed.length,0)
   assert.equal((await op({action:'status'}) as {completed_batches:number}).completed_batches,1)
   // A second batch in the SAME host must not inherit the first run's runtime/grant.
   memoryOperation(db,'append_evidence',{id:prefix+'e:two',source_id,source_kind:'im',locator:'two',raw_text:'第二批合成资料',hash:'v2',observed_at:at,recorded_at:at,trust:'untrusted_external',source_metadata:{sender_id:'self',recipient_id:'self',account_id:'test'}})
@@ -123,9 +123,9 @@ test('host projects shared profile and suggestions while legacy generators stay 
  let legacy=0
  const memory={sourceProcessing:op,sourceProcessingConsumer:()=>provider} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateProfile:()=>{legacy++;return Promise.resolve({about:null,work:[],interests:[]})}})
- try{await host.open();await host.refreshMemory();assert.equal(host.snapshot().profile_preparation.draft?.about?.text,'Shared profile');assert.equal(host.snapshot().workbench_context.cards[0]?.title,'Review interface');await host.profileWarmup.refresh(true);assert.equal(legacy,0)
- const adopt=await host.command({type:'personal.command',request_id:'adopt-one',method:'context.adopt',params:{id:'review'}}) as {ok:boolean};assert.equal(adopt.ok,true);assert.equal(host.snapshot().life.todos.length,1);assert.deepEqual(host.snapshot().life.todos[0]?.provenance_refs,[evidence]);assert.equal(host.snapshot().workbench_context.cards.length,0)
- await host.command({type:'personal.command',request_id:'adopt-two',method:'context.adopt',params:{id:'review'}});assert.equal(host.snapshot().life.todos.length,1)}finally{await host.close();db.close();await rm(dir,{recursive:true,force:true})}
+ try{await host.open();await host.refreshMemory();assert.equal(host.snapshot().profile_preparation.draft?.about?.text,'Shared profile');assert.equal(host.snapshot().derived_understanding.suggestions[0]?.title,'Review interface');await host.profileWarmup.refresh(true);assert.equal(legacy,0)
+ const adopt=await host.command({type:'personal.command',request_id:'adopt-one',method:'understanding.adopt',params:{id:'review'}}) as {ok:boolean};assert.equal(adopt.ok,true);assert.equal(host.snapshot().life.todos.length,1);assert.deepEqual(host.snapshot().life.todos[0]?.provenance_refs,[evidence]);assert.equal(host.snapshot().derived_understanding.suggestions.length,0)
+ await host.command({type:'personal.command',request_id:'adopt-two',method:'understanding.adopt',params:{id:'review'}});assert.equal(host.snapshot().life.todos.length,1)}finally{await host.close();db.close();await rm(dir,{recursive:true,force:true})}
 })
 
 
@@ -143,9 +143,9 @@ test('host startup does not wait for optional background maintenance',async()=>{
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  let release!:()=>void,started=false;const blocked=new Promise<void>(resolve=>{release=resolve})
  host.scheduledTaskTick=async()=>{started=true;await blocked}
- const opening=host.open()
- try{assert.equal(await Promise.race([opening.then(()=>true),new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),500))]),true);assert.equal(started,true)}
- finally{release();await opening;await host.close();await rm(dir,{recursive:true,force:true})}
+ const opening=host.open();let timer:ReturnType<typeof setTimeout>|undefined
+ try{assert.equal(await Promise.race([opening.then(()=>true),new Promise<boolean>(resolve=>{timer=setTimeout(()=>resolve(false),10000)})]),true);assert.equal(started,true)}
+ finally{clearTimeout(timer);release();await opening;await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
 test('interrupted built-in delivery retires after restart but a live delivery is preserved',async()=>{

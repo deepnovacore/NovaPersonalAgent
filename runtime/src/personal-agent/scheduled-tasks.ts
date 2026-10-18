@@ -116,7 +116,7 @@ export class ScheduleService{
    if(prior)return structuredClone(prior)
    if(Date.parse(item.processing.next_attempt)>+this.now())throw Error('processing_backoff')
    if(next.runs.some(run=>run.schedule_id===item.id&&run.stage!=='terminal'))throw Error('schedule_running')
-   const run=this.#run({...item,goal:item.goal+' Batch: '+batchId+'; recipe: '+recipe},null,'scheduled',runId);run.processing={batch_id:batchId,recipe,exhausted:false,calls:[]};next.runs.push(run);return structuredClone(run)
+   const run=this.#run(item,null,'scheduled',runId);run.processing={batch_id:batchId,recipe,exhausted:false,calls:[]};next.runs.push(run);return structuredClone(run)
   })
  }
  exhaustSourceProcessing(runId:string){return this.#changeRun(runId,run=>{if(run.processing)run.processing.exhausted=true})}

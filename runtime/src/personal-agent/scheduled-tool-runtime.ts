@@ -12,10 +12,10 @@ import type {ScheduledRunGrant} from './scheduled-run-authority.js'
 import type {ScheduledResponseScope} from './scheduled-response-scope.js'
 const recallSchema=z.object({query:z.string().trim().min(1).max(512),scope:z.enum(['recent','any']),source:z.literal('personal').optional(),source_filter:sourceFilterSchema.optional()}).strict()
 const evidenceSchema=z.object({evidence_id:z.string().min(1).max(512)}).strict()
-export function scheduledToolResult(call:ToolCallReady,data:unknown,code='ok',accepted=true,maxBytes=32768):ToolAcceptance{
+export function scheduledToolResult(call:ToolCallReady,data:unknown,code='ok',accepted=true,maxBytes=32768,sourceProcessing=false):ToolAcceptance{
  const content=JSON.stringify(data)
  if(Buffer.byteLength(content)>maxBytes)throw Error('context_capacity')
- const item={kind:'tool_output' as const,context_read:true as const,host_item_id:randomUUID(),event_id:randomUUID(),call_id:call.call_id,content}
+ const item={kind:'tool_output' as const,context_read:true as const,...(sourceProcessing?{source_processing_read:true as const}:{}),host_item_id:randomUUID(),event_id:randomUUID(),call_id:call.call_id,content}
  return {accepted,code,host_item:item,response_intent:{kind:'tool_result',item,task_summary:null,origin_spoken:false},delegate_id:null,sync_result:false,executor:null,op:null,inline_fulfilled:accepted,telemetry:null}
 }
 export class ScheduledToolRuntime{
@@ -33,7 +33,7 @@ export class ScheduledToolRuntime{
    scope.acceptCall(call.session_epoch,responseId,call.call_id,call.session_epoch===session.sessionEpoch&&session.activeProviderResponseId===responseId&&session.providerTurnPhase(responseId)==='active'&&!session.providerTurnWasFenced(responseId))
    if(!await this.validateContext())throw Error('context_authorization_changed')
    const run=host.schedules.getRun(grant.run_id),context=run.definition.context,binding=tools.bindings.get(call.name)
-   if(run.processing){if(call.name!=='source__process')throw Error('scheduled_tool_readonly');return scheduledToolResult(call,await host.sourceProcessingAgent.call(grant,call.call_id,call.arguments),'ok',true,131072)}
+   if(run.processing){if(call.name!=='source__process')throw Error('scheduled_tool_readonly');return scheduledToolResult(call,await host.sourceProcessingAgent.call(grant,call.call_id,call.arguments),'ok',true,131072,true)}
    if(call.name==='app__context'){
     const args=appContextArguments.parse(call.arguments)
     return scheduledToolResult(call,await host.readAppContext(args.section,args.cursor,grant))
@@ -69,6 +69,6 @@ export class ScheduledToolRuntime{
     return {...scheduledToolResult(call,{state:'pending'},'accepted'),delegate_id:admitted.delegate_id,sync_result:true,executor:binding.executor,op:binding.op,inline_fulfilled:false}
    }
    throw Error('scheduled_tool_readonly')
-  }catch(error){const code=error instanceof z.ZodError?'invalid_params':error instanceof Error?error.message:'scheduled_tool_failed';return scheduledToolResult(call,{state:'refused',code},code,false)}
+  }catch(error){const code=error instanceof z.ZodError?'invalid_params':error instanceof Error?error.message:'scheduled_tool_failed';const hint=error instanceof z.ZodError&&call.name==='source__process'?'Use only the fields declared for the chosen action. read accepts exactly {"action":"read"}. Batch, task, run and recipe identifiers are bound by the host; never include batch_id, task_id, run_id or recipe. Correct the arguments and retry.':undefined;return scheduledToolResult(call,{state:'refused',code,...(hint?{hint}:{})},code,false)}
  }
 }
