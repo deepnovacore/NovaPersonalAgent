@@ -28,6 +28,16 @@ export interface SelfHostedSpeechConfig {
   readonly apiKey: string
 }
 
+export interface CompatibleSpeechConfig {
+  readonly omitResponseFormat?: boolean
+  readonly sampleRate?: 24000
+  readonly provider: 'openai-compatible'
+  readonly endpoint: string
+  readonly apiKey: string
+  readonly model: string
+  readonly voice: string
+}
+
 export interface GeminiSpeechConfig {
   readonly provider: 'gemini'
   readonly endpoint: string
@@ -47,7 +57,8 @@ export interface VolcengineAsrConfig {
 }
 
 export interface QwenCascadedLlmConfig {
-  readonly provider?: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted'
+  readonly protocol?: 'chat-completions' | 'responses'
+  readonly provider?: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted' | 'openai-compatible'
   readonly baseUrl: string
   readonly apiKey: string
   readonly model: string
@@ -69,15 +80,15 @@ export interface VolcengineTtsConfig {
 }
 
 export type SelectedCascadedLlmConfig =
-  | {readonly provider: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted'; readonly config: QwenCascadedLlmConfig}
+  | {readonly provider: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted' | 'openai-compatible'; readonly config: QwenCascadedLlmConfig}
   | {readonly provider: 'ark'; readonly config: ArkCascadedLlmConfig}
 
 export interface SelectedCascadedRealtimeConfig {
   readonly selection: CascadedSelection
   readonly endpointing: AutoEndpointingConfig
-  readonly asr: VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig
+  readonly asr: VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig | CompatibleSpeechConfig
   readonly llm: SelectedCascadedLlmConfig
-  readonly tts: VolcengineTtsConfig | GeminiSpeechConfig | SelfHostedSpeechConfig
+  readonly tts: VolcengineTtsConfig | GeminiSpeechConfig | SelfHostedSpeechConfig | CompatibleSpeechConfig
 }
 
 export function requireSelectedCascadedRealtimeConfig(
@@ -102,7 +113,8 @@ export function requireSelectedCascadedLlmConfig(settings:Settings):SelectedCasc
     ? Object.freeze({
       provider: selection.llmProvider,
       config: Object.freeze({
-        baseUrl: selection.llmProvider === 'self-hosted' ? selfHostedEndpoint(settings.self_hosted_llm_base_url, 'http', 'SELF_HOSTED_LLM_BASE_URL') : selection.llmProvider === 'openai' ? OPENAI_BASE_URL : selection.llmProvider === 'gemini' ? GEMINI_BASE_URL : selection.llmProvider === 'deepseek' ? 'https://api.deepseek.com' : DASHSCOPE_COMPATIBLE_BASE_URL,
+        ...(selection.llmProvider === 'openai-compatible' ? {protocol: settings.openai_compatible_protocol} : {}),
+        baseUrl: selection.llmProvider === 'openai-compatible' ? selfHostedEndpoint(settings.openai_compatible_base_url, 'http', 'OPENAI_COMPATIBLE_BASE_URL') : selection.llmProvider === 'self-hosted' ? selfHostedEndpoint(settings.self_hosted_llm_base_url, 'http', 'SELF_HOSTED_LLM_BASE_URL') : selection.llmProvider === 'openai' ? OPENAI_BASE_URL : selection.llmProvider === 'gemini' ? GEMINI_BASE_URL : selection.llmProvider === 'deepseek' ? 'https://api.deepseek.com' : DASHSCOPE_COMPATIBLE_BASE_URL,
         ...(selection.llmProvider !== 'qwen' ? {provider: selection.llmProvider} : {}),
         apiKey: apiKey,
         model: selection.llmModel,
@@ -145,7 +157,8 @@ function resolveEndpointingConfig(settings: Settings): AutoEndpointingConfig {
   })
 }
 
-export function requireSelectedCascadedAsrConfig(settings:Settings):VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig {
+export function requireSelectedCascadedAsrConfig(settings:Settings):VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig | CompatibleSpeechConfig {
+  if(settings.cascade_asr_provider === 'openai-compatible')return resolveCompatibleSpeechConfig(settings, 'asr', stripLikePython(settings.compatible_asr_api_key ?? ''))
   if(settings.cascade_asr_provider === 'self-hosted')return resolveAsrConfig(settings, stripLikePython(settings.self_hosted_asr_api_key ?? ''))
   if(settings.cascade_asr_provider === 'gemini')return resolveGeminiSpeechConfig(settings, 'asr', stripLikePython(settings.gemini_api_key??''))
   const key=stripLikePython(settings.doubao_asr_api_key??'')||stripLikePython(settings.doubao_bigmodel_api_key??'')
@@ -153,7 +166,8 @@ export function requireSelectedCascadedAsrConfig(settings:Settings):VolcengineAs
   return resolveAsrConfig(settings,key)
 }
 
-function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig {
+function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig | CompatibleSpeechConfig {
+  if(settings.cascade_asr_provider === 'openai-compatible')return resolveCompatibleSpeechConfig(settings, 'asr', stripLikePython(settings.compatible_asr_api_key ?? ''))
   if(settings.cascade_asr_provider === 'self-hosted')return {provider:'self-hosted', endpoint:selfHostedEndpoint(settings.self_hosted_asr_url, 'ws', 'SELF_HOSTED_ASR_URL'), apiKey}
   if(settings.cascade_asr_provider === 'gemini')return resolveGeminiSpeechConfig(settings, 'asr', apiKey)
   if (settings.doubao_asr_chunk_ms <= 0) {
@@ -183,7 +197,8 @@ function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConf
   })
 }
 
-function resolveTtsConfig(settings: Settings, apiKey: string): VolcengineTtsConfig | GeminiSpeechConfig | SelfHostedSpeechConfig {
+function resolveTtsConfig(settings: Settings, apiKey: string): VolcengineTtsConfig | GeminiSpeechConfig | SelfHostedSpeechConfig | CompatibleSpeechConfig {
+  if(settings.cascade_tts_provider === 'openai-compatible')return resolveCompatibleSpeechConfig(settings, 'tts', apiKey)
   if(settings.cascade_tts_provider === 'self-hosted')return {provider:'self-hosted', endpoint:selfHostedEndpoint(settings.self_hosted_tts_url, 'http', 'SELF_HOSTED_TTS_URL'), apiKey}
   if(settings.cascade_tts_provider === 'gemini')return resolveGeminiSpeechConfig(settings, 'tts', apiKey)
   if (settings.doubao_tts_output_sample_rate !== 24_000) {
@@ -232,4 +247,11 @@ function resolveGeminiSpeechConfig(settings: Settings, service: 'asr' | 'tts', a
   return {provider:'gemini', endpoint:'https://generativelanguage.googleapis.com/v1beta', apiKey,
     model:requiredSetting(settings[service === 'asr' ? 'gemini_asr_model' : 'gemini_tts_model'], `GEMINI_${service.toUpperCase()}_MODEL`),
     voice:service === 'tts' ? requiredSetting(settings.gemini_tts_voice, 'GEMINI_TTS_VOICE') : settings.gemini_tts_voice}
+}
+
+function resolveCompatibleSpeechConfig(settings:Settings, service:'asr'|'tts', apiKey:string):CompatibleSpeechConfig {
+  if(!apiKey)throw new ConfigurationError(`缺少 COMPATIBLE_${service.toUpperCase()}_API_KEY`)
+  return {provider:'openai-compatible',...(service==='asr'?{omitResponseFormat:settings.compatible_asr_omit_response_format}:{}),...(service==='tts'&&settings.compatible_tts_send_sample_rate?{sampleRate:24000 as const}:{}),endpoint:selfHostedEndpoint(settings[`compatible_${service}_base_url`], 'http', `COMPATIBLE_${service.toUpperCase()}_BASE_URL`),apiKey,
+    model:requiredSetting(settings[`compatible_${service}_model`], `COMPATIBLE_${service.toUpperCase()}_MODEL`),
+    voice:service==='tts'?requiredSetting(settings.compatible_tts_voice,'COMPATIBLE_TTS_VOICE'):''}
 }

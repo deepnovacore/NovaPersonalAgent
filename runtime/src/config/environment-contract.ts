@@ -25,6 +25,18 @@ type Row = readonly [
 ]
 
 const rows: readonly Row[] = [
+  ['COMPATIBLE_ASR_OMIT_RESPONSE_FORMAT', 'core', false, true, 'never', 'false', 'Omit response_format for ASR services returning JSON without this field.', '为不支持 response_format 参数的 ASR 服务省略该字段。'],
+  ["OPENAI_COMPATIBLE_BASE_URL", "core", false, true, "never", "https://api.openai.com/v1", "OpenAI-compatible LLM API base URL.", "通用 OpenAI LLM API 基础地址。"],
+  ["OPENAI_COMPATIBLE_API_KEY", "core", true, true, "when_selected", null, "Dedicated OpenAI-compatible LLM credential.", "通用 OpenAI LLM 专用密钥。"],
+  ["OPENAI_COMPATIBLE_PROTOCOL", "core", false, true, "never", "chat-completions", "Explicit LLM protocol: chat-completions or responses.", "LLM 协议：chat-completions 或 responses。"],
+  ["COMPATIBLE_ASR_BASE_URL", "core", false, true, "never", "https://api.openai.com/v1", "OpenAI-compatible ASR base URL.", "通用 ASR API 基础地址。"],
+  ["COMPATIBLE_ASR_API_KEY", "core", true, true, "when_selected", null, "Dedicated compatible ASR credential.", "通用 ASR 专用密钥。"],
+  ["COMPATIBLE_ASR_MODEL", "core", false, true, "never", "whisper-1", "Compatible ASR model.", "通用 ASR 模型。"],
+  ["COMPATIBLE_TTS_BASE_URL", "core", false, true, "never", "https://api.openai.com/v1", "OpenAI-compatible TTS base URL.", "通用 TTS API 基础地址。"],
+  ["COMPATIBLE_TTS_API_KEY", "core", true, true, "when_selected", null, "Dedicated compatible TTS credential.", "通用 TTS 专用密钥。"],
+  ["COMPATIBLE_TTS_MODEL", "core", false, true, "never", "tts-1", "Compatible TTS model.", "通用 TTS 模型。"],
+  ["COMPATIBLE_TTS_VOICE", "core", false, true, "never", "alloy", "Compatible TTS voice.", "通用 TTS 音色。"],
+  ["COMPATIBLE_TTS_SEND_SAMPLE_RATE", "core", false, true, "never", "false", "Send sample_rate=24000 for compatible TTS services requiring it.", "为需要指定采样率的 TTS 服务发送 sample_rate=24000。"],
   ['SELF_HOSTED_ASR_URL', 'core', false, true, 'never', null, 'Self-hosted asr url; dedicated credential only.', '自托管 ASR_URL，仅使用专用凭据。'],
   ['SELF_HOSTED_LLM_BASE_URL', 'core', false, true, 'never', null, 'Self-hosted llm base url; dedicated credential only.', '自托管 LLM_BASE_URL，仅使用专用凭据。'],
   ['SELF_HOSTED_TTS_URL', 'core', false, true, 'never', null, 'Self-hosted tts url; dedicated credential only.', '自托管 TTS_URL，仅使用专用凭据。'],
