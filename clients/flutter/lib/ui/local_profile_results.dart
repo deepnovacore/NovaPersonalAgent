@@ -76,7 +76,7 @@ class LocalProfileResults extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Text(
                 t(
-                  '部分结果 · 已核对 ${value['coverage']?['validated_observation_records'] ?? 0} / ${value['coverage']?['eligible_records'] ?? 0} 条消息，正文依据 ${value['coverage']?['final_original_records'] ?? 0} 条原文。还有 ${value['coverage']?['unobserved_records'] ?? 0} 条未整理；后续消息可能更新其中状态。',
+                  '部分近况 · 已整理 ${value['coverage']?['validated_observation_records'] ?? 0} / ${value['coverage']?['eligible_records'] ?? 0} 条消息，引用 ${value['coverage']?['final_original_records'] ?? 0} 条原文。还有 ${value['coverage']?['unobserved_records'] ?? 0} 条待整理，可能尚未包含最新进展。',
                   'Partial results · ${value['coverage']?['validated_observation_records'] ?? 0} / ${value['coverage']?['eligible_records'] ?? 0} messages verified; ${value['coverage']?['final_original_records'] ?? 0} originals used. ${value['coverage']?['unobserved_records'] ?? 0} messages remain; later messages may change these statuses.',
                 ),
               ),

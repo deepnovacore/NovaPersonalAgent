@@ -768,7 +768,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
               ),
               Text(
                 t(
-                  '仅使用已核对的消息生成部分结果，不新增整理；其他消息可稍后继续。',
+                  '根据已核对的消息生成近况，剩余记录可稍后继续整理。',
                   'Generate partial results from verified messages without processing new ones. Continue the remaining messages later.',
                 ),
                 style: const TextStyle(color: Nova.secondary, fontSize: 12),

@@ -130,8 +130,8 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Grounded profile'), findsOneWidget);
         expect(find.textContaining('近况可能不完整'), findsOneWidget);
-        expect(find.textContaining('已核对 2 / 10 条消息'), findsOneWidget);
-        expect(find.textContaining('还有 8 条未整理'), findsOneWidget);
+        expect(find.textContaining('已整理 2 / 10 条消息'), findsOneWidget);
+        expect(find.textContaining('还有 8 条待整理'), findsOneWidget);
         final reopened = ProfileRepository(disk, authority, sources);
         await reopened.open();
         expect(reopened.value?['partial'], true);
