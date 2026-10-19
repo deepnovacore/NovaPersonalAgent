@@ -8,6 +8,7 @@ import 'package:nova_mobile/connectors/feishu/api.dart';
 import 'package:nova_mobile/connectors/feishu/auth.dart';
 import 'package:nova_mobile/connectors/feishu/host.dart';
 import 'package:nova_mobile/context/profile_agent.dart';
+import 'package:nova_mobile/context/profile_generation_coordinator.dart';
 import 'package:nova_mobile/context/profile_pipeline_checkpoint.dart';
 import 'package:nova_mobile/context/profile_observation_checkpoint.dart';
 import 'package:nova_mobile/context/secure_persistence.dart';
@@ -32,6 +33,10 @@ class _Fixture {
   late _Models models;
   bool failSecondCompose = true;
   bool failProfileDraft = false;
+  bool failProfileReview = false;
+  bool failSelection = false;
+  bool revokeDuringProfileReview = false;
+  String? profileAtRevocation;
   bool revokeDuringReview = false;
   bool revoked = false;
   final now = DateTime.utc(2026, 10, 19);
@@ -127,7 +132,15 @@ class _Fixture {
             : 'profile_draft';
         counts[stage] = (counts[stage] ?? 0) + 1;
         bodies.putIfAbsent(stage, () => []).add(input);
-        if (stage == 'profile_draft' && failProfileDraft) {
+        if (stage == 'profile_review' && revokeDuringProfileReview) {
+          revoked = true;
+          profileAtRevocation = await const SecureContextPersistence(
+            'nova.profile.local.v1',
+          ).read();
+          await sources.grantProcessing(provider, 'profile', false);
+        }
+        if (stage == 'profile_draft' && failProfileDraft ||
+            stage == 'timeline_select' && failSelection) {
           request.response.statusCode = 503;
           await request.response.close();
           return;
@@ -181,6 +194,9 @@ class _Fixture {
           }
           if (stage == 'timeline_review' && revokeDuringReview && !revoked) {
             revoked = true;
+            profileAtRevocation = await const SecureContextPersistence(
+              'nova.profile.local.v1',
+            ).read();
             await sources.grantProcessing(provider, 'profile', false);
           }
           final id = originals.last['evidence_id'];
@@ -207,7 +223,7 @@ class _Fixture {
             ],
           };
         } else if (stage == 'profile_review') {
-          response = {'review_notes': []};
+          response = {'review_notes': failProfileReview ? 'invalid' : []};
         } else {
           response = {
             'timeline': [],
@@ -273,10 +289,13 @@ void main() {
     () async {
       final fixture = _Fixture()
         ..failSecondCompose = false
-        ..failProfileDraft = true;
+        ..failProfileReview = true;
       await fixture.open();
       final first = fixture.createAgent();
-      await expectLater(first.run(), throwsA(isA<AgentFailure>()));
+      await expectLater(
+        first.run(),
+        throwsA(isA<ProfileGenerationTerminalFailure>()),
+      );
       expect(fixture.counts, {
         'observations': 6,
         'timeline_select': 1,
@@ -284,6 +303,7 @@ void main() {
         'timeline_compose': 2,
         'timeline_review': 2,
         'profile_draft': 1,
+        'profile_review': 1,
       });
       final partial = first.repository.value!;
       expect(
@@ -295,11 +315,19 @@ void main() {
       expect(partial['coverage']['timeline_completed_batches'], 2);
       expect(partial['coverage']['timeline_pending_batches'], 0);
       expect(partial['coverage']['profile_pending'], 1);
+      final failedReceipt = jsonDecode(
+        (await const SecureContextPersistence(ProfileAgent.receiptKey).read())!,
+      );
+      expect(failedReceipt['error_code'], 'profile_output_invalid');
+      expect(
+        failedReceipt['profile_validation_error'],
+        'invalid_profile_review',
+      );
       final pending = await first.inspectGeneration();
       expect(pending!.pendingOutput, true);
       expect(pending.complete, false);
       first.dispose();
-      fixture.failProfileDraft = false;
+      fixture.failProfileReview = false;
       final next = fixture.createAgent();
       addTearDown(next.dispose);
       await next.run(savedObservationsOnly: true);
@@ -310,7 +338,7 @@ void main() {
         'timeline_compose': 2,
         'timeline_review': 2,
         'profile_draft': 2,
-        'profile_review': 1,
+        'profile_review': 2,
         'profile_edit': 1,
       });
       final completed = next.repository.value!;
@@ -355,6 +383,9 @@ void main() {
         'timeline_reconcile': 1,
         'timeline_compose': 2,
         'timeline_review': 1,
+        'profile_draft': 1,
+        'profile_review': 1,
+        'profile_edit': 1,
       });
       final partial = first.repository.value!;
       expect(
@@ -372,7 +403,7 @@ void main() {
       expect(partial['partial'], true);
       expect(partial['coverage']['timeline_completed_batches'], 1);
       expect(partial['coverage']['timeline_pending_batches'], 1);
-      expect(partial['coverage']['final_original_records'], 3);
+      expect(partial['coverage']['final_original_records'], 4);
       final state = await first.inspectGeneration();
       expect(state!.pendingOutput, true);
       expect(state.complete, false);
@@ -383,7 +414,7 @@ void main() {
       final savedStages = await const SecureContextPersistence(
         ProfilePipelineCheckpoint.storageKey,
       ).read();
-      expect((jsonDecode(savedStages!)['entries'] as Map).length, 4);
+      expect((jsonDecode(savedStages!)['entries'] as Map).length, 5);
       first.dispose();
       fixture.failSecondCompose = false;
       final next = fixture.createAgent();
@@ -435,6 +466,90 @@ void main() {
   );
 
   test(
+    'first Timeline selection failure leaves fresh Profile durable and cached',
+    () async {
+      final fixture = _Fixture()
+        ..failSelection = true
+        ..failSecondCompose = false;
+      await fixture.open();
+      final first = fixture.createAgent();
+      await expectLater(first.run(), throwsA(isA<AgentFailure>()));
+      final partial = first.repository.value!;
+      expect((partial['entries'] as List).single['key'], 'work');
+      expect(partial['partial'], true);
+      expect(partial['coverage']['profile_pending'], 0);
+      expect(partial['coverage']['timeline_pending'], 1);
+      expect(partial['coverage']['timeline_pending_batches'], isNull);
+      expect((await first.inspectGeneration())!.pendingOutput, true);
+      first.dispose();
+      fixture.failSelection = false;
+      final next = fixture.createAgent();
+      addTearDown(next.dispose);
+      await next.run(savedObservationsOnly: true);
+      expect(fixture.counts['profile_draft'], 1);
+      expect(fixture.counts['profile_review'], 1);
+      expect(fixture.counts['profile_edit'], 1);
+      expect(next.repository.value!['coverage']['timeline_pending'], 0);
+      expect(next.repository.value!['partial'], false);
+    },
+  );
+
+  test(
+    'invalid Profile followed by Timeline network failure keeps primary cause and retry boundary',
+    () async {
+      final fixture = _Fixture()..failProfileReview = true;
+      await fixture.open();
+      final agent = fixture.createAgent();
+      addTearDown(agent.dispose);
+      await expectLater(
+        agent.run(),
+        throwsA(
+          isA<ProfileGenerationTerminalFailure>().having(
+            profileRunErrorCode,
+            'underlying code',
+            'model_http_503',
+          ),
+        ),
+      );
+      final receipt = jsonDecode(
+        (await const SecureContextPersistence(ProfileAgent.receiptKey).read())!,
+      );
+      expect(receipt['error_code'], 'model_http_503');
+      expect(receipt['profile_validation_error'], 'invalid_profile_review');
+      expect(agent.repository.value!['coverage']['profile_pending'], 1);
+      expect(agent.repository.value!['coverage']['timeline_pending'], 1);
+    },
+  );
+
+  test(
+    'revocation during Profile review prevents early publication and Timeline',
+    () async {
+      final fixture = _Fixture()..revokeDuringProfileReview = true;
+      await fixture.open();
+      final agent = fixture.createAgent();
+      addTearDown(agent.dispose);
+      await fixture.seedProfile(agent);
+      await expectLater(
+        agent.run(),
+        throwsA(anyOf(isA<AgentFailure>(), isA<StateError>())),
+      );
+      expect(fixture.revoked, true);
+      expect(fixture.counts['timeline_select'], isNull);
+      expect(fixture.counts['profile_edit'], isNull);
+      expect(
+        await const SecureContextPersistence('nova.profile.local.v1').read(),
+        fixture.profileAtRevocation,
+      );
+      expect(
+        await const SecureContextPersistence(
+          ProfilePipelineCheckpoint.storageKey,
+        ).read(),
+        'null',
+      );
+    },
+  );
+
+  test(
     'production revocation blocks cached processing and unpublished review output',
     () async {
       final fixture = _Fixture()..revokeDuringReview = true;
@@ -442,9 +557,6 @@ void main() {
       final agent = fixture.createAgent();
       addTearDown(agent.dispose);
       await fixture.seedProfile(agent);
-      final before = await const SecureContextPersistence(
-        'nova.profile.local.v1',
-      ).read();
       await expectLater(
         agent.run(),
         throwsA(anyOf(isA<AgentFailure>(), isA<StateError>())),
@@ -454,7 +566,7 @@ void main() {
       expect(fixture.counts['timeline_review'], 1);
       expect(
         await const SecureContextPersistence('nova.profile.local.v1').read(),
-        before,
+        fixture.profileAtRevocation,
       );
       expect(
         await const SecureContextPersistence(

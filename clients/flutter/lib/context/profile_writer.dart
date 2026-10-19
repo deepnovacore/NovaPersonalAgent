@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../agent_core/model_client.dart';
 import 'profile_observation_checkpoint.dart';
 import 'profile_repository.dart';
 import 'profile_corrections.dart';
@@ -70,6 +71,36 @@ class ProfileWriter {
   final _pipelineCoverage = <String, int>{};
   final _profileOriginalIds = <String>{};
   final _timelineOriginalIds = <String>{};
+  bool _profilePending = false, _timelinePending = false;
+  String? _verifiedProfileEntries;
+  String? profileFailureCode;
+
+  /// Carry the verified Profile through Timeline replay without inflating coverage.
+  String withVerifiedProfile(String timelineEntries) => jsonEncode([
+    ...jsonDecode(timelineEntries) as List,
+    if (_verifiedProfileEntries != null)
+      ...jsonDecode(_verifiedProfileEntries!) as List,
+  ]);
+
+  static String? _profileOutputFailure(Object error) {
+    final code = error is AgentFailure
+        ? error.code
+        : error is StateError
+        ? error.message
+        : null;
+    return const {
+          'invalid_profile_review',
+          'invalid_profile_json',
+          'invalid_projection',
+          'ungrounded_projection',
+          'invalid_projection_kind',
+          'invalid_profile_category',
+          'profile_requires_self_evidence',
+        }.contains(code)
+        ? code as String
+        : null;
+  }
+
   void updateTimelineEvidence(Iterable<String> ids) {
     _timelineOriginalIds.addAll(ids);
     selectedOriginalCount = {
@@ -88,8 +119,12 @@ class ProfileWriter {
   final void Function(String)? onProgress;
   int incompleteBatches = 0;
   int deferredBatches = 0;
+  bool get evidencePartial =>
+      validatedObservationRecordCount < sourceRecordCount;
   bool get isPartial =>
-      validatedObservationRecordCount < sourceRecordCount ||
+      evidencePartial ||
+      _profilePending ||
+      _timelinePending ||
       (_pipelineCoverage['timeline_pending_batches'] ?? 0) > 0 ||
       (_pipelineCoverage['timeline_deferred_batches'] ?? 0) > 0;
   // A recurring pattern can need several messages; final selection still keeps
@@ -126,6 +161,8 @@ class ProfileWriter {
     'unobserved_records': sourceRecordCount - validatedObservationRecordCount,
     ..._pipelineCoverage,
     if (timelinePipeline != null) ...{
+      'profile_pending': _profilePending ? 1 : 0,
+      'timeline_pending': _timelinePending ? 1 : 0,
       'timeline_original_records': _timelineOriginalIds.length,
       'profile_original_records': _profileOriginalIds.length,
       'final_original_records': {
@@ -179,6 +216,10 @@ class ProfileWriter {
     _pipelineCoverage.clear();
     _profileOriginalIds.clear();
     _timelineOriginalIds.clear();
+    _profilePending = timelinePipeline != null && writeProfile;
+    _timelinePending = timelinePipeline != null;
+    _verifiedProfileEntries = null;
+    profileFailureCode = null;
     timelineSelectedTopics = timelineIncludedTopics = timelineSkippedTopics = 0;
     incompleteBatches = 0;
     deferredBatches = 0;
@@ -339,19 +380,6 @@ class ProfileWriter {
       throw StateError('profile_context_too_large');
     }
     if (timelinePipeline != null) {
-      late final TimelinePipelineResult result;
-      try {
-        result = await timelinePipeline!.generate(
-          facts,
-          records,
-          historyComplete: validatedObservationRecordCount == sourceRecordCount,
-          corrections: corrections,
-        );
-      } finally {
-        // Preserve stage diagnostics even when no publishable card was produced.
-        updatePipelineCoverage(timelinePipeline!.coverage);
-        updateTimelineEvidence(timelinePipeline!.readEvidenceIds);
-      }
       if (writeProfile) {
         final profileOriginals = selectOriginals(records, facts);
         _profileOriginalIds.addAll(
@@ -362,21 +390,51 @@ class ProfileWriter {
         var profile = await loadProfileOutput?.call(profileKey);
         if (profile != null) {
           profile = encodeEntries({'entries': jsonDecode(profile)}, records);
+          if ((jsonDecode(profile) as List).any(
+            (entry) => (entry['kind'] ?? 'profile') != 'profile',
+          )) {
+            throw StateError('profile_timeline_checkpoint_invalid');
+          }
         } else {
-          profile = await _writeSelected(
-            facts,
-            profileOriginals,
-            const [],
-            corrections,
-            profileOnly: true,
-          );
-          await saveProfileOutput?.call(profileKey, profile);
+          // Only exhausted output validation is independent of Timeline. Storage,
+          // authorization, cancellation, network and budget errors stop the run.
+          try {
+            profile = await _writeSelected(
+              facts,
+              profileOriginals,
+              const [],
+              corrections,
+              profileOnly: true,
+            );
+          } catch (error) {
+            profileFailureCode = _profileOutputFailure(error);
+            if (profileFailureCode == null) rethrow;
+          }
+          if (profile != null) {
+            await saveProfileOutput?.call(profileKey, profile);
+          }
         }
-        updatePipelineCoverage({...result.coverage, 'profile_pending': 0});
-        updateTimelineEvidence(timelinePipeline!.readEvidenceIds);
-        await onProfilePublish?.call(profile, coverage);
+        if (profile != null) {
+          _verifiedProfileEntries = profile;
+          _profilePending = false;
+          await onProfilePublish?.call(profile, coverage);
+        }
       }
-      return result.entries;
+      late final TimelinePipelineResult result;
+      try {
+        result = await timelinePipeline!.generate(
+          facts,
+          records,
+          historyComplete: !evidencePartial,
+          corrections: corrections,
+        );
+        _timelinePending = false;
+      } finally {
+        // Preserve stage diagnostics even when no publishable card was produced.
+        updatePipelineCoverage(timelinePipeline!.coverage);
+        updateTimelineEvidence(timelinePipeline!.readEvidenceIds);
+      }
+      return withVerifiedProfile(result.entries);
     }
     onProgress?.call('正在梳理与你有关的进展…');
     final index = timelineObservationIndex(facts, records);
@@ -524,7 +582,7 @@ class ProfileWriter {
     final profileInstruction = profileOnly
         ? '本轮仅整理个人资料，timeline和todos必须为空数组。'
         : '';
-    final partialInstructions = isPartial
+    final partialInstructions = evidencePartial
         ? '本次仅基于已核对的部分资料；coverage说明未观察和未选入原文的数量。Timeline写来源时间发生的请求、决定和进展，不把当时计划表述为当前仍未完成，不声称已覆盖全部历史。画像只写现有依据支持的认识，避免把局部样本概括为稳定长期职责。未阅读的后续消息可能更新状态，本轮todos必须为空数组。'
         : '';
     final draft = await _completeFinal(
@@ -560,7 +618,7 @@ class ProfileWriter {
             )) {
           throw StateError('invalid_projection');
         }
-        if (isPartial) {
+        if (evidencePartial) {
           final entries = _projectionEntries(edited);
           if (entries is List &&
               entries.any(

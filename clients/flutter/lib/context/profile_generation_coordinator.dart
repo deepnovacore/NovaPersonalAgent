@@ -4,6 +4,15 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import '../personal/local_life.dart';
 
+/// A failed output must not trigger another paid Profile round automatically.
+/// Preserve the actual failure for permission, budget and network diagnostics.
+class ProfileGenerationTerminalFailure implements Exception {
+  const ProfileGenerationTerminalFailure(this.cause);
+  final Object cause;
+  @override
+  String toString() => cause.toString();
+}
+
 enum ProfileGenerationPhase {
   waiting,
   working,
@@ -107,6 +116,7 @@ class ProfileGenerationCoordinator extends ChangeNotifier
       }
       if (_disposed) return;
       if (!manuallyPaused &&
+          _record['requires_explicit_retry'] != true &&
           _record['terminal_code'] == 'profile_budget_exhausted') {
         final resumed = await recoverBudgetPause?.call(Map.of(_record));
         if (resumed != null) {
@@ -179,6 +189,13 @@ class ProfileGenerationCoordinator extends ChangeNotifier
     if (!_opened || _disposed || !_foreground || _checking) return;
     if (manuallyPaused) {
       phase = ProfileGenerationPhase.paused;
+      _notify();
+      return;
+    }
+    if (_record['requires_explicit_retry'] == true &&
+        _record['terminal_code'] is String) {
+      phase = ProfileGenerationPhase.blocked;
+      code = _record['terminal_code'] as String;
       _notify();
       return;
     }
@@ -299,19 +316,21 @@ class ProfileGenerationCoordinator extends ChangeNotifier
       } catch (error) {
         if (_disposed) return;
         code = failureCode(error);
+        final explicitRetry = error is ProfileGenerationTerminalFailure;
         final progressed = processedRecords() > before;
         _record['last_covered'] = math.max(before, processedRecords());
-        if (savedOnly &&
-                {
-                  'profile_no_saved_observations',
-                  'profile_no_progress',
-                  'profile_result_more_complete',
-                }.contains(code) ||
-            progressed &&
-                {
-                  'profile_round_no_observations',
-                  'profile_result_more_complete',
-                }.contains(code)) {
+        if (!explicitRetry &&
+            (savedOnly &&
+                    {
+                      'profile_no_saved_observations',
+                      'profile_no_progress',
+                      'profile_result_more_complete',
+                    }.contains(code) ||
+                progressed &&
+                    {
+                      'profile_round_no_observations',
+                      'profile_result_more_complete',
+                    }.contains(code))) {
           _record['stage'] = 'collect';
           // A cache-only probe is not a successful paid retry. Preserve the
           // failure count so network errors cannot alternate forever with misses.
@@ -319,8 +338,10 @@ class ProfileGenerationCoordinator extends ChangeNotifier
           _record.remove('error_code');
           code = null;
           phase = ProfileGenerationPhase.continuing;
-        } else if (manuallyPaused ||
-            !_foreground && {'cancelled', 'profile_cancelled'}.contains(code)) {
+        } else if (!explicitRetry &&
+            (manuallyPaused ||
+                !_foreground &&
+                    {'cancelled', 'profile_cancelled'}.contains(code))) {
           phase = manuallyPaused
               ? ProfileGenerationPhase.paused
               : ProfileGenerationPhase.continuing;
@@ -330,6 +351,7 @@ class ProfileGenerationCoordinator extends ChangeNotifier
           _record['retry_count'] = count;
           _record['error_code'] = code;
           final terminal =
+              explicitRetry ||
               code!.startsWith('profile_budget_') ||
               {
                 'authorization_changed',
@@ -354,6 +376,7 @@ class ProfileGenerationCoordinator extends ChangeNotifier
               count >= 3;
           if (terminal) {
             _record['terminal_code'] = code;
+            if (explicitRetry) _record['requires_explicit_retry'] = true;
             if (code!.startsWith('profile_budget_') &&
                 budgetLimitMicroyuan != null) {
               _record['budget_limit_microyuan'] = budgetLimitMicroyuan;
@@ -426,6 +449,7 @@ class ProfileGenerationCoordinator extends ChangeNotifier
   Future<void> retry() async {
     _record.remove('manual_pause');
     _record.remove('terminal_code');
+    _record.remove('requires_explicit_retry');
     _record.remove('error_code');
     _record['retry_count'] = 0;
     _record['next_at'] = 0;

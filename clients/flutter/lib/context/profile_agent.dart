@@ -24,6 +24,9 @@ class ProfileRunFailure extends AgentFailure {
 
 /// Only fixed diagnostic codes may be persisted; provider text is untrusted.
 String profileRunErrorCode(Object error) {
+  if (error is ProfileGenerationTerminalFailure) {
+    return profileRunErrorCode(error.cause);
+  }
   final code = error is AgentFailure
       ? error.code
       : error is StateError
@@ -48,6 +51,7 @@ String profileRunErrorCode(Object error) {
     'invalid_tool_calls',
     'unsupported_model_output',
     'invalid_profile_json',
+    'profile_output_invalid',
     'profile_not_published',
     'profile_no_saved_observations',
     'profile_round_no_observations',
@@ -207,7 +211,8 @@ class ProfileAgent extends ChangeNotifier {
     final coverage = sameScope ? (value?['coverage'] as Map?) : null;
     final pendingOutput =
         (coverage?['timeline_pending_batches'] as int? ?? 0) > 0 ||
-        (coverage?['profile_pending'] as int? ?? 0) > 0;
+        (coverage?['profile_pending'] as int? ?? 0) > 0 ||
+        (coverage?['timeline_pending'] as int? ?? 0) > 0;
     return ProfileGenerationSnapshot(
       pendingOutput: pendingOutput,
       outputBatches: coverage?['timeline_completed_batches'] as int? ?? 0,
@@ -352,7 +357,9 @@ class ProfileAgent extends ChangeNotifier {
           jsonEncode({
             if (previous is Map<String, dynamic>) ...previous,
             ..._budgetMetadata,
-            'status': failure is ProfileRunFailure ? 'paused' : 'interrupted',
+            'status': {'profile_deadline', 'profile_cancelled'}.contains(code)
+                ? 'paused'
+                : 'interrupted',
             'error_code': code,
             'finished_at': DateTime.now().toUtc().toIso8601String(),
             if (previous is! Map || previous['coverage'] is! Map)
@@ -371,6 +378,9 @@ class ProfileAgent extends ChangeNotifier {
   }
 
   Object _pauseFailure(Object error) {
+    if (error is ProfileGenerationTerminalFailure) {
+      return ProfileGenerationTerminalFailure(_pauseFailure(error.cause));
+    }
     // Only a cancelled operation can be attributed to a requested pause.
     // Permission failures and unrelated provider/storage errors keep their cause.
     if (error is! AgentFailure || error.code != 'cancelled') return error;
@@ -668,13 +678,10 @@ class ProfileAgent extends ChangeNotifier {
             loadCheckpoint: pipelineCheckpoint?.load,
             saveCheckpoint: pipelineCheckpoint?.save,
             onPublish: (result) async {
-              writer.updatePipelineCoverage({
-                ...result.coverage,
-                'profile_pending': 1,
-              });
+              writer.updatePipelineCoverage(result.coverage);
               writer.updateTimelineEvidence(pipeline!.readEvidenceIds);
               await publishProgress(
-                result.entries,
+                writer.withVerifiedProfile(result.entries),
                 writer.coverage,
                 partial: true,
               );
@@ -774,6 +781,9 @@ class ProfileAgent extends ChangeNotifier {
       }
       // Keep validated observations/stages for an interrupted or explicit rerun.
       // Scope/expiry/revocation invalidation owns their lifetime.
+      if (writer.profileFailureCode != null) {
+        throw const AgentFailure('profile_output_invalid');
+      }
       if ((writer.coverage['timeline_deferred_batches'] ?? 0) > 0) {
         throw StateError('profile_timeline_deferred');
       }
@@ -810,6 +820,9 @@ class ProfileAgent extends ChangeNotifier {
       }
       failure = _pauseFailure(failure);
       failureCode = profileRunErrorCode(failure);
+      if (writer.profileFailureCode != null) {
+        failure = ProfileGenerationTerminalFailure(failure);
+      }
       Error.throwWithStackTrace(failure, stack);
     } finally {
       lastCoverage = writer.coverage;
@@ -831,6 +844,7 @@ class ProfileAgent extends ChangeNotifier {
           'finished_at': DateTime.now().toUtc().toIso8601String(),
           'coverage': writer.coverage,
           'last_stage': ?lastStage,
+          'profile_validation_error': ?writer.profileFailureCode,
           'pipeline_validation': ?lastPipelineValidation,
           'cached_message_statuses': cachedCounts,
           'excluded_before_observations': excludedEvidence,
