@@ -3,7 +3,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "默认关闭，需要时仍可回忆。保存并重启后生效。": "Off by default; memories can still be recalled when needed. Takes effect after saving and restarting.",
   "Hub 已停止，Tailscale 映射尚未移除；网络恢复后可再次移除后台服务。": "Hub stopped. Its Tailscale mapping could not be removed. When the network is available, remove the background service again.",
   "手机同步 Hub": "Mobile sync Hub",
-  "在 Mac 托管 Hub，供 Android 手机同步资料与设备任务。": "Host a Hub on your Mac for Android data sync and device tasks.",
+  "在 Mac 后台运行 Hub，供 Android 手机同步资料与设备任务。": "Run a Hub in the background on your Mac for Android data sync and device tasks.",
   "使用 Android Nova 扫描连接同步 Hub": "Scan with Nova on Android to connect to the sync Hub",
   "启用后台同步": "Enable background sync",
   "取消二维码": "Cancel QR code",
