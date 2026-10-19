@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../personal/personal_store.dart';
 import '../protocol/request_id.dart';
@@ -298,15 +299,13 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
                 IconButton(
                   tooltip: t('Close'),
                   onPressed: busy ? null : () => Navigator.maybePop(context),
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(CupertinoIcons.xmark),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              t(
-                'Each run is an independent Agent task, using current authorized data.',
-              ),
+              t('Each run starts fresh and uses your latest authorized data.'),
               style: TextStyle(color: colors.onSurfaceVariant, height: 1.6),
             ),
             const SizedBox(height: 22),
@@ -356,13 +355,13 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
               children: [
                 OutlinedButton.icon(
                   onPressed: locked ? null : _pickTime,
-                  icon: const Icon(Icons.schedule, size: 18),
+                  icon: const Icon(CupertinoIcons.clock, size: 18),
                   label: Text(time),
                 ),
                 if (kind == 'once')
                   OutlinedButton.icon(
                     onPressed: locked ? null : _pickDate,
-                    icon: const Icon(Icons.calendar_today, size: 18),
+                    icon: const Icon(CupertinoIcons.calendar, size: 18),
                     label: Text(date),
                   ),
               ],
@@ -404,7 +403,7 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
               controller: zone,
               enabled: !locked,
               decoration: InputDecoration(
-                labelText: t('Timezone (IANA)'),
+                labelText: t('Time zone'),
                 hintText: 'Asia/Shanghai',
               ),
             ),

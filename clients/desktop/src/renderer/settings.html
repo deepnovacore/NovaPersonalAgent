@@ -34,7 +34,7 @@
     </nav>
     <main>
       <section class="setting-section" id="assistant-identity-section"><h2>你的助手</h2><div id="assistant-identity-panel"></div></section>
-      <section class="setting-section" id="desktop-permissions-section"><h2>电脑操作与系统权限</h2><div id="desktop-permissions-panel"></div><details class="computer-configuration"><summary>电脑操作配置说明</summary><p>当前需要在启动环境中选择 computer 执行器，并配置 GUI 模型和目标显示器。整屏模式仅支持一个显示器。</p><pre>EXECUTORS=computer,codex
+      <section class="setting-section" id="desktop-permissions-section"><h2>电脑操作与系统权限</h2><div id="desktop-permissions-panel"></div><details class="computer-configuration"><summary>高级配置</summary><p>当前需要在启动环境中选择 computer 执行器，并配置 GUI 模型和目标显示器。整屏模式仅支持一个显示器。</p><pre>EXECUTORS=computer,codex
 COMPUTER_DISPLAY_ID=0
 COMPUTER_BASE_URL=你的 GUI 模型地址
 COMPUTER_MODEL=模型名称
@@ -42,16 +42,16 @@ COMPUTER_MODEL_FAMILY=qwen3-vl
 COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 名称；系统没有 macOS 的辅助功能授权开关。修改启动配置后重启 Nova。</p></details></section>
       <section class="setting-section" id="visor-section">
         <h2>Nova Visor · 桌面驾驶舱</h2>
-        <p class="hint">透明框架叠在真实桌面上，仪表区域穿透鼠标，Nova 语音球保持可用。首版支持主显示器。</p>
+        <p class="hint">在桌面上叠加一层半透明的 Nova 状态面板。</p>
         <label><input id="visor-enabled" type="checkbox">启用桌面 HUD</label>
         <label for="visor-mode">显示模式</label>
         <select id="visor-mode"><option value="focus">专注 · 低动态</option><option value="showcase">展示 · 完整动画</option></select>
         <label for="visor-opacity">界面亮度 / 不透明度</label>
         <input id="visor-opacity" type="range" min="0.3" max="1" step="0.05" value="0.8">
-        <label><input id="visor-motion" type="checkbox">装配动画与核心动态（跟随系统减弱动态效果）</label>
+        <label><input id="visor-motion" type="checkbox">动态效果（跟随系统的减弱动态设置）</label>
         <label><input id="visor-hardware" type="checkbox">显示电脑硬件数据</label>
         <label><input id="visor-ai" type="checkbox">显示 Nova 状态与用量</label>
-        <p class="hint">此处修改即时保存，无需重启。⌘ / Ctrl + Shift + J 展开或收起；也可使用 Nova 托盘菜单。全屏应用建议收起。</p>
+        <p class="hint">修改即时生效。⌘ / Ctrl + Shift + J 展开或收起。</p>
         <p id="visor-settings-status" role="status"></p>
       </section>
       <section class="setting-section" id="orb-skin-section">
@@ -67,7 +67,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             <button type="button" id="orb-skin-discard">放弃皮肤修改</button>
           </div>
         </div>
-        <p class="hint">选择或导入后点击保存，即时应用外观；放弃修改可恢复。支持 Nova JSON 皮肤包。</p>
+        <p class="hint">选择或导入皮肤后点击保存即可应用。</p>
         <p id="orb-skin-status" role="status" aria-live="polite"></p>
       </section>
       <section class="setting-section" id="language-section">
@@ -105,10 +105,10 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
         <p class="phone-privacy">仅授权设备可连接 · 配对码仅可使用一次</p>
         <div id="phone-devices" aria-label="已配对设备" hidden></div>
         <div class="phone-bottom"><details id="phone-advanced"><summary>高级设置</summary>
-          <p class="note">通常无需修改。自定义地址用于已有安全转发；端口与认证文件仅在连接独立服务时填写，留空由 Nova 管理。</p>
-          <div class="field"><label for="phone-server-url">自定义地址</label><input id="phone-server-url" type="text" placeholder="自动检测 Tailscale" autocomplete="off" spellcheck="false"></div>
+          <p class="note">通常无需修改，留空即由 Nova 自动管理。</p>
+          <div class="field"><label for="phone-server-url">自定义地址</label><input id="phone-server-url" type="text" placeholder="自动检测" autocomplete="off" spellcheck="false"></div>
           <div class="field"><label for="phone-server-port">已有服务端口</label><input id="phone-server-port" type="number" min="1" max="65535" placeholder="自动管理"></div>
-          <div class="field"><label for="phone-server-token-file">认证文件</label><input id="phone-server-token-file" type="text" placeholder="已有服务的认证文件路径" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label for="phone-server-token-file">认证文件</label><input id="phone-server-token-file" type="text" placeholder="认证文件路径" autocomplete="off" spellcheck="false"></div>
           <button type="button" id="phone-pairing-open">保存并连接</button>
         </details><button type="button" id="phone-disable" class="phone-text-button" hidden>停用手机连接</button></div>
       </section>
@@ -119,7 +119,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           <button type="button" class="usage-scope" id="usage-session" aria-pressed="true"><span>本次运行</span><strong id="usage-session-cost">—</strong><span id="usage-session-count">0 次调用</span></button>
         </div>
         <p id="frontend-usage" role="status" aria-live="polite">模型调用后显示用量</p>
-        <p class="usage-note">包含前台对话与后台任务。人民币为估算费用，美元为服务商返回费用；未计价不代表免费。</p><p class="usage-note">外部编程／GUI Agent 和独立 SDK 未返回的用量不在 token 总量内。</p><label for="usage-group">统计维度</label><select id="usage-group"><option value="features">按功能</option><option value="models">按模型</option><option value="runs">按任务运行（最近 100 组）</option></select>
+        <p class="usage-note">包含对话与后台任务，费用为估算值。</p><p class="usage-note">部分外部工具的用量可能未计入。</p><label for="usage-group">统计维度</label><select id="usage-group"><option value="features">按功能</option><option value="models">按模型</option><option value="runs">按任务运行（最近 100 组）</option></select>
         <details id="usage-breakdown" open hidden><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
       </section>
       <section class="setting-section" id="capabilities-section">
@@ -141,7 +141,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           <div class="executor-card">
             <div id="coding-executor-toggle"></div>
             <div class="field"><label for="coding-provider">新会话默认执行器</label><select id="coding-provider"><option value="codex">Codex</option><option value="opencode">OpenCode</option><option value="codebuddy">CodeBuddy</option><option value="pi">Pi</option><option value="deepseek">DeepSeek Harness</option></select><button type="button" id="coding-executor-configure">配置…</button></div>
-            <p class="hint">保存后即用于新会话；已有会话继续使用原执行器，语音和进行中的任务不受影响。</p>
+            <p class="hint">保存后用于新会话，进行中的任务不受影响。</p>
           </div>
         </div>
         <div class="capability-group" id="mcp-section">
@@ -150,24 +150,24 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
         </div>
       </section>
       <section class="setting-section" id="im-section" hidden><h2>IM 渠道</h2><p class="hint">连接你使用的聊天工具，选择同步范围与提醒方式。</p><div id="im-connection"></div><p id="im-error" role="status" aria-live="polite"></p></section>
-      <section class="setting-section" id="connections-section" hidden><h2>连接与权限</h2><p class="hint">只读取你授权的目录和会话。正文可能交由设置中的模型服务处理；读取权限不授予修改或发送权限。</p><div id="connections-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
+      <section class="setting-section" id="connections-section" hidden><h2>连接与权限</h2><p class="hint">只读取你授权的内容，不会代你修改或发送；内容会交给你选择的模型服务处理。</p><div id="connections-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
       <section class="setting-section" id="privacy-section">
         <h2>隐私与数据</h2>
-        <p class="hint">这里决定哪些内容会交给你在设置里选的模型服务商处理。默认只读取你自己发的内容，以及直接 @ 你的消息。</p>
+        <p class="hint">决定哪些内容会交给模型服务处理。默认只读取你发的消息，以及 @ 你的消息。</p>
         <label class="toggle-row"><input type="checkbox" role="switch" id="profileParticipantMessages"> 让 Profile 读取会话里他人的发言</label>
-        <p class="hint">打开后，你已授权同步的会话里其他人的发言也会发送给模型服务商，用来了解你和谁协作、怎么协作。不会扩大同步范围，也不会绕过会话授权。关闭后，依赖这些发言生成的画像内容会被清除。保存并重启后生效。</p>
+        <p class="hint">打开后，已授权会话里其他人的发言也会交给模型服务处理，用来了解你的协作方式。关闭后，相关画像内容会被清除。保存并重启后生效。</p>
       </section>
       <section class="setting-section" id="knowledge-section">
         <h2>知识库配置</h2>
         <label class="toggle-row">文字回答前查找相关记忆<input id="memory-prerecall-enabled" type="checkbox" role="switch" aria-describedby="memory-prerecall-hint"></label>
-        <p class="hint" id="memory-prerecall-hint">默认关闭，文字对话仍可按需回忆；语音使用记忆摘要。保存并重启后生效。</p>
-        <p class="hint">在「执行器与 MCP」中启用知识库，保存并重启后生效。文档保存在本机，向量计算与回答会使用所选模型服务。</p>
+        <p class="hint" id="memory-prerecall-hint">默认关闭，需要时仍可回忆。保存并重启后生效。</p>
+        <p class="hint">先在「执行器与 MCP」中启用知识库。文档保存在本机，检索与回答会使用所选模型服务。</p>
         <div class="field"><label for="embeddingProvider">向量服务</label><select id="embeddingProvider"><option value="dashscope">DashScope</option></select></div>
         <div class="field"><label for="embeddingModel">向量模型</label><input id="embeddingModel" type="text"></div>
         <div class="field"><label for="knowledgePath">存储位置</label><input id="knowledgePath" type="text" placeholder="留空使用默认位置"></div>
-        <div class="field"><label for="capabilitiesConfigPath">能力配置文件</label><input id="capabilitiesConfigPath" type="text" placeholder="留空使用环境变量或默认配置"></div>
+        <div class="field"><label for="capabilitiesConfigPath">能力配置文件</label><input id="capabilitiesConfigPath" type="text" placeholder="留空使用默认配置"></div>
         <div id="knowledge-panel" hidden>
-          <p class="hint">支持文本、Markdown、代码、PDF、DOCX；单文件最多 10 MiB。敏感内容会被拒绝。修改模型后请重建所有来源。</p>
+          <p class="hint">支持文本、Markdown、代码、PDF、DOCX，单文件最多 10 MB。更换模型后需重建来源。</p>
           <div class="knowledge-actions"><button type="button" id="knowledge-files">添加文件</button> <button type="button" id="knowledge-folder">添加文件夹</button> <button type="button" id="knowledge-refresh">刷新</button></div>
           <div class="field"><label for="knowledge-url">公开网页 URL</label><input id="knowledge-url" type="url" maxlength="2048"><button type="button" id="knowledge-add-url">导入网页</button></div>
           <p id="knowledge-status" role="status" aria-live="polite"></p>
@@ -179,7 +179,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
         <fieldset>
           <legend>本地语音唤醒</legend>
           <label class="toggle-row" title="空闲后悬浮球缩成小气泡，在本机监听“你好星核 / Hi Nova”；闭麦时停止唤醒检测。"><input id="wake-word-enabled" type="checkbox" role="switch">启用“你好星核 / Hi Nova”唤醒</label>
-          <small>空闲后悬浮球缩成小气泡，仅在本机监听唤醒词，听到唤醒词即恢复原状；闭麦也会停止唤醒检测。首次开启需下载模型。</small>
+          <small>空闲后悬浮球缩成小气泡，仅在本机监听唤醒词。首次开启需下载模型。</small>
           <div class="field">
             <label for="auto-hide-seconds" title="空闲多久后休眠；0 表示不自动休眠。">空闲休眠秒数</label>
             <input id="auto-hide-seconds" type="number" min="0" max="3600" step="1" value="60">
@@ -224,7 +224,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           </select>
         </div>
         <label class="toggle-row"><input type="checkbox" role="switch" id="generatePlan"> 执行前生成计划</label>
-        <p class="hint">关闭后直接整理工作单，仍保留必要的澄清和操作确认。</p>
+        <p class="hint">关闭后直接开始，必要时仍会向你确认。</p>
         <fieldset id="plan-readback" class="segmented compact-segmented segmented-readback">
           <legend>规划回读</legend>
           <label class="choice" title="执行前简要回读计划。">
@@ -351,7 +351,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           </div>
         </section>
         <div class="actions"><button id="voice-preset-import" type="button">导入语音预设</button><button id="voice-preset-export" type="button">导出语音预设</button></div>
-        <p class="hint">预设支持自托管、火山 ASR 和 DeepSeek LLM，不包含密钥。导入后请保存。更换服务来源会清除旧密钥，请填写对应的新密钥。</p>
+        <p class="hint">预设不含密钥。导入后请保存；更换服务来源会清除旧密钥，请重新填写。</p>
         <p id="voice-preset-status" class="hint" role="status" aria-live="polite"></p>
         <section id="cascaded-pipeline" hidden>
           <p class="hint">相对集成式管线，多轮对话成本预计可节省约 <strong class="cost-saving">70%</strong>。实际取决于模型及语音用量。</p>
@@ -368,10 +368,10 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             </div>
             <div id="compatible-asr-settings" hidden>
               <div class="field"><label for="compatible-asr-preset">服务预设</label><select id="compatible-asr-preset"><option value="">自定义</option></select></div>
-              <p class="hint">预设仅填写接口参数；请确认账号可用的模型。更改地址会清除本阶段密钥，请重新填写。</p>
+              <p class="hint">预设只填写接口参数，请确认账号可用的模型。更改地址会清除本阶段密钥。</p>
               <div class="field"><label for="compatibleAsrBaseUrl">API Base URL</label><input id="compatibleAsrBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
               <div class="field"><label for="compatibleAsrModel">模型 ID</label><input id="compatibleAsrModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
-              <p class="hint">说完一句后返回最终转录，不显示实时中间结果。</p>
+              <p class="hint">说完一句后才显示识别结果。</p>
               <label class="toggle-row"><input id="compatibleAsrOmitResponseFormat" type="checkbox">省略 ASR response_format 参数（Mistral、智谱）</label>
               <div class="secret" data-key="compatibleAsrApiKey">
                 <label for="compatibleAsrApiKey">本阶段 API 密钥</label>
@@ -389,7 +389,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
                 <button type="button" class="clear" data-key="selfHostedAsrApiKey">清除</button>
               </div>
             </div>
-            <div id="gemini-asr-settings" hidden><label for="geminiAsrModel">Gemini ASR 模型</label><input id="geminiAsrModel" type="text" maxlength="64" autocomplete="off"><p class="hint">说完一句后返回最终转录，不显示实时中间结果。</p></div>
+            <div id="gemini-asr-settings" hidden><label for="geminiAsrModel">Gemini ASR 模型</label><input id="geminiAsrModel" type="text" maxlength="64" autocomplete="off"><p class="hint">说完一句后才显示识别结果。</p></div>
             <section aria-label="声纹验证">
               <h4>声纹验证</h4>
               <p class="hint">声纹功能仅支持火山引擎 ASR。</p>
@@ -400,7 +400,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
                 <p class="hint">录音期间会暂停对话。声纹服务不可用时，自动停用声纹验证。</p>
                 <p id="voiceprint-reading-label">请自然朗读下面这段话：</p>
                 <blockquote id="voiceprint-reading" aria-labelledby="voiceprint-reading-label">今天的天气很晴朗，窗外的树叶随风轻轻摇动。我准备好开始新的工作，也愿意慢慢讲清楚自己的想法。</blockquote>
-                <p class="hint">保持平时说话的语速和音量，不要耳语或模仿音色。读完后如仍在录音，可从头再读一遍。</p>
+                <p class="hint">保持平时的语速和音量。读完后如仍在录音，可从头再读一遍。</p>
                 <p id="voiceprint-identity" class="hint"></p>
                 <label class="toggle-row"><input id="voiceprint-enabled" type="checkbox" role="switch">只接收已注册说话人的语音</label>
                 <div class="actions"><button id="voiceprint-register" type="button">录制 12 秒并注册</button><button id="voiceprint-cancel" type="button" hidden>取消录音</button></div>
@@ -424,10 +424,10 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             </div>
             <div id="compatible-llm-settings" hidden>
               <div class="field"><label for="compatible-llm-preset">服务预设</label><select id="compatible-llm-preset"><option value="">自定义</option></select></div>
-              <p class="hint">预设仅填写接口参数；请确认账号可用的模型。更改地址会清除本阶段密钥，请重新填写。</p>
+              <p class="hint">预设只填写接口参数，请确认账号可用的模型。更改地址会清除本阶段密钥。</p>
               <div class="field"><label for="openaiCompatibleBaseUrl">API Base URL</label><input id="openaiCompatibleBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
               <div class="field"><label for="openaiCompatibleProtocol">协议</label><select id="openaiCompatibleProtocol"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></div>
-              <p class="hint">请在下方填写模型 ID。工具调用、视觉等能力取决于所选模型与服务。</p>
+              <p class="hint">请在下方填写模型 ID，部分能力取决于所选模型。</p>
               <div class="secret" data-key="openaiCompatibleApiKey">
                 <label for="openaiCompatibleApiKey">本阶段 API 密钥</label>
                 <span class="badge" id="badge-openaiCompatibleApiKey">未设置</span><span class="key-usage" id="usage-openaiCompatibleApiKey"></span>
@@ -463,12 +463,12 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             </div>
             <div id="compatible-tts-settings" hidden>
               <div class="field"><label for="compatible-tts-preset">服务预设</label><select id="compatible-tts-preset"><option value="">自定义</option></select></div>
-              <p class="hint">预设仅填写接口参数；请确认账号可用的模型。更改地址会清除本阶段密钥，请重新填写。</p>
+              <p class="hint">预设只填写接口参数，请确认账号可用的模型。更改地址会清除本阶段密钥。</p>
               <div class="field"><label for="compatibleTtsBaseUrl">API Base URL</label><input id="compatibleTtsBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
               <div class="field"><label for="compatibleTtsModel">模型 ID</label><input id="compatibleTtsModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
               <div class="field"><label for="compatibleTtsVoice">音色 ID</label><input id="compatibleTtsVoice" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
               <label class="toggle-row"><input id="compatibleTtsSendSampleRate" type="checkbox">发送 24000 Hz 采样率参数</label>
-              <p class="hint">服务需返回 24000 Hz PCM 音频；仅在服务支持 sample_rate 参数时开启。</p>
+              <p class="hint">仅在服务支持时开启。</p>
               <div class="secret" data-key="compatibleTtsApiKey">
                 <label for="compatibleTtsApiKey">本阶段 API 密钥</label>
                 <span class="badge" id="badge-compatibleTtsApiKey">未设置</span><span class="key-usage" id="usage-compatibleTtsApiKey"></span>
@@ -486,7 +486,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
               </div>
             </div>
             <div class="field" id="cascaded-tts-voice-settings">
-              <div id="gemini-tts-settings" hidden><label for="geminiTtsModel">Gemini TTS 模型</label><input id="geminiTtsModel" type="text" maxlength="64" autocomplete="off"><p class="hint">按回复分段合成并播放，每段需等待一次语音生成。</p></div>
+              <div id="gemini-tts-settings" hidden><label for="geminiTtsModel">Gemini TTS 模型</label><input id="geminiTtsModel" type="text" maxlength="64" autocomplete="off"><p class="hint">分段合成并播放，每段会有短暂等待。</p></div>
               <label for="cascadedTtsVoicePreset">音色</label>
               <div class="voice-picker">
                 <select id="cascadedTtsVoicePreset"></select>
@@ -498,7 +498,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
       </section>
             <details id="chatgpt-settings">
               <summary>ChatGPT 账号（官方登录）</summary>
-              <p>主对话与辅助推理可使用 ChatGPT 套餐；语音识别和语音合成仍使用各自提供商。</p>
+              <p>主对话可使用 ChatGPT 套餐；语音识别和合成仍使用各自的服务。</p>
               <label for="chatgpt-account">账号</label><select id="chatgpt-account"><option value="">添加账号</option></select>
               <button type="button" id="chatgpt-login">Continue with ChatGPT</button>
               <button type="button" id="chatgpt-cancel">取消登录</button>
@@ -593,7 +593,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           <div class="secret" data-key="composioApiKey">
             <label for="composioApiKey">Composio</label>
             <span class="badge" id="badge-composioApiKey">未设置</span>
-            <span class="key-usage" id="usage-composioApiKey">应用连接；修改后重启运行时</span>
+            <span class="key-usage" id="usage-composioApiKey">应用连接；修改后需重启</span>
             <input type="password" id="composioApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
             <button type="button" class="clear" data-key="composioApiKey">清除并停用</button>
           </div>
@@ -621,9 +621,9 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             <h3 id="coding-backend-title"></h3>
             <p id="coding-backend-status" class="connection-status" role="status"></p>
             <p id="coding-backend-guidance" class="hint"></p>
-            <div class="field"><label for="coding-binary-path">ACP 可执行文件</label><input id="coding-binary-path" type="text" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="留空则从 PATH 查找；也可填写绝对路径"></div>
-            <div id="coding-config-field" class="field"><label id="coding-config-label" for="coding-config-path"></label><input id="coding-config-path" type="text" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="留空则使用该工具的默认位置"></div>
-            <p class="hint">路径修改在保存并重启后用于新会话；已有会话保留原来的配置来源。登录与密钥由各工具自己的配置管理。</p>
+            <div class="field"><label for="coding-binary-path">可执行文件路径</label><input id="coding-binary-path" type="text" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="留空自动查找，或填写完整路径"></div>
+            <div id="coding-config-field" class="field"><label id="coding-config-label" for="coding-config-path"></label><input id="coding-config-path" type="text" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="留空使用默认位置"></div>
+            <p class="hint">修改在保存并重启后用于新会话。登录与密钥由各工具自行管理。</p>
           </div>
           <p id="codex-status" class="connection-status" aria-live="polite">正在检查 Codex…</p>
           <div id="codex-discovery" class="codex-discovery"><fieldset class="segmented compact-segmented">
@@ -641,8 +641,8 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           </div>
           <div id="codex-manual-settings" hidden>
             <div class="field">
-              <label for="codexBinaryPath">Codex 原生可执行文件</label>
-              <input type="text" id="codexBinaryPath" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="输入绝对路径">
+              <label for="codexBinaryPath">Codex 可执行文件</label>
+              <input type="text" id="codexBinaryPath" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="输入完整路径">
             </div>
             <div class="field">
               <label for="codexWorkspace">当前工作区</label>
@@ -655,7 +655,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
               <small>当前有效值：<code id="effective-managed-root"></code></small>
             </div>
             <button type="button" id="projects-repair">修复目录权限</button>
-            <small>仅修复当前设置对应的 状态目录、工作区根目录和当前工作区，不接受任意路径。</small>
+            <small>仅修复当前设置对应的目录。</small>
           </div>
           <div class="workspace-actions"><h3>工作区管理</h3>
             <button type="button" id="workspace-open-current">打开当前工作区</button>

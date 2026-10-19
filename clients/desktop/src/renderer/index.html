@@ -20,10 +20,11 @@
         <button data-welcome-skip type="button" hidden>先完成欢迎设置</button>
       </div>
       <div class="welcome-permissions" hidden>
+        <div class="welcome-hero" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
         <p class="welcome-eyebrow">开始之前</p><h1>让 nova 按你的选择工作</h1>
         <p class="welcome-lead">选择要开放的权限。你可以随时在设置中调整，也可以稍后再说。</p>
         <div data-permission-cards></div>
-        <p class="welcome-footnote">请在系统设置中选择当前运行的 Nova；源码开发时可能显示 Electron。授权屏幕录制后可能需要重启应用。</p>
+        <p class="welcome-footnote">授权屏幕录制后可能需要重启应用。</p>
         <button type="button" class="welcome-primary" data-permission-continue>继续，认识 nova</button>
       </div>
       <div data-welcome-error class="welcome-error" role="alert" hidden>暂时无法读取或保存设置，请重试。</div>
@@ -37,6 +38,7 @@
       </section>
       <div id="orb" role="img" aria-label="Nova Personal Agent 正在启动">
         <canvas class="orb-canvas" aria-hidden="true"></canvas>
+        <video id="orb-idle-video" src="./assets/nova-idle.mp4" muted loop playsinline preload="metadata" aria-hidden="true" hidden></video>
         <span id="capture-indicator" class="capture-indicator" aria-hidden="true"></span>
         <span id="unread-indicator" class="unread-indicator" aria-hidden="true" hidden></span>
       </div>

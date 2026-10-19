@@ -13,20 +13,26 @@ class NovaSection extends StatelessWidget {
     this.footer,
     this.trailing,
     this.onHeaderTap,
+    this.surface = Nova.cell,
+    this.margin = const EdgeInsets.fromLTRB(16, 0, 16, 10),
   });
   final List<Widget> children;
   final String? header, footer;
   final Widget? trailing;
   final VoidCallback? onHeaderTap;
+  final EdgeInsetsGeometry margin;
+
+  /// Row background; use [Nova.sheetCell] when the section sits on [Nova.sheet].
+  final Color surface;
   @override
   Widget build(BuildContext context) => CupertinoListSection.insetGrouped(
     backgroundColor: Colors.transparent,
     decoration: BoxDecoration(
-      color: Nova.cell,
+      color: surface,
       borderRadius: BorderRadius.circular(12),
     ),
     separatorColor: Nova.separator,
-    margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+    margin: margin,
     header: header == null
         ? null
         : GestureDetector(
@@ -67,14 +73,16 @@ class NovaTile extends StatelessWidget {
     this.trailing,
     this.onTap,
     this.titleLines = 3,
+    this.surface = Nova.cell,
   });
   final String title;
   final Widget? subtitle, leading, trailing;
   final VoidCallback? onTap;
   final int titleLines;
+  final Color surface;
   @override
   Widget build(BuildContext context) => CupertinoListTile(
-    backgroundColor: Nova.cell,
+    backgroundColor: surface,
     backgroundColorActivated: Nova.cellPressed,
     padding: const EdgeInsetsDirectional.fromSTEB(16, 11, 14, 11),
     leadingSize: 26,
@@ -165,7 +173,11 @@ class RoundCheck extends StatelessWidget {
               ),
             ),
             child: value
-                ? const Icon(Icons.check_rounded, size: 15, color: Nova.ink)
+                ? const Icon(
+                    CupertinoIcons.checkmark,
+                    size: 15,
+                    color: Nova.ink,
+                  )
                 : null,
           ),
         ),
@@ -262,6 +274,146 @@ class NovaCard extends StatelessWidget {
         child: Padding(padding: const EdgeInsets.all(16), child: child),
       ),
     ),
+  );
+}
+
+/// A grouped-list row with a trailing iOS switch (never a Material `Switch`).
+class NovaSwitchRow extends StatelessWidget {
+  const NovaSwitchRow({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle,
+    this.leading,
+  });
+  final String title;
+  final String? subtitle;
+  final Widget? leading;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  @override
+  Widget build(BuildContext context) => NovaTile(
+    title: title,
+    subtitle: subtitle == null ? null : Text(subtitle!),
+    leading: leading,
+    onTap: onChanged == null ? null : () => onChanged!(!value),
+    trailing: CupertinoSwitch(
+      value: value,
+      activeTrackColor: Nova.mint,
+      onChanged: onChanged,
+    ),
+  );
+}
+
+/// Rounded coloured tile behind a row icon, like iOS Settings.
+class NovaIconTile extends StatelessWidget {
+  const NovaIconTile(this.icon, {super.key, this.color = Nova.mint});
+  final IconData icon;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: SizedBox(
+      width: 26,
+      height: 26,
+      child: Icon(icon, size: 16, color: Nova.ink),
+    ),
+  );
+}
+
+enum NovaTone { neutral, active, success, warning, danger }
+
+/// Small rounded status label (running, waiting, done...), tinted from the palette.
+class NovaStatusChip extends StatelessWidget {
+  const NovaStatusChip(this.label, {super.key, this.tone = NovaTone.neutral});
+  final String label;
+  final NovaTone tone;
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (tone) {
+      NovaTone.active || NovaTone.success => Nova.mint,
+      NovaTone.warning => Nova.amber,
+      NovaTone.danger => Nova.red,
+      NovaTone.neutral => Nova.secondary,
+    };
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline message bar for errors and warnings, replacing bare coloured text.
+class NovaNotice extends StatelessWidget {
+  const NovaNotice(this.text, {super.key, this.tone = NovaTone.danger});
+  final String text;
+  final NovaTone tone;
+  @override
+  Widget build(BuildContext context) {
+    final color = tone == NovaTone.warning ? Nova.amber : Nova.red;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: SelectableText(
+            text,
+            style: TextStyle(color: color, fontSize: 14, height: 1.4),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shared shell for pushed secondary screens: quiet sheet colour and a centered title.
+class NovaPage extends StatelessWidget {
+  const NovaPage({
+    super.key,
+    required this.title,
+    required this.body,
+    this.actions,
+    this.floatingActionButton,
+  });
+  final String title;
+  final Widget body;
+  final List<Widget>? actions;
+  final Widget? floatingActionButton;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Nova.sheet,
+    appBar: AppBar(
+      backgroundColor: Nova.sheet,
+      centerTitle: true,
+      title: Text(
+        title,
+        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+      ),
+      actions: actions,
+    ),
+    floatingActionButton: floatingActionButton,
+    body: body,
   );
 }
 

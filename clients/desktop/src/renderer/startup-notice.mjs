@@ -10,7 +10,7 @@ export function startupMessage(value) {
   if (value.code === 'credential_access_failed') return t('凭据访问未完成。请检查系统授权弹窗或更新凭据，再在设置中重试。')
   if (value.code === 'workspace_not_found' || value.code === 'workspace_invalid') return t('工作区不存在或不是目录。请在设置中选择有效工作区。')
   if (value.code === 'state_permissions') return t('无法写入状态目录。请检查目录权限后在设置中重试。')
-  if (['state_busy', 'state_lock_failed', 'personal_store_locked'].includes(value.code)) return t('状态目录正被其他进程占用。请关闭占用它的实例后在设置中重试。')
+  if (['state_busy', 'state_lock_failed', 'personal_store_locked'].includes(value.code)) return t('Nova 已在另一个窗口运行。请关闭它后重试。')
   if (value.code === 'settings_recovery_failed') return t('设置恢复未完成。请在设置中恢复上次可用配置。')
   return t('后台启动失败，请打开设置检查配置后重试。')
 }

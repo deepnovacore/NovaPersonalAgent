@@ -78,6 +78,58 @@ ThemeData novaTheme() {
       backgroundColor: Nova.sheet,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      titleTextStyle: const TextStyle(
+        color: Nova.text,
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+      ),
+      contentTextStyle: const TextStyle(
+        color: Nova.text,
+        fontSize: 15,
+        height: 1.4,
+      ),
+    ),
+    // Plain Material widgets inherit the same quiet, rounded look as the
+    // grouped lists, so screens that have not been rebuilt still match.
+    cardTheme: CardThemeData(
+      color: Nova.cell,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    ),
+    listTileTheme: const ListTileThemeData(
+      iconColor: Nova.secondary,
+      textColor: Nova.text,
+      contentPadding: EdgeInsets.symmetric(horizontal: 16),
+      minVerticalPadding: 10,
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: Nova.sheetCell,
+      surfaceTintColor: Colors.transparent,
+      elevation: 6,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      textStyle: const TextStyle(color: Nova.text, fontSize: 15),
+    ),
+    expansionTileTheme: const ExpansionTileThemeData(
+      iconColor: Nova.secondary,
+      collapsedIconColor: Nova.tertiary,
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: Nova.cell,
+      selectedColor: Nova.mint.withValues(alpha: .14),
+      checkmarkColor: Nova.mint,
+      side: BorderSide.none,
+      shape: const StadiumBorder(),
+      labelStyle: const TextStyle(color: Nova.text, fontSize: 14),
+    ),
+    dividerTheme: const DividerThemeData(color: Nova.separator, thickness: .5),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Nova.mint,
+        side: BorderSide(color: Nova.mint.withValues(alpha: .5)),
+        shape: const StadiumBorder(),
+      ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,

@@ -66,10 +66,10 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
  const emptyConversation=el('div',undefined,'chat-intro');emptyConversation.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
  const companion=el('div',undefined,'chat-companion'),companionImage=el('img');companion.hidden=true;companionImage.alt='';companion.append(companionImage);head.append(companion)
- const companionAnimation=mountIdleAvatar(companionImage)
+ const companionAnimation=mountIdleAvatar(companionImage,{movieUrl:new URL('./assets/nova-idle.mp4',import.meta.url).href})
  let identityView=null
  const assistantWelcome=api?.welcome?mountAssistantWelcome(intro,{api:api.welcome,c,onIdentity:value=>identity(value)}):null
- function identity(value){const firstIntroduction=!identityView&&!value.profile.introduced;identityView=value;feedNodes.clear();assistantWelcome?.update(value);homeButton.replaceChildren();const avatar=el('img');avatar.src=value.profile.avatar??value.defaultAvatar;avatar.alt='';avatar.className='chat-brand-avatar';homeButton.append(avatar,el('span',value.profile.assistantName));companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true);if(firstIntroduction&&c.selectedId==='chat:main')history.scrollTop=0}
+ function identity(value){const firstIntroduction=!identityView&&!value.profile.introduced;identityView=value;feedNodes.clear();assistantWelcome?.update(value);homeButton.replaceChildren(el('span',value.profile.assistantName));companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true);if(firstIntroduction&&c.selectedId==='chat:main')history.scrollTop=0}
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
  const stage=el('div',undefined,'voice-stage');stage.hidden=true
  const stageCanvas=el('canvas',undefined,'voice-stage-orb');stageCanvas.setAttribute('aria-hidden','true')

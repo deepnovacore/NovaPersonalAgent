@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../personal/personal_store.dart';
 import '../protocol/request_id.dart';
@@ -196,7 +197,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
         busy || (requiresConnection && !widget.store.connected) || !enabled
         ? null
         : () => _run(action),
-    icon: Icon(icon ?? Icons.chevron_right, size: 18),
+    icon: Icon(icon ?? CupertinoIcons.chevron_right, size: 18),
     label: Text(t(text)),
   );
   Widget _card(Widget child, {Color? accent}) {
@@ -243,7 +244,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
         const SizedBox(height: 16),
         FilledButton.icon(
           onPressed: widget.store.connected ? () => _editor() : null,
-          icon: const Icon(Icons.add),
+          icon: const Icon(CupertinoIcons.add),
           label: Text(t('Create schedule')),
         ),
         const SizedBox(height: 22),
@@ -251,7 +252,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
           _card(
             Column(
               children: [
-                Icon(Icons.schedule, size: 34, color: colors.primary),
+                Icon(CupertinoIcons.clock, size: 34, color: colors.primary),
                 const SizedBox(height: 12),
                 Text(
                   t('Choose a suggested task, or create your own schedule.'),
@@ -267,7 +268,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
                 Row(
                   children: [
                     Icon(
-                      Icons.schedule,
+                      CupertinoIcons.clock,
                       color: item['enabled'] == true
                           ? colors.primary
                           : colors.onSurfaceVariant,
@@ -315,8 +316,8 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
               children: [
                 Icon(
                   index == 0
-                      ? Icons.format_list_bulleted
-                      : Icons.view_week_outlined,
+                      ? CupertinoIcons.list_bullet
+                      : CupertinoIcons.rectangle_split_3x1,
                   color: index == 0 ? colors.primary : const Color(0xffad99dd),
                 ),
                 const SizedBox(height: 12),
@@ -348,14 +349,14 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
                 _button(
                   'Set up task',
                   () => _editor(Map<String, dynamic>.from(preset['input'])),
-                  icon: Icons.add,
+                  icon: CupertinoIcons.add,
                 ),
               ],
             ),
             accent: index == 0 ? colors.primary : const Color(0xffad99dd),
           ),
         Text(
-          t('Runs while the Runtime is online. Your phone can be closed.'),
+          t('Runs while your computer is on. Your phone can be closed.'),
           style: TextStyle(
             color: colors.onSurfaceVariant,
             fontSize: 12,
@@ -409,7 +410,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
               });
               if (widget.store.connected) await _presets();
             },
-            icon: Icons.arrow_back,
+            icon: CupertinoIcons.chevron_back,
             requiresConnection: false,
           ),
         ),
@@ -445,7 +446,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
                   'id': selected,
                 });
                 await _editor(Map<String, dynamic>.from(fresh));
-              }, icon: Icons.edit_outlined),
+              }, icon: CupertinoIcons.pencil),
               _button(
                 current['enabled'] == true
                     ? 'Pause schedule'
@@ -458,8 +459,8 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
                   await _load(selected!);
                 },
                 icon: current['enabled'] == true
-                    ? Icons.pause
-                    : Icons.play_arrow,
+                    ? CupertinoIcons.pause_fill
+                    : CupertinoIcons.play_fill,
               ),
               _button(
                 'Run now',
@@ -471,7 +472,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
                   await _history();
                 },
                 enabled: run == null,
-                icon: Icons.play_circle_outline,
+                icon: CupertinoIcons.play_circle,
               ),
             ],
             if (run?['task_id'] != null)
@@ -485,7 +486,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
                   'control_revision': task['control_revision'],
                   'goal_revision': task['goal_revision'],
                 });
-              }, icon: Icons.stop_circle_outlined),
+              }, icon: CupertinoIcons.stop_circle),
           ],
         ),
         ExpansionTile(
@@ -509,7 +510,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
               onPressed: busy || !widget.store.connected
                   ? null
                   : () => _run(_history),
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(CupertinoIcons.arrow_clockwise),
             ),
           ],
         ),
@@ -578,7 +579,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
                 'expected_revision': current['revision'],
               });
               if (mounted) setState(() => selected = null);
-            }, icon: Icons.delete_outline),
+            }, icon: CupertinoIcons.trash),
           ],
         ),
       ],

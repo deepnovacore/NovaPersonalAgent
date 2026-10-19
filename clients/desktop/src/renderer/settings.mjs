@@ -273,7 +273,7 @@ function renderBadges(present, sources) {
     const badge = document.querySelector(`#badge-${key}`)
     const stored = present?.[key] === true
     const fromFile = sources?.[key] === 'dotenv' && !isEndpointSecret(key)
-    badge.textContent = fromFile ? t("来自 .env") : stored ? (sources?.[key] === 'environment' ? t("来自环境变量") : t("已设置")) : t("未设置")
+    badge.textContent = fromFile ? t("来自 .env") : stored ? (sources?.[key] === 'environment' ? t("来自系统配置") : t("已设置")) : t("未设置")
     secretInput(key).hidden = stored && !dirtySecretKeys.has(key)
     secretInput(key).disabled = fromFile
     secretClearButton(key).disabled = fromFile
@@ -298,7 +298,7 @@ function keyUsage(view) {
     arkApiKey: view.pipelineMode === 'cascaded'
       && view.cascadedLlmProvider === 'ark' ? t("必需") : t("当前未使用"),
     doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' && [view.cascadedAsrProvider,view.cascadedTtsProvider].includes('volcengine') ? t("必需") : t("当前未使用"),
-    composioApiKey: t('应用连接；修改后重启运行时'),
+    composioApiKey: t('应用连接；修改后需重启'),
     tavilyApiKey: t("可选"),
     openrouterApiKey: 'Jev',
   }
@@ -337,9 +337,9 @@ function renderCodingBackend(view) {
   codingConfigPath.value = view.codingBackendPaths?.[backendId]?.configPath ?? ''
   const status = view.codingBackends?.[backendId]
   document.querySelector('#coding-backend-status').textContent = [
-    status?.binary === 'available' ? t("已找到 ACP 可执行文件") : status?.binary === 'missing' ? t("未找到 ACP 可执行文件，请安装或指定路径") : t("可执行文件待检测"),
+    status?.binary === 'available' ? t("已找到可执行文件") : status?.binary === 'missing' ? t("未找到可执行文件，请安装或指定路径") : t("可执行文件待检测"),
     status?.configuration === 'missing' ? t("配置路径不可用") : codingConfigPath.value ? t("使用指定的配置来源") : t("使用默认配置"),
-    t("登录与 ACP 能力尚未验证，会在任务开始时检查。"),
+    t("登录状态尚未验证，会在任务开始时检查。"),
   ].join(t("；"))
 }
 
@@ -451,7 +451,7 @@ function renderUsage() {
   if (selected?.unpricedReports) notices.push(t("无法估价 {0} 次", selected.unpricedReports))
   const status = document.getElementById('frontend-usage')
   status.textContent = usage?.persistenceError
-    ? (usage.persistenceError === 'storage_failed' ? t("运行时用量存储失败，显示的历史可能不完整。") : usage.persistenceError === 'read_failed' ? t("历史记录读取失败，原文件已保留；当前仅显示本次启动用量。") : t("历史用量保存失败，本次用量仍保留在内存中。"))
+    ? (usage.persistenceError === 'storage_failed' ? t("用量记录保存失败，历史可能不完整。") : usage.persistenceError === 'read_failed' ? t("历史记录读取失败，原文件已保留；当前仅显示本次启动用量。") : t("历史用量保存失败，本次用量仍保留在内存中。"))
     : selected?.requests ? notices.join(' · ') : t("模型调用后显示用量")
   status.hidden = !status.textContent
   const breakdown = document.getElementById('usage-breakdown')
