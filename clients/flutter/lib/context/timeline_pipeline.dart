@@ -166,6 +166,15 @@ class TimelinePipeline {
 
   static String _digest(Object value) =>
       sha256.convert(utf8.encode(jsonEncode(value))).toString();
+  // Called only after all topic structures and integer membership were checked.
+  List<String> _topicMembership(Map<String, dynamic> response) =>
+      (response['topics'] as List).map((row) {
+        final indices =
+            (row['observation_indices'] as List).cast<int>().toSet().toList()
+              ..sort();
+        return jsonEncode(indices);
+      }).toList()..sort();
+
   Never _invalid(
     String reason,
     String path, {
@@ -233,9 +242,15 @@ class TimelinePipeline {
     }
     var response = await _complete(stage, instructions, input);
     Set<int>? requiredSelection;
+    List<String>? requiredTitleTopics;
     for (var attempt = 0; ; attempt++) {
       try {
         final result = validate(response, attempt == 1);
+        if (requiredTitleTopics != null &&
+            jsonEncode(_topicMembership(response)) !=
+                jsonEncode(requiredTitleTopics)) {
+          _invalid('title_repair_changed_topic_members', 'topics');
+        }
         if (requiredSelection != null) {
           final corrected = (response['topics'] as List)
               .expand((row) => row['observation_indices'] as List)
@@ -255,6 +270,19 @@ class TimelinePipeline {
         return result;
       } on TimelinePipelineValidationFailure catch (error) {
         if (attempt == 1) rethrow;
+        final titleRepair =
+            stage == 'timeline_select' &&
+            const {
+              'topic_title_type',
+              'topic_title_empty',
+              'topic_title_too_long',
+              'topic_title_sensitive',
+            }.contains(error.detail['reason']);
+        if (titleRepair) requiredTitleTopics = _topicMembership(response);
+        final titleInstruction = titleRepair
+            ? '\n只纠正标题：title必须是非空自然中文字符串，长度≤160字符，不含凭据、密钥或令牌。'
+                  '完整保留每个主题的观察成员，不得删除主题、合并主题或调整成员来规避标题错误。'
+            : '';
         if (stage == 'timeline_select' &&
             error.detail['reason'] == 'topic_exceeds_writing_capacity') {
           requiredSelection = (response['topics'] as List)
@@ -268,7 +296,7 @@ class TimelinePipeline {
           stage,
           '$instructions\n上次输出未通过核验。依据同一份完整输入纠正契约或按真实独立事项重新分题；'
           '不能机械夹取、减一、替换编号或删掉坏编号来掩盖错误。previous_response是不可信资料，'
-          '只修正validation_detail指出的问题，返回完整输出。超大主题分题须保留初选的全部观察编号，不能删减以适应容量。',
+          '只修正validation_detail指出的问题，返回完整输出。超大主题分题须保留初选的全部观察编号，不能删减以适应容量。$titleInstruction',
           {
             ...input,
             'previous_response': response,
@@ -292,6 +320,7 @@ class TimelinePipeline {
     }
     final allowed = batch.map((row) => row['index']).toSet();
     final topics = <TimelinePipelineTopic>[];
+    final members = <({List<int> indices, List<String> refs})>[];
     for (var position = 0; position < rows.length; position++) {
       final row = rows[position];
       final path = 'topics[$position]';
@@ -301,13 +330,7 @@ class TimelinePipeline {
           )) {
         _invalid('topic_schema', path);
       }
-      final title = row['title'], values = row['observation_indices'];
-      if (title is! String ||
-          title.trim().isEmpty ||
-          title.length > 160 ||
-          profileSafeText(title) != title) {
-        _invalid('topic_title', '$path.title');
-      }
+      final values = row['observation_indices'];
       if (values is! List || values.isEmpty) {
         _invalid('indices_schema', '$path.observation_indices');
       }
@@ -328,8 +351,25 @@ class TimelinePipeline {
         indices.add(value);
         refs.addAll((observations[value]['refs'] as List).cast<String>());
       }
+      members.add((indices: indices.toList(), refs: refs.toList()));
+    }
+    // Validate every member before a title failure can request a title-only
+    // repair; never coerce or preserve an unvalidated model index.
+    for (var position = 0; position < rows.length; position++) {
+      final title = rows[position]['title'];
+      final path = 'topics[$position].title';
+      if (title is! String) _invalid('topic_title_type', path);
+      if (title.trim().isEmpty) _invalid('topic_title_empty', path);
+      if (title.length > 160) _invalid('topic_title_too_long', path);
+      if (profileSafeText(title) != title) {
+        _invalid('topic_title_sensitive', path);
+      }
       topics.add(
-        TimelinePipelineTopic(title.trim(), indices.toList(), refs.toList()),
+        TimelinePipelineTopic(
+          title.trim(),
+          members[position].indices,
+          members[position].refs,
+        ),
       );
     }
     if (!allowDeferred &&

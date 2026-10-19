@@ -5,6 +5,7 @@ import 'package:nova_mobile/context/timeline_pipeline.dart';
 void main() {
   pipelineIntegrationTests();
   pipelineScopeTests();
+  pipelineTitleRepairTests();
   test(
     'all 624 complete observations retain their global indices across batches',
     () {
@@ -652,4 +653,164 @@ void pipelineScopeTests() {
       );
     },
   );
+}
+
+void pipelineTitleRepairTests() {
+  final invalidTitles = <String, Object>{
+    'topic_title_type': 42,
+    'topic_title_empty': '  \t ',
+    'topic_title_too_long': '甲' * 161,
+    'topic_title_sensitive': 'api_key=synthetic-private-value',
+  };
+  for (final invalid in invalidTitles.entries) {
+    test(
+      '${invalid.key} is content-free and repairs the same theme members once',
+      () async {
+        final data = fixture(2);
+        var selectionCalls = 0;
+        final pipeline = TimelinePipeline(
+          cacheScope: 'title-scope',
+          authorize: () async {},
+          complete: (stage, instructions, input) async {
+            if (stage == 'timeline_select') {
+              selectionCalls++;
+              if (selectionCalls == 1) {
+                expect(input.containsKey('previous_response'), false);
+                return {
+                  'topics': [
+                    {
+                      'title': invalid.value,
+                      'observation_indices': [0],
+                    },
+                    {
+                      'title': '乙事项已核验',
+                      'observation_indices': [1],
+                    },
+                  ],
+                };
+              }
+              expect(input['validation_detail'], {
+                'stage': 'timeline_select',
+                'reason': invalid.key,
+                'path': 'topics[0].title',
+              });
+              expect(instructions, contains('≤160'));
+              expect(instructions, contains('非空自然中文'));
+              expect(instructions, contains('凭据'));
+              return {
+                'topics': [
+                  {
+                    'title': '乙事项已核验',
+                    'observation_indices': [1],
+                  },
+                  {
+                    'title': '甲事项已核验',
+                    'observation_indices': [0, 0],
+                  },
+                ],
+              };
+            }
+            return normalComplete(stage, instructions, input);
+          },
+        );
+        final result = await pipeline.generate(
+          data.observations,
+          data.records,
+          historyComplete: true,
+        );
+        expect(selectionCalls, 2);
+        expect(result.partial, false);
+        expect((jsonDecode(result.entries) as List).length, 2);
+        expect(pipeline.validationDiagnostics!['first'], {
+          'stage': 'timeline_select',
+          'reason': invalid.key,
+          'path': 'topics[0].title',
+        });
+      },
+    );
+    test(
+      '${invalid.key} repair cannot delete a theme while preserving the index union',
+      () async {
+        final data = fixture(2);
+        var calls = 0;
+        final pipeline = TimelinePipeline(
+          cacheScope: 'title-scope',
+          authorize: () async {},
+          complete: (stage, instructions, input) async {
+            calls++;
+            expect(stage, 'timeline_select');
+            return calls == 1
+                ? {
+                    'topics': [
+                      {
+                        'title': invalid.value,
+                        'observation_indices': [0],
+                      },
+                      {
+                        'title': '乙事项',
+                        'observation_indices': [1],
+                      },
+                    ],
+                  }
+                : {
+                    'topics': [
+                      {
+                        'title': '合并全部事项',
+                        'observation_indices': [0, 1],
+                      },
+                    ],
+                  };
+          },
+        );
+        await expectLater(
+          pipeline.generate(
+            data.observations,
+            data.records,
+            historyComplete: true,
+          ),
+          throwsA(
+            isA<TimelinePipelineValidationFailure>().having(
+              (e) => e.detail['reason'],
+              'reason',
+              'title_repair_changed_topic_members',
+            ),
+          ),
+        );
+        expect(calls, 2);
+      },
+    );
+  }
+  test('title repair never coerces an unvalidated observation index', () async {
+    final data = fixture(1);
+    var calls = 0;
+    final pipeline = TimelinePipeline(
+      cacheScope: 'title-scope',
+      authorize: () async {},
+      complete: (stage, instructions, input) async {
+        calls++;
+        if (calls == 2) {
+          expect(input['validation_detail']['reason'], 'index_not_integer');
+        }
+        return {
+          'topics': [
+            {
+              'title': 42,
+              'observation_indices': ['0'],
+            },
+          ],
+        };
+      },
+    );
+    await expectLater(
+      pipeline.generate(data.observations, data.records, historyComplete: true),
+      throwsA(
+        isA<TimelinePipelineValidationFailure>().having(
+          (e) => e.detail['reason'],
+          'reason',
+          'index_not_integer',
+        ),
+      ),
+    );
+    expect(calls, 2);
+  });
 }
