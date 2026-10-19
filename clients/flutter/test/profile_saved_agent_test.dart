@@ -169,7 +169,12 @@ void main() {
       await authority.open();
       final host = FeishuHost(auth: auth, sources: sources);
       addTearDown(host.dispose);
-      final agent = ProfileAgent(host, authority, models);
+      final agent = ProfileAgent(
+        host,
+        authority,
+        models,
+        useTimelinePipeline: false,
+      );
       await expectLater(agent.run(), throwsA(isA<AgentFailure>()));
       expect(observationCalls, 2);
       expect(finalCalls, 0);

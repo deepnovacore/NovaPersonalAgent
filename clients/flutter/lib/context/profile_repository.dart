@@ -108,9 +108,13 @@ void _validateDisplayQuality(Map item, int index, Map originals) {
 }
 
 /// Shared pre-write validation for the writer and persisted projection.
-void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
+void validateProfileEntries(
+  dynamic entries,
+  Map<dynamic, dynamic> originals, {
+  int maxEntries = 100,
+}) {
   final evidence = originals.keys.toSet();
-  if (entries is! List || entries.length > 100) {
+  if (entries is! List || entries.length > maxEntries) {
     throw StateError('invalid_projection');
   }
   final keys = <String>{};
@@ -380,6 +384,7 @@ class ProfileRepository {
     bool partial = false,
     Map<String, int>? coverage,
     String? generationScope,
+    bool mergeTimelineHistory = false,
   }) {
     final result = _tail.then((_) async {
       final previous = _value;
@@ -395,7 +400,12 @@ class ProfileRepository {
         for (final e in sources.readAuthorizedEvidence(provider, 'profile'))
           e['evidence_id']: e,
       };
-      validateProfileEntries(entries, originals);
+      // Model responses stay capped at 100 per batch. A host-assembled snapshot
+      // can contain many independently validated batches.
+      if (entries is List && entries.length > 10000) {
+        throw StateError('profile_result_capacity');
+      }
+      validateProfileEntries(entries, originals, maxEntries: 10000);
       if (partial &&
           (entries as List).any((entry) => entry['kind'] == 'todo_candidate')) {
         throw StateError('partial_profile_todo_unsupported');
@@ -414,10 +424,21 @@ class ProfileRepository {
       final hasNewTimeline = entries.any((e) => e['kind'] == 'timeline');
       // A null/omitted profile category or an empty Timeline is not a deletion.
       // Prior suggestions never become current actionable candidates again.
+      String timelineIdentity(dynamic entry) {
+        final refs = List<String>.from(entry['evidence_ids'] as List)..sort();
+        return jsonEncode(refs);
+      }
+
+      final newTimelineEvidence = entries
+          .where((e) => e['kind'] == 'timeline')
+          .map(timelineIdentity)
+          .toSet();
       final preserved = oldEntries.where((e) {
         final kind = e['kind'] ?? 'profile';
         return kind == 'timeline'
-            ? !hasNewTimeline
+            ? !hasNewTimeline ||
+                  mergeTimelineHistory &&
+                      !newTimelineEvidence.contains(timelineIdentity(e))
             : kind == 'profile' &&
                   ProfileCorrections.categories.containsKey(e['key']) &&
                   !newProfileKeys.contains(e['key']);
@@ -445,6 +466,9 @@ class ProfileRepository {
         publishedKeys.add(key);
       }
       final publishedEntries = [...entries, ...preserved];
+      if (publishedEntries.length > 10000) {
+        throw StateError('profile_result_capacity');
+      }
       final oldFingerprints = _value?['evidence_fingerprints'] as Map? ?? {};
       final fingerprints = {
         for (final id

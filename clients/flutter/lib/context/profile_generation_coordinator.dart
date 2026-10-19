@@ -21,9 +21,12 @@ class ProfileGenerationSnapshot {
     required this.hasResult,
     required this.covered,
     required this.total,
+    this.pendingOutput = false,
+    this.outputBatches = 0,
   });
   final String scope;
-  final bool complete, hasResult;
+  final bool complete, hasResult, pendingOutput;
+  final int outputBatches;
   final int covered, total;
 }
 
@@ -40,6 +43,7 @@ class ProfileGenerationCoordinator extends ChangeNotifier
     int Function()? processedRecords,
     DateTime Function()? now,
     this.autoSchedule = true,
+    this.pauseAfterRound = false,
     this.inputs = const [],
     this.progress,
     this.recoverBudgetPause,
@@ -65,6 +69,10 @@ class ProfileGenerationCoordinator extends ChangeNotifier
   final int Function() processedRecords;
   final DateTime Function() now;
   final bool autoSchedule;
+
+  /// Bounded acceptance runs finish and persist before stopping new rounds.
+  /// Normal application builds leave this false.
+  final bool pauseAfterRound;
   final List<Listenable> inputs;
   final Listenable? progress;
   final Duration retryBase, roundDelay;
@@ -255,7 +263,7 @@ class ProfileGenerationCoordinator extends ChangeNotifier
         if (_disposed) return;
         final after = await inspect();
         if (_disposed) return;
-        _record['stage'] = 'collect';
+        _record['stage'] = after?.pendingOutput == true ? 'saved' : 'collect';
         _record['retry_count'] = 0;
         _record.remove('error_code');
         _record['last_covered'] = math.max(before, processedRecords());
@@ -270,7 +278,8 @@ class ProfileGenerationCoordinator extends ChangeNotifier
         final publicationAdvanced =
             after != null &&
             after.scope == snapshot.scope &&
-            (after.covered > snapshot.covered ||
+            (after.outputBatches > snapshot.outputBatches ||
+                after.covered > snapshot.covered ||
                 after.hasResult && !snapshot.hasResult);
         if (_record['completed'] != true &&
             processedRecords() <= before &&
@@ -336,6 +345,10 @@ class ProfileGenerationCoordinator extends ChangeNotifier
                 'source_expired',
                 'profile_checkpoint_storage_full',
                 'profile_selection_invalid',
+                'profile_timeline_checkpoint_invalid',
+                'profile_timeline_invalid',
+                'profile_timeline_deferred',
+                'profile_result_capacity',
                 'profile_context_too_large',
               }.contains(code) ||
               count >= 3;
@@ -352,6 +365,10 @@ class ProfileGenerationCoordinator extends ChangeNotifier
         }
       }
       if (_disposed) return;
+      if (pauseAfterRound) {
+        _record['manual_pause'] = true;
+        _record['stage'] = 'saved';
+      }
       _record['status'] = manuallyPaused ? 'paused' : 'idle';
       if (manuallyPaused) phase = ProfileGenerationPhase.paused;
       final retries = _record['retry_count'] as int? ?? 0;

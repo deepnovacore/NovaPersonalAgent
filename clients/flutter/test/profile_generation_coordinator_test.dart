@@ -4,8 +4,110 @@ import 'package:nova_mobile/context/profile_generation_coordinator.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  test(
+    'pending output resumes saved stages across restart and output batches count as progress',
+    () async {
+      final disk = MemoryLifePersistence();
+      var time = DateTime.utc(2026);
+      var outputBatches = 0;
+      final calls = <bool>[];
+      ProfileGenerationCoordinator create() => ProfileGenerationCoordinator(
+        persistence: disk,
+        autoSchedule: false,
+        now: () => time,
+        inspect: () async => ProfileGenerationSnapshot(
+          scope: 'progressive',
+          complete: outputBatches >= 6,
+          hasResult: true,
+          covered: 5,
+          total: 10,
+          pendingOutput: outputBatches < 5,
+          outputBatches: outputBatches,
+        ),
+        generate:
+            ({required savedObservationsOnly, required maxNewBatches}) async {
+              calls.add(savedObservationsOnly);
+              expect(maxNewBatches, savedObservationsOnly ? 0 : 4);
+              outputBatches++;
+            },
+        processedRecords: () => 5,
+        cancel: () {},
+        failureCode: (error) => '$error',
+      );
+      var coordinator = create();
+      await coordinator.start();
+      for (var round = 0; round < 5; round++) {
+        await coordinator.poll();
+        expect(coordinator.phase, ProfileGenerationPhase.continuing);
+        expect(coordinator.code, isNull);
+        expect(
+          disk.value,
+          contains(round < 4 ? '"stage":"saved"' : '"stage":"collect"'),
+        );
+        expect(disk.value, isNot(contains('no_progress_count')));
+        time = time.add(const Duration(seconds: 5));
+        if (round == 1) {
+          coordinator.dispose();
+          coordinator = create();
+          await coordinator.start();
+        }
+      }
+      expect(calls, [true, true, true, true, true]);
+      await coordinator.poll();
+      expect(calls, [true, true, true, true, true, false]);
+      expect(coordinator.phase, ProfileGenerationPhase.ready);
+      time = time.add(const Duration(days: 1));
+      await coordinator.poll();
+      expect(calls, hasLength(6));
+      coordinator.dispose();
+    },
+  );
+
+  test(
+    'pending output without advancing batches still reaches bounded no-progress stop',
+    () async {
+      var time = DateTime.utc(2026);
+      var calls = 0;
+      final coordinator = ProfileGenerationCoordinator(
+        persistence: MemoryLifePersistence(),
+        autoSchedule: false,
+        now: () => time,
+        inspect: () async => const ProfileGenerationSnapshot(
+          scope: 'stalled-output',
+          complete: false,
+          hasResult: true,
+          covered: 5,
+          total: 10,
+          pendingOutput: true,
+          outputBatches: 2,
+        ),
+        generate:
+            ({required savedObservationsOnly, required maxNewBatches}) async {
+              expect(savedObservationsOnly, true);
+              calls++;
+            },
+        processedRecords: () => 5,
+        cancel: () {},
+        failureCode: (error) => '$error',
+      );
+      await coordinator.start();
+      for (var attempt = 0; attempt < 6; attempt++) {
+        await coordinator.poll();
+        time = time.add(const Duration(minutes: 5));
+      }
+      expect(calls, 3);
+      expect(coordinator.phase, ProfileGenerationPhase.blocked);
+      expect(coordinator.code, 'profile_no_progress');
+      coordinator.dispose();
+    },
+  );
+
   for (final failure in [
     'profile_selection_invalid',
+    'profile_timeline_checkpoint_invalid',
+    'profile_timeline_invalid',
+    'profile_timeline_deferred',
+    'profile_result_capacity',
     'profile_context_too_large',
   ]) {
     test('$failure blocks paid reruns across polls and restart', () async {

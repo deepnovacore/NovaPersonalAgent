@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'profile_observation_checkpoint.dart';
 import 'profile_repository.dart';
 import 'profile_corrections.dart';
 import 'profile_text.dart';
 import 'timeline_brief.dart';
+import 'timeline_pipeline.dart';
 
 typedef ProfileCompletion =
     Future<Map<String, dynamic>> Function(
@@ -45,6 +47,11 @@ class ProfileWriter {
     this.onProgress,
     this.loadValidatedBatch,
     this.saveValidatedBatch,
+    this.timelinePipeline,
+    this.writeProfile = true,
+    this.onProfilePublish,
+    this.loadProfileOutput,
+    this.saveProfileOutput,
   });
   final Future<List<Map<String, dynamic>>?> Function(
     List<Map<String, dynamic>>,
@@ -55,11 +62,36 @@ class ProfileWriter {
     List<Map<String, dynamic>>,
   )?
   saveValidatedBatch;
+  final Future<String?> Function(String)? loadProfileOutput;
+  final Future<void> Function(String, String)? saveProfileOutput;
+  final TimelinePipeline? timelinePipeline;
+  final bool writeProfile;
+  final Future<void> Function(String, Map<String, int>)? onProfilePublish;
+  final _pipelineCoverage = <String, int>{};
+  final _profileOriginalIds = <String>{};
+  final _timelineOriginalIds = <String>{};
+  void updateTimelineEvidence(Iterable<String> ids) {
+    _timelineOriginalIds.addAll(ids);
+    selectedOriginalCount = {
+      ..._timelineOriginalIds,
+      ..._profileOriginalIds,
+    }.length;
+  }
+
+  void updatePipelineCoverage(Map<String, int> value) {
+    _pipelineCoverage.addAll(value);
+    selectedOriginalCount =
+        value['final_original_records'] ?? selectedOriginalCount;
+  }
+
   final ProfileCompletion complete;
   final void Function(String)? onProgress;
   int incompleteBatches = 0;
   int deferredBatches = 0;
-  bool get isPartial => validatedObservationRecordCount < sourceRecordCount;
+  bool get isPartial =>
+      validatedObservationRecordCount < sourceRecordCount ||
+      (_pipelineCoverage['timeline_pending_batches'] ?? 0) > 0 ||
+      (_pipelineCoverage['timeline_deferred_batches'] ?? 0) > 0;
   // A recurring pattern can need several messages; final selection still keeps
   // the complete reference group within the original-message capacity.
   static const maxObservationRefs = 24;
@@ -92,6 +124,18 @@ class ProfileWriter {
     'incomplete_batches': incompleteBatches,
     'deferred_batches': deferredBatches,
     'unobserved_records': sourceRecordCount - validatedObservationRecordCount,
+    ..._pipelineCoverage,
+    if (timelinePipeline != null) ...{
+      'timeline_original_records': _timelineOriginalIds.length,
+      'profile_original_records': _profileOriginalIds.length,
+      'final_original_records': {
+        ..._timelineOriginalIds,
+        ..._profileOriginalIds,
+      }.length,
+      'original_records_not_in_final':
+          sourceRecordCount -
+          {..._timelineOriginalIds, ..._profileOriginalIds}.length,
+    },
   };
 
   Future<Map<String, dynamic>> _completeFinal(
@@ -132,6 +176,9 @@ class ProfileWriter {
       throw ArgumentError.value(maxNewBatches, 'maxNewBatches');
     }
     _contextMetrics.clear();
+    _pipelineCoverage.clear();
+    _profileOriginalIds.clear();
+    _timelineOriginalIds.clear();
     timelineSelectedTopics = timelineIncludedTopics = timelineSkippedTopics = 0;
     incompleteBatches = 0;
     deferredBatches = 0;
@@ -291,6 +338,46 @@ class ProfileWriter {
     if (corrections.length > finalInputCharacters) {
       throw StateError('profile_context_too_large');
     }
+    if (timelinePipeline != null) {
+      late final TimelinePipelineResult result;
+      try {
+        result = await timelinePipeline!.generate(
+          facts,
+          records,
+          historyComplete: validatedObservationRecordCount == sourceRecordCount,
+          corrections: corrections,
+        );
+      } finally {
+        // Preserve stage diagnostics even when no publishable card was produced.
+        updatePipelineCoverage(timelinePipeline!.coverage);
+        updateTimelineEvidence(timelinePipeline!.readEvidenceIds);
+      }
+      if (writeProfile) {
+        final profileOriginals = selectOriginals(records, facts);
+        _profileOriginalIds.addAll(
+          profileOriginals.map((row) => row['evidence_id'] as String),
+        );
+        final profileKey =
+            'profile-output-v1-${ProfileObservationCheckpoint.digest(facts)}';
+        var profile = await loadProfileOutput?.call(profileKey);
+        if (profile != null) {
+          profile = encodeEntries({'entries': jsonDecode(profile)}, records);
+        } else {
+          profile = await _writeSelected(
+            facts,
+            profileOriginals,
+            const [],
+            corrections,
+            profileOnly: true,
+          );
+          await saveProfileOutput?.call(profileKey, profile);
+        }
+        updatePipelineCoverage({...result.coverage, 'profile_pending': 0});
+        updateTimelineEvidence(timelinePipeline!.readEvidenceIds);
+        await onProfilePublish?.call(profile, coverage);
+      }
+      return result.entries;
+    }
     onProgress?.call('正在梳理与你有关的进展…');
     final index = timelineObservationIndex(facts, records);
     var selectionInput = <String, dynamic>{
@@ -393,6 +480,16 @@ class ProfileWriter {
       facts,
       priorityGroups: admitted.groups,
     );
+    return _writeSelected(facts, selected, admitted.groups, corrections);
+  }
+
+  Future<String> _writeSelected(
+    List<Map<String, dynamic>> facts,
+    List<Map<String, dynamic>> selected,
+    List<List<String>> groups,
+    String corrections, {
+    bool profileOnly = false,
+  }) async {
     final ids = selected.map((e) => e['evidence_id']).toSet();
     final selectedFacts = <Map<String, dynamic>>[];
     var observationSize = 2;
@@ -411,7 +508,7 @@ class ProfileWriter {
     final material = <String, dynamic>{
       'messages': selected,
       'timeline_topics': [
-        for (final refs in admitted.groups) {'evidence_ids': refs},
+        for (final refs in groups) {'evidence_ids': refs},
       ],
       'self_evidence_ids': [
         for (final record in selected)
@@ -424,18 +521,24 @@ class ProfileWriter {
     onProgress?.call(
       '${observedRecordCount + reusedObservationRecordCount} 条合格文本已完成分批观察（本轮 $observedRecordCount 条、复用 $reusedObservationRecordCount 条）；最终撰写选用 $selectedOriginalCount 条完整原文和 $selectedObservationCount 条观察，其余未进入最终上下文（按相关性与容量筛选）。',
     );
+    final profileInstruction = profileOnly
+        ? '本轮仅整理个人资料，timeline和todos必须为空数组。'
+        : '';
     final partialInstructions = isPartial
         ? '本次仅基于已核对的部分资料；coverage说明未观察和未选入原文的数量。Timeline写来源时间发生的请求、决定和进展，不把当时计划表述为当前仍未完成，不声称已覆盖全部历史。画像只写现有依据支持的认识，避免把局部样本概括为稳定长期职责。未阅读的后续消息可能更新状态，本轮todos必须为空数组。'
         : '';
     final draft = await _completeFinal(
       'draft',
-      profileGrounding + _entryInstructions + partialInstructions,
+      profileGrounding +
+          _entryInstructions +
+          partialInstructions +
+          profileInstruction,
       material,
     );
     onProgress?.call('正在独立核对实际主体、计划与完成状态…');
     final review = await _completeFinal(
       'review',
-      '$profileGrounding$timelinePerspectiveRules$partialInstructions独立审查草稿，不重写正文。对照原消息检查具体行为、执行者、名称、角色、状态、引用与时间锚点。检查画像各主题一致，Timeline是否漏掉有依据的重要进展。重新判断每卡与用户的具体联系；即使事实准确，若只有例行通知、他人的独立事务或泛泛价值，删除整卡。核对brief事实引文、标题状态、why_now与uncertainty是否一致；缺少后续消息不能断言今天仍未完成，判断不得写成事实。没有价值事项时允许timeline为空。只有sender=self不够证明本人执行。多条消息支持的有分寸风格判断应保留，不要求逐字原文。不要因谨慎要求删成泛泛工作概况；指出实质问题即可。返回JSON对象 {"review_notes":["必要修正"]}，无实质问题返回空数组。',
+      '$profileGrounding$timelinePerspectiveRules$partialInstructions$profileInstruction独立审查草稿，不重写正文。对照原消息检查具体行为、执行者、名称、角色、状态、引用与时间锚点。检查画像各主题一致，Timeline是否漏掉有依据的重要进展。重新判断每卡与用户的具体联系；即使事实准确，若只有例行通知、他人的独立事务或泛泛价值，删除整卡。核对brief事实引文、标题状态、why_now与uncertainty是否一致；缺少后续消息不能断言今天仍未完成，判断不得写成事实。没有价值事项时允许timeline为空。只有sender=self不够证明本人执行。多条消息支持的有分寸风格判断应保留，不要求逐字原文。不要因谨慎要求删成泛泛工作概况；指出实质问题即可。返回JSON对象 {"review_notes":["必要修正"]}，无实质问题返回空数组。',
       {...material, 'draft': draft},
     );
     final notes = review['review_notes'];
@@ -445,11 +548,18 @@ class ProfileWriter {
     onProgress?.call('正在修订结果，保留有依据的主题和细节…');
     var edited = await _completeFinal(
       'edit',
-      '$profileGrounding$_entryInstructions$partialInstructions这是修订，不是压缩重写。落实review_notes，保留其余有依据的段落、分工、风格判断和篇幅；不删成一句职业概述，不因引用格式错误删除有依据的画像；Timeline允许整卡删除不相关或无价值的内容，不为数量保留。对事实层逐句复核，无法支持的具体行为才省略。',
+      '$profileGrounding$_entryInstructions$partialInstructions$profileInstruction这是修订，不是压缩重写。落实review_notes，保留其余有依据的段落、分工、风格判断和篇幅；不删成一句职业概述，不因引用格式错误删除有依据的画像；Timeline允许整卡删除不相关或无价值的内容，不为数量保留。对事实层逐句复核，无法支持的具体行为才省略。',
       {...material, 'draft': draft, 'review_notes': notes},
     );
     for (var attempt = 0; ; attempt++) {
       try {
+        if (profileOnly &&
+            (_projectionEntries(edited) as List).any(
+              (entry) =>
+                  entry is! Map || (entry['kind'] ?? 'profile') != 'profile',
+            )) {
+          throw StateError('invalid_projection');
+        }
         if (isPartial) {
           final entries = _projectionEntries(edited);
           if (entries is List &&
@@ -463,7 +573,7 @@ class ProfileWriter {
           edited,
           selected,
           requireBrief: true,
-          timelineGroups: admitted.groups,
+          timelineGroups: groups,
         );
       } catch (error) {
         final reason = profileRepairReason(error);
@@ -471,7 +581,7 @@ class ProfileWriter {
         onProgress?.call('正在修正引用格式，保留完整结果…');
         edited = await _completeFinal(
           'repair',
-          '$profileGrounding$_entryInstructions$partialInstructions若提供validation_detail，按path定位出错字段并严格使用allowed_values；若reason为internal_alias，将pN/cN内部别名改成原文明确的身份或姓名，没有依据就省略，不能编造名字；若reason为local_address，用原文支持的具体服务功能描述替换私有/回环地址或localhost，不换成另一个地址。只修改生成正文，不改原文或facts.quote。最终只填写规定的timeline、profile与todos区域。只修正校验错误，不压缩或删去其余有依据的内容。若画像或待办引用了participant或unknown，按validation_detail.path及invalid_references定位。当validation_error为profile_requires_self_evidence时，allowed_values和self_evidence_ids只是本轮上下文中可引用的本人原文编号，不能机械替换引用；必须重读原文并修正断言，没有本人依据的句子应删除，整类无依据则profile对应区域置null，待办无依据则删除该候选。即使没有self原文，仍可保留有明确个人联系且有原文依据的Timeline并写明实际主体。brief的facts.ref必须属于本项evidence_ids且quote逐字来自该ref完整原文；不能机械替换引用，无法支持或无价值就删除整卡，允许timeline为空。',
+          '$profileGrounding$_entryInstructions$partialInstructions$profileInstruction若提供validation_detail，按path定位出错字段并严格使用allowed_values；若reason为internal_alias，将pN/cN内部别名改成原文明确的身份或姓名，没有依据就省略，不能编造名字；若reason为local_address，用原文支持的具体服务功能描述替换私有/回环地址或localhost，不换成另一个地址。只修改生成正文，不改原文或facts.quote。最终只填写规定的timeline、profile与todos区域。只修正校验错误，不压缩或删去其余有依据的内容。若画像或待办引用了participant或unknown，按validation_detail.path及invalid_references定位。当validation_error为profile_requires_self_evidence时，allowed_values和self_evidence_ids只是本轮上下文中可引用的本人原文编号，不能机械替换引用；必须重读原文并修正断言，没有本人依据的句子应删除，整类无依据则profile对应区域置null，待办无依据则删除该候选。即使没有self原文，仍可保留有明确个人联系且有原文依据的Timeline并写明实际主体。brief的facts.ref必须属于本项evidence_ids且quote逐字来自该ref完整原文；不能机械替换引用，无法支持或无价值就删除整卡，允许timeline为空。',
           {
             ...material,
             'previous_result': edited,

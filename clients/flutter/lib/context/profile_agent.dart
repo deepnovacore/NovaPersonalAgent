@@ -10,6 +10,8 @@ import 'secure_persistence.dart';
 import 'profile_corrections.dart';
 import 'profile_evidence.dart';
 import 'profile_writer.dart';
+import 'timeline_pipeline.dart';
+import 'profile_pipeline_checkpoint.dart';
 import 'profile_budget.dart';
 import 'profile_observation_checkpoint.dart';
 import 'profile_generation_coordinator.dart';
@@ -71,6 +73,11 @@ String profileRunErrorCode(Object error) {
     'insufficient_profile_evidence',
     'profile_context_too_large',
     'profile_selection_invalid',
+    'profile_timeline_checkpoint_invalid',
+    'invalid_profile_pipeline_checkpoint',
+    'profile_timeline_invalid',
+    'profile_timeline_deferred',
+    'profile_result_capacity',
     'corrections_changed',
     'authorization_changed',
     'provider_changed',
@@ -132,9 +139,11 @@ class ProfileAgent extends ChangeNotifier {
     this.authority,
     this.models, {
     this.onProgress,
+    this.useTimelinePipeline = true,
     this.maxDuration = const Duration(minutes: 15),
   });
   final Duration maxDuration;
+  final bool useTimelinePipeline;
   bool _timedOut = false;
   bool _userCancelled = false;
   Object? _invalidationFailure;
@@ -193,12 +202,20 @@ class ProfileAgent extends ChangeNotifier {
       corrections.context(repository.correctionScope, provider),
     );
     final value = repository.value;
+    final sameScope = value?['generation_scope'] == scope;
+    final coverage = sameScope ? (value?['coverage'] as Map?) : null;
+    final pendingOutput =
+        (coverage?['timeline_pending_batches'] as int? ?? 0) > 0 ||
+        (coverage?['profile_pending'] as int? ?? 0) > 0;
     return ProfileGenerationSnapshot(
+      pendingOutput: pendingOutput,
+      outputBatches: coverage?['timeline_completed_batches'] as int? ?? 0,
       scope: scope,
       hasResult: value != null && value['generation_scope'] == scope,
       complete:
           value != null &&
           value['generation_scope'] == scope &&
+          !pendingOutput &&
           value['partial'] != true &&
           (value['incomplete_batches'] as int? ?? 0) == 0,
       covered: value?['generation_scope'] == scope
@@ -214,7 +231,9 @@ class ProfileAgent extends ChangeNotifier {
     String correctionContext,
   ) {
     return ProfileObservationCheckpoint.digest({
-      'result_recipe': 'timeline-brief-v4',
+      'result_recipe': useTimelinePipeline
+          ? 'timeline-batched-v5'
+          : 'timeline-brief-v4',
       'provider': '${model.endpoint}|${model.model}',
       'protocol': model.protocol.name,
       'account': connector.sources.identity,
@@ -455,6 +474,28 @@ class ProfileAgent extends ChangeNotifier {
             authorize: () => validate(ignoreCancellation: true),
           );
 
+    final generationScope = _generationScope(
+      model,
+      evidence,
+      correctionContext,
+    );
+    final pipelineCheckpoint = evidence.expiresAt == null
+        ? null
+        : ProfilePipelineCheckpoint(
+            const SecureContextPersistence(
+              ProfilePipelineCheckpoint.storageKey,
+            ),
+            scope: generationScope,
+            expiresAt: evidence.expiresAt!,
+            now: connector.sources.now,
+            authorize: () => validate(ignoreCancellation: true),
+          );
+    const pipelineStages = {
+      'timeline_select',
+      'timeline_reconcile',
+      'timeline_compose',
+      'timeline_review',
+    };
     String? lastStage;
     Future<Map<String, dynamic>> complete(
       String stage,
@@ -463,7 +504,7 @@ class ProfileAgent extends ChangeNotifier {
     ) async {
       if (const {
         'observations',
-        'timeline_select',
+        ...pipelineStages,
         'draft',
         'review',
         'edit',
@@ -471,7 +512,8 @@ class ProfileAgent extends ChangeNotifier {
       }.contains(stage)) {
         lastStage = stage;
       }
-      if ((stage == 'draft' || stage == 'timeline_select') &&
+      if (!useTimelinePipeline &&
+          (stage == 'draft' || stage == 'timeline_select') &&
           (savedObservationsOnly || maxNewBatches != null)) {
         final coverage = Map<String, int>.from(input['coverage'] as Map);
         if (coverage['validated_observation_records']! <
@@ -541,8 +583,12 @@ class ProfileAgent extends ChangeNotifier {
                 : null,
           );
         } on FormatException {
-          if (stage == 'timeline_select') {
-            throw const AgentFailure('profile_selection_invalid');
+          if (pipelineStages.contains(stage)) {
+            throw AgentFailure(
+              stage == 'timeline_select' || stage == 'timeline_reconcile'
+                  ? 'profile_selection_invalid'
+                  : 'profile_timeline_invalid',
+            );
           }
           if (attempt == 1) throw const AgentFailure('invalid_profile_json');
         } finally {
@@ -576,7 +622,87 @@ class ProfileAgent extends ChangeNotifier {
     authority.addListener(changed);
     var outcome = 'interrupted';
     String? failureCode;
-    final writer = ProfileWriter(
+    late final ProfileWriter writer;
+    Future<void> publishProgress(
+      String entries,
+      Map<String, int> coverage, {
+      required bool partial,
+    }) async {
+      await validate();
+      final existing = repository.value;
+      // A replay walks completed batches before reaching the interruption point.
+      // Keep the stronger durable publication until this run catches up.
+      if (partial && existing?['generation_scope'] == generationScope) {
+        final old = existing?['coverage'] as Map?;
+        if (existing?['partial'] != true ||
+            (old?['validated_observation_records'] as int? ?? 0) >
+                (coverage['validated_observation_records'] ?? 0) ||
+            (old?['final_original_records'] as int? ?? 0) >
+                (coverage['final_original_records'] ?? 0)) {
+          return;
+        }
+      }
+      await repository.publish(
+        evidence.restoreCitations(entries),
+        epoch: epoch,
+        sourceRevision: sourceRevision,
+        consentRevision: consentRevision,
+        provider: provider,
+        incompleteBatches: writer.incompleteBatches,
+        partial: partial,
+        coverage: coverage,
+        generationScope: generationScope,
+        mergeTimelineHistory: true,
+      );
+      await validate();
+      _report('已保存核对完成的内容，正在继续整理…');
+    }
+
+    late final TimelinePipeline? pipeline;
+    pipeline = useTimelinePipeline
+        ? TimelinePipeline(
+            complete: complete,
+            authorize: validate,
+            cacheScope: generationScope,
+            loadCheckpoint: pipelineCheckpoint?.load,
+            saveCheckpoint: pipelineCheckpoint?.save,
+            onPublish: (result) async {
+              writer.updatePipelineCoverage({
+                ...result.coverage,
+                'profile_pending': 1,
+              });
+              writer.updateTimelineEvidence(pipeline!.readEvidenceIds);
+              await publishProgress(
+                result.entries,
+                writer.coverage,
+                partial: true,
+              );
+            },
+          )
+        : null;
+    writer = ProfileWriter(
+      timelinePipeline: pipeline,
+      loadProfileOutput: pipelineCheckpoint == null
+          ? null
+          : (key) async {
+              await validate();
+              final cached = await pipelineCheckpoint.load(key);
+              await validate();
+              if (cached == null) return null;
+              if (cached['entries'] is! String) {
+                throw StateError('profile_timeline_checkpoint_invalid');
+              }
+              return cached['entries'] as String;
+            },
+      saveProfileOutput: pipelineCheckpoint == null
+          ? null
+          : (key, entries) async {
+              await validate();
+              await pipelineCheckpoint.save(key, {'entries': entries});
+              await validate();
+            },
+      onProfilePublish: (entries, coverage) =>
+          publishProgress(entries, coverage, partial: writer.isPartial),
       complete: complete,
       onProgress: _report,
       loadValidatedBatch: checkpoint == null
@@ -632,15 +758,23 @@ class ProfileAgent extends ChangeNotifier {
         incompleteBatches: writer.incompleteBatches,
         partial: writer.isPartial,
         coverage: writer.coverage,
-        generationScope: _generationScope(model, evidence, correctionContext),
+        generationScope: generationScope,
+        mergeTimelineHistory: useTimelinePipeline,
       );
       await validate();
       if (repository.value == null) {
         throw const AgentFailure('profile_not_published');
       }
       outcome = writer.isPartial ? 'partial' : 'completed';
-      if (!writer.isPartial && writer.incompleteBatches == 0) {
+      if (!useTimelinePipeline &&
+          !writer.isPartial &&
+          writer.incompleteBatches == 0) {
         await checkpoint?.clear();
+      }
+      // Keep validated observations/stages for an interrupted or explicit rerun.
+      // Scope/expiry/revocation invalidation owns their lifetime.
+      if ((writer.coverage['timeline_deferred_batches'] ?? 0) > 0) {
+        throw StateError('profile_timeline_deferred');
       }
       _report(
         '${writer.isPartial ? '已生成部分结果，未整理的消息可继续补充；' : ''}整理完成：缓存中 ${cachedCounts['available'] ?? 0} 条可用文本，${writer.observedRecordCount + writer.reusedObservationRecordCount} 条合格文本完成分批观察（本轮 ${writer.observedRecordCount} 条、复用 ${writer.reusedObservationRecordCount} 条）；最终撰写与审查使用 ${writer.selectedOriginalCount} 条完整原文和 ${writer.selectedObservationCount} 条观察。'
@@ -657,6 +791,7 @@ class ProfileAgent extends ChangeNotifier {
         await validate(ignoreCancellation: true);
       } catch (validationError) {
         await checkpoint?.clear();
+        await pipelineCheckpoint?.clear();
         if (const {
           'source_expired',
           'corrections_changed',

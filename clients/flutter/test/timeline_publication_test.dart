@@ -18,6 +18,207 @@ Map<String, dynamic> brief(String ref) => {
 };
 void main() {
   test(
+    'host accumulated 101 cards publish but model batches stay limited and capacity failure preserves success',
+    () async {
+      final now = DateTime.utc(2026, 10, 19);
+      final source = SourceStore(MemoryLifePersistence(), now: () => now);
+      await source.bind('fixture:self', 1);
+      await source.select('chat', DateTime.utc(1970));
+      final messages = List.generate(
+        101,
+        (index) => {
+          'message_id': 'source_$index',
+          'sender': {'id_type': 'open_id', 'id': 'self'},
+          'create_time': '${now.millisecondsSinceEpoch}',
+          'msg_type': 'text',
+          'body': {
+            'content': jsonEncode({'text': '验收事项$index已完成'}),
+          },
+        },
+      );
+      for (var offset = 0; offset < messages.length; offset += 50) {
+        await source.ingestPage(
+          source.fence('chat'),
+          messages.skip(offset).take(50).toList(),
+          nextPage: null,
+          windowEnd: now,
+        );
+      }
+      await source.grantProcessing('p', 'profile', true);
+      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+      await authority.open();
+      final disk = MemoryLifePersistence();
+      final repo = ProfileRepository(disk, authority, source);
+      final originals = {
+        for (final message in source.readAuthorizedEvidence('p', 'profile'))
+          message['evidence_id']: message,
+      };
+      final refs = originals.keys.toList();
+      final entries = List.generate(
+        101,
+        (index) => <String, dynamic>{
+          'key': 'event_$index',
+          'kind': 'timeline',
+          'text': originals[refs[index]]!['text'],
+          'evidence_ids': [refs[index]],
+          'observed_at': now.toIso8601String(),
+        },
+      );
+      expect(
+        () => validateProfileEntries(entries.take(100).toList(), originals),
+        returnsNormally,
+      );
+      expect(
+        () => validateProfileEntries(entries, originals),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'code',
+            'invalid_projection',
+          ),
+        ),
+      );
+      Future<void> publish(List<Map<String, dynamic>> items) async {
+        await repo.publish(
+          jsonEncode(items),
+          epoch: authority.epoch,
+          sourceRevision: source.revision,
+          consentRevision: source.processingRevision,
+          provider: 'p',
+          mergeTimelineHistory: true,
+        );
+      }
+
+      await publish(entries);
+      expect(repo.value!['entries'], entries);
+      final before = disk.value;
+      final revision = repo.value!['revision'];
+      final generated = repo.value!['generated_at'];
+      final tooMany = List.generate(
+        10001,
+        (index) => <String, dynamic>{
+          ...entries[index % entries.length],
+          'key': 'overflow_$index',
+        },
+      );
+      await expectLater(
+        publish(tooMany),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'code',
+            'profile_result_capacity',
+          ),
+        ),
+      );
+      expect(disk.value, before);
+      expect(repo.value!['entries'], entries);
+      expect(repo.value!['revision'], revision);
+      expect(repo.value!['generated_at'], generated);
+      final reopened = ProfileRepository(disk, authority, source);
+      await reopened.open();
+      expect(reopened.value!['entries'], entries);
+      authority.dispose();
+    },
+  );
+
+  test(
+    'progressive publications preserve cross-day deleted-source history and replay without duplicates',
+    () async {
+      var now = DateTime.utc(2026, 10, 19);
+      final source = SourceStore(MemoryLifePersistence(), now: () => now);
+      await source.bind('fixture:self', 1);
+      await source.select('chat', DateTime.utc(1970));
+      Future<void> ingest(String id, {bool deleted = false}) =>
+          source.ingestPage(
+            source.fence('chat'),
+            [
+              {
+                'message_id': id,
+                'sender': {'id_type': 'open_id', 'id': 'self'},
+                'create_time': '${now.millisecondsSinceEpoch}',
+                'msg_type': 'text',
+                'body': {
+                  'content': jsonEncode({'text': '接口验收$id'}),
+                },
+                if (deleted) 'deleted': true,
+              },
+            ],
+            nextPage: null,
+            windowEnd: now,
+          );
+      await ingest('first');
+      await source.grantProcessing('p', 'profile', true);
+      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+      await authority.open();
+      final disk = MemoryLifePersistence();
+      final repo = ProfileRepository(disk, authority, source);
+      Future<void> publish(List<String> refs, String text) async {
+        await repo.publish(
+          jsonEncode([
+            {
+              'key': 'event',
+              'kind': 'timeline',
+              'text': text,
+              'evidence_ids': refs,
+              'observed_at': now.toIso8601String(),
+            },
+          ]),
+          epoch: authority.epoch,
+          sourceRevision: source.revision,
+          consentRevision: source.processingRevision,
+          provider: 'p',
+          mergeTimelineHistory: true,
+        );
+      }
+
+      final oldRef = source.messages('chat').single['evidence_id'] as String;
+      await publish([oldRef], '第一天完成第一步');
+      final oldDate = now.toIso8601String();
+      final oldFingerprint = repo.value!['evidence_fingerprints'][oldRef];
+      now = now.add(const Duration(days: 1));
+      await ingest('second');
+      await ingest('third');
+      final newRefs = source
+          .messages('chat')
+          .map((message) => message['evidence_id'] as String)
+          .where((ref) => ref != oldRef)
+          .toList();
+      await ingest('first', deleted: true);
+      await publish(newRefs, '第二天完成后续验收');
+      final entries = repo.value!['entries'] as List;
+      expect(entries, hasLength(2));
+      final history = entries.singleWhere(
+        (entry) => entry['text'] == '第一天完成第一步',
+      );
+      expect(history['observed_at'], oldDate);
+      expect(history['evidence_ids'], [oldRef]);
+      expect(history['key'], isNot('event'));
+      expect(repo.value!['evidence_fingerprints'][oldRef], oldFingerprint);
+      expect(repo.value!['available_evidence_ids'], unorderedEquals(newRefs));
+      expect(repo.value!['historical'], true);
+
+      await publish(newRefs.reversed.toList(), '第二天结果经复核');
+      final replayed = repo.value!['entries'] as List;
+      expect(replayed, hasLength(2));
+      expect(replayed.where((entry) => entry['text'] == '第二天完成后续验收'), isEmpty);
+      expect(
+        replayed.singleWhere((entry) => entry['text'] == '第一天完成第一步'),
+        history,
+      );
+      expect(replayed.map((entry) => entry['key']).toSet(), hasLength(2));
+      final reopened = ProfileRepository(disk, authority, source);
+      await reopened.open();
+      expect(reopened.value!['entries'], replayed);
+      expect(
+        reopened.value!['available_evidence_ids'],
+        unorderedEquals(newRefs),
+      );
+      authority.dispose();
+    },
+  );
+
+  test(
     'publishing one region retains other successful categories without reviving todo candidates',
     () async {
       var now = DateTime.utc(2026, 10, 19);

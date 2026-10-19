@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../context/source_store.dart';
 import '../../context/secure_persistence.dart';
 import '../../context/profile_observation_checkpoint.dart';
+import '../../context/profile_pipeline_checkpoint.dart';
 import '../../personal/life_reducer.dart';
 import 'api.dart';
 import 'auth.dart';
@@ -31,6 +32,9 @@ class FeishuHost extends ChangeNotifier {
     }
     await ProfileObservationCheckpoint.invalidate(
       const SecureContextPersistence(ProfileObservationCheckpoint.storageKey),
+    );
+    await ProfilePipelineCheckpoint.invalidate(
+      const SecureContextPersistence(ProfilePipelineCheckpoint.storageKey),
     );
   }
 
