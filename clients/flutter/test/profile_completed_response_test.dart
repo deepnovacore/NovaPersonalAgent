@@ -6,6 +6,53 @@ import 'package:nova_mobile/context/profile_budget.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  test(
+    'exact JSON fences and stage-specific arrays keep schema validation',
+    () async {
+      expect(
+        await decodeCompletedProfileResponse(
+          '```json\n{"topics": []}\n```',
+          validate: () async {},
+        ),
+        {'topics': []},
+      );
+      expect(
+        await decodeCompletedProfileResponse(
+          '[{"observation_indices":[0]}]',
+          validate: () async {},
+          collection: 'topics',
+        ),
+        {
+          'topics': [
+            {
+              'observation_indices': [0],
+            },
+          ],
+        },
+      );
+      expect(
+        await decodeCompletedProfileResponse(
+          '["核对执行者"]',
+          validate: () async {},
+          collection: 'review_notes',
+        ),
+        {
+          'review_notes': ['核对执行者'],
+        },
+      );
+      for (final invalid in [
+        '[]',
+        '说明\n{"topics":[]}',
+        '```json\n{}\n```\n其它内容',
+      ]) {
+        await expectLater(
+          decodeCompletedProfileResponse(invalid, validate: () async {}),
+          throwsFormatException,
+        );
+      }
+    },
+  );
+
   for (final invalidAuthorization in [false, true]) {
     test(
       'complete trustworthy usage settles before JSON or authority failure: $invalidAuthorization',

@@ -94,6 +94,7 @@ List<List<String>> timelineSelectedGroups(
     throw StateError('invalid_projection');
   }
   final seen = <int>{}, groups = <List<String>>[];
+  final referenceSets = <String>{};
   for (final topic in topics) {
     if (topic is! Map || topic.keys.any((k) => k != 'observation_indices')) {
       throw StateError('invalid_projection');
@@ -112,11 +113,12 @@ List<List<String>> timelineSelectedGroups(
       }
       refs.addAll((observations[index]['refs'] as List).cast<String>());
     }
-    // Overlapping originals carry updates together even across model groups.
-    for (var i = groups.length - 1; i >= 0; i--) {
-      if (groups[i].any(refs.contains)) refs.addAll(groups.removeAt(i));
+    // Shared background or a multi-topic message does not identify one event.
+    // Keep the model's semantic groups; only identical evidence sets duplicate.
+    final canonicalRefs = refs.toList()..sort();
+    if (referenceSets.add(jsonEncode(canonicalRefs))) {
+      groups.add(refs.toList());
     }
-    groups.add(refs.toList());
   }
   return groups;
 }

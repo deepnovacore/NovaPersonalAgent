@@ -102,11 +102,22 @@ String profileRunErrorCode(Object error) {
 Future<Map<String, dynamic>> decodeCompletedProfileResponse(
   String content, {
   Future<void> Function()? settleUsage,
+  String? collection,
   required Future<void> Function() validate,
 }) async {
   await settleUsage?.call();
   await validate();
-  final value = jsonDecode(content);
+  // Match desktop transport handling without extracting JSON from prose.
+  final trimmed = content.trim();
+  final fence = RegExp(
+    r'^```(?:json)?\s*\n([\s\S]*?)\n```$',
+    caseSensitive: false,
+  ).firstMatch(trimmed);
+  final value = jsonDecode(fence?.group(1) ?? trimmed);
+  if (value is List &&
+      (collection == 'topics' || collection == 'review_notes')) {
+    return {collection!: value};
+  }
   if (value is! Map<String, dynamic>) {
     throw const FormatException('json_object_required');
   }
@@ -518,6 +529,11 @@ class ProfileAgent extends ChangeNotifier {
           }
           return await decodeCompletedProfileResponse(
             content,
+            collection: stage == 'timeline_select'
+                ? 'topics'
+                : stage == 'review'
+                ? 'review_notes'
+                : null,
             validate: validate,
             settleUsage: reservation != null && client.completedUsage != null
                 ? () => budget!.settle(reservation, client.completedUsage!)

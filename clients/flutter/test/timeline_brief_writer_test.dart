@@ -16,6 +16,66 @@ Map<String, dynamic> brief(String ref, String quote) => {
 
 void main() {
   test(
+    'shared background refs do not union independent deliveries or their later outcomes',
+    () {
+      final observations = <Map<String, dynamic>>[
+        {
+          'text': '【事】交付甲计划',
+          'refs': ['shared', 'a-plan'],
+        },
+        {
+          'text': '【事】交付甲完成',
+          'refs': ['a-done'],
+        },
+        {
+          'text': '【事】交付乙计划',
+          'refs': ['shared', 'b-plan'],
+        },
+        {
+          'text': '【事】交付乙取消',
+          'refs': ['b-cancelled'],
+        },
+        {
+          'text': '【事】甲事项重复观察',
+          'refs': ['a-done', 'shared', 'a-plan'],
+        },
+      ];
+      final groups = timelineSelectedGroups({
+        'topics': [
+          {
+            'observation_indices': [0, 1],
+          },
+          {
+            'observation_indices': [2, 3],
+          },
+          {
+            'observation_indices': [4],
+          },
+        ],
+      }, observations);
+      expect(groups, [
+        ['shared', 'a-plan', 'a-done'],
+        ['shared', 'b-plan', 'b-cancelled'],
+      ]);
+      final records = [
+        for (final id in [
+          'shared',
+          'a-plan',
+          'a-done',
+          'b-plan',
+          'b-cancelled',
+        ])
+          <String, dynamic>{'evidence_id': id, 'text': id},
+      ];
+      final fit = fitTimelineGroups(groups, records, maxRecords: 4);
+      expect(fit.groups, [
+        ['shared', 'a-plan', 'a-done'],
+      ]);
+      expect(fit.skipped, 1);
+    },
+  );
+
+  test(
     '552 unique Chinese observations and distinct dates survive compact selection',
     () async {
       final records = List.generate(
@@ -326,6 +386,8 @@ void main() {
               as List;
       expect(result.single['brief']['facts'].single['ref'], 'e129');
       expect(writer.coverage['timeline_included_topics'], 1);
+      expect(writer.coverage['raw_topic_count'], 1);
+      expect(writer.coverage['largest_topic_records'], 1);
     },
   );
   test(

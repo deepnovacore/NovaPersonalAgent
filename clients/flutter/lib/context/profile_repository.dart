@@ -31,6 +31,82 @@ String? profileRepairReason(Object error) {
       : null;
 }
 
+final _displayAlias = RegExp(
+  r'(?<![A-Za-z0-9_])[pc]\d{1,5}(?![A-Za-z0-9_])',
+  caseSensitive: false,
+);
+final _displayIpv4 = RegExp(
+  r'(?<![A-Za-z0-9_.])(?:\d{1,3}\.){3}\d{1,3}(?![A-Za-z0-9_.])',
+);
+final _displayLocalhost = RegExp(
+  r'(?<![A-Za-z0-9_-])localhost(?![A-Za-z0-9_-])',
+  caseSensitive: false,
+);
+
+void _validateDisplayQuality(Map item, int index, Map originals) {
+  final citedText = [
+    for (final ref in item['evidence_ids'] as List)
+      if (originals[ref]['text'] is String) originals[ref]['text'] as String,
+  ];
+  void check(String text, String field) {
+    void reject(String reason) => throw ProfileValidationFailure(
+      'ungrounded_projection',
+      {'path': 'entries[$index].$field', 'reason': reason},
+    );
+    for (final alias in _displayAlias.allMatches(text)) {
+      final originalToken = RegExp(
+        r'(?<![A-Za-z0-9_])' + RegExp.escape(alias[0]!) + r'(?![A-Za-z0-9_])',
+        caseSensitive: false,
+      );
+      if (!citedText.any(originalToken.hasMatch)) reject('internal_alias');
+    }
+    if (_displayLocalhost.hasMatch(text)) reject('local_address');
+    for (final match in _displayIpv4.allMatches(text)) {
+      final octets = match[0]!.split('.').map(int.parse).toList();
+      if (octets.any((n) => n > 255)) continue;
+      final local =
+          octets[0] == 10 ||
+          octets[0] == 127 ||
+          octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31 ||
+          octets[0] == 192 && octets[1] == 168;
+      if (!local) continue;
+      // Explicit, source-backed product versions are not network addresses.
+      final prefix = text.substring(
+        match.start > 20 ? match.start - 20 : 0,
+        match.start,
+      );
+      final version = RegExp(
+        r'(?:版本|version|ver\.?)\s*[:：]?\s*$',
+        caseSensitive: false,
+      ).hasMatch(prefix);
+      if (version && citedText.any((source) => source.contains(match[0]!))) {
+        continue;
+      }
+      reject('local_address');
+    }
+  }
+
+  final brief = item['brief'];
+  if (brief is Map) {
+    for (final field in ['title', 'status_label', 'why_now', 'uncertainty']) {
+      check(brief[field] as String, 'brief.$field');
+    }
+    final facts = brief['facts'] as List;
+    for (var i = 0; i < facts.length; i++) {
+      check(facts[i]['text'] as String, 'brief.facts[$i].text');
+    }
+    final steps = brief['next_steps'] as List;
+    for (var i = 0; i < steps.length; i++) {
+      for (final field in ['title', 'detail']) {
+        check(steps[i][field] as String, 'brief.next_steps[$i].$field');
+      }
+    }
+    // Host-derived text repeats title/facts; quotes remain exact source data.
+  } else {
+    check(item['text'] as String, 'text');
+  }
+}
+
 /// Shared pre-write validation for the writer and persisted projection.
 void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
   final evidence = originals.keys.toSet();
@@ -110,6 +186,7 @@ void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
             .toList(),
       });
     }
+    _validateDisplayQuality(item, index, originals);
     if (kind == 'todo_candidate' && (item['text'] as String).length > 200) {
       throw StateError('ungrounded_projection');
     }
