@@ -415,7 +415,9 @@ class SourceStore extends ChangeNotifier {
       .toList();
   Future<void> grantProcessing(String provider, String purpose, bool enabled) =>
       _write((data) {
-        if (provider.isEmpty || purpose != 'profile' || sources.isEmpty) {
+        if (provider.isEmpty ||
+            purpose != 'profile' ||
+            enabled && sources.isEmpty) {
           throw StateError('invalid_processing_grant');
         }
         final key = lifeFingerprint({'provider': provider, 'purpose': purpose});

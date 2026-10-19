@@ -20,8 +20,15 @@ class FeishuHost extends ChangeNotifier {
             const SecureContextPersistence('nova.feishu.sources.v1'),
             onInvalidated: invalidateDerivedProfile,
           );
-  static Future<void> invalidateDerivedProfile() async {
-    await const SecureContextPersistence('nova.profile.local.v1').write('null');
+  static Future<void> invalidateDerivedProfile({
+    bool clearPublished = false,
+  }) async {
+    // Input changes invalidate paid working checkpoints, not successful history.
+    if (clearPublished) {
+      await const SecureContextPersistence(
+        'nova.profile.local.v1',
+      ).write('null');
+    }
     await ProfileObservationCheckpoint.invalidate(
       const SecureContextPersistence(ProfileObservationCheckpoint.storageKey),
     );

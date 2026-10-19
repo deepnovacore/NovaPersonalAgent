@@ -27,7 +27,7 @@ class ReadyHost extends FeishuHost {
 void main() {
   for (final expire in [false, true]) {
     testWidgets(
-      'local results and open evidence disappear on ${expire ? 'expiry' : 'withdrawal'}',
+      'local history survives ${expire ? 'expiry' : 'processing withdrawal'} and unavailable evidence stays hidden',
       (tester) async {
         var now = DateTime.utc(2026, 10, 18);
         final sourceTime = now
@@ -148,10 +148,10 @@ void main() {
         }
         await tester.pumpAndSettle();
         expect(find.text('synthetic original plan'), findsNothing);
-        expect(find.textContaining('原文已过期，或当前已无权访问'), findsOneWidget);
+        expect(find.text('原始来源已不可用，仍保留此前整理的内容。'), findsOneWidget);
         await tester.tap(find.text('关闭'));
         await tester.pumpAndSettle();
-        expect(find.text('Grounded profile'), findsNothing);
+        expect(find.text('Grounded profile'), findsOneWidget);
         await tester.pumpWidget(const SizedBox());
         host.dispose();
         authority.dispose();

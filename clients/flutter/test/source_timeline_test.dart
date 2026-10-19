@@ -169,6 +169,7 @@ void main() {
         expect(find.text('查看 2 条原文 ›'), findsOneWidget);
         expect(find.textContaining('事情发生的时间'), findsOneWidget);
         await tester.ensureVisible(find.text('查看 2 条原文 ›'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('查看 2 条原文 ›'));
         await tester.pumpAndSettle();
         final evidence = tester

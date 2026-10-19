@@ -67,7 +67,6 @@ void main() {
         now: () => now,
         onInvalidated: () async {
           invalidations++;
-          profileDisk.value = 'null';
           cacheDisk.value = 'null';
         },
       );
@@ -174,9 +173,10 @@ void main() {
         windowEnd: now,
       );
       expect(source.revision, greaterThan(revision));
-      expect(profileDisk.value, 'null');
+      expect(profileDisk.value, savedProfile);
       expect(cacheDisk.value, 'null');
-      expect(repo.value, isNull);
+      expect(repo.value, isNotNull);
+      expect(repo.value!['available_evidence_ids'], isEmpty);
     },
   );
   test(

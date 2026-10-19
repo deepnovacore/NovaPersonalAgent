@@ -56,7 +56,7 @@ class LocalProfileResults extends StatelessWidget {
     revision: revision,
     changes: generation,
     builder: (context, profile, value, loading, failed, retry) {
-      if (generation != null && (value == null || loading)) {
+      if (generation != null && value == null) {
         return ProfileGenerationStatus(
           generation: generation!,
           language: language,
@@ -66,7 +66,7 @@ class LocalProfileResults extends StatelessWidget {
               : t('暂时没有可确认的近况', 'No confirmed updates yet'),
         );
       }
-      if (kind == 'timeline' && (loading || failed || value == null)) {
+      if (kind == 'timeline' && value == null) {
         return _timelineState(loading: loading, failed: failed, retry: retry);
       }
       if (value == null) return const SizedBox.shrink();
@@ -96,6 +96,34 @@ class LocalProfileResults extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              value['generated_at'] is String
+                  ? t(
+                      '最近成功整理 · ${sourceTime(value['generated_at'])}',
+                      'Last successful update · ${sourceTime(value['generated_at'])}',
+                    )
+                  : t('此前成功整理的内容', 'Previously generated results'),
+              style: const TextStyle(color: Nova.secondary, fontSize: 12),
+            ),
+          ),
+          if (loading || failed)
+            Text(
+              t(
+                loading ? '正在检查更新，先显示上次结果。' : '更新暂时不可用，保留上次结果。',
+                loading
+                    ? 'Checking for updates. Showing the last result.'
+                    : 'Update unavailable. Showing the last result.',
+              ),
+            ),
+          if (value['historical'] == true)
+            Text(
+              t(
+                '这是上次整理的结果，可能尚未包含后续变化。',
+                'These saved results may not include later changes.',
+              ),
+            ),
           if (generation != null)
             ProfileGenerationStatus(
               generation: generation!,
@@ -128,6 +156,7 @@ class LocalProfileResults extends StatelessWidget {
                   context,
                   profile,
                   entries.where((e) => e['kind'] == section).toList(),
+                  value,
                 )
               else ...[
                 ListTile(
@@ -148,7 +177,7 @@ class LocalProfileResults extends StatelessWidget {
                           '${b['observed_at'] ?? ''}',
                         ),
                       ))
-                  _entry(context, profile, entry, section),
+                  _entry(context, profile, entry, section, value),
               ],
             ],
         ],
@@ -214,6 +243,7 @@ class LocalProfileResults extends StatelessWidget {
     BuildContext context,
     ProfileRepository profile,
     List<Map> entries,
+    Map<String, dynamic> value,
   ) {
     entries.sort(
       (a, b) => DateTime.parse(
@@ -312,6 +342,7 @@ class LocalProfileResults extends StatelessWidget {
                                       profile,
                                       entry,
                                       'timeline',
+                                      value,
                                     ),
                                   ),
                                 ),
@@ -334,6 +365,7 @@ class LocalProfileResults extends StatelessWidget {
     ProfileRepository profile,
     Map entry,
     String section,
+    Map<String, dynamic> value,
   ) => ListTile(
     contentPadding: section == 'timeline'
         ? const EdgeInsets.symmetric(vertical: 10)
@@ -349,6 +381,16 @@ class LocalProfileResults extends StatelessWidget {
           ),
           const SizedBox(height: 8),
         ],
+        if (!(entry['evidence_ids'] as List).every(
+          ((value['available_evidence_ids'] as List?) ?? []).contains,
+        ))
+          Text(
+            t(
+              '原始来源已不可用 · 保留此前整理内容',
+              'Original source unavailable · saved result retained',
+            ),
+            style: const TextStyle(color: Nova.secondary, fontSize: 12),
+          ),
         Text(
           entry['text'] as String,
           style: section == 'timeline'
@@ -398,61 +440,65 @@ class LocalProfileResults extends StatelessWidget {
           ),
     trailing: section == 'todo_candidate' && adoptTodo != null
         ? TextButton(
-            child: Text(t('加入待办', 'Add to to-dos')),
-            onPressed: () async {
-              final accepted = await showDialog<bool>(
-                context: context,
-                builder: (dialog) => AlertDialog(
-                  scrollable: true,
-                  title: Text(t('加入待办', 'Add to to-dos')),
-                  content: Text(
-                    t(
-                      '${entry['text']}\n\n消息日期：${sourceTime(entry['observed_at'])}。请确认这件事仍需完成。加入后按当前待办设置同步。',
-                      '${entry['text']}\n\nMessage date: ${sourceTime(entry['observed_at'])}. Confirm this still needs doing. It will follow your current to-do sync settings.',
-                    ),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(dialog, false),
-                      child: Text(t('取消', 'Cancel')),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(dialog, true),
-                      child: Text(t('加入', 'Add')),
-                    ),
-                  ],
-                ),
-              );
-              if (accepted != true || !context.mounted) return;
-              try {
-                if (!host.ready) {
-                  throw StateError('connector_unavailable');
-                }
-                await profile.adoptTodo(
-                  entry['key'] as String,
-                  expectedText: entry['text'] as String,
-                  mutate: adoptTodo!,
-                );
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(t('已加入待办', 'Added to to-dos'))),
-                  );
-                }
-              } catch (_) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        t(
-                          '未能加入待办，请确认原文仍可访问后重试。',
-                          'Could not add to to-dos. Check that the source messages are still available and retry.',
+            onPressed: value['historical'] == true
+                ? null
+                : () async {
+                    final accepted = await showDialog<bool>(
+                      context: context,
+                      builder: (dialog) => AlertDialog(
+                        scrollable: true,
+                        title: Text(t('加入待办', 'Add to to-dos')),
+                        content: Text(
+                          t(
+                            '${entry['text']}\n\n消息日期：${sourceTime(entry['observed_at'])}。请确认这件事仍需完成。加入后按当前待办设置同步。',
+                            '${entry['text']}\n\nMessage date: ${sourceTime(entry['observed_at'])}. Confirm this still needs doing. It will follow your current to-do sync settings.',
+                          ),
                         ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialog, false),
+                            child: Text(t('取消', 'Cancel')),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(dialog, true),
+                            child: Text(t('加入', 'Add')),
+                          ),
+                        ],
                       ),
-                    ),
-                  );
-                }
-              }
-            },
+                    );
+                    if (accepted != true || !context.mounted) return;
+                    try {
+                      if (!host.ready) {
+                        throw StateError('connector_unavailable');
+                      }
+                      await profile.adoptTodo(
+                        entry['key'] as String,
+                        expectedText: entry['text'] as String,
+                        mutate: adoptTodo!,
+                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(t('已加入待办', 'Added to to-dos')),
+                          ),
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              t(
+                                '未能加入待办，请确认原文仍可访问后重试。',
+                                'Could not add to to-dos. Check that the source messages are still available and retry.',
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                    }
+                  },
+            child: Text(t('加入待办', 'Add to to-dos')),
           )
         : null,
     onTap: entry['explicit'] == true
@@ -472,7 +518,12 @@ class LocalProfileResults extends StatelessWidget {
                           e['key'] == entry['key'] &&
                           e['text'] == entry['text'],
                     );
-                final refs = (entry['evidence_ids'] as List).toSet();
+                final refs = (entry['evidence_ids'] as List)
+                    .toSet()
+                    .intersection(
+                      (current?['available_evidence_ids'] as List? ?? [])
+                          .toSet(),
+                    );
                 final messages = available
                     ? host.sources.sources
                           .expand(host.sources.messages)
@@ -505,11 +556,13 @@ class LocalProfileResults extends StatelessWidget {
                               onPressed: retry,
                               child: Text(t('重试', 'Retry')),
                             ),
-                          ] else if (!available)
+                          ] else if (!available ||
+                              refs.length !=
+                                  (entry['evidence_ids'] as List).length)
                             Text(
                               t(
-                                '原文已过期，或当前已无权访问。',
-                                'The source messages have expired or access has changed.',
+                                '原始来源已不可用，仍保留此前整理的内容。',
+                                'The original source is unavailable. The saved result is retained.',
                               ),
                             ),
                           for (final m in messages) ...[
@@ -634,7 +687,7 @@ class _ProfileScopeState extends State<_ProfileScope> {
 
   @override
   Widget build(BuildContext context) {
-    final value = loaded && !failed && widget.host.ready ? profile.value : null;
+    final value = widget.host.ready ? profile.value : null;
     expiry?.cancel();
     if (value != null) {
       final refs = (value['entries'] as List)

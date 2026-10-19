@@ -110,23 +110,64 @@ class ProfileRepository {
     final current = _value;
     if (current == null ||
         current['space_id'] != authority.record['space_id'] ||
-        current['source_revision'] != sources.revision ||
-        current['consent_revision'] != sources.processingRevision ||
         current['authority_epoch'] != authority.epoch ||
         current['publication_generation'] != authority.publicationGeneration) {
       return null;
     }
-    final evidence = sources.sources
-        .expand(sources.messages)
-        .where((m) => m['status'] == 'available')
-        .map((m) => m['evidence_id'])
-        .toSet();
-    if (!(current['entries'] as List).every(
-      (entry) => (entry['evidence_ids'] as List).every(evidence.contains),
-    )) {
+    final historicalSnapshot =
+        current['history_schema'] == 1 &&
+        current['evidence_fingerprints'] is Map;
+    if (historicalSnapshot) {
+      if (current['source_identity'] != sources.identity) {
+        return null;
+      }
+    } else if (current['source_revision'] != sources.revision ||
+        current['consent_revision'] != sources.processingRevision) {
+      // Legacy output cannot be assigned an identity or original content digest
+      // retroactively after its original generation fence has changed.
       return null;
     }
+    var evidenceAllowed = true;
+    if (historicalSnapshot) {
+      final provider = current['processing_provider'];
+      if (provider is String) {
+        try {
+          sources.validateProcessing(
+            provider,
+            'profile',
+            sources.processingRevision,
+          );
+        } catch (_) {
+          evidenceAllowed = false;
+        }
+      } else {
+        evidenceAllowed =
+            current['consent_revision'] == sources.processingRevision;
+      }
+    }
+    final originals = {
+      for (final m in sources.sources.expand(sources.messages))
+        if (evidenceAllowed && m['status'] == 'available') m['evidence_id']: m,
+    };
+    final refs = (current['entries'] as List)
+        .expand((entry) => entry['evidence_ids'] as List)
+        .toSet();
+    final available = refs
+        .where(
+          (id) =>
+              originals.containsKey(id) &&
+              (!historicalSnapshot ||
+                  current['evidence_fingerprints'][id] ==
+                      _evidenceFingerprint(originals[id]!)),
+        )
+        .toList();
+    if (!historicalSnapshot && available.length != refs.length) return null;
     final result = copyJson(current);
+    result['available_evidence_ids'] = available;
+    result['historical'] =
+        current['source_revision'] != sources.revision ||
+        current['consent_revision'] != sources.processingRevision ||
+        available.length != refs.length;
     final explicit = corrections?.values(correctionScope) ?? <String, String>{};
     result['entries'] = [
       ...(result['entries'] as List).where(
@@ -144,14 +185,47 @@ class ProfileRepository {
     return result;
   }
 
-  Future<void> open() async {
-    await corrections?.open();
-    final raw = await persistence.read();
-    if (raw != null) _value = jsonDecode(raw) as Map<String, dynamic>?;
+  static String _evidenceFingerprint(Map original) => lifeFingerprint({
+    for (final entry in original.entries)
+      if (entry.key != 'fetched_at') entry.key: entry.value,
+  });
+
+  Future<void> open() {
+    final result = _tail.then((_) async {
+      await corrections?.open();
+      final raw = await persistence.read();
+      if (raw != null) _value = jsonDecode(raw) as Map<String, dynamic>?;
+      final legacy = _value;
+      if (legacy != null && legacy['history_schema'] == null && value != null) {
+        // Only the original fences and still-readable references can establish a
+        // legacy snapshot's ownership. Do not invent its missing generation time.
+        final originals = {
+          for (final m in sources.sources.expand(sources.messages))
+            if (m['status'] == 'available') m['evidence_id']: m,
+        };
+        final migrated = {
+          ...legacy,
+          'source_identity': sources.identity,
+          'source_generation': sources.generation,
+          'history_schema': 1,
+          'evidence_fingerprints': {
+            for (final id
+                in (legacy['entries'] as List)
+                    .expand((e) => e['evidence_ids'] as List)
+                    .toSet())
+              id: _evidenceFingerprint(originals[id]!),
+          },
+        };
+        await persistence.write(jsonEncode(migrated));
+        _value = migrated;
+      }
+    });
+    _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
   }
 
   /// A useful published result must not regress when reusing a smaller checkpoint.
-  /// `value` excludes obsolete source, consent and authority generations.
+  /// History remains visible while a different generation is being prepared.
   void validatePartialCoverage(
     Map<String, int>? coverage, {
     String? generationScope,
@@ -194,6 +268,7 @@ class ProfileRepository {
     String? generationScope,
   }) {
     final result = _tail.then((_) async {
+      final previous = _value;
       final generation = authority.publicationGeneration;
       authority.validatePublish(epoch);
       sources.validateProcessing(provider, 'profile', consentRevision);
@@ -218,6 +293,18 @@ class ProfileRepository {
         'publication_generation': generation,
         'publisher_device_id': authority.deviceId,
         'revision': (_value?['revision'] as int? ?? 0) + 1,
+        'generated_at': sources.now().toUtc().toIso8601String(),
+        'processing_provider': provider,
+        'source_identity': sources.identity,
+        'source_generation': sources.generation,
+        'history_schema': 1,
+        'evidence_fingerprints': {
+          for (final id
+              in (entries as List)
+                  .expand((e) => e['evidence_ids'] as List)
+                  .toSet())
+            id: _evidenceFingerprint(originals[id]!),
+        },
         'source_revision': sourceRevision,
         'consent_revision': consentRevision,
         'entries': entries,
@@ -235,8 +322,9 @@ class ProfileRepository {
           throw StateError('stale_inputs');
         }
       } catch (_) {
-        await persistence.write('null');
-        _value = null;
+        // A failed replacement must not erase the prior committed success.
+        await persistence.write(jsonEncode(previous));
+        _value = previous;
         rethrow;
       }
       _value = next;
@@ -266,6 +354,11 @@ class ProfileRepository {
     );
     if (matching.length != 1) throw StateError('stale_todo_candidate');
     final candidate = matching.single as Map;
+    final available = (current!['available_evidence_ids'] as List).toSet();
+    if (current['historical'] == true ||
+        !(candidate['evidence_ids'] as List).every(available.contains)) {
+      throw StateError('stale_todo_candidate');
+    }
     final operation = lifeFingerprint({
       'kind': 'adopt_feishu_todo',
       'scope': correctionScope,
@@ -280,9 +373,12 @@ class ProfileRepository {
     }, operation);
   }
 
-  Future<void> clear() async {
-    await _tail;
-    await persistence.write('null');
-    _value = null;
+  Future<void> clear() {
+    final result = _tail.then((_) async {
+      await persistence.write('null');
+      _value = null;
+    });
+    _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
   }
 }

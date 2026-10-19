@@ -722,6 +722,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
               ProfileGenerationStatus(
                 generation: widget.generation!,
                 language: widget.language,
+                empty: profile.repository.value == null,
               )
             else if (profile.busy) ...[
               const LinearProgressIndicator(minHeight: 2),
@@ -1000,9 +1001,8 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                                   ? null
                                   : () => _run(() async {
                                       await host.sources.remove(id);
-                                      await profile.repository.clear();
                                     }),
-                              child: const Text('断开并删除本机内容'),
+                              child: const Text('断开并删除本机消息'),
                             ),
                             if (widget.authority.hubId != null)
                               TextButton(
@@ -1042,7 +1042,6 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                           chatPage = null;
                           await host.auth.forgetApp();
                           await host.synchronizeIdentity();
-                          await profile.repository.clear();
                         }),
                   child: const Text('移除本机应用凭据，改绑其他应用'),
                 ),

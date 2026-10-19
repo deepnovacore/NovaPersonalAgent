@@ -287,49 +287,54 @@ void main() {
       expect(profile.value, null);
     },
   );
-  test('expired originals cannot keep a derived profile usable', () async {
-    var now = DateTime.utc(2026, 10, 17);
-    final sources = SourceStore(MemoryLifePersistence(), now: () => now);
-    await sources.open();
-    await sources.bind('i', 1);
-    await sources.select('c', now);
-    await sources.ingestPage(
-      sources.fence('c'),
-      [
-        {
-          'message_id': 'm',
-          'sender': {'id_type': 'open_id', 'id': 'i'},
-          'create_time': '1792195200000',
-          'msg_type': 'text',
-          'body': {'content': '{"text":"hello"}'},
-        },
-      ],
-      nextPage: null,
-      windowEnd: now,
-    );
-    await sources.grantProcessing('p', 'profile', true);
-    final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-    await authority.open();
-    final profile = ProfileRepository(
-      MemoryLifePersistence(),
-      authority,
-      sources,
-    );
-    await profile.open();
-    await profile.publish(
-      jsonEncode([
-        {
-          'key': 'about',
-          'text': 't',
-          'evidence_ids': [sources.messages('c').single['evidence_id']],
-        },
-      ]),
-      epoch: 1,
-      sourceRevision: sources.revision,
-      consentRevision: sources.processingRevision,
-      provider: 'p',
-    );
-    now = now.add(const Duration(days: 31));
-    expect(profile.value, null);
-  });
+  test(
+    'expired originals keep saved history but are unavailable as evidence',
+    () async {
+      var now = DateTime.utc(2026, 10, 17);
+      final sources = SourceStore(MemoryLifePersistence(), now: () => now);
+      await sources.open();
+      await sources.bind('i', 1);
+      await sources.select('c', now);
+      await sources.ingestPage(
+        sources.fence('c'),
+        [
+          {
+            'message_id': 'm',
+            'sender': {'id_type': 'open_id', 'id': 'i'},
+            'create_time': '1792195200000',
+            'msg_type': 'text',
+            'body': {'content': '{"text":"hello"}'},
+          },
+        ],
+        nextPage: null,
+        windowEnd: now,
+      );
+      await sources.grantProcessing('p', 'profile', true);
+      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+      await authority.open();
+      final profile = ProfileRepository(
+        MemoryLifePersistence(),
+        authority,
+        sources,
+      );
+      await profile.open();
+      await profile.publish(
+        jsonEncode([
+          {
+            'key': 'about',
+            'text': 't',
+            'evidence_ids': [sources.messages('c').single['evidence_id']],
+          },
+        ]),
+        epoch: 1,
+        sourceRevision: sources.revision,
+        consentRevision: sources.processingRevision,
+        provider: 'p',
+      );
+      now = now.add(const Duration(days: 31));
+      expect(profile.value!['entries'], isNotEmpty);
+      expect(profile.value!['available_evidence_ids'], isEmpty);
+      expect(profile.value!['historical'], true);
+    },
+  );
 }
