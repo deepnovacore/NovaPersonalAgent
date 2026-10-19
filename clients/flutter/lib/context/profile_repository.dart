@@ -5,12 +5,8 @@ import '../personal/life_reducer.dart';
 import 'source_store.dart';
 import 'profile_corrections.dart';
 import 'timeline_brief.dart';
-
-/// Structured, content-free feedback for model output contract violations.
-class ProfileValidationFailure extends StateError {
-  ProfileValidationFailure(super.message, this.detail);
-  final Map<String, dynamic> detail;
-}
+import 'profile_validation.dart';
+export 'profile_validation.dart';
 
 String? profileRepairReason(Object error) {
   if (error is FormatException) return 'invalid_projection';
@@ -58,9 +54,13 @@ void _validateDisplayQuality(Map item, int index, Map originals) {
         r'(?<![A-Za-z0-9_])' + RegExp.escape(alias[0]!) + r'(?![A-Za-z0-9_])',
         caseSensitive: false,
       );
-      if (!citedText.any(originalToken.hasMatch)) reject('internal_alias');
+      if (!citedText.any(originalToken.hasMatch)) {
+        reject('internal_alias');
+      }
     }
-    if (_displayLocalhost.hasMatch(text)) reject('local_address');
+    if (_displayLocalhost.hasMatch(text)) {
+      reject('local_address');
+    }
     for (final match in _displayIpv4.allMatches(text)) {
       final octets = match[0]!.split('.').map(int.parse).toList();
       if (octets.any((n) => n > 255)) continue;
@@ -120,6 +120,10 @@ void validateProfileEntries(
   final keys = <String>{};
   for (var index = 0; index < entries.length; index++) {
     final item = entries[index];
+    Never reject(String reason, String field) => throw ProfileValidationFailure(
+      'ungrounded_projection',
+      {'reason': reason, 'path': 'entries[$index]$field'},
+    );
     if (item is! Map ||
         item.keys.toSet().difference({
           'key',
@@ -128,17 +132,38 @@ void validateProfileEntries(
           'kind',
           'observed_at',
           'brief',
-        }).isNotEmpty ||
-        item['key'] is! String ||
-        !RegExp(r'^[A-Za-z0-9_-]{1,100}$').hasMatch(item['key']) ||
-        !keys.add(item['key']) ||
-        item['text'] is! String ||
-        (item['text'] as String).trim().isEmpty ||
-        (item['text'] as String).length > 4000 ||
-        item['evidence_ids'] is! List ||
-        (item['evidence_ids'] as List).isEmpty ||
-        !(item['evidence_ids'] as List).every(evidence.contains)) {
-      throw StateError('ungrounded_projection');
+        }).isNotEmpty) {
+      reject('entry_schema', '');
+    }
+    if (item['key'] is! String) {
+      reject('entry_key_type', '.key');
+    }
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,100}$').hasMatch(item['key'])) {
+      reject('entry_key_format', '.key');
+    }
+    if (!keys.add(item['key'])) {
+      reject('entry_key_duplicate', '.key');
+    }
+    if (item['text'] is! String) {
+      reject('entry_text_type', '.text');
+    }
+    if ((item['text'] as String).trim().isEmpty) {
+      reject('entry_text_empty', '.text');
+    }
+    if ((item['text'] as String).length > 4000) {
+      reject('entry_text_too_long', '.text');
+    }
+    if (item['evidence_ids'] is! List) {
+      reject('evidence_ids_type', '.evidence_ids');
+    }
+    final evidenceIds = item['evidence_ids'] as List;
+    if (evidenceIds.isEmpty) {
+      reject('evidence_ids_empty', '.evidence_ids');
+    }
+    for (var i = 0; i < evidenceIds.length; i++) {
+      if (!evidence.contains(evidenceIds[i])) {
+        reject('evidence_id_unknown', '.evidence_ids[$i]');
+      }
     }
     final kind = item['kind'] ?? 'profile';
     if (!['profile', 'timeline', 'todo_candidate'].contains(kind)) {
@@ -157,9 +182,10 @@ void validateProfileEntries(
         item['brief'],
         item['evidence_ids'] as List,
         Map<String, dynamic>.from(originals),
+        path: 'entries[$index].brief',
       );
       if (item['text'] != timelineBriefText(brief)) {
-        throw StateError('ungrounded_projection');
+        reject('brief_text_mismatch', '.text');
       }
       item['brief'] = brief;
     }
@@ -192,7 +218,7 @@ void validateProfileEntries(
     }
     _validateDisplayQuality(item, index, originals);
     if (kind == 'todo_candidate' && (item['text'] as String).length > 200) {
-      throw StateError('ungrounded_projection');
+      reject('todo_text_too_long', '.text');
     }
     if (kind == 'timeline' || kind == 'todo_candidate') {
       final date = item['observed_at'] is String

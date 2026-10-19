@@ -696,9 +696,16 @@ class ProfileWriter {
         'allowed_values': ProfileCorrections.categories.keys.toList(),
       });
     }
-    Map<String, dynamic> content(dynamic value, Set<String> fields) {
+    Map<String, dynamic> content(
+      dynamic value,
+      Set<String> fields,
+      String path,
+    ) {
       if (value is! Map || value.keys.any((key) => !fields.contains(key))) {
-        throw StateError('ungrounded_projection');
+        throw ProfileValidationFailure('ungrounded_projection', {
+          'reason': 'entry_schema',
+          'path': path,
+        });
       }
       return Map<String, dynamic>.from(value);
     }
@@ -711,20 +718,27 @@ class ProfileWriter {
             'brief',
             'evidence_ids',
             'time_ref',
-          }),
+          }, 'timeline[$index]'),
           'key': 'timeline_${index + 1}',
           'kind': 'timeline',
         },
       for (var index = 0; index < todos.length; index++)
         {
-          ...content(todos[index], {'text', 'evidence_ids', 'time_ref'}),
+          ...content(todos[index], {
+            'text',
+            'evidence_ids',
+            'time_ref',
+          }, 'todos[$index]'),
           'key': 'todo_${index + 1}',
           'kind': 'todo_candidate',
         },
       for (final category in ProfileCorrections.categories.keys)
         if (profile[category] != null)
           {
-            ...content(profile[category], {'text', 'evidence_ids'}),
+            ...content(profile[category], {
+              'text',
+              'evidence_ids',
+            }, 'profile.$category'),
             'key': category,
             'kind': 'profile',
           },
@@ -743,22 +757,61 @@ class ProfileWriter {
     }
     final allowed = {for (final e in originals) e['evidence_id'] as String: e};
     final restored = <Map<String, dynamic>>[];
-    for (final item in entries) {
-      if (item is! Map ||
-          item['evidence_ids'] is! List ||
-          (item['evidence_ids'] as List).isEmpty ||
-          !(item['evidence_ids'] as List).every(allowed.containsKey)) {
-        throw StateError('ungrounded_projection');
+    String entryPath(int index) {
+      if (!output.containsKey('timeline') &&
+          !output.containsKey('profile') &&
+          !output.containsKey('todos')) {
+        return 'entries[$index]';
+      }
+      final item = entries[index];
+      if (item is Map && item['kind'] == 'profile') {
+        return 'profile.${item['key']}';
+      }
+      if (item is Map && item['kind'] == 'todo_candidate') {
+        return 'todos[${index - (output['timeline'] as List? ?? []).length}]';
+      }
+      return 'timeline[$index]';
+    }
+
+    for (var index = 0; index < entries.length; index++) {
+      final item = entries[index], path = entryPath(index);
+      Never reject(
+        String reason,
+        String field, {
+        String code = 'ungrounded_projection',
+      }) => throw ProfileValidationFailure(code, {
+        'reason': reason,
+        'path': '$path$field',
+      });
+      if (item is! Map) {
+        reject('entry_schema', '');
+      }
+      if (item['evidence_ids'] is! List) {
+        reject('evidence_ids_type', '.evidence_ids');
+      }
+      final evidenceIds = item['evidence_ids'] as List;
+      if (evidenceIds.isEmpty) {
+        reject('evidence_ids_empty', '.evidence_ids');
+      }
+      for (var i = 0; i < evidenceIds.length; i++) {
+        if (!allowed.containsKey(evidenceIds[i])) {
+          reject('evidence_id_unknown', '.evidence_ids[$i]');
+        }
       }
       final entry = Map<String, dynamic>.from(item);
       if (entry['kind'] == 'timeline') {
         final refs = entry['evidence_ids'] as List;
         if (timelineGroups != null &&
             !timelineGroups.any((group) => refs.every(group.contains))) {
-          throw StateError('ungrounded_projection');
+          reject('timeline_refs_cross_topic', '.evidence_ids');
         }
         if (requireBrief || entry.containsKey('brief')) {
-          final brief = normalizeTimelineBrief(entry['brief'], refs, allowed);
+          final brief = normalizeTimelineBrief(
+            entry['brief'],
+            refs,
+            allowed,
+            path: '$path.brief',
+          );
           entry['brief'] = brief;
           entry['text'] = timelineBriefText(brief);
         }
@@ -775,7 +828,11 @@ class ProfileWriter {
       if (entry['kind'] == 'timeline' || entry['kind'] == 'todo_candidate') {
         final anchor = entry.remove('time_ref');
         if (!(entry['evidence_ids'] as List).contains(anchor)) {
-          throw StateError('timeline_time_not_grounded');
+          reject(
+            'time_ref_not_cited',
+            '.time_ref',
+            code: 'timeline_time_not_grounded',
+          );
         }
         entry['observed_at'] = allowed[anchor]!['created_at'];
       }

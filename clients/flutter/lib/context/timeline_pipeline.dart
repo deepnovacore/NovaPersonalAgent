@@ -539,7 +539,14 @@ class TimelinePipeline {
     } catch (error) {
       final reason = profileRepairReason(error);
       if (reason == null) rethrow;
-      _invalid(reason, 'timeline', code: 'profile_timeline_invalid');
+      final detail = error is ProfileValidationFailure
+          ? safeTimelineValidationDetail(error)
+          : null;
+      _invalid(
+        detail?['reason'] ?? reason,
+        detail?['path'] ?? 'timeline',
+        code: 'profile_timeline_invalid',
+      );
     }
   }
 

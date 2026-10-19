@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'profile_text.dart';
+import 'profile_validation.dart';
 
 // Mirrors the personal relevance and temporal rules of the desktop Timeline.
 const timelinePerspectiveRules =
@@ -240,8 +241,17 @@ List<List<String>> timelineSelectedGroups(
 Map<String, dynamic> normalizeTimelineBrief(
   Object? value,
   List<dynamic> evidenceIds,
-  Map<String, dynamic> originals,
-) {
+  Map<String, dynamic> originals, {
+  String path = 'brief',
+}) {
+  Never reject(
+    String reason,
+    String field, {
+    String code = 'invalid_projection',
+  }) => throw ProfileValidationFailure(code, {
+    'reason': reason,
+    'path': '$path$field',
+  });
   if (value is! Map ||
       value.keys.any(
         (k) => !{
@@ -253,68 +263,108 @@ Map<String, dynamic> normalizeTimelineBrief(
           'uncertainty',
         }.contains(k),
       )) {
-    throw StateError('invalid_projection');
+    reject('brief_schema', '');
   }
-  String text(Object? value, int limit, {bool empty = false}) {
-    if (value is! String || value.length > limit) {
-      throw StateError('invalid_projection');
+  String text(Object? value, int limit, String field, {bool empty = false}) {
+    if (value is! String) {
+      reject('brief_text_type', field);
+    }
+    if (value.length > limit) {
+      reject('brief_text_too_long', field);
     }
     final safe = profileSafeText(value).trim();
     if (!empty && safe.replaceAll('[redacted]', '').trim().isEmpty) {
-      throw StateError('invalid_projection');
+      reject('brief_text_empty', field);
     }
     return safe;
   }
 
   final facts = value['facts'], steps = value['next_steps'];
-  if (facts is! List ||
-      facts.isEmpty ||
-      facts.length > 3 ||
-      steps is! List ||
-      steps.length > 3) {
-    throw StateError('invalid_projection');
+  if (facts is! List) {
+    reject('facts_type', '.facts');
+  }
+  if (facts.isEmpty) {
+    reject('facts_empty', '.facts');
+  }
+  if (facts.length > 3) {
+    reject('facts_too_many', '.facts');
+  }
+  if (steps is! List) {
+    reject('next_steps_type', '.next_steps');
+  }
+  if (steps.length > 3) {
+    reject('next_steps_too_many', '.next_steps');
   }
   return {
-    'title': text(value['title'], 96),
-    'status_label': text(value['status_label'], 18, empty: true),
+    'title': text(value['title'], 96, '.title'),
+    'status_label': text(
+      value['status_label'],
+      18,
+      '.status_label',
+      empty: true,
+    ),
     'facts': [
-      for (final fact in facts)
+      for (var index = 0; index < facts.length; index++)
         (() {
+          final fact = facts[index], field = '.facts[$index]';
           if (fact is! Map ||
               fact.keys.any((k) => !{'text', 'ref', 'quote'}.contains(k))) {
-            throw StateError('invalid_projection');
+            reject('fact_schema', field);
           }
           final ref = fact['ref'], quote = fact['quote'];
           final original = originals[ref];
-          if (ref is! String ||
-              !evidenceIds.contains(ref) ||
-              original is! Map ||
-              original['text'] is! String ||
-              quote is! String ||
-              quote.trim().isEmpty ||
-              quote.length > 600 ||
-              !(original['text'] as String).contains(quote) ||
-              profileSafeText(quote) != quote) {
-            throw StateError('ungrounded_projection');
+          Never ungrounded(String reason, String suffix) =>
+              reject(reason, '$field$suffix', code: 'ungrounded_projection');
+          if (ref is! String) {
+            ungrounded('fact_ref_type', '.ref');
           }
-          return {'text': text(fact['text'], 160), 'ref': ref, 'quote': quote};
-        })(),
-    ],
-    'why_now': text(value['why_now'], 200),
-    'next_steps': [
-      for (final step in steps)
-        (() {
-          if (step is! Map ||
-              step.keys.any((k) => !{'title', 'detail'}.contains(k))) {
-            throw StateError('invalid_projection');
+          if (!evidenceIds.contains(ref)) {
+            ungrounded('fact_ref_not_cited', '.ref');
+          }
+          if (original is! Map) {
+            ungrounded('fact_source_missing', '.ref');
+          }
+          if (original['text'] is! String) {
+            ungrounded('fact_source_text_type', '.ref');
+          }
+          if (quote is! String) {
+            ungrounded('fact_quote_type', '.quote');
+          }
+          if (quote.trim().isEmpty) {
+            ungrounded('fact_quote_empty', '.quote');
+          }
+          if (quote.length > 600) {
+            ungrounded('fact_quote_too_long', '.quote');
+          }
+          if (!(original['text'] as String).contains(quote)) {
+            ungrounded('fact_quote_not_exact', '.quote');
+          }
+          if (profileSafeText(quote) != quote) {
+            ungrounded('fact_quote_sensitive', '.quote');
           }
           return {
-            'title': text(step['title'], 40),
-            'detail': text(step['detail'], 120),
+            'text': text(fact['text'], 160, '$field.text'),
+            'ref': ref,
+            'quote': quote,
           };
         })(),
     ],
-    'uncertainty': text(value['uncertainty'], 200, empty: true),
+    'why_now': text(value['why_now'], 200, '.why_now'),
+    'next_steps': [
+      for (var index = 0; index < steps.length; index++)
+        (() {
+          final step = steps[index], field = '.next_steps[$index]';
+          if (step is! Map ||
+              step.keys.any((k) => !{'title', 'detail'}.contains(k))) {
+            reject('next_step_schema', field);
+          }
+          return {
+            'title': text(step['title'], 40, '$field.title'),
+            'detail': text(step['detail'], 120, '$field.detail'),
+          };
+        })(),
+    ],
+    'uncertainty': text(value['uncertainty'], 200, '.uncertainty', empty: true),
   };
 }
 
