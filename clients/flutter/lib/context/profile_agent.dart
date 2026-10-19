@@ -152,6 +152,7 @@ class ProfileAgent extends ChangeNotifier {
   String status = '';
   bool _disposed = false;
   Map<String, int> lastCoverage = {};
+  Map<String, dynamic>? lastPipelineValidation;
 
   /// Only inspect already-authorized inputs. Never create grants or refresh sources.
   Future<ProfileGenerationSnapshot?> inspectGeneration() async {
@@ -812,6 +813,7 @@ class ProfileAgent extends ChangeNotifier {
       Error.throwWithStackTrace(failure, stack);
     } finally {
       lastCoverage = writer.coverage;
+      lastPipelineValidation = pipeline?.validationDiagnostics;
       connector.removeListener(changed);
       authority.removeListener(changed);
       _stopClients();
@@ -829,6 +831,7 @@ class ProfileAgent extends ChangeNotifier {
           'finished_at': DateTime.now().toUtc().toIso8601String(),
           'coverage': writer.coverage,
           'last_stage': ?lastStage,
+          'pipeline_validation': ?lastPipelineValidation,
           'cached_message_statuses': cachedCounts,
           'excluded_before_observations': excludedEvidence,
         }),

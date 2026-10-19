@@ -149,6 +149,17 @@ class TimelinePipeline {
   final Future<void> Function(String, Map<String, dynamic>)? saveCheckpoint;
   final Future<void> Function(TimelinePipelineResult)? onPublish;
   final _metrics = <String, int>{};
+  Map<String, dynamic>? _firstValidationFailure, _lastValidationFailure;
+  String? _activeStage;
+
+  /// Host-defined reason/path/index only; no model output or source content.
+  Map<String, dynamic>? get validationDiagnostics =>
+      _firstValidationFailure == null
+      ? null
+      : {
+          'first': Map.of(_firstValidationFailure!),
+          'last': Map.of(_lastValidationFailure!),
+        };
   final _readEvidenceIds = <String>{};
   Set<String> get readEvidenceIds => Set.unmodifiable(_readEvidenceIds);
   Map<String, int> get coverage => Map.unmodifiable(_metrics);
@@ -161,11 +172,15 @@ class TimelinePipeline {
     String code = 'profile_selection_invalid',
     int? index,
   }) {
-    throw TimelinePipelineValidationFailure(code, {
+    final detail = <String, dynamic>{
+      'stage': ?_activeStage,
       'reason': reason,
       'path': path,
       'invalid_index': ?index,
-    });
+    };
+    _firstValidationFailure ??= Map.of(detail);
+    _lastValidationFailure = Map.of(detail);
+    throw TimelinePipelineValidationFailure(code, detail);
   }
 
   Future<Map<String, dynamic>> _complete(
@@ -194,6 +209,7 @@ class TimelinePipeline {
     Map<String, dynamic> input,
     T Function(Map<String, dynamic>, bool) validate,
   ) async {
+    _activeStage = stage;
     final key = _digest({
       'recipe': recipe,
       'scope': cacheScope,
@@ -408,6 +424,9 @@ class TimelinePipeline {
     String corrections = '',
   }) async {
     _metrics.clear();
+    _firstValidationFailure = null;
+    _lastValidationFailure = null;
+    _activeStage = null;
     _readEvidenceIds.clear();
     _metrics.addAll({
       'timeline_cached_stages': 0,

@@ -352,6 +352,20 @@ void pipelineIntegrationTests() {
         ),
       );
       expect(calls, 3);
+      final diagnostic = pipeline.validationDiagnostics!;
+      expect(diagnostic['first']['reason'], 'index_outside_batch');
+      expect(diagnostic['last']['reason'], 'index_outside_batch');
+      expect(diagnostic['last']['stage'], 'timeline_select');
+      expect(diagnostic['last']['invalid_index'], 0);
+      expect(diagnostic['last'].keys.toSet(), {
+        'stage',
+        'reason',
+        'path',
+        'invalid_index',
+      });
+      expect(jsonEncode(diagnostic), isNot(contains('错误索引')));
+      await pipeline.generate([], [], historyComplete: true);
+      expect(pipeline.validationDiagnostics, isNull);
     },
   );
   for (final members in <List<List<String>>>[
@@ -624,6 +638,18 @@ void pipelineScopeTests() {
         ),
       );
       expect(calls, 2);
+      expect(
+        pipeline.validationDiagnostics!['first']['reason'],
+        'topic_exceeds_writing_capacity',
+      );
+      expect(
+        pipeline.validationDiagnostics!['last']['reason'],
+        'refinement_changed_selected_observations',
+      );
+      expect(
+        jsonEncode(pipeline.validationDiagnostics),
+        isNot(contains('完整事项')),
+      );
     },
   );
 }
