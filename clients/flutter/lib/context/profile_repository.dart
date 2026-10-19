@@ -72,7 +72,29 @@ void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
     final refs = (item['evidence_ids'] as List).map((id) => originals[id]!);
     if ((kind == 'profile' || kind == 'todo_candidate') &&
         refs.any((e) => e['relation'] != 'self')) {
-      throw StateError('profile_requires_self_evidence');
+      final invalid = (item['evidence_ids'] as List)
+          .where((id) => originals[id]!['relation'] != 'self')
+          .toList();
+      throw ProfileValidationFailure('profile_requires_self_evidence', {
+        'path': 'entries[$index].evidence_ids',
+        'entry_kind': kind,
+        'entry_key': item['key'],
+        'invalid_reference_count': invalid.length,
+        'invalid_references': [
+          for (final id in invalid.take(120))
+            {
+              'evidence_id': id,
+              'relation': originals[id]!['relation'] == 'participant'
+                  ? 'participant'
+                  : 'unknown',
+            },
+        ],
+        'allowed_values': originals.entries
+            .where((e) => e.value['relation'] == 'self')
+            .map((e) => e.key)
+            .take(120)
+            .toList(),
+      });
     }
     if (kind == 'todo_candidate' && (item['text'] as String).length > 200) {
       throw StateError('ungrounded_projection');

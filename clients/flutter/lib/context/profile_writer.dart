@@ -265,6 +265,10 @@ class ProfileWriter {
     }
     final material = <String, dynamic>{
       'messages': selected,
+      'self_evidence_ids': [
+        for (final record in selected)
+          if (record['relation'] == 'self') record['evidence_id'],
+      ],
       'observations': selectedFacts,
       'explicit_corrections': corrections,
       'coverage': coverage,
@@ -320,7 +324,7 @@ class ProfileWriter {
         onProgress?.call('正在修正引用格式，保留完整结果…');
         edited = await _completeFinal(
           'repair',
-          '$profileGrounding$_entryInstructions$partialInstructions若提供validation_detail，按path定位出错字段并严格使用allowed_values；最终只填写规定的timeline、profile与todos区域。只修正校验错误，不压缩或删去其余有依据的内容。若画像引用了participant，回看本人self原文支撑该判断；找不到才删除对应句子。',
+          '$profileGrounding$_entryInstructions$partialInstructions若提供validation_detail，按path定位出错字段并严格使用allowed_values；最终只填写规定的timeline、profile与todos区域。只修正校验错误，不压缩或删去其余有依据的内容。若画像或待办引用了participant或unknown，按validation_detail.path及invalid_references定位。当validation_error为profile_requires_self_evidence时，allowed_values和self_evidence_ids只是本轮上下文中可引用的本人原文编号，不能机械替换引用；必须重读原文并修正断言，没有本人依据的句子应删除，整类无依据则profile对应区域置null，待办无依据则删除该候选。即使没有self原文，仍保留有依据的Timeline并正确写明实际主体，不把整份结果清空。',
           {
             ...material,
             'previous_result': edited,
@@ -499,15 +503,40 @@ class ProfileWriter {
     if (requireTimeline && !restored.any((e) => e['kind'] == 'timeline')) {
       throw StateError('missing_timeline');
     }
-    validateProfileEntries(restored, {
-      for (final original in originals)
-        original['evidence_id']: {
-          ...original,
-          'created_at': DateTime.parse(
-            original['created_at'] as String,
-          ).millisecondsSinceEpoch,
-        },
-    });
+    try {
+      validateProfileEntries(restored, {
+        for (final original in originals)
+          original['evidence_id']: {
+            ...original,
+            'created_at': DateTime.parse(
+              original['created_at'] as String,
+            ).millisecondsSinceEpoch,
+          },
+      });
+    } on ProfileValidationFailure catch (error) {
+      if (output.containsKey('timeline') ||
+          output.containsKey('profile') ||
+          output.containsKey('todos')) {
+        final match = RegExp(
+          r'^entries\[(\d+)\]\.(.+)$',
+        ).firstMatch('${error.detail['path'] ?? ''}');
+        final index = match == null ? null : int.tryParse(match.group(1)!);
+        if (index != null && index < restored.length) {
+          final entry = restored[index];
+          final timelineCount = (output['timeline'] as List? ?? []).length;
+          final prefix = entry['kind'] == 'profile'
+              ? 'profile.${entry['key']}'
+              : entry['kind'] == 'todo_candidate'
+              ? 'todos[${index - timelineCount}]'
+              : 'timeline[$index]';
+          throw ProfileValidationFailure(error.message, {
+            ...error.detail,
+            'path': '$prefix.${match!.group(2)}',
+          });
+        }
+      }
+      rethrow;
+    }
     return jsonEncode(restored);
   }
 }
