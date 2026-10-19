@@ -8,6 +8,7 @@ import 'package:nova_mobile/connectors/feishu/api.dart';
 import 'package:nova_mobile/connectors/feishu/auth.dart';
 import 'package:nova_mobile/connectors/feishu/host.dart';
 import 'package:nova_mobile/context/profile_agent.dart';
+import 'package:nova_mobile/context/profile_evidence.dart';
 import 'package:nova_mobile/context/profile_observation_checkpoint.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/context/secure_persistence.dart';
@@ -24,7 +25,7 @@ class _Models extends ModelSettings {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
-    'paused run publishes saved progress and later resumes untouched remaining batches',
+    'saved progress reruns after recipe upgrade and resumes untouched remaining batches',
     () async {
       FlutterSecureStorage.setMockInitialValues({});
       final previous = HttpOverrides.current;
@@ -183,10 +184,69 @@ void main() {
       );
       expect(receipt['status'], 'partial');
       expect(receipt['coverage']['unobserved_records'], 1);
+      // Simulate a result from the previous shipped recipe while preserving
+      // exactly the current sources, model, correction context and checkpoint.
+      final provider = '${models.configuration.endpoint}|fixture';
+      final evidence = ProfileEvidence(
+        sources.readAuthorizedEvidence(provider, 'profile'),
+        validThrough: sources.now().add(agent.maxDuration),
+      );
+      final legacyScope = ProfileObservationCheckpoint.digest({
+        'result_recipe': 'timeline-brief-v1',
+        'provider': provider,
+        'protocol': models.configuration.protocol.name,
+        'account': sources.identity,
+        'auth_generation': auth.generation,
+        'source_generation': sources.generation,
+        'source_revision': sources.revision,
+        'consent_revision': sources.processingRevision,
+        'authority': authority.record,
+        'publication_generation': authority.publicationGeneration,
+        'corrections': agent.corrections.context(
+          agent.repository.correctionScope,
+          provider,
+        ),
+        'evidence': evidence.checkpointDigest,
+      });
+      final legacyEntries = jsonEncode(agent.repository.value!['entries']);
+      final legacyCoverage = Map<String, int>.from(
+        agent.repository.value!['coverage'] as Map,
+      );
+      await agent.repository.publish(
+        legacyEntries,
+        epoch: authority.epoch,
+        sourceRevision: sources.revision,
+        consentRevision: sources.processingRevision,
+        provider: provider,
+        partial: true,
+        coverage: legacyCoverage,
+        generationScope: legacyScope,
+      );
+      final sourceRevisionBeforeUpgrade = sources.revision;
+      final recipeScope = await agent.inspectGeneration();
+      expect(recipeScope!.scope, isNot(legacyScope));
+      expect(recipeScope.hasResult, false);
+      expect(recipeScope.covered, 0);
+      // The previous result remains readable until replacement is validated.
+      expect(jsonEncode(agent.repository.value!['entries']), legacyEntries);
+      await agent.run(savedObservationsOnly: true);
+      expect(observationCalls, 2); // Only cached observations were used.
+      expect(finalCalls, 8); // Selection, draft, review and edit reran once.
+      expect(await checkpoint.read(), saved);
+      expect(sources.revision, sourceRevisionBeforeUpgrade);
+      expect(agent.repository.value!['generation_scope'], recipeScope.scope);
+      expect(
+        agent.repository.value!['coverage']['validated_observation_records'],
+        legacyCoverage['validated_observation_records'],
+      );
+      expect(
+        agent.repository.value!['coverage']['final_original_records'],
+        legacyCoverage['final_original_records'],
+      );
       failMissing = false;
       await agent.run(maxNewBatches: 4);
       expect(observationCalls, 3);
-      expect(finalCalls, 8);
+      expect(finalCalls, 12);
       expect(agent.repository.value?['partial'], false);
       final completedScope = await agent.inspectGeneration();
       expect(completedScope?.complete, true);
@@ -214,7 +274,7 @@ void main() {
           ),
         ),
       );
-      expect(finalCalls, 8); // Reject before spending on another draft.
+      expect(finalCalls, 12); // Reject before spending on another draft.
       expect(await checkpoint.read(), smallerCheckpoint);
       expect(
         await const SecureContextPersistence('nova.profile.local.v1').read(),
