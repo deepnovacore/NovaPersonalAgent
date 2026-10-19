@@ -369,9 +369,178 @@ void pipelineIntegrationTests() {
       expect(pipeline.validationDiagnostics, isNull);
     },
   );
-  for (final members in <List<List<String>>>[
+  test(
+    'reconciliation lists only confident merges and preserves unlisted themes with shared refs',
+    () async {
+      final data = fixture(3), cache = <String, Map<String, dynamic>>{};
+      data.observations[2]['refs'] = ['e1', 'e2'];
+      final requests = <String>[];
+      TimelinePipeline create() => TimelinePipeline(
+        cacheScope: 'sparse-reconcile',
+        authorize: () async {},
+        loadCheckpoint: (key) async => cache[key] == null
+            ? null
+            : jsonDecode(jsonEncode(cache[key])) as Map<String, dynamic>,
+        saveCheckpoint: (key, value) async {
+          cache[key] = jsonDecode(jsonEncode(value)) as Map<String, dynamic>;
+        },
+        complete: (stage, instructions, input) async {
+          requests.add(stage);
+          if (stage == 'timeline_select') {
+            return {
+              'topics': [
+                for (var i = 0; i < 3; i++)
+                  {
+                    'title': '独立事项$i',
+                    'observation_indices': [i],
+                  },
+              ],
+            };
+          }
+          if (stage == 'timeline_reconcile') {
+            return {
+              'groups': [
+                {
+                  'members': ['t0', 't1'],
+                },
+              ],
+            };
+          }
+          expect(input['history_complete'], false);
+          expect(instructions, contains('不得推断当前仍未完成'));
+          expect(
+            (input['timeline_topics'] as List)
+                .map((t) => t['evidence_ids'])
+                .toList(),
+            [
+              ['e0', 'e1'],
+              ['e1', 'e2'],
+            ],
+          );
+          expect(input['timeline_topics'][1]['title'], '独立事项2');
+          return normalComplete(stage, instructions, input);
+        },
+      );
+      final first = await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: false,
+      );
+      expect(first.coverage['timeline_reconcile_unlisted_topics'], 1);
+      expect(first.coverage['timeline_selected_topics'], 2);
+      expect(first.coverage['timeline_repair_requests'], 0);
+      expect(requests.where((s) => s == 'timeline_reconcile').length, 1);
+      final prior = requests.length;
+      final replay = await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: false,
+      );
+      expect(requests.length, prior);
+      expect(replay.coverage['timeline_reconcile_unlisted_topics'], 1);
+      expect(replay.entries, first.entries);
+    },
+  );
+  test(
+    'empty reconciliation preserves all 239 candidates in deterministic writing order',
+    () async {
+      final data = fixture(239);
+      final written = <String>[];
+      var reconciliations = 0;
+      final pipeline = TimelinePipeline(
+        cacheScope: 'all-singletons',
+        authorize: () async {},
+        complete: (stage, instructions, input) async {
+          if (stage == 'timeline_select') {
+            return {
+              'topics': [
+                for (final row in input['observations'] as List)
+                  {
+                    'title': '独立事项${row['index']}',
+                    'observation_indices': [row['index']],
+                  },
+              ],
+            };
+          }
+          if (stage == 'timeline_reconcile') {
+            reconciliations++;
+            return {'groups': []};
+          }
+          if (stage == 'timeline_compose') {
+            written.addAll(
+              (input['timeline_topics'] as List)
+                  .expand((t) => t['evidence_ids'] as List)
+                  .cast<String>(),
+            );
+          }
+          return normalComplete(stage, instructions, input);
+        },
+      );
+      final result = await pipeline.generate(
+        data.observations,
+        data.records,
+        historyComplete: false,
+      );
+      expect(reconciliations, 1);
+      expect(written, List.generate(239, (i) => 'e$i'));
+      expect(result.coverage['timeline_reconcile_unlisted_topics'], 239);
+      expect(result.coverage['timeline_selected_topics'], 239);
+      expect(result.completedBatches, 60);
+      expect(result.coverage['timeline_repair_requests'], 0);
+    },
+  );
+  test(
+    'reconciliation repair resets unlisted count and retains writing capacity gates',
+    () async {
+      final data = fixture(2);
+      var reconciliations = 0;
+      final pipeline = TimelinePipeline(
+        cacheScope: 'sparse-capacity',
+        authorize: () async {},
+        maxWritingRecords: 1,
+        complete: (stage, instructions, input) async {
+          if (stage == 'timeline_select') {
+            return normalComplete(stage, instructions, input);
+          }
+          if (stage == 'timeline_reconcile') {
+            reconciliations++;
+            if (reconciliations == 1) {
+              return {
+                'groups': [
+                  {
+                    'members': ['t0', 't1'],
+                  },
+                ],
+              };
+            }
+            expect(
+              input['validation_detail']['reason'],
+              'group_exceeds_writing_capacity',
+            );
+            return {'groups': []};
+          }
+          expect((input['messages'] as List).length, 1);
+          return normalComplete(stage, instructions, input);
+        },
+      );
+      final result = await pipeline.generate(
+        data.observations,
+        data.records,
+        historyComplete: true,
+      );
+      expect(reconciliations, 2);
+      expect(result.coverage['timeline_reconcile_unlisted_topics'], 2);
+      expect(result.completedBatches, 2);
+      expect(result.coverage['timeline_repair_requests'], 1);
+    },
+  );
+  for (final members in <List<List<Object?>>>[
+    [[]],
     [
-      ['t0'],
+      [42],
+    ],
+    [
+      [null],
     ],
     [
       ['t0'],
@@ -382,35 +551,38 @@ void pipelineIntegrationTests() {
       ['foreign'],
     ],
   ]) {
-    test('reconciliation must include each candidate once: $members', () async {
-      final data = fixture(2);
-      var calls = 0;
-      final pipeline = TimelinePipeline(
-        cacheScope: 'scope',
-        authorize: () async {},
-        complete: (stage, instructions, input) async {
-          calls++;
-          if (stage == 'timeline_select') {
-            return normalComplete(stage, instructions, input);
-          }
-          expect(stage, 'timeline_reconcile');
-          return {
-            'groups': [
-              for (final ids in members) {'members': ids},
-            ],
-          };
-        },
-      );
-      await expectLater(
-        pipeline.generate(
-          data.observations,
-          data.records,
-          historyComplete: true,
-        ),
-        throwsStateError,
-      );
-      expect(calls, 3);
-    });
+    test(
+      'reconciliation rejects malformed or repeated members: $members',
+      () async {
+        final data = fixture(2);
+        var calls = 0;
+        final pipeline = TimelinePipeline(
+          cacheScope: 'scope',
+          authorize: () async {},
+          complete: (stage, instructions, input) async {
+            calls++;
+            if (stage == 'timeline_select') {
+              return normalComplete(stage, instructions, input);
+            }
+            expect(stage, 'timeline_reconcile');
+            return {
+              'groups': [
+                for (final ids in members) {'members': ids},
+              ],
+            };
+          },
+        );
+        await expectLater(
+          pipeline.generate(
+            data.observations,
+            data.records,
+            historyComplete: true,
+          ),
+          throwsStateError,
+        );
+        expect(calls, 3);
+      },
+    );
   }
   test(
     'genuinely oversized complete topic is deferred after one refinement and never paid-written',

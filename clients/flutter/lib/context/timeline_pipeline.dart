@@ -113,7 +113,7 @@ TimelineWritingPlan timelineWritingPlan(
 const _selectInstructions = '''$timelinePerspectiveRules
 逐条阅读本批完整观察，选出有实际个人价值的独立事项，不设目标数量。只返回 {"topics":[{"title":"具体对象的独立交付与变化","observation_indices":[0]}]}。title只作检索索引，不是发布事实；写具体事项，不能用“项目概况”“全部进展”把不同事项塞成一组。同一对象同一交付的计划、完成、取消、恢复归在一起，不同交付分开。编号只能是allowed_indices中的原观察global index，不是本批行号或字典下标。观察不是最终证据，正文会回取全部所引完整原文。共享背景观察可跨主题引用，但不能因此合并独立事项。没有相关事项可返回空topics。单主题原文过大时按真实独立事项重新分题；若确实不可分割则保留完整主题，宿主标记待处理，不能机械拆编号伪造独立事项或抛掉完成/取消观察。''';
 const _reconcileInstructions = '''$timelinePerspectiveRules
-这是跨批次主题索引归并。只返回 {"groups":[{"members":["t0","t1"]}]}。输入每个主题id恰好出现一次，不能丢弃或新增id。同一主体、同一对象、同一交付的早期计划与后续完成、取消、恢复归为一组；不同事项独立。共同项目名、会话、背景消息或同一个人不足以证明同一事项。拿不准则独立保留。title及观察文字只是检索线索，不是最终证据；正文回取所有所选完整原文。不要把全部主题压成项目概况。容量不足时按真正独立事项分组，不能为了容量拆散确属同一事项的状态更新。''';
+这是跨批次主题索引归并。只返回 {"groups":[{"members":["t0","t1"]}]}。仅列出有把握应合并的主题组；未列出的主题由宿主保留为独立项，不会删除。没有确定的合并关系时返回空groups，不需要逐个枚举独立主题；也允许单成员组。每个列出的id必须来自输入且最多出现一次，不能新增id。同一主体、同一对象、同一交付的早期计划与后续完成、取消、恢复归为一组；不同事项独立。共同项目名、会话、背景消息或同一个人不足以证明同一事项。拿不准则独立保留。title及观察文字只是检索线索，不是最终证据；正文回取所有所选完整原文。不要把全部主题压成项目概况。容量不足时按真正独立事项分组，不能为了容量拆散确属同一事项的状态更新。''';
 const _composeInstructions =
     '''$profileGrounding
 $timelinePerspectiveRules
@@ -447,7 +447,13 @@ class TimelinePipeline {
         ),
       );
     }
-    if (seen.length != topics.length) _invalid('member_missing', 'groups');
+    // Only confirmed merges are model decisions. Unlisted candidates stay
+    // independent, with their original title, observations and full references.
+    _metrics['timeline_reconcile_unlisted_topics'] =
+        topics.length - seen.length;
+    for (final entry in byId.entries) {
+      if (!seen.contains(entry.key)) result.add(entry.value);
+    }
     if (!allowDeferred &&
         timelineWritingPlan(
           result,
