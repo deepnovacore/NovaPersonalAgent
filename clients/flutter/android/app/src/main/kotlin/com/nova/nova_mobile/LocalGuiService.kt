@@ -149,7 +149,8 @@ class LocalGuiService : AccessibilityService() {
             if(stopButton!=null)return@post
             val button=Button(this).apply { text="停止 Nova";setOnClickListener{onStop?.invoke()} }
             val params=WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,android.graphics.PixelFormat.TRANSLUCENT)
-            params.gravity=Gravity.TOP or Gravity.END;params.y=48
+            // Keep the user stop control away from app search/back navigation.
+            params.gravity=Gravity.CENTER_VERTICAL or Gravity.END
             getSystemService(WindowManager::class.java).addView(button,params);stopButton=button
         }
     }

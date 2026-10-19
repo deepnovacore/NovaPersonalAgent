@@ -8,7 +8,7 @@ class ToolDecision private constructor(val kind: String, val summary: String, va
         fun parse(value: JSONObject): ToolDecision {
             require(value.keys().asSequence().all { it in setOf("kind", "summary", "action") }) { "invalid_model_decision" }
             val kind = value.getString("kind")
-            require(kind in setOf("action", "complete", "wait")) { "invalid_model_decision" }
+            require(kind in setOf("action", "complete", "wait", "observe")) { "invalid_model_decision" }
             val summary = value.getString("summary").trim()
             require(summary.isNotEmpty() && summary.length <= 2000) { "invalid_model_decision" }
             if (kind != "action") {
@@ -38,7 +38,8 @@ class ToolDecision private constructor(val kind: String, val summary: String, va
 class LocalToolLoop(
     private val host: Host,
     private val model: (JSONObject, Int) -> ToolDecision,
-    private val maxTurns: Int = 30
+    private val maxTurns: Int = 30,
+    private val initialLaunchGrace: Boolean = false
 ) {
     interface Host {
         fun active(): Boolean
@@ -53,26 +54,41 @@ class LocalToolLoop(
         repeat(8) { cause.cause?.let { if (it !== cause) cause = it } }
         return cause
     }
-    private fun observeStable(): JSONObject {
-        repeat(3) { attempt ->
+    private fun observeStable(launching: Boolean = false): JSONObject {
+        var captureRetries = 0
+        var launchRetries = 0
+        while(true) {
             try { return host.observe() } catch (error: Exception) {
                 val cause = rootCause(error)
-                // A transition can invalidate a read after an already dispatched
-                // action. Re-capture only; never repeat that action or its approval.
-                if (!host.active() || attempt == 2 || cause !is IllegalStateException ||
-                    cause.message != "screen_changed_during_capture") throw error
+                if(!host.active() || cause !is IllegalStateException) throw error
+                // Only the first observation may wait for the explicitly launched app.
+                // The service rejects other packages before taking a screenshot.
+                if(launching && cause.message == "outside_target_app" && launchRetries++ < 5) {
+                    Thread.sleep(500)
+                    if(!host.active()) throw error
+                    continue
+                }
+                // Re-capture a transition only; never repeat a dispatched action.
+                val throttled = cause.message == "screenshot_unavailable_3"
+                if((cause.message != "screen_changed_during_capture" && !throttled) || captureRetries++ >= 2) throw error
+                // Android's screenshot rate limit is a read failure with no effect.
+                if(throttled) {
+                    Thread.sleep(500)
+                    if(!host.active()) throw error
+                }
             }
         }
-        error("unreachable")
     }
     fun run() {
         require(maxTurns in 1..100)
         var stage = "observation"
+        var stalePlans = 0
+        var loadingObservations = 0
         try {
             repeat(maxTurns) { turn ->
                 if(!host.active()) return
                 stage = "observation"
-                val observation = observeStable()
+                val observation = observeStable(initialLaunchGrace && turn == 0)
                 if(!host.active()) return
                 stage = "model"
                 val decision = model(observation, turn)
@@ -81,13 +97,31 @@ class LocalToolLoop(
                 when(decision.kind) {
                     "complete" -> { host.finish(decision.summary); return }
                     "wait" -> { host.interrupt("model_needs_user"); return }
+                    "observe" -> {
+                        // Loading is a read-only wait, never a replay of the last effect.
+                        if(loadingObservations++ >= 3) { host.interrupt("model_observation_limit"); return }
+                        Thread.sleep(1000)
+                    }
                     "action" -> {
                         val accepted = host.approve(decision, observation)
                         if(!host.active()) return
                         if(!accepted) { host.interrupt("approval_declined"); return }
-                        val outcome = host.execute(decision.action!!)
+                        val outcome = try { host.execute(decision.action!!) } catch(error: Exception) {
+                            val cause = rootCause(error)
+                            if(!host.active()) return
+                            // The controller throws screen_changed only before beginAttempt.
+                            // Observe and ask the model again; never retry the old action.
+                            // Errors after journaling are returned as unknown and stop the run.
+                            if(cause is IllegalStateException && cause.message == "screen_changed" && stalePlans < 3) {
+                                stalePlans++
+                                return@repeat
+                            }
+                            throw error
+                        }
                         if(!host.active()) return
                         if(outcome != "dispatched") { host.interrupt("action_outcome_$outcome"); return }
+                        stalePlans = 0
+                        loadingObservations = 0
                     }
                 }
             }
@@ -108,6 +142,8 @@ class LocalToolLoop(
                 stage == "model" && cause is javax.net.ssl.SSLException -> "model_tls_failed"
                 stage == "model" && cause is org.json.JSONException -> "model_invalid_response"
                 stage == "model" && cause is IllegalArgumentException && cause.message in safeModelCodes -> "model_${cause.message}"
+                stage != "model" && cause is java.util.concurrent.TimeoutException -> "${stage}_timeout"
+                stage != "model" && cause is IllegalStateException && cause.message?.matches(Regex("screenshot_unavailable_[0-9]+")) == true -> "${stage}_${cause.message}"
                 stage != "model" && cause.message in safeGuiCodes -> "${stage}_${cause.message}"
                 else -> "${stage}_failed"
             }

@@ -97,7 +97,7 @@ class LocalAgentController(context: Context) {
                     override fun execute(action:JSONObject)=this@LocalAgentController.execute(JSONObject(control.toString()).put("attempt_id",UUID.randomUUID().toString()).put("action",action)).getString("state")
                     override fun finish(summary:String) {this@LocalAgentController.finish(JSONObject(control.toString()).put("summary",summary))}
                     override fun interrupt(reason:String) {this@LocalAgentController.interrupt(run.id,reason)}
-                },{ observation,turn -> run.model!!.decide(journal.task(run.id)!!,observation,turn) },maxTurns=29).run()
+                },{ observation,turn -> run.model!!.decide(journal.task(run.id)!!,observation,turn) },maxTurns=29,initialLaunchGrace=true).run()
             } catch(_:Exception) {interrupt(run.id,"native_loop_failed")}
             finally { if(active===run) interrupt(run.id,"execution_interrupted") }
         }
