@@ -134,11 +134,12 @@ class LocalProfileResults extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Text(
                 t(
-                  '部分近况 · 已整理 ${value['coverage']?['validated_observation_records'] ?? 0} / ${value['coverage']?['eligible_records'] ?? 0} 条消息，引用 ${value['coverage']?['final_original_records'] ?? 0} 条原文。还有 ${value['coverage']?['unobserved_records'] ?? 0} 条待整理，可能尚未包含最新进展。',
-                  'Partial results · ${value['coverage']?['validated_observation_records'] ?? 0} / ${value['coverage']?['eligible_records'] ?? 0} messages verified; ${value['coverage']?['final_original_records'] ?? 0} originals used. ${value['coverage']?['unobserved_records'] ?? 0} messages remain; later messages may change these statuses.',
+                  '还有部分消息待整理，后续进展可能尚未包含。',
+                  'Some messages remain to be reviewed. Later developments may be missing.',
                 ),
               ),
             ),
+          if (value['coverage'] is Map) _coverage(value['coverage'] as Map),
           if ((value['incomplete_batches'] as int? ?? 0) > 0)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -183,6 +184,31 @@ class LocalProfileResults extends StatelessWidget {
         ],
       );
     },
+  );
+
+  Widget _coverage(Map coverage) => ExpansionTile(
+    tilePadding: EdgeInsets.zero,
+    childrenPadding: const EdgeInsets.only(bottom: 16),
+    title: Text(
+      t('整理范围', 'Review coverage'),
+      style: const TextStyle(fontSize: 13, color: Nova.secondary),
+    ),
+    children: [
+      Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          t(
+            '已整理 ${coverage['validated_observation_records'] ?? '未知'} / ${coverage['eligible_records'] ?? '未知'} 条消息，最终参考 ${coverage['final_original_records'] ?? '未知'} 条原文。还有 ${coverage['unobserved_records'] ?? '未知'} 条待整理。',
+            '${coverage['validated_observation_records'] ?? 'Unknown'} / ${coverage['eligible_records'] ?? 'unknown'} messages reviewed; ${coverage['final_original_records'] ?? 'unknown'} originals used in the result. ${coverage['unobserved_records'] ?? 'Unknown'} messages remain.',
+          ),
+          style: const TextStyle(
+            color: Nova.secondary,
+            fontSize: 13,
+            height: 1.5,
+          ),
+        ),
+      ),
+    ],
   );
 
   Widget _timelineState({
@@ -250,15 +276,6 @@ class LocalProfileResults extends StatelessWidget {
         b['observed_at'] as String,
       ).compareTo(DateTime.parse(a['observed_at'] as String)),
     );
-    final days = <String, List<Map>>{};
-    for (final entry in entries) {
-      final date = DateTime.parse(entry['observed_at'] as String).toLocal();
-      final day = t(
-        '${date.year}年${date.month}月${date.day}日',
-        '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}',
-      );
-      days.putIfAbsent(day, () => []).add(entry);
-    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
       child: Column(
@@ -268,92 +285,152 @@ class LocalProfileResults extends StatelessWidget {
             t('飞书近况', 'Feishu updates'),
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 16),
+          for (final entry in entries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: DecoratedBox(
+                key: ValueKey('timeline-card-${entry['key']}'),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Nova.separator),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  child: entry['brief'] is Map
+                      ? _briefCard(context, profile, entry, value)
+                      : _entry(context, profile, entry, 'timeline', value),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _briefCard(
+    BuildContext context,
+    ProfileRepository profile,
+    Map entry,
+    Map<String, dynamic> value,
+  ) {
+    final brief = entry['brief'] as Map;
+    final facts = (brief['facts'] as List? ?? []).whereType<Map>();
+    final steps = (brief['next_steps'] as List? ?? [])
+        .whereType<Map>()
+        .toList();
+    final status = brief['status_label'] as String? ?? '';
+    final uncertainty = brief['uncertainty'] as String? ?? '';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (status.isNotEmpty) ...[
+            Text(
+              status,
+              style: const TextStyle(
+                color: Nova.secondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 6),
+          ],
+          Text(
+            brief['title'] as String,
+            style: const TextStyle(
+              fontSize: 18,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          for (final fact in facts)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                fact['text'] as String,
+                style: const TextStyle(fontSize: 15, height: 1.6),
+              ),
+            ),
+          if ((brief['why_now'] as String? ?? '').isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              brief['why_now'] as String,
+              style: const TextStyle(
+                fontSize: 15,
+                height: 1.6,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+          if (steps.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Text(
+              t('下一步', 'Next steps'),
+              style: const TextStyle(fontSize: 13, color: Nova.secondary),
+            ),
+            for (final step in steps) ...[
+              const SizedBox(height: 8),
+              Text(
+                step['title'] as String,
+                style: const TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                step['detail'] as String,
+                style: const TextStyle(fontSize: 14, height: 1.6),
+              ),
+            ],
+          ],
+          if (uncertainty.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text(
+              uncertainty,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.5,
+                color: Nova.secondary,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          if (!(entry['evidence_ids'] as List).every(
+            ((value['available_evidence_ids'] as List?) ?? []).contains,
+          ))
+            Text(
+              t(
+                '原始来源已不可用 · 保留此前整理内容',
+                'Original source unavailable · saved result retained',
+              ),
+              style: const TextStyle(color: Nova.secondary, fontSize: 12),
+            ),
           Text(
             t(
-              '按消息日期倒序显示，事情发生的时间以正文为准。',
-              'Newest messages first. Event dates and status are described in each update.',
+              '更新依据 · ${sourceTime(entry['observed_at'])}',
+              'Based on messages · ${sourceTime(entry['observed_at'])}',
             ),
             style: const TextStyle(
               color: Nova.secondary,
-              fontSize: 13,
-              height: 1.5,
+              fontSize: 12,
+              height: 1.6,
             ),
           ),
-          const SizedBox(height: 20),
-          Stack(
-            children: [
-              Positioned(
-                left: 5,
-                top: 10,
-                bottom: 12,
-                child: Container(width: 1, color: Nova.separator),
+          TextButton(
+            onPressed: () => _showSources(context, profile, entry),
+            child: Text(
+              t(
+                '查看 ${(entry['evidence_ids'] as List).length} 条原文 ›',
+                'View ${(entry['evidence_ids'] as List).length} source messages ›',
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final day in days.entries)
-                    Stack(
-                      children: [
-                        Positioned(
-                          left: 1,
-                          top: 6,
-                          child: Container(
-                            width: 9,
-                            height: 9,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Nova.ink,
-                              border: Border.all(color: Nova.mint, width: 2),
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 24, bottom: 16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Text(
-                                  t(
-                                    '消息日期 · ${day.key}',
-                                    'Message date · ${day.key}',
-                                  ),
-                                  key: ValueKey(
-                                    'source-timeline-date-${day.key}',
-                                  ),
-                                  style: const TextStyle(
-                                    color: Nova.secondary,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.6,
-                                  ),
-                                ),
-                              ),
-                              for (final entry in day.value)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Material(
-                                    color: Nova.ink,
-                                    clipBehavior: Clip.antiAlias,
-                                    child: _entry(
-                                      context,
-                                      profile,
-                                      entry,
-                                      'timeline',
-                                      value,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-            ],
+            ),
           ),
         ],
       ),
@@ -410,7 +487,10 @@ class LocalProfileResults extends StatelessWidget {
                   runSpacing: 4,
                   children: [
                     Text(
-                      sourceTime(entry['observed_at']).split(' ').last,
+                      t(
+                        '更新依据 · ${sourceTime(entry['observed_at'])}',
+                        'Based on messages · ${sourceTime(entry['observed_at'])}',
+                      ),
                       style: const TextStyle(
                         color: Nova.secondary,
                         fontSize: 13,
@@ -425,8 +505,6 @@ class LocalProfileResults extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                const Divider(height: 1),
               ],
             ),
           )
@@ -503,92 +581,86 @@ class LocalProfileResults extends StatelessWidget {
         : null,
     onTap: entry['explicit'] == true
         ? null
-        : () => showDialog<void>(
-            context: context,
-            builder: (_) => _ProfileScope(
-              host: host,
-              authority: authority,
-              repository: profile,
-              revision: revision,
-              builder: (dialogContext, _, current, loading, failed, retry) {
-                final available =
-                    current != null &&
-                    (current['entries'] as List).any(
-                      (e) =>
-                          e['key'] == entry['key'] &&
-                          e['text'] == entry['text'],
-                    );
-                final refs = (entry['evidence_ids'] as List)
-                    .toSet()
-                    .intersection(
-                      (current?['available_evidence_ids'] as List? ?? [])
-                          .toSet(),
-                    );
-                final messages = available
-                    ? host.sources.sources
-                          .expand(host.sources.messages)
-                          .where((m) => refs.contains(m['evidence_id']))
-                          .toList()
-                    : <Map<String, dynamic>>[];
-                messages.sort(
-                  (a, b) => (a['created_at'] as int).compareTo(
-                    b['created_at'] as int,
-                  ),
-                );
-                return AlertDialog(
-                  title: Text(t('聊天原文', 'Source messages')),
-                  content: SizedBox(
-                    width: 500,
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (loading)
-                            Text(t('正在加载原文…', 'Loading source messages…'))
-                          else if (failed) ...[
-                            Text(
-                              t(
-                                '暂时无法加载原文，请重试。',
-                                'Could not load source messages. Please retry.',
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: retry,
-                              child: Text(t('重试', 'Retry')),
-                            ),
-                          ] else if (!available ||
-                              refs.length !=
-                                  (entry['evidence_ids'] as List).length)
-                            Text(
-                              t(
-                                '原始来源已不可用，仍保留此前整理的内容。',
-                                'The original source is unavailable. The saved result is retained.',
-                              ),
-                            ),
-                          for (final m in messages) ...[
-                            Text(
-                              '${sourceTime(DateTime.fromMillisecondsSinceEpoch(m['created_at']).toIso8601String())} · ${m['relation'] == 'self' ? t('我', 'You') : t('其他参与者', 'Another participant')}',
-                            ),
-                            SelectableText(
-                              m['text'] as String? ??
-                                  t('正文不可用', 'Message unavailable'),
-                            ),
-                            const Divider(),
-                          ],
-                        ],
+        : () => _showSources(context, profile, entry),
+  );
+
+  Future<void> _showSources(
+    BuildContext context,
+    ProfileRepository profile,
+    Map entry,
+  ) => showDialog<void>(
+    context: context,
+    builder: (_) => _ProfileScope(
+      host: host,
+      authority: authority,
+      repository: profile,
+      revision: revision,
+      builder: (dialogContext, _, current, loading, failed, retry) {
+        final available =
+            current != null &&
+            (current['entries'] as List).any(
+              (e) => e['key'] == entry['key'] && e['text'] == entry['text'],
+            );
+        final refs = (entry['evidence_ids'] as List).toSet().intersection(
+          (current?['available_evidence_ids'] as List? ?? []).toSet(),
+        );
+        final messages = available
+            ? host.sources.sources
+                  .expand(host.sources.messages)
+                  .where((m) => refs.contains(m['evidence_id']))
+                  .toList()
+            : <Map<String, dynamic>>[];
+        messages.sort(
+          (a, b) => (a['created_at'] as int).compareTo(b['created_at'] as int),
+        );
+        return AlertDialog(
+          title: Text(t('聊天原文', 'Source messages')),
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (loading)
+                    Text(t('正在加载原文…', 'Loading source messages…'))
+                  else if (failed) ...[
+                    Text(
+                      t(
+                        '暂时无法加载原文，请重试。',
+                        'Could not load source messages. Please retry.',
                       ),
                     ),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(dialogContext),
-                      child: Text(t('关闭', 'Close')),
+                    TextButton(onPressed: retry, child: Text(t('重试', 'Retry'))),
+                  ] else if (!available ||
+                      refs.length != (entry['evidence_ids'] as List).length)
+                    Text(
+                      t(
+                        '原始来源已不可用，仍保留此前整理的内容。',
+                        'The original source is unavailable. The saved result is retained.',
+                      ),
                     ),
+                  for (final m in messages) ...[
+                    Text(
+                      '${sourceTime(DateTime.fromMillisecondsSinceEpoch(m['created_at']).toIso8601String())} · ${m['relation'] == 'self' ? t('我', 'You') : t('其他参与者', 'Another participant')}',
+                    ),
+                    SelectableText(
+                      m['text'] as String? ?? t('正文不可用', 'Message unavailable'),
+                    ),
+                    const Divider(),
                   ],
-                );
-              },
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(t('关闭', 'Close')),
+            ),
+          ],
+        );
+      },
+    ),
   );
 }
 
@@ -690,6 +762,7 @@ class _ProfileScopeState extends State<_ProfileScope> {
     final value = widget.host.ready ? profile.value : null;
     expiry?.cancel();
     if (value != null) {
+      final now = widget.host.sources.now();
       final refs = (value['entries'] as List)
           .expand((e) => e['evidence_ids'] as List)
           .toSet();
@@ -698,13 +771,14 @@ class _ProfileScopeState extends State<_ProfileScope> {
               .expand(widget.host.sources.messages)
               .where((m) => refs.contains(m['evidence_id']))
               .map((m) => sourceAccessExpiry(m).millisecondsSinceEpoch)
+              .where((deadline) => deadline > now.millisecondsSinceEpoch)
               .toList()
             ..sort();
       if (dates.isNotEmpty) {
         final end = DateTime.fromMillisecondsSinceEpoch(
           dates.first,
         ).add(const Duration(milliseconds: 1));
-        expiry = Timer(end.difference(widget.host.sources.now()), _changed);
+        expiry = Timer(end.difference(now), _changed);
       }
     }
     return widget.builder(

@@ -143,7 +143,7 @@ class _Fixture {
 void main() {
   for (final width in [320.0, 360.0]) {
     testWidgets(
-      'generated source timeline groups newest first and fits $width at large text',
+      'generated source timeline orders cards newest first and fits $width at large text',
       (tester) async {
         tester.view.physicalSize = Size(width, 740);
         tester.view.devicePixelRatio = 1;
@@ -153,8 +153,8 @@ void main() {
         await f.open();
         await tester.pumpWidget(f.app(scale: 2));
         await tester.pumpAndSettle();
-        expect(find.text('消息日期 · 2026年10月17日'), findsOneWidget);
-        expect(find.text('消息日期 · 2026年10月16日'), findsOneWidget);
+        expect(find.text('更新依据 · 2026年10月17日 15:00'), findsOneWidget);
+        expect(find.text('更新依据 · 2026年10月16日 10:00'), findsOneWidget);
         final cards = tester
             .widgetList<ListTile>(find.byType(ListTile))
             .toList();
@@ -165,9 +165,9 @@ void main() {
           '当天上午的计划',
           '较早的项目讨论',
         ]);
-        expect(find.text('15:00'), findsOneWidget);
+        expect(find.textContaining('消息日期 ·'), findsNothing);
         expect(find.text('查看 2 条原文 ›'), findsOneWidget);
-        expect(find.textContaining('事情发生的时间'), findsOneWidget);
+        expect(find.textContaining('更新依据 ·'), findsNWidgets(3));
         await tester.ensureVisible(find.text('查看 2 条原文 ›'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('查看 2 条原文 ›'));
@@ -237,7 +237,9 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('No Feishu updates yet'), findsOneWidget);
         expect(
-          find.text('Updates appear automatically after messages sync and access is allowed.'),
+          find.text(
+            'Updates appear automatically after messages sync and access is allowed.',
+          ),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);
@@ -253,7 +255,7 @@ void main() {
       await f.open();
       await tester.pumpWidget(f.app(language: 'en'));
       await tester.pumpAndSettle();
-      expect(find.text('Message date · 2026-10-17'), findsOneWidget);
+      expect(find.text('Based on messages · 2026-10-17 15:00'), findsOneWidget);
       expect(find.text('View 2 source messages ›'), findsOneWidget);
       await tester.tap(find.text('View 2 source messages ›'));
       await tester.pumpAndSettle();

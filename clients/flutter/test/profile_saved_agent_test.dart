@@ -57,13 +57,23 @@ void main() {
           };
         } else {
           finalCalls++;
-          if ((messages.first['content'] as String).contains('独立审查草稿')) {
+          if (input.containsKey('history_complete')) {
+            response = {'topics': [
+              for (final observation in input['observations'] as List)
+                {'observation_indices': [observation['index']]},
+            ]};
+          } else if ((messages.first['content'] as String).contains('独立审查草稿')) {
             response = {'review_notes': []};
           } else {
             response = {
               'timeline': [
                 {
-                  'text': '提出项目计划。',
+                  'brief': {
+                    'title': '提出项目计划', 'status_label': '已提出',
+                    'facts': [{'text': '提出项目计划。', 'ref': 'e1', 'quote': '项目计划 0'}],
+                    'why_now': '这是本人正在协调的项目安排。',
+                    'next_steps': [], 'uncertainty': '',
+                  },
                   'evidence_ids': ['e1'],
                   'time_ref': 'e1',
                 },
@@ -160,7 +170,7 @@ void main() {
       expect((jsonDecode(saved!)['batches'] as Map).length, 1);
       await agent.run(savedObservationsOnly: true);
       expect(observationCalls, 2);
-      expect(finalCalls, 3);
+      expect(finalCalls, 4);
       expect(await checkpoint.read(), saved);
       expect(agent.repository.value?['partial'], true);
       expect(agent.repository.value?['coverage']['eligible_records'], 2);
@@ -176,7 +186,7 @@ void main() {
       failMissing = false;
       await agent.run(maxNewBatches: 4);
       expect(observationCalls, 3);
-      expect(finalCalls, 6);
+      expect(finalCalls, 8);
       expect(agent.repository.value?['partial'], false);
       final completedScope = await agent.inspectGeneration();
       expect(completedScope?.complete, true);
@@ -204,7 +214,7 @@ void main() {
           ),
         ),
       );
-      expect(finalCalls, 6); // Reject before spending on another draft.
+      expect(finalCalls, 8); // Reject before spending on another draft.
       expect(await checkpoint.read(), smallerCheckpoint);
       expect(
         await const SecureContextPersistence('nova.profile.local.v1').read(),

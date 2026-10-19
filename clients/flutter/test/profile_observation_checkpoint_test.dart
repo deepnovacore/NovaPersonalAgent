@@ -1,9 +1,9 @@
+import 'profile_writer_fixtures.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:nova_mobile/context/profile_observation_checkpoint.dart';
-import 'package:nova_mobile/context/profile_writer.dart';
 import 'package:nova_mobile/context/profile_evidence.dart';
 import 'package:nova_mobile/context/secure_persistence.dart';
 import 'package:nova_mobile/connectors/feishu/host.dart';
@@ -233,7 +233,7 @@ void main() {
         },
       );
       final saved = Completer<void>();
-      final first = ProfileWriter(
+      final first = fixtureProfileWriter(
         loadValidatedBatch: cache.load,
         saveValidatedBatch: (batch, valid) async {
           await cache.save(batch, valid);
@@ -257,7 +257,7 @@ void main() {
       );
       await expectLater(first.generate(records), throwsStateError);
       var newCalls = 0;
-      final resumed = ProfileWriter(
+      final resumed = fixtureProfileWriter(
         loadValidatedBatch: cache.load,
         saveValidatedBatch: cache.save,
         complete: (stage, _, input) async {

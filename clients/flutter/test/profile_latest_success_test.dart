@@ -109,7 +109,7 @@ void main() {
         // A failed replacement never erases the committed success.
         await expectLater(
           actual.publish(
-            '[]',
+            '[{}]',
             epoch: auth.epoch,
             sourceRevision: source.revision,
             consentRevision: source.processingRevision,

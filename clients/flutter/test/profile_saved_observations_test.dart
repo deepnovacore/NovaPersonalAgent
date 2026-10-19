@@ -1,6 +1,6 @@
+import 'profile_writer_fixtures.dart';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nova_mobile/context/profile_writer.dart';
 
 List<Map<String, dynamic>> records() => List.generate(
   3,
@@ -37,7 +37,7 @@ void main() {
       );
       var observations = 0;
       final loaded = <String>[];
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         loadValidatedBatch: (batch) async {
           final id = batch.single['evidence_id'] as String;
           loaded.add(id);
@@ -97,7 +97,7 @@ void main() {
     () async {
       final stages = <String>[];
       final looked = <String>[];
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         loadValidatedBatch: (messages) async {
           final id = messages.single['evidence_id'] as String;
           looked.add(id);
@@ -138,7 +138,7 @@ void main() {
   test(
     'saved-only without valid checkpoint does not send any model request',
     () async {
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           fail('unexpected model request');
         },
@@ -157,7 +157,7 @@ void main() {
   );
   test('partial evidence cannot publish current todo claims', () async {
     final stages = <String>[];
-    final writer = ProfileWriter(
+    final writer = fixtureProfileWriter(
       loadValidatedBatch: (messages) async =>
           messages.single['evidence_id'] == 'e2'
           ? [

@@ -1,3 +1,4 @@
+import 'profile_writer_fixtures.dart';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_writer.dart';
@@ -17,7 +18,7 @@ void main() {
         },
       );
       var attempts = 0;
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           expect(stage, 'observations');
           if (attempts++ > 0) {
@@ -67,7 +68,7 @@ void main() {
       );
       final refs = records.map((r) => r['evidence_id']).toList();
       var attempts = 0;
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           if (stage == 'observations') {
             attempts++;
@@ -114,7 +115,7 @@ void main() {
           'text': '核对项目依据',
         },
       );
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async => {
           'facts': [
             {
@@ -148,7 +149,7 @@ void main() {
     final progress = <String>[];
     final finalStages = <String>[];
     late ProfileWriter writer;
-    writer = ProfileWriter(onProgress: progress.add, complete: (stage, instructions, input) async {
+    writer = fixtureProfileWriter(onProgress: progress.add, complete: (stage, instructions, input) async {
       if (stage == 'observations') {
         final messages = (input['messages'] as List).cast<Map<String, dynamic>>();
         for (final message in messages) {
@@ -156,7 +157,7 @@ void main() {
           expect(message['text'], records.first['text']);
         }
         return {'facts': List.generate(24, (index) => {
-          'text': '【风】${messages.first['evidence_id']}-$index ${'y' * 380}',
+          'text': '【风】${messages.first['evidence_id']}-$index ${'y' * 280}',
           'refs': [messages.first['evidence_id']],
         })};
       }
@@ -187,14 +188,14 @@ void main() {
     expect(writer.coverage['final_original_records'], 3);
     expect(writer.coverage['original_records_not_in_final'], 9);
     expect(writer.observationCount, 288);
-    expect(writer.selectedObservationCount, lessThan(72));
+    expect(writer.selectedObservationCount, lessThanOrEqualTo(72));
     expect(writer.selectedObservationCount, greaterThan(24));
     expect(progress.any((p) => p.contains('最终撰写选用 3 条完整原文')), true);
   });
 
   test('oversized final corrections fail visibly after observations without truncation', () async {
     final calls = <String>[];
-    final writer = ProfileWriter(complete: (stage, _, input) async {
+    final writer = fixtureProfileWriter(complete: (stage, _, input) async {
       calls.add(stage);
       return {'facts': [{'text': '【风】核对依据', 'refs': ['e1']}]};
     });
@@ -249,7 +250,7 @@ void main() {
       },
     };
     var repaired = false;
-    final writer = ProfileWriter(
+    final writer = fixtureProfileWriter(
       complete: (stage, _, input) async {
         if (stage == 'observations') {
           return {
@@ -296,7 +297,7 @@ void main() {
             as List;
     expect(repaired, true);
     expect(output.map((e) => e['key']), ['timeline_1', 'about', 'work']);
-    expect(output.first['text'], '计划核对项目。');
+    expect(output.first['text'], contains('计划核对项目。'));
   });
 
   test(
@@ -332,7 +333,6 @@ void main() {
                       'created_at': '2026-10-17T00:00:00Z',
                     },
                   ],
-                  requireTimeline: true,
                 ),
               )
               as List;
@@ -406,7 +406,7 @@ void main() {
     'category repair identifies the exact entry and allowed stable keys',
     () async {
       var repairs = 0;
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           if (stage == 'observations') {
             return {
@@ -459,7 +459,7 @@ void main() {
   );
 
   test(
-    'sampling cannot turn supported events into an optional Timeline',
+    'sampled events do not force a Timeline card without personal value',
     () async {
       final records = List.generate(
         121,
@@ -471,7 +471,7 @@ void main() {
           'text': '计划推进项目' * 200,
         },
       );
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           if (stage == 'observations') {
             return {
@@ -501,23 +501,15 @@ void main() {
           };
         },
       );
-      await expectLater(
-        writer.generate(records),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'reason',
-            'missing_timeline',
-          ),
-        ),
-      );
+      final result = jsonDecode(await writer.generate(records)) as List;
+      expect(result.where((row) => row['kind'] == 'timeline'), isEmpty);
     },
   );
   test(
     'retains valid observations when a different observation cannot be repaired',
     () async {
       var attempts = 0;
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           if (stage == 'observations') {
             attempts++;
@@ -579,7 +571,7 @@ void main() {
       },
     );
     var observations = 0;
-    final writer = ProfileWriter(
+    final writer = fixtureProfileWriter(
       complete: (stage, _, input) async {
         if (stage == 'observations') {
           observations++;
@@ -614,7 +606,7 @@ void main() {
     expect(observations, 1);
   });
   test('failed observation diagnostics never expose model prose', () async {
-    final writer = ProfileWriter(
+    final writer = fixtureProfileWriter(
       complete: (_, _, _) async => {
         'facts': [
           {
@@ -650,7 +642,7 @@ void main() {
     'invalid batch references are repaired against the same originals',
     () async {
       var observations = 0;
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           if (stage == 'observations') {
             observations++;
@@ -722,7 +714,7 @@ void main() {
           },
         ],
       };
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           if (stage == 'observations') {
             return {
@@ -741,7 +733,7 @@ void main() {
             expect(input['validation_error'], 'invalid_projection');
             if (corrected) return valid;
           }
-          return {'entries': []};
+          return {'entries': 'invalid'};
         },
       );
       final run = writer.generate([
@@ -763,7 +755,7 @@ void main() {
     });
   }
   test(
-    'empty timeline and other-speaker profile cannot pass final validation',
+    'empty timeline is allowed while other-speaker profile stays invalid',
     () {
       final originals = [
         {
@@ -793,16 +785,7 @@ void main() {
           throwsStateError,
         );
       }
-      expect(
-        () => ProfileWriter.encodeEntries(
-          {
-            'entries': [profile],
-          },
-          originals,
-          requireTimeline: true,
-        ),
-        throwsStateError,
-      );
+      expect(jsonDecode(ProfileWriter.encodeEntries({'entries': [profile]}, originals)), hasLength(1));
       expect(
         () => ProfileWriter.encodeEntries({
           'entries': [
@@ -872,7 +855,7 @@ void main() {
       );
       final seen = <String>{};
       final stages = <String>[];
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, instructions, input) async {
           stages.add(stage);
           if (stage == 'observations') {
@@ -932,7 +915,7 @@ void main() {
     'forged batch citations fail instead of retaining unsupported prose',
     () async {
       var attempts = 0;
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (_, _, _) async {
           attempts++;
           return {

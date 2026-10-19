@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'profile_repository.dart';
 import 'profile_corrections.dart';
 import 'profile_text.dart';
+import 'timeline_brief.dart';
 
 typedef ProfileCompletion =
     Future<Map<String, dynamic>> Function(
@@ -21,7 +22,8 @@ const profileGrounding =
 
 const _entryInstructions =
     '''返回JSON对象 {"timeline":[...],"profile":{"about":null,"work":null,"interests":null}}。另可返回todos数组（无明确未完成承诺时为空）；不返回entries，不生成key或kind字段，程序会为结果分配标识。todos只提出本人明确承诺且后续消息没有完成/取消的候选待办，不把他人请求、过去计划或模型建议当成本人的当前任务。每项仅含text（最多200字）、evidence_ids（本人self原消息）、time_ref（所引原消息编号）；消息日期只是来源时间，不等于截止日期。候选需本人逐项确认后才加入待办。
-Timeline：每项仅含text（自然中文）、evidence_ids（直接支撑该项的原消息evidence_id）、time_ref（evidence_ids中的一条原消息，程序取其原始时间）。归并同一事项，覆盖不同时间的实质进展和决定，保留实际主体和计划/完成状态，通常选6到12项；资料不足可更少，不造事件。
+$timelinePerspectiveRules
+$timelineEntryInstructions
 画像：分别填写profile.about（个人概况）、profile.work（工作）、profile.interests（兴趣偏好）。每个区域为 {"text":"自然中文段落","evidence_ids":["原消息编号"]}，证据不足则为null。不能增加、改名或细分区域，也不要在区域内部生成key或kind。evidence_ids只能引用本人self发言。about写3到6个连贯段落，按有依据的身份与处境、反复推进的项目与关注点、协作关系、做事风格组织。work按有依据的工作主题分段，不罗列模块或版本履历；interests只写反复关注且有依据的内容。不要把近期流水账当画像，也不要缩成一句职业标签。每段具体、克制，判断有余地，每类最多4000字。显式用户纠正的类别不再推断。只有原消息可以作为引用，观察摘要只是索引。''';
 
 class ProfileWriter {
@@ -55,7 +57,13 @@ class ProfileWriter {
   int validatedObservationRecordCount = 0, selectedOriginalCount = 0;
   int observationCount = 0, selectedObservationCount = 0;
   int reusedObservationRecordCount = 0;
+  int timelineSelectedTopics = 0,
+      timelineIncludedTopics = 0,
+      timelineSkippedTopics = 0;
   Map<String, int> get coverage => {
+    'timeline_selected_topics': timelineSelectedTopics,
+    'timeline_included_topics': timelineIncludedTopics,
+    'timeline_skipped_topics': timelineSkippedTopics,
     'eligible_records': sourceRecordCount,
     'observation_model_records': observedRecordCount,
     'reused_observation_records': reusedObservationRecordCount,
@@ -92,6 +100,7 @@ class ProfileWriter {
     if (maxNewBatches != null && maxNewBatches < 0) {
       throw ArgumentError.value(maxNewBatches, 'maxNewBatches');
     }
+    timelineSelectedTopics = timelineIncludedTopics = timelineSkippedTopics = 0;
     incompleteBatches = 0;
     deferredBatches = 0;
     sourceRecordCount = records.length;
@@ -247,7 +256,34 @@ class ProfileWriter {
       }
       throw observationFailure ?? StateError('insufficient_profile_evidence');
     }
-    final selected = selectOriginals(records, facts);
+    if (corrections.length > finalInputCharacters) {
+      throw StateError('profile_context_too_large');
+    }
+    onProgress?.call('正在梳理与你有关的进展…');
+    final selectedTopics = timelineSelectedGroups(
+      await _completeFinal('timeline_select', timelineSelectionInstructions, {
+        'observations': timelineObservationIndex(facts, records),
+        'history_complete': !isPartial,
+        'coverage': coverage,
+      }),
+      facts,
+    );
+    timelineSelectedTopics = selectedTopics.length;
+    final admitted = fitTimelineGroups(
+      selectedTopics,
+      records,
+      maxCharacters: finalOriginalCharacters,
+    );
+    timelineIncludedTopics = admitted.groups.length;
+    timelineSkippedTopics = admitted.skipped;
+    if (admitted.skipped > 0) {
+      onProgress?.call('有 ${admitted.skipped} 件事的相关消息较多，这一轮还未整理完。');
+    }
+    final selected = selectOriginals(
+      records,
+      facts,
+      priorityGroups: admitted.groups,
+    );
     final ids = selected.map((e) => e['evidence_id']).toSet();
     final selectedFacts = <Map<String, dynamic>>[];
     var observationSize = 2;
@@ -265,6 +301,9 @@ class ProfileWriter {
     }
     final material = <String, dynamic>{
       'messages': selected,
+      'timeline_topics': [
+        for (final refs in admitted.groups) {'evidence_ids': refs},
+      ],
       'self_evidence_ids': [
         for (final record in selected)
           if (record['relation'] == 'self') record['evidence_id'],
@@ -287,7 +326,7 @@ class ProfileWriter {
     onProgress?.call('正在独立核对实际主体、计划与完成状态…');
     final review = await _completeFinal(
       'review',
-      '$profileGrounding$partialInstructions独立审查草稿，不重写正文。对照原消息检查具体行为、执行者、名称、角色、状态、引用与时间锚点。检查画像各主题一致，Timeline是否漏掉有依据的重要进展。只有sender=self不够证明本人执行。多条消息支持的有分寸风格判断应保留，不要求逐字原文。不要因谨慎要求删成泛泛工作概况；指出实质问题即可。返回JSON对象 {"review_notes":["必要修正"]}，无实质问题返回空数组。',
+      '$profileGrounding$timelinePerspectiveRules$partialInstructions独立审查草稿，不重写正文。对照原消息检查具体行为、执行者、名称、角色、状态、引用与时间锚点。检查画像各主题一致，Timeline是否漏掉有依据的重要进展。重新判断每卡与用户的具体联系；即使事实准确，若只有例行通知、他人的独立事务或泛泛价值，删除整卡。核对brief事实引文、标题状态、why_now与uncertainty是否一致；缺少后续消息不能断言今天仍未完成，判断不得写成事实。没有价值事项时允许timeline为空。只有sender=self不够证明本人执行。多条消息支持的有分寸风格判断应保留，不要求逐字原文。不要因谨慎要求删成泛泛工作概况；指出实质问题即可。返回JSON对象 {"review_notes":["必要修正"]}，无实质问题返回空数组。',
       {...material, 'draft': draft},
     );
     final notes = review['review_notes'];
@@ -297,7 +336,7 @@ class ProfileWriter {
     onProgress?.call('正在修订结果，保留有依据的主题和细节…');
     var edited = await _completeFinal(
       'edit',
-      '$profileGrounding$_entryInstructions$partialInstructions这是修订，不是压缩重写。落实review_notes，保留其余有依据的段落、分工、风格判断和篇幅；不删成一句职业概述，不因引用格式错误而删除整段或全部Timeline。对事实层逐句复核，无法支持的具体行为才省略。',
+      '$profileGrounding$_entryInstructions$partialInstructions这是修订，不是压缩重写。落实review_notes，保留其余有依据的段落、分工、风格判断和篇幅；不删成一句职业概述，不因引用格式错误删除有依据的画像；Timeline允许整卡删除不相关或无价值的内容，不为数量保留。对事实层逐句复核，无法支持的具体行为才省略。',
       {...material, 'draft': draft, 'review_notes': notes},
     );
     for (var attempt = 0; ; attempt++) {
@@ -314,9 +353,8 @@ class ProfileWriter {
         return encodeEntries(
           edited,
           selected,
-          requireTimeline: facts.any(
-            (f) => (f['text'] as String).startsWith('【事】'),
-          ),
+          requireBrief: true,
+          timelineGroups: admitted.groups,
         );
       } catch (error) {
         final reason = profileRepairReason(error);
@@ -324,7 +362,7 @@ class ProfileWriter {
         onProgress?.call('正在修正引用格式，保留完整结果…');
         edited = await _completeFinal(
           'repair',
-          '$profileGrounding$_entryInstructions$partialInstructions若提供validation_detail，按path定位出错字段并严格使用allowed_values；最终只填写规定的timeline、profile与todos区域。只修正校验错误，不压缩或删去其余有依据的内容。若画像或待办引用了participant或unknown，按validation_detail.path及invalid_references定位。当validation_error为profile_requires_self_evidence时，allowed_values和self_evidence_ids只是本轮上下文中可引用的本人原文编号，不能机械替换引用；必须重读原文并修正断言，没有本人依据的句子应删除，整类无依据则profile对应区域置null，待办无依据则删除该候选。即使没有self原文，仍保留有依据的Timeline并正确写明实际主体，不把整份结果清空。',
+          '$profileGrounding$_entryInstructions$partialInstructions若提供validation_detail，按path定位出错字段并严格使用allowed_values；最终只填写规定的timeline、profile与todos区域。只修正校验错误，不压缩或删去其余有依据的内容。若画像或待办引用了participant或unknown，按validation_detail.path及invalid_references定位。当validation_error为profile_requires_self_evidence时，allowed_values和self_evidence_ids只是本轮上下文中可引用的本人原文编号，不能机械替换引用；必须重读原文并修正断言，没有本人依据的句子应删除，整类无依据则profile对应区域置null，待办无依据则删除该候选。即使没有self原文，仍可保留有明确个人联系且有原文依据的Timeline并写明实际主体。brief的facts.ref必须属于本项evidence_ids且quote逐字来自该ref完整原文；不能机械替换引用，无法支持或无价值就删除整卡，允许timeline为空。',
           {
             ...material,
             'previous_result': edited,
@@ -340,12 +378,18 @@ class ProfileWriter {
   // As on desktop, interleave observation types and spread selection over history.
   static List<Map<String, dynamic>> selectOriginals(
     List<Map<String, dynamic>> records,
-    List<Map<String, dynamic>> facts,
-  ) {
+    List<Map<String, dynamic>> facts, {
+    List<List<String>> priorityGroups = const [],
+  }) {
     final chosen = <String>{};
     final byId = {for (final r in records) r['evidence_id']: r};
     final lanes = <List<List<String>>>[];
     var characters = 2;
+    for (final group in priorityGroups) {
+      for (final id in group) {
+        if (chosen.add(id)) characters += jsonEncode(byId[id]).length + 1;
+      }
+    }
     for (final kind in ['【人】', '【风】', '【事】', 'other']) {
       final lane =
           facts.where((f) {
@@ -443,7 +487,12 @@ class ProfileWriter {
     return [
       for (var index = 0; index < timeline.length; index++)
         {
-          ...content(timeline[index], {'text', 'evidence_ids', 'time_ref'}),
+          ...content(timeline[index], {
+            'text',
+            'brief',
+            'evidence_ids',
+            'time_ref',
+          }),
           'key': 'timeline_${index + 1}',
           'kind': 'timeline',
         },
@@ -466,13 +515,14 @@ class ProfileWriter {
   static String encodeEntries(
     Map<String, dynamic> output,
     List<Map<String, dynamic>> originals, {
-    bool requireTimeline = false,
+    bool requireBrief = false,
+    List<List<String>>? timelineGroups,
   }) {
     final entries = _projectionEntries(output);
-    if (entries is! List || entries.isEmpty) {
+    if (entries is! List) {
       throw StateError('invalid_projection');
     }
-    final allowed = {for (final e in originals) e['evidence_id']: e};
+    final allowed = {for (final e in originals) e['evidence_id'] as String: e};
     final restored = <Map<String, dynamic>>[];
     for (final item in entries) {
       if (item is! Map ||
@@ -482,6 +532,18 @@ class ProfileWriter {
         throw StateError('ungrounded_projection');
       }
       final entry = Map<String, dynamic>.from(item);
+      if (entry['kind'] == 'timeline') {
+        final refs = entry['evidence_ids'] as List;
+        if (timelineGroups != null &&
+            !timelineGroups.any((group) => refs.every(group.contains))) {
+          throw StateError('ungrounded_projection');
+        }
+        if (requireBrief || entry.containsKey('brief')) {
+          final brief = normalizeTimelineBrief(entry['brief'], refs, allowed);
+          entry['brief'] = brief;
+          entry['text'] = timelineBriefText(brief);
+        }
+      }
       if (entry['text'] is String) {
         entry['text'] = profileSafeText(entry['text'] as String);
         if ((entry['text'] as String)
@@ -499,9 +561,6 @@ class ProfileWriter {
         entry['observed_at'] = allowed[anchor]!['created_at'];
       }
       restored.add(entry);
-    }
-    if (requireTimeline && !restored.any((e) => e['kind'] == 'timeline')) {
-      throw StateError('missing_timeline');
     }
     try {
       validateProfileEntries(restored, {

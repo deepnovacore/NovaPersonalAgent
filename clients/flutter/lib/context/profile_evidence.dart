@@ -101,6 +101,21 @@ class ProfileEvidence {
       if (entry is! Map || entry['evidence_ids'] is! List) {
         throw StateError('ungrounded_projection');
       }
+      if (entry['brief'] != null) {
+        final brief = entry['brief'];
+        if (brief is! Map || brief['facts'] is! List) {
+          throw StateError('invalid_projection');
+        }
+        for (final fact in brief['facts'] as List) {
+          if (fact is! Map ||
+              !(entry['evidence_ids'] as List).contains(fact['ref'])) {
+            throw StateError('ungrounded_projection');
+          }
+          final id = _ids[fact['ref']];
+          if (id == null) throw StateError('ungrounded_projection');
+          fact['ref'] = id;
+        }
+      }
       entry['evidence_ids'] = (entry['evidence_ids'] as List).map((ref) {
         final id = _ids[ref];
         if (id == null) throw StateError('ungrounded_projection');

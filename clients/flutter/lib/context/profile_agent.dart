@@ -202,6 +202,7 @@ class ProfileAgent extends ChangeNotifier {
     String correctionContext,
   ) {
     return ProfileObservationCheckpoint.digest({
+      'result_recipe': 'timeline-brief-v1',
       'provider': '${model.endpoint}|${model.model}',
       'protocol': model.protocol.name,
       'account': connector.sources.identity,
@@ -450,6 +451,7 @@ class ProfileAgent extends ChangeNotifier {
     ) async {
       if (const {
         'observations',
+        'timeline_select',
         'draft',
         'review',
         'edit',
@@ -457,14 +459,25 @@ class ProfileAgent extends ChangeNotifier {
       }.contains(stage)) {
         lastStage = stage;
       }
-      if (stage == 'draft' &&
+      if ((stage == 'draft' || stage == 'timeline_select') &&
           (savedObservationsOnly || maxNewBatches != null)) {
         final coverage = Map<String, int>.from(input['coverage'] as Map);
         if (coverage['validated_observation_records']! <
             coverage['eligible_records']!) {
           final scope = _generationScope(model, evidence, correctionContext);
-          repository.validatePartialCoverage(coverage, generationScope: scope);
           final existing = repository.value;
+          // Compare the actual original count again once selection is complete.
+          final checkedCoverage = {
+            ...coverage,
+            if (stage == 'timeline_select' &&
+                existing?['generation_scope'] == scope)
+              'final_original_records':
+                  existing?['coverage']?['final_original_records'] as int? ?? 0,
+          };
+          repository.validatePartialCoverage(
+            checkedCoverage,
+            generationScope: scope,
+          );
           final oldCovered = existing?['generation_scope'] == scope
               ? existing?['coverage']?['validated_observation_records']
               : null;

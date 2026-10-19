@@ -130,6 +130,9 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Grounded profile'), findsOneWidget);
         expect(find.textContaining('近况可能不完整'), findsOneWidget);
+        expect(find.textContaining('已整理 2 / 10 条消息'), findsNothing);
+        await tester.tap(find.text('整理范围'));
+        await tester.pumpAndSettle();
         expect(find.textContaining('已整理 2 / 10 条消息'), findsOneWidget);
         expect(find.textContaining('还有 8 条待整理'), findsOneWidget);
         final reopened = ProfileRepository(disk, authority, sources);
@@ -137,6 +140,7 @@ void main() {
         expect(reopened.value?['partial'], true);
         expect(reopened.value?['coverage']['final_original_records'], 1);
         expect(disk.value, saved);
+        await tester.ensureVisible(find.text('Grounded plan'));
         await tester.tap(find.text('Grounded plan'));
         await tester.pumpAndSettle();
         expect(find.text('synthetic original plan'), findsOneWidget);

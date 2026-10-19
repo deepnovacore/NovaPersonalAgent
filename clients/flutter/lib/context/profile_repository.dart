@@ -4,6 +4,7 @@ import '../personal/local_life.dart';
 import '../personal/life_reducer.dart';
 import 'source_store.dart';
 import 'profile_corrections.dart';
+import 'timeline_brief.dart';
 
 /// Structured, content-free feedback for model output contract violations.
 class ProfileValidationFailure extends StateError {
@@ -33,7 +34,7 @@ String? profileRepairReason(Object error) {
 /// Shared pre-write validation for the writer and persisted projection.
 void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
   final evidence = originals.keys.toSet();
-  if (entries is! List || entries.isEmpty || entries.length > 100) {
+  if (entries is! List || entries.length > 100) {
     throw StateError('invalid_projection');
   }
   final keys = <String>{};
@@ -46,6 +47,7 @@ void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
           'evidence_ids',
           'kind',
           'observed_at',
+          'brief',
         }).isNotEmpty ||
         item['key'] is! String ||
         !RegExp(r'^[A-Za-z0-9_-]{1,100}$').hasMatch(item['key']) ||
@@ -68,6 +70,18 @@ void validateProfileEntries(dynamic entries, Map<dynamic, dynamic> originals) {
         'path': 'entries[$index].key',
         'allowed_values': ProfileCorrections.categories.keys.toList(),
       });
+    }
+    if (item.containsKey('brief')) {
+      if (kind != 'timeline') throw StateError('invalid_projection_kind');
+      final brief = normalizeTimelineBrief(
+        item['brief'],
+        item['evidence_ids'] as List,
+        Map<String, dynamic>.from(originals),
+      );
+      if (item['text'] != timelineBriefText(brief)) {
+        throw StateError('ungrounded_projection');
+      }
+      item['brief'] = brief;
     }
     final refs = (item['evidence_ids'] as List).map((id) => originals[id]!);
     if ((kind == 'profile' || kind == 'todo_candidate') &&
@@ -187,6 +201,7 @@ class ProfileRepository {
     final result = copyJson(current);
     result['available_evidence_ids'] = available;
     result['historical'] =
+        (current['preserved_history'] as int? ?? 0) > 0 ||
         current['source_revision'] != sources.revision ||
         current['consent_revision'] != sources.processingRevision ||
         available.length != refs.length;
@@ -308,6 +323,60 @@ class ProfileRepository {
           (entries as List).any((entry) => entry['kind'] == 'todo_candidate')) {
         throw StateError('partial_profile_todo_unsupported');
       }
+      final retained = value;
+      final noNewContent = (entries as List).isEmpty && retained != null;
+      // value gates account/authority ownership. Preserve the underlying
+      // publication, not its temporary overlay of explicit user corrections.
+      final oldEntries = retained == null
+          ? <dynamic>[]
+          : _value!['entries'] as List;
+      final newProfileKeys = entries
+          .where((e) => (e['kind'] ?? 'profile') == 'profile')
+          .map((e) => e['key'])
+          .toSet();
+      final hasNewTimeline = entries.any((e) => e['kind'] == 'timeline');
+      // A null/omitted profile category or an empty Timeline is not a deletion.
+      // Prior suggestions never become current actionable candidates again.
+      final preserved = oldEntries.where((e) {
+        final kind = e['kind'] ?? 'profile';
+        return kind == 'timeline'
+            ? !hasNewTimeline
+            : kind == 'profile' &&
+                  ProfileCorrections.categories.containsKey(e['key']) &&
+                  !newProfileKeys.contains(e['key']);
+      }).toList();
+      final publishedKeys = entries.map((e) => e['key'] as String).toSet();
+      for (var index = 0; index < preserved.length; index++) {
+        final entry = preserved[index] as Map;
+        var key = entry['key'] as String;
+        if (publishedKeys.contains(key)) {
+          // Timeline keys are display identifiers; keep fixed profile category
+          // keys and current candidate identifiers intact. Hash without the old
+          // key so a subsequent publication never grows history prefixes.
+          if (entry['kind'] != 'timeline') {
+            throw StateError('invalid_projection');
+          }
+          final basis = Map<String, dynamic>.from(entry)..remove('key');
+          final base = 'timeline_history_${lifeFingerprint(basis)}';
+          key = base;
+          var suffix = 1;
+          while (publishedKeys.contains(key)) {
+            key = '${base}_${suffix++}';
+          }
+          preserved[index] = {...entry, 'key': key};
+        }
+        publishedKeys.add(key);
+      }
+      final publishedEntries = [...entries, ...preserved];
+      final oldFingerprints = _value?['evidence_fingerprints'] as Map? ?? {};
+      final fingerprints = {
+        for (final id
+            in entries.expand((e) => e['evidence_ids'] as List).toSet())
+          id: _evidenceFingerprint(originals[id]!),
+        for (final id
+            in preserved.expand((e) => e['evidence_ids'] as List).toSet())
+          if (oldFingerprints.containsKey(id)) id: oldFingerprints[id],
+      };
       final next = {
         'version': 1,
         'space_id': authority.record['space_id'],
@@ -315,21 +384,22 @@ class ProfileRepository {
         'publication_generation': generation,
         'publisher_device_id': authority.deviceId,
         'revision': (_value?['revision'] as int? ?? 0) + 1,
-        'generated_at': sources.now().toUtc().toIso8601String(),
+        'generated_at': noNewContent
+            ? _value!['generated_at']
+            : sources.now().toUtc().toIso8601String(),
         'processing_provider': provider,
         'source_identity': sources.identity,
         'source_generation': sources.generation,
         'history_schema': 1,
-        'evidence_fingerprints': {
-          for (final id
-              in (entries as List)
-                  .expand((e) => e['evidence_ids'] as List)
-                  .toSet())
-            id: _evidenceFingerprint(originals[id]!),
-        },
-        'source_revision': sourceRevision,
-        'consent_revision': consentRevision,
-        'entries': entries,
+        'evidence_fingerprints': fingerprints,
+        'source_revision': noNewContent
+            ? _value!['source_revision']
+            : sourceRevision,
+        'consent_revision': noNewContent
+            ? _value!['consent_revision']
+            : consentRevision,
+        'entries': publishedEntries,
+        'preserved_history': preserved.length,
         'incomplete_batches': incompleteBatches,
         'partial': partial,
         'generation_scope': ?generationScope,
@@ -350,7 +420,7 @@ class ProfileRepository {
         rethrow;
       }
       _value = next;
-      return {'revision': next['revision'], 'entries': entries.length};
+      return {'revision': next['revision'], 'entries': publishedEntries.length};
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;

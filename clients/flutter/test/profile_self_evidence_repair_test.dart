@@ -1,3 +1,4 @@
+import 'profile_writer_fixtures.dart';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
@@ -41,7 +42,7 @@ void main() {
             },
           },
         };
-        final writer = ProfileWriter(
+        final writer = fixtureProfileWriter(
           complete: (stage, instructions, input) async {
             if (stage == 'observations') {
               return {
@@ -101,7 +102,7 @@ void main() {
     'no self evidence can retain grounded timeline and omit unsupported profile',
     () async {
       var repairs = 0;
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           if (stage == 'observations') {
             return {
@@ -153,7 +154,7 @@ void main() {
           },
         },
       };
-      final writer = ProfileWriter(
+      final writer = fixtureProfileWriter(
         complete: (stage, _, input) async {
           if (stage == 'observations') {
             return {
