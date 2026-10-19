@@ -656,11 +656,261 @@ void pipelineScopeTests() {
 }
 
 void pipelineTitleRepairTests() {
+  test(
+    'routing title redaction preserves themes and safe reusable checkpoints without repair',
+    () async {
+      final data = fixture(2), cache = <String, Map<String, dynamic>>{};
+      final calls = <String>[];
+      TimelinePipeline create() => TimelinePipeline(
+        cacheScope: 'safe-routing',
+        authorize: () async {},
+        loadCheckpoint: (key) async => cache[key] == null
+            ? null
+            : jsonDecode(jsonEncode(cache[key])) as Map<String, dynamic>,
+        saveCheckpoint: (key, value) async {
+          cache[key] = jsonDecode(jsonEncode(value)) as Map<String, dynamic>;
+        },
+        complete: (stage, instructions, input) async {
+          calls.add(stage);
+          expect(jsonEncode(input), isNot(contains('synthetic-private-value')));
+          if (stage == 'timeline_select') {
+            expect(input.containsKey('previous_response'), false);
+            return {
+              'topics': [
+                {
+                  'title': '接口 api_key=synthetic-private-value 已核验',
+                  'observation_indices': [0],
+                },
+                {
+                  'title': '另一个独立事项',
+                  'observation_indices': [1],
+                },
+              ],
+            };
+          }
+          if (stage == 'timeline_reconcile') {
+            expect(
+              (input['topics'] as List)
+                  .map((t) => t['observation_indices'])
+                  .toList(),
+              [
+                [0],
+                [1],
+              ],
+            );
+            expect(input['topics'][0]['title'], '接口 [redacted] 已核验');
+          }
+          return normalComplete(stage, instructions, input);
+        },
+      );
+      final first = await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: true,
+      );
+      expect(calls.where((stage) => stage == 'timeline_select').length, 1);
+      expect(first.coverage['timeline_repair_requests'], 0);
+      expect((jsonDecode(first.entries) as List).length, 2);
+      expect(jsonEncode(cache), isNot(contains('synthetic-private-value')));
+      final count = calls.length;
+      final second = await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: true,
+      );
+      expect(calls.length, count);
+      expect(second.coverage['timeline_cached_stages'], 4);
+      // Even a legacy cache title must be made safe before routing it downstream.
+      final selectionKey = cache.keys.firstWhere(
+        (key) => cache[key]!['response']['topics'] is List,
+      );
+      cache[selectionKey]!['response']['topics'][0]['title'] =
+          '接口 api_key=synthetic-private-value 已核验';
+      cache.removeWhere((key, _) => key != selectionKey);
+      await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: true,
+      );
+      expect(calls.where((stage) => stage == 'timeline_select').length, 1);
+      expect(
+        jsonEncode(
+          cache.entries
+              .where((entry) => entry.key != selectionKey)
+              .map((entry) => entry.value)
+              .toList(),
+        ),
+        isNot(contains('synthetic-private-value')),
+      );
+    },
+  );
+  for (final invalid in <String, Object>{
+    'index_not_integer': '0',
+    'topic_title_type': {'token': 'synthetic-private-value'},
+    'topic_title_too_long': 'token=synthetic-private-value ${'甲' * 161}',
+  }.entries) {
+    test(
+      'routing repair redacts titles without hiding ${invalid.key}',
+      () async {
+        final data = fixture(2);
+        var selections = 0;
+        final pipeline = TimelinePipeline(
+          cacheScope: 'safe-repair',
+          authorize: () async {},
+          complete: (stage, instructions, input) async {
+            if (stage != 'timeline_select') {
+              return normalComplete(stage, instructions, input);
+            }
+            selections++;
+            if (selections == 1) {
+              return {
+                'topics': [
+                  {
+                    'title': invalid.key == 'index_not_integer'
+                        ? 'token=synthetic-private-value'
+                        : invalid.value,
+                    'observation_indices': [
+                      invalid.key == 'index_not_integer' ? invalid.value : 0,
+                    ],
+                  },
+                  {
+                    'title': '接口 api_key=synthetic-private-value 已核验',
+                    'observation_indices': [1],
+                  },
+                ],
+              };
+            }
+            expect(input['validation_detail']['reason'], invalid.key);
+            expect(
+              jsonEncode(input['previous_response']),
+              isNot(contains('synthetic-private-value')),
+            );
+            expect(
+              input['previous_response']['topics'][1]['observation_indices'],
+              [1],
+            );
+            return {
+              'topics': [
+                {
+                  'title': '甲事项',
+                  'observation_indices': [0],
+                },
+                {
+                  'title': '乙事项',
+                  'observation_indices': [1],
+                },
+              ],
+            };
+          },
+        );
+        final result = await pipeline.generate(
+          data.observations,
+          data.records,
+          historyComplete: true,
+        );
+        expect(selections, 2);
+        expect((jsonDecode(result.entries) as List).length, 2);
+      },
+    );
+  }
+  test(
+    'routing title expansion trims checkpoint titles before cache replay',
+    () async {
+      final data = fixture(1), cache = <String, Map<String, dynamic>>{};
+      var calls = 0;
+      TimelinePipeline create() => TimelinePipeline(
+        cacheScope: 'expanded-title',
+        authorize: () async {},
+        loadCheckpoint: (key) async => cache[key] == null
+            ? null
+            : jsonDecode(jsonEncode(cache[key])) as Map<String, dynamic>,
+        saveCheckpoint: (key, value) async {
+          cache[key] = jsonDecode(jsonEncode(value)) as Map<String, dynamic>;
+        },
+        complete: (stage, instructions, input) async {
+          calls++;
+          if (stage == 'timeline_select') {
+            return {
+              'topics': [
+                {
+                  'title': '${' ' * 155}PIN=1',
+                  'observation_indices': [0],
+                },
+              ],
+            };
+          }
+          return {'timeline': []};
+        },
+      );
+      await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: true,
+      );
+      final before = calls;
+      expect(
+        cache.values.first['response']['topics'][0]['title'],
+        '[redacted]',
+      );
+      await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: true,
+      );
+      expect(calls, before);
+    },
+  );
+  test(
+    'routing title redaction cannot store an expanded overlength title',
+    () async {
+      final data = fixture(1);
+      var calls = 0, saves = 0;
+      final pipeline = TimelinePipeline(
+        cacheScope: 'expanded-overlength',
+        authorize: () async {},
+        saveCheckpoint: (_, _) async {
+          saves++;
+        },
+        complete: (stage, instructions, input) async {
+          calls++;
+          if (calls == 2) {
+            expect(
+              input['validation_detail']['reason'],
+              'topic_title_too_long',
+            );
+          }
+          return {
+            'topics': [
+              {
+                'title': '${'甲' * 154} PIN=1',
+                'observation_indices': [0],
+              },
+            ],
+          };
+        },
+      );
+      await expectLater(
+        pipeline.generate(
+          data.observations,
+          data.records,
+          historyComplete: true,
+        ),
+        throwsA(
+          isA<TimelinePipelineValidationFailure>().having(
+            (e) => e.detail['reason'],
+            'reason',
+            'topic_title_too_long',
+          ),
+        ),
+      );
+      expect(calls, 2);
+      expect(saves, 0);
+    },
+  );
   final invalidTitles = <String, Object>{
     'topic_title_type': 42,
     'topic_title_empty': '  \t ',
     'topic_title_too_long': '甲' * 161,
-    'topic_title_sensitive': 'api_key=synthetic-private-value',
   };
   for (final invalid in invalidTitles.entries) {
     test(

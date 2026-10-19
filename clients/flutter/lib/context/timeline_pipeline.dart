@@ -175,6 +175,30 @@ class TimelinePipeline {
         return jsonEncode(indices);
       }).toList()..sort();
 
+  // Routing labels are untrusted index metadata, never source evidence. Redact
+  // copies used in checkpoints and repair prompts; malformed title objects are
+  // represented by null rather than echoed back to the model.
+  Map<String, dynamic> _safeSelectionResponse(Map<String, dynamic> response) {
+    final rows = response['topics'];
+    if (rows is! List) return response;
+    return {
+      ...response,
+      'topics': [
+        for (final row in rows)
+          if (row is Map)
+            {
+              ...row,
+              if (row.containsKey('title'))
+                'title': row['title'] is String
+                    ? profileSafeText(row['title'] as String).trim()
+                    : null,
+            }
+          else
+            row,
+      ],
+    };
+  }
+
   Never _invalid(
     String reason,
     String path, {
@@ -264,7 +288,9 @@ class TimelinePipeline {
         await authorize();
         await saveCheckpoint?.call(key, {
           'recipe': recipe,
-          'response': response,
+          'response': stage == 'timeline_select'
+              ? _safeSelectionResponse(response)
+              : response,
         });
         await authorize();
         return result;
@@ -276,7 +302,6 @@ class TimelinePipeline {
               'topic_title_type',
               'topic_title_empty',
               'topic_title_too_long',
-              'topic_title_sensitive',
             }.contains(error.detail['reason']);
         if (titleRepair) requiredTitleTopics = _topicMembership(response);
         final titleInstruction = titleRepair
@@ -299,7 +324,9 @@ class TimelinePipeline {
           '只修正validation_detail指出的问题，返回完整输出。超大主题分题须保留初选的全部观察编号，不能删减以适应容量。$titleInstruction',
           {
             ...input,
-            'previous_response': response,
+            'previous_response': stage == 'timeline_select'
+                ? _safeSelectionResponse(response)
+                : response,
             'validation_detail': error.detail,
           },
         );
@@ -361,12 +388,11 @@ class TimelinePipeline {
       if (title is! String) _invalid('topic_title_type', path);
       if (title.trim().isEmpty) _invalid('topic_title_empty', path);
       if (title.length > 160) _invalid('topic_title_too_long', path);
-      if (profileSafeText(title) != title) {
-        _invalid('topic_title_sensitive', path);
-      }
+      final safeTitle = profileSafeText(title).trim();
+      if (safeTitle.length > 160) _invalid('topic_title_too_long', path);
       topics.add(
         TimelinePipelineTopic(
-          title.trim(),
+          safeTitle,
           members[position].indices,
           members[position].refs,
         ),
