@@ -321,8 +321,11 @@ class ProfileWriter {
       selectionInstructions,
       selectionInput,
     );
-    final selectedTopics = timelineSelectedGroups(selection, facts);
-    _contextMetrics['raw_topic_count'] = (selection['topics'] as List).length;
+    final selectedTopics = timelineSelectedGroups(
+      selection,
+      facts,
+      onMetrics: _contextMetrics.addAll,
+    );
     _contextMetrics['largest_topic_records'] = selectedTopics.fold<int>(
       0,
       (largest, topic) => topic.length > largest ? topic.length : largest,

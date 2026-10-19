@@ -15,6 +15,136 @@ Map<String, dynamic> brief(String ref, String quote) => {
 };
 
 void main() {
+  test('shared observations preserve distinct complete topic refs', () {
+    final observations = <Map<String, dynamic>>[
+      {
+        'text': '【事】共同背景',
+        'refs': ['shared-1', 'shared-2'],
+      },
+      {
+        'text': '【事】甲完成',
+        'refs': ['a-plan', 'a-done'],
+      },
+      {
+        'text': '【事】乙取消',
+        'refs': ['b-plan', 'b-cancelled'],
+      },
+    ];
+    final metrics = <String, int>{};
+    expect(timelineSelectionInstructions, contains('跨主题复用'));
+    expect(
+      timelineSelectedGroups(
+        {
+          'topics': [
+            {
+              'observation_indices': [0, 1, 0],
+            },
+            {
+              'observation_indices': [0, 2],
+            },
+            {
+              'observation_indices': [1, 0],
+            },
+          ],
+        },
+        observations,
+        onMetrics: metrics.addAll,
+      ),
+      [
+        ['shared-1', 'shared-2', 'a-plan', 'a-done'],
+        ['shared-1', 'shared-2', 'b-plan', 'b-cancelled'],
+      ],
+    );
+    expect(metrics, {
+      'raw_topic_count': 3,
+      'shared_observation_count': 2,
+      'within_topic_duplicate_count': 1,
+      'selection_invalid_type_count': 0,
+      'selection_out_of_range_count': 0,
+    });
+  });
+
+  test('selection still rejects malformed topic structures', () {
+    for (final response in <Map<String, dynamic>>[
+      {'topics': [], 'extra': 1},
+      {'topics': {}},
+      {
+        'topics': [null],
+      },
+      {
+        'topics': [
+          {'observation_indices': [], 'extra': 1},
+        ],
+      },
+      {
+        'topics': [
+          {'observation_indices': []},
+        ],
+      },
+      {
+        'topics': [
+          {'observation_indices': '0'},
+        ],
+      },
+    ]) {
+      expect(() => timelineSelectedGroups(response, []), throwsStateError);
+    }
+  });
+
+  for (final invalid in <Object?>['0', 0.0, null, true, -1, 1]) {
+    test(
+      'selection rejects invalid index $invalid without another completion',
+      () async {
+        var calls = 0;
+        final writer = ProfileWriter(
+          loadValidatedBatch: (_) async => [
+            {
+              'text': '【事】本人完成核验',
+              'refs': ['e0'],
+            },
+          ],
+          complete: (stage, _, input) async {
+            calls++;
+            expect(stage, 'timeline_select');
+            return {
+              'topics': [
+                {
+                  'observation_indices': [0],
+                },
+                {
+                  'observation_indices': [invalid],
+                },
+              ],
+            };
+          },
+        );
+        await expectLater(
+          writer.generate([
+            {
+              'evidence_id': 'e0',
+              'chat': 'c1',
+              'speaker': 'p1',
+              'relation': 'self',
+              'created_at': '2026-10-19T00:00:00Z',
+              'text': '本人完成核验',
+            },
+          ], savedObservationsOnly: true),
+          throwsStateError,
+        );
+        expect(calls, 1);
+        expect(writer.coverage['raw_topic_count'], 2);
+        expect(
+          writer.coverage['selection_invalid_type_count'],
+          invalid is int ? 0 : 1,
+        );
+        expect(
+          writer.coverage['selection_out_of_range_count'],
+          invalid is int ? 1 : 0,
+        );
+      },
+    );
+  }
+
   test(
     'shared background refs do not union independent deliveries or their later outcomes',
     () {

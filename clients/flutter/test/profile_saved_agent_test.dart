@@ -192,7 +192,7 @@ void main() {
         validThrough: sources.now().add(agent.maxDuration),
       );
       final legacyScope = ProfileObservationCheckpoint.digest({
-        'result_recipe': 'timeline-brief-v1',
+        'result_recipe': 'timeline-brief-v2',
         'provider': provider,
         'protocol': models.configuration.protocol.name,
         'account': sources.identity,

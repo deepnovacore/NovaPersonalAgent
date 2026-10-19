@@ -213,7 +213,7 @@ class ProfileAgent extends ChangeNotifier {
     String correctionContext,
   ) {
     return ProfileObservationCheckpoint.digest({
-      'result_recipe': 'timeline-brief-v2',
+      'result_recipe': 'timeline-brief-v3',
       'provider': '${model.endpoint}|${model.model}',
       'protocol': model.protocol.name,
       'account': connector.sources.identity,
