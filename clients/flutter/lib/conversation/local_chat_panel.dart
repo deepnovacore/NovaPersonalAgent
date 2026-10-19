@@ -41,7 +41,8 @@ Future<void> showLocalModelSettings(
   );
   final key = TextEditingController();
   String? error, notice;
-  var saving = false, verifying = false, noticeBad = false;
+  var saving = false, loadingModels = false, noticeBad = false;
+  var modelListRevision = 0;
   var protocol = current?.protocol ?? ModelProtocol.chatCompletions;
   // New users start on the former default (OpenRouter); saved endpoints that
   // match no preset stay on the free-form "custom" form.
@@ -54,12 +55,19 @@ Future<void> showLocalModelSettings(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) {
-          void choose(String id) {
-            final next = ModelPreset.byId(id);
-            preset = next;
+          void invalidateModels() {
+            modelListRevision++;
+            loadingModels = false;
             fetched = [];
             notice = null;
             error = null;
+          }
+
+          void choose(String id) {
+            final next = ModelPreset.byId(id);
+            preset = next;
+            key.clear();
+            invalidateModels();
             if (next == null) return;
             endpoint.text = next.endpoint;
             protocol = next.protocol;
@@ -68,7 +76,8 @@ Future<void> showLocalModelSettings(
                 : next.recommendedModels.first;
           }
 
-          Future<void> verify() async {
+          Future<void> loadModels() async {
+            final revision = ++modelListRevision;
             // A blank key reuses the saved one only while the URL is unchanged.
             final usable = key.text.isNotEmpty
                 ? key.text
@@ -76,7 +85,7 @@ Future<void> showLocalModelSettings(
                       ? current.key
                       : '');
             setState(() {
-              verifying = true;
+              loadingModels = true;
               notice = null;
             });
             String? message;
@@ -86,13 +95,10 @@ Future<void> showLocalModelSettings(
               ids = await listModels(endpoint: endpoint.text, key: usable);
               message = ids.isEmpty
                   ? t(
-                      '密钥可用，但该厂商没有返回模型列表，请直接填写模型名。',
-                      'Key accepted, but the provider returned no models. Enter a model name.',
+                      '该厂商没有返回模型列表，请直接填写模型名。',
+                      'The provider returned no models. Enter a model name.',
                     )
-                  : t(
-                      '验证通过，共 ${ids.length} 个模型。',
-                      'Verified. ${ids.length} models available.',
-                    );
+                  : t('已加载 ${ids.length} 个模型。', 'Loaded ${ids.length} models.');
             } on AgentFailure catch (failure) {
               bad =
                   failure.code != 'model_http_404' &&
@@ -110,7 +116,7 @@ Future<void> showLocalModelSettings(
                   'This provider has no usable model list. Enter the model name yourself.',
                 ),
                 'model_http_429' => t(
-                  '请求被限流或额度不足，请稍后再验证。',
+                  '请求被限流或额度不足，请稍后重试。',
                   'Rate limited or out of quota. Try again later.',
                 ),
                 'invalid_model_settings' => t(
@@ -123,9 +129,9 @@ Future<void> showLocalModelSettings(
                 ),
               };
             }
-            if (!context.mounted) return;
+            if (!context.mounted || revision != modelListRevision) return;
             setState(() {
-              verifying = false;
+              loadingModels = false;
               fetched = ids;
               notice = message;
               noticeBad = bad;
@@ -134,6 +140,7 @@ Future<void> showLocalModelSettings(
 
           final keyField = TextField(
             controller: key,
+            onChanged: (_) => setState(invalidateModels),
             obscureText: true,
             autocorrect: false,
             enableSuggestions: false,
@@ -153,14 +160,14 @@ Future<void> showLocalModelSettings(
             autocorrect: false,
             decoration: InputDecoration(labelText: t('模型名称', 'Model name')),
           );
-          final verifyButton = Align(
+          final loadModelsButton = Align(
             alignment: Alignment.centerLeft,
             child: OutlinedButton(
-              onPressed: saving || verifying ? null : verify,
+              onPressed: saving || loadingModels ? null : loadModels,
               child: Text(
-                verifying
-                    ? t('正在验证…', 'Verifying…')
-                    : t('验证并获取模型', 'Verify & load models'),
+                loadingModels
+                    ? t('正在获取模型…', 'Loading models…')
+                    : t('获取模型列表', 'Load model list'),
               ),
             ),
           );
@@ -239,7 +246,7 @@ Future<void> showLocalModelSettings(
                         ),
                       ),
                     ],
-                    onChanged: saving || verifying
+                    onChanged: saving
                         ? null
                         : (value) {
                             if (value != null) setState(() => choose(value));
@@ -269,7 +276,7 @@ Future<void> showLocalModelSettings(
                         child: Text(t('去获取 API 密钥', 'Get an API key')),
                       ),
                     ),
-                    verifyButton,
+                    loadModelsButton,
                   ] else ...[
                     DropdownButtonFormField<ModelProtocol>(
                       initialValue: protocol,
@@ -298,6 +305,10 @@ Future<void> showLocalModelSettings(
                     const SizedBox(height: 16),
                     TextField(
                       controller: endpoint,
+                      onChanged: (_) => setState(() {
+                        key.clear();
+                        invalidateModels();
+                      }),
                       keyboardType: TextInputType.url,
                       autocorrect: false,
                       decoration: InputDecoration(
@@ -314,7 +325,7 @@ Future<void> showLocalModelSettings(
                     const SizedBox(height: 16),
                     keyField,
                     const SizedBox(height: 8),
-                    verifyButton,
+                    loadModelsButton,
                   ],
                   if (notice != null)
                     Padding(

@@ -126,18 +126,27 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('模型设置'));
     await tester.pumpAndSettle();
-    final fields = find.byType(TextField);
+    await tester.tap(find.text('OpenRouter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek').last);
+    await tester.pumpAndSettle();
+    expect(find.text('接口地址'), findsNothing);
     await tester.enterText(
-      fields.at(0),
-      'https://example.com/v1/chat/completions',
+      find.widgetWithText(TextField, '模型名称'),
+      'test-model',
     );
-    await tester.enterText(fields.at(1), 'test-model');
-    await tester.enterText(fields.at(2), 'test-only-key');
+    await tester.enterText(
+      find.widgetWithText(TextField, 'API 密钥'),
+      'test-only-key',
+    );
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     final shared = await ModelSettings(native: agent).read();
-    expect(shared!.model, 'test-model');
+    expect(shared!.endpoint, 'https://api.deepseek.com');
+    expect(shared.model, 'test-model');
     expect(shared.key, 'test-only-key');
+    expect(agent.savedModel!['endpoint'], shared.endpoint);
+    expect(agent.savedModel!['protocol'], shared.protocol.name);
     expect(agent.savedModel!['model'], shared.model);
     expect(agent.savedModel!['key'], shared.key);
     await tester.pumpWidget(const SizedBox());

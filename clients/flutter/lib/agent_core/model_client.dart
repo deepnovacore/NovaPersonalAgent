@@ -283,8 +283,9 @@ Uri compatibleEndpoint(String endpoint, String route) {
   return uri.replace(path: '$path/$route');
 }
 
-/// Model ids from `{base}/models`, doubling as a key/endpoint check.
-/// Validation is shared with [ModelConfiguration] so the rules cannot drift.
+/// Model ids from `{base}/models`. Public catalogues may accept invalid keys,
+/// so a successful response does not establish access to inference.
+/// Input validation is shared with [ModelConfiguration].
 Future<List<String>> listModels({
   required String endpoint,
   required String key,
