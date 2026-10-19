@@ -70,6 +70,7 @@ String profileRunErrorCode(Object error) {
     'invalid_profile_review',
     'insufficient_profile_evidence',
     'profile_context_too_large',
+    'profile_selection_invalid',
     'corrections_changed',
     'authorization_changed',
     'provider_changed',
@@ -213,7 +214,7 @@ class ProfileAgent extends ChangeNotifier {
     String correctionContext,
   ) {
     return ProfileObservationCheckpoint.digest({
-      'result_recipe': 'timeline-brief-v3',
+      'result_recipe': 'timeline-brief-v4',
       'provider': '${model.endpoint}|${model.model}',
       'protocol': model.protocol.name,
       'account': connector.sources.identity,
@@ -540,6 +541,9 @@ class ProfileAgent extends ChangeNotifier {
                 : null,
           );
         } on FormatException {
+          if (stage == 'timeline_select') {
+            throw const AgentFailure('profile_selection_invalid');
+          }
           if (attempt == 1) throw const AgentFailure('invalid_profile_json');
         } finally {
           client.cancel();

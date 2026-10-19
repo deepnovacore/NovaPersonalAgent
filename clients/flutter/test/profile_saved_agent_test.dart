@@ -34,6 +34,7 @@ void main() {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
       var observationCalls = 0, finalCalls = 0, failMissing = true;
+      var malformedSelection = false;
       server.listen((request) async {
         final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
         final messages = body['messages'] as List;
@@ -59,10 +60,14 @@ void main() {
         } else {
           finalCalls++;
           if (input.containsKey('history_complete')) {
-            response = {'topics': [
-              for (final observation in input['observations'] as List)
-                {'observation_indices': [observation['index']]},
-            ]};
+            response = {
+              'topics': [
+                for (final observation in input['observations'] as List)
+                  {
+                    'observation_indices': [observation['index']],
+                  },
+              ],
+            };
           } else if ((messages.first['content'] as String).contains('独立审查草稿')) {
             response = {'review_notes': []};
           } else {
@@ -70,10 +75,14 @@ void main() {
               'timeline': [
                 {
                   'brief': {
-                    'title': '提出项目计划', 'status_label': '已提出',
-                    'facts': [{'text': '提出项目计划。', 'ref': 'e1', 'quote': '项目计划 0'}],
+                    'title': '提出项目计划',
+                    'status_label': '已提出',
+                    'facts': [
+                      {'text': '提出项目计划。', 'ref': 'e1', 'quote': '项目计划 0'},
+                    ],
                     'why_now': '这是本人正在协调的项目安排。',
-                    'next_steps': [], 'uncertainty': '',
+                    'next_steps': [],
+                    'uncertainty': '',
                   },
                   'evidence_ids': ['e1'],
                   'time_ref': 'e1',
@@ -93,7 +102,7 @@ void main() {
             'data: ${jsonEncode({
               'choices': [
                 {
-                  'delta': {'content': jsonEncode(response)},
+                  'delta': {'content': malformedSelection && input.containsKey('history_complete') ? '{not json' : jsonEncode(response)},
                 },
               ],
             })}\n\ndata: [DONE]\n\n',
@@ -184,6 +193,31 @@ void main() {
       );
       expect(receipt['status'], 'partial');
       expect(receipt['coverage']['unobserved_records'], 1);
+      // Invalid JSON has no safe parsed selection to repair. It must not
+      // trigger transport retries or erase the saved result/checkpoint.
+      final beforeMalformed = await const SecureContextPersistence(
+        'nova.profile.local.v1',
+      ).read();
+      malformedSelection = true;
+      await expectLater(
+        agent.run(savedObservationsOnly: true),
+        throwsA(
+          isA<AgentFailure>().having(
+            (e) => e.code,
+            'code',
+            'profile_selection_invalid',
+          ),
+        ),
+      );
+      expect(finalCalls, 5);
+      expect(observationCalls, 2);
+      expect(await checkpoint.read(), saved);
+      expect(
+        await const SecureContextPersistence('nova.profile.local.v1').read(),
+        beforeMalformed,
+      );
+      malformedSelection = false;
+
       // Simulate a result from the previous shipped recipe while preserving
       // exactly the current sources, model, correction context and checkpoint.
       final provider = '${models.configuration.endpoint}|fixture';
@@ -192,7 +226,7 @@ void main() {
         validThrough: sources.now().add(agent.maxDuration),
       );
       final legacyScope = ProfileObservationCheckpoint.digest({
-        'result_recipe': 'timeline-brief-v2',
+        'result_recipe': 'timeline-brief-v3',
         'provider': provider,
         'protocol': models.configuration.protocol.name,
         'account': sources.identity,
@@ -231,7 +265,7 @@ void main() {
       expect(jsonEncode(agent.repository.value!['entries']), legacyEntries);
       await agent.run(savedObservationsOnly: true);
       expect(observationCalls, 2); // Only cached observations were used.
-      expect(finalCalls, 8); // Selection, draft, review and edit reran once.
+      expect(finalCalls, 9); // Selection, draft, review and edit reran once.
       expect(await checkpoint.read(), saved);
       expect(sources.revision, sourceRevisionBeforeUpgrade);
       expect(agent.repository.value!['generation_scope'], recipeScope.scope);
@@ -246,7 +280,7 @@ void main() {
       failMissing = false;
       await agent.run(maxNewBatches: 4);
       expect(observationCalls, 3);
-      expect(finalCalls, 12);
+      expect(finalCalls, 13);
       expect(agent.repository.value?['partial'], false);
       final completedScope = await agent.inspectGeneration();
       expect(completedScope?.complete, true);
@@ -274,7 +308,7 @@ void main() {
           ),
         ),
       );
-      expect(finalCalls, 12); // Reject before spending on another draft.
+      expect(finalCalls, 13); // Reject before spending on another draft.
       expect(await checkpoint.read(), smallerCheckpoint);
       expect(
         await const SecureContextPersistence('nova.profile.local.v1').read(),

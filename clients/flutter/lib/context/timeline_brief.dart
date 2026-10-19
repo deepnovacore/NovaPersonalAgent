@@ -85,6 +85,12 @@ Map<String, dynamic> compactTimelineObservationIndex(
   };
 }
 
+/// Only trusted schema paths, fixed reasons and numeric bounds are retained.
+class TimelineSelectionFailure extends StateError {
+  TimelineSelectionFailure(this.detail) : super('profile_selection_invalid');
+  final Map<String, dynamic> detail;
+}
+
 List<List<String>> timelineSelectedGroups(
   Map<String, dynamic> response,
   List<Map<String, dynamic>> observations, {
@@ -99,29 +105,80 @@ List<List<String>> timelineSelectedGroups(
     'selection_invalid_type_count': 0,
     'selection_out_of_range_count': 0,
   };
+  Never invalid(String reason, String path, {int? index}) {
+    // Stable codes 1..7 identify schema/range failures without retaining prose.
+    const reasons = [
+      'unexpected_fields',
+      'topics_not_list',
+      'topic_not_object',
+      'indices_not_list',
+      'indices_empty',
+      'index_not_integer',
+      'index_out_of_range',
+    ];
+    final positions = RegExp(
+      r'\[(\d+)\]',
+    ).allMatches(path).map((match) => int.parse(match.group(1)!)).toList();
+    metrics.addAll({
+      'selection_failure_reason_code': reasons.indexOf(reason) + 1,
+      'selection_failure_observation_count': observations.length,
+      'selection_failure_allowed_index_min': 0,
+      'selection_failure_allowed_index_max': observations.length - 1,
+      'selection_failure_invalid_index': ?index,
+      if (positions.isNotEmpty)
+        'selection_failure_topic_position': positions[0],
+      if (positions.length > 1)
+        'selection_failure_index_position': positions[1],
+    });
+    throw TimelineSelectionFailure(
+      Map<String, dynamic>.unmodifiable({
+        'reason': reason,
+        'path': path,
+        'invalid_index': ?index,
+        'observation_count': observations.length,
+        'allowed_index_min': 0,
+        'allowed_index_max': observations.length - 1,
+      }),
+    );
+  }
+
   try {
-    if (response.keys.any((k) => k != 'topics') || topics is! List) {
-      throw StateError('invalid_projection');
+    if (response.keys.any((k) => k != 'topics')) {
+      invalid('unexpected_fields', r'$');
     }
+    if (topics is! List) invalid('topics_not_list', 'topics');
     final seen = <int>{}, shared = <int>{}, groups = <List<String>>[];
     final referenceSets = <String>{};
-    for (final topic in topics) {
-      if (topic is! Map || topic.keys.any((k) => k != 'observation_indices')) {
-        throw StateError('invalid_projection');
+    for (
+      var topicPosition = 0;
+      topicPosition < topics.length;
+      topicPosition++
+    ) {
+      final topic = topics[topicPosition];
+      final topicPath = 'topics[$topicPosition]';
+      if (topic is! Map) invalid('topic_not_object', topicPath);
+      if (topic.keys.any((k) => k != 'observation_indices')) {
+        invalid('unexpected_fields', topicPath);
       }
       final indices = topic['observation_indices'];
-      if (indices is! List || indices.isEmpty) {
-        throw StateError('invalid_projection');
-      }
+      final indicesPath = '$topicPath.observation_indices';
+      if (indices is! List) invalid('indices_not_list', indicesPath);
+      if (indices.isEmpty) invalid('indices_empty', indicesPath);
       final refs = <String>{}, topicSeen = <int>{};
-      for (final index in indices) {
+      for (
+        var indexPosition = 0;
+        indexPosition < indices.length;
+        indexPosition++
+      ) {
+        final index = indices[indexPosition];
+        final indexPath = '$indicesPath[$indexPosition]';
         if (index is! int) {
           metrics['selection_invalid_type_count'] = 1;
-          throw StateError('ungrounded_projection');
+          invalid('index_not_integer', indexPath);
         }
         if (index < 0 || index >= observations.length) {
           metrics['selection_out_of_range_count'] = 1;
-          throw StateError('ungrounded_projection');
+          invalid('index_out_of_range', indexPath, index: index);
         }
         if (!topicSeen.add(index)) {
           metrics['within_topic_duplicate_count'] =

@@ -93,7 +93,7 @@ void main() {
 
   for (final invalid in <Object?>['0', 0.0, null, true, -1, 1]) {
     test(
-      'selection rejects invalid index $invalid without another completion',
+      'selection rejects invalid index $invalid after one bounded repair',
       () async {
         var calls = 0;
         final writer = ProfileWriter(
@@ -129,9 +129,15 @@ void main() {
               'text': '本人完成核验',
             },
           ], savedObservationsOnly: true),
-          throwsStateError,
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'code',
+              'profile_selection_invalid',
+            ),
+          ),
         );
-        expect(calls, 1);
+        expect(calls, 2);
         expect(writer.coverage['raw_topic_count'], 2);
         expect(
           writer.coverage['selection_invalid_type_count'],

@@ -335,6 +335,8 @@ class ProfileGenerationCoordinator extends ChangeNotifier
                 'connector_unavailable',
                 'source_expired',
                 'profile_checkpoint_storage_full',
+                'profile_selection_invalid',
+                'profile_context_too_large',
               }.contains(code) ||
               count >= 3;
           if (terminal) {

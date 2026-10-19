@@ -4,6 +4,55 @@ import 'package:nova_mobile/context/profile_generation_coordinator.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  for (final failure in [
+    'profile_selection_invalid',
+    'profile_context_too_large',
+  ]) {
+    test('$failure blocks paid reruns across polls and restart', () async {
+      final disk = MemoryLifePersistence();
+      var calls = 0;
+      var scope = 's';
+      var time = DateTime.utc(2026);
+      ProfileGenerationCoordinator create() => ProfileGenerationCoordinator(
+        persistence: disk,
+        autoSchedule: false,
+        now: () => time,
+        inspect: () async => ProfileGenerationSnapshot(
+          scope: scope,
+          complete: false,
+          hasResult: false,
+          covered: 0,
+          total: 10,
+        ),
+        generate:
+            ({required savedObservationsOnly, required maxNewBatches}) async {
+              calls++;
+              throw failure;
+            },
+        cancel: () {},
+        failureCode: (e) => '$e',
+      );
+      final first = create();
+      await first.start();
+      await first.poll();
+      expect(first.phase, ProfileGenerationPhase.blocked);
+      for (var i = 0; i < 4; i++) {
+        time = time.add(const Duration(days: 1));
+        await first.poll();
+      }
+      first.dispose();
+      final next = create();
+      await next.start();
+      await next.poll();
+      expect(calls, 1);
+      expect(next.code, failure);
+      scope = 'changed-input';
+      await next.poll();
+      expect(calls, 2);
+      next.dispose();
+    });
+  }
+
   test(
     'backgrounding lets the bounded in-flight round save and blocks new rounds',
     () async {
