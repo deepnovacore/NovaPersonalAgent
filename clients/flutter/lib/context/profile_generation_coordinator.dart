@@ -42,11 +42,16 @@ class ProfileGenerationCoordinator extends ChangeNotifier
     this.autoSchedule = true,
     this.inputs = const [],
     this.progress,
+    this.recoverBudgetPause,
+    this.budgetLimitMicroyuan,
     this.retryBase = const Duration(seconds: 30),
     this.roundDelay = const Duration(seconds: 3),
   }) : now = now ?? DateTime.now,
        processedRecords = processedRecords ?? (() => 0);
   final LifePersistence persistence;
+  final Future<Map<String, dynamic>?> Function(Map<String, dynamic>)?
+  recoverBudgetPause;
+  final int? budgetLimitMicroyuan;
   final Future<ProfileGenerationSnapshot?> Function() inspect;
   final Future<void> Function({
     required bool savedObservationsOnly,
@@ -93,6 +98,19 @@ class ProfileGenerationCoordinator extends ChangeNotifier
         _record = value;
       }
       if (_disposed) return;
+      if (!manuallyPaused &&
+          _record['terminal_code'] == 'profile_budget_exhausted') {
+        final resumed = await recoverBudgetPause?.call(Map.of(_record));
+        if (resumed != null) {
+          _record = resumed;
+          _record.remove('error_code');
+          _record.remove('next_at');
+          _record['stage'] = 'saved';
+          _record['retry_count'] = 0;
+          _record['status'] = 'budget_resumed';
+          await _save();
+        }
+      }
       if (_record['status'] == 'running') {
         _record['stage'] = 'saved';
         _record['retry_count'] = (_record['retry_count'] as int? ?? 0) + 1;
@@ -319,7 +337,13 @@ class ProfileGenerationCoordinator extends ChangeNotifier
                 'profile_checkpoint_storage_full',
               }.contains(code) ||
               count >= 3;
-          if (terminal) _record['terminal_code'] = code;
+          if (terminal) {
+            _record['terminal_code'] = code;
+            if (code!.startsWith('profile_budget_') &&
+                budgetLimitMicroyuan != null) {
+              _record['budget_limit_microyuan'] = budgetLimitMicroyuan;
+            }
+          }
           phase = terminal
               ? ProfileGenerationPhase.blocked
               : ProfileGenerationPhase.failed;
@@ -349,6 +373,9 @@ class ProfileGenerationCoordinator extends ChangeNotifier
         code = failureCode(error);
         if (code?.startsWith('profile_budget_') == true) {
           _record['terminal_code'] = code;
+          if (budgetLimitMicroyuan != null) {
+            _record['budget_limit_microyuan'] = budgetLimitMicroyuan;
+          }
           _record['status'] = 'blocked';
           try {
             await _save();

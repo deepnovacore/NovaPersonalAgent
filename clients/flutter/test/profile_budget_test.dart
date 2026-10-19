@@ -63,9 +63,9 @@ void main() {
       final disk = MemoryLifePersistence();
       final flashCost = ProfileBudget.requestCost(model, messages);
       final visionCost = ProfileBudget.requestCost(vision, messages);
-      final original = ProfileBudget(disk);
+      final original = ProfileBudget(disk, capMicroyuan: 5000000);
       await original.reserve(model, messages);
-      final reopened = ProfileBudget(disk);
+      final reopened = ProfileBudget(disk, capMicroyuan: 5000000);
       await reopened.reserve(vision, messages);
       expect(reopened.reservedMicroyuan, flashCost + visionCost);
       // Reopening with a different model does not reset or partition the remainder.
@@ -162,7 +162,7 @@ void main() {
       final disk = MemoryLifePersistence();
       final cost = ProfileBudget.requestCost(model, messages);
       disk.value = jsonEncode({'reserved_microyuan': 5000000 - cost});
-      final budget = ProfileBudget(disk);
+      final budget = ProfileBudget(disk, capMicroyuan: 5000000);
       await budget.reserve(model, messages);
       final full = disk.value;
       await expectLater(

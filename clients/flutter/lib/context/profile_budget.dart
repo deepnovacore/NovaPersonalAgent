@@ -5,11 +5,48 @@ import '../personal/local_life.dart';
 
 // shortcut: acceptance-only DashScope pricing; add provider pricing before general use.
 class ProfileBudget {
-  ProfileBudget(this.persistence);
+  ProfileBudget(this.persistence, {this.capMicroyuan = limitMicroyuan});
   final LifePersistence persistence;
   static Future<void> _tail = Future.value();
-  static const limitMicroyuan = 5000000;
+  static const limitMicroyuan = int.fromEnvironment(
+    'NOVA_PROFILE_BUDGET_LIMIT_MICROYUAN',
+    defaultValue: 5000000,
+  );
+  final int capMicroyuan;
   int reservedMicroyuan = 0;
+
+  /// Explicit build approval, scoped to the same acceptance ledger. This only
+  /// reads accounting: old reservations and pending tickets are never released.
+  Future<Map<String, dynamic>?> recoverExhaustedPause(
+    Map<String, dynamic> state, {
+    required String budgetId,
+    required String upgradeId,
+    required int previousCapMicroyuan,
+    String errorKey = 'error_code',
+  }) => _serialize(() async {
+    if (state[errorKey] != 'profile_budget_exhausted' ||
+        state['manual_pause'] == true ||
+        budgetId.isEmpty ||
+        upgradeId.isEmpty ||
+        previousCapMicroyuan <= 0 ||
+        capMicroyuan <= previousCapMicroyuan ||
+        state['budget_resume_approval'] == upgradeId ||
+        (state['budget_id'] != null && state['budget_id'] != budgetId)) {
+      return null;
+    }
+    final pausedCap = state['budget_limit_microyuan'];
+    // A cap-less legacy record requires the explicit from-cap build approval.
+    if (pausedCap != null && pausedCap != previousCapMicroyuan) return null;
+    final ledger = await _read(requireExisting: true);
+    reservedMicroyuan = ledger['reserved_microyuan'] as int;
+    if (reservedMicroyuan >= capMicroyuan) return null;
+    return {
+      ...state,
+      'budget_id': budgetId,
+      'budget_limit_microyuan': capMicroyuan,
+      'budget_resume_approval': upgradeId,
+    }..remove(errorKey);
+  });
 
   static int requestCost(
     ModelConfiguration model,
@@ -75,7 +112,7 @@ class ProfileBudget {
     final ledger = await _read();
     final spent = ledger['reserved_microyuan'] as int;
     reservedMicroyuan = spent;
-    if (spent + cost > limitMicroyuan) {
+    if (spent + cost > capMicroyuan) {
       throw const AgentFailure('profile_budget_exhausted');
     }
     final pending = ledger['pending_reservations'] as Map<String, dynamic>;
@@ -129,8 +166,11 @@ class ProfileBudget {
         reservedMicroyuan = spent - cost + actual;
       });
 
-  Future<Map<String, dynamic>> _read() async {
+  Future<Map<String, dynamic>> _read({bool requireExisting = false}) async {
     final raw = await persistence.read();
+    if (requireExisting && raw == null) {
+      throw const AgentFailure('profile_budget_unavailable');
+    }
     final decoded = raw == null ? {'reserved_microyuan': 0} : jsonDecode(raw);
     if (decoded is! Map<String, dynamic>) {
       throw const AgentFailure('profile_budget_unavailable');
@@ -139,7 +179,7 @@ class ProfileBudget {
     final pending = decoded['pending_reservations'] ?? <String, dynamic>{};
     if (spent is! int ||
         spent < 0 ||
-        spent > limitMicroyuan ||
+        spent > capMicroyuan ||
         pending is! Map<String, dynamic>) {
       throw const AgentFailure('profile_budget_unavailable');
     }

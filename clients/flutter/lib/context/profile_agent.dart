@@ -143,7 +143,19 @@ class ProfileAgent extends ChangeNotifier {
     }
     if (budget != null) {
       final raw = await const SecureContextPersistence(receiptKey).read();
-      final receipt = raw == null ? null : jsonDecode(raw);
+      var receipt = raw == null ? null : jsonDecode(raw);
+      if (receipt is Map<String, dynamic>) {
+        final resumed = await recoverBudgetPause(
+          receipt,
+          errorKey: 'error_code',
+        );
+        if (resumed != null) {
+          await const SecureContextPersistence(
+            receiptKey,
+          ).write(jsonEncode(resumed));
+          receipt = resumed;
+        }
+      }
       final failure = receipt is Map ? receipt['error_code'] : null;
       if (failure is String &&
           profileRunErrorCode(
@@ -210,9 +222,29 @@ class ProfileAgent extends ChangeNotifier {
       : ProfileBudget(
           const SecureContextPersistence('nova.profile.budget.$budgetId'),
         );
+  static const budgetUpgradeId = String.fromEnvironment(
+    'NOVA_PROFILE_BUDGET_UPGRADE_ID',
+  );
+  static const previousBudgetCap = int.fromEnvironment(
+    'NOVA_PROFILE_BUDGET_PREVIOUS_LIMIT_MICROYUAN',
+  );
+  Map<String, dynamic> get _budgetMetadata => budget == null
+      ? {}
+      : {'budget_id': budgetId, 'budget_limit_microyuan': budget!.capMicroyuan};
+  Future<Map<String, dynamic>?> recoverBudgetPause(
+    Map<String, dynamic> state, {
+    String errorKey = 'terminal_code',
+  }) async => budget?.recoverExhaustedPause(
+    state,
+    budgetId: budgetId,
+    upgradeId: budgetUpgradeId,
+    previousCapMicroyuan: previousBudgetCap,
+    errorKey: errorKey,
+  );
+
   void _report(String value) {
     status =
-        '$value${budget == null ? '' : '\n验收预算 ¥5；累计预留 ¥${(budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}（保守上限，非账单）'}';
+        '$value${budget == null ? '' : '\n验收预算 ¥${budget!.capMicroyuan / 1000000}；累计预留 ¥${(budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}（保守上限，非账单）'}';
     if (!_disposed) {
       onProgress?.call();
       notifyListeners();
@@ -256,6 +288,7 @@ class ProfileAgent extends ChangeNotifier {
     try {
       await const SecureContextPersistence(receiptKey).write(
         jsonEncode({
+          ..._budgetMetadata,
           'status': 'running',
           'started_at': DateTime.now().toUtc().toIso8601String(),
           'coverage': <String, int>{},
@@ -285,6 +318,7 @@ class ProfileAgent extends ChangeNotifier {
         await const SecureContextPersistence(receiptKey).write(
           jsonEncode({
             if (previous is Map<String, dynamic>) ...previous,
+            ..._budgetMetadata,
             'status': failure is ProfileRunFailure ? 'paused' : 'interrupted',
             'error_code': code,
             'finished_at': DateTime.now().toUtc().toIso8601String(),
@@ -538,6 +572,7 @@ class ProfileAgent extends ChangeNotifier {
     try {
       await receipt.write(
         jsonEncode({
+          ..._budgetMetadata,
           'status': 'running',
           'authority_epoch': epoch,
           'source_revision': sourceRevision,
@@ -614,6 +649,7 @@ class ProfileAgent extends ChangeNotifier {
       _stopClients();
       await receipt.write(
         jsonEncode({
+          ..._budgetMetadata,
           'status': outcome,
           'error_code': ?failureCode,
           'model': ['qwen-flash', 'qwen3-vl-plus'].contains(model.model)

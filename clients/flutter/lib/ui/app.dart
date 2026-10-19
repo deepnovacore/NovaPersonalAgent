@@ -332,6 +332,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         'nova.profile.automatic.v1${ProfileAgent.budgetId.isEmpty ? '' : '.${ProfileAgent.budgetId}'}',
       ),
       inspect: profile.inspectGeneration,
+      recoverBudgetPause: profile.recoverBudgetPause,
+      budgetLimitMicroyuan: profile.budget?.capMicroyuan,
       generate: ({required savedObservationsOnly, required maxNewBatches}) =>
           profile.run(
             savedObservationsOnly: savedObservationsOnly,
