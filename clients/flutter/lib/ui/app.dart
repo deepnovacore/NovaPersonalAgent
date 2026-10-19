@@ -36,6 +36,7 @@ import '../personal/personal_store.dart';
 import 'package:nova_audio/nova_audio.dart';
 import 'devices_page.dart';
 import 'workbench_page.dart';
+import 'components.dart';
 import 'theme.dart';
 import 'local_workspace.dart';
 import 'local_task_request.dart';
@@ -749,16 +750,30 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   Future<void> _languageSettings() async {
     final selected = await showModalBottomSheet<String>(
       context: context,
+      backgroundColor: Nova.sheet,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (final entry in [('zh', '简体中文'), ('en', 'English')])
-              ListTile(
-                title: Text(entry.$2),
-                trailing: language == entry.$1 ? const Icon(Icons.check) : null,
-                onTap: () => Navigator.pop(context, entry.$1),
-              ),
+            const SizedBox(height: 16),
+            NovaSection(
+              surface: Nova.sheetCell,
+              children: [
+                for (final entry in [('zh', '简体中文'), ('en', 'English')])
+                  NovaTile(
+                    surface: Nova.sheetCell,
+                    title: entry.$2,
+                    trailing: language == entry.$1
+                        ? const Icon(
+                            CupertinoIcons.checkmark,
+                            size: 18,
+                            color: Nova.mint,
+                          )
+                        : null,
+                    onTap: () => Navigator.pop(context, entry.$1),
+                  ),
+              ],
+            ),
           ],
         ),
       ),
@@ -823,73 +838,53 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   ),
                 ),
               ),
-              Material(
-                color: Nova.sheetCell,
-                borderRadius: BorderRadius.circular(22),
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  children: [
-                    for (final entry in [
-                      (
-                        5,
-                        _t('记忆与偏好', 'Profile'),
-                        _t(
-                          '关于你，以及你希望 Nova 记住的事',
-                          'About you and what Nova remembers',
-                        ),
-                        CupertinoIcons.person_crop_circle,
+              NovaSection(
+                surface: Nova.sheetCell,
+                children: [
+                  for (final entry in [
+                    (
+                      5,
+                      _t('记忆与偏好', 'Profile'),
+                      _t(
+                        '关于你，以及你希望 Nova 记住的事',
+                        'About you and what Nova remembers',
                       ),
-                      (
-                        4,
-                        _t('目标', 'Goals'),
-                        _t('持续关注的方向', 'What you’re working towards'),
-                        CupertinoIcons.flag,
-                      ),
-                      (
-                        3,
-                        _t('想法', 'Ideas'),
-                        _t('留下灵感，之后接着聊', 'Ideas to come back to'),
-                        CupertinoIcons.lightbulb,
-                      ),
-                      (
-                        2,
-                        _t('待办', 'Todos'),
-                        _t('需要跟进的事', 'Things to follow up on'),
-                        CupertinoIcons.checkmark_circle,
-                      ),
-                      (
-                        1,
-                        _t('资讯', 'Feeds'),
-                        _t('来自你关注的信息源', 'From sources you follow'),
-                        CupertinoIcons.news,
-                      ),
-                    ])
-                      ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 7,
-                        ),
-                        leading: Icon(entry.$4, color: Nova.mint, size: 22),
-                        title: Text(
-                          entry.$2,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                        subtitle: Text(
-                          entry.$3,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Nova.secondary,
-                          ),
-                        ),
-                        trailing: const Icon(
-                          CupertinoIcons.chevron_right,
-                          size: 15,
-                          color: Nova.tertiary,
-                        ),
-                        onTap: () => Navigator.pop(context, entry.$1),
-                      ),
-                  ],
-                ),
+                      CupertinoIcons.person_crop_circle,
+                    ),
+                    (
+                      4,
+                      _t('目标', 'Goals'),
+                      _t('持续关注的方向', 'What you’re working towards'),
+                      CupertinoIcons.flag,
+                    ),
+                    (
+                      3,
+                      _t('想法', 'Ideas'),
+                      _t('留下灵感，之后接着聊', 'Ideas to come back to'),
+                      CupertinoIcons.lightbulb,
+                    ),
+                    (
+                      2,
+                      _t('待办', 'Todos'),
+                      _t('需要跟进的事', 'Things to follow up on'),
+                      CupertinoIcons.checkmark_circle,
+                    ),
+                    (
+                      1,
+                      _t('资讯', 'Feeds'),
+                      _t('来自你关注的信息源', 'From sources you follow'),
+                      CupertinoIcons.news,
+                    ),
+                  ])
+                    NovaTile(
+                      surface: Nova.sheetCell,
+                      leading: NovaIconTile(entry.$4),
+                      title: entry.$2,
+                      subtitle: Text(entry.$3),
+                      trailing: const CupertinoListTileChevron(),
+                      onTap: () => Navigator.pop(context, entry.$1),
+                    ),
+                ],
               ),
             ],
           ),
@@ -903,56 +898,21 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     BuildContext context,
     String title,
     List<(String, String, IconData)> rows,
-  ) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 0, 16, 26),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-          child: Text(
-            title,
-            style: const TextStyle(
-              color: Nova.secondary,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+  ) => NovaSection(
+    header: title,
+    surface: Nova.sheetCell,
+    children: [
+      for (final row in rows)
+        NovaTile(
+          surface: Nova.sheetCell,
+          leading: NovaIconTile(row.$3),
+          title: row.$2,
+          trailing: const CupertinoListTileChevron(),
+          onTap: row.$1 == 'model' && agentCore?.busy == true
+              ? null
+              : () => Navigator.pop(context, row.$1),
         ),
-        Material(
-          color: Nova.sheetCell,
-          borderRadius: BorderRadius.circular(22),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              for (final (index, row) in rows.indexed) ...[
-                if (index > 0)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 58),
-                    child: Divider(height: 1),
-                  ),
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 5,
-                  ),
-                  leading: Icon(row.$3, size: 22, color: Nova.mint),
-                  title: Text(row.$2, style: const TextStyle(fontSize: 16)),
-                  trailing: const Icon(
-                    CupertinoIcons.chevron_right,
-                    size: 15,
-                    color: Nova.tertiary,
-                  ),
-                  onTap: row.$1 == 'model' && agentCore?.busy == true
-                      ? null
-                      : () => Navigator.pop(context, row.$1),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
-    ),
+    ],
   );
 
   @override
@@ -1009,6 +969,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   toolbarHeight: 64,
                   centerTitle: true,
                   leadingWidth: 64,
+                  automaticallyImplyLeading: false,
+                  // Back to the conversation list only inside an open chat;
+                  // settings now has a single, fixed home on the right.
                   leading: _tab == 0 && !_showHome && host != null
                       ? IconButton(
                           tooltip: _t('所有对话', 'All conversations'),
@@ -1023,14 +986,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                             });
                           },
                         )
-                      : IconButton(
-                          tooltip: _t('设置', 'Settings'),
-                          icon: const Icon(
-                            CupertinoIcons.slider_horizontal_3,
-                            size: 23,
-                          ),
-                          onPressed: _settings,
-                        ),
+                      : null,
                   title: Text(
                     _tab == 0
                         ? 'Nova'
@@ -1056,16 +1012,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                       onPressed: () => _workspace(5),
                     ),
                     IconButton(
-                      tooltip: _t('设备', 'Devices'),
-                      icon: const Icon(CupertinoIcons.device_phone_portrait),
-                      onPressed: _devices,
+                      tooltip: _t('设置', 'Settings'),
+                      icon: const Icon(CupertinoIcons.gear, size: 25),
+                      onPressed: _settings,
                     ),
-                    if (_tab == 0 && !_showHome && host != null)
-                      IconButton(
-                        tooltip: _t('设置', 'Settings'),
-                        icon: const Icon(CupertinoIcons.ellipsis, size: 24),
-                        onPressed: _settings,
-                      ),
                     const SizedBox(width: 10),
                   ],
                 ),

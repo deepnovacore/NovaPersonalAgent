@@ -19,11 +19,13 @@ Future<void> showTaskSheet(
   PersonalStore store,
   Map<String, dynamic> task, {
   VoidCallback? onOpenConversation,
+  String language = 'en',
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
   useSafeArea: true,
   builder: (sheetContext) => TaskDetails(
+    language: language,
     store: store,
     task: task,
     onDiscuss: () async {
@@ -374,12 +376,12 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       background: _swipe(
         Alignment.centerLeft,
         Nova.mint,
-        kind == 'todo' ? Icons.check_rounded : Icons.archive_outlined,
+        kind == 'todo' ? CupertinoIcons.checkmark : CupertinoIcons.archivebox,
       ),
       secondaryBackground: _swipe(
         Alignment.centerRight,
         kind == 'todo' ? Nova.amber : const Color(0xff5b6670),
-        kind == 'todo' ? CupertinoIcons.calendar : Icons.archive_outlined,
+        kind == 'todo' ? CupertinoIcons.calendar : CupertinoIcons.archivebox,
       ),
       child: nested
           ? Padding(padding: const EdgeInsets.only(left: 38), child: tile)
@@ -818,6 +820,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       store,
       task,
       onOpenConversation: widget.onOpenConversation,
+      language: widget.language,
     ),
   );
 
@@ -1283,6 +1286,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                             store,
                             task,
                             onOpenConversation: widget.onOpenConversation,
+                            language: widget.language,
                           );
                         }
                       },

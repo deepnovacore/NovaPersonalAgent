@@ -1,10 +1,13 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'authority_controls.dart';
 import '../personal/life_host.dart';
 import '../personal/local_life.dart';
 import '../agent/hub_tasks.dart';
+import 'components.dart';
 import 'local_dialog.dart';
 import 'local_tasks.dart';
+import 'theme.dart';
 
 /// Controls for the application-owned dataset; never opens a second repository.
 class LifeControls extends StatefulWidget {
@@ -199,63 +202,86 @@ class _LifeControlsState extends State<LifeControls> {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.host,
-    builder: (context, _) => Column(
-      children: [
-        AuthorityControls(host: widget.host),
-        Row(
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  repo == null
-                      ? '正在打开本机事项'
-                      : '${repo!.pendingCount} 项待同步 · ${repo!.accountId ?? "仅本机"}',
-                ),
-              ),
-            ),
-            IconButton(
-              tooltip: '本机任务',
-              onPressed: repo == null ? null : () => _run(_openTasks),
-              icon: const Icon(Icons.play_circle_outline),
-            ),
-            IconButton(
-              tooltip: '同步设置',
-              onPressed: widget.host.busy || repo == null
-                  ? null
-                  : () => _run(_settings),
-              icon: const Icon(Icons.settings_outlined),
-            ),
-            IconButton(
-              tooltip: '同步',
-              onPressed: widget.host.busy || repo == null
-                  ? null
-                  : () => _run(() async {
-                      if (!widget.host.hubConfigured) await _settings();
-                      await widget.host.sync();
-                    }),
-              icon: const Icon(Icons.sync),
-            ),
-          ],
+    builder: (context, _) {
+      final busy = widget.host.busy, ready = repo != null;
+      final lastSync = widget.host.lastSync;
+      // Tooltips keep each row addressable by its action name.
+      Widget row({
+        required String tooltip,
+        required IconData icon,
+        required String title,
+        String? subtitle,
+        VoidCallback? onTap,
+      }) => Tooltip(
+        message: tooltip,
+        child: NovaTile(
+          leading: NovaIconTile(icon),
+          title: title,
+          subtitle: subtitle == null ? null : Text(subtitle),
+          trailing: const CupertinoListTileChevron(),
+          onTap: onTap,
         ),
-        if (widget.host.lastSync != null)
-          Text('最近同步：${widget.host.lastSync!.toLocal()}'),
-        if (widget.host.busy) const LinearProgressIndicator(),
-        if (error != null || widget.host.error != null)
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: SelectableText(
-              error ?? widget.host.error!,
-              style: const TextStyle(color: Colors.red),
+      );
+      return Column(
+        children: [
+          AuthorityControls(host: widget.host),
+          NovaSection(
+            header: '同步',
+            footer: !ready
+                ? '正在打开本机事项'
+                : '${repo!.pendingCount} 项待同步 · ${repo!.accountId == null ? "仅本机" : "已连接同步"}',
+            children: [
+              row(
+                tooltip: '同步',
+                icon: CupertinoIcons.arrow_2_circlepath,
+                title: '立即同步',
+                subtitle: lastSync == null
+                    ? null
+                    : '最近同步：${relativeTime(lastSync.toIso8601String(), 'zh')}',
+                onTap: busy || !ready
+                    ? null
+                    : () => _run(() async {
+                        if (!widget.host.hubConfigured) await _settings();
+                        await widget.host.sync();
+                      }),
+              ),
+              row(
+                tooltip: '同步设置',
+                icon: CupertinoIcons.gear,
+                title: 'Hub 连接',
+                onTap: busy || !ready ? null : () => _run(_settings),
+              ),
+              row(
+                tooltip: '本机任务',
+                icon: CupertinoIcons.play_circle,
+                title: '任务与执行记录',
+                onTap: ready ? () => _run(_openTasks) : null,
+              ),
+            ],
+          ),
+          if (busy)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: LinearProgressIndicator(),
             ),
-          ),
-        if (repo?.conflict != null)
-          ListTile(
-            title: const Text('有修改需要选择版本'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: widget.host.busy ? null : () => _run(_choose),
-          ),
-      ],
-    ),
+          if (error != null || widget.host.error != null)
+            NovaNotice(error ?? widget.host.error!),
+          if (repo?.conflict != null)
+            NovaSection(
+              children: [
+                NovaTile(
+                  leading: const NovaIconTile(
+                    CupertinoIcons.exclamationmark_triangle_fill,
+                    color: Nova.amber,
+                  ),
+                  title: '有修改需要选择版本',
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: busy ? null : () => _run(_choose),
+                ),
+              ],
+            ),
+        ],
+      );
+    },
   );
 }

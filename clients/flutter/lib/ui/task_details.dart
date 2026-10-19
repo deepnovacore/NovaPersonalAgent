@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../personal/personal_store.dart';
+import 'strings.dart';
 
 /// Reads task activity; extra instructions stay in the authorized conversation.
 class TaskDetails extends StatefulWidget {
@@ -8,7 +9,9 @@ class TaskDetails extends StatefulWidget {
     required this.store,
     required this.task,
     required this.onDiscuss,
+    this.language = 'en',
   });
+  final String language;
   final PersonalStore store;
   final Map<String, dynamic> task;
   final Future<void> Function() onDiscuss;
@@ -101,6 +104,16 @@ class _TaskDetailsState extends State<TaskDetails> {
     }
   }
 
+  bool get _zh => widget.language == 'zh';
+  String t(String zh, String en) => _zh ? zh : en;
+
+  /// Chinese shows a readable label and never an internal key; English keeps the phase word.
+  String _phase(Object? phase) {
+    if (!_zh) return '$phase';
+    final key = 'phase:$phase', label = tr('zh', key);
+    return label == key ? '处理中' : label;
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.store,
@@ -113,11 +126,16 @@ class _TaskDetailsState extends State<TaskDetails> {
           padding: const EdgeInsets.all(24),
           children: [
             Text(
-              '${current['goal'] ?? 'Task'}',
+              '${current['goal'] ?? t('任务', 'Task')}',
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            Text('${current['phase']} · ${current['waiting_reason'] ?? ''}'),
-            if (!widget.store.connected) const Text('Offline · cached task'),
+            Text(
+              _zh
+                  ? _phase(current['phase'])
+                  : '${current['phase']} · ${current['waiting_reason'] ?? ''}',
+            ),
+            if (!widget.store.connected)
+              Text(t('离线 · 显示缓存的任务', 'Offline · cached task')),
             if (error != null) Text(error!),
             if (busy) const LinearProgressIndicator(),
             Wrap(
@@ -125,7 +143,7 @@ class _TaskDetailsState extends State<TaskDetails> {
               children: [
                 TextButton(
                   onPressed: !busy && widget.store.connected ? _refresh : null,
-                  child: const Text('Load activity'),
+                  child: Text(t('加载动态', 'Load activity')),
                 ),
                 TextButton(
                   onPressed:
@@ -142,24 +160,28 @@ class _TaskDetailsState extends State<TaskDetails> {
                           }
                         }
                       : null,
-                  child: const Text('Discuss / add input in Nova'),
+                  child: Text(
+                    t('在 Nova 中讨论或补充', 'Discuss / add input in Nova'),
+                  ),
                 ),
                 if (!['completed', 'cancelled'].contains(current['phase']))
                   TextButton(
                     onPressed: !busy && widget.store.connected
                         ? () => _act('tasks.cancel')
                         : null,
-                    child: const Text('Cancel task'),
+                    child: Text(t('取消任务', 'Cancel task')),
                   ),
               ],
             ),
-            if (incomplete) const Text('Some earlier activity is unavailable.'),
+            if (incomplete)
+              Text(t('部分较早的动态已无法查看。', 'Some earlier activity is unavailable.')),
             for (final event in events.values)
               ListTile(
                 title: Text('${event['text'] ?? ''}'),
-                subtitle: Text('${event['kind'] ?? ''}'),
+                subtitle: _zh ? null : Text('${event['kind'] ?? ''}'),
               ),
-            if (!busy && events.isEmpty) const Text('No task activity loaded'),
+            if (!busy && events.isEmpty)
+              Text(t('还没有加载动态', 'No task activity loaded')),
           ],
         ),
       );

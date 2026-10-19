@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -100,7 +101,7 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
         padding: const EdgeInsets.only(left: 16, right: 4),
         child: Row(
           children: [
-            const Icon(Icons.call_outlined, color: Nova.mint, size: 20),
+            const Icon(CupertinoIcons.phone, color: Nova.mint, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Padding(
@@ -116,7 +117,7 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
             IconButton(
               tooltip: t('结束通话', 'End call'),
               onPressed: _ending ? null : () => unawaited(_end()),
-              icon: const Icon(Icons.call_end, color: Nova.red),
+              icon: const Icon(CupertinoIcons.phone_down_fill, color: Nova.red),
             ),
           ],
         ),
@@ -147,7 +148,7 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                   tooltip: t('收起通话', 'Minimize call'),
                   onPressed: widget.onMinimize,
                   icon: const Icon(
-                    Icons.keyboard_arrow_down,
+                    CupertinoIcons.chevron_down,
                     color: Nova.secondary,
                   ),
                 ),
@@ -155,7 +156,7 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                     session.active)
                   IconButton(
                     tooltip: t('悬浮通话', 'Float call'),
-                    icon: const Icon(Icons.picture_in_picture_alt),
+                    icon: const Icon(CupertinoIcons.rectangle_on_rectangle),
                     onPressed: () => _action(() async {
                       final shown = await session.minimizeToFloating();
                       if (!shown && mounted) {
@@ -184,7 +185,10 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                   onPressed: session.active || session.connecting
                       ? null
                       : widget.onSettings,
-                  icon: const Icon(Icons.tune, size: 21),
+                  icon: const Icon(
+                    CupertinoIcons.slider_horizontal_3,
+                    size: 21,
+                  ),
                 ),
               ],
             ),
@@ -364,7 +368,9 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
           children: [
             _control(
               label: session.muted ? t('取消静音', 'Unmute') : t('静音', 'Mute'),
-              icon: session.muted ? Icons.mic_off_outlined : Icons.mic_none,
+              icon: session.muted
+                  ? CupertinoIcons.mic_slash
+                  : CupertinoIcons.mic,
               selected: session.muted,
               onPressed: session.active
                   ? () => unawaited(_action(session.toggleMute))
@@ -373,8 +379,8 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
             _control(
               label: t('扬声器', 'Speaker'),
               icon: session.speaker
-                  ? Icons.volume_up_outlined
-                  : Icons.hearing_outlined,
+                  ? CupertinoIcons.speaker_2
+                  : CupertinoIcons.ear,
               selected: session.speaker,
               onPressed: session.active
                   ? () => unawaited(_action(session.toggleSpeaker))
@@ -385,8 +391,8 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                   ? t('结束通话', 'End call')
                   : t('开始通话', 'Start call'),
               icon: session.active || session.connecting
-                  ? Icons.call_end
-                  : Icons.call_outlined,
+                  ? CupertinoIcons.phone_down_fill
+                  : CupertinoIcons.phone,
               end: session.active || session.connecting,
               onPressed: _ending
                   ? null
@@ -430,7 +436,7 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
         shape: const Border(),
         collapsedShape: const Border(),
         leading: const Icon(
-          Icons.auto_awesome_outlined,
+          CupertinoIcons.sparkles,
           color: Nova.mint,
           size: 19,
         ),

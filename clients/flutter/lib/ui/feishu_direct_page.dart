@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../connectors/feishu/browser.dart';
 import '../connectors/feishu/host.dart';
@@ -230,7 +231,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                           )[category.key] ??
                           t('未填写', 'Not provided'),
                     ),
-                    trailing: const Icon(Icons.edit_outlined),
+                    trailing: const Icon(CupertinoIcons.pencil),
                     onTap: editing || busy || provider == null
                         ? null
                         : () async {
@@ -659,7 +660,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
           ),
         ] else ...[
           ListTile(
-            leading: const Icon(Icons.forum_outlined),
+            leading: const Icon(CupertinoIcons.chat_bubble_2),
             title: Text(
               host.auth.authorized
                   ? t('已连接飞书', 'Connected to Feishu')
@@ -883,7 +884,11 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                   : _busy
                   ? null
                   : () => _run(_readScope),
-              icon: Icon(host.collection.running ? Icons.pause : Icons.sync),
+              icon: Icon(
+                host.collection.running
+                    ? CupertinoIcons.pause_fill
+                    : CupertinoIcons.arrow_2_circlepath,
+              ),
               label: Text(
                 host.collection.running
                     ? t('暂停同步', 'Pause sync')
@@ -938,7 +943,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                   title: Text(chat['name'] as String? ?? chat['chat_id']),
 
                   trailing: host.sources.sources.contains(chat['chat_id'])
-                      ? const Icon(Icons.check)
+                      ? const Icon(CupertinoIcons.checkmark)
                       : null,
                   onTap: busy
                       ? null

@@ -5,7 +5,7 @@ import {readDesktopPermissions,requestDesktopPermission} from './desktop-permiss
 export function installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,windows,environment,backendReady}){
  const store=createWelcomeStore(app.getPath('userData')+'/welcome-profile.json')
  let defaultImage
- const avatar=()=>defaultImage??=readFile(new URL('./default-avatar.png',import.meta.url)).then(bytes=>'data:image/png;base64,'+bytes.toString('base64'))
+ const avatar=()=>defaultImage??=readFile(new URL('./nova-avatar.png',import.meta.url)).then(bytes=>'data:image/png;base64,'+bytes.toString('base64'))
  const authorize=event=>{
   const window=windows().find(w=>w&&!w.isDestroyed()&&event.sender===w.webContents)
   if(!window||event.senderFrame!==event.sender.mainFrame)throw Error('welcome_access_denied')

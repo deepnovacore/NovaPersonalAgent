@@ -42,7 +42,9 @@ void main() {
     await tester.pumpAndSettle();
     await binding.convertFlutterSurfaceToImage();
     await binding.takeScreenshot('phone-home');
-    await tester.tap(find.byTooltip('Devices'));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Devices'));
     await tester.pumpAndSettle();
     expect(find.text('This phone'), findsOneWidget);
     await binding.takeScreenshot('phone-devices');

@@ -1,13 +1,43 @@
 import '../conversation/local_chat_panel.dart';
 import '../agent_core/model_settings.dart';
 import 'dart:async';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'components.dart';
 import 'local_dialog.dart';
 import 'local_task_request.dart';
+import 'theme.dart';
 import '../agent/local_agent.dart';
 import '../agent/hub_tasks.dart';
 import '../agent/task_todo_completion.dart';
 import '../personal/local_life.dart';
+
+/// User-facing task phase; an unknown phase never leaks its internal key.
+String _phaseText(Object? phase) =>
+    const {
+      'running': '执行中',
+      'waiting_approval': '等待批准',
+      'verifying': '等待核验',
+      'completed': '已完成',
+      'cancelled': '已停止',
+      'interrupted': '已暂停，需核对',
+    }[phase] ??
+    '处理中';
+
+const _titleStyle = TextStyle(
+  color: Nova.text,
+  fontSize: 16,
+  fontWeight: FontWeight.w600,
+  height: 1.3,
+);
+const _metaStyle = TextStyle(color: Nova.secondary, fontSize: 13, height: 1.4);
+
+NovaTone _phaseTone(Object? phase) => switch (phase) {
+  'running' => NovaTone.active,
+  'completed' => NovaTone.success,
+  'waiting_approval' || 'verifying' || 'interrupted' => NovaTone.warning,
+  _ => NovaTone.neutral,
+};
 
 class LocalTasksPage extends StatefulWidget {
   const LocalTasksPage({
@@ -327,144 +357,189 @@ class _LocalTasksPageState extends State<LocalTasksPage>
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('本机任务'),
+      centerTitle: true,
       actions: [
         IconButton(
           tooltip: '模型设置',
           onPressed: _settings,
-          icon: const Icon(Icons.settings_outlined),
+          icon: const Icon(CupertinoIcons.gear),
         ),
       ],
     ),
     body: ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.only(top: 8),
       children: [
         if (capabilities['platform'] == 'android' &&
             capabilities['accessibility'] != true)
-          ListTile(
-            title: const Text('需要开启 Nova 无障碍服务'),
-            trailing: TextButton(
-              onPressed: () => _command('accessibilitySettings', {}),
-              child: const Text('去设置'),
-            ),
+          NovaSection(
+            children: [
+              NovaTile(
+                leading: const NovaIconTile(
+                  CupertinoIcons.hand_raised_fill,
+                  color: Nova.amber,
+                ),
+                title: '需要开启 Nova 无障碍服务',
+                trailing: TextButton(
+                  onPressed: () => _command('accessibilitySettings', {}),
+                  child: const Text('去设置'),
+                ),
+              ),
+            ],
           ),
         if (capabilities['model_configured'] != true)
-          const Text('请先在模型设置中配置服务。'),
-        if (error != null)
-          SelectableText(error!, style: const TextStyle(color: Colors.red)),
+          const NovaNotice('请先在模型设置中配置服务。', tone: NovaTone.warning),
+        if (error != null) NovaNotice(error!),
         for (final offer in offers)
-          Card(
-            child: ListTile(
-              title: Text('其他设备委托：${offer['command']['goal']}'),
-              subtitle: Text('完成标准：${offer['command']['acceptance']}'),
-              trailing: TextButton(
-                onPressed: () => _hubAction(
-                  () =>
-                      _acceptOffer(Map<String, dynamic>.from(offer['command'])),
+          NovaCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('其他设备委托：${offer['command']['goal']}', style: _titleStyle),
+                const SizedBox(height: 4),
+                Text(
+                  '完成标准：${offer['command']['acceptance']}',
+                  style: _metaStyle,
                 ),
-                child: const Text('查看并接收'),
-              ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => _hubAction(
+                      () => _acceptOffer(
+                        Map<String, dynamic>.from(offer['command']),
+                      ),
+                    ),
+                    child: const Text('查看并接收'),
+                  ),
+                ),
+              ],
             ),
           ),
         for (final task in remoteTasks)
-          Card(
-            child: ListTile(
-              title: Text(task['goal'] as String),
-              subtitle: Text('跨设备任务 · ${task['phase']}\n${task['summary']}'),
-              trailing:
-                  [
-                    'completed',
-                    'cancelled',
-                    'interrupted',
-                  ].contains(task['phase'])
-                  ? null
-                  : TextButton(
+          NovaCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(task['goal'] as String, style: _titleStyle),
+                    ),
+                    const SizedBox(width: 8),
+                    NovaStatusChip(
+                      _phaseText(task['phase']),
+                      tone: _phaseTone(task['phase']),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text('跨设备任务 · ${task['summary']}', style: _metaStyle),
+                if (![
+                  'completed',
+                  'cancelled',
+                  'interrupted',
+                ].contains(task['phase']))
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
                       onPressed: () => _hubAction(
                         () =>
                             widget.hub!.cancel(Map<String, dynamic>.from(task)),
                       ),
                       child: const Text('请求停止'),
                     ),
+                  ),
+              ],
             ),
           ),
         if (tasks.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Text('本机任务不依赖电脑连接。完成结果会在这里等待核验。'),
+          const EmptyNote(
+            '本机任务不依赖电脑连接。完成结果会在这里等待核验。',
+            icon: CupertinoIcons.checkmark_seal,
           ),
         for (final task in tasks)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    task['goal'] as String,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  Text(
-                    const {
-                          'running': '执行中',
-                          'waiting_approval': '等待批准',
-                          'verifying': '等待核验',
-                          'completed': '已完成',
-                          'cancelled': '已停止',
-                          'interrupted': '已暂停，需核对',
-                        }[task['phase']] ??
-                        task['phase'] as String,
-                  ),
-                  Text('完成标准：${task['acceptance']}'),
-                  if (task['todo_ref'] != null)
-                    const Text('核验完成后更新关联待办；待办有新修改时会提示你核对。'),
-                  if (todoErrors[task['id']] != null)
-                    Text(
-                      todoErrors[task['id']]!,
-                      style: const TextStyle(color: Colors.orange),
+          NovaCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(task['goal'] as String, style: _titleStyle),
                     ),
-                  if (task['summary'] != null) Text(task['summary'] as String),
-                  if (task['proposal'] != null) ...[
-                    Text('拟执行：${task['proposal']['summary']}'),
-                    SelectableText('${task['proposal']['action']}'),
-                    if (capabilities['platform'] == 'ios')
-                      Wrap(
-                        children: [
-                          TextButton(
-                            onPressed: () => _command('approve', {
-                              'id': task['id'],
-                              'proposal_id': task['proposal']['id'],
-                              'allow': false,
-                            }),
-                            child: const Text('拒绝'),
-                          ),
-                          FilledButton(
-                            onPressed: () => _command('approve', {
-                              'id': task['id'],
-                              'proposal_id': task['proposal']['id'],
-                              'allow': true,
-                            }),
-                            child: const Text('批准此操作'),
-                          ),
-                        ],
-                      )
-                    else
-                      const Text('可在目标 App 上的 Nova 提示中批准；回到任务页面会使原界面审批失效。'),
+                    const SizedBox(width: 8),
+                    NovaStatusChip(
+                      _phaseText(task['phase']),
+                      tone: _phaseTone(task['phase']),
+                    ),
                   ],
-                  if (task['phase'] == 'verifying')
-                    TextButton(
-                      onPressed: () => _command('verify', {'id': task['id']}),
-                      child: const Text('确认已完成'),
-                    ),
-                  if ([
-                    'running',
-                    'waiting_approval',
-                    'verifying',
-                  ].contains(task['phase']))
-                    TextButton(
-                      onPressed: () => _command('stop', {'id': task['id']}),
-                      child: const Text('停止任务'),
+                ),
+                const SizedBox(height: 6),
+                Text('完成标准：${task['acceptance']}', style: _metaStyle),
+                if (task['summary'] != null) ...[
+                  const SizedBox(height: 4),
+                  Text(task['summary'] as String, style: _metaStyle),
+                ],
+                if (task['todo_ref'] != null) ...[
+                  const SizedBox(height: 4),
+                  const Text('核验完成后更新关联待办；待办有新修改时会提示你核对。', style: _metaStyle),
+                ],
+                if (todoErrors[task['id']] != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    todoErrors[task['id']]!,
+                    style: const TextStyle(color: Nova.amber, fontSize: 13),
+                  ),
+                ],
+                if (task['proposal'] != null) ...[
+                  const SizedBox(height: 8),
+                  Text('拟执行：${task['proposal']['summary']}'),
+                  SelectableText(
+                    '${task['proposal']['action']}',
+                    style: _metaStyle,
+                  ),
+                  if (capabilities['platform'] == 'ios')
+                    Wrap(
+                      children: [
+                        TextButton(
+                          onPressed: () => _command('approve', {
+                            'id': task['id'],
+                            'proposal_id': task['proposal']['id'],
+                            'allow': false,
+                          }),
+                          child: const Text('拒绝'),
+                        ),
+                        FilledButton(
+                          onPressed: () => _command('approve', {
+                            'id': task['id'],
+                            'proposal_id': task['proposal']['id'],
+                            'allow': true,
+                          }),
+                          child: const Text('批准此操作'),
+                        ),
+                      ],
+                    )
+                  else
+                    const Text(
+                      '可在目标 App 上的 Nova 提示中批准；回到任务页面会使原界面审批失效。',
+                      style: _metaStyle,
                     ),
                 ],
-              ),
+                if (task['phase'] == 'verifying')
+                  TextButton(
+                    onPressed: () => _command('verify', {'id': task['id']}),
+                    child: const Text('确认已完成'),
+                  ),
+                if ([
+                  'running',
+                  'waiting_approval',
+                  'verifying',
+                ].contains(task['phase']))
+                  TextButton(
+                    onPressed: () => _command('stop', {'id': task['id']}),
+                    child: const Text('停止任务'),
+                  ),
+              ],
             ),
           ),
         const SizedBox(height: 80),
@@ -479,7 +554,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
           ? _chooseExecution
           : null,
       label: const Text('委托任务'),
-      icon: const Icon(Icons.add),
+      icon: const Icon(CupertinoIcons.add),
     ),
   );
 }

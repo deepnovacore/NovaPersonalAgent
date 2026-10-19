@@ -310,17 +310,12 @@ test('WHATWG Request canonicalization makes dot aliases the canonical fixed came
   assert.equal(cameraCalls.length, 3)
 })
 
-test('public renderer has no default movie while explicit media routes support byte ranges',async()=>{
- const publicFiles=await buildRendererAssetGraph(ACTUAL_RENDERER_ROOT)
- assert.equal(publicFiles.some(file=>file.endsWith('.mp4')),false)
- const rendererFiles=await buildRendererAssetGraph(ACTUAL_RENDERER_ROOT,async file=>{
-  const source=await readFile(file,'utf8')
-  return file===resolve(ACTUAL_RENDERER_ROOT,'index.html')?source+'<video src="./assets/fixture.mp4"></video>':source
- })
- assert.ok(rendererFiles.includes('/assets/fixture.mp4'))
+test('approved default movie is served with byte ranges and other media stay private',async()=>{
+ const rendererFiles=await buildRendererAssetGraph(ACTUAL_RENDERER_ROOT)
+ assert.deepEqual(rendererFiles.filter(file=>file.endsWith('.mp4')),['/assets/nova-idle.mp4'])
  let handler,range
  installAppProtocol({handle:(_,fn)=>{handler=fn}},{rendererRoot:ACTUAL_RENDERER_ROOT,rendererFiles,fetchFile:(_file,options)=>{range=options.headers.get('range');return new Response('video',{status:206})}})
- assert.equal((await handler(new Request('nova://orb/assets/fixture.mp4',{headers:{range:'bytes=100-200'}}))).status,206)
+ assert.equal((await handler(new Request('nova://orb/assets/nova-idle.mp4',{headers:{range:'bytes=100-200'}}))).status,206)
  assert.equal(range,'bytes=100-200')
  assert.equal((await handler(new Request('nova://orb/assets/other.mp4'))).status,404)
 })

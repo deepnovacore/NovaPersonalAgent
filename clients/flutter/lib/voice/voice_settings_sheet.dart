@@ -361,8 +361,8 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
               if (_draft.asrProvider == SpeechProvider.selfHosted)
                 Text(
                   t(
-                    '自部署识别服务需兼容 Nova ASR 协议，并可由手机直接访问。',
-                    'Your self-hosted recognition service must support the Nova ASR protocol and be reachable from this phone.',
+                    '自部署的识别服务需兼容 Nova，并能被手机直接访问。',
+                    'Your self-hosted recognition service must be compatible with Nova and reachable from this phone.',
                   ),
                 ),
             ] else ...[
@@ -371,15 +371,15 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
               DropdownButtonFormField<VoicePipeline>(
                 key: const ValueKey('voice.pipeline'),
                 initialValue: _draft.pipeline,
-                decoration: const InputDecoration(labelText: '语音管线'),
+                decoration: const InputDecoration(labelText: '语音模式'),
                 items: const [
                   DropdownMenuItem(
                     value: VoicePipeline.integrated,
-                    child: Text('集成实时'),
+                    child: Text('实时语音（一体式）'),
                   ),
                   DropdownMenuItem(
                     value: VoicePipeline.cascaded,
-                    child: Text('级联 ASR → 快速模型 → TTS'),
+                    child: Text('分步处理（识别 → 对话 → 合成）'),
                   ),
                 ],
                 onChanged: _saving

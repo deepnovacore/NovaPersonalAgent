@@ -9,6 +9,7 @@ void main() {
     await tester.pump();
     expect(find.text('Nova'), findsOneWidget);
     expect(find.text('Not connected'), findsNothing);
-    expect(find.byTooltip('Devices'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsOneWidget);
+    expect(find.byTooltip('Devices'), findsNothing);
   });
 }

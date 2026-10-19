@@ -1046,3 +1046,163 @@ button[aria-busy="true"]::before { content: ""; display: inline-block; width: 12
 /* Keep routine startup visible without status prose, including settings retries. */
 #startup-status:empty:is([data-stage="configuration"],[data-stage="backend"])::before { content: ""; display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line-strong); border-top-color: var(--ink-dim); border-radius: 50%; animation: refresh-icon .8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { #startup-status::before { animation: none !important; } }
+
+/* ── Card layout layer ─────────────────────────────────────────────────────
+ * Page sits on --page; every section is a rounded card on --plate. Nav icons
+ * are CSS masks so the contract-pinned nav markup stays text-only. */
+:root {
+  --page: #f6f6f7;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --nav-active: rgba(24, 31, 41, .07);
+  --card-shadow: 0 1px 2px rgba(24, 31, 41, .04);
+}
+
+html { background: var(--page); }
+
+body {
+  grid-template-columns: 208px minmax(0, 1fr);
+  column-gap: 24px;
+  padding: 0 24px;
+  background: var(--page);
+  font-size: 14px;
+}
+
+main { max-width: 780px; }
+
+header {
+  min-height: 64px;
+  margin-bottom: 8px;
+  border-bottom: 0;
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+}
+
+header h1 { font-size: 20px; font-weight: 650; letter-spacing: 0; }
+
+.settings-nav { top: 72px; gap: 3px; }
+
+.settings-nav .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.settings-nav .nav-item::before {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  background: currentColor;
+  -webkit-mask: var(--nav-icon) center / contain no-repeat;
+  mask: var(--nav-icon) center / contain no-repeat;
+  content: "";
+}
+
+.settings-nav .nav-item:hover { background: rgba(24, 31, 41, .04); }
+
+.settings-nav .nav-item[aria-current="true"] {
+  background: var(--nav-active);
+  color: var(--ink);
+  font-weight: 620;
+}
+
+#category-general { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0'/%3E%3Ccircle cx='16' cy='6' r='2'/%3E%3Ccircle cx='10' cy='12' r='2'/%3E%3Ccircle cx='18' cy='18' r='2'/%3E%3C/svg%3E"); }
+#category-themes { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8zM19 15v5M16.5 17.5h5'/%3E%3C/svg%3E"); }
+#category-usage { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 20V10M12 20V4M19 20v-7'/%3E%3C/svg%3E"); }
+#category-pipeline { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 10v4M8 7v10M12 4v16M16 8v8M20 10v4'/%3E%3C/svg%3E"); }
+#category-capabilities { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='7' height='7' rx='2'/%3E%3Crect x='13' y='4' width='7' height='7' rx='2'/%3E%3Crect x='4' y='13' width='7' height='7' rx='2'/%3E%3Cpath d='M16.5 13v7M13 16.5h7'/%3E%3C/svg%3E"); }
+#category-im { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z'/%3E%3C/svg%3E"); }
+#category-connections { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'/%3E%3C/svg%3E"); }
+#category-privacy { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6zM9 12l2 2 4-4'/%3E%3C/svg%3E"); }
+#category-knowledge { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 4h9a4 4 0 0 1 4 4v12H9a4 4 0 0 1-4-4zM5 16a4 4 0 0 1 4-4h9'/%3E%3C/svg%3E"); }
+#category-secrets { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='15' r='4'/%3E%3Cpath d='M11 12l8-8M16 7l3 3M14 9l2 2'/%3E%3C/svg%3E"); }
+#category-phone { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='7' y='3' width='10' height='18' rx='2.5'/%3E%3Cpath d='M11 18h2'/%3E%3C/svg%3E"); }
+#category-codex { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='3'/%3E%3Cpath d='M7 10l3 2.5L7 15M12 15h5'/%3E%3C/svg%3E"); }
+
+.setting-section,
+main > .setting-section:first-child {
+  margin: 0 0 16px;
+  padding: 20px 22px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--plate);
+  box-shadow: var(--card-shadow), 0 0 0 1px var(--line);
+}
+
+.setting-section > h2 { margin: 0 0 14px; font-size: 15px; font-weight: 620; }
+
+.secret-disclosure,
+#chatgpt-settings {
+  margin: 0 0 16px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--plate);
+  box-shadow: var(--card-shadow), 0 0 0 1px var(--line);
+}
+
+#chatgpt-settings { padding: 16px 22px; }
+#chatgpt-settings > summary { font-weight: 620; cursor: pointer; }
+#chatgpt-settings > button { margin: 6px 8px 0 0; }
+
+input[type="text"],
+input[type="url"],
+input[type="password"],
+input[type="number"],
+textarea,
+select {
+  min-height: 42px;
+  padding: 10px 14px;
+  border-radius: 12px;
+}
+
+.segmented { border-radius: 12px; background: var(--surface); box-shadow: none; }
+.segmented label.choice { border-radius: 9px; }
+.segmented label.choice:has(:checked)::after { display: none; }
+
+#integrated-pipeline,
+#cascaded-pipeline { border-radius: 12px; background: var(--surface); box-shadow: none; }
+
+#settings-save,
+#settings-restart,
+#settings-restore { min-height: 38px; padding: 0 22px; border-radius: 999px; }
+
+footer {
+  padding: 12px 24px;
+  background: color-mix(in srgb, var(--page) 92%, transparent);
+  backdrop-filter: blur(18px) saturate(120%);
+  box-shadow: none;
+}
+
+@media (max-width: 640px) {
+  body { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
+  .setting-section,
+  main > .setting-section:first-child { padding: 16px; }
+  footer { padding: 12px 14px; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #141516;
+    --plate: #212225;
+    --surface: #2a2c30;
+    --surface-raised: #33353a;
+    --surface-active: #303236;
+    --nav-active: rgba(255, 255, 255, .1);
+    --card-shadow: none;
+  }
+  .settings-nav .nav-item:hover { background: rgba(255, 255, 255, .05); }
+  .segmented label.choice:has(:checked) { background: var(--surface-raised); }
+}
+
+@media (prefers-contrast: more) {
+  :root { --page: #fff; }
+}
+
+@media (forced-colors: active) {
+  .setting-section,
+  .secret-disclosure,
+  #chatgpt-settings { border: 1px solid CanvasText; box-shadow: none; }
+}
