@@ -42,6 +42,49 @@ List<Map<String, dynamic>> timelineObservationIndex(
   ];
 }
 
+const timelineCompactIndexInstructions =
+    '本次observation_index采用无损字典编码schema=timeline-index-v1。rows每行=[原观察index,texts下标,contexts下标]；texts保存完整观察文字；contexts每行=[from的times下标,to的times下标,relation_sets下标,group_sets下标]。times保存完整原时间字符串，relation_sets和group_sets保存原关系与会话数组。必须解读每行对应的完整文字、起止时间、关系和会话。输出observation_indices只能用rows第一列原观察index，不能用任意字典下标；共用字典项的各行仍是独立观察，不得遗漏。';
+
+/// Only representation changes: every row, full text and context survives.
+Map<String, dynamic> compactTimelineObservationIndex(
+  List<Map<String, dynamic>> observations,
+) {
+  final texts = <String>[], times = <String>[];
+  final relations = <List<dynamic>>[], groups = <List<dynamic>>[];
+  final contexts = <List<int>>[], rows = <List<int>>[];
+  final textIds = <String, int>{}, timeIds = <String, int>{};
+  final relationIds = <String, int>{}, groupIds = <String, int>{};
+  final contextIds = <String, int>{};
+  int intern<T>(T value, List<T> values, Map<String, int> ids) =>
+      ids.putIfAbsent(jsonEncode(value), () {
+        values.add(value);
+        return values.length - 1;
+      });
+  for (final observation in observations) {
+    final textId = intern(observation['text'] as String, texts, textIds);
+    final context = [
+      intern(observation['from'] as String, times, timeIds),
+      intern(observation['to'] as String, times, timeIds),
+      intern(observation['relations'] as List, relations, relationIds),
+      intern(observation['groups'] as List, groups, groupIds),
+    ];
+    rows.add([
+      observation['index'] as int,
+      textId,
+      intern(context, contexts, contextIds),
+    ]);
+  }
+  return {
+    'schema': 'timeline-index-v1',
+    'texts': texts,
+    'times': times,
+    'relation_sets': relations,
+    'group_sets': groups,
+    'contexts': contexts,
+    'rows': rows,
+  };
+}
+
 List<List<String>> timelineSelectedGroups(
   Map<String, dynamic> response,
   List<Map<String, dynamic>> observations,

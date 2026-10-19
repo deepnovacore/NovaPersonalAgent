@@ -16,6 +16,103 @@ Map<String, dynamic> brief(String ref, String quote) => {
 
 void main() {
   test(
+    '552 unique Chinese observations and distinct dates survive compact selection',
+    () async {
+      final records = List.generate(
+        552,
+        (i) => <String, dynamic>{
+          'evidence_id': 'e$i',
+          'chat': 'shared-chat',
+          'relation': 'self',
+          'created_at': DateTime.utc(
+            2025,
+            1,
+            1,
+          ).add(Duration(days: i)).toIso8601String(),
+          'text': '本人等待的验证通过',
+        },
+      );
+      final facts = List.generate(
+        552,
+        (i) => <String, dynamic>{
+          'text': '${['【事】', '【人】', '【风】'][i % 3]}${'项目进展核对' * 15}，观察$i',
+          'refs': ['e$i'],
+        },
+      );
+      var selectionCalls = 0;
+      final writer = ProfileWriter(
+        loadValidatedBatch: (messages) async => [
+          for (final message in messages)
+            facts[int.parse((message['evidence_id'] as String).substring(1))],
+        ],
+        complete: (stage, instructions, input) async {
+          if (stage == 'timeline_select') {
+            selectionCalls++;
+            expect(input.containsKey('observations'), false);
+            final compact = input['observation_index'] as Map;
+            expect(compact['schema'], 'timeline-index-v1');
+            final restored = [
+              for (final row in compact['rows'] as List)
+                {
+                  'index': row[0],
+                  'text': compact['texts'][row[1]],
+                  'from': compact['times'][compact['contexts'][row[2]][0]],
+                  'to': compact['times'][compact['contexts'][row[2]][1]],
+                  'relations':
+                      compact['relation_sets'][compact['contexts'][row[2]][2]],
+                  'groups':
+                      compact['group_sets'][compact['contexts'][row[2]][3]],
+                },
+            ];
+            expect(restored, timelineObservationIndex(facts, records));
+            expect(compact['rows'], hasLength(552));
+            expect(compact['contexts'], hasLength(552));
+            expect(compact['texts'], hasLength(552));
+            expect(compact['times'], hasLength(552));
+            expect(compact['group_sets'], hasLength(1));
+            expect(instructions, contains('observation_index'));
+            return {
+              'topics': [
+                {
+                  'observation_indices': [551],
+                },
+              ],
+            };
+          }
+          if (stage == 'review') return {'review_notes': []};
+          return {
+            'timeline': [
+              {
+                'brief': brief('e551', '验证通过'),
+                'evidence_ids': ['e551'],
+                'time_ref': 'e551',
+              },
+            ],
+            'profile': {},
+          };
+        },
+      );
+      final output =
+          jsonDecode(
+                await writer.generate(records, savedObservationsOnly: true),
+              )
+              as List;
+      expect(output.single['brief']['facts'].single['ref'], 'e551');
+      expect(selectionCalls, 1);
+      expect(writer.coverage['timeline_index_compact'], 1);
+      expect(
+        writer.coverage['timeline_index_full_characters'],
+        greaterThan(128000),
+      );
+      expect(
+        writer.coverage['timeline_index_sent_characters'],
+        lessThan(128000),
+      );
+      expect(writer.coverage['timeline_index_sent_bytes'], lessThan(220000));
+    },
+  );
+
+  test(
     'new generation repairs legacy prose instead of accepting unstructured timeline',
     () async {
       var repairs = 0;
@@ -238,7 +335,7 @@ void main() {
       final facts = List.generate(
         500,
         (i) => <String, dynamic>{
-          'text': '【事】${'x' * 390}',
+          'text': '【事】$i${'x' * 390}',
           'refs': ['e1'],
         },
       );
@@ -260,13 +357,22 @@ void main() {
           },
         ], savedObservationsOnly: true),
         throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'reason',
-            'profile_context_too_large',
-          ),
+          isA<ProfileContextFailure>()
+              .having((e) => e.message, 'reason', 'profile_context_too_large')
+              .having((e) => e.stage, 'stage', 'timeline_select')
+              .having((e) => e.characters, 'characters', greaterThan(128000))
+              .having(
+                (e) => jsonDecode(e.detail).keys.toSet(),
+                'diagnostic keys',
+                {'stage', 'characters', 'utf8_bytes'},
+              ),
         ),
       );
+      expect(
+        writer.coverage['timeline_index_sent_characters'],
+        greaterThan(128000),
+      );
+      expect(writer.coverage['timeline_index_sent_bytes'], greaterThan(0));
       expect(calls, 0);
     },
   );
