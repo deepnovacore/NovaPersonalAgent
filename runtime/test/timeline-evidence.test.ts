@@ -35,3 +35,26 @@ test('two-week pool admits thousands of ordinary messages and includes the bound
   assert.equal(rows.length,1099);assert(rows.some(r=>r.id===prefix+'e:0'));assert(!rows.some(r=>r.id===prefix+'e:1'))
  }finally{db.close()}
 })
+
+test('cached historical citations are revalidated beyond the recent window without bypassing scope, grants, expiry or message heads',()=>{
+ const db=new DatabaseSync(':memory:');initializeMemory(db)
+ const prefix='personal:history:',provider='fixture',now=new Date().toISOString(),old='2020-01-01T00:00:00Z'
+ const add=(key:string,extra:Record<string,unknown>={})=>{
+  const source_id=prefix+key,id=prefix+'e:'+key
+  memoryOperation(db,'append_evidence',{id,source_id,source_kind:'im',locator:key,raw_text:'Synthetic historical event',hash:key,observed_at:old,recorded_at:now,trust:'untrusted_external',...extra})
+  memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null}})
+  return id
+ }
+ try{
+  const kept=add('kept'),revoked=add('revoked'),expired=add('expired',{retention_until:old}),superseded=add('superseded'),foreign=add('foreign',{source_id:'personal:other:foreign'}),fresh=add('fresh',{observed_at:now})
+  memoryOperation(db,'source_grant',{source_id:prefix+'revoked',expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:null,embedding_provider:null}})
+  memoryOperation(db,'source_grant',{source_id:'personal:other:foreign',expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null}})
+  memoryOperation(db,'append_evidence',{id:prefix+'replacement',source_id:prefix+'superseded',source_kind:'im',locator:'superseded',raw_text:'Updated original',hash:'replacement',observed_at:old,recorded_at:now,trust:'untrusted_external'})
+  const query={source_prefix:prefix,provider,limit:1}
+  assert.deepEqual((memoryOperation(db,'timeline_evidence',query) as {id:string}[]).map(r=>r.id),[fresh])
+  const retained_ids=[kept,revoked,expired,superseded,foreign,'missing']
+  const rows=memoryOperation(db,'timeline_evidence',{...query,retained_ids}) as {id:string}[]
+  assert.deepEqual(rows.map(r=>r.id),[fresh,kept])
+  assert.deepEqual(memoryOperation(db,'timeline_evidence',{...query,provider:'wrong',retained_ids}),[])
+ }finally{db.close()}
+})

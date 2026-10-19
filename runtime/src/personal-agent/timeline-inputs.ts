@@ -6,14 +6,15 @@ import type {TimelineInput} from './timeline-brief.js'
 import type {MemoryEntry} from '../memory/entry.js'
 
 /** Use Profile's authorized document pool and stated memories; retain original dates. */
-export function timelineContextInputs(files:readonly ContextEntry[],memories:readonly MemoryEntry[]):TimelineInput[]{
+export function timelineContextInputs(files:readonly ContextEntry[],memories:readonly MemoryEntry[],retainedIds:readonly string[]=[]):TimelineInput[]{
  const groups=new Map<string,TimelineInput[]>()
  for(const entry of [...files].sort((a,b)=>('mtime_ms' in b?b.mtime_ms:0)-('mtime_ms' in a?a.mtime_ms:0))){
   if(!('kind' in entry)||entry.kind!=='file'||!digestEligible(entry))continue
   const group='project:'+createHash('sha256').update(entry.root).digest('hex'),rows=groups.get(group)??[]
   rows.push({id:entry.id,version:String(entry.version),kind:'file',group,text:entry.content,observed_at:new Date(entry.mtime_ms).toISOString(),source:{evidence_id:entry.id,type:'file',label:entry.rel_path.split(/[\\/]/u).at(-1)!.slice(0,120),observed_at:new Date(entry.mtime_ms).toISOString()}});groups.set(group,rows)
  }
- return [...memories.map(entry=>({id:'memory:'+entry.id,version:String(entry.version),kind:'memory',text:entry.content,observed_at:entry.observed_at,evidence_refs:entry.evidence_refs??[],...(entry.sources?.[0]?{source:entry.sources[0]}:{})})),...interleave(groups.values(),128)]
+ const selected=interleave(groups.values(),128),ids=new Set(selected.map(input=>input.id)),retained=new Set(retainedIds),historical=[...groups.values()].flat().filter(input=>retained.has(input.id)&&!ids.has(input.id)).map(input=>({...input,history_only:true}))
+ return [...memories.map(entry=>({id:'memory:'+entry.id,version:String(entry.version),kind:'memory',text:entry.content,observed_at:entry.observed_at,evidence_refs:entry.evidence_refs??[],...(entry.sources?.[0]?{source:entry.sources[0]}:{})})),...selected,...historical]
 }
 
 /** Keep the two-week message pool intact; model requests are bounded in the writer. */

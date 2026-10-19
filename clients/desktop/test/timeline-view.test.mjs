@@ -293,3 +293,16 @@ test('unified actions and progress remain visible beside TimelineBrief and use i
  assert.deepEqual(calls,[['understanding.adopt',{id:'s'}],['understanding.adopt',{id:'p'}]])
  assert.equal(parent.querySelectorAll('.timeline-axis').length,1)
 })
+
+test('historical cards label prior status, assessment and suggestions without shifting the event date',()=>{
+ const card={id:'history',version:'v1',kind:'deadline',status_label:'今天截止',category:'交付',title:'Release',why_now:'今天需要交付',facts:[{text:'Recorded release date'}],next_steps:[{title:'确认',detail:'今天核对'}],sources:[],actions:[],time:{as_of:'2026-10-11',anchor_date:'2026-10-11',anchor_basis:'deadline',due_on:'2026-10-11',kind:'deadline'}}
+ const {parent}=render({...snapshot,timeline:{status:'ready',cards:[card]}})
+ const node=parent.querySelectorAll('.timeline-attention-card')[0]
+ assert.equal(node.dataset.historical,'true')
+ assert.equal(node.querySelectorAll('.timeline-status-tag')[0].textContent,'当时状态：今天截止')
+ assert.equal(node.querySelectorAll('.timeline-attention-reason')[0].querySelectorAll('span')[0].textContent,'当时判断')
+ assert.equal(node.querySelectorAll('.timeline-followups')[0].querySelectorAll('h4')[0].textContent,'当时建议')
+ assert.ok(node.querySelectorAll('.timeline-history-note')[0].textContent.includes('2026-10-11'))
+ assert.ok(node.querySelectorAll('.timeline-time-label').some(n=>n.textContent==='原截止已过 1 天，结果以最新记录为准'))
+ assert.deepEqual(parent.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),['2026-10-11'])
+})

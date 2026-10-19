@@ -7,7 +7,7 @@ import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {abortable} from '../core/camera-session.js'
 import {sourceTagSchema,type SourceTag} from '../memory/provenance.js'
 
-export interface TimelineInput {id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
+export interface TimelineInput {history_only?:boolean;id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
 export const TIMELINE_MAX_REFS=16
 const ref=z.string().min(1).max(600)
 export const timelineReplySchema=z.object({cards:z.array(z.object({
@@ -41,7 +41,7 @@ export type TimelineDiagnostics=z.infer<typeof timelineDiagnosticsSchema>
 export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:TimelineDiagnostics}
 export interface TimelineContext {local_date:string;timezone:string;viewer_names?:string[]}
 export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>)=>Promise<TimelineGenerated>
-const cardSchema=timelineReplySchema.shape.cards.element.extend({id:z.string(),version:z.string(),sources:z.array(sourceTagSchema),time:resolvedTimeSchema})
+const cardSchema=timelineReplySchema.shape.cards.element.extend({id:z.string(),version:z.string(),timezone:z.string().optional(),sources:z.array(sourceTagSchema),time:resolvedTimeSchema})
 const failureSchema=z.object({name:z.string(),code:z.string(),issues:z.array(z.object({code:z.string(),path:z.array(z.union([z.string(),z.number()])),maximum:z.number().optional()})).optional()})
 const stateSchema=z.object({diagnostics:timelineDiagnosticsSchema.nullable().default(null),failure:failureSchema.nullable().default(null),version:z.literal(1),perspective_revision:z.number().int().default(0),key:z.string(),local_date:z.string(),timezone:z.string().nullable().default(null),basis:z.array(z.object({id:ref,version:z.string()})),cards:z.array(cardSchema),updated_at:z.string().nullable(),last_attempt:z.number(),dismissed:z.array(z.string()).max(256)})
 type State=z.infer<typeof stateSchema>
@@ -54,9 +54,11 @@ const sensitive=(text:string)=>scrubber.scrub('timeline',text).kind!=='clean'
 export class TimelineBrief {
  #pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
  constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void){this.#store=new BoundedJsonStore(path,stateSchema)}
- async open(){try{this.#state=await this.#store.read(empty())}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#state=empty()}this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
+ async open(){try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#state=empty()}this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
  startGeneration(){this.#defer=false;this.#schedule()}
  #save(){const state=structuredClone(this.#state);const run=this.#tail.then(()=>this.#store.write(state));this.#tail=run.catch(()=>undefined);return run}
+ /** IDs only: each cached citation must be re-read under current source permissions. */
+ retainedEvidenceIds(){return [...new Set(this.#state.cards.filter(card=>!this.#state.dismissed.includes(card.id)).flatMap(card=>card.refs))]}
  basis(){const refs=new Set(this.#visibleCards().flatMap(card=>card.refs));return structuredClone(this.#state.basis.filter(input=>refs.has(input.id)))}
  async clear(){this.#abort.abort();await this.#run;this.#abort=new AbortController();this.#state=empty();this.#inputs=[];await this.#save();this.changed()}
  suspend(){this.#pendingValidation=true;this.changed()}
@@ -69,28 +71,28 @@ export class TimelineBrief {
   return basis.every(input=>versions.get(input.id)===input.version)
  }
  #visibleCards(){
-  if(this.#state.perspective_revision!==1||this.#pendingValidation||this.#state.local_date!==this.#date||this.#state.timezone!==this.#timezone)return []
+  if(this.#state.perspective_revision!==1||this.#pendingValidation)return []
   const versions=new Map(this.#inputs.map(input=>[input.id,input.version])),basis=new Map(this.#state.basis.map(input=>[input.id,input.version]))
   return this.#state.cards.filter(card=>!this.#state.dismissed.includes(card.id)&&card.refs.every(ref=>versions.has(ref)&&versions.get(ref)===basis.get(ref)))
  }
  #current(){return this.#state.perspective_revision===1&&!this.#pendingValidation&&(this.#state.key===this.#key()||this.#state.basis.length>0&&this.#compatible(this.#state.basis,this.#state.local_date,this.#state.timezone)||this.#visibleCards().length>0)}
  snapshot(){const counts={messages:0,files:0,memories:0},dates:string[]=[];for(const input of this.#inputs){if(input.kind==='file')counts.files++;else if(input.kind==='memory')counts.memories++;else{counts.messages++;if(Number.isFinite(Date.parse(input.observed_at)))dates.push(new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:this.#timezone}))}}dates.sort();return {generation_id:this.#current()?this.#state.key:null,diagnostics:this.#current()?structuredClone(this.#state.diagnostics):null,available:!!this.generate,status:this.#status,error:this.#error,updated_at:this.#current()?this.#state.updated_at:null,input_count:this.#inputs.length,coverage:`本轮资料：${counts.messages} 条消息 · ${counts.files} 份文档 · ${counts.memories} 条个人记录${dates.length?'；消息记录 '+dates[0]+'—'+dates.at(-1):''}`,cards:this.#current()?structuredClone(this.#visibleCards()):[]}}
  update(inputs:readonly TimelineInput[],date:string,timezone:string){
-  const old=this.#key(),previous=this.#inputs,previousDate=this.#date,previousZone=this.#timezone,pending=this.#pendingValidation;this.#pendingValidation=false;this.#inputs=selectTimelineInputs(inputs.filter(input=>input.text.trim()&&!sensitive(input.text)));this.#date=date;this.#timezone=timezone
+  const old=this.#key(),previous=this.#inputs,previousDate=this.#date,previousZone=this.#timezone,pending=this.#pendingValidation;this.#pendingValidation=false;const eligible=inputs.filter(input=>input.text.trim()&&!sensitive(input.text)),selected=selectTimelineInputs(eligible.filter(input=>!input.history_only)),selectedIds=new Set(selected.map(input=>input.id)),retained=new Set(this.retainedEvidenceIds());this.#inputs=[...selected,...eligible.filter(input=>retained.has(input.id)&&!selectedIds.has(input.id))];this.#date=date;this.#timezone=timezone
   if(old!==this.#key()){const additionsOnly=previous.length>0&&this.#compatible(previous,previousDate,previousZone);if(!additionsOnly){this.#abort.abort();this.#abort=new AbortController()}this.#error=null;this.#status=this.#run&&additionsOnly?'working':this.#current()?'ready':this.#inputs.length?'queued':'idle';this.changed()}
   else if(pending){if(this.#current())this.#status=this.#run?'working':'ready';this.changed()}
   this.#schedule()
  }
  #schedule(){
   clearTimeout(this.#timer);this.#timer=undefined
-  if(this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.length||this.#key()===this.#state.key&&this.#state.perspective_revision===1)return
+  if(this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.some(input=>!input.history_only)||this.#key()===this.#state.key&&this.#state.perspective_revision===1)return
   this.#timer=setTimeout(()=>{this.#timer=undefined;void this.refresh()},Math.max(1000,this.#state.last_attempt+300000-Date.now()));this.#timer.unref()
  }
  async refresh(){
   if(this.#run)return this.#run
-  if(this.#pendingValidation||!this.#opened||!this.generate||!this.#inputs.length)return
+  if(this.#pendingValidation||!this.#opened||!this.generate||!this.#inputs.some(input=>!input.history_only))return
   clearTimeout(this.#timer);this.#timer=undefined
-  const key=this.#key(),inputs=structuredClone(this.#inputs),context={local_date:this.#date,timezone:this.#timezone},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
+  const key=this.#key(),inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only))),context={local_date:this.#date,timezone:this.#timezone},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
   this.#status='working';this.#error=null;this.changed()
   const publish=async(generated:TimelineGenerated,done:boolean)=>{
    if(signal.aborted||!this.#compatible(inputs,context.local_date,context.timezone)||!this.#opened)return
@@ -111,10 +113,14 @@ export class TimelineBrief {
     if(time.anchor_date&&time.anchor_date<recentSince&&(!time.last_reported_on||time.last_reported_on<recentSince)&&(!time.due_on||time.due_on<recentSince)&&(!time.scheduled_on||time.scheduled_on<recentSince))return drop('outside_window')
     const id=hash([card.title,refs.sort()]);if(seen.has(id))return drop('duplicate');seen.add(id)
     const sources=refs.flatMap(id=>{const source=byId.get(id)!.source;return source?[{...source,summary:card.facts.filter(fact=>fact.ref===id).map(fact=>fact.quote).join('\n').slice(0,700)||source.summary}]:[]})
-    return [{...card,time,refs,id,version:hash([card,refs.map(id=>byId.get(id)!.version)]),sources}]
+    return [{...card,time,timezone:context.timezone,refs,id,version:hash([card,refs.map(id=>byId.get(id)!.version)]),sources}]
    })
+   // A new synthesis updates matching cards; omission is not a withdrawal.
+   const merged=new Map(this.#visibleCards().map(card=>[card.id,card]))
+   for(const card of cards)merged.set(card.id,card)
+   const retainedCards=[...merged.values()]
    diagnostics.published=cards.length
-   this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis:inputs.map(({id,version})=>({id,version})),cards,updated_at:new Date().toISOString()};await this.#save();if(done)this.#status='ready';this.changed()
+   this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis:this.#inputs.map(({id,version})=>({id,version})),cards:retainedCards,updated_at:new Date().toISOString()};await this.#save();if(done)this.#status='ready';this.changed()
   }
   const work=(async()=>{try{
    this.#state.last_attempt=Date.now();this.#state.failure=null;await this.#save();signal.throwIfAborted()

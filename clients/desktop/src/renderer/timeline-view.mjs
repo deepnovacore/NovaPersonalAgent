@@ -59,11 +59,13 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
   const orderedBriefs=[...(attention.cards??[])].sort((a,b)=>(b.time?.anchor_date??'').localeCompare(a.time?.anchor_date??'')||latestReport(b)-latestReport(a))
   if(orderedBriefs.length)section.append(el('p',t('共 {0} 条进展 · 已展示 {1} 条',orderedBriefs.length,Math.min(visibleCount,orderedBriefs.length)),'hint timeline-brief-count'))
   for(const item of orderedBriefs.slice(0,visibleCount)){
+   const historical=!!item.time?.as_of&&(item.time.as_of!==currentDate||!!item.timezone&&item.timezone!==(snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone))
    const kind=['attention','deadline','progress','insight'].includes(item.kind)?item.kind:'insight'
-   const card=el('article',undefined,'timeline-attention-card');card.tabIndex=-1;card.dataset.kind=kind;card.dataset.objectId=item.id;briefCards.push({item,card});if(compact)section.append(card)
+   const card=el('article',undefined,'timeline-attention-card');card.tabIndex=-1;card.dataset.kind=kind;card.dataset.historical=String(historical);card.dataset.objectId=item.id;briefCards.push({item,card});if(compact)section.append(card)
    const meta=el('div',undefined,'timeline-brief-meta'),topic=el('span',undefined,'timeline-topic')
    const glyph=el('span',{attention:'!',deadline:'◷',progress:'✓',insight:'◇'}[kind],'timeline-topic-icon');glyph.setAttribute('aria-hidden','true');topic.append(glyph,el('span',item.category));meta.append(topic)
-   if(item.status_label)meta.append(el('span',item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
+   if(item.status_label)meta.append(el('span',historical?t('当时状态：{0}',item.status_label):item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
+   if(historical)card.append(el('p',t('整理于 {0}',item.time.as_of),'hint timeline-history-note'))
    if(item.people?.length){const people=renderCardTags(card,item.people.map(person=>({label:person.name,tone:'person'})),{el});people.className+=' timeline-people';people.setAttribute('aria-label',t('相关同事'))}
    const timeMeta=el('div',undefined,'timeline-card-time'),time=item.time,label=text=>timeMeta.append(el('span',text,'timeline-time-label'))
    if(time?.anchor_date){
@@ -77,9 +79,9 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    }else label(t('时间待明确'))
    card.append(timeMeta)
    const facts=el('div',undefined,'timeline-attention-facts');facts.dataset.count=String(item.facts?.length??0);for(const fact of item.facts??[]){const panel=el('div',undefined,'timeline-fact');panel.dataset.tone=['risk','warning','positive'].includes(fact.tone)?fact.tone:'neutral';if(fact.label)panel.append(el('h4',fact.label));panel.append(el('p',fact.text));facts.append(panel)}card.append(facts)
-   const reason=el('div',undefined,'timeline-attention-reason');reason.append(el('span',t({attention:'影响',deadline:'时间窗口',progress:'进展',insight:'判断'}[kind])),el('p',item.why_now));card.append(reason)
+   const reason=el('div',undefined,'timeline-attention-reason');reason.append(el('span',t(historical?'当时判断':{attention:'影响',deadline:'时间窗口',progress:'进展',insight:'判断'}[kind])),el('p',item.why_now));card.append(reason)
    if(item.next_steps?.length){
-    const followups=el('section',undefined,'timeline-followups');followups.append(el('h4',t('接下来可以推进')))
+    const followups=el('section',undefined,'timeline-followups');followups.append(el('h4',t(historical?'当时建议':'后续建议')))
     const steps=el('ol',undefined,'timeline-next-steps');for(const [index,step] of item.next_steps.entries()){const tile=el('li');tile.append(el('span',String(index+1).padStart(2,'0'),'timeline-step-number'),el('h5',step.title),el('p',step.detail));steps.append(tile)}followups.append(steps);card.append(followups)
    }
    if(item.uncertainty){const caution=el('p',undefined,'timeline-caution');caution.append(el('span',t('尚不确定：')),el('span',item.uncertainty));card.append(caution)}

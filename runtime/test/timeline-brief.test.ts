@@ -226,3 +226,60 @@ test('a colleague name may be grounded in sender metadata but not an unrelated n
   assert.deepEqual(brief.snapshot().cards[0]!.people,[])
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('midnight and later empty refreshes preserve authorized history without rewriting its as-of date',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-history-'));let generated=reply
+ const make=()=>new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(generated),()=>undefined)
+ let brief=make()
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  const original=brief.snapshot().cards[0]!
+  brief.update([input],'2026-10-18','UTC')
+  assert.deepEqual(brief.snapshot().cards,[original])
+  generated={cards:[]};await brief.refresh();assert.deepEqual(brief.snapshot().cards,[original])
+  await brief.close();brief=make();await brief.open();brief.update([input],'2026-10-19','UTC')
+  assert.deepEqual(brief.snapshot().cards,[original]);assert.equal(brief.snapshot().cards[0]!.time.as_of,'2026-10-17')
+  brief.update([input],'2026-10-19','Asia/Shanghai');assert.deepEqual(brief.snapshot().cards,[original]);assert.equal(brief.snapshot().cards[0]!.timezone,'UTC')
+  brief.suspend();assert.equal(brief.snapshot().cards.length,0)
+  brief.update([input],'2026-10-19','UTC');assert.equal(brief.snapshot().cards.length,1)
+  brief.update([{...input,version:'changed'}],'2026-10-19','UTC');assert.equal(brief.snapshot().cards.length,0)
+  await brief.refresh();assert.equal(brief.snapshot().cards.length,0)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('refresh adds independent cards and updates stable identities while removing withdrawn citations',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-incremental-'))
+ const other={...input,id:'other'},second={...reply.cards[0]!,title:'Second issue',refs:['other'],facts:[{text:other.text,quote:other.text,ref:'other'}]}
+ let generated=reply
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(generated),()=>undefined)
+ try{
+  await brief.open();brief.update([input,other],'2026-10-17','UTC');await brief.refresh()
+  const original=brief.snapshot().cards[0]!
+  brief.update([input,other],'2026-10-18','UTC');generated={cards:[second]};await brief.refresh()
+  assert.equal(brief.snapshot().cards.length,2)
+  assert.deepEqual(brief.basis().map(ref=>ref.id).sort(),['message','other'])
+  generated={cards:[{...reply.cards[0]!,why_now:'Updated grounded assessment'}]};await brief.refresh()
+  assert.equal(brief.snapshot().cards.length,2)
+  const updated=brief.snapshot().cards.find(card=>card.id===original.id)!
+  assert.equal(updated.why_now,'Updated grounded assessment');assert.equal(updated.time.as_of,'2026-10-18')
+  brief.update([other],'2026-10-19','UTC');generated={cards:[]};await brief.refresh()
+  assert.deepEqual(brief.snapshot().cards.map(card=>card.title),['Second issue'])
+  brief.update([],'2026-10-19','UTC');assert.equal(brief.snapshot().cards.length,0)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('retained citations survive the generation selection cap and historical originals are not sent for synthesis',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-retained-'));let observed:readonly TimelineInput[]=[]
+ const brief=new TimelineBrief(join(dir,'timeline.json'),(inputs)=>{observed=inputs;return Promise.resolve(reply)},()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  assert.deepEqual(brief.retainedEvidenceIds(),['message'])
+  const newer=Array.from({length:5200},(_,i)=>({...input,id:'new-'+i}))
+  brief.update([...newer,input],'2026-10-18','UTC');assert.equal(brief.snapshot().cards.length,1)
+  brief.update([{...input,history_only:true}],'2026-11-18','UTC');await brief.refresh()
+  assert.equal(brief.snapshot().cards.length,1);assert.equal(observed[0]!.id,'message','no historical-only generation')
+  brief.update([{...input,history_only:true},newer[0]!],'2026-11-18','UTC');await brief.refresh()
+  assert.deepEqual(observed.map(i=>i.id),['new-0']);assert.equal(brief.snapshot().cards.length,1)
+  brief.update([],'2026-11-18','UTC');assert.equal(brief.snapshot().cards.length,0)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})

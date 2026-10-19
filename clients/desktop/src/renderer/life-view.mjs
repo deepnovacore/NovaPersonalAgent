@@ -62,7 +62,7 @@ export function renderProfile(panel,{products,state,news,warmup,command,button,l
   button('保存介绍',async()=>{await command('life.mutate',{op:'profile',expected_version:draft.version,about:draft.about});delete local.profile;rerender()},actions,'profile:save').className='page-add'
   button('取消编辑',()=>{delete local.profile;rerender()},actions,'profile:save')
  }else{
-  const caption=el('p',confirmed?'你写下的介绍':state?.profile?.version>0?'你已清空个人介绍，可以随时重新写一段。':suggested||work.length?'我照你最近的工作写的，随时可以改':'我还不太了解你。看完你的资料会先写一版，你也可以自己写一段。');caption.className='preference-caption';card.append(caption)
+  const caption=el('p',confirmed?'你写下的介绍':state?.profile?.version>0?'你已清空个人介绍，可以随时重新写一段。':suggested||work.length?'我照你最近的工作写的，随时可以改':warmup?.needs_update?'个人资料需要更新，原有资料仍保存在本机。':'我还不太了解你。看完你的资料会先写一版，你也可以自己写一段。');caption.className='preference-caption';card.append(caption)
   if(about){const holder=el('div');holder.className='profile-about';const preview=el('p',about);preview.className='profile-preview';holder.append(preview);card.append(holder);if(state?.profile?.version===0&&warmup?.draft?.about)sourceDetails(holder,warmup.draft.about.refs)}
   if(work.length){const grid=el('div');grid.className='profile-work';card.append(grid);for(const item of work){const block=el('article');block.className='profile-work-item';block.append(el('h4',item.title),el('p',item.text));sourceDetails(block,item.refs);grid.append(block)}}
   const actions=el('div');actions.className='preference-actions';card.append(actions)

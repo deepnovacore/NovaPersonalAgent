@@ -11,7 +11,7 @@ export const understandingProductsSchema=z.object({projects:z.array(projectUnder
 export type UnderstandingProducts=z.infer<typeof understandingProductsSchema>
 export const projectCorrectionSchema=z.enum(['participating','historical','reference','automatic'])
 export interface UnderstandingSnapshot extends UnderstandingProducts {
- profile_pending?:boolean;news_cleanup_pending?:boolean;revision:number;draft:z.infer<typeof profileDraftSchema>|null;generated_at:string|null;
+ profile_needs_update?:boolean;profile_pending?:boolean;news_cleanup_pending?:boolean;revision:number;draft:z.infer<typeof profileDraftSchema>|null;generated_at:string|null;
  sources:{id:string;version:string;label:string;observed_at:string;type?:SourceTag['type'];provider?:string;url?:string}[];
  corrections:Record<string,z.infer<typeof projectCorrectionSchema>>;
 }

@@ -209,20 +209,24 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         result=context;break
       }
       case 'timeline_evidence':{
-        const q=z.object({source_prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,limit:z.number().int().min(1).max(5000).default(5000),since:z.string().datetime().optional()}).strict().parse(input)
+        const q=z.object({source_prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,limit:z.number().int().min(1).max(5000).default(5000),since:z.string().datetime().optional(),retained_ids:z.array(id).max(20000).default([])}).strict().parse(input)
         const resultRows:EvidenceRecord[]=[]
         const since=q.since??new Date(Date.now()-14*86400000).toISOString()
         const candidates=db.prepare(`SELECT id FROM (SELECT id,json_extract(payload_json,'$.observed_at') at,
           row_number() OVER (PARTITION BY coalesce(json_extract(payload_json,'$.source_metadata.chat_id'),source_id) ORDER BY json_extract(payload_json,'$.observed_at') DESC,rowid DESC) rank
           FROM memory_evidence WHERE substr(source_id,1,?)=? AND json_extract(payload_json,'$.source_kind') IN ('calendar','im','mail') AND json_extract(payload_json,'$.observed_at')>=?)
           ORDER BY rank,at DESC LIMIT 20000`).all(q.source_prefix.length,q.source_prefix,since)
-        for(const candidate of candidates){
+        const retained=new Set(q.retained_ids),seen=new Set<string>();let recentCount=0
+        for(const candidate of [...candidates,...q.retained_ids.map(id=>({id}))]){
+          if(seen.has(String(candidate.id)))continue
+          seen.add(String(candidate.id))
+          if(recentCount>=q.limit&&!retained.has(String(candidate.id)))continue
           const record=effectiveEvidence(db,String(candidate.id),{purpose:'extraction',provider:q.provider})
-          if(!record?.raw_text||Date.parse(record.observed_at)>Date.now())continue
+          if(!record?.raw_text||!record.source_id.startsWith(q.source_prefix)||!['calendar','im','mail'].includes(record.source_kind)||Date.parse(record.observed_at)>Date.now())continue
           const head=db.prepare('SELECT evidence_id FROM memory_message_heads WHERE key=?').get(sha256(canonicalJson([record.source_id,record.locator])))
           if(head&&head.evidence_id!==record.id)continue
           if(!head&&db.prepare("SELECT 1 FROM memory_evidence WHERE source_id=? AND json_extract(payload_json,'$.locator')=? AND rowid>(SELECT rowid FROM memory_evidence WHERE id=?) LIMIT 1").get(record.source_id,record.locator,record.id))continue
-          resultRows.push({...record,hash:timelineEvidenceVersion(record,processingStamp(db,[record.id],'extraction',q.provider))});if(resultRows.length>=q.limit)break
+          resultRows.push({...record,hash:timelineEvidenceVersion(record,processingStamp(db,[record.id],'extraction',q.provider))});if(record.observed_at>=since)recentCount++
         }
         result=resultRows;break
       }

@@ -1,4 +1,11 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  '个人资料需要更新，原有资料仍保存在本机。': 'Your profile needs an update. Previous results remain stored on this device.',
+  '个人资料尚未更新，原有资料仍保存在本机。': 'Your profile has not been updated. Previous results remain stored on this device.',
+  '当时状态：{0}': 'Status at the time: {0}',
+  '整理于 {0}': 'Prepared on {0}',
+  '当时判断': 'Assessment at the time',
+  '当时建议': 'Suggestions at the time',
+  '后续建议': 'Suggested next steps',
   "个人资料": "Profile",
   "今天": "Today",
   "记录待办和需要跟进的事。": "Keep track of to-dos and follow-ups.",

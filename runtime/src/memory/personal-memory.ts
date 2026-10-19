@@ -113,7 +113,7 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly profileSources?: (ids?:readonly string[]) => Promise<ProfileInput[]>
   readonly resolveLifeCandidate?: (row:EvaluatedCandidate,signal:AbortSignal,guard:()=>void)=>Promise<ResolvedLifeCandidate>
   readonly lifeBackend?: () => LifeBackend
-  readonly timelineEvidence?: ()=>Promise<TimelineInput[]>
+  readonly timelineEvidence?: (retainedIds?:readonly string[])=>Promise<TimelineInput[]>
   readonly dailyBriefEvidence?: (input:{localDate:string;timezone:string;signal?:AbortSignal})=>Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}[]>
   readonly readEvidence?: (id:string) => Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}|null>
   readonly canProcessEvidence?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>

@@ -23,3 +23,11 @@ test('all five thousand messages reach bounded screening batches exactly once',(
  assert.equal(pool.length,5000);assert.equal(new Set(batches.flat().map(x=>x.id)).size,5000)
  assert.ok(batches.every(batch=>batch.length<=200&&batch.reduce((sum,x)=>sum+x.text.length,0)<=60000))
 })
+
+test('authorized cached file citations survive the document selection cap without expanding generation inputs',()=>{
+ const files:ContextEntry[]=Array.from({length:140},(_,i)=>({kind:'file',id:'source:'+i,version:'v1',content:'Project evidence '+i,source_id:'s',file_id:String(i),root:'/project',rel_path:'notes/'+i+'.md',role:'document',mtime_ms:Date.UTC(2026,9,1)+i,priority:1}))
+ const selected=timelineContextInputs(files,[],['source:0','source:1'])
+ assert.equal(selected.filter(input=>!input.history_only).length,128)
+ assert.deepEqual(selected.filter(input=>input.history_only).map(input=>input.id),['source:1','source:0'])
+ assert.equal(timelineContextInputs(files.filter(file=>file.id!=='source:0'),[],['source:0']).some(input=>input.id==='source:0'),false,'a revoked or removed file is not recovered from the cache')
+})

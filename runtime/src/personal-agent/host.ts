@@ -1043,17 +1043,18 @@ export class PersonalAgentHost {
         }else await this.#serial(async()=>{const next=structuredClone(this.#state);Object.assign(next.settings,q);await this.#commit(next)});
     }
     identity(){return {assistant_name:this.#state.settings.assistant_name??'nova',user_name:this.#state.settings.user_name??''}}
-    async #timelineInputs():Promise<TimelineInput[]>{
-        const messages=await this.options.memory()?.timelineEvidence?.()??[];
+    async #timelineInputs(retainHistory=false):Promise<TimelineInput[]>{
+        const history=retainHistory?this.timeline.retainedEvidenceIds():[],stated=this.#stated.map(entry=>entry.id);
+        const messages=await this.options.memory()?.timelineEvidence?.(history)??[];
         const retained=await this.options.memory()?.profileSources?.(this.#profileExternal.map(input=>input.id))??[];
-        const memories=await this.authorizedGenerationEntries((await this.#generationMemories(this.#stated.map(entry=>entry.id))).filter((entry):entry is MemoryEntry=>!!entry&&memoryEligibleForDiscovery(entry)));
-        const context=timelineContextInputs(this.#sources?.contextEntries?.()??[],memories);
+        const memories=await this.authorizedGenerationEntries((await this.#generationMemories([...new Set([...stated,...history.filter(id=>id.startsWith('memory:')).map(id=>id.slice(7))])])).filter((entry):entry is MemoryEntry=>!!entry&&memoryEligibleForDiscovery(entry)));
+        const context=timelineContextInputs(this.#sources?.contextEntries?.()??[],memories,history).map(input=>input.kind==='memory'&&!stated.includes(input.id.slice(7))?{...input,history_only:true}:input);
         return [...messages,...retained.filter(entry=>!messages.some(message=>message.id===entry.id)).map(entry=>({id:entry.id,version:String(entry.version),kind:entry.source?.kind??'memory',text:entry.content,observed_at:entry.observed_at??'',...(entry.source?.relation?{relation:entry.source.relation}:{})})),...context];
     }
     refreshTimeline():Promise<void>{
         if(!this.#opened)return Promise.resolve();
         if(this.#timelineRefresh)return this.#timelineRefresh;
-        const run=(async()=>{try{while(this.#opened){const revision=this.#timelineRevision,inputs=await this.#timelineInputs();if(!this.#opened)return;if(revision!==this.#timelineRevision)continue;const timezone=dailyBriefSettings(this.#state.settings).timezone;this.timeline.update(inputs,this.#now().toLocaleDateString('en-CA',{timeZone:timezone}),timezone);return}}catch(error){this.timeline.unavailable();throw error}})();
+        const run=(async()=>{try{while(this.#opened){const revision=this.#timelineRevision,inputs=await this.#timelineInputs(true);if(!this.#opened)return;if(revision!==this.#timelineRevision)continue;const timezone=dailyBriefSettings(this.#state.settings).timezone;this.timeline.update(inputs,this.#now().toLocaleDateString('en-CA',{timeZone:timezone}),timezone);return}}catch(error){this.timeline.unavailable();throw error}})();
         this.#timelineRefresh=run.finally(()=>{this.#timelineRefresh=undefined});return this.#timelineRefresh;
     }
     async timelineAuthorized(id:string,version:string,consumer:string|undefined):Promise<boolean>{
