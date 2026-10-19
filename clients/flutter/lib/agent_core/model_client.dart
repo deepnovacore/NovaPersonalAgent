@@ -283,6 +283,62 @@ Uri compatibleEndpoint(String endpoint, String route) {
   return uri.replace(path: '$path/$route');
 }
 
+/// Model ids from `{base}/models`, doubling as a key/endpoint check.
+/// Validation is shared with [ModelConfiguration] so the rules cannot drift.
+Future<List<String>> listModels({
+  required String endpoint,
+  required String key,
+  Duration timeout = const Duration(seconds: 15),
+}) async {
+  ModelConfiguration(endpoint: endpoint, model: '-', key: key);
+  final http = HttpClient()..connectionTimeout = timeout;
+  try {
+    final request = await http
+        .getUrl(compatibleEndpoint(endpoint, 'models'))
+        .timeout(timeout);
+    request.followRedirects = false;
+    request.headers.set('Authorization', 'Bearer $key');
+    request.headers.set('Accept', 'application/json');
+    final response = await request.close().timeout(timeout);
+    var count = 0;
+    final body = await utf8.decoder
+        .bind(
+          response.map((bytes) {
+            count += bytes.length;
+            if (count > 1024 * 1024) {
+              throw const AgentFailure('model_response_too_large');
+            }
+            return bytes;
+          }),
+        )
+        .join()
+        .timeout(timeout);
+    if (response.statusCode != 200) {
+      throw ModelRequestFailure(
+        'model_http_${response.statusCode}',
+        status: response.statusCode,
+      );
+    }
+    final data = (jsonDecode(body) as Map)['data'] as List;
+    final ids = {
+      for (final item in data)
+        if (item is Map && item['id'] is String)
+          (item['id'] as String).replaceFirst(RegExp(r'^models/'), ''),
+    }.where((id) => id.isNotEmpty && id.length <= 200).toList()..sort();
+    return ids.take(500).toList();
+  } on AgentFailure {
+    rethrow;
+  } on FormatException {
+    throw const AgentFailure('invalid_model_response');
+  } on TypeError {
+    throw const AgentFailure('invalid_model_response');
+  } catch (_) {
+    throw const AgentFailure('model_request_failed');
+  } finally {
+    http.close(force: true);
+  }
+}
+
 Map<String, dynamic> modelRequestBody(
   ModelConfiguration config,
   List<Map<String, dynamic>> messages,
