@@ -95,27 +95,33 @@ class ProfileGenerationStatus extends StatelessWidget {
                   height: 1.5,
                 ),
               ),
-            if (phase == ProfileGenerationPhase.working ||
-                phase == ProfileGenerationPhase.continuing)
-              TextButton(
-                onPressed: generation.pause,
-                child: Text(t('暂停', 'Pause')),
-              )
-            else if (phase == ProfileGenerationPhase.paused ||
-                phase == ProfileGenerationPhase.failed ||
-                phase == ProfileGenerationPhase.blocked &&
-                    !(code?.startsWith('profile_budget_') ?? false))
-              TextButton(
-                onPressed: generation.retry,
-                child: Text(
-                  t(
-                    phase == ProfileGenerationPhase.paused ? '继续' : '重试',
-                    phase == ProfileGenerationPhase.paused
-                        ? 'Continue'
-                        : 'Retry',
+            Wrap(
+              spacing: 8,
+              children: [
+                if (phase == ProfileGenerationPhase.working ||
+                    phase == ProfileGenerationPhase.continuing ||
+                    phase == ProfileGenerationPhase.failed)
+                  TextButton(
+                    onPressed: generation.pause,
+                    child: Text(t('暂停', 'Pause')),
                   ),
-                ),
-              ),
+                if (phase == ProfileGenerationPhase.paused ||
+                    phase == ProfileGenerationPhase.failed ||
+                    phase == ProfileGenerationPhase.blocked &&
+                        !(code?.startsWith('profile_budget_') ?? false))
+                  TextButton(
+                    onPressed: generation.retry,
+                    child: Text(
+                      t(
+                        phase == ProfileGenerationPhase.paused ? '继续' : '重试',
+                        phase == ProfileGenerationPhase.paused
+                            ? 'Continue'
+                            : 'Retry',
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
       );

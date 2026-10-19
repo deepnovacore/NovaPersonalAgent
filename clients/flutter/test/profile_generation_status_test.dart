@@ -52,6 +52,50 @@ void main() {
       c.dispose();
     },
   );
+  testWidgets('failed retry can be paused before another paid round', (
+    tester,
+  ) async {
+    var attempts = 0;
+    var clock = DateTime.utc(2026, 10, 19);
+    final c = ProfileGenerationCoordinator(
+      persistence: MemoryLifePersistence(),
+      autoSchedule: false,
+      now: () => clock,
+      inspect: () async => const ProfileGenerationSnapshot(
+        scope: 's',
+        complete: false,
+        hasResult: false,
+        covered: 0,
+        total: 10,
+      ),
+      generate:
+          ({required savedObservationsOnly, required maxNewBatches}) async {
+            attempts++;
+            throw 'ungrounded_projection';
+          },
+      cancel: () {},
+      failureCode: (e) => '$e',
+    );
+    await c.start();
+    await c.poll();
+    expect(c.phase, ProfileGenerationPhase.failed);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: ProfileGenerationStatus(generation: c)),
+      ),
+    );
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.text('暂停'), findsOneWidget);
+    await tester.tap(find.text('暂停'));
+    await tester.pump();
+    expect(c.phase, ProfileGenerationPhase.paused);
+    clock = clock.add(const Duration(minutes: 5));
+    await c.poll();
+    expect(attempts, 1);
+    expect(find.text('继续'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
   testWidgets(
     'completed empty section does not ask a synced user to sync again',
     (tester) async {
