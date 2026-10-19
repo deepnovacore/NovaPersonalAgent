@@ -141,6 +141,11 @@ class TimelinePipeline {
     }
   }
   static const recipe = 'timeline-pipeline-v1';
+  static const _hostFallbackReasons = {
+    'groups_schema',
+    'members_schema',
+    'member_unknown_or_repeated',
+  };
   final ProfileCompletion complete;
   final Future<void> Function() authorize;
   final String cacheScope;
@@ -258,8 +263,36 @@ class TimelinePipeline {
           saved['response'] is! Map<String, dynamic>) {
         throw StateError('profile_timeline_checkpoint_invalid');
       }
-      // Revalidate every schema, citation and quote against current full input.
-      final result = validate(saved['response'] as Map<String, dynamic>, true);
+      final hostFallback = saved['outcome'] == 'host_fallback';
+      final savedResponse = saved['response'] as Map<String, dynamic>;
+      if (hostFallback) {
+        if (stage != 'timeline_reconcile' ||
+            saved.length != 5 ||
+            saved.keys.any(
+              (key) => !{
+                'recipe',
+                'outcome',
+                'version',
+                'reason',
+                'response',
+              }.contains(key),
+            ) ||
+            saved['version'] is! int ||
+            saved['version'] != 1 ||
+            !_hostFallbackReasons.contains(saved['reason']) ||
+            savedResponse.length != 1 ||
+            savedResponse['groups'] is! List ||
+            (savedResponse['groups'] as List).isNotEmpty) {
+          throw StateError('profile_timeline_checkpoint_invalid');
+        }
+      } else if (saved.length != 2 ||
+          saved.keys.any((key) => !{'recipe', 'response'}.contains(key))) {
+        throw StateError('profile_timeline_checkpoint_invalid');
+      }
+      // A host fallback is reconstructed from current authorized candidates,
+      // never from stored candidate objects or an untrusted model marker.
+      final result = validate(savedResponse, true);
+      if (hostFallback) _metrics['timeline_reconcile_host_fallback'] = 1;
       _metrics['timeline_cached_stages'] =
           (_metrics['timeline_cached_stages'] ?? 0) + 1;
       return result;
@@ -267,9 +300,16 @@ class TimelinePipeline {
     var response = await _complete(stage, instructions, input);
     Set<int>? requiredSelection;
     List<String>? requiredTitleTopics;
+    String? hostFallbackReason;
     for (var attempt = 0; ; attempt++) {
       try {
-        final result = validate(response, attempt == 1);
+        final result = validate(
+          response,
+          attempt == 1 || hostFallbackReason != null,
+        );
+        if (hostFallbackReason != null) {
+          _metrics['timeline_reconcile_host_fallback'] = 1;
+        }
         if (requiredTitleTopics != null &&
             jsonEncode(_topicMembership(response)) !=
                 jsonEncode(requiredTitleTopics)) {
@@ -288,6 +328,11 @@ class TimelinePipeline {
         await authorize();
         await saveCheckpoint?.call(key, {
           'recipe': recipe,
+          if (hostFallbackReason != null) ...{
+            'outcome': 'host_fallback',
+            'version': 1,
+            'reason': hostFallbackReason,
+          },
           'response': stage == 'timeline_select'
               ? _safeSelectionResponse(response)
               : response,
@@ -295,7 +340,16 @@ class TimelinePipeline {
         await authorize();
         return result;
       } on TimelinePipelineValidationFailure catch (error) {
-        if (attempt == 1) rethrow;
+        if (stage == 'timeline_reconcile' &&
+            hostFallbackReason == null &&
+            _hostFallbackReasons.contains(error.detail['reason'])) {
+          // Discard the entire rejected merge proposal. Empty groups preserve
+          // every original candidate independently, with explicit provenance.
+          hostFallbackReason = error.detail['reason'] as String;
+          response = <String, dynamic>{'groups': <dynamic>[]};
+          continue;
+        }
+        if (attempt >= 1) rethrow;
         final titleRepair =
             stage == 'timeline_select' &&
             const {
@@ -503,6 +557,7 @@ class TimelinePipeline {
     _metrics.addAll({
       'timeline_cached_stages': 0,
       'timeline_repair_requests': 0,
+      'timeline_reconcile_host_fallback': 0,
       'final_original_records': 0,
       'timeline_completed_batches': 0,
     });

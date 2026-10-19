@@ -6,6 +6,7 @@ void main() {
   pipelineIntegrationTests();
   pipelineScopeTests();
   pipelineTitleRepairTests();
+  hostFallbackTests();
   test(
     'all 624 complete observations retain their global indices across batches',
     () {
@@ -532,6 +533,7 @@ void pipelineIntegrationTests() {
       expect(result.coverage['timeline_reconcile_unlisted_topics'], 2);
       expect(result.completedBatches, 2);
       expect(result.coverage['timeline_repair_requests'], 1);
+      expect(result.coverage['timeline_reconcile_host_fallback'], 0);
     },
   );
   for (final members in <List<List<Object?>>>[
@@ -552,7 +554,7 @@ void pipelineIntegrationTests() {
     ],
   ]) {
     test(
-      'reconciliation rejects malformed or repeated members: $members',
+      'host fallback discards malformed or repeated reconciliation: $members',
       () async {
         final data = fixture(2);
         var calls = 0;
@@ -564,23 +566,26 @@ void pipelineIntegrationTests() {
             if (stage == 'timeline_select') {
               return normalComplete(stage, instructions, input);
             }
-            expect(stage, 'timeline_reconcile');
-            return {
-              'groups': [
-                for (final ids in members) {'members': ids},
-              ],
-            };
+            if (stage == 'timeline_reconcile') {
+              return {
+                'groups': [
+                  for (final ids in members) {'members': ids},
+                ],
+              };
+            }
+            expect((input['timeline_topics'] as List).length, 2);
+            return normalComplete(stage, instructions, input);
           },
         );
-        await expectLater(
-          pipeline.generate(
-            data.observations,
-            data.records,
-            historyComplete: true,
-          ),
-          throwsStateError,
+        final result = await pipeline.generate(
+          data.observations,
+          data.records,
+          historyComplete: true,
         );
-        expect(calls, 3);
+        expect(calls, 4);
+        expect(result.coverage['timeline_reconcile_host_fallback'], 1);
+        expect(result.coverage['timeline_repair_requests'], 0);
+        expect(result.coverage['timeline_reconcile_unlisted_topics'], 2);
       },
     );
   }
@@ -1234,5 +1239,294 @@ void pipelineTitleRepairTests() {
       ),
     );
     expect(calls, 2);
+  });
+}
+
+void hostFallbackTests() {
+  test(
+    'host fallback persists explicit provenance and replays without another model request',
+    () async {
+      final data = fixture(2), cache = <String, Map<String, dynamic>>{};
+      final requests = <String>[];
+      TimelinePipeline create() => TimelinePipeline(
+        cacheScope: 'host-fallback',
+        authorize: () async {},
+        loadCheckpoint: (key) async => cache[key] == null
+            ? null
+            : jsonDecode(jsonEncode(cache[key])) as Map<String, dynamic>,
+        saveCheckpoint: (key, value) async {
+          cache[key] = jsonDecode(jsonEncode(value)) as Map<String, dynamic>;
+        },
+        complete: (stage, instructions, input) async {
+          requests.add(stage);
+          if (stage == 'timeline_reconcile') {
+            // Discard even the valid merge when any later member is invalid.
+            return {
+              'groups': [
+                {
+                  'members': ['t0', 't1'],
+                },
+                {
+                  'members': ['synthetic-invalid-id'],
+                },
+              ],
+            };
+          }
+          if (stage == 'timeline_compose' || stage == 'timeline_review') {
+            expect(
+              (input['timeline_topics'] as List)
+                  .map((t) => t['evidence_ids'])
+                  .toList(),
+              [
+                ['e0'],
+                ['e1'],
+              ],
+            );
+            expect(input['history_complete'], false);
+          }
+          return normalComplete(stage, instructions, input);
+        },
+      );
+      final result = await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: false,
+      );
+      final fallbackKey = cache.keys.singleWhere(
+        (key) => cache[key]!['outcome'] == 'host_fallback',
+      );
+      final saved =
+          jsonDecode(jsonEncode(cache[fallbackKey])) as Map<String, dynamic>;
+      expect(saved, {
+        'recipe': TimelinePipeline.recipe,
+        'outcome': 'host_fallback',
+        'version': 1,
+        'reason': 'member_unknown_or_repeated',
+        'response': {'groups': []},
+      });
+      expect(jsonEncode(cache), isNot(contains('synthetic-invalid-id')));
+      expect(result.coverage['timeline_reconcile_host_fallback'], 1);
+      expect(result.coverage['timeline_repair_requests'], 0);
+      expect(requests, [
+        'timeline_select',
+        'timeline_reconcile',
+        'timeline_compose',
+        'timeline_review',
+      ]);
+      final prior = requests.length;
+      final replay = await create().generate(
+        data.observations,
+        data.records,
+        historyComplete: false,
+      );
+      expect(requests.length, prior);
+      expect(replay.entries, result.entries);
+      expect(replay.coverage['timeline_reconcile_host_fallback'], 1);
+      expect(replay.coverage['timeline_reconcile_unlisted_topics'], 2);
+      expect(replay.coverage['timeline_cached_stages'], 4);
+      for (final corrupt in <Map<String, dynamic>>[
+        {...saved}..remove('outcome'),
+        {...saved, 'outcome': 'model_success'},
+        {...saved, 'version': 2},
+        {...saved, 'version': 1.0},
+        {...saved, 'reason': 'profile_budget_exhausted'},
+        {...saved, 'unexpected': true},
+        {
+          ...saved,
+          'response': {
+            'groups': [
+              {
+                'members': ['t0', 't1'],
+              },
+            ],
+          },
+        },
+        {
+          ...saved,
+          'response': {'groups': [], 'unexpected': true},
+        },
+      ]) {
+        cache[fallbackKey] = corrupt;
+        await expectLater(
+          create().generate(
+            data.observations,
+            data.records,
+            historyComplete: false,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'code',
+              'profile_timeline_checkpoint_invalid',
+            ),
+          ),
+        );
+        expect(requests.length, prior);
+      }
+      cache[fallbackKey] = saved;
+      final selectionKey = cache.keys.singleWhere(
+        (key) => cache[key]!['response']['topics'] is List,
+      );
+      cache[selectionKey] = saved;
+      await expectLater(
+        create().generate(
+          data.observations,
+          data.records,
+          historyComplete: false,
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'code',
+            'profile_timeline_checkpoint_invalid',
+          ),
+        ),
+      );
+      expect(requests.length, prior);
+    },
+  );
+  for (final response in <Map<String, dynamic>>[
+    {'groups': 'invalid'},
+    {
+      'groups': [
+        {
+          'members': ['t0'],
+          'extra': true,
+        },
+      ],
+    },
+    {
+      'outcome': 'host_fallback',
+      'version': 1,
+      'reason': 'made-up',
+      'groups': [],
+    },
+  ]) {
+    test(
+      'host fallback is constructed by the host after invalid schema $response',
+      () async {
+        final data = fixture(2);
+        var reconcileCalls = 0;
+        Map<String, dynamic>? envelope;
+        final pipeline = TimelinePipeline(
+          cacheScope: 'host-schema',
+          authorize: () async {},
+          saveCheckpoint: (_, value) async {
+            if (value['outcome'] == 'host_fallback') {
+              envelope = value;
+            }
+          },
+          complete: (stage, instructions, input) async {
+            if (stage == 'timeline_reconcile') {
+              reconcileCalls++;
+              return response;
+            }
+            return normalComplete(stage, instructions, input);
+          },
+        );
+        final result = await pipeline.generate(
+          data.observations,
+          data.records,
+          historyComplete: true,
+        );
+        expect(reconcileCalls, 1);
+        expect(result.coverage['timeline_repair_requests'], 0);
+        expect(
+          envelope!['reason'],
+          response['groups'] is List && !response.containsKey('outcome')
+              ? 'members_schema'
+              : 'groups_schema',
+        );
+        expect(envelope!['response'], {'groups': []});
+      },
+    );
+  }
+  for (final code in [
+    'model_timeout',
+    'profile_budget_exhausted',
+    'authorization_changed',
+    'profile_context_too_large',
+    'profile_timeline_checkpoint_invalid',
+  ]) {
+    test('host fallback does not swallow $code', () async {
+      final data = fixture(2);
+      var fallbacks = 0;
+      final pipeline = TimelinePipeline(
+        cacheScope: 'host-fail-closed',
+        authorize: () async {},
+        saveCheckpoint: (_, value) async {
+          if (value['outcome'] == 'host_fallback') {
+            fallbacks++;
+          }
+        },
+        complete: (stage, instructions, input) async {
+          if (stage == 'timeline_reconcile') {
+            throw StateError(code);
+          }
+          return normalComplete(stage, instructions, input);
+        },
+      );
+      await expectLater(
+        pipeline.generate(
+          data.observations,
+          data.records,
+          historyComplete: true,
+        ),
+        throwsA(isA<StateError>().having((e) => e.message, 'code', code)),
+      );
+      expect(fallbacks, 0);
+    });
+  }
+  test('host fallback reauthorizes after saving before any writing', () async {
+    final data = fixture(2);
+    var revoked = false, writes = 0;
+    final pipeline = TimelinePipeline(
+      cacheScope: 'host-revoked',
+      authorize: () async {
+        if (revoked) {
+          throw StateError('authorization_changed');
+        }
+      },
+      saveCheckpoint: (_, value) async {
+        if (value['outcome'] == 'host_fallback') {
+          revoked = true;
+        }
+      },
+      complete: (stage, instructions, input) async {
+        if (stage == 'timeline_reconcile') {
+          return {
+            'groups': [
+              {
+                'members': ['foreign'],
+              },
+            ],
+          };
+        }
+        if (stage == 'timeline_compose' || stage == 'timeline_review') {
+          writes++;
+        }
+        return normalComplete(stage, instructions, input);
+      },
+    );
+    await expectLater(
+      pipeline.generate(data.observations, data.records, historyComplete: true),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'code',
+          'authorization_changed',
+        ),
+      ),
+    );
+    expect(writes, 0);
+  });
+  test('host fallback is zero for successful model reconciliation', () async {
+    final data = fixture(2);
+    final result = await TimelinePipeline(
+      cacheScope: 'model-reconcile',
+      authorize: () async {},
+      complete: normalComplete,
+    ).generate(data.observations, data.records, historyComplete: true);
+    expect(result.coverage['timeline_reconcile_host_fallback'], 0);
   });
 }
