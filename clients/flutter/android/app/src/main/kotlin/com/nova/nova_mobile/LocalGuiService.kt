@@ -17,8 +17,6 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
@@ -30,7 +28,6 @@ class LocalGuiService : AccessibilityService() {
     companion object { @Volatile var current: LocalGuiService?=null }
     private val main=Handler(Looper.getMainLooper())
     private var stopButton: Button?=null
-    private var approvalView: LinearLayout?=null
     private var nextScreenshotAt=0L
     var onStop: (() -> Unit)?=null
     var onUnavailable: (() -> Unit)?=null
@@ -156,24 +153,5 @@ class LocalGuiService : AccessibilityService() {
             getSystemService(WindowManager::class.java).addView(button,params);stopButton=button
         }
     }
-    fun showApproval(summary: String, details: String, resolve: (Boolean) -> Unit) {
-        main.post {
-            hideApprovalNow()
-            val box = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(20,16,20,16)
-                setBackgroundColor(android.graphics.Color.WHITE)
-                addView(TextView(context).apply { text = "Nova 请求执行\n${summary.take(500)}\n${details.take(500)}";setTextColor(android.graphics.Color.BLACK) })
-                addView(Button(context).apply { text = "允许这一步";setOnClickListener { hideApprovalNow();resolve(true) } })
-                addView(Button(context).apply { text = "拒绝并暂停";setOnClickListener { hideApprovalNow();resolve(false) } })
-            }
-            val params = WindowManager.LayoutParams((resources.displayMetrics.widthPixels * 0.85).toInt(),WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,android.graphics.PixelFormat.TRANSLUCENT)
-            params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            getSystemService(WindowManager::class.java).addView(box,params)
-            approvalView = box
-        }
-    }
-    private fun hideApprovalNow() { approvalView?.let { getSystemService(WindowManager::class.java).removeView(it) };approvalView = null }
-    fun hideApproval() { main.post { hideApprovalNow() } }
-    fun hideStop(){main.post{hideApprovalNow();stopButton?.let { getSystemService(WindowManager::class.java).removeView(it) };stopButton=null}}
+    fun hideStop(){main.post{stopButton?.let { getSystemService(WindowManager::class.java).removeView(it) };stopButton=null}}
 }

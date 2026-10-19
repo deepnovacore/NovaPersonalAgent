@@ -58,7 +58,7 @@ class MainActivity : FlutterActivity() {
                     "clearChatGptSettings" -> result.success(controller!!.clearChatGptSettings().toString())
                     "saveModelSettings" -> result.success(controller!!.saveModelSettings(args).toString())
                     "run" -> result.success(controller!!.runModel(args).toString())
-                    "approve" -> result.success(JSONObject().put("accepted",controller!!.approve(args.getString("id"),args.getString("proposal_id"),args.getBoolean("allow"))).toString())
+                    "approve" -> result.success(JSONObject().put("accepted",false).toString())
                     "apps" -> {
                         val rows=JSONArray()
                         packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)

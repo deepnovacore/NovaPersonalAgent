@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalGuiModelTest {
+    @Test fun startedTaskAuthorizesStepsWithoutAskingForApproval() {
+        val task = JSONObject().put("goal", "Toggle twice").put("acceptance", "Count is 2")
+        val screen = JSONObject().put("image", "YWJj").put("package", "test.app").put("tree", "Counter 0").put("width", 100).put("height", 200)
+        for (protocol in listOf("chatCompletions", "responses", "chatgptResponses")) {
+            val body = LocalGuiModel.requestBody("m", task, screen, 0, protocol)
+            val messages = body.getJSONArray(if (protocol == "chatCompletions") "messages" else "input")
+            val instructions = messages.getJSONObject(0).getString("content")
+            assertTrue(instructions.contains("automatically authorized"))
+            assertFalse(instructions.contains("every action needs user approval"))
+            assertTrue(instructions.contains("leave the selected app"))
+        }
+    }
+
     @Test fun responsesPreservesScreenAndExplicitToolContract() {
         val task = JSONObject().put("goal", "Toggle once").put("acceptance", "Count is 1")
         val screen = JSONObject().put("image","YWJj").put("package","test.app").put("tree","Counter 0").put("width",100).put("height",200)

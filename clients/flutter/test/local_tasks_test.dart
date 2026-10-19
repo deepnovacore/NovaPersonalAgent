@@ -174,6 +174,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('委托任务'));
     await tester.pumpAndSettle();
+    expect(find.textContaining('每一步操作由你确认'), findsNothing);
+    expect(find.textContaining('自动执行后续操作'), findsOneWidget);
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Fixture App').last);

@@ -186,42 +186,14 @@ void main() {
         });
         final deadline = DateTime.now().add(const Duration(minutes: 3));
         Map task = {};
-        var approvals = 0;
         while (DateTime.now().isBefore(deadline)) {
           await tester.pump(const Duration(milliseconds: 250));
           await Future<void>.delayed(const Duration(milliseconds: 250));
           task = (await call('tasks') as List).cast<Map>().firstWhere(
             (row) => row['id'] == id,
           );
-          if (task['phase'] == 'waiting_approval') {
-            // This harness is authorized only for this synthetic counter action.
-            // It validates the proposal before granting the native single-use permit.
-            final proposal = task['proposal'] as Map;
-            final action = proposal['action'] as Map;
-            expect(action['type'], 'tap');
-            expect(
-              approvals,
-              0,
-              reason: 'The model must not request a second tap',
-            );
-            final button = tester.getRect(find.text('Toggle fixture'));
-            final screen = tester.view.physicalSize;
-            final ratio = tester.view.devicePixelRatio;
-            final x = (action['x'] as num) * screen.width / ratio;
-            final y = (action['y'] as num) * screen.height / ratio;
-            expect(
-              button.inflate(35).contains(Offset(x, y)),
-              true,
-              reason: 'Only a tap within the synthetic button is authorized',
-            );
-            final result = await call('approve', {
-              'id': id,
-              'proposal_id': proposal['id'],
-              'allow': true,
-            });
-            expect(result['accepted'], true);
-            approvals++;
-          }
+          expect(task['phase'], isNot('waiting_approval'));
+          expect(task['proposal'], isNull);
           if ([
             'verifying',
             'completed',
@@ -237,7 +209,8 @@ void main() {
           reason:
               'Native loop must reach a completion claim: ${task['reason']}',
         );
-        expect(approvals, 1);
+        expect(task['authorization_mode'], 'automatic');
+        expect((task['actions'] as List).length, 1);
         await tester.pumpAndSettle();
         expect(find.text('Counter: 1'), findsOneWidget);
         expect((await call('verify', {'id': id}))['phase'], 'completed');
@@ -254,7 +227,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Counter: 1'), findsOneWidget);
         debugPrint(
-          'LIVE MODEL: native loop, one approved action, completion verification and replay passed',
+          'LIVE MODEL: native loop, one automatically authorized action, completion verification and replay passed',
         );
       },
     );

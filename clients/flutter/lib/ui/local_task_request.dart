@@ -6,7 +6,7 @@ import 'local_dialog.dart';
 
 /// Collect explicit user scope and consent before asking the native task host to
 /// run. This deliberately only returns a native `run` payload: dispatch and
-/// every subsequent action approval remain owned by the native host.
+/// subsequent execution policy remain owned by the native host.
 Future<Map<String, dynamic>?> requestLocalTask(
   BuildContext context, {
   required LocalAgent agent,
@@ -78,7 +78,7 @@ Future<Map<String, dynamic>?> requestLocalTask(
                 Text(
                   capabilities['platform'] == 'ios'
                       ? '请保持 Nova 在前台，每一步修改由你确认。进入后台会停止执行，任务最多运行 5 分钟。系统可能请求日历或提醒事项权限。'
-                      : '开始后打开所选 App。每一步操作由你确认，可随时点屏幕上的“停止 Nova”。任务最多运行 5 分钟。',
+                      : '开始后打开所选 App，并自动执行后续操作，无需逐步确认。可随时点屏幕上的“停止 Nova”。任务最多运行 5 分钟。',
                 ),
               ],
             ),

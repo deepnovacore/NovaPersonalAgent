@@ -177,7 +177,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
       builder: (context) => AlertDialog(
         title: const Text('在这台手机执行'),
         content: Text(
-          '${command['goal']}\n\n完成标准：${command['acceptance']}\n操作范围：${command['target']}\n\n允许将本次目标及所选范围的数据${capabilities['platform'] == 'android' ? '、界面截图' : ''}发送给 ${Uri.tryParse(settings['endpoint'] as String? ?? '')?.host ?? '模型服务'}（${settings['model']}）？每一步修改仍需你批准。',
+          '${command['goal']}\n\n完成标准：${command['acceptance']}\n操作范围：${command['target']}\n\n允许将本次目标及所选范围的数据${capabilities['platform'] == 'android' ? '、界面截图' : ''}发送给 ${Uri.tryParse(settings['endpoint'] as String? ?? '')?.host ?? '模型服务'}（${settings['model']}）？${capabilities['platform'] == 'android' ? '开始后会在所选 App 内自动执行后续操作，无需逐步确认，可随时点“停止 Nova”。' : '每一步修改仍需你批准。'}',
         ),
         actions: [
           TextButton(

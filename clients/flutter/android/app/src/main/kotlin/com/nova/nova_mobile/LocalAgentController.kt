@@ -67,7 +67,7 @@ class LocalAgentController(context: Context) {
         val run=active!!
         run.target=target
         run.model=LocalGuiModel(config)
-        record.put("target_package",target).put("execution_mode","native_model").put("model",config.model).put("model_endpoint",config.endpoint)
+        record.put("target_package",target).put("execution_mode","native_model").put("authorization_mode","automatic").put("model",config.model).put("model_endpoint",config.endpoint)
         journal.save(record)
         loopWorker.execute {
             try {
@@ -93,7 +93,7 @@ class LocalAgentController(context: Context) {
                         check(observation.getString("package")==target){"outside_target_app"}
                         return observation
                     }
-                    override fun approve(decision:ToolDecision,observation:JSONObject)=requestApproval(run,decision,observation)
+                    override fun approve(decision:ToolDecision,observation:JSONObject)=authorizeAction(run,decision,observation)
                     override fun execute(action:JSONObject)=this@LocalAgentController.execute(JSONObject(control.toString()).put("attempt_id",UUID.randomUUID().toString()).put("action",action)).getString("state")
                     override fun finish(summary:String) {this@LocalAgentController.finish(JSONObject(control.toString()).put("summary",summary))}
                     override fun interrupt(reason:String) {this@LocalAgentController.interrupt(run.id,reason)}
@@ -103,29 +103,16 @@ class LocalAgentController(context: Context) {
         }
         return record
     }
-    private fun requestApproval(run:Active,decision:ToolDecision,observation:JSONObject):Boolean {
-        val approval=ActionApproval(UUID.randomUUID().toString(),decision.action!!.toString(),observation.getString("fingerprint"),SystemClock.elapsedRealtime()+90000)
-        synchronized(this) {
-            check(active===run && run.fence.allows(run.fence.token(),SystemClock.elapsedRealtime())){"task_stopped"}
-            run.approval=approval
-            val task=journal.task(run.id)!!
-            task.put("phase","waiting_approval").put("proposal",JSONObject().put("id",approval.id).put("summary",decision.summary).put("action",decision.action))
-            journal.save(task)
-            LocalGuiService.current?.showApproval(decision.summary,decision.action.toString()){allow -> approve(run.id,approval.id,allow)}
-        }
-        val allowed=approval.await(90000)
-        synchronized(this) {
-            if(active===run) {
-                LocalGuiService.current?.hideApproval()
-                val task=journal.task(run.id)!!;task.remove("proposal");task.put("phase","running");journal.save(task)
-            }
-        }
-        return allowed
-    }
-    @Synchronized fun approve(id:String,proposalId:String,allow:Boolean):Boolean {
-        val run=active?:return false
-        if(run.id!=id || !run.fence.allows(run.fence.token(),SystemClock.elapsedRealtime()))return false
-        return run.approval?.resolve(proposalId,allow,SystemClock.elapsedRealtime())?:false
+    /** Starting a task authorizes its steps within the selected app. Keep a
+     * single-use, screen-bound permit, but never wait for a per-step UI approval. */
+    @Synchronized private fun authorizeAction(run:Active,decision:ToolDecision,observation:JSONObject):Boolean {
+        val now=SystemClock.elapsedRealtime()
+        if(active!==run || !run.fence.allows(run.fence.token(),now))return false
+        check(observation.getString("package")==run.target){"outside_target_app"}
+        run.approval?.cancel()
+        val approval=ActionApproval(UUID.randomUUID().toString(),decision.action!!.toString(),observation.getString("fingerprint"),now+90000)
+        run.approval=approval
+        return approval.resolve(approval.id,true,now)
     }
     @Synchronized fun interrupt(id:String,reason:String):JSONObject? {
         val run=active

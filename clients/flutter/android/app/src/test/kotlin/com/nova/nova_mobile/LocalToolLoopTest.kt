@@ -45,6 +45,16 @@ class LocalToolLoopTest {
         assertEquals(0, host.writes)
         assertEquals("approval_declined", host.interruption)
     }
+    @Test fun authorizedTaskContinuesAcrossMultipleFreshObservations() {
+        val host = Host()
+        LocalToolLoop(host, { _, turn ->
+            if (turn < 3) action() else ToolDecision.parse(JSONObject("""{"kind":"complete","summary":"Counter shows three"}"""))
+        }).run()
+        assertEquals(3, host.writes)
+        assertEquals(4, host.observed)
+        assertTrue(host.verified)
+        assertNull(host.interruption)
+    }
     @Test fun unknownEffectNeverGetsRetriedOrReportedComplete() {
         val host = Host().apply { effect = "unknown" }
         LocalToolLoop(host, { _, _ -> action() }).run()
