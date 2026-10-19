@@ -20,13 +20,15 @@
 
 Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如何、何时澄清意图、征求批准，再推进工作。前后双脑协作，让后台 Agent 执行长任务时，前台依然能流畅交流。你可以边聊边调整目标，随时回看结果，始终掌握主动权。
 
-**[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [视频演示](https://youtu.be/t1c-2O-QsxE)**
+**[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)**
 
 [快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [使用案例](#23-使用案例) · [路线图](#5-路线图)
 
 </div>
 
 ---
+
+https://github.com/user-attachments/assets/6f050c21-aede-4b2a-8f79-e7794d5137d4
 
 ## News
 
