@@ -8,10 +8,10 @@ Alternatives considered: tapping approval buttons from Flutter would retain the 
 
 ## Implementation and verification
 
-- [ ] Add regression assertions for automatic model instructions and Android start copy; observe failures with the existing implementation.
-- [ ] Replace native approval waiting with immediate, screen-bound authorization and remove unused Android approval overlay code. Retain the legacy approve command as a rejected compatibility call.
-- [ ] Update Android task and Hub acceptance copy, and native real-model fixtures to fail if a per-step approval is requested.
-- [ ] Run native unit tests, focused Flutter tests and Flutter analysis using isolated external outputs/caches.
+- [x] Add regression assertions for automatic model instructions and Android start copy; observe failures with the existing implementation.
+- [x] Replace native approval waiting with immediate, screen-bound authorization and remove unused Android approval overlay code. Retain the legacy approve command as a rejected compatibility call.
+- [x] Update Android task and Hub acceptance copy, and native real-model fixtures to fail if a per-step approval is requested.
+- [x] Run native unit tests, focused Flutter tests and Flutter analysis using isolated external outputs/caches.
 - [ ] Build the isolated .autonomy candidate, have the user enable its accessibility service, and run a real model against a multi-step synthetic counter and the system calculator. Independently inspect target UI and durable native receipts; verify stop and replay without automatic retries.
 - [ ] Record source state, APK hash, device, model, exact checks and limitations in the acceptance report; commit the reviewed change locally.
 
