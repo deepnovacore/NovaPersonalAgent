@@ -100,6 +100,8 @@ String _plain(String value, int limit) {
 }
 
 DateTime? _published(String raw, DateTime now) {
+  // Public RSS feeds may pad the separator before their numeric UTC offset.
+  raw = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
   DateTime? date = DateTime.tryParse(raw);
   if (date == null) {
     try {

@@ -42,6 +42,21 @@ void main() {
       expect(newsArticleUrl(url), isNull, reason: url);
     }
   });
+  test('RSS timestamps accept repeated whitespace before numeric timezone', () {
+    for (final input in [
+      '2026-10-19 14:49:04  +0800',
+      '2026-10-19 14:49:04\t+0800',
+      '  2026-10-19 14:49:04   +08:00  ',
+    ]) {
+      final xml =
+          '<rss><channel><item><title>Public article</title><link>https://example.com/date</link><pubDate>$input</pubDate></item></channel></rss>';
+      expect(
+        parseNewsFeed(xml, source, now).single['published_at'],
+        '2026-10-19T06:49:04.000Z',
+        reason: input,
+      );
+    }
+  });
   test('rejects oversized, deeply nested, malformed, DTD and HTML input', () {
     for (final xml in [
       'x' * (1024 * 1024 + 1),
