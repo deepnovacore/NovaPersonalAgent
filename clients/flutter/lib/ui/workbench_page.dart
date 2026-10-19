@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'scheduled_tasks_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -75,6 +76,52 @@ class WorkbenchPage extends StatefulWidget {
 }
 
 class _WorkbenchPageState extends State<WorkbenchPage> {
+  @override
+  void initState() {
+    super.initState();
+    _syncNewsLanguage();
+  }
+
+  @override
+  void didUpdateWidget(covariant WorkbenchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.page == 1 &&
+        (oldWidget.language != widget.language ||
+            oldWidget.store != store ||
+            oldWidget.page != 1)) {
+      _syncNewsLanguage();
+    }
+  }
+
+  void _syncNewsLanguage() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.page == 1) {
+        unawaited(store.news?.setLanguage(widget.language));
+      }
+    });
+  }
+
+  Future<dynamic> _runNews(Future<dynamic> Function() action) async {
+    try {
+      return await action();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t(
+                error is StateError && error.message == 'saved_limit_100'
+                    ? 'Saved articles are full (100). Remove one first.'
+                    : 'Could not save news. Please try again.',
+              ),
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
   String get _kind => widget.page == 2
       ? 'todo'
       : widget.page == 4
@@ -784,6 +831,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           article['source_name'] as String? ?? article['source_id'] as String?,
           relativeTime(article['published_at'] as String?, widget.language),
           if (article['saved'] == true) t('Saved'),
+          if (article['read'] == true) t('Read'),
         ]),
         if ((article['summary'] as String? ?? '').isNotEmpty)
           Padding(
@@ -796,7 +844,36 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           ),
       ],
     ),
-    onTap: () => _openArticle(article),
+    trailing: IconButton(
+      tooltip: t(article['saved'] == true ? 'Unsave article' : 'Save article'),
+      icon: Icon(
+        article['saved'] == true
+            ? CupertinoIcons.bookmark_fill
+            : CupertinoIcons.bookmark,
+        color: article['saved'] == true ? Nova.mint : Nova.secondary,
+      ),
+      onPressed: !store.available
+          ? null
+          : () => _runNews(
+              () => store.command('news.action', {
+                'action': 'save',
+                'id': article['id'],
+                'value': article['saved'] != true,
+              }),
+            ),
+    ),
+    onTap: () async {
+      if (store.available) {
+        await _runNews(
+          () => store.command('news.action', {
+            'action': 'read',
+            'id': article['id'],
+            'value': true,
+          }),
+        );
+      }
+      if (mounted) await _openArticle(article);
+    },
   );
 
   Future<void> _openArticle(Map<String, dynamic> article) =>
@@ -910,7 +987,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 version == 0 &&
                 confirmed.isEmpty &&
                 suggested.isEmpty
-            ? t('Add your introduction here. Information from Feishu appears below.')
+            ? t(
+                'Add your introduction here. Information from Feishu appears below.',
+              )
             : t(
                 confirmed.isNotEmpty
                     ? 'Written by you'
@@ -1120,7 +1199,13 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           child: RefreshIndicator(
             color: Nova.mint,
             backgroundColor: Nova.cell,
-            onRefresh: () async => store.refresh(force: true),
+            onRefresh: () async {
+              if (widget.page == 1) {
+                await _runNews(() => store.command('news.refresh'));
+              } else {
+                store.refresh(force: true);
+              }
+            },
             child: ListView(
               key: _viewport,
               physics: const AlwaysScrollableScrollPhysics(),
@@ -1220,13 +1305,107 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 ],
                 if (widget.page == 1) ...[
                   Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 16, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            t(
+                              news['mode'] == 'personalized'
+                                  ? 'For you'
+                                  : 'Public news, newest first',
+                            ),
+                            style: const TextStyle(
+                              color: Nova.secondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        if (news['refreshing'] == true)
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          IconButton(
+                            tooltip: t('Refresh'),
+                            icon: const Icon(CupertinoIcons.refresh),
+                            onPressed: !store.available
+                                ? null
+                                : () => _runNews(
+                                    () => store.command('news.refresh'),
+                                  ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (_rows(news['sources']).isNotEmpty)
+                    ExpansionTile(
+                      title: Text(
+                        t('News sources'),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Nova.secondary,
+                        ),
+                      ),
+                      tilePadding: const EdgeInsets.symmetric(horizontal: 20),
+                      dense: true,
+                      children: [
+                        for (final source in _rows(news['sources']))
+                          ListTile(
+                            dense: true,
+                            title: Text(
+                              source['name'] as String? ??
+                                  source['id'] as String? ??
+                                  '',
+                            ),
+                            subtitle: Text(
+                              source['last_success'] == null
+                                  ? t(
+                                      source['error'] != null
+                                          ? 'Temporarily unavailable'
+                                          : 'Waiting for first update',
+                                    )
+                                  : '${t('Last updated')} ${relativeTime(source['last_success'] as String?, widget.language)}',
+                            ),
+                            trailing: source['error'] != null
+                                ? const Icon(
+                                    CupertinoIcons.exclamationmark_circle,
+                                    color: Nova.amber,
+                                    size: 18,
+                                  )
+                                : null,
+                          ),
+                      ],
+                    ),
+                  if (news['error'] != null ||
+                      _rows(news['sources']).any((s) => s['error'] != null))
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                      child: Text(
+                        t(
+                          news['error'] != null
+                              ? 'Could not save news. Please try again.'
+                              : 'Some sources are unavailable. Saved news is still available.',
+                        ),
+                        style: const TextStyle(color: Nova.amber, fontSize: 13),
+                      ),
+                    ),
+                  Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                     child: CupertinoSlidingSegmentedControl<bool>(
                       groupValue: _saved,
                       backgroundColor: const Color(0xff1f252c),
                       thumbColor: const Color(0xff4a515a),
                       children: {
-                        false: Text(t('For you')),
+                        false: Text(
+                          t(
+                            news['mode'] == 'personalized'
+                                ? 'For you'
+                                : 'Latest',
+                          ),
+                        ),
                         true: Text(t('Saved')),
                       },
                       onValueChanged: (value) =>
@@ -1238,9 +1417,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                       t(
                         _saved
                             ? 'No saved articles yet'
-                            : news['enabled'] == false
-                            ? 'News updates are off. Turn them on in the Mac workbench.'
-                            : 'No news recommendations yet',
+                            : news['refreshing'] == true
+                            ? 'Loading public news…'
+                            : 'No articles yet. Pull down to retry.',
                       ),
                       icon: CupertinoIcons.news,
                     )

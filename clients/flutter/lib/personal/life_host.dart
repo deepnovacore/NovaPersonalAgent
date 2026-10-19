@@ -8,12 +8,15 @@ import '../protocol/request_id.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/preferences.dart';
 import '../agent/hub_tasks.dart';
 import '../agent/life_tool_bridge.dart';
 import '../agent/local_agent.dart';
 import 'hub_transport.dart';
 import 'life_sync_scheduler.dart';
 import 'local_life.dart';
+import 'local_news.dart';
 import 'personal_store.dart';
 
 abstract interface class LifeAccess {
@@ -30,10 +33,16 @@ abstract interface class LifeAccess {
 class LifeHost extends ChangeNotifier
     with WidgetsBindingObserver
     implements LifeAccess {
-  LifeHost({LocalLife? repository, this.backgroundReader = false})
-    : _provided = repository;
+  LifeHost({
+    LocalLife? repository,
+    LocalNews? newsRepository,
+    this.backgroundReader = false,
+  }) : _provided = repository,
+       _providedNews = newsRepository;
   final bool backgroundReader;
   final LocalLife? _provided;
+  final LocalNews? _providedNews;
+  LocalNews? news;
   final authority = SpaceAuthorityRepository(
     const SecureContextPersistence('nova.space.authority.v1'),
   );
@@ -93,7 +102,33 @@ class LifeHost extends ChangeNotifier
       repo = local;
       if (!local.ready) await local.open();
       _checkActive();
-      store = PersonalStore(send: (_) => false, local: local);
+      // Injected Life repositories may omit News (e.g. background/test hosts).
+      if (!backgroundReader && (_provided == null || _providedNews != null)) {
+        var newsLanguage = WidgetsBinding.instance.platformDispatcher.locale
+            .toLanguageTag();
+        if (_providedNews == null) {
+          try {
+            newsLanguage = Preferences(
+              await SharedPreferences.getInstance(),
+            ).language(newsLanguage);
+          } catch (_) {
+            /* Use system language when preferences are unavailable. */
+          }
+        }
+        news =
+            _providedNews ??
+            LocalNews(
+              FileLifePersistence(
+                File(
+                  '${(await getApplicationSupportDirectory()).path}/local-news-v1.json',
+                ),
+              ),
+              language: newsLanguage,
+            );
+        await news!.open();
+        _checkActive();
+      }
+      store = PersonalStore(send: (_) => false, local: local, news: news);
       await authority.open();
       authorityReady = true;
       authority.addListener(_notify);
@@ -119,6 +154,13 @@ class LifeHost extends ChangeNotifier
         return;
       }
       _scheduler = LifeSyncScheduler(sync: sync, onError: (_) {});
+      unawaited(
+        news?.setForeground(
+          WidgetsBinding.instance.lifecycleState == null ||
+              WidgetsBinding.instance.lifecycleState ==
+                  AppLifecycleState.resumed,
+        ),
+      );
       _scheduler!.setForeground(
         WidgetsBinding.instance.lifecycleState == null ||
             WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
@@ -137,8 +179,10 @@ class LifeHost extends ChangeNotifier
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) =>
-      _scheduler?.setForeground(state == AppLifecycleState.resumed);
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _scheduler?.setForeground(state == AppLifecycleState.resumed);
+    unawaited(news?.setForeground(state == AppLifecycleState.resumed));
+  }
 
   LocalLife get _ready {
     _checkActive();
@@ -368,6 +412,7 @@ class LifeHost extends ChangeNotifier
     _tasks?.dispose();
     repo?.removeListener(_changed);
     store?.dispose();
+    news?.dispose();
     authority.removeListener(_notify);
     authority.dispose();
     contextSync?.dispose();

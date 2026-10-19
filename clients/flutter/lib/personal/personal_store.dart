@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../protocol/request_id.dart';
 import 'models.dart';
 import 'local_life.dart';
+import 'local_news.dart';
 
 final class PersonalCommandError implements Exception {
   const PersonalCommandError(this.code);
@@ -18,19 +19,24 @@ final class PersonalStore extends ChangeNotifier {
     required this.send,
     this.timeout = const Duration(seconds: 30),
     this.local,
+    this.news,
   }) {
     local?.addListener(_localChanged);
+    news?.addListener(_localChanged);
     if (local != null) _localChanged();
   }
   final LocalLife? local;
+  final LocalNews? news;
+  int _localRevision = 0;
   bool get available => local?.ready ?? connected;
   void _localChanged() {
     final repository = local;
     if (repository == null || !repository.ready) return;
     snapshot = PersonalSnapshot({
       'type': 'personal.state',
-      'revision': repository.revision,
+      'revision': ++_localRevision,
       'life': repository.life,
+      'news': news?.snapshot() ?? {'enabled': true, 'items': [], 'saved': []},
     });
     notifyListeners();
   }
@@ -121,6 +127,12 @@ final class PersonalStore extends ChangeNotifier {
     final repository = local;
     if (repository != null) {
       if (method == 'state') return Future.value(snapshot?.data);
+      if (method == 'news.refresh' && news != null) {
+        return news!.refresh().then((_) => news!.snapshot());
+      }
+      if (method == 'news.action' && news != null) {
+        return news!.action(params).then((_) => news!.snapshot());
+      }
       if (method == 'life.mutate') {
         return repository.mutate(params, operationId: id);
       }
@@ -213,6 +225,7 @@ final class PersonalStore extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     local?.removeListener(_localChanged);
+    news?.removeListener(_localChanged);
     for (final pending in _pending.values) {
       pending.timer.cancel();
       pending.result.completeError(const PersonalCommandError('Disposed'));

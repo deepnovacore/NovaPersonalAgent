@@ -12,6 +12,7 @@ void main() {
     addTearDown(store.dispose);
     expect(store.connected, false);
     expect(store.available, true);
+    expect(store.snapshot!.object('news')['items'], isList);
     await store.command('life.mutate', {
       'op': 'create',
       'kind': 'todo',
