@@ -54,7 +54,7 @@ typedef void (^ISHShellCompletionCallback)(ISHShellExecutionResult *result);
 /// Execute a shell command with line-by-line output callback
 /// @param command Shell command to execute (will be passed to /bin/sh -c)
 /// @param lineCallback Called for each line of output (on main queue), can be nil
-/// @param completion Called when process exits (on main queue), can be nil
+/// @param completion Called after execution cleanup (worker queue), can be nil
 /// @return Guest process PID, or negative error code on failure
 + (int)executeCommand:(NSString *)command
          lineCallback:(nullable ISHShellLineCallback)lineCallback
@@ -65,7 +65,7 @@ typedef void (^ISHShellCompletionCallback)(ISHShellExecutionResult *result);
 /// @param arguments Array of arguments (e.g., @[@"-la", @"/tmp"])
 /// @param environment Dictionary of environment variables (nil = default)
 /// @param lineCallback Called for each line of output (on main queue), can be nil
-/// @param completion Called when process exits (on main queue), can be nil
+/// @param completion Called after execution cleanup (worker queue), can be nil
 /// @return Guest process PID, or negative error code on failure
 + (int)executeExecutable:(NSString *)executable
                arguments:(nullable NSArray<NSString *> *)arguments
@@ -73,13 +73,24 @@ typedef void (^ISHShellCompletionCallback)(ISHShellExecutionResult *result);
             lineCallback:(nullable ISHShellLineCallback)lineCallback
               completion:(nullable ISHShellCompletionCallback)completion;
 
+/// Nova callers retain this identity with the PID for cancellation/finalization.
+/// It is assigned before the guest task starts and is never derived from a PID.
++ (int)executeExecutable:(NSString *)executable
+               arguments:(nullable NSArray<NSString *> *)arguments
+             environment:(nullable NSDictionary<NSString *, NSString *> *)environment
+            lineCallback:(nullable ISHShellLineCallback)lineCallback
+              completion:(nullable ISHShellCompletionCallback)completion
+               ownership:(uint64_t *)ownership;
++ (void)killProcessGroup:(int)pid ownership:(uint64_t)ownership;
++ (void)finalizeTimedOutPid:(int)pid ownership:(uint64_t)ownership;
+
 /// Execute an executable with data fed to stdin via pipe.
 /// @param executable Path to executable (e.g., "/bin/sh")
 /// @param arguments Array of arguments (e.g., @[])
 /// @param environment Dictionary of environment variables (nil = default)
 /// @param stdinData Data to write to the process's stdin (pipe is closed after write)
 /// @param lineCallback Called for each line of output (on main queue), can be nil
-/// @param completion Called when process exits (on main queue), can be nil
+/// @param completion Called after execution cleanup (worker queue), can be nil
 /// @return Guest process PID, or negative error code on failure
 + (int)executeExecutable:(NSString *)executable
                arguments:(nullable NSArray<NSString *> *)arguments
@@ -118,8 +129,9 @@ typedef void (^ISHShellCompletionCallback)(ISHShellExecutionResult *result);
 + (BOOL)killProcess:(int)pid withSignal:(int)signal;
 
 /// Kill a process and all children in its process group.
-/// First sends SIGTERM to the group, waits briefly, then sends SIGKILL.
-/// @param pid Guest process PID — its pgid is used to find the group
+/// Signals the currently registered execution. Nova uses the token-taking
+/// overload below so delayed cancellation cannot address a recycled PID.
+/// @param pid Guest process PID
 + (void)killProcessGroup:(int)pid;
 
 /// Finish a timed-out command's bookkeeping without waiting to be told the

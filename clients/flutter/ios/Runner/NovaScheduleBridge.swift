@@ -11,6 +11,8 @@ final class NovaScheduleBridge {
   private static var channel: FlutterMethodChannel?
   private static var channels: [String: FlutterMethodChannel] = [:]
   private static var headless: FlutterEngine?
+  private static var workspace: NovaWorkspaceBridge?
+  private static var artifactHost: ArtifactWebHost?
   private static var ownerIsHeadless = false
   private static var ready = false
   private static var completion: ((Bool) -> Void)?
@@ -39,6 +41,9 @@ final class NovaScheduleBridge {
         headless = engine
         GeneratedPluginRegistrant.register(with: engine)
         install(messenger: engine.binaryMessenger)
+        workspace = NovaWorkspaceBridge(messenger: engine.binaryMessenger)
+        artifactHost = ArtifactWebHost(messenger: engine.binaryMessenger)
+        NovaBackgroundExecution.install(with: engine.binaryMessenger)
         if !engine.run(withEntrypoint: "novaScheduleMain") { finish(false) }
       } else if ready { dispatch() }
       DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
@@ -112,6 +117,7 @@ final class NovaScheduleBridge {
     if ownerIsHeadless || owner == nil {
       let engine = headless; headless = nil
       if let id = owner { channels.removeValue(forKey: id) }
+      workspace = nil; artifactHost = nil
       engine?.destroyContext(); release()
     }
   }

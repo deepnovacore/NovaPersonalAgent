@@ -10,6 +10,8 @@
 #import "ISHKernel.h"
 
 #include <poll.h>
+#include <stdatomic.h>
+#include <unistd.h>
 #include <libkern/OSAtomic.h>
 #include "ish/kernel/init.h"
 #include "ish/kernel/calls.h"
@@ -18,6 +20,8 @@
 #include "ish/kernel/fs.h"
 #include "ish/fs/devices.h"
 #include "ish/fs/real.h"
+
+static _Atomic uint64_t nextOwnership = 1;
 
 #pragma mark - Leak Guard Tunables
 
@@ -66,6 +70,7 @@ static const NSTimeInterval ISHShellExecutorStaleContextAge = 7200.0; // 2h
     int32_t _liveReaders;
 }
 @property (nonatomic) int guestPid;
+@property (nonatomic) uint64_t ownership;
 @property (nonatomic) NSDate *startTime;
 @property (nonatomic, copy) ISHShellLineCallback lineCallback;
 @property (nonatomic, copy) ISHShellCompletionCallback completion;
@@ -339,6 +344,21 @@ static int32_t _sweptContexts = 0;
                fsContext:(uint64_t)fsContext
             lineCallback:(ISHShellLineCallback)lineCallback
               completion:(ISHShellCompletionCallback)completion {
+    return [self executeExecutable:executable arguments:arguments environment:environment stdinData:stdinData fsContext:fsContext lineCallback:lineCallback completion:completion ownership:NULL];
+}
+
++ (int)executeExecutable:(NSString *)executable arguments:(NSArray<NSString *> *)arguments environment:(NSDictionary<NSString *,NSString *> *)environment lineCallback:(ISHShellLineCallback)lineCallback completion:(ISHShellCompletionCallback)completion ownership:(uint64_t *)ownership {
+    return [self executeExecutable:executable arguments:arguments environment:environment stdinData:nil fsContext:0 lineCallback:lineCallback completion:completion ownership:ownership];
+}
+
++ (int)executeExecutable:(NSString *)executable
+               arguments:(NSArray<NSString *> *)arguments
+             environment:(NSDictionary<NSString *, NSString *> *)environment
+               stdinData:(NSData *)stdinData
+               fsContext:(uint64_t)fsContext
+            lineCallback:(ISHShellLineCallback)lineCallback
+              completion:(ISHShellCompletionCallback)completion ownership:(uint64_t *)ownership {
+    if (ownership) *ownership = 0;
 
     // Bail out if the iSH kernel hasn't booted yet. become_new_init_child()
     // calls pid_get_task(1) and then assert(init != NULL); on a non-booted
@@ -378,6 +398,9 @@ static int32_t _sweptContexts = 0;
     }
 
     struct task *task = current;
+    ctx.ownership = atomic_fetch_add_explicit(&nextOwnership,1,memory_order_relaxed);
+    task->group->nova_execution_id = ctx.ownership;
+    if (ownership) *ownership = ctx.ownership;
 
     // Stamp the new task group with the caller-provided fs_context so the
     // fakefs path-translate hook can route this task's file operations
@@ -600,13 +623,12 @@ static int32_t _sweptContexts = 0;
     // Get guest PID and start task
     ctx.guestPid = task->pid;
     ctx.result.pid = ctx.guestPid;
-    task_start(task);
-    current = saved_current;
-
-    // Register context
+    // Register before starting: even a one-instruction command may exit now.
     @synchronized(_activeExecutions) {
         _activeExecutions[@(ctx.guestPid)] = ctx;
     }
+    task_start(task);
+    current = saved_current;
 
     // Write stdinData to pipe in background, then close write end
     if (stdinData && stdinPipe[1] >= 0) {
@@ -745,117 +767,35 @@ static int32_t _sweptContexts = 0;
     return task != NULL;
 }
 
-// Returns YES if `t` is `rootPid` or has `rootPid` somewhere in its parent
-// chain. The caller must hold `pids_lock`. Bounded by MAX_PID to defend
-// against a malformed parent cycle.
-static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
-    int hops = 0;
-    while (t != NULL && hops < MAX_PID) {
-        if (t->pid == rootPid) return YES;
-        struct task *parent = t->parent;
-        // [T-ish-killpg-stale-parent] Only walk to a parent the pid table
-        // still vouches for.
-        //
-        // `task_destroy` zeroes the struct and defers the free, but it never
-        // clears the `parent` pointer of the children it leaves behind. A
-        // surviving child therefore keeps pointing at its dead parent, and
-        // once `flush_deferred_frees` releases that block and malloc hands
-        // the address to something else, the pointer is neither NULL nor
-        // zeroed — it is another object's memory. Reading `->pid` off it
-        // faulted (EXC_BAD_ACCESS at 0x7a8, 1.14(12), iOS 17.0).
-        //
-        // Re-deriving the parent through `pid_get_task` closes that: a
-        // destroyed task's pid slot was set to NULL by `task_destroy`, and a
-        // recycled slot returns a DIFFERENT pointer, which fails the identity
-        // check below. Either way the walk stops instead of chasing freed
-        // memory. Costs one table lookup per hop, on a path that already
-        // scans MAX_PID entries.
-        if (parent == NULL) return NO;
-        pid_t_ parentPid = parent->pid;
-        if (parentPid == 0 || parentPid >= MAX_PID) return NO;
-        if (pid_get_task((dword_t)parentPid) != parent) return NO;
-        t = parent;
-        hops++;
+// Ownership survives reparenting and setsid, and is independent of recycled PIDs.
++ (BOOL)signalOwnedExecution:(uint64_t)ownership {
+    if (ownership == 0) return YES;
+    BOOL empty = YES;
+    struct siginfo_ info = SIGINFO_NIL;
+    lock(&pids_lock);
+    for (int i = 2; i < MAX_PID; i++) {
+        struct task *task = pid_get_task(i);
+        if (!task || !task->group || task->zombie || task->group->nova_execution_id != ownership) continue;
+        empty = NO;
+        send_signal(task,SIGKILL_,info);
     }
-    return NO;
+    unlock(&pids_lock);
+    return empty;
 }
 
 + (void)killProcessGroup:(int)pid {
-    // Signal every task belonging to this shell_execute command — matched
-    // either by pgid OR by being a descendant of the root pid. The ancestry
-    // arm is needed because busybox ash sometimes puts subshells into a
-    // fresh process group (setpgid(0,0) for job control), which would leave
-    // `sleep` and similar grandchildren invisible to a pgid-only sweep —
-    // that is why the Stop button failed to kill `sleep`.
-    //
-    // Safety rails:
-    //   - Refuse pid <= 1: pid 1 is init; an ancestry sweep rooted at init
-    //     would match every task in iSH and tear the whole kernel down.
-    //   - Re-verify the task pointer on the deferred SIGKILL pass. If the
-    //     root has already exited and its pid was recycled to an unrelated
-    //     task, the pointer comparison fails and we abort the sweep —
-    //     otherwise we would kill an innocent command and its descendants.
-    if (pid <= 1) {
-        NSLog(@"ISHShellExecutor: refusing killProcessGroup for pid=%d", pid);
-        return;
-    }
-    struct siginfo_ info = SIGINFO_NIL;
+    ISHShellExecutionContext *context;
+    @synchronized(_activeExecutions) { context = _activeExecutions[@(pid)]; }
+    if (context) [self signalOwnedExecution:context.ownership];
+}
 
-    lock(&pids_lock);
-    struct task *rootTask = pid_get_task((dword_t)pid);
-    pid_t_ pgid = 0;
-    if (rootTask) {
-        pgid = rootTask->group->pgid;
-        for (int i = 2; i < MAX_PID; i++) {
-            struct task *t = pid_get_task(i);
-            if (!t) continue;
-            // [T-ish-killpg-stale-parent] `task_destroy` zeroes the struct
-            // before deferring the free, so a task still reachable from the
-            // pid table can have a NULL group for that window.
-            BOOL byPgid = (pgid != 0 && t->group != NULL && t->group->pgid == pgid);
-            BOOL byAncestry = ISHTaskIsDescendantOf(t, (pid_t_)pid);
-            if (byPgid || byAncestry) {
-                send_signal(t, SIGTERM_, info);
-            }
-        }
-    }
-    unlock(&pids_lock);
-
-    if (rootTask == NULL) {
-        // Root already gone — don't schedule a delayed SIGKILL against a pid
-        // that might already have been recycled.
-        return;
-    }
-
-    // After a short delay, SIGKILL any survivors. SIGTERM may be caught
-    // or, for tasks blocked inside host nanosleep, need the pthread_kill
-    // wakeup that send_signal already issues — give the wakeup a chance
-    // to land and the signal handler to run before escalating.
-    int capturedPid = pid;
-    struct task *capturedRoot = rootTask;
-    pid_t_ capturedPgid = pgid;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(200 * NSEC_PER_MSEC)), dispatch_get_global_queue(0, 0), ^{
-        lock(&pids_lock);
-        // Verify the pid still maps to the same task struct we saw earlier.
-        // pid_get_task returns NULL once task_destroy unlinks the task, and
-        // a different pointer if the pid slot has been reused. Either way
-        // the original command is already gone — skip the sweep.
-        struct task *still = pid_get_task((dword_t)capturedPid);
-        if (still != capturedRoot) {
-            unlock(&pids_lock);
-            return;
-        }
-        for (int i = 2; i < MAX_PID; i++) {
-            struct task *t = pid_get_task(i);
-            if (!t) continue;
-            BOOL byPgid = (capturedPgid != 0 && t->group != NULL && t->group->pgid == capturedPgid);
-            BOOL byAncestry = ISHTaskIsDescendantOf(t, (pid_t_)capturedPid);
-            if (byPgid || byAncestry) {
-                send_signal(t, SIGKILL_, info);
-            }
-        }
-        unlock(&pids_lock);
-    });
++ (void)killProcessGroup:(int)pid ownership:(uint64_t)ownership {
+    [self signalOwnedExecution:ownership];
+}
++ (void)finalizeTimedOutPid:(int)pid ownership:(uint64_t)ownership {
+    ISHShellExecutionContext *ctx;
+    @synchronized(_activeExecutions) { ctx = _activeExecutions[@(pid)]; }
+    if (ctx && ctx.ownership == ownership) [self finalizeContext:ctx exitCode:-1 error:ISHShellExecutorErrorTimeout];
 }
 
 #pragma mark - Finalisation
@@ -884,6 +824,17 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
         ctx.didFinalize = YES;
     }
 
+    // Successful shell exit must also retire detached/background descendants.
+    // Repeat for forks already in flight at the first sweep; never reuse a PID
+    // to decide ownership. This runs on a worker queue, not the main thread.
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    BOOL empty = [self signalOwnedExecution:ctx.ownership];
+    while (!empty && deadline.timeIntervalSinceNow > 0) {
+        usleep(10000);
+        empty = [self signalOwnedExecution:ctx.ownership];
+    }
+    if (!empty) error = ISHShellExecutorErrorTimeout;
+
     // Tell readers to stop. Any that are mid-poll return within 500ms (the
     // poll timeout) and the last one out closes the pipes.
     ctx.isCompleted = YES;
@@ -904,7 +855,9 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
     ctx.result.output = outCopy ?: @"";
     ctx.result.errorOutput = errCopy ?: @"";
 
-    [self unregisterContextForPid:ctx.guestPid];
+    @synchronized(_activeExecutions) {
+        if (_activeExecutions[@(ctx.guestPid)] == ctx) [_activeExecutions removeObjectForKey:@(ctx.guestPid)];
+    }
 
     // Closes now only if the readers have already gone; otherwise the last
     // reader out does it. Never closes an fd that is still being polled.
@@ -949,7 +902,7 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
     ISHShellExecutionContext *ctx;
     @synchronized(_activeExecutions) {
         ctx = _activeExecutions[@(pid)];
-        if (!ctx) return;
+        if (!ctx || ctx.ownership != [notification.userInfo[@"ownership"] unsignedLongLongValue]) return;
         // NOTE: intentionally NOT removed here. The removal now happens in
         // +finalizeContext:, after the drain window below. Removing it up
         // front left a ~200ms hole in which the sweeper could see no entry
@@ -973,7 +926,7 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
     // DO NOT set isCompleted yet — let reader threads drain remaining pipe data.
     // Give readers 200ms to flush, then finalize.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC),
-                   dispatch_get_main_queue(), ^{
+                   dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
         [self finalizeContext:ctx
                      exitCode:exitCode
                         error:ISHShellExecutorErrorNone];
@@ -1147,8 +1100,8 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
             // Nova: bound reader memory even for a command that never writes a newline.
             if (lineBuffer.length + outputBuffer.length > 128 * 1024) {
                 if (lineBuffer.length > 128 * 1024) [lineBuffer deleteCharactersInRange:NSMakeRange(128 * 1024, lineBuffer.length - 128 * 1024)];
-                [self killProcessGroup:ctx.guestPid];
-                [self finalizeTimedOutPid:ctx.guestPid];
+                [self killProcessGroup:ctx.guestPid ownership:ctx.ownership];
+                [self finalizeTimedOutPid:ctx.guestPid ownership:ctx.ownership];
                 break;
             }
             // Process complete lines

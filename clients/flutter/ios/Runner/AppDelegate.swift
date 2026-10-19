@@ -1,13 +1,20 @@
 import Flutter
 import UIKit
 import SafariServices
+#if NOVA_WORKSPACE_ACCEPTANCE
+import Network
+#endif
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, SFSafariViewControllerDelegate {
   private var chatGptBrowser: SFSafariViewController?
   private var chatGptBrowserChannel: FlutterMethodChannel?
   private var localAgent: AnyObject?
+  private var workspace: NovaWorkspaceBridge?
   private var artifactHost: ArtifactWebHost?
+  #if NOVA_WORKSPACE_ACCEPTANCE
+  private var acceptanceNetwork: FlutterMethodChannel?
+  #endif
   func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
     chatGptBrowser = nil
     chatGptBrowserChannel?.invokeMethod("closed", arguments:nil)
@@ -16,6 +23,10 @@ import SafariServices
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    #if NOVA_WORKSPACE_ACCEPTANCE
+    application.isIdleTimerDisabled = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + 600) { application.isIdleTimerDisabled = false }
+    #endif
     NovaScheduleBridge.register()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -27,6 +38,52 @@ import SafariServices
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    #if NOVA_WORKSPACE_ACCEPTANCE
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaAcceptanceNetwork") {
+      let channel = FlutterMethodChannel(name: "nova/acceptance_network/v1", binaryMessenger: registrar.messenger())
+      acceptanceNetwork = channel
+      channel.setMethodCallHandler { call, reply in
+        guard call.method == "probe" else { reply(FlutterMethodNotImplemented); return }
+        let monitor = NWPathMonitor()
+        var pathInfo: [String: Any] = ["status": "pending"]
+        monitor.pathUpdateHandler = { path in
+          pathInfo = ["status": String(describing: path.status),
+                      "unsatisfied_reason": String(describing: path.unsatisfiedReason),
+                      "wifi": path.usesInterfaceType(.wifi),
+                      "cellular": path.usesInterfaceType(.cellular),
+                      "supports_dns": path.supportsDNS,
+                      "supports_ipv4": path.supportsIPv4,
+                      "supports_ipv6": path.supportsIPv6]
+        }
+        monitor.start(queue: .main)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 25
+        let session = URLSession(configuration: configuration)
+        var request = URLRequest(url: URL(string: "https://mirrors.tuna.tsinghua.edu.cn/alpine/v3.21/main/aarch64/APKINDEX.tar.gz")!)
+        request.httpMethod = "HEAD"
+        session.dataTask(with: request) { _, response, error in
+          DispatchQueue.main.async {
+            var result: [String: Any] = ["path": pathInfo]
+            if let response = response as? HTTPURLResponse { result["http_status"] = response.statusCode }
+            if let error = error as NSError? {
+              result["error_domain"] = error.domain
+              result["error_code"] = error.code
+              result["error"] = error.localizedDescription
+              if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+                result["underlying_domain"] = underlying.domain
+                result["underlying_code"] = underlying.code
+                result["underlying"] = underlying.localizedDescription
+              }
+            }
+            monitor.cancel()
+            session.invalidateAndCancel()
+            reply(result)
+          }
+        }.resume()
+      }
+    }
+    #endif
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaChatGptBrowser") {
       let channel = FlutterMethodChannel(name: "nova/chatgpt_browser/v1", binaryMessenger: registrar.messenger())
       chatGptBrowserChannel = channel
@@ -52,6 +109,9 @@ import SafariServices
       NovaScheduleBridge.install(messenger: registrar.messenger())
       NovaBackgroundExecution.install(with: registrar.messenger())
       NativeModelTransfer.shared.install(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaWorkspace") {
+      workspace = NovaWorkspaceBridge(messenger: registrar.messenger())
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaArtifacts") {
       artifactHost = ArtifactWebHost(messenger: registrar.messenger())

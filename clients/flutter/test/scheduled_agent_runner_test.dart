@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:nova_mobile/agent_core/agent_workspace.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,12 +25,14 @@ class FixtureSettings extends ModelSettings {
 class ScheduleModel extends ModelClient {
   int calls = 0;
   bool write = false;
+  List<String> advertised = [];
   @override
   Stream<Map<String, dynamic>> stream(
     ModelConfiguration config,
     List<Map<String, dynamic>> messages, {
     List<Map<String, dynamic>> tools = const [],
   }) async* {
+    advertised = tools.map((t) => t['function']['name'] as String).toList();
     calls++;
     if (calls == 1) {
       yield {
@@ -54,6 +58,62 @@ class ScheduleModel extends ModelClient {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  for (final grantWorkspace in [false, true]) {
+    test(
+      'scheduled workspace tools require explicit grant: $grantWorkspace',
+      () async {
+        final root = await Directory.systemTemp.createTemp(
+          'schedule-workspace-',
+        );
+        addTearDown(() => root.delete(recursive: true));
+        var now = DateTime.utc(2026, 10, 17, 8);
+        final life = LifeHost(repository: LocalLife(MemoryLifePersistence()));
+        await life.open();
+        life.didChangeAppLifecycleState(AppLifecycleState.paused);
+        addTearDown(life.dispose);
+        final repo = ScheduleRepository(
+          MemoryLifePersistence(),
+          deviceId: 'phone',
+          clock: ScheduleClock(),
+          now: () => now,
+        );
+        await repo.open();
+        await repo.create({
+          'title': 'Fixture',
+          'goal': 'Read tasks',
+          'acceptance': 'Summary',
+          'rule': {'kind': 'daily', 'timezone': 'UTC', 'time': '09:00'},
+          'provider': 'https://model.invalid|fixture',
+          'context': {
+            'life': true,
+            'web': false,
+            if (grantWorkspace) 'workspace': true,
+          },
+        });
+        final model = ScheduleModel();
+        final runner = ScheduledAgentRunner(
+          repo,
+          life,
+          FixtureSettings(),
+          workspace: AgentWorkspace(root),
+          clientFactory: () => model,
+        );
+        addTearDown(runner.dispose);
+        now = DateTime.utc(2026, 10, 17, 9);
+        await runner.wake();
+        for (final name in [
+          'file_read',
+          'file_write',
+          'file_edit',
+          'shell_execute',
+        ]) {
+          expect(model.advertised.contains(name), grantWorkspace, reason: name);
+        }
+        expect(model.advertised, isNot(contains('web_fetch')));
+        expect(repo.runs.single['status'], 'completed');
+      },
+    );
+  }
   test(
     'due task invokes the ordinary model and journal once, then persists its terminal receipt',
     () async {

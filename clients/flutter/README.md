@@ -27,3 +27,9 @@ These remote snapshot caches are not imported into local conversation history.
 
 Build and test only in an isolated copy/output directory on the selected external
 disk, namespaced by canonical worktree path and chat ID, including `TMPDIR`.
+
+## Local agent tools
+
+Mobile file and shell tools use a persistent `/workspace` backed by on-device Linux.
+See [general agent tools](docs/general-agent-tools.md) for tool contracts, migration,
+voice ownership, browser limits, and required native runtime build steps.

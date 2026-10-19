@@ -712,9 +712,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     ),
   };
 
-  Future<void> _openArtifact(String id) async {
+  Future<void> _openArtifact(String pathOrId) async {
     try {
-      await widget.host.tools!.registry.artifacts!.openPreview(id);
+      await widget.host.tools!.registry.workspace!.openPreview(pathOrId);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -731,18 +731,30 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   Widget _message(Map message) {
     if (message['role'] == 'tool') {
       String status = '';
-      Map? artifact;
+      String? preview, title;
       try {
         final result = jsonDecode(message['content'] as String) as Map;
         status = result['status'] as String? ?? '';
-        if (result['data'] is Map && result['data']['artifact'] is Map) {
-          artifact = result['data']['artifact'] as Map;
+        final data = result['data'];
+        if (data is Map) {
+          if (data['artifact'] is Map) {
+            final artifact = data['artifact'] as Map;
+            preview = artifact['id'] as String?;
+            title = artifact['title'] as String?;
+          } else if (data['path'] is String &&
+              RegExp(
+                r'\.html?$',
+                caseSensitive: false,
+              ).hasMatch(data['path'] as String)) {
+            preview = data['url'] as String? ?? data['path'] as String;
+            title = (data['path'] as String).split('/').last;
+          }
         }
       } catch (_) {}
       if (status == 'completed' &&
-          artifact != null &&
-          widget.host.tools?.registry.artifacts != null) {
-        final item = artifact;
+          preview != null &&
+          widget.host.tools?.registry.workspace != null) {
+        final target = preview;
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Material(
@@ -757,7 +769,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                 color: Nova.mint,
               ),
               title: Text(
-                item['title'] as String,
+                title ?? t('打开页面', 'Open page'),
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               subtitle: Text(t('已保存 · 点此打开', 'Saved · Tap to open')),
@@ -765,14 +777,14 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                 CupertinoIcons.arrow_up_right_square,
                 size: 20,
               ),
-              onTap: () => _openArtifact(item['id'] as String),
+              onTap: () => _openArtifact(target),
             ),
           ),
         );
       }
       final label = switch (status) {
         'completed' => switch (message['tool_name']) {
-          'artifact_test' => t('作品运行检查已返回', 'Artifact check returned'),
+          'shell_execute' => t('命令执行已返回', 'Command returned'),
           'calendar_list' => t('系统日历读取已返回', 'Calendar returned'),
           'reminders_list' => t('提醒事项读取已返回', 'Reminders returned'),
           _ => t('操作返回结果', 'Operation returned a result'),
@@ -967,18 +979,13 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                     widget.conversationId)
                               ChatActivity(
                                 label: switch (host.activeTool) {
-                                  'artifact_write' => t(
-                                    '正在编写作品',
-                                    'Writing the artifact',
+                                  'file_write' ||
+                                  'file_edit' => t('正在编写文件', 'Writing files'),
+                                  'shell_execute' => t(
+                                    '正在执行命令',
+                                    'Running a command',
                                   ),
-                                  'artifact_test' => t(
-                                    '正在运行检查',
-                                    'Running checks',
-                                  ),
-                                  'artifact_read' => t(
-                                    '正在读取作品',
-                                    'Reading the artifact',
-                                  ),
+                                  'file_read' => t('正在读取文件', 'Reading files'),
                                   'calendar_list' => t(
                                     '正在读取系统日历',
                                     'Reading Calendar',

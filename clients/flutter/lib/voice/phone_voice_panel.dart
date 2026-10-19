@@ -418,9 +418,9 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
   );
 
   String _taskLabel(String? tool) => switch (tool) {
-    'artifact_write' => t('正在生成作品', 'Creating your work'),
-    'artifact_test' => t('正在检查作品', 'Checking your work'),
-    'artifact_read' => t('正在读取作品', 'Reading your work'),
+    'file_write' || 'file_edit' => t('正在编写文件', 'Writing files'),
+    'shell_execute' => t('正在执行命令', 'Running a command'),
+    'file_read' => t('正在读取文件', 'Reading files'),
     'web_search' || 'web_fetch' => t('正在查找资料', 'Finding information'),
     'life_create' || 'life_update' => t('正在整理事项', 'Organizing your items'),
     _ => t('任务进行中', 'Task in progress'),

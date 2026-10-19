@@ -1,0 +1,7 @@
+// Pass NOVA_LINUX_ROOT=<external chat build root>/ios to xcodebuild.
+// Deliberately no internal-disk default and no runtime-unavailable fallback.
+HEADER_SEARCH_PATHS = $(inherited) "$(PROJECT_DIR)/Vendor/OpenMinis" "$(NOVA_LINUX_ROOT)/include" "$(NOVA_LINUX_ROOT)/include/ish" "$(NOVA_LINUX_ROOT)/build-$(PLATFORM_NAME)"
+LIBRARY_SEARCH_PATHS = $(inherited) "$(NOVA_LINUX_ROOT)/build-$(PLATFORM_NAME)"
+OTHER_CFLAGS = $(inherited) -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -DISH_INTERNAL=1
+OTHER_LDFLAGS = $(inherited) -lish -lish_emu -lfakefs -lsqlite3 -lresolv -framework SystemConfiguration
+ARCHS = arm64

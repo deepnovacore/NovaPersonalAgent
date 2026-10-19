@@ -302,7 +302,7 @@ void main() {
             store: ConversationStore(MemoryPersistence()),
             settings: ModelSettings(),
           )
-          ..activeTool = 'artifact_write'
+          ..activeTool = 'file_write'
           ..draft = '正在整理内容';
     final bridge = VoiceDelegateBridge(primary: primary, worker: worker)
       ..id = 'synthetic-task';
@@ -312,11 +312,11 @@ void main() {
     addTearDown(primary.dispose);
     await tester.pumpWidget(panelHost(session));
     await tester.ensureVisible(find.byKey(const ValueKey('voice-task')));
-    expect(find.text('正在生成作品'), findsOneWidget);
-    expect(find.textContaining('artifact_write'), findsNothing);
-    await tester.tap(find.text('正在生成作品'));
+    expect(find.text('正在编写文件'), findsOneWidget);
+    expect(find.textContaining('file_write'), findsNothing);
+    await tester.tap(find.text('正在编写文件'));
     await tester.pumpAndSettle();
-    expect(find.text('工具: artifact_write'), findsOneWidget);
+    expect(find.text('工具: file_write'), findsOneWidget);
     expect(find.text('停止任务'), findsOneWidget);
   });
 }

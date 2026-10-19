@@ -58,7 +58,7 @@ class _LocalSchedulesPageState extends State<LocalSchedulesPage> {
         date = TextEditingController(
           text: DateTime.now().toIso8601String().substring(0, 10),
         );
-    var kind = 'daily', life = false, web = false;
+    var kind = 'daily', life = false, web = false, workspace = false;
     final weekdays = <int>{1};
     final accepted = await showDialog<bool>(
       context: context,
@@ -126,6 +126,12 @@ class _LocalSchedulesPageState extends State<LocalSchedulesPage> {
                   onChanged: (v) => setLocal(() => life = v),
                 ),
                 SwitchListTile(
+                  title: const Text('允许读写工作区和运行命令'),
+                  subtitle: const Text('可安装软件包、访问网络并修改工作区文件'),
+                  value: workspace,
+                  onChanged: (v) => setLocal(() => workspace = v),
+                ),
+                SwitchListTile(
                   title: const Text('允许申请网页访问'),
                   value: web,
                   onChanged: (v) => setLocal(() => web = v),
@@ -155,7 +161,7 @@ class _LocalSchedulesPageState extends State<LocalSchedulesPage> {
           'goal': goal.text.trim(),
           'acceptance': '说明完成的内容、依据和未完成部分，等待用户核对。',
           'provider': '${model.endpoint}|${model.model}',
-          'context': {'life': life, 'web': web},
+          'context': {'life': life, 'web': web, 'workspace': workspace},
           'rule': {
             'kind': kind,
             'timezone': zone.text.trim(),

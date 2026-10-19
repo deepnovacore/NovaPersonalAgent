@@ -13,6 +13,7 @@ import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     private var artifactHost: ArtifactWebHost? = null
+    private var linuxWorkspaceHost: LinuxWorkspaceHost? = null
     override fun onResume() {
         super.onResume()
         artifactHost?.resume()
@@ -23,6 +24,8 @@ class MainActivity : FlutterActivity() {
     }
     override fun onDestroy() {
         artifactHost?.dispose()
+        linuxWorkspaceHost?.dispose()
+        linuxWorkspaceHost = null
         artifactHost = null
         super.onDestroy()
     }
@@ -41,6 +44,8 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine:FlutterEngine){
         super.configureFlutterEngine(flutterEngine)
         NovaScheduleBridge.install(this, flutterEngine)
+        linuxWorkspaceHost?.dispose()
+        linuxWorkspaceHost = LinuxWorkspaceHost(this, flutterEngine.dartExecutor.binaryMessenger)
         artifactHost?.dispose()
         artifactHost = ArtifactWebHost(this, flutterEngine.dartExecutor.binaryMessenger)
         if(controller==null)controller=LocalAgentController(applicationContext)

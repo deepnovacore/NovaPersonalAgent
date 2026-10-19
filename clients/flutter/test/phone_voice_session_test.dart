@@ -72,6 +72,7 @@ class TestVoiceProvider implements VoiceProvider {
   final cancels = <String>[], playback = <int>[];
   List<VoiceHistoryItem> history = [];
   String instructions = '';
+  List<Map<String, dynamic>> toolDefinitions = [];
   Completer<void>? connecting;
   Completer<void>? injecting;
   final injected = <String>[],
@@ -99,6 +100,7 @@ class TestVoiceProvider implements VoiceProvider {
     this.epoch = epoch;
     this.history = history;
     this.instructions = instructions;
+    toolDefinitions = tools;
     if (connecting != null) await connecting!.future;
   }
 
@@ -1165,22 +1167,22 @@ void main() {
   );
 
   test(
-    'frontbrain describes runnable phone artifacts without promising Python execution',
+    'frontbrain describes local Linux execution and delegates tool work',
     () async {
       await start();
       expect(provider.instructions, contains('Use Simplified Chinese'));
+      expect(provider.instructions, contains('delegate_task'));
       expect(
-        provider.instructions,
-        contains('self-contained HTML, CSS and JavaScript'),
+        provider.toolDefinitions.map((t) => t['function']['name']),
+        everyElement(isIn(['delegate_task', 'cancel_delegate'])),
       );
       expect(
         provider.instructions,
-        contains('Do not promise Python or pygame execution on the phone'),
+        isNot(contains('compatible external runtime')),
       );
-      expect(
-        provider.instructions,
-        contains('generate their source code when requested'),
-      );
+      expect(provider.instructions, contains('Linux'));
+      expect(provider.instructions, contains('Python'));
+      expect(provider.instructions, contains('package installation'));
     },
   );
 }

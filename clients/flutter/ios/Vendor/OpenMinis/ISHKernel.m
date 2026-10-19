@@ -14,6 +14,8 @@
 // guest-ABI socket structs.
 #include <sys/un.h>
 #include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <TargetConditionals.h>
 #include "ish/kernel/init.h"
 #include "ish/kernel/task.h"
 #include "ish/kernel/calls.h"
@@ -89,6 +91,15 @@ extern void (*exit_hook)(struct task *task, int code);
 // which is outside the App sandbox. See setUpUnixSocketPrefix for the full story.
 extern const char *sock_tmp_prefix;
 
+// iOS exposes per-process headroom; macOS is used only by the host test harness.
+static size_t nova_available_memory(void) {
+#if TARGET_OS_IPHONE
+    return os_proc_available_memory();
+#else
+    return (size_t)[NSProcessInfo processInfo].physicalMemory;
+#endif
+}
+
 #pragma mark - Fork memory guard
 
 // [fork-guard] Stall guest fork() while the app's memory footprint is too high.
@@ -99,7 +110,7 @@ extern const char *sock_tmp_prefix;
 //
 // We measure phys_footprint (TASK_VM_INFO) — the metric Jetsam actually uses to
 // decide what to kill. An earlier version of this guard used
-// os_proc_available_memory() (remaining headroom) with a 400MB reserve, but on
+// nova_available_memory() (remaining headroom) with a 400MB reserve, but on
 // an 8GB device the per-process limit is ~1.5-2GB, so headroom never fell
 // anywhere near 400MB and the guard never fired once. Measuring what we have
 // spent, not what is nominally left, is the check that trips in practice.
@@ -222,8 +233,8 @@ static void minis_fork_guard_start_pressure_source(void) {
 // [T-resource-diag] Counters live in Swift (ResourceDiagnostics); declared here
 // rather than imported so this file keeps its current include set and the call
 // stays a direct C call on the guest-fork path.
-extern void minis_diag_note_guest_fork(void);
-extern void minis_diag_note_task_info_call(void);
+static void minis_diag_note_guest_fork(void) {}
+static void minis_diag_note_task_info_call(void) {}
 
 static uint64_t minis_read_phys_footprint(void) {
     task_vm_info_data_t info;
@@ -486,7 +497,7 @@ static void jit_crash_handler(int sig, siginfo_t *info, void *ctx) {
 /// only the current thread instead of calling abort() which kills the entire app.
 // [T-ish-footprint-brake] Feed the kernel's memory governor the two numbers
 // jetsam actually operates on: the app's physical footprint and its remaining
-// allowance. `limit = phys_footprint + os_proc_available_memory()` is the live
+// allowance. `limit = phys_footprint + nova_available_memory()` is the live
 // per-app jetsam line — both terms are cheap calls, so no hardcoded per-device
 // table and no boot-time snapshot that goes stale (avail on this device has
 // been observed to swing 2030 MB busy -> 3300+ MB idle).
@@ -502,7 +513,7 @@ static void ish_memory_governor_tick(bool pressureCritical) {
     uint64_t footprint = 0;
     if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
         footprint = info.phys_footprint;
-    uint64_t avail = (uint64_t)os_proc_available_memory();
+    uint64_t avail = (uint64_t)nova_available_memory();
     if (footprint == 0 || avail == 0)
         return; // couldn't measure — the staleness rule handles a dead feed
     ish_set_memory_status(footprint + avail, avail, pressureCritical);
@@ -643,11 +654,12 @@ static void handle_process_exit(struct task *task, int code) {
         return;
 
     pid_t pid = task->pid;
+    uint64_t ownership = task->group ? task->group->nova_execution_id : 0;
     dispatch_async(dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter]
             postNotificationName:ISHProcessExitedNotification
             object:nil
-            userInfo:@{@"pid": @(pid), @"code": @(code)}];
+            userInfo:@{@"pid": @(pid), @"code": @(code), @"ownership": @(ownership)}];
     });
 }
 
@@ -658,7 +670,7 @@ static void handle_process_exit(struct task *task, int code) {
     struct tty *_consoleTTY;
     NSString *_rootPath;    // Host filesystem path to fakefs root (contains data/ + meta.db)
     NSString *_dataPath;    // Host filesystem path to fakefs data/ directory
-    NSString *_dnsHostPath; // Host path to resolv.conf (Library/MinisChat/dns/resolv.conf)
+    NSString *_dnsHostPath; // Private runtime DNS file; no application data directory mount.
 
     // Command execution state
     NSMutableString *_commandOutputBuffer;
@@ -748,7 +760,7 @@ static void handle_process_exit(struct task *task, int code) {
     // installed a nominal 1953MB cap that really allowed ~7.6GB, and the
     // runaway compile reached jetsam at 3361MB without one refusal firing.
     {
-        size_t avail = os_proc_available_memory();
+        size_t avail = nova_available_memory();
         size_t hostPage = (size_t)getpagesize();
         if (avail > 0 && hostPage > 0) {
             // See the GUEST_MEMORY_SHARE box above before changing this.
@@ -1153,14 +1165,13 @@ static void handle_process_exit(struct task *task, int code) {
 
 /// Set up /etc/resolv.conf as a file-level bind mount pointing to a host file.
 /// Called once during boot, after the root filesystem and init process are ready.
-/// The host file lives in Library/MinisChat/dns/resolv.conf and can be freely
+/// The host file lives beside the private runtime metadata and can be freely
 /// updated by the app at any time — changes are instantly visible inside iSH.
 - (void)mountDnsConfig {
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    // Determine host path: Library/MinisChat/dns/resolv.conf
-    NSString *library = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *dnsDir = [library stringByAppendingPathComponent:@"MinisChat/dns"];
+    // Keep harness writes in its selected runtime directory as well.
+    NSString *dnsDir = [_rootPath stringByAppendingPathComponent:@"dns"];
     _dnsHostPath = [dnsDir stringByAppendingPathComponent:@"resolv.conf"];
 
     // Ensure directory and seed file exist before bind mount
@@ -1174,7 +1185,7 @@ static void handle_process_exit(struct task *task, int code) {
         NSLog(@"ISHKernel: [DNS] seeded host resolv.conf at %@", _dnsHostPath);
     }
 
-    // Bind mount: /etc/resolv.conf -> Library/MinisChat/dns/resolv.conf
+    // Bind only the DNS file, never the containing host directory.
     int err = fakefs_bind_mount("/etc/resolv.conf", _dnsHostPath.fileSystemRepresentation, false);
     if (err < 0) {
         NSLog(@"ISHKernel: [DNS] bind mount FAILED (%d) — writing via VFS fallback", err);

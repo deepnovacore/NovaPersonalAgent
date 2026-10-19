@@ -5,6 +5,9 @@ import '../context/secure_persistence.dart';
 import '../conversation/local_conversation_store.dart';
 import '../personal/life_host.dart';
 import 'agent_core_host.dart';
+import 'agent_workspace.dart';
+import 'workspace_shell.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'background_execution.dart';
 import 'model_settings.dart';
 import 'tool_registry.dart';
@@ -21,11 +24,13 @@ class ScheduledAgentRunner extends ChangeNotifier with WidgetsBindingObserver {
     this.life,
     this.models, {
     this.clientFactory,
+    this.workspace,
   });
   final ScheduleRepository repository;
   final LifeHost life;
   final ModelSettings models;
   final ModelClient Function()? clientFactory;
+  final AgentWorkspace? workspace;
   AgentCoreHost? _active;
   String? activeRun;
   ApprovalOffer? pendingApproval;
@@ -61,6 +66,7 @@ class ScheduledAgentRunner extends ChangeNotifier with WidgetsBindingObserver {
     LifeHost life,
     ModelSettings models, {
     bool headless = false,
+    AgentWorkspace? workspace,
   }) async {
     final nativeWake = ScheduleWake();
     await nativeWake.acquire(headless: headless);
@@ -72,7 +78,17 @@ class ScheduledAgentRunner extends ChangeNotifier with WidgetsBindingObserver {
         clock: ScheduleClock(),
       );
       await repository.open();
-      final runner = ScheduledAgentRunner(repository, life, models);
+      final sharedWorkspace =
+          workspace ??
+          (AgentWorkspace.supportsPlatform(defaultTargetPlatform)
+              ? await AgentWorkspace.open()
+              : null);
+      final runner = ScheduledAgentRunner(
+        repository,
+        life,
+        models,
+        workspace: sharedWorkspace,
+      );
       runner._nativeWake = nativeWake;
       runner.headless = headless;
       runner.start();
@@ -171,6 +187,9 @@ class ScheduledAgentRunner extends ChangeNotifier with WidgetsBindingObserver {
       mutate: life.mutate,
       hasConflict: () => life.hasConflict,
       fetch: SafeWebFetch().fetch,
+      workspace: workspace,
+      // Each host owns cancellation; native execution coordinates the shared root.
+      shell: workspace == null ? null : WorkspaceShell(workspace!),
       allowedNames: {
         if (scopes['life'] == true) ...[
           'life.list',
@@ -178,6 +197,12 @@ class ScheduledAgentRunner extends ChangeNotifier with WidgetsBindingObserver {
           if (!headless) ...['life.create', 'life.update'],
         ],
         if (scopes['web'] == true) 'web.fetch',
+        if (scopes['workspace'] == true) ...[
+          'file.read',
+          'file.write',
+          'file.edit',
+          'shell.execute',
+        ],
       },
     );
     final agent = AgentCoreHost(

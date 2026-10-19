@@ -33,6 +33,7 @@ object NovaScheduleBridge {
     private var owner: FlutterEngine? = null
     private var channel: MethodChannel? = null
     private var headless: FlutterEngine? = null
+    private var headlessWorkspace: LinuxWorkspaceHost? = null
     private var ready = false
     private var completion: ((Boolean) -> Unit)? = null
     private var pendingOwner: (() -> Unit)? = null
@@ -103,6 +104,7 @@ object NovaScheduleBridge {
                 loader.startInitialization(app); loader.ensureInitializationComplete(app, null)
                 val engine = FlutterEngine(app)
                 headless = engine
+                headlessWorkspace = LinuxWorkspaceHost(app, engine.dartExecutor.binaryMessenger)
                 install(app, engine)
                 engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "novaScheduleMain"))
             } catch (_: Exception) { finish(false) }
@@ -130,6 +132,7 @@ object NovaScheduleBridge {
         context?.getSharedPreferences("nova-schedule-wake", 0)?.edit()?.putString("last_status", if (success) "wake_returned" else "interrupted")?.apply()
         done(success)
         if (owner === headless || owner == null) {
+            headlessWorkspace?.dispose(); headlessWorkspace = null
             val engine = headless; headless = null; engine?.destroy(); release()
         }
     }

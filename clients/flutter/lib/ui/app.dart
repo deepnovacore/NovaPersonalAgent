@@ -19,7 +19,8 @@ import '../voice/voice_settings_sheet.dart';
 import '../voice/voice_provider_factory.dart';
 import '../agent/hub_tasks.dart';
 import '../agent/ios_chat_task.dart';
-import '../agent_core/artifact_workspace.dart';
+import '../agent_core/agent_workspace.dart';
+import '../agent_core/workspace_shell.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'conversation_home.dart';
 import 'timeline_page.dart';
@@ -194,11 +195,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       final iosTasks = defaultTargetPlatform == TargetPlatform.iOS
           ? IosChatTaskRunner()
           : null;
-      final artifacts =
-          !ArtifactWorkspace.supportsPlatform(defaultTargetPlatform) ||
+      final workspace =
+          !AgentWorkspace.supportsPlatform(defaultTargetPlatform) ||
               widget.agentCore != null
           ? null
-          : await ArtifactWorkspace.open();
+          : await AgentWorkspace.open();
       final host =
           widget.agentCore ??
           await AgentCoreHost.open(
@@ -233,7 +234,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               hasConflict: () => lifeHost.hasConflict,
               fetch: SafeWebFetch().fetch,
               automaticExecution: iosTasks != null,
-              artifacts: artifacts,
+              workspace: workspace,
+              shell: workspace == null ? null : WorkspaceShell(workspace),
               queryNative: iosTasks == null
                   ? null
                   : (input) async => Map<String, dynamic>.from(
@@ -370,6 +372,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       final scheduler = await ScheduledAgentRunner.open(
         lifeHost,
         host.settings,
+        workspace: host.tools?.registry.workspace,
       );
       if (!mounted) {
         scheduler.dispose();

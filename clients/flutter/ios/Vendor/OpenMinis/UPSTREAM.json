@@ -16,7 +16,7 @@
     "ISHShellExecutor.h": {
       "upstream_path": "src/ios/iSH/ISHShellExecutor.h",
       "upstream_sha256": "96148e6cc44c24c6b9a100803ba4831c5a37593155596425b18d0ced42eea022",
-      "modified_for_nova": false
+      "modified_for_nova": true
     },
     "ISHShellExecutor.m": {
       "upstream_path": "src/ios/iSH/ISHShellExecutor.m",
@@ -31,7 +31,7 @@
     "CurrentRoot.m": {
       "upstream_path": "src/ios/iSH/CurrentRoot.m",
       "upstream_sha256": "6481488e9bd52197e7ef919289c16a98c3b20b380fb33b055c828ab56ff62918",
-      "modified_for_nova": false
+      "modified_for_nova": true
     }
   }
 }

@@ -4,6 +4,30 @@ import 'package:nova_mobile/agent_core/schedule_time.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  test('workspace execution is an optional explicit schedule grant', () async {
+    final repo = ScheduleRepository(
+      MemoryLifePersistence(),
+      deviceId: 'phone',
+      clock: ScheduleClock(),
+      now: () => DateTime.utc(2026, 10, 17, 8),
+    );
+    await repo.open();
+    final input = <String, dynamic>{
+      'title': 'Build report',
+      'goal': 'Run a report script',
+      'acceptance': 'Saved report',
+      'rule': {'kind': 'daily', 'timezone': 'UTC', 'time': '09:00'},
+      'provider': 'fixture',
+      'context': {'life': false, 'web': false, 'workspace': true},
+    };
+    final saved = await repo.create(input);
+    expect(saved['context']['workspace'], true);
+    input['context'] = {'life': false, 'web': false, 'workspace': 'true'};
+    await expectLater(repo.create(input), throwsStateError);
+    input['context'] = {'life': false, 'web': false};
+    final legacy = await repo.create(input);
+    expect(legacy['context']['workspace'], isNot(true));
+  });
   test(
     'duplicate wakes and epoch changes keep one occurrence; unknown runs never replay',
     () async {

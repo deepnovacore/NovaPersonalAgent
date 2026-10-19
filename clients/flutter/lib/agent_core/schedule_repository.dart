@@ -82,9 +82,12 @@ class ScheduleRepository extends ChangeNotifier {
             (input['context'] as Map).keys.toSet().difference({
               'life',
               'web',
+              'workspace',
             }).isNotEmpty ||
             input['context']['life'] is! bool ||
-            input['context']['web'] is! bool) {
+            input['context']['web'] is! bool ||
+            ((input['context'] as Map).containsKey('workspace') &&
+                input['context']['workspace'] is! bool)) {
           throw StateError('invalid_context');
         }
         final rule = Map<String, dynamic>.from(input['rule'] as Map),
@@ -108,24 +111,25 @@ class ScheduleRepository extends ChangeNotifier {
         (data['items'] as List).add(item);
         return copyJson(item);
       });
-  Future<void> setEnabled(String id, int revision, bool enabled) =>
-      _write((data) async {
-        final item = (data['items'] as List).firstWhere((e) => e['id'] == id);
-        if (item['owner_device_id'] != deviceId || item['revision'] != revision) {
-          throw StateError('stale_schedule');
-        }
-        item['enabled'] = enabled;
-        item['revision'] = (item['revision'] as int) + 1;
-        if (enabled) {
-          final cursor = DateTime.parse(item['cursor']);
-          final after = now().isAfter(cursor) ? now() : cursor;
-          item['cursor'] = after.toUtc().toIso8601String();
-          item['next_slot'] = await clock.next(
-            Map<String, dynamic>.from(item['rule']),
-            after,
-          );
-        }
-      });
+  Future<void> setEnabled(String id, int revision, bool enabled) => _write((
+    data,
+  ) async {
+    final item = (data['items'] as List).firstWhere((e) => e['id'] == id);
+    if (item['owner_device_id'] != deviceId || item['revision'] != revision) {
+      throw StateError('stale_schedule');
+    }
+    item['enabled'] = enabled;
+    item['revision'] = (item['revision'] as int) + 1;
+    if (enabled) {
+      final cursor = DateTime.parse(item['cursor']);
+      final after = now().isAfter(cursor) ? now() : cursor;
+      item['cursor'] = after.toUtc().toIso8601String();
+      item['next_slot'] = await clock.next(
+        Map<String, dynamic>.from(item['rule']),
+        after,
+      );
+    }
+  });
   Future<List<Map<String, dynamic>>> claimDue() => _write((data) async {
     final claimed = <Map<String, dynamic>>[], instant = now().toUtc();
     for (final item in data['items'] as List) {
