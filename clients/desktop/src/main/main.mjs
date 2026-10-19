@@ -1,3 +1,7 @@
+import {createHubService} from './hub-service.mjs'
+import {createHubNetwork} from './hub-network.mjs'
+import {createHubConnection} from './hub-connection.mjs'
+import {installHubIpc} from './hub-integration.mjs'
 import {ChatGptAccounts} from './chatgpt-auth.mjs'
 import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
 import {isEndpointSecret} from '../renderer/compatible-providers.mjs'
@@ -648,6 +652,7 @@ function openSettingsWindow(launchId, { category } = {}) {
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
     void cancelPhonePairing()
+    void desktopHubConnection?.action('cancel')
     endVoiceprintRecording()
     settingsWindow = null
     pendingSettingsCategory = null
@@ -733,6 +738,19 @@ const managedPhone = {
     phoneOperation = operation.catch(() => {})
     return operation
   },
+}
+
+let desktopHubService, desktopHubConnection
+function hubAvailable() { return process.platform === 'darwin' && !acceptance && !sourceStartupSmoke && releaseSmokeChannel === null }
+function getDesktopHub() {
+  if (!desktopHubConnection) {
+    const entry = app.isPackaged
+      ? resolve(app.getAppPath(), 'node_modules/@nova-personal-agent/runtime/dist/src/hub/managed-entry.js')
+      : resolve(packageRoot, '../../runtime/dist/src/hub/managed-entry.js')
+    desktopHubService = createHubService({homeDir:homedir(), executable:process.execPath, entry, appVersion:app.getVersion(), development:!app.isPackaged})
+    desktopHubConnection = createHubConnection({service:desktopHubService, network:createHubNetwork()})
+  }
+  return desktopHubConnection
 }
 
 async function cancelPhonePairing(invalidate = true) {
@@ -1588,6 +1606,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   ipcMain.on('nova:orb-menu:show', event => {
     if (mainWindow && event.sender === mainWindow.webContents) showOrbMenu(launchId)
   })
+  installHubIpc({ipcMain, getSender:()=>settingsWindow?.webContents, enabled:hubAvailable, action:(name,id)=>getDesktopHub().action(name,id)})
   ipcMain.handle('nova:phone:action', (event, action, deviceId) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents
       || !['status', 'enable', 'disable', 'network', 'refresh', 'cancel', 'install', 'help', 'login', 'revoke'].includes(action)
@@ -2390,6 +2409,7 @@ if (packagedSourceRollbackUnavailable) {
       platform: process.platform,
       iconFile: resolve(packageRoot, 'resources/icon-source/1024x1024.png'),
     })
+    if (hubAvailable()) { getDesktopHub(); void desktopHubService.restore().catch(() => {}) }
     const started=start()
     if(acceptance)void started.then(async()=>{
       await waitForNativeWorkbench(mainWindow)
@@ -2447,7 +2467,7 @@ app.on('before-quit', event => {
     await maintenance?.close()
     sourceSmokeStage('maintenance_closed')
   }), wait(3000).then(() => sourceSmokeStage('maintenance_deadline'))])
-  const drain = Promise.all([backendDrain, maintenanceDrain, feishuSetupOwner.release(), cancelPhonePairing().then(() => managedPhone.stop())])
+  const drain = Promise.all([backendDrain, maintenanceDrain, desktopHubConnection?.action('cancel'), feishuSetupOwner.release(), cancelPhonePairing().then(() => managedPhone.stop())])
   const resumeQuit = () => { quitDrained = true; sourceSmokeStage('quit_resumed'); app.quit() }
   quitDrain = drain.then(resumeQuit, resumeQuit)
 })

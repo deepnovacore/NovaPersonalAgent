@@ -1,5 +1,8 @@
 # Remote service
 
+This guide covers the native iPhone voice host (`/client/v1`). Android personal-data sync uses a separate Hub (`/hub/v1`); its macOS background service and QR pairing are described in the [Hub pairing guide](../../development/HUB-PAIRING.zh-CN.md). The two QR types are not interchangeable.
+
+
 Run Nova as a Node service on Ubuntu 22.04+ x64 or your Mac and connect from an iPhone over a private Tailscale network. Electron is not required. The service uses the `relay` media mode by default and exposes `/client/v1`; native camera capture is unavailable in remote sessions.
 
 For the simplest desktop setup, use **Connect iPhone…** from Nova's menu; see the [iPhone guide](../iphone.md). The instructions below are for a separately managed service.

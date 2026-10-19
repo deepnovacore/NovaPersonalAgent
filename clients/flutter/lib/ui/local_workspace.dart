@@ -8,6 +8,7 @@ import 'components.dart';
 import 'local_dialog.dart';
 import 'local_tasks.dart';
 import 'theme.dart';
+import 'hub_connection_page.dart';
 
 /// Controls for the application-owned dataset; never opens a second repository.
 class LifeControls extends StatefulWidget {
@@ -33,65 +34,18 @@ class _LifeControlsState extends State<LifeControls> {
   }
 
   Future<void> _settings() async {
-    final url = TextEditingController(
-      text: await widget.host.readHubUrl() ?? '',
-    );
-    final token = TextEditingController();
-    if (!mounted) {
-      url.dispose();
-      token.dispose();
-      return;
-    }
-    final accepted = await showLocalDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('连接同步 Hub'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                '同步本机的 Todo、Idea、Goal 及其关联。现有电脑资料不会自动导入；模型密钥和执行权限不会同步。',
-              ),
-              if (repo?.accountId != null)
-                Text('当前数据属于 ${repo!.accountId}，不能切换为其他账号。'),
-              TextField(
-                controller: url,
-                decoration: const InputDecoration(labelText: 'Hub HTTPS 地址'),
-                autocorrect: false,
-              ),
-              TextField(
-                controller: token,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: '设备令牌'),
-                autocorrect: false,
-              ),
-            ],
-          ),
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HubConnectionPage(
+          host: widget.host,
+          language: Localizations.localeOf(context).languageCode == 'zh'
+              ? 'zh'
+              : 'en',
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('允许同步这些资料'),
-          ),
-        ],
       ),
     );
-    try {
-      if (accepted == true) {
-        await widget.host.configureHub(
-          url: url.text.trim(),
-          token: token.text.trim(),
-        );
-      }
-    } finally {
-      url.dispose();
-      token.dispose();
-    }
   }
 
   Future<void> _choose() async {

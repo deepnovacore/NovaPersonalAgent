@@ -37,7 +37,8 @@
     "sherpa-onnx": "1.13.4",
     "tar-stream": "3.1.7",
     "unbzip2-stream": "1.4.3",
-    "jose": "5.10.0"
+    "jose": "5.10.0",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "electron": "43.2.0",

@@ -27,53 +27,54 @@ final class HttpLifeSync implements LifeSyncTransport {
     'mutations',
     command,
   ).then((value) => Map<String, dynamic>.from(value as Map));
-  Future<dynamic> request(
-    String method,
-    String path, [
-    Object? body,
-  ]) async {
+  Future<dynamic> request(String method, String path, [Object? body]) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
     try {
-      final relative = Uri.parse(path);
-      final url = base.replace(
-        path: '${base.path.replaceFirst(RegExp(r'/$'), '')}/hub/v1/${relative.path}',
-        query: relative.hasQuery ? relative.query : null,
-      );
-      final request = await client
-          .openUrl(method, url)
-          .timeout(const Duration(seconds: 15));
-      request.followRedirects = false;
-      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      if (body != null) {
-        request.headers.contentType = ContentType.json;
-        request.write(jsonEncode(body));
-      }
-      final response = await request.close().timeout(
-        const Duration(seconds: 15),
-      );
-      final bytes = <int>[];
-      await for (final chunk in response.timeout(const Duration(seconds: 15))) {
-        bytes.addAll(chunk);
-        if (bytes.length > 16 * 1024 * 1024) {
-          throw const FormatException('Hub response too large');
+      return await (() async {
+        final relative = Uri.parse(path);
+        final url = base.replace(
+          path:
+              '${base.path.replaceFirst(RegExp(r'/$'), '')}/hub/v1/${relative.path}',
+          query: relative.hasQuery ? relative.query : null,
+        );
+        final request = await client
+            .openUrl(method, url)
+            .timeout(const Duration(seconds: 15));
+        request.followRedirects = false;
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        if (body != null) {
+          request.headers.contentType = ContentType.json;
+          request.write(jsonEncode(body));
         }
-      }
-      final value = jsonDecode(utf8.decode(bytes));
-      if ([400, 409].contains(response.statusCode) &&
-          value is Map &&
-          value['snapshot'] is Map) {
-        throw LifeSyncConflict(
-          value['error'] as String,
-          Map<String, dynamic>.from(value['snapshot']),
+        final response = await request.close().timeout(
+          const Duration(seconds: 15),
         );
-      }
-      if (response.statusCode != 200) {
-        throw HttpException(
-          'Hub: ${value is Map ? value['error'] : response.statusCode}',
-        );
-      }
-      return value;
+        final bytes = <int>[];
+        await for (final chunk in response.timeout(
+          const Duration(seconds: 15),
+        )) {
+          bytes.addAll(chunk);
+          if (bytes.length > 16 * 1024 * 1024) {
+            throw const FormatException('Hub response too large');
+          }
+        }
+        final value = jsonDecode(utf8.decode(bytes));
+        if ([400, 409].contains(response.statusCode) &&
+            value is Map &&
+            value['snapshot'] is Map) {
+          throw LifeSyncConflict(
+            value['error'] as String,
+            Map<String, dynamic>.from(value['snapshot']),
+          );
+        }
+        if (response.statusCode != 200) {
+          throw HttpException(
+            'Hub: ${value is Map ? value['error'] : response.statusCode}',
+          );
+        }
+        return value;
+      })().timeout(const Duration(seconds: 30));
     } finally {
       client.close(force: true);
     }

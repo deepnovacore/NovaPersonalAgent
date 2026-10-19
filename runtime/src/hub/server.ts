@@ -2,9 +2,12 @@ import {createServer} from 'node:http'
 import {z,ZodError} from 'zod'
 import {spaceId} from '../device/space-authority.js'
 import type {HubStore} from './store.js'
+import {pairingHandler} from './pairing-http.js'
 
 export function createHubServer(store:HubStore){
+ const redeem=pairingHandler(store)
  return createServer((req,res)=>{void (async()=>{
+  if(req.method==='POST'&&req.url==='/hub/v1/pairing/redeem'){await redeem(req,res);return}
   const reply=(status:number,value:unknown)=>{res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(value))}
   const token=/^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization??'')?.[1]
   try{

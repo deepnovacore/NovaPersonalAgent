@@ -12,6 +12,7 @@ import {createConnectionsPanel} from './connections-panel.mjs'
 import {t, currentLanguage} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
+import {createHubPanel} from './hub-panel.mjs'
 import {createPhonePanel} from './phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
 import {createCapabilitiesEditor} from './capabilities-editor.mjs'
@@ -178,6 +179,7 @@ const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelect
 let activeCategory = SETTINGS_CATEGORIES[0].id
 const skinPanel = createSkinPanel({document, stage: patch => controller.stage(patch), discard: () => controller.discardFields(['skinId', 'importedSkins'])})
 window.addEventListener('beforeunload', () => skinPanel.destroy(), {once: true})
+const hubPanel = createHubPanel({document, api})
 const phonePanel = createPhonePanel({document, api, save: saveAll})
 
 // Sections are addressed by id from the category table rather than by a markup
@@ -187,8 +189,9 @@ function applyCategory(id) {
   activeCategory = id
   if (id === 'im') void imPanel.load()
   if (id === 'connections') void connectionsPanel.load()
+  hubPanel.setActive(id === 'hub')
   phonePanel.setActive(id === 'phone')
-  document.querySelector('footer').hidden = id === 'phone'
+  document.querySelector('footer').hidden = id === 'phone' || id === 'hub'
   for (const category of SETTINGS_CATEGORIES) {
     const visible = category.id === id
     for (const sectionId of category.sections) {

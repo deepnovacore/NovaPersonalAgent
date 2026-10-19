@@ -9,6 +9,7 @@ import {HubContextSync} from './context-sync.js'
 import {ScheduleOwnership} from '../device/schedule-ownership.js'
 import {deviceKind,type DeviceKind} from '../device/space-authority.js'
 import {hubImportSchema,importLifeEntity} from './life-projection.js'
+import {pairingDeviceName,pairingOrigin,pairingRequest,type PairingInvitation} from './pairing.js'
 
 const id=z.string().min(1).max(200).regex(/^[a-zA-Z0-9_-]+$/)
 const commandSchema=z.object({op_id:id,input:z.union([lifeInputSchema,hubImportSchema])}).strict()
@@ -31,32 +32,68 @@ export class HubStore {
  readonly authority:HubSpaceAuthority
  readonly context:HubContextSync
  readonly scheduleOwnership:ScheduleOwnership
- constructor(path:string){
+ constructor(path:string,private readonly options:{now?:()=>number}={}){
   this.#db=new DatabaseSync(path,{allowExtension:false})
   this.#db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
    CREATE TABLE IF NOT EXISTS hub_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),id TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS hub_accounts(account_id TEXT PRIMARY KEY,state TEXT NOT NULL,cursor INTEGER NOT NULL,tombstones TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS hub_devices(token_hash TEXT PRIMARY KEY,account_id TEXT NOT NULL,device_id TEXT NOT NULL,epoch INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,UNIQUE(account_id,device_id));
+   CREATE TABLE IF NOT EXISTS hub_invitations(account_id TEXT PRIMARY KEY,code_hash TEXT NOT NULL UNIQUE,expires_at INTEGER NOT NULL);
    CREATE TABLE IF NOT EXISTS hub_receipts(account_id TEXT NOT NULL,op_id TEXT NOT NULL,hash TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(account_id,op_id));
    CREATE TABLE IF NOT EXISTS hub_log(account_id TEXT NOT NULL,seq INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(account_id,seq));`)
   this.#db.prepare('INSERT OR IGNORE INTO hub_identity VALUES(1,?)').run(randomUUID())
   this.#identity=String(this.#db.prepare('SELECT id FROM hub_identity WHERE singleton=1').get()!.id)
   if(!this.#db.prepare('PRAGMA table_info(hub_devices)').all().some(row=>row.name==='kind'))this.#db.exec("ALTER TABLE hub_devices ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown'")
+  if(!this.#db.prepare('PRAGMA table_info(hub_devices)').all().some(row=>row.name==='label'))this.#db.exec("ALTER TABLE hub_devices ADD COLUMN label TEXT NOT NULL DEFAULT 'Device'")
   this.routing=new HubRouting(this.#db,token=>this.#device(token))
   this.authority=new HubSpaceAuthority(this.#db,token=>this.#device(token))
   this.context=new HubContextSync(this.#db,token=>this.#device(token),this.authority)
   this.scheduleOwnership=new ScheduleOwnership(this.#db,token=>this.#device(token),this.authority)
  }
  close(){this.#db.close()}
- enroll(accountId:string,label:string,kind:DeviceKind='unknown'){
-  deviceKind.parse(kind)
-  id.parse(accountId);z.string().trim().min(1).max(100).parse(label)
+ get hubId(){return this.#identity}
+ private now(){return (this.options.now??Date.now)()}
+ private insertDevice(accountId:string,label:string,kind:DeviceKind){
+  const count=this.#db.prepare('SELECT count(*) AS n FROM hub_devices WHERE account_id=? AND revoked=0').get(accountId)!
+  if(Number(count.n)>=32)throw Error('device_capacity')
   const token=randomBytes(32).toString('base64url'),device_id=randomUUID()
-  this.#transaction(()=>{
-   this.#db.prepare('INSERT OR IGNORE INTO hub_accounts VALUES(?,?,0,?)').run(accountId,JSON.stringify(emptyLifeState()),'{}')
-   this.#db.prepare('INSERT INTO hub_devices(token_hash,account_id,device_id,epoch,kind) VALUES(?,?,?,1,?)').run(digest(token),accountId,device_id,kind)
+  this.#db.prepare('INSERT OR IGNORE INTO hub_accounts VALUES(?,?,0,?)').run(accountId,JSON.stringify(emptyLifeState()),'{}')
+  this.#db.prepare('INSERT INTO hub_devices(token_hash,account_id,device_id,epoch,kind,label) VALUES(?,?,?,1,?,?)').run(digest(token),accountId,device_id,kind,label)
+  return {account_id:accountId,hub_id:this.#identity,device_id,device_name:label,device_epoch:1,token}
+ }
+ enroll(accountId:string,label:string,kind:DeviceKind='unknown'){
+  deviceKind.parse(kind);id.parse(accountId)
+  const name=pairingDeviceName.parse(label)
+  return this.#transaction(()=>this.insertDevice(accountId,name,kind))
+ }
+ /** Operator-only methods: these never authorize an account from a remote request. */
+ createInvitation(accountId:string,rawUrl:string):PairingInvitation {
+  id.parse(accountId)
+  const url=pairingOrigin(rawUrl),code=randomBytes(32).toString('base64url'),expires_at=this.now()+300000
+  this.#transaction(()=>this.#db.prepare('INSERT INTO hub_invitations VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET code_hash=excluded.code_hash,expires_at=excluded.expires_at').run(accountId,digest(code),expires_at))
+  return {type:'nova.hub',version:1,url,code,expires_at,hub_id:this.#identity,account_id:accountId}
+ }
+ cancelInvitation(accountId:string){id.parse(accountId);this.#db.prepare('DELETE FROM hub_invitations WHERE account_id=?').run(accountId)}
+ invitationStatus(accountId:string):{invitation_active:boolean;expires_at?:number}{
+  const row=this.#db.prepare('SELECT expires_at FROM hub_invitations WHERE account_id=? AND expires_at>?').get(accountId,this.now())
+  return row?{invitation_active:true,expires_at:Number(row.expires_at)}:{invitation_active:false}
+ }
+ listDevices(accountId:string){
+  id.parse(accountId)
+  return this.#db.prepare('SELECT device_id,label,kind,epoch,revoked FROM hub_devices WHERE account_id=? ORDER BY rowid').all(accountId).map(row=>({device_id:String(row.device_id),device_name:String(row.label),kind:deviceKind.parse(row.kind),device_epoch:Number(row.epoch),revoked:Boolean(row.revoked)}))
+ }
+ redeemInvitation(raw:unknown){
+  const parsed=pairingRequest.safeParse(raw)
+  if(!parsed.success)throw Error('invalid_pairing')
+  const request=parsed.data
+  return this.#transaction(()=>{
+   const invitation=this.#db.prepare('SELECT account_id,expires_at FROM hub_invitations WHERE code_hash=?').get(digest(request.code))
+   if(!invitation||Number(invitation.expires_at)<=this.now())throw Error('invalid_pairing')
+   if(request.hub_id!==this.#identity||request.account_id!==invitation.account_id)throw Error('pairing_identity_mismatch')
+   const device=this.insertDevice(String(invitation.account_id),request.device_name,'mobile')
+   this.#db.prepare('DELETE FROM hub_invitations WHERE account_id=?').run(invitation.account_id)
+   return device
   })
-  return {account_id:accountId,device_id,device_name:label,device_epoch:1,token}
  }
  revoke(accountId:string,deviceId:string){this.#db.prepare('UPDATE hub_devices SET revoked=1 WHERE account_id=? AND device_id=?').run(accountId,deviceId)}
  #device(token:string):Device{

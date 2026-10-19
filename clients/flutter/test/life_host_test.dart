@@ -112,6 +112,51 @@ void main() {
     },
   );
 
+  test('first QR connection verifies scanned identity before saving', () async {
+    final host = LifeHost(repository: LocalLife(MemoryLifePersistence()));
+    await host.open();
+    host.didChangeAppLifecycleState(AppLifecycleState.paused);
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'schema_version': 1,
+          'hub_id': 'wrong-hub',
+          'account_id': 'scanned-account',
+          'cursor': 0,
+          'state': host.repo!.life,
+          'tombstones': {},
+        }),
+      );
+      await request.response.close();
+    });
+    try {
+      await expectLater(
+        HttpOverrides.runWithHttpOverrides(
+          () => host.configureHub(
+            url: 'http://127.0.0.1:${server.port}',
+            token: 'credential',
+            expectedHubId: 'scanned-hub',
+            expectedAccountId: 'scanned-account',
+          ),
+          LocalHttpOverrides(),
+        ),
+        throwsStateError,
+      );
+      expect(host.hubConfigured, isFalse);
+      expect(
+        await const FlutterSecureStorage().read(
+          key: 'nova.local.hub.credentials',
+        ),
+        isNull,
+      );
+    } finally {
+      host.dispose();
+      await server.close(force: true);
+    }
+  });
+
   test('settings reject another account before saving credentials', () async {
     final repo = LocalLife(MemoryLifePersistence());
     final host = LifeHost(repository: repo);

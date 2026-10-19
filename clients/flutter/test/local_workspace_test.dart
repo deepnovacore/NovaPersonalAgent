@@ -72,8 +72,10 @@ void main() {
     await tester.tap(find.byTooltip('同步设置'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    await tester.enterText(find.byType(TextField).first, 'https://hub.example');
-    await tester.tap(find.text('取消'));
+    await tester.tap(find.text('Advanced: manual connection'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(1), 'https://hub.example');
+    await tester.pageBack();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(tester.takeException(), isNull);
@@ -82,8 +84,8 @@ void main() {
     await tester.tap(find.byTooltip('同步设置'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('连接同步 Hub'), findsOneWidget);
-    await tester.tap(find.text('取消'));
+    expect(find.text('Connect sync Hub'), findsOneWidget);
+    await tester.pageBack();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
   });
@@ -140,7 +142,7 @@ void main() {
       await tester.tap(find.byTooltip('同步设置'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.tap(find.text('取消'));
+      await tester.pageBack();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);

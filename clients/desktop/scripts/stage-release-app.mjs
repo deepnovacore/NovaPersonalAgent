@@ -36,9 +36,15 @@ export async function stageReleaseApplication({packageRoot}) {
         assert.ok(name in optional, `production dependency wrong platform: ${name}`)
         continue
       }
-      // Keep one copy per installed identity; a conflicting version remains nested.
-      let target = resolve(stageRoot, 'node_modules', name)
-      if (selected.has(target) && selected.get(target) !== dependency) target = resolve(destination, 'node_modules', name)
+      // Match Node's nearest-ancestor lookup before placing a dependency.
+      // Cyclic peers can reuse an enclosing copy even when the root has another
+      // version; skipping that ancestor would nest the cycle indefinitely.
+      const installed = (createRequire(resolve(destination, 'package.json')).resolve.paths('nova-package-resolution') ?? [])
+        .map(directory => resolve(directory, name)).find(target => selected.has(target))
+      if (installed && selected.get(installed) === dependency) continue
+      const target = installed
+        ? resolve(destination, 'node_modules', name)
+        : resolve(stageRoot, 'node_modules', name)
       if (selected.has(target)) {
         assert.equal(selected.get(target), dependency, `production dependency conflict: ${name}`)
         continue

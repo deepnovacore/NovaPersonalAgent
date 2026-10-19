@@ -92,9 +92,9 @@ Mac 启动本 worktree 的新版 headless 服务后，在使用相同 `SERVER_PO
 npm run server:pair --workspace @nova-personal-agent/runtime -- wss://你的主机.ts.net
 ```
 
-原生 Mac 窗口显示 120 秒内有效的一次性二维码，并可刷新二维码、查看和撤销设备。刷新会让上一张码失效；关窗会尝试取消当前码，强制退出时最迟到期失效。配对后二维码自动隐藏。二维码使用 macOS CoreImage，扫码使用 iOS VisionKit，没有新增第三方依赖；Mac 运行窗口需要 Xcode Command Line Tools。
+原生 Mac 窗口显示一次性二维码（此 client/v1 协议目前没有定时过期），并可刷新二维码、查看和撤销设备。刷新会让上一张码失效；关窗会尝试取消当前码；强制退出后不能依赖定时过期，应主动刷新或取消。配对后二维码自动隐藏。二维码使用 macOS CoreImage，扫码使用 iOS VisionKit，没有新增第三方依赖；Mac 运行窗口需要 Xcode Command Line Tools。
 
-二维码只包含 WSS 地址、一次性配对码、协议版本和到期时间，不包含主机长期 token 或模型 API Key。每台手机兑换独立的 32 位 token 并保存到 Keychain；主机只保存其 SHA-256 哈希。撤销设备会立即关闭其已有连接，并拒绝以后重连。手填旧主机 token 仍兼容；它不属于单独可撤销的手机凭据。
+二维码只包含类型、WSS 地址、一次性配对码和协议版本，不包含主机长期 token 或模型 API Key。每台手机兑换独立的 32 位 token 并保存到 Keychain；主机只保存其 SHA-256 哈希。撤销设备会立即关闭其已有连接，并拒绝以后重连。手填旧主机 token 仍兼容；它不属于单独可撤销的手机凭据。
 
 配对需要相机权限，拒绝权限或设备不支持 VisionKit 时可手填。二维码不提供网络穿透：手机仍须能访问该 WSS 地址，例如已加入对应 Tailscale 网络。地址确认不会触发麦克风；取消、超时、退到后台均不应保存迟到的配对响应。若兑换成功后网络中断或 Keychain 写入失败，可在 Mac 撤销该设备并重新生成二维码。
 

@@ -216,6 +216,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
   settings: Object.freeze({
     voicePreset: (action, settings) => ipcRenderer.invoke('nova:settings:voice-preset', action, settings),
     voiceprint: input => ipcRenderer.invoke('nova:settings:voiceprint', input),
+    hubAction: (action, deviceId) => ipcRenderer.invoke('nova:hub:action', action, deviceId),
     phoneAction: (action, deviceId) => ipcRenderer.invoke('nova:phone:action', action, deviceId),
     get: () => ipcRenderer.invoke('nova:settings:get'),
     rescanCodex: () => ipcRenderer.invoke('nova:codex:rescan'),

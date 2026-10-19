@@ -14,6 +14,7 @@ import '../agent/hub_tasks.dart';
 import '../agent/life_tool_bridge.dart';
 import '../agent/local_agent.dart';
 import 'hub_transport.dart';
+import 'hub_errors.dart';
 import 'life_sync_scheduler.dart';
 import 'local_life.dart';
 import 'local_news.dart';
@@ -225,9 +226,9 @@ class LifeHost extends ChangeNotifier
         final result = await work();
         error = null;
         return result;
-      } catch (_) {
-        // Do not surface transport text: a remote error may echo credentials.
-        error = 'Hub 操作失败，请检查连接、账号和同步状态。';
+      } catch (failure) {
+        // Only allowlisted local error codes are exposed to the UI.
+        error = hubErrorMessage(failure);
         rethrow;
       } finally {
         busy = false;
@@ -243,28 +244,44 @@ class LifeHost extends ChangeNotifier
     return _url;
   }
 
-  Future<void> configureHub({required String url, required String token}) =>
-      _serial(() async {
-        final local = _ready;
-        final endpoint = url.trim(), credential = token.trim();
-        if (credential.isEmpty) {
-          throw const FormatException('device_token_required');
-        }
-        final transport = HttpLifeSync(endpoint, credential);
-        local.validateSnapshot(await transport.snapshot());
-        _checkActive();
-        // Store the pair atomically so a failed write cannot mix two accounts.
-        await _secrets.write(
-          key: 'nova.local.hub.credentials',
-          value: jsonEncode({'url': endpoint, 'token': credential}),
-        );
-        _checkActive();
-        _url = endpoint;
-        _token = credential;
-        _tasks?.dispose();
-        _tasks = null;
-        _scheduler?.changed();
-      });
+  Future<void> configureHub({
+    required String url,
+    required String token,
+    String? expectedHubId,
+    String? expectedAccountId,
+  }) => _serial(() async {
+    final local = _ready;
+    final endpoint = url.trim(), credential = token.trim();
+    if (credential.isEmpty) {
+      throw const FormatException('device_token_required');
+    }
+    final transport = HttpLifeSync(endpoint, credential);
+    final snapshot = await transport.snapshot();
+    if (expectedHubId != null && snapshot['hub_id'] != expectedHubId) {
+      throw StateError('hub_identity_changed');
+    }
+    if (expectedAccountId != null &&
+        snapshot['account_id'] != expectedAccountId) {
+      throw StateError('account_mismatch');
+    }
+    local.validateSnapshot(snapshot);
+    _checkActive();
+    // Store the pair atomically so a failed write cannot mix two accounts.
+    try {
+      await _secrets.write(
+        key: 'nova.local.hub.credentials',
+        value: jsonEncode({'url': endpoint, 'token': credential}),
+      );
+    } catch (_) {
+      throw const HubPairingException('save_failed');
+    }
+    _checkActive();
+    _url = endpoint;
+    _token = credential;
+    _tasks?.dispose();
+    _tasks = null;
+    _scheduler?.changed();
+  });
 
   Future<void> sync() => _serial(() async {
     final local = _ready;

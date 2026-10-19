@@ -40,6 +40,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:confirmation-mode',
     'nova:confirmation-placement',
     'nova:executor-result:open',
+    'nova:hub:action',
     'nova:knowledge:action',
     'nova:memory-board:clear',
     'nova:memory-board:copy-json',
@@ -905,9 +906,10 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const {default: vm} = await import('node:vm')
   let beforeQuit, releaseMaintenanceDeadline, releaseBackend, timeout
-  let prevented = 0, quits = 0, backendStops = 0
+  let prevented = 0, quits = 0, backendStops = 0, hubCancels = 0
   const event = {preventDefault() { prevented++ }}
   const context = vm.createContext({
+    desktopHubConnection: {action: async action => { assert.equal(action, 'cancel'); hubCancels++ }},
     sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}}, cancelPhonePairing: async () => {}, managedPhone: {stop: async () => {}},
     app: {
       on: (name, handler) => { if (name === 'before-quit') beforeQuit = handler },
@@ -934,6 +936,7 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   await context.quitDrain
   assert.equal(quits, 1)
   assert.equal(prevented, 2, 'the resumed quit must reach normal window shutdown')
+  assert.equal(hubCancels, 1, 'quitting cancels pairing without stopping the background Hub')
   assert.equal(backendStops, Number(hasBackend))
 })
 

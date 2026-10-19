@@ -27,3 +27,6 @@ Model: https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html
 
 The model archive readers `tar-stream` 3.1.7 and `unbzip2-stream` 1.4.3 are MIT-licensed.
 Their license texts accompany their packages in the production dependency closure.
+
+Hub pairing renders QR images with `qrcode` 1.5.4 (MIT). Its license accompanies
+the package in the production dependency closure.
