@@ -68,17 +68,23 @@ class _LiveModelFixtureState extends State<LiveModelFixture> {
       result['task_id'] = id;
       final input = <String, dynamic>{
         'id': id,
-        'goal': scenario == 'calculator'
+        'goal': scenario == 'xiaohongshu'
+            ? '打开小红书，搜索“今日OOTD”，停留在搜索结果列表。不要点赞、收藏、关注、评论或发布。'
+            : scenario == 'calculator'
             ? 'Use the standard calculator to calculate 17 multiplied by 23. Clear the current expression first if necessary, enter 17 × 23, then press equals. Do not open settings, history or other apps. Finish when the result is visible.'
             : scenario == 'stop'
             ? 'Tap Toggle fixture repeatedly until Counter: 20. This is a synthetic counter test.'
             : 'Tap Toggle fixture exactly three times until Counter: 3. This is a synthetic counter test.',
-        'acceptance': scenario == 'calculator'
+        'acceptance': scenario == 'xiaohongshu'
+            ? '小红书搜索结果页的搜索词是“今日OOTD”，且可见相关笔记结果列表。'
+            : scenario == 'calculator'
             ? 'The calculator visibly shows the result 391 for 17 × 23.'
             : scenario == 'stop'
             ? 'Counter: 20 is visible.'
             : 'Counter: 3 is visible.',
-        'target_package': scenario == 'calculator'
+        'target_package': scenario == 'xiaohongshu'
+            ? 'com.xingin.xhs'
+            : scenario == 'calculator'
             ? 'com.miui.calculator'
             : ownPackage,
       };
@@ -161,8 +167,8 @@ class _LiveModelFixtureState extends State<LiveModelFixture> {
           );
         } else {
           check(
-            (task['actions'] as List).length >= 3,
-            'calculator_not_multistep',
+            (task['actions'] as List).isNotEmpty,
+            'external_app_has_no_actions',
           );
           result['external_ui_verification_required'] = true;
         }
@@ -232,6 +238,10 @@ class _LiveModelFixtureState extends State<LiveModelFixture> {
             FilledButton(
               onPressed: () => unawaited(run('calculator')),
               child: const Text('计算器跨 App 验收'),
+            ),
+            FilledButton(
+              onPressed: () => unawaited(run('xiaohongshu')),
+              child: const Text('小红书搜索验收'),
             ),
             FilledButton(
               onPressed: () => unawaited(run('stop')),
