@@ -175,6 +175,8 @@ export function purgeEntry(db:LedgerDatabase,path:string,input:unknown):PurgeRes
  try{
   db.prepare('DELETE FROM memory_explicit_turns WHERE prefix=?').run(q.entry_prefix)
   for(const id of selectedIds){db.prepare('INSERT OR IGNORE INTO memory_purged_ids VALUES(?)').run(hash(id));db.prepare('DELETE FROM memory_revisions WHERE entry_id=?').run(id);db.prepare('DELETE FROM memory_vectors WHERE entry_id=?').run(id)}
+  // Explicit permanent purge includes published derived prose; ordinary source deletion does not.
+  for(const id of refs)db.prepare("DELETE FROM processing_publications WHERE EXISTS(SELECT 1 FROM json_each(payload_json,'$.sources') source WHERE json_extract(source.value,'$.id')=?)").run(id)
   for(const record of evidence){db.prepare('INSERT OR IGNORE INTO memory_purged_ids VALUES(?)').run(hash(record.id));db.prepare('INSERT OR IGNORE INTO memory_suppressed VALUES(?)').run(record.hash);db.prepare('DELETE FROM memory_evidence WHERE id=?').run(record.id);db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(record.id);db.prepare("DELETE FROM source_extractions WHERE json_extract(payload_json,'$.ticket.evidence_id')=?").run(record.id)}
   for(const row of db.prepare('SELECT namespace,payload_json FROM memory_life_meta').all()){
    const meta=JSON.parse(String(row.payload_json)) as {profile_version?:number;receipts:Record<string,{result:{id:string}}>},selectedHere=selected.filter(entry=>entry.entry_id.startsWith(String(row.namespace))),selectedLife=new Set(selectedHere.map(entry=>entry.content.life_id))

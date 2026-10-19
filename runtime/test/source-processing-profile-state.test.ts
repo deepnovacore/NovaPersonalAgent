@@ -16,3 +16,15 @@ test('prior recipe profile is reported as needing an update without exposing or 
   assert.equal(db.prepare('SELECT payload_json FROM processing_profiles WHERE prefix=?').get(prefix)?.payload_json,old,'old cache is retained verbatim')
  }finally{db.close()}
 })
+
+
+test('temporary read failure preserves only same-account published display and clears executable products',async()=>{
+ const {SourceProcessingAgent}=await import('../src/personal-agent/source-processing-agent.js')
+ const {emptyUnderstanding}=await import('../src/personal-agent/understanding-products.js')
+ let fail=false,account='first';const published={draft:{about:{text:'Last successful portrait',refs:[{entry_id:'s',version:'v'}]},work:[],interests:[]},generation_version:'understanding-v7',generated_at:'2026-10-18T00:00:00Z',read_only:true as const,unavailable_sources:0,sources:[],projects:[],suggestions:[]}
+ const host={options:{memory:()=>({sourceProcessing:async()=>{if(fail)throw Error('temporary');return {...emptyUnderstanding(),last_success:published}}})},snapshot:()=>({feishu:{account_id:account}}),life:{snapshot:()=>({todos:[],ideas:[],goals:[]})},schedules:{activeRuns:()=>[],terminalRuns:()=>[]}}
+ const agent=new SourceProcessingAgent(host as unknown as import('../src/personal-agent/host.js').PersonalAgentHost)
+ await agent.reload();assert.deepEqual(agent.profileSnapshot().last_success,published);assert.equal(agent.profileSnapshot().draft,null)
+ fail=true;await agent.reload();assert.deepEqual(agent.profileSnapshot().last_success,published);assert.equal(agent.profileSnapshot().status,'failed');assert.deepEqual(agent.snapshot().suggestions,[])
+ account='second';agent.setPresentationAccount(account);assert.equal(agent.profileSnapshot().draft,null);assert.equal(agent.profileSnapshot().last_success,undefined);assert.deepEqual(agent.snapshot().suggestions,[]);await agent.reload();assert.equal(agent.profileSnapshot().last_success,null)
+})

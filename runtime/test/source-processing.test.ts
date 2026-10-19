@@ -528,3 +528,34 @@ test('older synthesis rules require rewriting without discarding durable observa
   process({action:'commit',...rewriteOwner,topics:[]});assert.equal(process({action:'claim'}),null)
  }finally{db.close()}
 })
+
+
+test('published profile is a display-only last success across recipe changes and source deletion',()=>{
+ const {db,process,add,bind}=setup()
+ try{
+  const id=add('history','PRIVATE RAW ORIGINAL THAT MUST NOT BE ARCHIVED'),batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id})
+  process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,refs:batch.items,draft:{about:{text:'Previously established profile.',refs:[{entry_id:id,version:'history'}]},work:[],interests:[]},products:{projects:[],suggestions:[]}})
+  // Simulate a genuinely old successful cache imported by the migration.
+  db.prepare("UPDATE processing_profiles SET payload_json=json_set(payload_json,'$.generation_version','understanding-v7','$.generated_at','2026-10-18T12:00:00.000Z')").run();db.prepare('DELETE FROM processing_publications').run();initializeMemory(db)
+  const read=(presentation=false)=>memoryOperation(db,'source_processing',{prefix,provider,recipe:'new-v8-recipe',action:'products',presentation}) as {draft:unknown;last_success?:{draft:{about:{text:string}};generation_version:string;generated_at:string;unavailable_sources:number;read_only:boolean}}
+  assert.equal(read().draft,null);assert.equal(read().last_success,undefined)
+  let history=read(true).last_success!;assert.equal(history.draft.about.text,'Previously established profile.');assert.equal(history.generation_version,'understanding-v7');assert.equal(history.generated_at,'2026-10-18T12:00:00.000Z');assert.equal(history.read_only,true)
+  memoryOperation(db,'delete_source',{source_id:prefix+'source:history'});initializeMemory(db)
+  history=read(true).last_success!;assert.equal(history.draft.about.text,'Previously established profile.');assert.equal(history.unavailable_sources,1);assert.equal(read().draft,null)
+  const archive=String(db.prepare('SELECT payload_json FROM processing_publications').get()!.payload_json);assert.ok(!archive.includes('PRIVATE RAW ORIGINAL'))
+  assert.equal((memoryOperation(db,'source_processing',{prefix:'personal:other:',provider,action:'products',presentation:true}) as {last_success:unknown}).last_success,null)
+ }finally{db.close()}
+})
+
+test('published account scope survives deleted sources and never follows another Feishu account',()=>{
+ const {db,process,bind}=setup();const id=prefix+'account-message',source_id=prefix+'chat',now=new Date().toISOString()
+ try{
+  memoryOperation(db,'append_evidence',{id,source_id,source_kind:'im',locator:'message',raw_text:'I manage a team',hash:'account-hash',observed_at:now,recorded_at:now,trust:'untrusted_external',source_metadata:{sender_id:'self',recipient_id:'self',account_id:'original-account',mention:'direct'}})
+  memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
+  const batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id});process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,refs:batch.items,draft:{about:{text:'You manage a team.',refs:[{entry_id:id,version:'account-hash'}]},work:[],interests:[]}})
+  const read=(account_scope?:string)=>process({action:'products',presentation:true,...(account_scope?{account_scope}: {})}) as {last_success:unknown}
+  assert.ok(read('original-account').last_success);assert.equal(read('other-account').last_success,null);assert.equal(read().last_success,null)
+  memoryOperation(db,'delete_source',{source_id});initializeMemory(db)
+  assert.ok(read('original-account').last_success);assert.equal(read('other-account').last_success,null)
+ }finally{db.close()}
+})

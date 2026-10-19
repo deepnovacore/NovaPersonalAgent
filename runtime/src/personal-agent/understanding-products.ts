@@ -10,7 +10,12 @@ export const actionSuggestionSchema=z.object({id:z.string().max(128),kind:z.enum
 export const understandingProductsSchema=z.object({projects:z.array(projectUnderstandingSchema).max(24),suggestions:z.array(actionSuggestionSchema).max(24)}).strict()
 export type UnderstandingProducts=z.infer<typeof understandingProductsSchema>
 export const projectCorrectionSchema=z.enum(['participating','historical','reference','automatic'])
+export interface PublishedUnderstanding extends UnderstandingProducts {
+ draft:z.infer<typeof profileDraftSchema>;generation_version:string|null;generated_at:string|null;read_only:true;unavailable_sources:number;
+ sources:{id:string;version:string;label:string;observed_at:string;type:string;available:boolean}[];
+}
 export interface UnderstandingSnapshot extends UnderstandingProducts {
+ last_success?:PublishedUnderstanding|null;
  profile_needs_update?:boolean;profile_pending?:boolean;news_cleanup_pending?:boolean;revision:number;draft:z.infer<typeof profileDraftSchema>|null;generated_at:string|null;
  sources:{id:string;version:string;label:string;observed_at:string;type?:SourceTag['type'];provider?:string;url?:string}[];
  corrections:Record<string,z.infer<typeof projectCorrectionSchema>>;

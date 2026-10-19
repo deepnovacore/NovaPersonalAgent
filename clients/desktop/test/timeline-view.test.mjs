@@ -306,3 +306,14 @@ test('historical cards label prior status, assessment and suggestions without sh
  assert.ok(node.querySelectorAll('.timeline-time-label').some(n=>n.textContent==='原截止已过 1 天，结果以最新记录为准'))
  assert.deepEqual(parent.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),['2026-10-11'])
 })
+
+test('deleted-source history keeps its content and date while disabling source actions',()=>{
+ const card={id:'saved',version:'v1',category:'项目',title:'Saved update',why_now:'Original assessment',facts:[{text:'Original successful summary'}],sources:[],actions:[{label:'讨论',kind:'discuss'}],sources_available:false,historical:true,time:{as_of:'2026-10-11',anchor_date:'2026-10-11',kind:'event'}}
+ const {parent}=render({...snapshot,timeline:{status:'failed',cards:[card]}},{command:()=>{}})
+ const node=parent.querySelectorAll('.timeline-attention-card')[0]
+ assert.equal(node.querySelectorAll('h3')[0].textContent,'Saved update')
+ assert.equal(node.querySelectorAll('.timeline-source-unavailable')[0].textContent,'原始来源已不可用')
+ assert.ok(!node.querySelectorAll('button').some(button=>button.textContent==='讨论'))
+ assert.ok(node.querySelectorAll('button').some(button=>button.textContent==='隐藏'))
+ assert.deepEqual(parent.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),['2026-10-11'])
+})

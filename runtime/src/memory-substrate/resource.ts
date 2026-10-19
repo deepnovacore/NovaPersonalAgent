@@ -678,7 +678,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return records.map(e=>{
       const attribution=profileSourceInput(e).source!,system=e.source_metadata?.sender_type==='app'
       const author={key:attribution.sender_id!,...(attribution.sender_name?{name:attribution.sender_name}:{}),kind:system?'system' as const:e.source_metadata?.sender_type==='user'?'person' as const:'unknown' as const,is_user:!system&&attribution.relation==='self'}
-      return {id:e.id,version:e.hash,kind:e.source_kind,history_only:Date.parse(e.observed_at)<since,group:e.source_metadata?.chat_id??e.source_id,text:e.raw_text!,observed_at:e.observed_at,author,relation:system?'system' as const:attribution.relation??'participant' as const,source:{evidence_id:e.id,type:e.source_kind as 'im'|'mail'|'calendar',observed_at:e.observed_at,summary:e.raw_text!.slice(0,700),...(e.source_metadata?.provider?{provider:e.source_metadata.provider}:{})}}
+      return {...(typeof e.source_metadata?.account_id==='string'?{account_scope:e.source_metadata.account_id}:{}),id:e.id,version:e.hash,kind:e.source_kind,history_only:Date.parse(e.observed_at)<since,group:e.source_metadata?.chat_id??e.source_id,text:e.raw_text!,observed_at:e.observed_at,author,relation:system?'system' as const:attribution.relation??'participant' as const,source:{evidence_id:e.id,type:e.source_kind as 'im'|'mail'|'calendar',observed_at:e.observed_at,summary:e.raw_text!.slice(0,700),...(e.source_metadata?.provider?{provider:e.source_metadata.provider}:{})}}
     })
   }
   async dailyBriefEvidence(input:{localDate:string;timezone:string;signal?:AbortSignal}){

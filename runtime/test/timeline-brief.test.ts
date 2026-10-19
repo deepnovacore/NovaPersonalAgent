@@ -6,7 +6,7 @@ import {join} from 'node:path'
 import {TimelineBrief,type TimelineInput} from '../src/personal-agent/timeline-brief.js'
 const input:TimelineInput={id:'message',version:'v1',kind:'im',text:'Synthetic node is still down',observed_at:'2026-10-17T01:00:00Z',relation:'participant'}
 const reply={cards:[{category:'需要关注',title:'Check the node',why_now:'Repeated alert needs checking',facts:[{text:'The node is down',quote:'node is still down',ref:'message'}],uncertainty:'No recovery confirmed',actions:[{label:'Draft a question',kind:'draft' as const}],refs:['message']}]}
-test('timeline uses ordinary evidence, caches across restart, hides changed evidence and rejects ungrounded facts',async()=>{
+test('timeline uses ordinary evidence, caches across restart, preserves changed-source history and rejects new ungrounded facts',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-brief-'));let calls=0
  const make=()=>new TimelineBrief(join(dir,'timeline.json'),()=>{calls++;return Promise.resolve(reply)},()=>undefined)
  let brief=make()
@@ -14,11 +14,11 @@ test('timeline uses ordinary evidence, caches across restart, hides changed evid
   await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');assert.equal(calls,0,'update does not wait for generation')
   await brief.refresh();assert.equal(brief.snapshot().cards.length,1);assert.equal(calls,1)
   await brief.close();brief=make();await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1);assert.equal(calls,1)
-  brief.update([{...input,version:'v2',text:'recovered'}],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,0)
-  await brief.refresh();assert.equal(brief.snapshot().cards.length,0,'quote from the old source is not evidence')
+  brief.update([{...input,version:'v2',text:'recovered'}],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1);assert.equal(brief.snapshot().cards[0]!.sources_available,false)
+  await brief.refresh();assert.equal(brief.snapshot().cards.length,1,'new unsupported output cannot erase the previous success')
   assert.equal(brief.snapshot().diagnostics?.host_dropped.unsupported_quote,1)
   assert.equal(brief.snapshot().diagnostics?.published,0)
-  brief.update([],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,0)
+  brief.update([],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 test('timeline drops a late model result after revocation and close cancels non-cooperative generation',async()=>{
@@ -93,7 +93,7 @@ test('old reports stay out of recent briefing while future deadlines remain, and
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('rechecking unchanged source permissions hides cached cards without cancelling synthesis',async()=>{
+test('source rechecks keep published cards visible without cancelling synthesis',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-recheck-'));let release!:(value:typeof reply)=>void,signal:AbortSignal|undefined
  const brief=new TimelineBrief(join(dir,'timeline.json'),(_inputs,_context,current)=>{signal=current;return new Promise(resolve=>{release=resolve})},()=>undefined)
  try{
@@ -102,9 +102,9 @@ test('rechecking unchanged source permissions hides cached cards without cancell
   brief.suspend();assert.equal(brief.snapshot().cards.length,0);assert.equal(signal!.aborted,false)
   brief.update([input],'2026-10-17','Asia/Shanghai');assert.equal(signal!.aborted,false)
   release(reply);await running;assert.equal(brief.snapshot().cards.length,1)
-  brief.suspend();assert.equal(brief.snapshot().cards.length,0)
+  brief.suspend();assert.equal(brief.snapshot().cards.length,1)
   brief.update([input],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1)
-  brief.suspend();brief.update([],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,0)
+  brief.suspend();brief.update([],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -133,7 +133,7 @@ test('batch diagnostics survive persistence alongside the grounded cards',async(
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('checked batches appear while working and survive timeout; withdrawal still hides them',async(t)=>{
+test('checked batches survive timeouts and source withdrawal as history',async(t)=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-progress-'))
  const timeout=new AbortController();t.mock.method(AbortSignal,'timeout',()=>timeout.signal)
  let published=false
@@ -146,7 +146,7 @@ test('checked batches appear while working and survive timeout; withdrawal still
   assert.equal(brief.snapshot().status,'working');assert.equal(brief.snapshot().cards.length,1)
   timeout.abort(new DOMException('Timed out','TimeoutError'));await run
   assert.equal(brief.snapshot().status,'failed');assert.equal(brief.snapshot().cards.length,1)
-  brief.update([],'2026-10-17','UTC');assert.equal(brief.snapshot().cards.length,0)
+  brief.update([],'2026-10-17','UTC');assert.equal(brief.snapshot().cards.length,1)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -162,7 +162,7 @@ test('new messages do not starve an authorized generation; edits and revocation 
   release(reply);await run;assert.equal(brief.snapshot().cards.length,1)
   const next=brief.refresh();while(signal?.aborted)await new Promise(resolve=>setImmediate(resolve))
   brief.update([{...input,version:'changed'}, {...input,id:'new-message'}],'2026-10-17','UTC')
-  await next;assert.equal(brief.snapshot().cards.length,0)
+  await next;assert.equal(brief.snapshot().cards.length,1);assert.equal(brief.snapshot().cards[0]!.sources_available,false)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -186,29 +186,29 @@ test('people tags retain only names grounded in the card sources and prose, and 
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('unrelated source edits preserve still-authorized published cards while changed citations disappear',async()=>{
+test('source edits preserve all published cards while unavailable citations cannot be reused',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-independent-'))
  const other={...input,id:'other',version:'v1'}
  const brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards:[reply.cards[0]!,{...reply.cards[0]!,title:'Other issue',refs:['other'],facts:[{text:other.text,quote:other.text,ref:'other'}]}]}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  try{
   await brief.open();brief.update([input,other],'2026-10-17','Asia/Shanghai');await brief.refresh()
   brief.update([input,{...other,version:'v2'}],'2026-10-17','Asia/Shanghai')
-  assert.deepEqual(brief.snapshot().cards.map(c=>c.title),['Check the node'])
+  assert.deepEqual(brief.snapshot().cards.map(c=>c.title),['Check the node','Other issue'])
   assert.deepEqual(brief.basis(),[{id:input.id,version:input.version}])
-  brief.update([{...other,version:'v2'}],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,0)
+  brief.update([{...other,version:'v2'}],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,2);assert.deepEqual(brief.basis(),[])
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
 
-test('cached briefings from the old relevance policy require regeneration before display',async()=>{
+test('older policy results remain readable as historical results while awaiting regeneration',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-policy-')),path=join(dir,'timeline.json')
  const make=()=>new TimelineBrief(path,()=>{try{return Promise.resolve(reply)}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  let brief=make()
  try{
   await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');await brief.refresh();await brief.close()
-  const saved=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;delete saved.perspective_revision;await writeFile(path,JSON.stringify(saved))
+  const saved=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;delete saved.perspective_revision;for(const card of saved.cards as Record<string,unknown>[]){delete card.artifact_scope;delete card.evidence_basis;delete card.policy_revision}await writeFile(path,JSON.stringify(saved))
   brief=make();await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai')
-  assert.equal(brief.snapshot().cards.length,0)
+  assert.equal(brief.snapshot().cards.length,1);assert.equal(brief.snapshot().cards[0]!.historical,true)
   await brief.refresh();assert.equal(brief.snapshot().cards.length,1)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
@@ -240,14 +240,14 @@ test('midnight and later empty refreshes preserve authorized history without rew
   await brief.close();brief=make();await brief.open();brief.update([input],'2026-10-19','UTC')
   assert.deepEqual(brief.snapshot().cards,[original]);assert.equal(brief.snapshot().cards[0]!.time.as_of,'2026-10-17')
   brief.update([input],'2026-10-19','Asia/Shanghai');assert.deepEqual(brief.snapshot().cards,[original]);assert.equal(brief.snapshot().cards[0]!.timezone,'UTC')
-  brief.suspend();assert.equal(brief.snapshot().cards.length,0)
+  brief.suspend();assert.equal(brief.snapshot().cards.length,1)
   brief.update([input],'2026-10-19','UTC');assert.equal(brief.snapshot().cards.length,1)
-  brief.update([{...input,version:'changed'}],'2026-10-19','UTC');assert.equal(brief.snapshot().cards.length,0)
-  await brief.refresh();assert.equal(brief.snapshot().cards.length,0)
+  brief.update([{...input,version:'changed'}],'2026-10-19','UTC');assert.equal(brief.snapshot().cards.length,1)
+  await brief.refresh();assert.equal(brief.snapshot().cards.length,1)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('refresh adds independent cards and updates stable identities while removing withdrawn citations',async()=>{
+test('refresh adds independent cards and updates stable identities without erasing history whose citations are withdrawn',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-incremental-'))
  const other={...input,id:'other'},second={...reply.cards[0]!,title:'Second issue',refs:['other'],facts:[{text:other.text,quote:other.text,ref:'other'}]}
  let generated=reply
@@ -263,8 +263,8 @@ test('refresh adds independent cards and updates stable identities while removin
   const updated=brief.snapshot().cards.find(card=>card.id===original.id)!
   assert.equal(updated.why_now,'Updated grounded assessment');assert.equal(updated.time.as_of,'2026-10-18')
   brief.update([other],'2026-10-19','UTC');generated={cards:[]};await brief.refresh()
-  assert.deepEqual(brief.snapshot().cards.map(card=>card.title),['Second issue'])
-  brief.update([],'2026-10-19','UTC');assert.equal(brief.snapshot().cards.length,0)
+  assert.deepEqual(brief.snapshot().cards.map(card=>card.title),['Check the node','Second issue']);assert.equal(brief.snapshot().cards[0]!.sources_available,false)
+  brief.update([],'2026-10-19','UTC');assert.equal(brief.snapshot().cards.length,2)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -280,6 +280,52 @@ test('retained citations survive the generation selection cap and historical ori
   assert.equal(brief.snapshot().cards.length,1);assert.equal(observed[0]!.id,'message','no historical-only generation')
   brief.update([{...input,history_only:true},newer[0]!],'2026-11-18','UTC');await brief.refresh()
   assert.deepEqual(observed.map(i=>i.id),['new-0']);assert.equal(brief.snapshot().cards.length,1)
-  brief.update([],'2026-11-18','UTC');assert.equal(brief.snapshot().cards.length,0)
+  brief.update([],'2026-11-18','UTC');assert.equal(brief.snapshot().cards.length,1)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('deleted originals leave durable history but cannot be discussed or sent for synthesis',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-deleted-'));let calls=0
+ const make=()=>new TimelineBrief(join(dir,'timeline.json'),async()=>{calls++;return reply},()=>undefined)
+ let brief=make()
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  const saved=brief.snapshot().cards[0]!
+  brief.update([],'2026-10-19','UTC');await brief.refresh()
+  assert.equal(calls,1);assert.equal(brief.snapshot().cards[0]!.title,saved.title)
+  assert.equal(brief.snapshot().cards[0]!.sources_available,false)
+  assert.throws(()=>brief.discussion(saved.id,saved.version),/stale_reference/)
+  await brief.close();brief=make();await brief.open();brief.update([],'2026-10-20','UTC')
+  assert.equal(brief.snapshot().cards[0]!.time.as_of,'2026-10-17')
+  await brief.dismiss(saved.id);assert.equal(brief.snapshot().cards.length,0)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('historical cards remain isolated to their published account even after all sources are deleted',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-accounts-'))
+ const access=(scope:string,refs:string[]=[])=>({scope,allowed:true,legacy_refs:refs})
+ const brief=new TimelineBrief(join(dir,'timeline.json'),async()=>reply,()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC',access('account-a',[input.id]));await brief.refresh()
+  brief.update([],'2026-10-18','UTC',access('account-b'));assert.equal(brief.snapshot().cards.length,0)
+  brief.update([],'2026-10-18','UTC',access('account-a'));assert.equal(brief.snapshot().cards.length,1)
+  brief.unavailable();assert.equal(brief.snapshot().cards.length,1);assert.equal(brief.snapshot().cards[0]!.sources_available,false)
+  brief.invalidate();assert.equal(brief.snapshot().cards.length,1)
+  brief.setAccess({...access('account-a'),allowed:false});assert.equal(brief.snapshot().cards.length,0)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('identical local-source cards and dismissals remain independent between account spaces',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-scoped-dismiss-'))
+ const access=(scope:string)=>({scope,allowed:true,legacy_refs:[input.id]})
+ const brief=new TimelineBrief(join(dir,'timeline.json'),async()=>reply,()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC',access('a'));await brief.refresh()
+  const id=brief.snapshot().cards[0]!.id;await brief.dismiss(id)
+  brief.update([input],'2026-10-18','UTC',access('b'));await brief.refresh()
+  assert.equal(brief.snapshot().cards.length,1)
+  brief.update([],'2026-10-19','UTC',access('a'));assert.equal(brief.snapshot().cards.length,0)
+  brief.update([],'2026-10-19','UTC',access('b'));assert.equal(brief.snapshot().cards.length,1)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })

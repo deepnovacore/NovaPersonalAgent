@@ -39,7 +39,7 @@ export const processingRequestSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('observe'),...owner,refs:z.array(processingRefSchema).min(1).max(8),observations:z.array(processingObservationSchema).max(24)}).strict(),
  z.object({action:z.literal('profile_context'),...owner}).strict(),
  z.object({action:z.literal('identities'),...owner,refs:z.array(processingRefSchema).min(1).max(8)}).strict(),
- z.object({action:z.literal('products'),include_dismissed:z.boolean().optional()}).strict(),
+ z.object({action:z.literal('products'),include_dismissed:z.boolean().optional(),presentation:z.boolean().optional(),account_scope:id.optional()}).strict(),
  z.object({action:z.literal('confirm_cleanup')}).strict(),
  z.object({action:z.literal('dismiss'),id}).strict(),
  z.object({action:z.literal('correct_project'),id,value:projectCorrectionSchema}).strict(),
@@ -67,6 +67,7 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  CREATE TABLE IF NOT EXISTS processing_decisions(prefix TEXT NOT NULL,kind TEXT NOT NULL,id TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(prefix,kind,id));
  CREATE TABLE IF NOT EXISTS processing_heads(key TEXT PRIMARY KEY,revision INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS processing_profiles(prefix TEXT NOT NULL,provider TEXT NOT NULL,revision INTEGER NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(prefix,provider));
+ CREATE TABLE IF NOT EXISTS processing_publications(prefix TEXT NOT NULL,provider TEXT NOT NULL,publication_key TEXT NOT NULL,scope_json TEXT NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(prefix,provider,publication_key));
  CREATE TABLE IF NOT EXISTS processing_reads(batch_id TEXT NOT NULL,ref_key TEXT NOT NULL,PRIMARY KEY(batch_id,ref_key));
  CREATE TRIGGER IF NOT EXISTS processing_head_insert AFTER INSERT ON memory_message_heads BEGIN
  INSERT INTO processing_heads VALUES(NEW.key,1) ON CONFLICT(key) DO UPDATE SET revision=revision+1; END;
@@ -78,6 +79,7 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  if(!db.prepare('PRAGMA table_info(processing_receipts)').all().some(column=>column.name==='evidence_id')){
   db.exec("ALTER TABLE processing_receipts ADD COLUMN evidence_id TEXT NOT NULL DEFAULT ''; DELETE FROM processing_receipts; DELETE FROM processing_state;")
  }
+ for(const row of db.prepare("SELECT prefix,provider,payload_json FROM processing_profiles ORDER BY coalesce(json_extract(payload_json,'$.generated_at'),''),rowid").all())archivePublication(db,String(row.prefix),String(row.provider),String(row.payload_json))
  const affected=`SELECT json_extract(r.value,'$.evidence_id') FROM processing_topics t,json_each(t.payload_json,'$.refs') r WHERE EXISTS(SELECT 1 FROM json_each(t.payload_json,'$.refs') removed WHERE json_extract(removed.value,'$.evidence_id')=OLD.id)
  UNION SELECT json_extract(r.value,'$.evidence_id') FROM processing_profiles p,json_each(p.payload_json,'$.refs') r WHERE EXISTS(SELECT 1 FROM json_each(p.payload_json,'$.refs') removed WHERE json_extract(removed.value,'$.evidence_id')=OLD.id)`
  // Erase revoked clauses, retain unrelated profile clauses, and requeue surviving mixed-topic inputs.
@@ -124,6 +126,40 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  INSERT OR IGNORE INTO processing_meta VALUES(1);`)
  db.exec('RELEASE processing_initialize')
  }catch(error){db.exec('ROLLBACK TO processing_initialize; RELEASE processing_initialize');throw error}
+}
+
+
+/** Published prose belongs to the user independently of its original evidence.
+ * This table never contains raw evidence and never feeds model input or adoption.
+ * Legacy imports require every cited source's identity to still be provable. */
+function archivePublication(db:LedgerDatabase,prefix:string,provider:string,payload:string){
+ const parsed=profileCacheSchema.safeParse(JSON.parse(payload));if(!parsed.success)return
+ const content=parsed.data;if(content.profile_pending||!content.draft.about&&!content.draft.work.length&&!content.draft.interests.length)return
+ const key=content.publication_key??sha256(payload)
+ if(db.prepare('SELECT 1 FROM processing_publications WHERE prefix=? AND provider=? AND publication_key=?').get(prefix,provider,key))return
+ const refs=[...(content.draft.about?.refs??[]),...content.draft.work.flatMap(f=>f.refs),...content.draft.interests.flatMap(f=>f.refs),...(content.products?.projects.flatMap(f=>f.refs)??[]),...(content.products?.suggestions.flatMap(f=>f.refs)??[])],accounts=new Set<string>(),sources=[]
+ for(const ref of [...new Map(refs.map(ref=>[ref.entry_id,ref])).values()]){
+  if(!ref.entry_id.startsWith(prefix))return
+  const row=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(ref.entry_id);if(!row)return
+  const record=JSON.parse(String(row.payload_json)) as EvidenceRecord
+  if(record.hash!==ref.version||!record.source_id.startsWith(prefix))return
+  if(['im','mail'].includes(record.source_kind)){const account=record.source_metadata?.account_id;if(typeof account!=='string'||!account)return;accounts.add(account)}
+  sources.push({id:ref.entry_id,version:String(ref.version),label:record.locator,observed_at:record.observed_at,type:record.source_kind})
+ }
+ if(!sources.length)return
+ const published={draft:content.draft,projects:content.products?.projects??[],suggestions:(content.products?.suggestions??[]).map(({anchor,date_evidence,...item})=>item),generation_version:content.generation_version??null,generated_at:content.generated_at??null,sources}
+ db.prepare('INSERT OR IGNORE INTO processing_publications VALUES(?,?,?,?,?)').run(prefix,provider,key,canonicalJson([...accounts].sort()),canonicalJson(published))
+}
+function lastPublication(db:LedgerDatabase,prefix:string,consumer:string,accountScope:string|undefined){
+ const rows=db.prepare('SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY rowid DESC').all(prefix)
+ for(const row of rows){
+  const accounts=JSON.parse(String(row.scope_json)) as string[]
+  if(accounts.some(account=>account!==accountScope))continue
+  const saved=JSON.parse(String(row.payload_json)) as {draft:z.infer<typeof profileDraftSchema>;projects:unknown[];suggestions:unknown[];generation_version:string|null;generated_at:string|null;sources:{id:string;version:string;label:string;observed_at:string;type:string}[]}
+  const sources=saved.sources.map(item=>{const record=effectiveEvidence(db,item.id,{purpose:'extraction',provider:consumer});return {...item,available:!!record&&record.hash===item.version}})
+  return {...saved,sources,read_only:true as const,unavailable_sources:sources.filter(source=>!source.available).length}
+ }
+ return null
 }
 
 function joinAbout(parts:z.infer<typeof profileDraftSchema>['about'][]){
@@ -291,7 +327,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const suggestions=(content.products?.suggestions??[]).filter(item=>valid(item)&&(q.include_dismissed===true||!dismissed.has(item.id))&&(!item.project_id||projects.some(project=>project.id===item.project_id&&project.relation==='participating'&&project.status==='current')))
   const originals=content.refs.flatMap(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)?.items??[])
   const profile_needs_update=!result.draft&&!!db.prepare("SELECT 1 FROM processing_profiles WHERE prefix=? AND provider<>? AND (json_type(payload_json,'$.draft.about')='object' OR json_array_length(payload_json,'$.draft.work')>0 OR json_array_length(payload_json,'$.draft.interests')>0) LIMIT 1").get(prefix,provider)
-  return {...result,projects,suggestions,corrections,profile_needs_update,profile_pending:content.profile_pending===true,news_cleanup_pending:decisions.some(row=>row.kind==='policy'&&row.id==='cleanup'&&row.value==='pending'),generated_at:content.generated_at??null,sources:[...new Map(originals.map(item=>[item.evidence_id,{id:item.evidence_id,version:item.version,label:item.locator,observed_at:item.observed_at,type:item.source_kind==='user_correction'?'conversation':item.source_kind==='task_result'?'task':item.source_kind,...(item.source_metadata?.provider?{provider:item.source_metadata.provider.slice(0,80)}:{}),...(item.source_metadata?.source_url?{url:item.source_metadata.source_url}:{})}])).values()]}
+  return {...result,projects,suggestions,corrections,...(q.presentation?{last_success:lastPublication(db,prefix,consumer,q.account_scope)}:{}),profile_needs_update,profile_pending:content.profile_pending===true,news_cleanup_pending:decisions.some(row=>row.kind==='policy'&&row.id==='cleanup'&&row.value==='pending'),generated_at:content.generated_at??null,sources:[...new Map(originals.map(item=>[item.evidence_id,{id:item.evidence_id,version:item.version,label:item.locator,observed_at:item.observed_at,type:item.source_kind==='user_correction'?'conversation':item.source_kind==='task_result'?'task':item.source_kind,...(item.source_metadata?.provider?{provider:item.source_metadata.provider.slice(0,80)}:{}),...(item.source_metadata?.source_url?{url:item.source_metadata.source_url}:{})}])).values()]}
 
  }
  const row=db.prepare('SELECT payload_json FROM processing_batches WHERE id=? AND prefix=? AND provider=?').get(q.batch_id,prefix,provider)
@@ -397,6 +433,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   for(const item of products?.suggestions??[]){const original=readRefs(db,prefix,consumer,refs.filter((ref:ProcessingRef)=>item.refs.some(r=>r.entry_id===ref.evidence_id)),recipe,participants)?.items[0];if(!original)continue;const identity={id:item.id,kind:item.kind,title:item.title,project_id:item.project_id,source_key:original.source_key};db.prepare('INSERT INTO processing_identities VALUES(?,?,?,?,?) ON CONFLICT(prefix,id) DO UPDATE SET evidence_id=excluded.evidence_id,source_key=excluded.source_key,payload_json=excluded.payload_json').run(prefix,item.id,original.evidence_id,original.source_key,canonicalJson(identity))}
   db.prepare('DELETE FROM processing_identities WHERE prefix=? AND rowid NOT IN (SELECT rowid FROM processing_identities WHERE prefix=? ORDER BY rowid DESC LIMIT 1000)').run(prefix,prefix)
   db.prepare('INSERT INTO processing_profiles VALUES(?,?,?,?) ON CONFLICT(prefix,provider) DO UPDATE SET revision=excluded.revision,payload_json=excluded.payload_json').run(prefix,provider,revision+1,payload)
+  archivePublication(db,prefix,provider,payload)
   decision('published',batch.id,'done')
   if(batch.profile_only&&q.profile_context_key&&!q.defer_profile)decision('observed',batch.id,'done')
   return {applied:true,revision:revision+1}

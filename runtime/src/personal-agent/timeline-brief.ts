@@ -7,7 +7,8 @@ import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {abortable} from '../core/camera-session.js'
 import {sourceTagSchema,type SourceTag} from '../memory/provenance.js'
 
-export interface TimelineInput {history_only?:boolean;id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
+export interface TimelineAccess {scope:string;allowed:boolean;legacy_refs:readonly string[]}
+export interface TimelineInput {account_scope?:string;history_only?:boolean;id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
 export const TIMELINE_MAX_REFS=16
 const ref=z.string().min(1).max(600)
 export const timelineReplySchema=z.object({cards:z.array(z.object({
@@ -41,7 +42,7 @@ export type TimelineDiagnostics=z.infer<typeof timelineDiagnosticsSchema>
 export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:TimelineDiagnostics}
 export interface TimelineContext {local_date:string;timezone:string;viewer_names?:string[]}
 export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>)=>Promise<TimelineGenerated>
-const cardSchema=timelineReplySchema.shape.cards.element.extend({id:z.string(),version:z.string(),timezone:z.string().optional(),sources:z.array(sourceTagSchema),time:resolvedTimeSchema})
+const cardSchema=timelineReplySchema.shape.cards.element.extend({id:z.string(),version:z.string(),timezone:z.string().optional(),artifact_scope:z.string().optional(),evidence_basis:z.array(z.object({id:ref,version:z.string()})).optional(),policy_revision:z.number().int().optional(),sources:z.array(sourceTagSchema),time:resolvedTimeSchema})
 const failureSchema=z.object({name:z.string(),code:z.string(),issues:z.array(z.object({code:z.string(),path:z.array(z.union([z.string(),z.number()])),maximum:z.number().optional()})).optional()})
 const stateSchema=z.object({diagnostics:timelineDiagnosticsSchema.nullable().default(null),failure:failureSchema.nullable().default(null),version:z.literal(1),perspective_revision:z.number().int().default(0),key:z.string(),local_date:z.string(),timezone:z.string().nullable().default(null),basis:z.array(z.object({id:ref,version:z.string()})),cards:z.array(cardSchema),updated_at:z.string().nullable(),last_attempt:z.number(),dismissed:z.array(z.string()).max(256)})
 type State=z.infer<typeof stateSchema>
@@ -52,17 +53,17 @@ const sensitive=(text:string)=>scrubber.scrub('timeline',text).kind!=='clean'
 
 /** Read-only derived attention cards. This owns no task execution or Life mutation authority. */
 export class TimelineBrief {
- #pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
+ #access:TimelineAccess|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
  constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void){this.#store=new BoundedJsonStore(path,stateSchema)}
- async open(){try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#state=empty()}this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
+ async open(){try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#state=empty()}this.#access=undefined;this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
  startGeneration(){this.#defer=false;this.#schedule()}
  #save(){const state=structuredClone(this.#state);const run=this.#tail.then(()=>this.#store.write(state));this.#tail=run.catch(()=>undefined);return run}
  /** IDs only: each cached citation must be re-read under current source permissions. */
- retainedEvidenceIds(){return [...new Set(this.#state.cards.filter(card=>!this.#state.dismissed.includes(card.id)).flatMap(card=>card.refs))]}
- basis(){const refs=new Set(this.#visibleCards().flatMap(card=>card.refs));return structuredClone(this.#state.basis.filter(input=>refs.has(input.id)))}
+ retainedEvidenceIds(){return [...new Set(this.#state.cards.filter(card=>!this.#dismissed(card)).flatMap(card=>card.refs))]}
+ basis(id?:string){return structuredClone([...new Map(this.#visibleCards().filter(card=>(!id||card.id===id)&&this.#sourcesAvailable(card)).flatMap(card=>(card.evidence_basis??this.#state.basis).filter(input=>card.refs.includes(input.id))).map(input=>[input.id,input])).values()])}
  async clear(){this.#abort.abort();await this.#run;this.#abort=new AbortController();this.#state=empty();this.#inputs=[];await this.#save();this.changed()}
  suspend(){this.#pendingValidation=true;this.changed()}
- invalidate(){this.update([],this.#date,this.#timezone)}
+ invalidate(){this.update([],this.#date,this.#timezone,this.#access?{...this.#access,legacy_refs:[]}:{scope:'local',allowed:true,legacy_refs:[]})}
  unavailable(){this.invalidate();this.#status='failed';this.#error='timeline_sources_unavailable';this.changed()}
  #key(){return hash(['timeline-scope-v14',this.#date,this.#timezone,this.#inputs.map(({id,version})=>({id,version}))])}
  #compatible(basis:readonly {id:string;version:string}[],date:string,timezone:string|null){
@@ -70,29 +71,46 @@ export class TimelineBrief {
   const versions=new Map(this.#inputs.map(input=>[input.id,input.version]))
   return basis.every(input=>versions.get(input.id)===input.version)
  }
- #visibleCards(){
-  if(this.#state.perspective_revision!==1||this.#pendingValidation)return []
-  const versions=new Map(this.#inputs.map(input=>[input.id,input.version])),basis=new Map(this.#state.basis.map(input=>[input.id,input.version]))
-  return this.#state.cards.filter(card=>!this.#state.dismissed.includes(card.id)&&card.refs.every(ref=>versions.has(ref)&&versions.get(ref)===basis.get(ref)))
+ setAccess(access:TimelineAccess){
+  if(this.#access?.scope!==access.scope||!access.allowed){this.#abort.abort();this.#abort=new AbortController();this.#inputs=[]}
+  this.#access={...access,legacy_refs:[...access.legacy_refs]}
  }
- #current(){return this.#state.perspective_revision===1&&!this.#pendingValidation&&(this.#state.key===this.#key()||this.#state.basis.length>0&&this.#compatible(this.#state.basis,this.#state.local_date,this.#state.timezone)||this.#visibleCards().length>0)}
- snapshot(){const counts={messages:0,files:0,memories:0},dates:string[]=[];for(const input of this.#inputs){if(input.kind==='file')counts.files++;else if(input.kind==='memory')counts.memories++;else{counts.messages++;if(Number.isFinite(Date.parse(input.observed_at)))dates.push(new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:this.#timezone}))}}dates.sort();return {generation_id:this.#current()?this.#state.key:null,diagnostics:this.#current()?structuredClone(this.#state.diagnostics):null,available:!!this.generate,status:this.#status,error:this.#error,updated_at:this.#current()?this.#state.updated_at:null,input_count:this.#inputs.length,coverage:`本轮资料：${counts.messages} 条消息 · ${counts.files} 份文档 · ${counts.memories} 条个人记录${dates.length?'；消息记录 '+dates[0]+'—'+dates.at(-1):''}`,cards:this.#current()?structuredClone(this.#visibleCards()):[]}}
- update(inputs:readonly TimelineInput[],date:string,timezone:string){
+ #dismissed(card:State['cards'][number]){return this.#state.dismissed.includes(`${card.artifact_scope??''}:${card.id}`)||!card.artifact_scope&&this.#state.dismissed.includes(card.id)}
+ #sourcesAvailable(card:State['cards'][number]){
+  if(this.#pendingValidation)return false
+  const versions=new Map(this.#inputs.map(input=>[input.id,input.version])),basis=new Map((card.evidence_basis??this.#state.basis).map(input=>[input.id,input.version]))
+  return card.refs.every(ref=>versions.has(ref)&&versions.get(ref)===basis.get(ref))
+ }
+ #visibleCards(){
+  if(!this.#access?.allowed)return []
+  return this.#state.cards.filter(card=>card.artifact_scope===this.#access!.scope&&!this.#dismissed(card))
+ }
+ #current(){return this.#visibleCards().length>0||this.#state.perspective_revision===1&&!this.#pendingValidation&&this.#state.key===this.#key()}
+ snapshot(){const counts={messages:0,files:0,memories:0},dates:string[]=[];for(const input of this.#inputs){if(input.kind==='file')counts.files++;else if(input.kind==='memory')counts.memories++;else{counts.messages++;if(Number.isFinite(Date.parse(input.observed_at)))dates.push(new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:this.#timezone}))}}dates.sort();return {generation_id:this.#current()?this.#state.key:null,diagnostics:this.#current()?structuredClone(this.#state.diagnostics):null,available:!!this.generate,status:this.#status,error:this.#error,updated_at:this.#current()?this.#state.updated_at:null,input_count:this.#inputs.length,coverage:`本轮资料：${counts.messages} 条消息 · ${counts.files} 份文档 · ${counts.memories} 条个人记录${dates.length?'；消息记录 '+dates[0]+'—'+dates.at(-1):''}`,cards:structuredClone(this.#visibleCards().map(card=>({...card,sources_available:this.#sourcesAvailable(card),sources_checking:this.#pendingValidation,historical:card.policy_revision!==1||!this.#sourcesAvailable(card)})))}}
+ update(inputs:readonly TimelineInput[],date:string,timezone:string,access:TimelineAccess={scope:'local',allowed:true,legacy_refs:inputs.map(input=>input.id)}){
+  this.setAccess(access)
   const old=this.#key(),previous=this.#inputs,previousDate=this.#date,previousZone=this.#timezone,pending=this.#pendingValidation;this.#pendingValidation=false;const eligible=inputs.filter(input=>input.text.trim()&&!sensitive(input.text)),selected=selectTimelineInputs(eligible.filter(input=>!input.history_only)),selectedIds=new Set(selected.map(input=>input.id)),retained=new Set(this.retainedEvidenceIds());this.#inputs=[...selected,...eligible.filter(input=>retained.has(input.id)&&!selectedIds.has(input.id))];this.#date=date;this.#timezone=timezone
   if(old!==this.#key()){const additionsOnly=previous.length>0&&this.#compatible(previous,previousDate,previousZone);if(!additionsOnly){this.#abort.abort();this.#abort=new AbortController()}this.#error=null;this.#status=this.#run&&additionsOnly?'working':this.#current()?'ready':this.#inputs.length?'queued':'idle';this.changed()}
   else if(pending){if(this.#current())this.#status=this.#run?'working':'ready';this.changed()}
+  // Bind legacy output only while every original reference can still prove its scope.
+  const safe=new Set(access.legacy_refs);let migrated=false
+  for(const card of this.#state.cards)if(!card.artifact_scope&&card.refs.every(id=>safe.has(id))&&this.#sourcesAvailable(card)){
+   if(this.#state.dismissed.includes(card.id))this.#state.dismissed=this.#state.dismissed.map(id=>id===card.id?`${access.scope}:${id}`:id)
+   card.artifact_scope=access.scope;card.evidence_basis=this.#state.basis.filter(input=>card.refs.includes(input.id));card.policy_revision=this.#state.perspective_revision;migrated=true
+  }
+  if(migrated){if(this.#visibleCards().length&&!this.#run)this.#status='ready';void this.#save().catch(()=>undefined);this.changed()}
   this.#schedule()
  }
  #schedule(){
   clearTimeout(this.#timer);this.#timer=undefined
-  if(this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.some(input=>!input.history_only)||this.#key()===this.#state.key&&this.#state.perspective_revision===1)return
+  if(!this.#access?.allowed||this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.some(input=>!input.history_only)||this.#key()===this.#state.key&&this.#state.perspective_revision===1)return
   this.#timer=setTimeout(()=>{this.#timer=undefined;void this.refresh()},Math.max(1000,this.#state.last_attempt+300000-Date.now()));this.#timer.unref()
  }
  async refresh(){
   if(this.#run)return this.#run
-  if(this.#pendingValidation||!this.#opened||!this.generate||!this.#inputs.some(input=>!input.history_only))return
+  if(!this.#access?.allowed||this.#pendingValidation||!this.#opened||!this.generate||!this.#inputs.some(input=>!input.history_only))return
   clearTimeout(this.#timer);this.#timer=undefined
-  const key=this.#key(),inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only))),context={local_date:this.#date,timezone:this.#timezone},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
+  const key=this.#key(),inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only)).map(({account_scope:_scope,...input})=>input)),context={local_date:this.#date,timezone:this.#timezone},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
   this.#status='working';this.#error=null;this.changed()
   const publish=async(generated:TimelineGenerated,done:boolean)=>{
    if(signal.aborted||!this.#compatible(inputs,context.local_date,context.timezone)||!this.#opened)return
@@ -113,11 +131,11 @@ export class TimelineBrief {
     if(time.anchor_date&&time.anchor_date<recentSince&&(!time.last_reported_on||time.last_reported_on<recentSince)&&(!time.due_on||time.due_on<recentSince)&&(!time.scheduled_on||time.scheduled_on<recentSince))return drop('outside_window')
     const id=hash([card.title,refs.sort()]);if(seen.has(id))return drop('duplicate');seen.add(id)
     const sources=refs.flatMap(id=>{const source=byId.get(id)!.source;return source?[{...source,summary:card.facts.filter(fact=>fact.ref===id).map(fact=>fact.quote).join('\n').slice(0,700)||source.summary}]:[]})
-    return [{...card,time,timezone:context.timezone,refs,id,version:hash([card,refs.map(id=>byId.get(id)!.version)]),sources}]
+    return [{...card,time,timezone:context.timezone,artifact_scope:this.#access!.scope,evidence_basis:refs.map(id=>({id,version:byId.get(id)!.version})),policy_revision:1,refs,id,version:hash([card,refs.map(id=>byId.get(id)!.version)]),sources}]
    })
    // A new synthesis updates matching cards; omission is not a withdrawal.
-   const merged=new Map(this.#visibleCards().map(card=>[card.id,card]))
-   for(const card of cards)merged.set(card.id,card)
+   const merged=new Map(this.#state.cards.map(card=>[`${card.artifact_scope??''}:${card.id}`,card]))
+   for(const card of cards)merged.set(`${card.artifact_scope}:${card.id}`,card)
    const retainedCards=[...merged.values()]
    diagnostics.published=cards.length
    this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis:this.#inputs.map(({id,version})=>({id,version})),cards:retainedCards,updated_at:new Date().toISOString()};await this.#save();if(done)this.#status='ready';this.changed()
@@ -129,7 +147,7 @@ export class TimelineBrief {
   }catch(error){if(!cancel.aborted){if(error instanceof Error&&'diagnostics' in error){const parsed=timelineDiagnosticsSchema.safeParse(error.diagnostics);if(parsed.success)this.#state.diagnostics=parsed.data}this.#state.failure={name:error instanceof Error?error.name:'unknown',code:error instanceof Error&&['invalid_timeline_evidence','invalid_timeline_selection','timeline_batches_failed','processing_consent_required'].includes(error.message)?error.message:error instanceof Error&&'classification' in error&&typeof error.classification==='string'?error.classification:'unavailable',...(error instanceof z.ZodError?{issues:error.issues.map(issue=>({code:issue.code,path:issue.path.map(part=>typeof part==='number'?part:String(part)),...('maximum' in issue&&typeof issue.maximum==='number'?{maximum:issue.maximum}:{})}))}:{})};await this.#save().catch(()=>undefined)}if(cancel.aborted){this.#status=this.#inputs.length?'queued':'idle';this.#error=null;this.#state.last_attempt=0}else{this.#status='failed';this.#error=timeout.aborted?'timeline_generation_timeout':'timeline_generation_failed'}}finally{this.#run=undefined;this.changed();this.#schedule()}})()
   this.#run=work;await work
  }
- async dismiss(id:string){if(!this.snapshot().cards.some(card=>card.id===id))throw Error('stale_reference');this.#state.dismissed=[...new Set([...this.#state.dismissed,id])].slice(-256);await this.#save();this.changed()}
- discussion(id:string,version:string){const card=this.snapshot().cards.find(card=>card.id===id&&card.version===version);if(!card)throw Error('stale_reference');return {card,evidence_refs:[...new Set(card.refs.flatMap(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return input.kind==='file'?[]:input.evidence_refs??[ref]}))],originals:card.refs.map(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return {text:input.text,observed_at:input.observed_at,relation:input.relation,author:input.author}})}}
+ async dismiss(id:string){if(!this.snapshot().cards.some(card=>card.id===id))throw Error('stale_reference');this.#state.dismissed=[...new Set([...this.#state.dismissed,`${this.#access!.scope}:${id}`])].slice(-256);await this.#save();this.changed()}
+ discussion(id:string,version:string){const card=this.snapshot().cards.find(card=>card.id===id&&card.version===version);if(!card||!this.#sourcesAvailable(card)||card.policy_revision!==1)throw Error('stale_reference');return {card,evidence_refs:[...new Set(card.refs.flatMap(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return input.kind==='file'?[]:input.evidence_refs??[ref]}))],originals:card.refs.map(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return {text:input.text,observed_at:input.observed_at,relation:input.relation,author:input.author}})}}
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#timer=undefined;this.#abort.abort();await this.#run;await this.#tail}
 }

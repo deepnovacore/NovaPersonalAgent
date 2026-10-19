@@ -59,7 +59,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
   const orderedBriefs=[...(attention.cards??[])].sort((a,b)=>(b.time?.anchor_date??'').localeCompare(a.time?.anchor_date??'')||latestReport(b)-latestReport(a))
   if(orderedBriefs.length)section.append(el('p',t('共 {0} 条进展 · 已展示 {1} 条',orderedBriefs.length,Math.min(visibleCount,orderedBriefs.length)),'hint timeline-brief-count'))
   for(const item of orderedBriefs.slice(0,visibleCount)){
-   const historical=!!item.time?.as_of&&(item.time.as_of!==currentDate||!!item.timezone&&item.timezone!==(snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone))
+   const historical=item.historical===true||!!item.time?.as_of&&(item.time.as_of!==currentDate||!!item.timezone&&item.timezone!==(snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone))
    const kind=['attention','deadline','progress','insight'].includes(item.kind)?item.kind:'insight'
    const card=el('article',undefined,'timeline-attention-card');card.tabIndex=-1;card.dataset.kind=kind;card.dataset.historical=String(historical);card.dataset.objectId=item.id;briefCards.push({item,card});if(compact)section.append(card)
    const meta=el('div',undefined,'timeline-brief-meta'),topic=el('span',undefined,'timeline-topic')
@@ -85,9 +85,10 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
     const steps=el('ol',undefined,'timeline-next-steps');for(const [index,step] of item.next_steps.entries()){const tile=el('li');tile.append(el('span',String(index+1).padStart(2,'0'),'timeline-step-number'),el('h5',step.title),el('p',step.detail));steps.append(tile)}followups.append(steps);card.append(followups)
    }
    if(item.uncertainty){const caution=el('p',undefined,'timeline-caution');caution.append(el('span',t('尚不确定：')),el('span',item.uncertainty));card.append(caution)}
-   attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
+   if(item.sources_available===false&&!item.sources_checking)card.append(el('p',t('原始来源已不可用'),'hint timeline-source-unavailable'))
+   else if(item.sources_available!==false)attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
    const actions=el('div',undefined,'timeline-actions');card.append(actions)
-   for(const action of item.actions??[])button(action.label,()=>discuss([{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],action.kind==='draft'?t('请直接在当前对话中根据引用事项写出草稿，并标明事实缺口。只展示文字，不创建待办或任务，不发送消息或执行操作。'):t('请在当前对话中分析引用事项，说明已知事实、判断和下一步。只讨论，不创建待办或任务，不执行操作。')),actions).className=action===item.actions[0]?'timeline-primary':'soft'
+   for(const action of item.sources_available===false||item.historical===true?[]:item.actions??[])button(action.label,()=>discuss([{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],action.kind==='draft'?t('请直接在当前对话中根据引用事项写出草稿，并标明事实缺口。只展示文字，不创建待办或任务，不发送消息或执行操作。'):t('请在当前对话中分析引用事项，说明已知事实、判断和下一步。只讨论，不创建待办或任务，不执行操作。')),actions).className=action===item.actions[0]?'timeline-primary':'soft'
    if(command)button(t('隐藏'),()=>command('timeline.dismiss',{id:item.id}),actions).className='quiet timeline-dismiss'
   }
   if(!attention.cards?.length)section.append(el('p',t(attention.status==='working'?'正在结合近期信息整理…':attention.status==='queued'?'即将整理近期信息…':attention.status==='failed'?(attention.error==='timeline_generation_timeout'?'整理用时较长，尚未完成，可点击刷新重试。':'这次整理未完成，可稍后刷新。'):attention.input_count?'暂时没有足够明确的关注事项。':'已授权来源中暂时没有可整理的近期内容。'),'hint'))
