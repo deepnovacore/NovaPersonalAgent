@@ -44,7 +44,7 @@ class LocalGuiModel(private val config: ModelConfiguration) {
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Accept", if(config.protocol == "chatgptResponses") "text/event-stream" else "application/json")
             conn.setRequestProperty("Authorization", "Bearer ${config.key}")
-            val bytes = requestBody(config.model, task, observation, turn, config.protocol).toString().toByteArray(Charsets.UTF_8)
+            val bytes = requestBody(config.model, task, observation, turn, config.protocol, config.endpoint).toString().toByteArray(Charsets.UTF_8)
             conn.setFixedLengthStreamingMode(bytes.size)
             conn.outputStream.use { it.write(bytes) }
             val status = conn.responseCode
@@ -99,7 +99,7 @@ class LocalGuiModel(private val config: ModelConfiguration) {
             require(function.getString("name") == "next_step") { "unsupported_model_tool" }
             return ToolDecision.parse(JSONObject(function.getString("arguments")))
         }
-        fun requestBody(model: String, task: JSONObject, observation: JSONObject, turn: Int, protocol: String = "chatCompletions"): JSONObject {
+        fun requestBody(model: String, task: JSONObject, observation: JSONObject, turn: Int, protocol: String = "chatCompletions", endpoint: String = ""): JSONObject {
             val schema = JSONObject("""{"type":"object","additionalProperties":false,"required":["kind","summary"],"properties":{"kind":{"type":"string","enum":["action","complete","wait","observe"]},"summary":{"type":"string"},"action":{"type":"object","additionalProperties":false,"required":["type"],"properties":{"type":{"type":"string","enum":["tap","swipe","type","back"]},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"to_x":{"type":"number","minimum":0,"maximum":1},"to_y":{"type":"number","minimum":0,"maximum":1},"text":{"type":"string"}}}}}""")
             val context = JSONObject().put("goal", task.getString("goal")).put("acceptance", task.getString("acceptance"))
                 .put("step", turn).put("package", observation.getString("package"))
@@ -114,6 +114,12 @@ class LocalGuiModel(private val config: ModelConfiguration) {
                     .put(JSONObject().put("role", "user").put("content", content)))
                 .put("tools", JSONArray().put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "next_step").put("description", "Propose one native action or a completion claim, subject to host validation.").put("parameters", schema))))
                 .put("tool_choice", JSONObject().put("type", "function").put("function", JSONObject().put("name", "next_step")))
+            // DeepSeek Flash defaults to thinking, which rejects a forced named tool.
+            // Keep native decisions as one explicit tool call and use non-thinking mode.
+            if(protocol == "chatCompletions" && model == "deepseek-flash" &&
+                URI(endpoint).host.equals("api.deepseek.com", ignoreCase = true)) {
+                body.put("thinking", JSONObject().put("type", "disabled"))
+            }
             if(protocol != "chatCompletions") {
                 val messages = body.getJSONArray("messages")
                 for(i in 0 until content.length()) {

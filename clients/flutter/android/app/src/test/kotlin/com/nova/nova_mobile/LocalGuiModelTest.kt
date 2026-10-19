@@ -5,6 +5,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalGuiModelTest {
+    @Test fun officialDeepSeekFlashDisablesThinkingForForcedToolCalls() {
+        val task = JSONObject().put("goal", "Search").put("acceptance", "Results visible")
+        val screen = JSONObject().put("image", "YWJj").put("package", "test.app").put("tree", "Search").put("width", 100).put("height", 200)
+        val body = LocalGuiModel.requestBody("deepseek-flash", task, screen, 0, endpoint = "https://api.deepseek.com/v1/chat/completions")
+        assertEquals("disabled", body.getJSONObject("thinking").getString("type"))
+        assertEquals("next_step", body.getJSONObject("tool_choice").getJSONObject("function").getString("name"))
+        assertEquals("image_url", body.getJSONArray("messages").getJSONObject(1).getJSONArray("content").getJSONObject(1).getString("type"))
+    }
+    @Test fun deepSeekProviderOptionDoesNotLeakIntoOtherProvidersOrProtocols() {
+        val task = JSONObject().put("goal", "Search").put("acceptance", "Results visible")
+        val screen = JSONObject().put("image", "YWJj").put("package", "test.app").put("tree", "Search").put("width", 100).put("height", 200)
+        for(endpoint in listOf("", "https://api.deepseek.com.example.com/v1", "https://example.com/v1")) {
+            assertFalse(LocalGuiModel.requestBody("deepseek-flash", task, screen, 0, endpoint = endpoint).has("thinking"))
+        }
+        assertFalse(LocalGuiModel.requestBody("qwen3-vl-plus", task, screen, 0, endpoint = "https://api.deepseek.com/v1").has("thinking"))
+        assertFalse(LocalGuiModel.requestBody("deepseek-flash", task, screen, 0, "responses", endpoint = "https://api.deepseek.com/v1").has("thinking"))
+    }
     @Test fun startedTaskAuthorizesStepsWithoutAskingForApproval() {
         val task = JSONObject().put("goal", "Toggle twice").put("acceptance", "Count is 2")
         val screen = JSONObject().put("image", "YWJj").put("package", "test.app").put("tree", "Counter 0").put("width", 100).put("height", 200)
