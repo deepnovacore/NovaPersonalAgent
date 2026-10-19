@@ -318,6 +318,7 @@ const _zh = <String, String>{
   'Waiting for first update': '等待首次更新',
   'Temporarily unavailable': '暂时不可用',
   'Saved articles are full (100). Remove one first.': '已收藏 100 篇文章，请先取消部分收藏',
+  'Refresh': '刷新',
   'Latest': '最新',
   'Public news, newest first': '公开资讯 · 按时间排序',
   'Save article': '收藏文章',

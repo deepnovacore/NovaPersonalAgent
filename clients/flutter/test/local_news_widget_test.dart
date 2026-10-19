@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/personal/local_life.dart';
 import 'package:nova_mobile/personal/local_news.dart';
@@ -10,6 +11,68 @@ import 'local_life_test.dart' show MemoryLifePersistence;
 import 'local_news_test.dart' show rss, source, now;
 
 void main() {
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'news segmented labels have readable contrast in ${brightness.name} theme',
+      (tester) async {
+        final life = LocalLife(MemoryLifePersistence());
+        await life.open();
+        final store = PersonalStore(send: (_) => false, local: life);
+        addTearDown(() {
+          store.dispose();
+          life.dispose();
+        });
+        final theme = brightness == Brightness.light
+            ? novaTheme()
+            : ThemeData(brightness: brightness);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            home: WorkbenchPage(
+              store: store,
+              page: 1,
+              language: 'zh',
+              onSettings: () {},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        void checkContrast() {
+          final control = tester.widget<CupertinoSlidingSegmentedControl<bool>>(
+            find.byType(CupertinoSlidingSegmentedControl<bool>),
+          );
+          for (final entry in {false: '最新', true: '收藏'}.entries) {
+            final label = find.text(entry.value);
+            final text = tester.widget<Text>(label);
+            final foreground =
+                text.style?.color ??
+                DefaultTextStyle.of(tester.element(label)).style.color!;
+            final background = control.groupValue == entry.key
+                ? control.thumbColor
+                : control.backgroundColor;
+            final a = foreground.computeLuminance(),
+                b = background.computeLuminance();
+            final contrast = a > b
+                ? (a + .05) / (b + .05)
+                : (b + .05) / (a + .05);
+            expect(
+              contrast,
+              greaterThanOrEqualTo(4.5),
+              reason:
+                  '${entry.value}, selected=${control.groupValue == entry.key}',
+            );
+          }
+        }
+
+        checkContrast();
+        await tester.tap(find.text('收藏'));
+        await tester.pumpAndSettle();
+        checkContrast();
+        expect(find.byTooltip('刷新'), findsOneWidget);
+      },
+    );
+  }
+
   testWidgets(
     'news refresh waits for fetch; local bookmark and read work without runtime',
     (tester) async {

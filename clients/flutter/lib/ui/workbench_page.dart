@@ -1172,6 +1172,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           .where((t) => activePhases.contains(t['phase']))
           .toList();
       final news = snapshot?.object('news') ?? {};
+      final colors = Theme.of(context).colorScheme;
       final articles = _rows(news[_saved ? 'saved' : 'items']);
       final rows = widget.page == 3 || widget.page == 4
           ? _rows(
@@ -1396,8 +1397,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                     child: CupertinoSlidingSegmentedControl<bool>(
                       groupValue: _saved,
-                      backgroundColor: const Color(0xff1f252c),
-                      thumbColor: const Color(0xff4a515a),
+                      backgroundColor: colors.surfaceContainerHighest,
+                      thumbColor: colors.surface,
                       children: {
                         false: Text(
                           t(
@@ -1405,8 +1406,12 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                 ? 'For you'
                                 : 'Latest',
                           ),
+                          style: TextStyle(color: colors.onSurface),
                         ),
-                        true: Text(t('Saved')),
+                        true: Text(
+                          t('Saved'),
+                          style: TextStyle(color: colors.onSurface),
+                        ),
                       },
                       onValueChanged: (value) =>
                           setState(() => _saved = value ?? false),
