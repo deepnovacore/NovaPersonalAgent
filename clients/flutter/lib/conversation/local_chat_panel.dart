@@ -13,6 +13,8 @@ import '../ui/local_dialog.dart';
 import '../agent_core/agent_core_host.dart';
 import '../agent_core/model_client.dart';
 import '../agent_core/model_settings.dart';
+import '../agent_core/model_presets.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../ui/chatgpt_settings.dart';
 import '../agent_core/tool_registry.dart';
 import 'dart:convert';
@@ -32,165 +34,364 @@ Future<void> showLocalModelSettings(
   final current = await settings.read();
   if (!context.mounted) return;
   final endpoint = TextEditingController(
-    text: current?.endpoint ?? 'https://openrouter.ai/api/v1/chat/completions',
+    text: current?.endpoint ?? ModelPreset.byId('openrouter')!.endpoint,
   );
   final model = TextEditingController(
     text: current?.model ?? 'openai/gpt-4.1-mini',
   );
   final key = TextEditingController();
-  String? error;
-  var saving = false;
+  String? error, notice;
+  var saving = false, verifying = false, noticeBad = false;
   var protocol = current?.protocol ?? ModelProtocol.chatCompletions;
+  // New users start on the former default (OpenRouter); saved endpoints that
+  // match no preset stay on the free-form "custom" form.
+  var preset = current == null
+      ? ModelPreset.byId('openrouter')
+      : ModelPreset.forEndpoint(current.endpoint);
+  var fetched = <String>[];
   try {
     await showLocalDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text(t('模型服务', 'Model provider')),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  t(
-                    '对话和任务所需内容会发送给所选模型服务。API 密钥仅保存在这台设备，不会同步到 Hub。',
-                    'Content needed for conversations and tasks is sent to the selected model provider. Your API key stays on this device and is not synced to Hub.',
-                  ),
+        builder: (context, setState) {
+          void choose(String id) {
+            final next = ModelPreset.byId(id);
+            preset = next;
+            fetched = [];
+            notice = null;
+            error = null;
+            if (next == null) return;
+            endpoint.text = next.endpoint;
+            protocol = next.protocol;
+            model.text = next.recommendedModels.isEmpty
+                ? ''
+                : next.recommendedModels.first;
+          }
+
+          Future<void> verify() async {
+            // A blank key reuses the saved one only while the URL is unchanged.
+            final usable = key.text.isNotEmpty
+                ? key.text
+                : (current != null && endpoint.text == current.endpoint
+                      ? current.key
+                      : '');
+            setState(() {
+              verifying = true;
+              notice = null;
+            });
+            String? message;
+            var bad = false;
+            var ids = <String>[];
+            try {
+              ids = await listModels(endpoint: endpoint.text, key: usable);
+              message = ids.isEmpty
+                  ? t(
+                      '密钥可用，但该厂商没有返回模型列表，请直接填写模型名。',
+                      'Key accepted, but the provider returned no models. Enter a model name.',
+                    )
+                  : t(
+                      '验证通过，共 ${ids.length} 个模型。',
+                      'Verified. ${ids.length} models available.',
+                    );
+            } on AgentFailure catch (failure) {
+              bad =
+                  failure.code != 'model_http_404' &&
+                  failure.code != 'model_http_405' &&
+                  failure.code != 'invalid_model_response';
+              message = switch (failure.code) {
+                'model_http_401' || 'model_http_403' => t(
+                  '密钥被拒绝，请检查密钥是否正确、是否属于该厂商。',
+                  'The key was rejected. Check that it is correct and belongs to this provider.',
                 ),
-                TextButton(
-                  onPressed: saving
-                      ? null
-                      : () async {
-                          await showChatGptSettings(context, settings);
-                          if (context.mounted &&
-                              await settings.chatGpt.active() != null) {
-                            if (context.mounted) Navigator.pop(context);
-                          }
-                        },
-                  child: Text(t('使用 ChatGPT 登录', 'Continue with ChatGPT')),
+                'model_http_404' ||
+                'model_http_405' ||
+                'invalid_model_response' => t(
+                  '该厂商没有提供可识别的模型列表，直接填写模型名即可。',
+                  'This provider has no usable model list. Enter the model name yourself.',
                 ),
-                Text(
-                  t('或使用 API', 'Or use an API'),
-                  style: const TextStyle(color: Nova.secondary, fontSize: 13),
+                'model_http_429' => t(
+                  '请求被限流或额度不足，请稍后再验证。',
+                  'Rate limited or out of quota. Try again later.',
                 ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<ModelProtocol>(
-                  initialValue: protocol,
+                'invalid_model_settings' => t(
+                  '请先填写有效的接口地址和密钥。',
+                  'Enter a valid API URL and key first.',
+                ),
+                _ => t(
+                  '无法连接到该厂商，请检查网络和接口地址。',
+                  'Could not reach the provider. Check the network and API URL.',
+                ),
+              };
+            }
+            if (!context.mounted) return;
+            setState(() {
+              verifying = false;
+              fetched = ids;
+              notice = message;
+              noticeBad = bad;
+            });
+          }
+
+          final keyField = TextField(
+            controller: key,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: InputDecoration(
+              labelText: t('API 密钥', 'API key'),
+              helperText: current == null
+                  ? null
+                  : t(
+                      '不修改接口地址时，留空可保留现有密钥',
+                      'Leave blank to keep your current key if the API URL is unchanged',
+                    ),
+              helperMaxLines: 3,
+            ),
+          );
+          final modelField = TextField(
+            controller: model,
+            autocorrect: false,
+            decoration: InputDecoration(labelText: t('模型名称', 'Model name')),
+          );
+          final verifyButton = Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton(
+              onPressed: saving || verifying ? null : verify,
+              child: Text(
+                verifying
+                    ? t('正在验证…', 'Verifying…')
+                    : t('验证并获取模型', 'Verify & load models'),
+              ),
+            ),
+          );
+          final modelPicker = fetched.isEmpty
+              ? null
+              : DropdownButtonFormField<String>(
+                  key: ValueKey(fetched.length),
+                  initialValue: fetched.contains(model.text)
+                      ? model.text
+                      : null,
                   isExpanded: true,
                   decoration: InputDecoration(
-                    labelText: t('API 协议', 'API protocol'),
+                    labelText: t('从列表选择模型', 'Pick a model'),
                   ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: ModelProtocol.chatCompletions,
-                      child: Text('Chat Completions'),
-                    ),
-                    DropdownMenuItem(
-                      value: ModelProtocol.responses,
-                      child: Text('Responses'),
-                    ),
+                  items: [
+                    for (final id in fetched)
+                      DropdownMenuItem(
+                        value: id,
+                        child: Text(id, overflow: TextOverflow.ellipsis),
+                      ),
                   ],
                   onChanged: saving
                       ? null
                       : (value) {
-                          if (value != null) setState(() => protocol = value);
+                          if (value != null) setState(() => model.text = value);
                         },
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: endpoint,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: InputDecoration(
-                    labelText: t('接口地址', 'API URL'),
-                    helperText: t(
-                      '支持 Base URL 或完整接口地址',
-                      'Base URL or full endpoint URL',
+                );
+          final note = preset == null
+              ? null
+              : (language == 'zh' ? preset!.noteZh : preset!.noteEn);
+          return AlertDialog(
+            title: Text(t('模型服务', 'Model provider')),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    t(
+                      '对话和任务所需内容会发送给所选模型服务。API 密钥仅保存在这台设备，不会同步到 Hub。',
+                      'Content needed for conversations and tasks is sent to the selected model provider. Your API key stays on this device and is not synced to Hub.',
                     ),
-                    helperMaxLines: 3,
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: model,
-                  autocorrect: false,
-                  decoration: InputDecoration(
-                    labelText: t('模型名称', 'Model name'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: key,
-                  obscureText: true,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: InputDecoration(
-                    labelText: t('API 密钥', 'API key'),
-                    helperText: current == null
+                  TextButton(
+                    onPressed: saving
                         ? null
-                        : t(
-                            '不修改接口地址时，留空可保留现有密钥',
-                            'Leave blank to keep your current key if the API URL is unchanged',
-                          ),
-                    helperMaxLines: 3,
+                        : () async {
+                            await showChatGptSettings(context, settings);
+                            if (context.mounted &&
+                                await settings.chatGpt.active() != null) {
+                              if (context.mounted) Navigator.pop(context);
+                            }
+                          },
+                    child: Text(t('使用 ChatGPT 登录', 'Continue with ChatGPT')),
                   ),
-                ),
-                if (error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      error!,
-                      style: const TextStyle(color: Nova.red),
+                  Text(
+                    t('或使用 API', 'Or use an API'),
+                    style: const TextStyle(color: Nova.secondary, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: preset?.id ?? 'custom',
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: t('模型厂商', 'Provider'),
                     ),
+                    items: [
+                      for (final p in modelPresets)
+                        DropdownMenuItem(
+                          value: p.id,
+                          child: Text(p.name, overflow: TextOverflow.ellipsis),
+                        ),
+                      DropdownMenuItem(
+                        value: 'custom',
+                        child: Text(
+                          t('自定义（OpenAI 兼容）', 'Custom (OpenAI-compatible)'),
+                        ),
+                      ),
+                    ],
+                    onChanged: saving || verifying
+                        ? null
+                        : (value) {
+                            if (value != null) setState(() => choose(value));
+                          },
                   ),
-              ],
+                  const SizedBox(height: 16),
+                  if (preset != null) ...[
+                    if (note != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          note,
+                          style: const TextStyle(
+                            color: Nova.secondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    keyField,
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () => launchUrl(
+                          Uri.parse(preset!.keyUrl),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                        child: Text(t('去获取 API 密钥', 'Get an API key')),
+                      ),
+                    ),
+                    verifyButton,
+                  ] else ...[
+                    DropdownButtonFormField<ModelProtocol>(
+                      initialValue: protocol,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: t('API 协议', 'API protocol'),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: ModelProtocol.chatCompletions,
+                          child: Text('Chat Completions'),
+                        ),
+                        DropdownMenuItem(
+                          value: ModelProtocol.responses,
+                          child: Text('Responses'),
+                        ),
+                      ],
+                      onChanged: saving
+                          ? null
+                          : (value) {
+                              if (value != null) {
+                                setState(() => protocol = value);
+                              }
+                            },
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: endpoint,
+                      keyboardType: TextInputType.url,
+                      autocorrect: false,
+                      decoration: InputDecoration(
+                        labelText: t('接口地址', 'API URL'),
+                        helperText: t(
+                          '支持 Base URL 或完整接口地址',
+                          'Base URL or full endpoint URL',
+                        ),
+                        helperMaxLines: 3,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    modelField,
+                    const SizedBox(height: 16),
+                    keyField,
+                    const SizedBox(height: 8),
+                    verifyButton,
+                  ],
+                  if (notice != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        notice!,
+                        style: TextStyle(
+                          color: noticeBad ? Nova.red : Nova.secondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  if (modelPicker != null) ...[
+                    const SizedBox(height: 16),
+                    modelPicker,
+                  ],
+                  if (preset != null) ...[
+                    const SizedBox(height: 16),
+                    modelField,
+                  ],
+                  if (error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        error!,
+                        style: const TextStyle(color: Nova.red),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: saving ? null : () => Navigator.pop(context),
-              child: Text(t('取消', 'Cancel')),
-            ),
-            FilledButton(
-              onPressed: saving
-                  ? null
-                  : () async {
-                      setState(() {
-                        saving = true;
-                        error = null;
-                      });
-                      try {
-                        await settings.save(
-                          endpoint: endpoint.text,
-                          model: model.text,
-                          key: key.text,
-                          protocol: protocol,
-                        );
-                        if (context.mounted) Navigator.pop(context);
-                      } catch (failure) {
-                        if (context.mounted) {
-                          setState(() {
-                            error =
-                                failure is AgentFailure &&
-                                    failure.code ==
-                                        'model_settings_projection_failed'
-                                ? t(
-                                    '设置未能生效，请重试。',
-                                    'Could not apply these settings. Please retry.',
-                                  )
-                                : t(
-                                    '未能保存，请检查接口地址、模型名称和密钥后重试。',
-                                    'Could not save. Check the API URL, model name and key, then retry.',
-                                  );
-                            saving = false;
-                          });
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.pop(context),
+                child: Text(t('取消', 'Cancel')),
+              ),
+              FilledButton(
+                onPressed: saving
+                    ? null
+                    : () async {
+                        setState(() {
+                          saving = true;
+                          error = null;
+                        });
+                        try {
+                          await settings.save(
+                            endpoint: endpoint.text,
+                            model: model.text,
+                            key: key.text,
+                            protocol: protocol,
+                          );
+                          if (context.mounted) Navigator.pop(context);
+                        } catch (failure) {
+                          if (context.mounted) {
+                            setState(() {
+                              error =
+                                  failure is AgentFailure &&
+                                      failure.code ==
+                                          'model_settings_projection_failed'
+                                  ? t(
+                                      '设置未能生效，请重试。',
+                                      'Could not apply these settings. Please retry.',
+                                    )
+                                  : t(
+                                      '未能保存，请检查接口地址、模型名称和密钥后重试。',
+                                      'Could not save. Check the API URL, model name and key, then retry.',
+                                    );
+                              saving = false;
+                            });
+                          }
                         }
-                      }
-                    },
-              child: Text(saving ? t('正在保存…', 'Saving…') : t('保存', 'Save')),
-            ),
-          ],
-        ),
+                      },
+                child: Text(saving ? t('正在保存…', 'Saving…') : t('保存', 'Save')),
+              ),
+            ],
+          );
+        },
       ),
     );
   } finally {
