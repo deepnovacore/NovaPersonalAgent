@@ -79,6 +79,39 @@ class SourceStore extends ChangeNotifier {
     });
   }
 
+  // Processing scope follows evidence and permission, not ingestion cursors.
+  // Duplicate fetches can renew source access without invalidating paid work.
+  static String _processingFingerprint(Map<String, dynamic> data) {
+    final view = Map<String, dynamic>.from(data)..remove('revision');
+    const cursorFields = {
+      'from',
+      'page_token',
+      'window_end',
+      'read_through',
+      'seen_pages',
+      'history_refresh_pending',
+      'scope_revision',
+    };
+    view['sources'] = {
+      for (final entry in (data['sources'] as Map).entries)
+        entry.key: {
+          for (final item in (entry.value as Map).entries)
+            if (!cursorFields.contains(item.key)) item.key: item.value,
+          // Legacy scopes retain their original boundary until migration.
+          if (!(entry.value as Map).containsKey('history_from'))
+            'history_from': entry.value['from'],
+        },
+    };
+    view['messages'] = {
+      for (final entry in (data['messages'] as Map).entries)
+        entry.key: {
+          for (final item in (entry.value as Map).entries)
+            if (item.key != 'fetched_at') item.key: item.value,
+        },
+    };
+    return lifeFingerprint(view);
+  }
+
   Future<void> _write(
     void Function(Map<String, dynamic>) change, {
     bool refreshExpired = false,
@@ -86,17 +119,24 @@ class SourceStore extends ChangeNotifier {
     final result = _tail.then((_) async {
       if (_disposed) throw StateError('source_disposed');
       final next = copyJson(_data);
+      // Pin legacy selection boundaries before any cursor advances. The old
+      // fingerprint uses this same fallback, so migration preserves paid work.
+      for (final source in (next['sources'] as Map).values) {
+        source['history_from'] ??= source['from'];
+      }
       change(next);
       _prune(next, refreshExpired: refreshExpired);
       if (lifeFingerprint(next) == lifeFingerprint(_data)) return;
-      next['revision'] = (next['revision'] as int) + 1;
+      final processingChanged =
+          _processingFingerprint(next) != _processingFingerprint(_data);
+      if (processingChanged) next['revision'] = (next['revision'] as int) + 1;
       final encoded = jsonEncode(next);
       if (utf8.encode(encoded).length > maxBytes) {
         throw StateError('source_storage_full');
       }
       await persistence.write(encoded);
       _data = next;
-      await onInvalidated?.call();
+      if (processingChanged) await onInvalidated?.call();
       if (!_disposed) notifyListeners();
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
@@ -362,6 +402,7 @@ class SourceStore extends ChangeNotifier {
         .map((entry) => '${counts[entry.key]} 条${entry.value}')
         .join('；');
   }
+
   List<Map<String, dynamic>> messages(String id) => (_data['messages'] as Map)
       .values
       .where(

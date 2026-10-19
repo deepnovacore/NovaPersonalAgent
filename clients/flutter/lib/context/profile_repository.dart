@@ -152,9 +152,16 @@ class ProfileRepository {
 
   /// A useful published result must not regress when reusing a smaller checkpoint.
   /// `value` excludes obsolete source, consent and authority generations.
-  void validatePartialCoverage(Map<String, int>? coverage) {
+  void validatePartialCoverage(
+    Map<String, int>? coverage, {
+    String? generationScope,
+  }) {
     final previous = value;
     if (previous == null) return;
+    if (generationScope != null &&
+        previous['generation_scope'] != generationScope) {
+      return;
+    }
     final oldCoverage = previous['coverage'];
     final oldVerified = oldCoverage is Map
         ? oldCoverage['validated_observation_records']
@@ -184,13 +191,16 @@ class ProfileRepository {
     int incompleteBatches = 0,
     bool partial = false,
     Map<String, int>? coverage,
+    String? generationScope,
   }) {
     final result = _tail.then((_) async {
       final generation = authority.publicationGeneration;
       authority.validatePublish(epoch);
       sources.validateProcessing(provider, 'profile', consentRevision);
       if (sources.revision != sourceRevision) throw StateError('stale_inputs');
-      if (partial) validatePartialCoverage(coverage);
+      if (partial) {
+        validatePartialCoverage(coverage, generationScope: generationScope);
+      }
       final entries = jsonDecode(encoded);
       final originals = {
         for (final e in sources.readAuthorizedEvidence(provider, 'profile'))
@@ -213,6 +223,7 @@ class ProfileRepository {
         'entries': entries,
         'incomplete_batches': incompleteBatches,
         'partial': partial,
+        'generation_scope': ?generationScope,
         if (coverage != null) 'coverage': Map<String, int>.from(coverage),
       };
       await persistence.write(jsonEncode(next));

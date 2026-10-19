@@ -59,10 +59,15 @@ class ProfileObservationCheckpoint {
         throw const FormatException('size');
       }
       final value = jsonDecode(raw);
+      final cachedExpiry = value is Map && value['expires_at'] is String
+          ? DateTime.tryParse(value['expires_at'] as String)
+          : null;
       if (value is! Map<String, dynamic> ||
           value['version'] != 1 ||
           value['scope'] != scope ||
-          value['expires_at'] != empty['expires_at'] ||
+          cachedExpiry == null ||
+          !now().isBefore(cachedExpiry) ||
+          cachedExpiry.isAfter(expiresAt) ||
           value['batches'] is! Map<String, dynamic>) {
         throw const FormatException('scope');
       }

@@ -13,6 +13,8 @@ import '../context/context_sync.dart';
 import '../context/profile_corrections.dart';
 import 'local_profile_results.dart';
 import 'theme.dart';
+import 'profile_generation_status.dart';
+import '../context/profile_generation_coordinator.dart';
 import '../personal/life_reducer.dart';
 
 /// Short display copy only; detailed agent diagnostics never become progress UI.
@@ -57,11 +59,15 @@ class FeishuDirectPage extends StatefulWidget {
     required this.authority,
     required this.contextSync,
     this.adoptTodo,
+    this.profileAgent,
+    this.generation,
     this.language = 'zh',
   });
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>, String)?
   adoptTodo;
   final String language;
+  final ProfileAgent? profileAgent;
+  final ProfileGenerationCoordinator? generation;
   final FeishuHost host;
   final ModelSettings models;
   final SpaceAuthorityRepository authority;
@@ -86,18 +92,17 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
   bool registering = false;
   List<Map<String, dynamic>> get chats => host.collection.chats;
   Timer? timer;
-  late final profile = ProfileAgent(
-    host,
-    widget.authority,
-    widget.models,
-    onProgress: _changed,
-  );
+  late final profile =
+      widget.profileAgent ??
+      ProfileAgent(host, widget.authority, widget.models, onProgress: _changed);
   FeishuHost get host => widget.host;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     host.addListener(_changed);
+    profile.addListener(_changed);
+    widget.generation?.addListener(_changed);
     _loadProvider();
     unawaited(profile.repository.open().then((_) => _changed()));
   }
@@ -192,6 +197,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                   host: host,
                   authority: widget.authority,
                   repository: profile.repository,
+                  generation: widget.generation,
                   kind: 'all',
                   language: widget.language,
                   adoptTodo: widget.adoptTodo,
@@ -296,6 +302,14 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
     AgentFailure(code: 'tool_round_limit') => t(
       '本次未能生成完整近况，消息仍保存在手机。',
       'Could not generate complete updates. Messages remain on this phone.',
+    ),
+    AgentFailure(code: 'profile_budget_exhausted') => t(
+      '本次费用额度已用完，整理已暂停。已保存的进度会保留。',
+      'The cost allowance is used up. Updates are paused and saved progress is kept.',
+    ),
+    AgentFailure(code: 'profile_budget_unavailable') => t(
+      '暂时无法确认剩余额度，已暂停整理，避免重复扣费。',
+      'The remaining allowance could not be checked. Updates are paused to avoid repeated charges.',
     ),
     StateError(message: 'profile_result_more_complete') => t(
       '已保留先前更完整的结果。可继续生成，补充尚未整理的消息。',
@@ -461,6 +475,11 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
 
   Future<void> _organize({bool savedObservationsOnly = false}) async {
     if (busy) return;
+    if (widget.generation != null && !savedObservationsOnly) {
+      if (!processingAllowed) await _processing();
+      if (processingAllowed) await widget.generation!.retry();
+      return;
+    }
     setState(() {
       _busy = true;
       error = null;
@@ -699,7 +718,12 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                 ),
               ),
             ),
-            if (profile.busy) ...[
+            if (widget.generation != null)
+              ProfileGenerationStatus(
+                generation: widget.generation!,
+                language: widget.language,
+              )
+            else if (profile.busy) ...[
               const LinearProgressIndicator(minHeight: 2),
               const SizedBox(height: 8),
               Text(
@@ -735,7 +759,9 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                 onPressed: _showResults,
                 child: Text(t('查看近况', 'View updates')),
               ),
-              if (widget.authority.canPublish && !profile.busy)
+              if (widget.generation == null &&
+                  widget.authority.canPublish &&
+                  !profile.busy)
                 OutlinedButton(
                   onPressed: busy ? null : _organize,
                   child: Text(
@@ -745,7 +771,9 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                   ),
                 ),
             ] else ...[
-              if (widget.authority.canPublish && !profile.busy)
+              if (widget.generation == null &&
+                  widget.authority.canPublish &&
+                  !profile.busy)
                 FilledButton(
                   onPressed: busy ? null : _organize,
                   child: Text(
@@ -759,7 +787,9 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                 child: Text(t('个人信息', 'Personal info')),
               ),
             ],
-            if (widget.authority.canPublish && !profile.busy) ...[
+            if (widget.generation == null &&
+                widget.authority.canPublish &&
+                !profile.busy) ...[
               TextButton(
                 onPressed: busy
                     ? null
@@ -1056,7 +1086,9 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
   );
   @override
   void dispose() {
-    profile.cancel();
+    widget.generation?.removeListener(_changed);
+    profile.removeListener(_changed);
+    if (widget.profileAgent == null) profile.dispose();
     timer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     host.removeListener(_changed);

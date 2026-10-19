@@ -174,10 +174,17 @@ void main() {
       expect(receipt['status'], 'partial');
       expect(receipt['coverage']['unobserved_records'], 1);
       failMissing = false;
-      await agent.run();
+      await agent.run(maxNewBatches: 4);
       expect(observationCalls, 3);
       expect(finalCalls, 6);
       expect(agent.repository.value?['partial'], false);
+      final completedScope = await agent.inspectGeneration();
+      expect(completedScope?.complete, true);
+      expect(
+        agent.repository.value?['generation_scope'],
+        completedScope!.scope,
+      );
+
       expect(await checkpoint.read(), 'null');
       final completeProjection = await const SecureContextPersistence(
         'nova.profile.local.v1',
@@ -204,6 +211,40 @@ void main() {
         completeProjection,
       );
       expect(agent.repository.value!['revision'], completeRevision);
+      await agent.corrections.correct(
+        agent.repository.correctionScope,
+        'work',
+        '用户确认的工作',
+        '${models.configuration.endpoint}|fixture',
+      );
+      final changedScope = await agent.inspectGeneration();
+      expect(changedScope?.complete, false);
+      expect(changedScope?.covered, 0);
+      expect(changedScope?.scope, isNot(completedScope.scope));
+      expect(agent.repository.value!['revision'], completeRevision);
+      // New assumptions form a separate generation; old results remain until
+      // a newly validated projection is ready, even if it is initially partial.
+      await agent.repository.publish(
+        jsonEncode(
+          agent.repository.value!['entries']
+              .where((e) => e['explicit'] != true)
+              .toList(),
+        ),
+        epoch: authority.epoch,
+        sourceRevision: sources.revision,
+        consentRevision: sources.processingRevision,
+        provider: '${models.configuration.endpoint}|fixture',
+        partial: true,
+        coverage: {
+          'eligible_records': 2,
+          'validated_observation_records': 1,
+          'final_original_records': 1,
+          'unobserved_records': 1,
+        },
+        generationScope: changedScope!.scope,
+      );
+      expect(agent.repository.value?['partial'], true);
+      expect(agent.repository.value?['generation_scope'], changedScope.scope);
     },
   );
 }

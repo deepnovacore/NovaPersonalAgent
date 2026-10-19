@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'theme.dart';
+import 'profile_generation_status.dart';
+import '../context/profile_generation_coordinator.dart';
 import '../connectors/feishu/host.dart';
 import '../context/profile_corrections.dart';
 import '../context/profile_repository.dart';
@@ -16,12 +18,14 @@ class LocalProfileResults extends StatelessWidget {
     required this.authority,
     required this.kind,
     this.repository,
+    this.generation,
     this.revision = 0,
     this.excludeAbout = false,
     this.language = 'zh',
     this.onOpenFeishu,
     this.adoptTodo,
   });
+  final ProfileGenerationCoordinator? generation;
   final FeishuHost host;
   final SpaceAuthorityRepository authority;
   final ProfileRepository? repository;
@@ -50,7 +54,18 @@ class LocalProfileResults extends StatelessWidget {
     authority: authority,
     repository: repository,
     revision: revision,
+    changes: generation,
     builder: (context, profile, value, loading, failed, retry) {
+      if (generation != null && (value == null || loading)) {
+        return ProfileGenerationStatus(
+          generation: generation!,
+          language: language,
+          empty: true,
+          emptyLabel: kind == 'profile'
+              ? t('暂时没有可确认的个人信息', 'No confirmed personal information yet')
+              : t('暂时没有可确认的近况', 'No confirmed updates yet'),
+        );
+      }
       if (kind == 'timeline' && (loading || failed || value == null)) {
         return _timelineState(loading: loading, failed: failed, retry: retry);
       }
@@ -64,6 +79,16 @@ class LocalProfileResults extends StatelessWidget {
           )
           .toList();
       if (entries.isEmpty) {
+        if (generation != null) {
+          return ProfileGenerationStatus(
+            generation: generation!,
+            language: language,
+            empty: true,
+            emptyLabel: kind == 'profile'
+                ? t('暂时没有可确认的个人信息', 'No confirmed personal information yet')
+                : t('暂时没有可确认的近况', 'No confirmed updates yet'),
+          );
+        }
         return kind == 'timeline'
             ? _timelineState(loading: false, failed: false, retry: retry)
             : const SizedBox.shrink();
@@ -71,6 +96,11 @@ class LocalProfileResults extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (generation != null)
+            ProfileGenerationStatus(
+              generation: generation!,
+              language: language,
+            ),
           if (value['partial'] == true)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -159,7 +189,10 @@ class LocalProfileResults extends StatelessWidget {
           else ...[
             const SizedBox(height: 6),
             Text(
-              t('在设置中的「飞书」生成近况。', 'Generate updates in Settings → Feishu.'),
+              t(
+                '消息同步并授权后，会自动整理到这里。',
+                'Updates appear automatically after messages sync and access is allowed.',
+              ),
               style: const TextStyle(
                 color: Nova.secondary,
                 fontSize: 13,
@@ -513,11 +546,13 @@ class _ProfileScope extends StatefulWidget {
     required this.builder,
     this.repository,
     required this.revision,
+    this.changes,
   });
   final FeishuHost host;
   final SpaceAuthorityRepository authority;
   final ProfileRepository? repository;
   final int revision;
+  final Listenable? changes;
   final Widget Function(
     BuildContext,
     ProfileRepository,
@@ -532,7 +567,8 @@ class _ProfileScope extends StatefulWidget {
 }
 
 class _ProfileScopeState extends State<_ProfileScope> {
-  late final profile =
+  late ProfileRepository profile = _repository();
+  ProfileRepository _repository() =>
       widget.repository ??
       ProfileRepository(
         const SecureContextPersistence('nova.profile.local.v1'),
@@ -549,6 +585,7 @@ class _ProfileScopeState extends State<_ProfileScope> {
     super.initState();
     widget.host.addListener(_changed);
     widget.authority.addListener(_changed);
+    widget.changes?.addListener(_changed);
     unawaited(_open());
   }
 
@@ -579,7 +616,16 @@ class _ProfileScopeState extends State<_ProfileScope> {
   @override
   void didUpdateWidget(covariant _ProfileScope oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.revision != oldWidget.revision) unawaited(_open());
+    if (widget.changes != oldWidget.changes) {
+      oldWidget.changes?.removeListener(_changed);
+      widget.changes?.addListener(_changed);
+    }
+    if (widget.repository != oldWidget.repository) {
+      profile = _repository();
+      unawaited(_open());
+    } else if (widget.revision != oldWidget.revision) {
+      unawaited(_open());
+    }
   }
 
   void _changed() {
@@ -623,6 +669,7 @@ class _ProfileScopeState extends State<_ProfileScope> {
     expiry?.cancel();
     widget.host.removeListener(_changed);
     widget.authority.removeListener(_changed);
+    widget.changes?.removeListener(_changed);
     super.dispose();
   }
 }

@@ -25,6 +25,74 @@ Map<String, dynamic> result() => {
 };
 void main() {
   test(
+    'bounded rounds process only two misses and still include later cached batches',
+    () async {
+      final input = List.generate(
+        7,
+        (i) => {
+          ...records().first,
+          'evidence_id': 'e$i',
+          'created_at': '2026-10-17T00:0$i:00Z',
+        },
+      );
+      var observations = 0;
+      final loaded = <String>[];
+      final writer = ProfileWriter(
+        loadValidatedBatch: (batch) async {
+          final id = batch.single['evidence_id'] as String;
+          loaded.add(id);
+          if (id == 'e0') return <Map<String, dynamic>>[];
+          return id == 'e6'
+              ? [
+                  {
+                    'text': '【事】已有项目计划',
+                    'refs': ['e6'],
+                  },
+                ]
+              : null;
+        },
+        saveValidatedBatch: (batch, facts) async {},
+        complete: (stage, _, material) async {
+          if (stage == 'observations') {
+            observations++;
+            final id = (material['allowed_evidence_ids'] as List).first;
+            return {
+              'facts': [
+                {
+                  'text': '【事】补充计划',
+                  'refs': [id],
+                },
+              ],
+            };
+          }
+          expect(
+            (material['messages'] as List).any((m) => m['evidence_id'] == 'e6'),
+            true,
+          );
+          return stage == 'review'
+              ? {'review_notes': []}
+              : {
+                  'timeline': [
+                    {
+                      'text': '已有项目计划',
+                      'evidence_ids': ['e6'],
+                      'time_ref': 'e6',
+                    },
+                  ],
+                  'profile': {},
+                  'todos': [],
+                };
+        },
+      );
+      await writer.generate(input, maxNewBatches: 2);
+      expect(observations, 2);
+      expect(loaded, hasLength(7));
+      expect(writer.validatedObservationRecordCount, 4);
+      expect(writer.coverage['deferred_batches'], 3);
+    },
+  );
+
+  test(
     'saved-only scans all batches and never observes missing batches',
     () async {
       final stages = <String>[];

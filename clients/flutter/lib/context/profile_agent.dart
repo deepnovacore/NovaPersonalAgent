@@ -12,6 +12,7 @@ import 'profile_evidence.dart';
 import 'profile_writer.dart';
 import 'profile_budget.dart';
 import 'profile_observation_checkpoint.dart';
+import 'profile_generation_coordinator.dart';
 
 /// Distinguish a planned pause from provider/network and permission failures.
 class ProfileRunFailure extends AgentFailure {
@@ -47,6 +48,9 @@ String profileRunErrorCode(Object error) {
     'invalid_profile_json',
     'profile_not_published',
     'profile_no_saved_observations',
+    'profile_round_no_observations',
+    'profile_no_progress',
+    'profile_running',
     'profile_result_more_complete',
     'partial_profile_todo_unsupported',
     'profile_budget_exhausted',
@@ -93,8 +97,24 @@ String profileRunErrorCode(Object error) {
   return 'profile_run_failed';
 }
 
+/// Completed provider usage describes an incurred cost even if JSON or permission
+/// validation subsequently fails. Missing/incomplete usage supplies no callback.
+Future<Map<String, dynamic>> decodeCompletedProfileResponse(
+  String content, {
+  Future<void> Function()? settleUsage,
+  required Future<void> Function() validate,
+}) async {
+  await settleUsage?.call();
+  await validate();
+  final value = jsonDecode(content);
+  if (value is! Map<String, dynamic>) {
+    throw const FormatException('json_object_required');
+  }
+  return value;
+}
+
 /// Phone-owned orchestration; desktop's observation/write/review recipe in Dart.
-class ProfileAgent {
+class ProfileAgent extends ChangeNotifier {
   ProfileAgent(
     this.connector,
     this.authority,
@@ -109,6 +129,81 @@ class ProfileAgent {
   static const receiptKey = 'nova.profile.task.receipt.v1';
   final VoidCallback? onProgress;
   String status = '';
+  bool _disposed = false;
+  Map<String, int> lastCoverage = {};
+
+  /// Only inspect already-authorized inputs. Never create grants or refresh sources.
+  Future<ProfileGenerationSnapshot?> inspectGeneration() async {
+    if (_disposed ||
+        busy ||
+        !connector.ready ||
+        !authority.canPublish ||
+        connector.collection.running) {
+      return null;
+    }
+    if (budget != null) {
+      final raw = await const SecureContextPersistence(receiptKey).read();
+      final receipt = raw == null ? null : jsonDecode(raw);
+      final failure = receipt is Map ? receipt['error_code'] : null;
+      if (failure is String &&
+          profileRunErrorCode(
+            AgentFailure(failure),
+          ).startsWith('profile_budget_')) {
+        throw AgentFailure(failure);
+      }
+    }
+    final model = await models.read();
+    if (model == null) throw const AgentFailure('model_required');
+    final provider = '${model.endpoint}|${model.model}';
+    final consent = connector.sources.processingRevision;
+    connector.sources.validateProcessing(provider, 'profile', consent);
+    await repository.open();
+    final evidence = ProfileEvidence(
+      connector.sources.readAuthorizedEvidence(provider, 'profile'),
+      validThrough: connector.sources.now().add(maxDuration),
+    );
+    if (evidence.records.isEmpty) return null;
+    final scope = _generationScope(
+      model,
+      evidence,
+      corrections.context(repository.correctionScope, provider),
+    );
+    final value = repository.value;
+    return ProfileGenerationSnapshot(
+      scope: scope,
+      hasResult: value != null && value['generation_scope'] == scope,
+      complete:
+          value != null &&
+          value['generation_scope'] == scope &&
+          value['partial'] != true &&
+          (value['incomplete_batches'] as int? ?? 0) == 0,
+      covered: value?['generation_scope'] == scope
+          ? value?['coverage']?['validated_observation_records'] as int? ?? 0
+          : 0,
+      total: evidence.records.length,
+    );
+  }
+
+  String _generationScope(
+    ModelConfiguration model,
+    ProfileEvidence evidence,
+    String correctionContext,
+  ) {
+    return ProfileObservationCheckpoint.digest({
+      'provider': '${model.endpoint}|${model.model}',
+      'protocol': model.protocol.name,
+      'account': connector.sources.identity,
+      'auth_generation': connector.auth.generation,
+      'source_generation': connector.sources.generation,
+      'source_revision': connector.sources.revision,
+      'consent_revision': connector.sources.processingRevision,
+      'authority': authority.record,
+      'publication_generation': authority.publicationGeneration,
+      'corrections': correctionContext,
+      'evidence': evidence.checkpointDigest,
+    });
+  }
+
   static const budgetId = String.fromEnvironment('NOVA_PROFILE_BUDGET_ID');
   final budget = budgetId.isEmpty
       ? null
@@ -118,7 +213,10 @@ class ProfileAgent {
   void _report(String value) {
     status =
         '$value${budget == null ? '' : '\n验收预算 ¥5；累计预留 ¥${(budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}（保守上限，非账单）'}';
-    onProgress?.call();
+    if (!_disposed) {
+      onProgress?.call();
+      notifyListeners();
+    }
   }
 
   final FeishuHost connector;
@@ -135,7 +233,12 @@ class ProfileAgent {
   bool _cancelled = false;
   static bool _running = false;
   bool get busy => _running;
-  Future<void> run({bool savedObservationsOnly = false}) async {
+  Future<void> run({
+    bool savedObservationsOnly = false,
+    int? maxNewBatches,
+  }) async {
+    if (_disposed) throw StateError('profile_disposed');
+    lastCoverage = {};
     if (busy) throw StateError('profile_running');
     _running = true;
     _cancelled = false;
@@ -159,7 +262,10 @@ class ProfileAgent {
         }),
       );
       receiptStarted = true;
-      await _run(savedObservationsOnly: savedObservationsOnly);
+      await _run(
+        savedObservationsOnly: savedObservationsOnly,
+        maxNewBatches: maxNewBatches,
+      );
     } catch (error, stack) {
       final failure = _pauseFailure(error);
       final code = profileRunErrorCode(failure);
@@ -193,6 +299,7 @@ class ProfileAgent {
     } finally {
       deadlineTimer.cancel();
       _running = false;
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -206,7 +313,10 @@ class ProfileAgent {
     return error;
   }
 
-  Future<void> _run({required bool savedObservationsOnly}) async {
+  Future<void> _run({
+    required bool savedObservationsOnly,
+    int? maxNewBatches,
+  }) async {
     final model = await models.read();
     if (model == null) throw const AgentFailure('model_required');
     if (!connector.ready) throw const AgentFailure('connector_unavailable');
@@ -298,16 +408,37 @@ class ProfileAgent {
             authorize: () => validate(ignoreCancellation: true),
           );
 
+    String? lastStage;
     Future<Map<String, dynamic>> complete(
       String stage,
       String instructions,
       Map<String, dynamic> input,
     ) async {
-      if (stage == 'draft' && savedObservationsOnly) {
+      if (const {
+        'observations',
+        'draft',
+        'review',
+        'edit',
+        'repair',
+      }.contains(stage)) {
+        lastStage = stage;
+      }
+      if (stage == 'draft' &&
+          (savedObservationsOnly || maxNewBatches != null)) {
         final coverage = Map<String, int>.from(input['coverage'] as Map);
         if (coverage['validated_observation_records']! <
             coverage['eligible_records']!) {
-          repository.validatePartialCoverage(coverage);
+          final scope = _generationScope(model, evidence, correctionContext);
+          repository.validatePartialCoverage(coverage, generationScope: scope);
+          final existing = repository.value;
+          final oldCovered = existing?['generation_scope'] == scope
+              ? existing?['coverage']?['validated_observation_records']
+              : null;
+          if (maxNewBatches != null &&
+              oldCovered is int &&
+              coverage['validated_observation_records']! <= oldCovered) {
+            throw StateError('profile_no_progress');
+          }
         }
       }
       for (var attempt = 0; attempt < 2; attempt++) {
@@ -338,15 +469,13 @@ class ProfileAgent {
             if (delta['_nova_replace'] == true) content = '';
             content += delta['content'] as String? ?? '';
           }
-          await validate();
-          final value = jsonDecode(content);
-          if (value is! Map<String, dynamic>) {
-            throw const FormatException('json_object_required');
-          }
-          if (reservation != null && client.completedUsage != null) {
-            await budget!.settle(reservation, client.completedUsage!);
-          }
-          return value;
+          return await decodeCompletedProfileResponse(
+            content,
+            validate: validate,
+            settleUsage: reservation != null && client.completedUsage != null
+                ? () => budget!.settle(reservation, client.completedUsage!)
+                : null,
+          );
         } on FormatException {
           if (attempt == 1) throw const AgentFailure('invalid_profile_json');
         } finally {
@@ -422,6 +551,7 @@ class ProfileAgent {
         evidence.records,
         corrections: correctionContext,
         savedObservationsOnly: savedObservationsOnly,
+        maxNewBatches: maxNewBatches,
       );
       await validate();
       checkRun();
@@ -434,6 +564,7 @@ class ProfileAgent {
         incompleteBatches: writer.incompleteBatches,
         partial: writer.isPartial,
         coverage: writer.coverage,
+        generationScope: _generationScope(model, evidence, correctionContext),
       );
       await validate();
       if (repository.value == null) {
@@ -477,6 +608,7 @@ class ProfileAgent {
       failureCode = profileRunErrorCode(failure);
       Error.throwWithStackTrace(failure, stack);
     } finally {
+      lastCoverage = writer.coverage;
       connector.removeListener(changed);
       authority.removeListener(changed);
       _stopClients();
@@ -492,11 +624,19 @@ class ProfileAgent {
           'consent_revision': consentRevision,
           'finished_at': DateTime.now().toUtc().toIso8601String(),
           'coverage': writer.coverage,
+          'last_stage': ?lastStage,
           'cached_message_statuses': cachedCounts,
           'excluded_before_observations': excludedEvidence,
         }),
       );
     }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    cancel();
+    super.dispose();
   }
 
   void cancel() {

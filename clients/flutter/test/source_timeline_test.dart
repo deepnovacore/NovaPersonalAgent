@@ -236,7 +236,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('No Feishu updates yet'), findsOneWidget);
         expect(
-          find.text('Generate updates in Settings → Feishu.'),
+          find.text('Updates appear automatically after messages sync and access is allowed.'),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);

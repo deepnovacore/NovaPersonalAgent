@@ -910,7 +910,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 version == 0 &&
                 confirmed.isEmpty &&
                 suggested.isEmpty
-            ? '可在这里补充自己的介绍；飞书整理的画像显示在下方。'
+            ? t('Add your introduction here. Information from Feishu appears below.')
             : t(
                 confirmed.isNotEmpty
                     ? 'Written by you'
@@ -948,7 +948,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         ],
       ),
       if (widget.localProfile != null)
-        widget.localProfile!(version > 0 || confirmed.isNotEmpty),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: widget.localProfile!(version > 0 || confirmed.isNotEmpty),
+        ),
       if (work.isNotEmpty)
         NovaSection(
           header: t('Recently working on'),

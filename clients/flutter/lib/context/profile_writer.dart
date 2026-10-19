@@ -87,7 +87,11 @@ class ProfileWriter {
     List<Map<String, dynamic>> records, {
     String corrections = '',
     bool savedObservationsOnly = false,
+    int? maxNewBatches,
   }) async {
+    if (maxNewBatches != null && maxNewBatches < 0) {
+      throw ArgumentError.value(maxNewBatches, 'maxNewBatches');
+    }
     incompleteBatches = 0;
     deferredBatches = 0;
     sourceRecordCount = records.length;
@@ -119,7 +123,7 @@ class ProfileWriter {
       batches.length,
       (_) => <Map<String, dynamic>>[],
     );
-    var next = 0;
+    var next = 0, newBatches = 0;
     var failed = false;
     // Two independent requests bound phone memory and provider concurrency.
     await Future.wait(
@@ -137,10 +141,12 @@ class ProfileWriter {
               );
               continue;
             }
-            if (savedObservationsOnly) {
+            if (savedObservationsOnly ||
+                maxNewBatches != null && newBatches >= maxNewBatches) {
               deferredBatches++;
               continue;
             }
+            newBatches++;
             final allowed = messages.map((m) => m['evidence_id']).toSet();
             String? error;
             Object? previous;
@@ -234,6 +240,11 @@ class ProfileWriter {
       if (savedObservationsOnly) {
         throw StateError('profile_no_saved_observations');
       }
+      if (maxNewBatches != null &&
+          validatedObservationRecordCount > 0 &&
+          isPartial) {
+        throw StateError('profile_round_no_observations');
+      }
       throw observationFailure ?? StateError('insufficient_profile_evidence');
     }
     final selected = selectOriginals(records, facts);
@@ -256,7 +267,7 @@ class ProfileWriter {
       'messages': selected,
       'observations': selectedFacts,
       'explicit_corrections': corrections,
-      if (savedObservationsOnly || isPartial) 'coverage': coverage,
+      'coverage': coverage,
     };
     onProgress?.call(
       '${observedRecordCount + reusedObservationRecordCount} 条合格文本已完成分批观察（本轮 $observedRecordCount 条、复用 $reusedObservationRecordCount 条）；最终撰写选用 $selectedOriginalCount 条完整原文和 $selectedObservationCount 条观察，其余未进入最终上下文（按相关性与容量筛选）。',

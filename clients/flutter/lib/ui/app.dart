@@ -1,6 +1,9 @@
 import 'dart:convert';
 import '../connectors/feishu/host.dart';
 import '../context/profile_corrections.dart';
+import '../context/profile_agent.dart';
+import '../context/profile_generation_coordinator.dart';
+import '../context/secure_persistence.dart';
 import 'feishu_direct_page.dart';
 import 'local_profile_results.dart';
 import 'local_schedules_page.dart';
@@ -115,6 +118,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   AgentCoreHost? agentCore;
   FeishuHost? feishu;
   int _profileRevision = 0;
+  ProfileAgent? profileAgent;
+  ProfileGenerationCoordinator? profileGeneration;
+  final _profileChanges = ValueNotifier<int>(0);
+  Future<void>? _profileOpening;
   ScheduledAgentRunner? localSchedules;
   String? chatId;
   bool _showHome = true, _creatingChat = false;
@@ -282,6 +289,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         )..addListener(_lifeChanged);
       });
       unawaited(_openLocalSchedules(host));
+      unawaited(_openProfileGeneration().catchError((Object _) {}));
       // Open a separate durable context for the voice worker. Failure leaves
       // plain voice available and never substitutes an in-memory task journal.
       try {
@@ -307,6 +315,48 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         );
       }
     }
+  }
+
+  Future<void> _openProfileGeneration() =>
+      _profileOpening ??= _startProfileGeneration();
+
+  Future<void> _startProfileGeneration() async {
+    await lifeHost.open();
+    final connector = feishu ??= FeishuHost();
+    await connector.open();
+    final models = agentCore?.settings;
+    if (!mounted || models == null) return;
+    final profile = ProfileAgent(connector, lifeHost.authority, models);
+    final generation = ProfileGenerationCoordinator(
+      persistence: SecureContextPersistence(
+        'nova.profile.automatic.v1${ProfileAgent.budgetId.isEmpty ? '' : '.${ProfileAgent.budgetId}'}',
+      ),
+      inspect: profile.inspectGeneration,
+      generate: ({required savedObservationsOnly, required maxNewBatches}) =>
+          profile.run(
+            savedObservationsOnly: savedObservationsOnly,
+            maxNewBatches: maxNewBatches,
+          ),
+      cancel: profile.cancel,
+      failureCode: profileRunErrorCode,
+      processedRecords: () =>
+          profile.lastCoverage['validated_observation_records'] ?? 0,
+      inputs: [connector, lifeHost.authority],
+      progress: profile,
+    );
+    generation.addListener(_profileChanged);
+    setState(() {
+      profileAgent = profile;
+      profileGeneration = generation;
+    });
+    _profileChanges.value++;
+    await generation.start();
+  }
+
+  void _profileChanged() {
+    if (!mounted) return;
+    _profileChanges.value++;
+    setState(() => _profileRevision = profileGeneration?.revision ?? 0);
   }
 
   Future<void> _openLocalSchedules(AgentCoreHost host) async {
@@ -477,7 +527,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             ),
           ),
           body: ListenableBuilder(
-            listenable: lifeHost,
+            listenable: Listenable.merge([lifeHost, _profileChanges]),
             builder: (context, _) {
               final store = lifeHost.store;
               return Column(
@@ -496,6 +546,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     host: feishu!,
                                     authority: lifeHost.authority,
                                     kind: 'profile',
+                                    language: language,
+                                    repository: profileAgent?.repository,
+                                    generation: profileGeneration,
                                     revision: _profileRevision,
                                     excludeAbout: excludeAbout,
                                   ),
@@ -605,6 +658,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 host: connector,
                 language: language,
                 models: agentCore?.settings ?? ModelSettings(),
+                profileAgent: profileAgent,
+                generation: profileGeneration,
                 authority: lifeHost.authority,
                 contextSync: lifeHost.getContextSync,
                 adoptTodo: (input, operation) =>
@@ -635,6 +690,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             language: language,
           );
           if (mounted) setState(() => _modelRevision++);
+          profileGeneration?.wake();
         } catch (_) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -902,6 +958,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     voiceDelegates?.dispose();
     unawaited(phoneAudio.dispose());
     lifeHost.removeListener(_lifeChanged);
+    profileGeneration?.removeListener(_profileChanged);
+    profileGeneration?.dispose();
+    profileAgent?.dispose();
+    _profileChanges.dispose();
     lifeHost.dispose();
     feishu?.dispose();
     localSchedules?.dispose();
@@ -1129,6 +1189,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     host: feishu!,
                                     authority: lifeHost.authority,
                                     kind: 'timeline',
+                                    repository: profileAgent?.repository,
+                                    generation: profileGeneration,
                                     language: language,
                                     revision: _profileRevision,
                                   ),
