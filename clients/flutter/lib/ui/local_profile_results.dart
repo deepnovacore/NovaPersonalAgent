@@ -97,58 +97,52 @@ class LocalProfileResults extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
-              value['generated_at'] is String
-                  ? t(
-                      '最近成功整理 · ${sourceTime(value['generated_at'])}',
-                      'Last successful update · ${sourceTime(value['generated_at'])}',
-                    )
-                  : t('此前成功整理的内容', 'Previously generated results'),
-              style: const TextStyle(color: Nova.secondary, fontSize: 12),
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                Text(
+                  value['generated_at'] is String
+                      ? t(
+                          '最近成功整理 · ${sourceTime(value['generated_at'])}',
+                          'Updated · ${sourceTime(value['generated_at'])}',
+                        )
+                      : t('此前成功整理的内容', 'Saved results'),
+                  style: const TextStyle(color: Nova.secondary, fontSize: 12),
+                ),
+                if (value['historical'] == true)
+                  Text(
+                    t('历史结果', 'Saved'),
+                    style: const TextStyle(color: Nova.secondary, fontSize: 12),
+                  ),
+                if (value['partial'] == true ||
+                    (value['incomplete_batches'] as int? ?? 0) > 0)
+                  Text(
+                    t('部分内容', 'Partial'),
+                    style: const TextStyle(color: Nova.secondary, fontSize: 12),
+                  ),
+              ],
             ),
           ),
-          if (loading || failed)
-            Text(
-              t(
-                loading ? '正在检查更新，先显示上次结果。' : '更新暂时不可用，保留上次结果。',
-                loading
-                    ? 'Checking for updates. Showing the last result.'
-                    : 'Update unavailable. Showing the last result.',
-              ),
-            ),
-          if (value['historical'] == true)
-            Text(
-              t(
-                '这是上次整理的结果，可能尚未包含后续变化。',
-                'These saved results may not include later changes.',
+          if ((loading || failed) &&
+              (generation == null ||
+                  generation!.phase == ProfileGenerationPhase.ready))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                t(
+                  loading ? '正在检查更新，先显示上次结果。' : '更新暂时不可用，保留上次结果。',
+                  loading
+                      ? 'Checking for updates. Showing the last result.'
+                      : 'Update unavailable. Showing the last result.',
+                ),
               ),
             ),
           if (generation != null)
             ProfileGenerationStatus(
               generation: generation!,
               language: language,
-            ),
-          if (value['partial'] == true)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                t(
-                  '还有部分消息待整理，后续进展可能尚未包含。',
-                  'Some messages remain to be reviewed. Later developments may be missing.',
-                ),
-              ),
-            ),
-          if (value['coverage'] is Map) _coverage(value['coverage'] as Map),
-          if ((value['incomplete_batches'] as int? ?? 0) > 0)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                t(
-                  '部分内容无法与原文核对，未显示，近况可能不完整。',
-                  'Some content could not be checked against the original messages and is not shown. Updates may be incomplete.',
-                ),
-              ),
             ),
           for (final section in ['timeline', 'profile', 'todo_candidate'])
             if (entries.any((e) => (e['kind'] ?? 'profile') == section)) ...[
@@ -181,35 +175,61 @@ class LocalProfileResults extends StatelessWidget {
                   _entry(context, profile, entry, section, value),
               ],
             ],
+          _coverage(value),
         ],
       );
     },
   );
 
-  Widget _coverage(Map coverage) => ExpansionTile(
-    tilePadding: EdgeInsets.zero,
-    childrenPadding: const EdgeInsets.only(bottom: 16),
-    title: Text(
-      t('整理范围', 'Review coverage'),
-      style: const TextStyle(fontSize: 13, color: Nova.secondary),
-    ),
-    children: [
-      Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          t(
-            '已整理 ${coverage['validated_observation_records'] ?? '未知'} / ${coverage['eligible_records'] ?? '未知'} 条消息，最终参考 ${coverage['final_original_records'] ?? '未知'} 条原文。还有 ${coverage['unobserved_records'] ?? '未知'} 条待整理。',
-            '${coverage['validated_observation_records'] ?? 'Unknown'} / ${coverage['eligible_records'] ?? 'unknown'} messages reviewed; ${coverage['final_original_records'] ?? 'unknown'} originals used in the result. ${coverage['unobserved_records'] ?? 'Unknown'} messages remain.',
-          ),
-          style: const TextStyle(
-            color: Nova.secondary,
-            fontSize: 13,
-            height: 1.5,
-          ),
+  Widget _coverage(Map<String, dynamic> value) {
+    final coverage = value['coverage'];
+    final notes = <String>[
+      if (value['historical'] == true)
+        t(
+          '这是上次整理的结果，可能尚未包含后续变化。',
+          'These saved results may not include later changes.',
         ),
+      if (value['partial'] == true)
+        t(
+          '还有部分内容待整理，后续进展可能尚未包含。',
+          'Some content remains to be organized. Later developments may be missing.',
+        ),
+      if ((value['incomplete_batches'] as int? ?? 0) > 0)
+        t(
+          '部分内容无法与原文核对，未显示，近况可能不完整。',
+          'Some content could not be checked against the original messages and is not shown. Updates may be incomplete.',
+        ),
+      if (coverage is Map)
+        t(
+          '已整理 ${coverage['validated_observation_records'] ?? '未知'} / ${coverage['eligible_records'] ?? '未知'} 条消息，最终参考 ${coverage['final_original_records'] ?? '未知'} 条原文。还有 ${coverage['unobserved_records'] ?? '未知'} 条待整理。',
+          '${coverage['validated_observation_records'] ?? 'Unknown'} / ${coverage['eligible_records'] ?? 'unknown'} messages reviewed; ${coverage['final_original_records'] ?? 'unknown'} originals used in the result. ${coverage['unobserved_records'] ?? 'Unknown'} messages remain.',
+        ),
+    ];
+    if (notes.isEmpty) return const SizedBox.shrink();
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 16),
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      title: Text(
+        t('整理范围', 'Review coverage'),
+        style: const TextStyle(fontSize: 13, color: Nova.secondary),
       ),
-    ],
-  );
+      children: [
+        for (final note in notes)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              note,
+              style: const TextStyle(
+                color: Nova.secondary,
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 
   Widget _timelineState({
     required bool loading,

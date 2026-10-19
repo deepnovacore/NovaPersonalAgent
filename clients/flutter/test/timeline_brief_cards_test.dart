@@ -188,11 +188,13 @@ void main() {
         expect(find.text('此前保留的项目讨论'), findsOneWidget);
         expect(find.textContaining('更新依据 ·'), findsNWidgets(2));
         expect(find.textContaining('消息日期 ·'), findsNothing);
-        expect(find.text('还有部分消息待整理，后续进展可能尚未包含。'), findsOneWidget);
+        expect(find.text('部分内容'), findsOneWidget);
+        expect(find.text('还有部分内容待整理，后续进展可能尚未包含。'), findsNothing);
         expect(find.textContaining('已整理 8 / 20'), findsNothing);
         await tester.ensureVisible(find.text('整理范围'));
         await tester.tap(find.text('整理范围'));
         await tester.pumpAndSettle();
+        expect(find.text('还有部分内容待整理，后续进展可能尚未包含。'), findsOneWidget);
         expect(find.textContaining('已整理 8 / 20 条消息'), findsOneWidget);
         expect(find.textContaining('还有 12 条待整理'), findsOneWidget);
         expect(find.text('加入待办'), findsNothing);
