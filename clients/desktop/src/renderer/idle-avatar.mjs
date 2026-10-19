@@ -1,4 +1,3 @@
-const IDLE_MOVIE = new URL('./assets/nova-idle.mp4', import.meta.url).href
 const noop = Object.freeze({setIdle(){},setEnabled(){},setVisible(){},update(){},destroy(){}})
 
 /** A decorative movie never owns audio, input, or assistant state. */
@@ -24,13 +23,14 @@ export function createIdlePlayback({video,image,document,mediaQuery}) {
  }
 }
 
-export function mountIdleAvatar(image) {
+export function mountIdleAvatar(image,{movieUrl=null}={}) {
+ if(!movieUrl)return {...noop,update(value){image.src=value.profile.avatar??value.defaultAvatar}}
  const doc=image.ownerDocument
  if(!image.replaceWith||!doc?.createElement)return noop
  const video=doc.createElement('video')
  if(typeof video.play!=='function')return noop
  const wrapper=doc.createElement('span');wrapper.className='idle-avatar'
- video.src=IDLE_MOVIE;video.setAttribute('aria-hidden','true');video.tabIndex=-1
+ video.src=movieUrl;video.setAttribute('aria-hidden','true');video.tabIndex=-1
  image.replaceWith(wrapper);wrapper.append(image,video)
  const view=doc.defaultView,control=createIdlePlayback({video,image,document:doc,mediaQuery:view?.matchMedia?.('(prefers-reduced-motion: reduce)')})
  const observer=view?.IntersectionObserver?new view.IntersectionObserver(entries=>control.setVisible(entries.some(entry=>entry.isIntersecting))):null

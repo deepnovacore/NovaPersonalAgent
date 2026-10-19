@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
+import {readFile} from 'node:fs/promises'
 
 import {
   CAMERA_SOURCE_PATH,
@@ -309,12 +310,17 @@ test('WHATWG Request canonicalization makes dot aliases the canonical fixed came
   assert.equal(cameraCalls.length, 3)
 })
 
- test('bundled idle movie is allowlisted and forwards byte-range headers for native looping',async()=>{
- const rendererFiles=await buildRendererAssetGraph(ACTUAL_RENDERER_ROOT)
- assert.ok(rendererFiles.includes('/assets/nova-idle.mp4'))
+test('public renderer has no default movie while explicit media routes support byte ranges',async()=>{
+ const publicFiles=await buildRendererAssetGraph(ACTUAL_RENDERER_ROOT)
+ assert.equal(publicFiles.some(file=>file.endsWith('.mp4')),false)
+ const rendererFiles=await buildRendererAssetGraph(ACTUAL_RENDERER_ROOT,async file=>{
+  const source=await readFile(file,'utf8')
+  return file===resolve(ACTUAL_RENDERER_ROOT,'index.html')?source+'<video src="./assets/fixture.mp4"></video>':source
+ })
+ assert.ok(rendererFiles.includes('/assets/fixture.mp4'))
  let handler,range
  installAppProtocol({handle:(_,fn)=>{handler=fn}},{rendererRoot:ACTUAL_RENDERER_ROOT,rendererFiles,fetchFile:(_file,options)=>{range=options.headers.get('range');return new Response('video',{status:206})}})
- assert.equal((await handler(new Request('nova://orb/assets/nova-idle.mp4',{headers:{range:'bytes=100-200'}}))).status,206)
+ assert.equal((await handler(new Request('nova://orb/assets/fixture.mp4',{headers:{range:'bytes=100-200'}}))).status,206)
  assert.equal(range,'bytes=100-200')
  assert.equal((await handler(new Request('nova://orb/assets/other.mp4'))).status,404)
- })
+})

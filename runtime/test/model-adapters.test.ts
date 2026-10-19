@@ -561,6 +561,7 @@ test('a composition that overruns its reference and item counts keeps only items
 })
 
 test('internal message keys and sender aliases never reach the profile prose',async()=>{
+ // Synthetic collaborators and RFC 5737 documentation addresses only.
  const entries=Array.from({length:3},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i}))
  const leaky=(text:string)=>({about:{paragraphs:[{text,refs:['e0']}]},work:[{title:'部署 e5',text:'你和示例甲（p00000001）协作（e14、e40、e91）。',refs:['e1']}],interests:[{text:'示例设计参考图（e50, e51），区间（e12–e15）、（e3–e5，e9）、本地服务（如192.0.2.10:8080、198.51.100.20）',refs:['e2']}]})
  const gateway=profileFixtureGateway(()=>leaky('你与示例乙（p00000002）和示例丙 p00000001 协作，界面渲染限制（e110）要先验证，参考 Qwen3 与 e2e 测试和 Pi5。'))

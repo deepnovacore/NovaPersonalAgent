@@ -57,4 +57,3 @@ export function priceUsage(input:UsageReport): UsagePrice {
   }
   return unknown
 }
-

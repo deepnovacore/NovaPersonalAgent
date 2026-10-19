@@ -62,6 +62,8 @@ test('welcome IPC rejects foreign frames, preserves canceled selections and stor
   let selection={canceled:true,filePaths:[]},empty=false
   installWelcomeIpc({ipcMain:{handle:(name,fn)=>handlers.set(name,fn)},app:{getPath:()=>root},dialog:{showOpenDialog:async()=>selection},nativeImage:{createFromBuffer:()=>({isEmpty:()=>empty,getSize:()=>({width:100,height:200}),resize:options=>{assert.deepEqual(options,{height:512});return {toPNG:()=>Buffer.from('normalized png')}}})},systemPreferences:{getMediaAccessStatus:()=> 'denied',isTrustedAccessibilityClient:()=>false},shell:{openExternal:async()=>{}},windows:()=>[window],environment:()=>({}),backendReady:()=>false})
   const invoke=(name,...args)=>handlers.get('nova:welcome:'+name)(event,...args)
+  const publicIcon=await readFile(new URL('../resources/icon-source/128x128.png',import.meta.url))
+  assert.equal((await invoke('get')).defaultAvatar,'data:image/png;base64,'+publicIcon.toString('base64'))
   assert.throws(()=>handlers.get('nova:welcome:get')({...event,senderFrame:{}}),/access_denied/)
   assert.throws(()=>handlers.get('nova:welcome:get')({...event,sender:{}}),/access_denied/)
   await assert.rejects(invoke('save',{avatar:null}),/use_avatar_picker/)

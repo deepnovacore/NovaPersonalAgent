@@ -43,6 +43,7 @@ docs/demos/
 docs/superpowers/
 docs/research/
 docs/internal/
+docs/development/
 .superpowers/
 assets/demos/cat-sofa-guard/*-preroll.mp4
 assets/demos/video-cut
@@ -99,3 +100,10 @@ references/
 
 # Self-operated services are kept local, outside the public source tree.
 /services/
+
+# Generated Flutter visual-test failure artifacts
+/clients/flutter/test/failures/
+
+# Private device acceptance journal
+/docs/testing/mobile-authority-acceptance-2026-10-17.zh-CN.md
+/docs/plans/2026-10-15-unified-understanding.md

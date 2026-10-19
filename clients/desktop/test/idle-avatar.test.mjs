@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {createIdlePlayback} from '../src/renderer/idle-avatar.mjs'
+import {createIdlePlayback,mountIdleAvatar,mountOrbIdle} from '../src/renderer/idle-avatar.mjs'
 
 function fixture(){
  const listeners=new Map(),mediaListeners=new Map();let plays=0,pauses=0
@@ -35,3 +35,25 @@ test('custom avatar, reduced motion, hidden/offscreen page and media errors reta
  f.control.setIdle(true);assert.equal(resumed,true);f.listeners.get('playing')();assert.equal(f.video.hidden,false)
  f.control.destroy()
  })
+
+
+test('an unconfigured avatar remains a still image without loading decorative media',()=>{
+ const created=[]
+ const image={src:'',style:{},replaceWith(){throw Error('still image must remain mounted')},ownerDocument:{createElement:tag=>{created.push(tag);return {play(){}}}}}
+ const control=mountIdleAvatar(image)
+ control.update({profile:{avatar:null},defaultAvatar:'data:image/png;base64,default'})
+ control.setIdle(true)
+ assert.equal(image.src,'data:image/png;base64,default')
+ control.update({profile:{avatar:'data:image/png;base64,custom'},defaultAvatar:'data:image/png;base64,default'})
+ assert.equal(image.src,'data:image/png;base64,custom')
+ assert.deepEqual(created,[])
+ control.destroy()
+})
+
+test('an orb without a configured video keeps its original canvas visible',()=>{
+ const canvas={style:{visibility:''}}
+ const control=mountOrbIdle({},canvas,null)
+ control.profile({profile:{avatar:null},defaultAvatar:'default'})
+ control.state('idle');control.settings({skinId:'nova'});control.destroy()
+ assert.equal(canvas.style.visibility,'')
+})

@@ -24,7 +24,7 @@ Search matches original text. Long entries show an excerpt. Inspection currently
 
 The unified ledger defaults to `~/.nova-audio-agent/workspace-graph.sqlite`; use `MEMORY_LEDGER_PATH` to select another location. With mem0 selected, files are stored under `~/.nova-audio-agent/memory.sqlite.mem0/`, with separate data for each user.
 
-The ledger's sibling `<MEMORY_LEDGER_PATH>.memory/` directory contains `USER.md` for stated user information, one file per goal/todo/idea, and a generated `MEMORY.md` directory. Profile summaries remain derived rather than a second fact store. You may edit marked record bodies; IDs, versions, sources, status and links are maintained by Nova. Corrections enter the same versioned merge path. See [the storage contract](../development/structured-memory.md) for migration and editing boundaries.
+The ledger's sibling `<MEMORY_LEDGER_PATH>.memory/` directory contains `USER.md` for stated user information, one file per goal/todo/idea, and a generated `MEMORY.md` directory. Profile summaries remain derived rather than a second fact store. You may edit marked record bodies; IDs, versions, sources, status and links are maintained by Nova. Corrections enter the same versioned merge path.
 
 **Local storage is not offline processing.** Extraction and embeddings send relevant text to your configured model service.
 
