@@ -1307,7 +1307,7 @@ test('the expanded workbench casts a native shadow and the resting orb does not'
  const shadow=[],bounds={x:0,y:0,width:100,height:100}
  const mainWindow={getBounds:()=>bounds,setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds(){},setHasShadow:value=>shadow.push(value)}
  const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}})}
- const set=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame)
+ const set=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame','windowsPresentation',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame,null)
  set(false);set(true);set(false)
  assert.deepEqual(shadow,[true,false,true])
 })
@@ -1340,8 +1340,8 @@ test('closing the workbench stays in background and macOS activation reopens it 
  const app={isQuitting:false,on:(_name,handler)=>{activate=handler}},sender={},requests=[]
  const mainWindow={webContents:sender,on:(_name,handler)=>{close=handler},isVisible:()=>visible,isDestroyed:()=>destroyed}
  const requestPresentation=mode=>{requests.push(mode);if(mode==='background')visible=false}
- const closeStart=source.indexOf("  mainWindow.on('close', event => {")
- new Function('app','mainWindow','requestPresentation',source.slice(closeStart,source.indexOf('\n  })',closeStart)+5))(app,mainWindow,requestPresentation)
+ const closeStart=source.indexOf('  const bindPresentationClose =')
+ new Function('app','mainWindow','requestPresentation',`${source.slice(closeStart,source.indexOf('\n  for (const window',closeStart))};bindPresentationClose(mainWindow)`)(app,mainWindow,requestPresentation)
  const activateStart=source.indexOf("  app.on('activate', () => {")
  new Function('app','mainWindow','requestPresentation',source.slice(activateStart,source.indexOf('\n  })',activateStart)+5))(app,mainWindow,requestPresentation)
  const controlStart=source.indexOf("  ipcMain.on('nova:window:control',")

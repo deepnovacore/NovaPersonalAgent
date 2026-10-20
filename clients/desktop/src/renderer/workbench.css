@@ -9,7 +9,7 @@
  *  - cards are flat: raised surface + 1px line, radius 10 (cards) / 5 (chips, buttons); hover lifts a hairline shadow
  *  - card anatomy: title, body clamped to four lines, footer row (evidence/status left, actions right)
  *  - button weight: primary (.page-add) once per page, .soft for the card's main action, .ghost for the rest
- *  - the window is frameless and transparent (it doubles as the orb), so the workbench draws its own frame
+ *  - the workbench draws its frame; Windows uses an opaque shell with native window corners and shadow
  */
 .workbench{
  color-scheme:light dark;
@@ -35,6 +35,8 @@ body[data-personal-collapsed="false"]{background:transparent;overflow:hidden}
 .workbench{position:relative;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));height:100vh;border:1px solid var(--frame);border-radius:var(--radius-window);background:var(--surface);color:var(--ink);font:13px/1.6 var(--font);text-align:left;user-select:text;overflow:hidden}
 /* An opaque plate (NOVA_ORB_OPAQUE) cannot show rounded corners: the square window backing would show behind them. */
 body[data-opaque="1"] .workbench{border-radius:0}
+/* Windows clips the opaque workbench to the system window corners. */
+body[data-platform="win32"] .workbench{border-radius:0}
 .page-head,.chat-head{-webkit-app-region:drag}
 .page-head :is(button,select,input),.chat-head :is(button,select,input,details){-webkit-app-region:no-drag}
 .workbench button{font:inherit;color:inherit;user-select:none;cursor:pointer;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-raised);padding:5px 10px;font-size:12px;line-height:1.4}
@@ -67,6 +69,7 @@ body[data-opaque="1"] .workbench{border-radius:0}
 :is(.workbench,.welcome-screen) .window-minimize{background:#febc2e}.window-minimize::after{content:'−'}
 :is(.workbench,.welcome-screen) .window-control:hover:not(:disabled){filter:brightness(.92)}
 .window-grip{flex:1 1 auto;align-self:stretch;min-width:24px;margin:-8px 0;-webkit-app-region:no-drag}
+.window-grip.native-window-drag{-webkit-app-region:drag}
 .workspace-topbar{flex-shrink:0;min-width:0;border-bottom:1px solid var(--line);background:var(--surface-raised);padding:0 14px;min-height:49px;display:flex;align-items:center;-webkit-app-region:drag}
 .workspace-tabs{display:flex;align-items:center;gap:2px;overflow-x:auto;min-width:0;scrollbar-width:thin;-webkit-app-region:no-drag}
 .workbench .workspace-tab{display:flex;align-items:center;gap:6px;flex-shrink:0;border:0;border-radius:8px;background:transparent;color:var(--ink-dim);font-size:12px;padding:8px 8px;white-space:nowrap}

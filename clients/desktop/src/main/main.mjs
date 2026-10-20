@@ -29,6 +29,7 @@ import {parseCapabilityRegistry} from '@nova-personal-agent/runtime/desktop'
 import { WakeWordRuntime } from './wake-word/runtime.mjs'
 import {
   app,
+  BaseWindow,
   BrowserWindow,
   clipboard,
   dialog,
@@ -37,6 +38,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  nativeTheme,
   net,
   protocol,
   safeStorage,
@@ -46,6 +48,7 @@ import {
   systemPreferences,
   Tray,
   utilityProcess,
+  WebContentsView,
 } from 'electron'
 import {
   describeMissingBlockingEnvironment,
@@ -82,7 +85,9 @@ import {
 import { installAppProtocol, loadAppWindow, registerAppScheme } from './app-protocol.mjs'
 import { startWithSelectedCamera } from './camera-source.mjs'
 import { createDragController } from './drag-controller.mjs'
+import { configureWorkbenchNativeDrag } from './workbench-drag.mjs'
 import { createWorkbenchFrame } from './workbench-frame.mjs'
+import { createWindowsPresentationWindows } from './windows-presentation.mjs'
 import { executorResultDialogOptions, executorResultMenuTemplate } from './executor-result.mjs'
 import { shouldOpenSettings } from './launch-command.mjs'
 import { createNativeAudioManager } from './native-audio.mjs'
@@ -219,6 +224,7 @@ let settingsRecoveryAvailable = false
 let visor = null
 let visorAI = {state:'idle',muted:false,activated:false}
 let mainWindow = null
+let windowsPresentation = null
 let boardWindow = null
 let clearingConversation = null
 let settingsWindow = null
@@ -595,7 +601,14 @@ function localizedWindowOptions(options) {
 }
 
 async function createWindow(launchId) {
-  const window = new BrowserWindow(localizedWindowOptions(browserWindowOptions(preload, launchId, { opaque })))
+  const options = localizedWindowOptions(browserWindowOptions(preload, launchId, { opaque }))
+  if (process.platform === 'win32') {
+    windowsPresentation = createWindowsPresentationWindows({
+      BaseWindow, WebContentsView, options,
+      workbenchBackground: nativeTheme.shouldUseDarkColors ? '#0f1216' : '#f4f5f7',
+    })
+  }
+  const window = windowsPresentation?.orb ?? new BrowserWindow(options)
   const positionFile = windowPositionFile()
   const primary = screen.getPrimaryDisplay().workArea
   const fallback = { x: primary.x + primary.width - 208, y: primary.y + 24 }
@@ -606,7 +619,9 @@ async function createWindow(launchId) {
   window.setAlwaysOnTop(true, 'floating')
   if(acceptance)installAcceptanceWindowGate(window,assertAcceptanceUrl)
   configureWindowSecurity(window, () => voiceprintRecording ? settingsWindow?.webContents : null)
-  window.once('ready-to-show', () => window.showInactive())
+  if (windowsPresentation) {
+    window.webContents.once('did-finish-load', () => windowsPresentation.activeWindow.showInactive())
+  } else window.once('ready-to-show', () => window.showInactive())
   return window
 }
 
@@ -1413,16 +1428,6 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   wakeWord.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
 
-  const windowShown = sourceStartupSmoke
-    ? new Promise((resolveShown, rejectShown) => {
-        if (mainWindow.isVisible()) {
-          resolveShown()
-          return
-        }
-        mainWindow.once('show', resolveShown)
-        mainWindow.once('closed', () => rejectShown(new Error('source_startup_window_closed')))
-      })
-    : null
   let personalCollapsed = false
   let personalBounds = null
   let initialOrbBounds = mainWindow.getBounds()
@@ -1433,9 +1438,12 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   const setPersonalCollapsed = value => {
     if (value === personalCollapsed && personalBounds !== null) return
+    const wasVisible = windowsPresentation && mainWindow.isVisible()
     if (value) {
       personalBounds = workbenchFrame.naturalBounds()
+      if (windowsPresentation && workbenchFrame.maximized) mainWindow.setBounds(personalBounds)
       workbenchFrame.forget()
+      if (windowsPresentation) mainWindow = windowsPresentation.select(true)
       personalCollapsed = true
       mainWindow.setResizable(false)
       mainWindow.setMinimumSize(1, 1)
@@ -1445,6 +1453,7 @@ async function startSelectedCamera(camera, smokeChannel) {
       orbWindow.sync()
     } else {
       if(personalCollapsed)initialOrbBounds=mainWindow.getBounds()
+      if (windowsPresentation) mainWindow = windowsPresentation.select(false)
       personalCollapsed = false
       const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
       const width = Math.min(1120, area.width), height = Math.min(780, area.height)
@@ -1452,14 +1461,16 @@ async function startSelectedCamera(camera, smokeChannel) {
       mainWindow.setResizable(true)
       mainWindow.setMinimumSize(Math.min(660, area.width), Math.min(520, area.height))
       mainWindow.setAlwaysOnTop(false)
-      // The orb window is created shadowless; the workbench needs the system
-      // shadow (macOS derives it from the rounded, transparent content) to read
-      // as a window against the desktop.
+      // Windows uses an opaque shell with a thick frame; macOS can derive the
+      // system shadow directly from the existing transparent, rounded content.
       mainWindow.setHasShadow(true)
-      mainWindow.setBounds(personalBounds ?? {x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2),width,height})
+      // A dedicated Windows shell retains its bounds. Reapplying its rounded
+      // DIP readback on every mode switch would gradually grow it at 175% DPI.
+      if (!windowsPresentation || personalBounds === null) mainWindow.setBounds(personalBounds ?? {x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2),width,height})
       personalBounds = mainWindow.getBounds()
     }
     sendToOrb('nova:personal:collapsed', value)
+    if (windowsPresentation && wasVisible) mainWindow.showInactive()
   }
   ipcMain.handle('nova:personal:presentation-error', (event, message) => {
     if(event.sender !== mainWindow.webContents || typeof message !== 'string' || message.length > 2000) throw new Error('presentation error rejected')
@@ -1468,11 +1479,15 @@ async function startSelectedCamera(camera, smokeChannel) {
   ipcMain.handle('nova:personal:presentation', async (event, mode, activate=true) => {
     if(event.sender !== mainWindow.webContents || !['background','workbench','orb'].includes(mode) || typeof activate!=='boolean') throw new Error('presentation request rejected')
     if(mode === 'background'){enterBackground();return}
-    // configure() can show too; fence before any path can trigger the native reset.
-    const shown=activate&&!mainWindow.isVisible()?new Promise(resolve=>mainWindow.once('show',()=>resolve())):undefined
+    const waitForShow=()=>activate&&!mainWindow.isVisible()?new Promise(resolve=>mainWindow.once('show',()=>resolve())):undefined
+    // Other platforms keep the existing show fence before changing bounds.
+    let shown=process.platform==='win32'?undefined:waitForShow()
     const wasBackground=presentationMode==='background'
     presentationMode=mode
     setPersonalCollapsed(mode === 'orb')
+    // Select the destination shell first. configure() can show it too, so fence
+    // before wake configuration can trigger the native show/dormancy reset.
+    if(process.platform==='win32')shown=waitForShow()
     if (settingsReady) {
       await settingsWriter({lastPresentation: mode}, undefined, {preserveSecrets: true}).catch(error => {
         console.error(`[desktop-diagnostic] presentation_save_failure type=${error.name}`)
@@ -1508,11 +1523,14 @@ async function startSelectedCamera(camera, smokeChannel) {
     const result = await dialog.showOpenDialog(event.sender === settingsWindow?.webContents ? settingsWindow : mainWindow, {title:'选择允许 Nova 读取的目录', properties:['openDirectory']})
     return result.canceled ? null : result.filePaths[0] ?? null
   })
-  mainWindow.on('close', event => {
-    if (app.isQuitting) return
-    event.preventDefault()
-    requestPresentation('background')
-  })
+  const bindPresentationClose = mainWindow => {
+    mainWindow.on('close', event => {
+      if (app.isQuitting) return
+      event.preventDefault()
+      requestPresentation('background')
+    })
+  }
+  for (const window of windowsPresentation?.windows ?? [mainWindow]) bindPresentationClose(window)
   const orbWindow = createOrbWindowController({
     getBounds: () => personalCollapsed ? mainWindow.getBounds() : initialOrbBounds,
     setBounds: bounds => { if (personalCollapsed) mainWindow.setBounds(bounds) },
@@ -1530,8 +1548,29 @@ async function startSelectedCamera(camera, smokeChannel) {
   // render reconciles it. Registered here rather than in the wake-word `show`
   // callback because that one can fire from configure() before `orbWindow` is
   // assigned, which would throw on a const in its temporal dead zone.
-  mainWindow.on('show', () => { if (personalCollapsed) orbWindow.setDormant(false) })
+  const bindPresentationShow = mainWindow => {
+    mainWindow.on('show', () => { if (personalCollapsed) orbWindow.setDormant(false) })
+  }
+  for (const window of windowsPresentation?.windows ?? [mainWindow]) bindPresentationShow(window)
   setPersonalCollapsed(false)
+
+  const windowShown = sourceStartupSmoke
+    ? new Promise((resolveShown, rejectShown) => {
+        if (mainWindow.isVisible()) {
+          resolveShown()
+          return
+        }
+        mainWindow.once('show', resolveShown)
+        mainWindow.once('closed', () => rejectShown(new Error('source_startup_window_closed')))
+      })
+    : null
+
+  configureWorkbenchNativeDrag({
+    window: mainWindow,
+    platform: process.platform,
+    isCollapsed: () => personalCollapsed,
+    frame: workbenchFrame,
+  })
 
   const dragController = createDragController({
     getCursor: () => screen.getCursorScreenPoint(),

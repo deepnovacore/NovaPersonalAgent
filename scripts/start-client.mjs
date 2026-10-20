@@ -236,6 +236,7 @@ export async function main({
     pathExists: existsSync,
     runVswhere: command => spawnSync(command, [
       '-latest',
+      '-prerelease',
       '-products', '*',
       '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
       '-property', 'installationPath',
