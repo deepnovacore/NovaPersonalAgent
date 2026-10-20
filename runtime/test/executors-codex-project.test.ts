@@ -825,6 +825,24 @@ test('confirmed select publishes one atomic project context', async () => {
   }
 })
 
+test('an uncertain run releases its physical resources after confirmed transport shutdown', async () => {
+  const value = await fixture()
+  const controller = new AbortController()
+  try {
+    value.factory.nextOutcome = {classification: 'uncertain', code: 'transport_lost', turnStartWritten: true, completion: null}
+    assert.equal((await run(value, 'interrupted review')).outcome, 'unknown')
+    assert.equal(value.factory.transports[0]?.closeCalls, 1)
+    value.factory.nextOutcome = COMPLETE
+    const next = run(value, 'retry after stopped process', {session: 'new', signal: controller.signal})
+    void next.catch(() => undefined)
+    assert.equal((await settleWithin('next run after confirmed shutdown', next)).outcome, 'ok')
+  } finally {
+    controller.abort()
+    await value.adapter.close().catch(() => undefined)
+    await rm(value.root, {recursive: true, force: true})
+  }
+})
+
 test('transport close rejection cannot downgrade a completed side effect into a retryable failure', async () => {
   const value = await fixture()
   try {
@@ -838,6 +856,26 @@ test('transport close rejection cannot downgrade a completed side effect into a 
     const second = await run(value, 'new process only after retained cleanup')
     assert.equal(second.outcome, 'ok')
     assert.equal(value.factory.transports[0]?.closeCalls, 2)
+    assert.equal(value.factory.transports.length, 2)
+  } finally {
+    await value.adapter.close().catch(() => undefined)
+    await rm(value.root, {recursive: true, force: true})
+  }
+})
+
+test('a quarantined Codex cleanup must prove shutdown before another transport can start', async () => {
+  const value = await fixture()
+  try {
+    value.factory.closeFailures = 2
+    value.factory.nextOutcome = {classification: 'uncertain', code: 'transport_lost', turnStartWritten: true, completion: null}
+    assert.equal((await run(value, 'lost transport')).outcome, 'unknown')
+    const blocked = await settleWithin('failed cleanup retry', run(value, 'blocked retry'))
+    assert.equal(blocked.outcome, 'failed')
+    assert.equal(value.factory.transports.length, 1, 'an unconfirmed process tree keeps its resources')
+    value.factory.closeFailures = 0
+    value.factory.nextOutcome = COMPLETE
+    assert.equal((await settleWithin('verified cleanup retry', run(value, 'safe retry'))).outcome, 'ok')
+    assert.equal(value.factory.transports[0]?.closeCalls, 3)
     assert.equal(value.factory.transports.length, 2)
   } finally {
     await value.adapter.close().catch(() => undefined)

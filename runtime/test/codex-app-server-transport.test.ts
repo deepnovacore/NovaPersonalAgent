@@ -83,6 +83,38 @@ test('a cold run follows the app-server handshake and returns bounded internal c
   })
 })
 
+test('only the shared provider credential alternative accepts legacy config while retaining permission checks', async () => {
+  for (const scenario of [
+    {policy: 'provider_config', widening: false, code: 'completed'},
+    {policy: 'provider_config', widening: true, code: 'config_not_isolated'},
+    {policy: 'saved_login', widening: false, code: 'completed'},
+  ]) {
+    const argv: string[][] = []
+    const owners: MemoryAppServerOwner[] = []
+    const transport = createTransport({spawn: async spec => {
+      argv.push([...spec.argv])
+      const owner = new MemoryAppServerOwner([], {persistent: true, configWidening: scenario.widening})
+      owners.push(owner)
+      return owner
+    }}, {
+      persistent: true, preserveHome: true, apiKey: null,
+      preflightRunner: {run: async () => ({
+        ...safePreflightReport(), credential: {present: true, identity: 'api_key', policy: scenario.policy},
+      })},
+    })
+    try {
+      const result = await transport.run({workOrder: 'Read-only provider verification'}, {}, {expiresAtMs: Date.now() + 5000})
+      assert.equal(result.code, scenario.code)
+      assert.ok(argv.length > 0)
+      assert.ok(argv.every(args => args.includes('--strict-config') === (scenario.policy === 'saved_login')))
+      if (scenario.widening) {
+        assert.equal(result.turnStartWritten, false)
+        assert.ok(owners.every(owner => owner.received.every(item => item.method !== 'turn/start')))
+      }
+    } finally { await transport.close() }
+  }
+})
+
 test('turn usage-limit failure is projected as a safe transport code', async () => {
   const owner = new MemoryAppServerOwner([], {turnFailure: 'usageLimitExceeded'})
   const transport = createTransport({spawn: async () => owner})
@@ -834,6 +866,8 @@ test('stdout applies pause/resume backpressure and rejects an oversized chunk be
   owner.emitHostileOversizedStdout()
   const result = await running
   assert.equal(result.code, 'transport_lost')
+  assert.equal(result.diagnostic?.method, 'app-server/stdout')
+  assert.match(result.diagnostic?.message ?? '', /stdout_byte_limit_or_invalid_chunk; received_bytes=\d+; incoming_bytes=2097153; limit_bytes=2097152/u)
   assert.equal(owner.stdoutPauseCalls > 0, true)
   assert.equal(owner.hostileIteratorRead, false)
 })
@@ -2899,6 +2933,7 @@ function threadResponse(
   persistent = false,
 ): Record<string, unknown> {
   return {
+    model: 'provider-selected-model',
     modelProvider: 'nova_api_key',
     approvalPolicy: 'never',
     cwd: workspace,
@@ -2929,6 +2964,7 @@ function createTransport(
     }
     readonly managedMcp?: ManagedCodexMcp
     readonly persistent?: boolean
+    readonly apiKey?: string | null
     readonly generateTitles?: boolean
     readonly preserveHome?: boolean
     readonly binary?: ReturnType<typeof hostBinaryForTest>
@@ -2947,7 +2983,7 @@ function createTransport(
       binary: overrides.binary ?? hostBinaryForTest(process.execPath),
       workspace: hostWorkspaceForTest(workspace),
       codexHome: hostCodexHomeForTest(workspace, {ephemeral: !overrides.persistent}),
-      apiKey: 'api-key-sentinel',
+      apiKey: overrides.apiKey === null ? null : overrides.apiKey ?? 'api-key-sentinel',
       ...(overrides.managedMcp === undefined ? {} : {managedMcp: overrides.managedMcp}),
       developerInstructions: overrides.developerInstructions ?? null,
       resumeThreadId: overrides.resumeThreadId ?? null,
@@ -2970,7 +3006,7 @@ function createTransport(
       environment: () => ({
         ...managedMcpEnvironment(overrides.managedMcp),
         PATH: '/safe-path', HOME: '/safe-home', CODEX_HOME: workspace,
-        NOVA_CODEX_API_KEY: 'api-key-sentinel',
+        ...(overrides.apiKey === null ? {} : {NOVA_CODEX_API_KEY: overrides.apiKey ?? 'api-key-sentinel'}),
         CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
       }),
       removeEphemeralHome: overrides.removeEphemeralHome ?? (async () => {}),
@@ -3117,6 +3153,29 @@ test('owned transport generates a title with an auxiliary thread while preservin
     assert.deepEqual(names, ['thread-1:修复登录校验'])
     assert.equal(owner.received.filter(item => item.method === 'thread/name/set').at(-1)?.params.threadId, 'thread-1')
   } finally { await transport.close() }
+})
+
+test('saved subscription login retains its title model while provider config reuses the selected model', async () => {
+  for (const policy of ['saved_login', 'provider_config'] as const) {
+    const owners: MemoryAppServerOwner[] = []
+    const transport = createTransport({spawn: async () => {
+      const owner = new MemoryAppServerOwner([], {persistent: true})
+      owners.push(owner)
+      return owner
+    }}, {
+      persistent: true, preserveHome: true, apiKey: null, generateTitles: true,
+      preflightRunner: {run: async () => ({...safePreflightReport(), credential: {present: true, identity: policy === 'saved_login' ? 'chatgpt' : 'api_key', policy}})},
+    })
+    try {
+      const result = await transport.run({workOrder: 'Read-only review', threadName: 'Temporary title'}, {}, {expiresAtMs: Date.now() + 5000})
+      assert.equal(result.classification, 'completed', JSON.stringify({policy, ...result}))
+      const owner = owners.at(-1)!
+      const titleRequest = owner.received.find(item => item.method === 'thread/start' && item.params.ephemeral === true)
+      assert.ok(titleRequest)
+      assert.equal(titleRequest.params.model, policy === 'saved_login' ? 'gpt-5.6-luna' : 'provider-selected-model')
+      assert.equal(owner.received.find(item => item.method === 'thread/start' && item.params.ephemeral === false)?.params.model, undefined, 'the main task keeps its configured model')
+    } finally { await transport.close() }
+  }
 })
 
 

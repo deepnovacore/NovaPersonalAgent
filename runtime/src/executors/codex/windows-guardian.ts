@@ -280,6 +280,7 @@ export class WindowsGuardianCodexProcessOwnerFactory implements CodexProcessOwne
       details.argv,
       details.cwd,
       details.environment,
+      details.terminateDescendantsOnExit===true,
     )
     const remaining = Math.min(
       WINDOWS_GUARDIAN_READY_TIMEOUT_MS,
@@ -389,6 +390,7 @@ export class WindowsGuardianCodexProcessOwnerFactory implements CodexProcessOwne
     argv: readonly string[],
     cwd: string,
     environment: Readonly<Record<string, string>>,
+    terminateDescendantsOnExit=false,
   ): WindowsGuardianOwnedCodexProcess {
     const helperPath = windowsGuardianHelperPath(this.#helper)
     let child: WindowsGuardianChild
@@ -396,6 +398,7 @@ export class WindowsGuardianCodexProcessOwnerFactory implements CodexProcessOwne
       child = this.#launch(helperPath, Object.freeze([
         '--target', target,
         '--cwd', cwd,
+        ...(terminateDescendantsOnExit?['--terminate-on-leader-exit']:[]),
         '--', target,
         ...argv,
       ]), Object.freeze({

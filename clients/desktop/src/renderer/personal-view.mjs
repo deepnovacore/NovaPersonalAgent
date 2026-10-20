@@ -47,7 +47,11 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const run=async(action)=>{try{c.error='';await action()}catch(e){c.error=e.message==='version_conflict'?'内容已在其他操作中更新，请核对最新状态后重试。':e.message;if(c.presentationMode==='background')void api.personal.showPresentationError?.(c.error);update();if(/conflict|version/i.test(e.message)&&c.connected)await c.command('state').catch(()=>{})}update()}
  const button=(label,action,parent,key=Symbol())=>{const b=el('button',label);b.type='button';bindPending(b,key,action);parent.append(b);return b}
  const chips=(parent,values)=>{const row=el('div',undefined,'chips');for(const value of values.filter(Boolean))row.append(el('span',value));parent.append(row)}
- const c=new PersonalController({send,start,stop,applyPresentation,changed:update})
+ const c=new PersonalController({send,start,stop,applyPresentation,changed:update,confirmBuildSwitch:()=>new Promise(resolve=>{
+  const modal=el('dialog',undefined,'build-switch-dialog');modal.append(el('h2',t('Build 正在执行')),el('p',t('停止并保存进度后再切换，返回时点击 Resume 继续。')))
+  const stay=el('button',t('继续执行')),leave=el('button',t('停止并切换'));stay.type=leave.type='button';modal.append(stay,leave)
+  const done=value=>{modal.close();modal.remove();resolve(value)};stay.addEventListener('click',()=>done(false));leave.addEventListener('click',()=>done(true));modal.addEventListener('cancel',event=>{event.preventDefault();done(false)});document.body.append(modal);modal.showModal();stay.focus()
+ })})
  const openSettings=category=>api.orbMenu.openSettings?.(category)
  // The conversation and workspace keep independent state.
  let selected='timeline',initialHome=false,inspector=null,inspectedId=null,returnFocus=null,openSequence=0

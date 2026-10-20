@@ -101,6 +101,8 @@ export interface CodexSpawnSpec {
   readonly detached: true
   readonly stdio: readonly ['pipe', 'pipe', 'pipe']
   readonly windowsHide: true
+  /** Short commands own their descendants only until the command leader exits. */
+  readonly terminateDescendantsOnExit?:boolean
 }
 
 export function createCodexSpawnSpec(input: {
@@ -112,6 +114,7 @@ export function createCodexSpawnSpec(input: {
   readonly launchProfile?: CodexLaunchProfile
   readonly managedMcp?: ManagedCodexMcp
   readonly preserveHome?: boolean | undefined
+  readonly allowLegacyProviderConfig?: boolean
   readonly sharedHomeOverrides?: readonly string[]
 }): CodexSpawnSpec {
   const binary = hostBinaryPath(input.binary)
@@ -129,7 +132,8 @@ export function createCodexSpawnSpec(input: {
       ...(environment[NOVA_API_KEY_ENV] === undefined ? [] : apiKeyProviderOverrides(environment[NOVA_RESPONSES_PROXY_ENV])),
       ...codexAppServerArgv(input.launchProfile ?? resolveCodexLaunchProfile({
         approvalMode: 'ask', project: false, foregroundBroker: false,
-      }), input.managedMcp !== undefined || input.preserveHome === true),
+      }), input.managedMcp !== undefined || input.preserveHome === true,
+      input.allowLegacyProviderConfig !== true),
     ]),
     cwd,
     environment,

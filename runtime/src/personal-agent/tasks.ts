@@ -4,6 +4,7 @@ import { BoundedJsonStore } from '../storage/bounded-json.js'
 import type { TaskDispatchContext } from '../core/task-tools.js'
 import { taskDecisionSchema, type TaskDecision } from './task-loop.js'
 import { canonicalJson } from '../text/canonical-json.js'
+import {planSchema,type WorkbenchPlan} from './workbench-store.js'
 export type TaskPhase = 'queued' | 'running' | 'verifying' | 'waiting' | 'completed' | 'cancelled'
 export type TaskActor = {
   kind: 'nova'
@@ -17,6 +18,7 @@ export interface TaskFence {
   goal_revision: number
 }
 export interface TaskInput {
+  approved_plan?:WorkbenchPlan|undefined
   trigger?: TaskTrigger | undefined
   execution_route?: string | undefined
   conversation_generation?: number | undefined
@@ -84,7 +86,7 @@ export type TaskTrigger=z.infer<typeof taskTriggerSchema>
 export const taskInputSchema = z.object({
   execution_route: id.optional(), conversation_generation: z.number().int().nonnegative().optional(), conversation_id: id, goal: z.string().trim().min(1).max(16000), acceptance: z.array(z.string().trim().min(1).max(2000)).max(64), origin_ref: id, todo_ref: z.object({ id, version: z.number().int().nonnegative() }).strict().optional()
 }).strict()
-export const internalTaskInputSchema=taskInputSchema.extend({trigger:taskTriggerSchema.optional()}).strict().refine(input=>!input.trigger||(input.origin_ref==='schedule-run:'+input.trigger.run_id&&input.conversation_id==='schedule:'+input.trigger.schedule_id&&input.conversation_generation===0),'invalid_schedule_origin')
+export const internalTaskInputSchema=taskInputSchema.extend({approved_plan:planSchema.optional(),trigger:taskTriggerSchema.optional()}).strict().refine(input=>!input.trigger||(input.origin_ref==='schedule-run:'+input.trigger.run_id&&input.conversation_id==='schedule:'+input.trigger.schedule_id&&input.conversation_generation===0),'invalid_schedule_origin')
 const actorSchema = z.union([z.object({ kind: z.literal('nova') }).strict(), z.object({ kind: z.literal('user'), client_id: id }).strict()])
 export const taskFenceSchema = z.object({
   task_id: id, control_revision: z.number().int().nonnegative(), goal_revision: z.number().int().nonnegative()
@@ -94,7 +96,7 @@ const controlChangeSchema = z.object({ fence: taskFenceSchema, actor: actorSchem
 const goalChangeSchema = z.object({
   fence: taskFenceSchema, actor: actorSchema, goal: goalSchema.shape.goal, acceptance: goalSchema.shape.acceptance
 }).strict()
-const recordSchema = taskInputSchema.extend({trigger:taskTriggerSchema.optional(),
+const recordSchema = taskInputSchema.extend({approved_plan:planSchema.optional(),trigger:taskTriggerSchema.optional(),
   reconciled_inputs: z.array(id).default([]), pending_delivery: id.optional(), original_goal: z.string().optional(), execution_route: z.string().optional(), id, phase: z.enum(['queued', 'running', 'verifying', 'waiting', 'completed', 'cancelled']), controller: actorSchema, control_revision: z.number().int().nonnegative(), goal_revision: z.number().int().nonnegative(), corrections: z.number().int().nonnegative(), work_ids: z.array(id), session_ids: z.array(id), works: z.array(z.object({ work_id: id, executor: id, session_id: id.optional(), target: id.optional() }).strict()).default([]), primary_session_id: id.optional(), evidence_refs: z.array(id), criteria_evidence: z.array(z.object({ index: z.number().int().nonnegative(), evidence_refs: z.array(id) }).strict()).optional(), artifact_refs: z.array(id).default([]), waiting_reason: z.string().trim().min(1).max(4000).nullable(), todo_sync: z.enum(['none', 'pending', 'synced', 'conflict'])
 }).strict()
 type StoredTask = z.infer<typeof recordSchema>
@@ -356,6 +358,7 @@ export class TaskService {
         reconciled_inputs: string[]
         works: TaskWork[]
       } = {
+        ...(parsed.approved_plan?{approved_plan:parsed.approved_plan}:{}),
         ...(parsed.trigger?{trigger:parsed.trigger}:{}),reconciled_inputs: [], works: [], ...(parsed.execution_route ? { execution_route: parsed.execution_route } : {}), original_goal: parsed.goal, ...(parsed.conversation_generation === undefined ? {} : { conversation_generation: parsed.conversation_generation }), conversation_id: parsed.conversation_id, goal: parsed.goal, acceptance: parsed.acceptance, origin_ref: parsed.origin_ref, ...(parsed.todo_ref ? { todo_ref: parsed.todo_ref } : {}), id: randomUUID(), phase: 'queued', controller: { kind: 'nova' }, control_revision: 0, goal_revision: 0, corrections: 0, work_ids: [], session_ids: [], evidence_refs: [], artifact_refs: [], waiting_reason: null, todo_sync: 'none'
       }
       next.tasks.push(task)

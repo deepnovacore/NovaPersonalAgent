@@ -13,7 +13,8 @@ import {stripLikePython} from '../text/python-text.js'
 export const DISPATCH_TOOL = 'dispatch'
 export const CANCEL_TOOL = 'cancel'
 export const CONFIRM_TOOL = 'confirm'
-export const HOST_TOOL_NAMES: ReadonlySet<string> = new Set([DISPATCH_TOOL, CANCEL_TOOL, CONFIRM_TOOL, 'task'])
+export const ENTER_PLAN_MODE_TOOL = 'enter_plan_mode'
+export const HOST_TOOL_NAMES: ReadonlySet<string> = new Set([DISPATCH_TOOL, CANCEL_TOOL, CONFIRM_TOOL, ENTER_PLAN_MODE_TOOL, 'task'])
 
 // ponytail: one app-server child per CODEX_HOME, i.e. per workspace; a settings key is the upgrade
 // path once real usage shows the need.
@@ -35,6 +36,13 @@ export interface HostToolSpec {
   readonly params: Readonly<Record<string, JsonValue>>
   /** `dispatch` carries the user's origin for intake; `cancel` and `confirm` do not dispatch. */
   readonly inject_origin_ref: boolean
+}
+
+export const ENTER_PLAN_MODE_TOOL_SPEC:HostToolSpec={
+  name:ENTER_PLAN_MODE_TOOL,
+  description:'Switch this workbench conversation from Chat to Plan when the user explicitly asks to plan, clarify requirements, or enter Plan mode. This only changes the conversation mode; it does not start or delegate work. Call this tool by itself.',
+  params:{type:'object',properties:{},additionalProperties:false},
+  inject_origin_ref:false,
 }
 
 const INSTRUCTION = {type: 'string', minLength: 1, maxLength: 4000} as const

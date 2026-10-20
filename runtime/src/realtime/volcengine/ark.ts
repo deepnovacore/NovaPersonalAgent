@@ -6,6 +6,7 @@ import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
 import { jsonValueSchema, type JsonValue } from '../../core/events.js'
 import { codePointLengthLikePython, stripLikePython } from '../../text/python-text.js'
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
+import {llmStreamLimits,llmToolCallLimit,type LlmStreamLimits,type LlmTransportOptions} from '../cascaded/llm-stream-limits.js'
 
 export const MAX_ARK_REQUEST_BYTES = 4 * 1_024 * 1_024
 export const MAX_ARK_SSE_LINE_BYTES = 256 * 1_024
@@ -91,7 +92,7 @@ export interface ArkResponsesGateway {
   close(): Promise<void>
 }
 
-export interface FetchArkResponsesGatewayOptions {
+export interface FetchArkResponsesGatewayOptions extends LlmTransportOptions {
   readonly protocol?: 'ark' | 'openai-compatible'
   readonly baseUrl: string
   readonly apiKey: string
@@ -99,7 +100,6 @@ export interface FetchArkResponsesGatewayOptions {
   readonly instructions: string
   readonly onUsage?: UsageReporter
   readonly fetchImpl?: typeof globalThis.fetch
-  readonly idleTimeoutMs?: number
   readonly closeTimeoutMs?: number
 }
 
@@ -262,12 +262,15 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
   readonly #instructions: string
   readonly #fetch: typeof globalThis.fetch
   readonly #idleTimeoutMs: number
+  readonly #streamLimits:LlmStreamLimits
+  readonly #toolCallLimit:number
   readonly #closeTimeoutMs: number
   readonly #active = new Set<ActiveStream>()
   #closed = false
   #closePromise: Promise<void> | null = null
 
   constructor(options: FetchArkResponsesGatewayOptions) {
+    try{this.#streamLimits=llmStreamLimits(options);this.#toolCallLimit=llmToolCallLimit(options)}catch{throw new ArkResponsesFailure('configuration')}
     this.#compatible = options.protocol === 'openai-compatible'
     this.#onUsage = options.onUsage
     this.#endpoint = resolveResponsesEndpoint(this.#compatible ? selfHostedEndpoint(options.baseUrl,'http','OPENAI_COMPATIBLE_BASE_URL') : options.baseUrl)
@@ -298,7 +301,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
         .join('\n\n'),
       input: inputItems,
       tools,
-      parallel_tool_calls: false,
+      parallel_tool_calls: this.#toolCallLimit>1,
       store: !this.#compatible,
       stream: true,
       ...(this.#compatible ? {include:['reasoning.encrypted_content']} : {thinking: {type:'disabled'}}),
@@ -371,7 +374,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
         if (lineBytes.byteLength > 0 && lineBytes[lineBytes.byteLength - 1] === 13) {
           lineBytes = lineBytes.subarray(0, lineBytes.byteLength - 1)
         }
-        if (lineBytes.byteLength > MAX_ARK_SSE_LINE_BYTES) {
+        if (lineBytes.byteLength > this.#streamLimits.lineBytes) {
           throw new ArkResponsesFailure('overflow')
         }
         let line: string
@@ -389,7 +392,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
           if (field === 'data') {
             const encoded = new TextEncoder().encode(fieldValue)
             dataBytes += encoded.byteLength + (dataLines.length === 0 ? 0 : 1)
-            if (dataBytes > MAX_ARK_SSE_EVENT_BYTES) {
+            if (dataBytes > this.#streamLimits.eventBytes) {
               throw new ArkResponsesFailure('overflow')
             }
             dataLines.push(fieldValue)
@@ -398,7 +401,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
         }
         if (dataLines.length === 0) return null
         dispatchedEvents += 1
-        if (dispatchedEvents > MAX_ARK_EVENTS) throw new ArkResponsesFailure('overflow')
+        if (dispatchedEvents > this.#streamLimits.events) throw new ArkResponsesFailure('overflow')
         const data = dataLines.join('\n')
         dataLines = []
         dataBytes = 0
@@ -410,10 +413,10 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
         }
         if (!isJsonObject(parsed)) throw new ArkResponsesFailure('protocol')
         let event = normalizeProviderEvent(parsed)
-        if(this.#compatible && event?.kind==='response_completed') {
+        if(event?.kind==='response_completed') {
           const output=isJsonObject(parsed.response)?parsed.response.output:undefined
-          if(!Array.isArray(output)||!output.every(isJsonObject))throw new ArkResponsesFailure('protocol')
-          event={...event,outputItems:copyJsonObjects(output)}
+          if(Array.isArray(output)&&output.every(isJsonObject))event={...event,outputItems:copyJsonObjects(output)}
+          else if(this.#compatible)throw new ArkResponsesFailure('protocol')
         }
         if (event?.kind === 'response_completed' || event?.kind === 'response_failed') {
           const response = isJsonObject(parsed.response) ? parsed.response : {}
@@ -459,7 +462,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
         }
         const chunk = copyReadableChunk(result.value)
         aggregateBytes += chunk.byteLength
-        if (aggregateBytes > MAX_ARK_RESPONSE_BYTES) throw new ArkResponsesFailure('overflow')
+        if (aggregateBytes > this.#streamLimits.responseBytes) throw new ArkResponsesFailure('overflow')
         buffered = concatBytes(buffered, chunk)
         let newline = buffered.indexOf(10)
         while (newline >= 0) {
@@ -472,7 +475,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
           }
           newline = buffered.indexOf(10)
         }
-        if (buffered.byteLength > MAX_ARK_SSE_LINE_BYTES) {
+        if (buffered.byteLength > this.#streamLimits.lineBytes) {
           throw new ArkResponsesFailure('overflow')
         }
       }

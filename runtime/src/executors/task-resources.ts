@@ -1,8 +1,12 @@
 /** Host configured physical resources. Ownership outlives task/UI control changes. */
+/** Canonical native paths identify a project across executor and local Build operations. */
+export function projectResourceKey(path:string):string{return 'project:'+(process.platform==='win32'?path.toLowerCase():path)}
 const held=new Set<string>()
 const uncertain=new Set<string>()
 /** No provider stop/idle inspection is available: keep quarantine visible; no automatic unlock without provider stop evidence. */
 export function quarantineTaskResources(keys:readonly string[]):void{for(const key of keys)uncertain.add(key)}
+/** Call only after the owner has positive process/tree termination evidence. */
+export function releaseQuarantinedTaskResources(keys:readonly string[]):void{for(const key of keys){uncertain.delete(key);held.delete(key)}drain()}
 const waiting:{keys:readonly string[];signal:AbortSignal;grant:()=>void;abort:()=>void}[]=[]
 function drain():void{
  const earlier=new Set<string>()

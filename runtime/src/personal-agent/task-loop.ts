@@ -81,6 +81,9 @@ export class TaskLoop {
         catch { /* durable projection remains pending; execution is never retried */ }
       return
     }
+    // A plan delegation refused before executor admission is retried only by the Plan UI.
+    if (task.approved_plan && task.waiting_reason === 'plan_delegation_refused')
+      return
     if (task.pending_delivery || this.ports.ready?.(task) === false)
       return
     if (task.phase === 'cancelled' || task.controller.kind !== 'nova' || this.tasks.activeWork(task.id).length)

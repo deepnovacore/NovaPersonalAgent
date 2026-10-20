@@ -227,6 +227,7 @@ export interface RealtimeAssemblyOptions {
   readonly taskConversationGeneration?: number
   readonly taskConversationId?: string
   readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
+  readonly requestPlanMode?:(callId:string,originRef:string,stillWanted:()=>boolean)=>Promise<unknown>
 
   readonly onUsage?: UsageReporter
 
@@ -1071,6 +1072,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     }}),
     onIntakePrepared:(intake,proposal)=>{taskIntakes.clear();taskIntakes.set(proposal.proposal_id,structuredClone(intake))},
     ...(options.sharedPersonal && options.taskConversationId ? {taskHost:{...(options.taskSourceTodo?{sourceTodo:options.taskSourceTodo}:{}),wake:taskId=>options.sharedPersonal!.host.wakeTask(taskId),cancel:(requestId,fence)=>options.sharedPersonal!.host.cancelTask(requestId,fence,{kind:'nova'}),...(options.taskFrontendCurrent?{isCurrent:options.taskFrontendCurrent}:{}),tasks:options.sharedPersonal.host.tasks,conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration})}} : {}),
+    ...(options.requestPlanMode?{requestPlanMode:options.requestPlanMode}:{}),
     provider: providerSession,
     runtime: core.runtime,
     tools: core.tools,

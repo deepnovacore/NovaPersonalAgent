@@ -226,6 +226,15 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           YOLO 已选中：保存并重启后将关闭沙箱和审批，Coding 执行器可访问主机文件与网络。
         </p>
       </section>
+      <section class="setting-section" id="local-tool-approval-section">
+        <h2>本地 Build 工具</h2>
+        <label for="localToolApproval">本地工具确认</label>
+        <select id="localToolApproval">
+          <option value="ask">写入和命令逐次确认</option>
+          <option value="never">无需确认</option>
+        </select>
+        <p class="hint">只影响工作台本地 Build；读取直接执行。保存并重启后生效。</p>
+      </section>
       <section class="setting-section" id="intent-section">
         <h2>意图理解</h2>
         <div class="field">

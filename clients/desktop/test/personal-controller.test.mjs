@@ -8,6 +8,18 @@ function harness({start,autoVoice=true}={}){
  c.connect();c.receive({type:'desktop.capabilities',input_instance_id:'host-A',capabilities:['text_input','dictation']});snapshot()
  return {c,sent,snapshot,get starts(){return starts},get stops(){return stops}}
 }
+test('model failures show safe actionable details in the owning conversation',()=>{
+ const {c}=harness()
+ c.receive({type:'conversation.error',conversation_id:'b',error:'response_failed',reason:'model_protocol_tool_arguments_json'})
+ assert.match(c.state('b').error,/JSON/);assert.equal(c.state('a').error,'')
+ c.receive({type:'conversation.error',conversation_id:'b',error:'response_failed',reason:'model_protocol_choice_delta'})
+ assert.equal(c.state('b').error,'模型回复格式异常，请重试。')
+ c.receive({type:'conversation.error',conversation_id:'b',error:'response_failed',reason:'private provider error with a token'})
+ assert.equal(c.state('b').error,'回复失败，请重试。')
+ c.receive({type:'conversation.error',conversation_id:'b',error:'response_failed'})
+ assert.equal(c.state('b').error,'回复失败，请重试。')
+})
+
 test('opening and changing text conversations never starts capture; drafts stay scoped',()=>{
  const h=harness();h.c.draft='A draft';h.snapshot('b');assert.equal(h.c.draft,'');h.c.draft='B draft';h.snapshot('a');assert.equal(h.c.draft,'A draft');assert.equal(h.starts,0)
  const revision=h.c.snapshot.revision;h.c.receive({type:'personal.state',revision:revision-1,conversations:{selected_id:'stale'}});assert.equal(h.c.selectedId,'a')
@@ -24,6 +36,18 @@ test('text sent for a named conversation goes there; text that cannot be sent is
  const h=harness();h.snapshot('b');h.c.draft='B draft'
  assert.equal(h.c.submitText('switch place','a'),true);assert.equal(h.sent.at(-1).conversation_id,'a');assert.equal(h.c.state('b').draft,'B draft')
  assert.equal(h.c.submitText('second','a'),false,'a pending submission blocks the next');assert.equal(h.c.state('a').draft,'second')
+})
+test('Build accepts steering messages while active and locks its composer only after finish_build',async()=>{
+ const sent=[],c=new PersonalController({send:frame=>{sent.push(frame);return true},start:async()=>{},stop:async()=>{}})
+ c.connect();c.receive({type:'desktop.capabilities',input_instance_id:'desktop',capabilities:['text_input']})
+ const state=(status,revision)=>c.receive({type:'personal.state',revision,conversations:{selected_id:'build',voice_id:null,items:[{id:'build',kind:'build',build:{status}}],messages:[]}})
+ state('awaiting_approval',1);c.draft='先检查审批中的消息'
+ assert.equal(await c.submit(),false);assert.equal(sent.length,0)
+ state('running',2);c.draft='请继续检查测试'
+ assert.equal(await c.submit(),true);assert.equal(sent.at(-1).conversation_id,'build');assert.equal(sent.at(-1).text,'请继续检查测试')
+ state('finished',3);c.draft='不应再发出'
+ assert.equal(await c.submit(),false);assert.equal(c.submitText('也不能再发','build'),false);assert.equal(c.draft,'不应再发出')
+ assert.equal(sent.filter(frame=>frame.type==='input.text').length,1)
 })
 test('voice owner blocks own text and all dictation, other text does not stop or steal capture',async()=>{
  const h=harness();await h.c.voice();assert.equal(h.starts,1);assert.equal(h.c.voiceId,'a');h.c.draft='blocked';assert.equal(await h.c.submit(),false)

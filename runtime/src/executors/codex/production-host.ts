@@ -56,6 +56,7 @@ import {
 } from '../../projects/project-native-resource.js'
 import {stripLikePython} from '../../text/python-text.js'
 import {admitCodexCliVersion} from './version.js'
+import {hasLocalProviderCredential} from './local-provider-credential.js'
 
 const PROBE_ID = 'codex_sandbox_probe'
 const PROBE_PATH = 'native/codex-sandbox-probe'
@@ -368,14 +369,17 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
           config.preserveHome ? {...this.#environment, CODEX_HOME: hostCodexHomeValue(config.codexHome).path} : this.#environment,
           observe,
         )
-        let identity: 'chatgpt' | 'api_key'
         try {
-          identity = parseLogin(loginResult)
+          const identity = parseLogin(loginResult)
+          credential = Object.freeze({present: true, identity, policy: 'saved_login'})
         } catch (error) {
-          this.#emitDiagnostic(loginDiagnostic(loginResult))
-          throw error
+          if (config.preserveHome && hasLocalProviderCredential(hostCodexHomeValue(config.codexHome).path)) {
+            credential = Object.freeze({present: true, identity: 'api_key', policy: 'provider_config'})
+          } else {
+            this.#emitDiagnostic(loginDiagnostic(loginResult))
+            throw error
+          }
         }
-        credential = Object.freeze({present: true, identity, policy: 'saved_login'})
       }
       observePreflight(observe, 'sandbox')
       const limits = await this.#runSandboxProbe(binary, prefixArgs, workspace, deadline, observe)

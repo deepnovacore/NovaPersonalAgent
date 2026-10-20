@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
   }),
   personal: Object.freeze({
     openArticle: url => ipcRenderer.invoke('nova:personal:article', url),
+    chooseBuildDirectory: () => ipcRenderer.invoke('nova:personal:build-directory'),
     setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
     showPresentationError: message => ipcRenderer.invoke('nova:personal:presentation-error', message),

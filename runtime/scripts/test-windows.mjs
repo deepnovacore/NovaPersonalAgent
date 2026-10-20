@@ -13,7 +13,7 @@ const posixTests = new Set([
   'knowledge-store.test.js',
   'realtime-telemetry.test.js',
 ])
-const directory = resolve(import.meta.dirname, '../dist/test')
+const directory = process.env.NOVA_TEST_DIST ? resolve(process.env.NOVA_TEST_DIST,'test') : resolve(import.meta.dirname, '../dist/test')
 // CI covers Windows-specific process and filesystem authority here; the full
 // portable suite remains available via test:win and runs on macOS/Linux in CI.
 const platformTests = [
@@ -21,11 +21,17 @@ const platformTests = [
   'codex-windows-guardian.test.js',
   'codex-project-platform-policy.test.js',
   'project-native-resource.test.js',
+  'workbench-local-tools.test.js',
+  'workbench-runtime.test.js',
+  'workbench-providers.test.js',
 ]
 const files = process.argv.includes('--platform-only')
   ? platformTests
   : readdirSync(directory).filter(file => file.endsWith('.test.js') && !posixTests.has(file))
-const tests = files.map(file => resolve(directory, file))
+const tests = [
+  ...files.map(file => resolve(directory, file)),
+  resolve(import.meta.dirname, '../../clients/desktop/test/windows-job-guardian-behavior.test.mjs'),
+]
 // Native workers and cold module loads compete with unrelated fixtures' short
 // deadlines on Windows. Files are isolated; concurrency inside each case is unchanged.
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...tests], { stdio: 'inherit' })

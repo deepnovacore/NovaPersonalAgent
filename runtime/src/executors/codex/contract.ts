@@ -397,7 +397,8 @@ function sanitizeCodexPreflightReportChecked(
       credential.identity = value.credential.identity
     }
     if (Object.hasOwn(value.credential, 'policy')) {
-      if (value.credential.policy !== 'saved_login' && value.credential.policy !== 'process_only') {
+      if (value.credential.policy !== 'saved_login' && value.credential.policy !== 'process_only'
+        && value.credential.policy !== 'provider_config') {
         return null
       }
       credential.policy = value.credential.policy

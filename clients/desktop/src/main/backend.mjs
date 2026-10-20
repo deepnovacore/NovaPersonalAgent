@@ -180,6 +180,7 @@ export function backendLaunchSpec({
   const v4 = {
     CODEX_APPROVAL_MODE: settings?.codexApprovalMode
       ?? SETTINGS_DEFAULTS.codexApprovalMode,
+    NOVA_LOCAL_TOOL_APPROVAL: settings?.localToolApproval??SETTINGS_DEFAULTS.localToolApproval,
     CLARIFICATION_DEPTH: settings?.clarificationDepth
       ?? SETTINGS_DEFAULTS.clarificationDepth,
     GENERATE_PLAN: String(settings?.generatePlan ?? SETTINGS_DEFAULTS.generatePlan),

@@ -8,6 +8,14 @@ import {frontendInstructions} from './realtime/frontend-instructions.js'
 import type {CommittedConversationPair} from './realtime/history.js'
 import type {RealtimeProvider} from './realtime/protocol.js'
 import {usageReporterForEndpoint,type UsageReporter} from './realtime/usage.js'
+import type {CascadedLlmFactory} from './realtime/cascaded/llm.js'
+import type {LlmTransportOptions} from './realtime/cascaded/llm-stream-limits.js'
+
+/** Same selected text model, transports and usage routing for chat, planning and local builds. */
+export function configuredTextLlm(options:{settings:Settings;clock:Clock;idFactory:()=>string;instructions:string;onUsage?:UsageReporter;transport?:LlmTransportOptions},registry:CascadedProviderRegistries=cascadedProviderRegistries):CascadedLlmFactory{
+ const selected=requireSelectedCascadedLlmConfig(options.settings)
+ return registry.llm[selected.provider==='ark'?'ark':'qwen']({config:selected.config,clock:options.clock,ids:{next:options.idFactory},instructions:options.instructions,...(options.transport?{transport:options.transport}:{}),...(options.onUsage?{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!}:{})})
+}
 
 /** One independent text conversation. Construct no endpointing, recognition, or synthesis nodes. */
 export function buildCascadedTextProvider(options:{
@@ -20,13 +28,14 @@ export function buildCascadedTextProvider(options:{
   readonly schedules?:boolean
   readonly sourceProcessingTask?:boolean
   readonly scheduledTask?:boolean
+  readonly enterPlanMode?:boolean
 }&Pick<CascadedRealtimeAdapterOptions,'prerecall'|'captureFrame'|'telemetry'>,registry:CascadedProviderRegistries=cascadedProviderRegistries):RealtimeProvider {
   const selected=requireSelectedCascadedLlmConfig(options.settings)
   const capabilities=capabilitiesFromSettings(options.settings)
   const input={config:selected.config,clock:options.clock,ids:{next:options.idFactory},instructions:options.sourceProcessingTask?SOURCE_PROCESSING_INSTRUCTIONS:options.scheduledTask?scheduledTaskInstructions(options.settings.language):frontendInstructions({
-    schedules:options.schedules===true,search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled,
+    schedules:options.schedules===true,search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled,enterPlanMode:options.enterPlanMode===true,
   },options.executorApproval===true),...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
-  const factory=registry.llm[selected.provider === 'ark' ? 'ark' : 'qwen'](input)
+  const factory=configuredTextLlm({...options,instructions:input.instructions},registry)
   return new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,scheduledTask:options.scheduledTask===true,llm:factory.open(),llmFactory:factory,idFactory:options.idFactory,...(options.prerecall===undefined?{}:{prerecall:options.prerecall}),...(options.captureFrame===undefined?{}:{captureFrame:options.captureFrame}),...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),...(options.history===undefined?{}:{history:options.history})})
 }
 

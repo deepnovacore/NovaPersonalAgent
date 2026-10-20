@@ -13,6 +13,8 @@ import { ProviderProjection } from './provider-projection.js'
 import type { DeliverySnapshot,HostItemOptions,ProviderReconnectReason,RealtimeServiceOptions,ServiceProvider,ServiceRuntime } from './service-ports.js'
 import { Mutex,Signal,diagnosticName } from './service-state.js'
 import { ToolContinuations } from './tool-continuations.js'
+import type {StandaloneToolTurn} from './tool-continuations.js'
+import type {ToolAcceptance} from './bridge.js'
 /**
  * Coordinates provider event ordering, lifecycle and user-origin evidence.
  * HostDelivery owns speech/acknowledgements; ToolContinuations owns admitted work;
@@ -92,6 +94,7 @@ function sameAgentDescriptors(
 const SHUTDOWN_GRACE_MS = 250
 
 export class RealtimeService {
+  invokeConversationTool(event:ToolCallReady,turn:StandaloneToolTurn):Promise<ToolAcceptance>{return this.#continuations.invokeStandalone(event,turn)}
   async setLanguage(language?: PromptLanguage): Promise<void> { await this.#provider.setLanguage?.(language) }
 
   playbackStarted(utteranceId: string, generationEpoch: number): boolean {return this.#host.playbackStarted(utteranceId, generationEpoch)}
@@ -418,6 +421,7 @@ export class RealtimeService {
     }
     this.#continuations = new ToolContinuations({
       ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
+      ...(options.requestPlanMode?{requestPlanMode:options.requestPlanMode}:{}),
       ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
       ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
       ...(options.taskHost ? {taskHost:options.taskHost} : {}),

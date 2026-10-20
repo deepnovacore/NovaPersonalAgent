@@ -2,7 +2,8 @@ import {readFile, writeFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
 
-import {publicEnvironmentContract} from '../dist/src/config/environment-contract.js'
+import {pathToFileURL} from 'node:url'
+const {publicEnvironmentContract}=await import(pathToFileURL(resolve(process.env.NOVA_TEST_DIST??resolve(import.meta.dirname,'../dist'),'src/config/environment-contract.js')).href)
 
 // Common user settings only; .env.example retains the complete public contract.
 const coreNames = new Set([
@@ -13,7 +14,7 @@ const coreNames = new Set([
   'CASCADE_LLM_PROVIDER',
   'CASCADE_LLM_MODEL', 'QWEN_REALTIME_MODEL',
   'QWEN_REALTIME_VOICE', 'CODEX_BIN',
-  'CODEX_WORKSPACE', 'CODEX_APPROVAL_MODE',
+  'CODEX_WORKSPACE', 'CODEX_APPROVAL_MODE', 'NOVA_LOCAL_TOOL_APPROVAL',
   'MEMORY_CONNECTION', 'MEMORY_PROVIDER',
   'CAPABILITIES_CONFIG',
 ])
@@ -40,7 +41,7 @@ const envSections = [
   ['Camera and vision',
     'CAMERA_MODULE_ENABLED CONVERSATION_VISION_ENABLED MONITOR_CAMERA_DEVICE_ID WATCH_MODEL'],
   ['Coding and approvals — EXECUTORS takes precedence over the legacy EXECUTOR alias',
-    'CODING_MODULE_ENABLED EXECUTORS EXECUTOR CODING_BACKEND CODEX_WORKSPACE CODEX_BIN CODEX_APPROVAL_MODE CODEX_PREWARM CODEX_MANAGED_ROOT CODEX_PROJECT_STATE_ROOT OPENCODE_ACP_BIN CODEBUDDY_ACP_BIN PI_ACP_BIN DEEPSEEK_ACP_BIN'],
+    'CODING_MODULE_ENABLED EXECUTORS EXECUTOR CODING_BACKEND CODEX_WORKSPACE CODEX_BIN CODEX_APPROVAL_MODE NOVA_LOCAL_TOOL_APPROVAL CODEX_PREWARM CODEX_MANAGED_ROOT CODEX_PROJECT_STATE_ROOT OPENCODE_ACP_BIN CODEBUDDY_ACP_BIN PI_ACP_BIN DEEPSEEK_ACP_BIN'],
   ['Managed browser executor (opt-in) — select browser in EXECUTORS',
     'BROWSER_ENGINE BROWSER_URL BROWSER_HEADLESS BROWSER_BASE_URL BROWSER_MODEL BROWSER_MODEL_FAMILY BROWSER_API_KEY BROWSER_MAX_STEPS BROWSER_TIMEOUT_SECONDS BROWSER_SETTLE_MS'],
   ['Local computer executor (opt-in) — select computer in EXECUTORS',

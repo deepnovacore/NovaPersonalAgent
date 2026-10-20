@@ -17,6 +17,16 @@ test('completion requires resolved task evidence, not public refs, and preserves
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
 
+test('a refused approved-plan dispatch waits for a user retry instead of auto-running',async()=>{
+ const f=await setup();let evaluations=0,executions=0
+ try{
+  const task=await f.tasks.delegate('approved-plan',{conversation_id:'c',goal:'build the project',acceptance:[],origin_ref:'conversation:plan',approved_plan:{id:'plan',version:1,title:'Build',content:'Complete plan',conversation_id:'c',generation:0,created_at:new Date().toISOString()}})
+  const fenceNow=fence(task),effect=await f.tasks.reserveInitial(fenceNow);await f.tasks.markEffectDispatching(effect);await f.tasks.settleEffect(effect,'failed');await f.tasks.wait(fenceNow,'plan_delegation_refused')
+  const loop=new TaskLoop(f.tasks,{evaluate:async()=>{evaluations++;return {kind:'wait',reason:'unused',evidence_refs:[]}},execute:async()=>{executions++},syncTodo:async()=> 'synced'})
+  await loop.wake(task.id);assert.equal(evaluations,0);assert.equal(executions,0);assert.equal(f.tasks.get(task.id).waiting_reason,'plan_delegation_refused');await loop.close()
+ }finally{await f.close()}
+})
+
 import {TaskLoop} from '../src/personal-agent/task-loop.js'
 import {LifeService} from '../src/personal-agent/life.js'
 async function setup(){const dir=await mkdtemp(join(await realpath(tmpdir()),'task-loop-')),tasks=new TaskService(join(dir,'tasks.json'));await tasks.open();const task=await tasks.delegate('d',{conversation_id:'c',goal:'original',acceptance:['checked'],origin_ref:'conversation:1'});return {tasks,task,close:async()=>{await tasks.close();await rm(dir,{recursive:true,force:true})}}}

@@ -55,9 +55,13 @@ export type CascadedLlmEvent =
   | {readonly kind: 'text_delta'; readonly text: string}
   | {readonly kind: 'tool_call'; readonly item_id: string; readonly call_id: string; readonly name: string; readonly arguments: JsonObject}
   | {readonly kind: 'response_completed'; readonly response_id: string}
-  | {readonly kind: 'response_failed'; readonly response_id: string; readonly code: string}
+  | {readonly kind: 'response_failed'; readonly response_id: string; readonly code: string; readonly detail?:string; readonly tool_call_count?:number}
 
 export interface CascadedLlmSession {
+  /** Host-only durable provider context, including unresolved tool pairs and provider extras. */
+  checkpoint?(): JsonValue
+  restoreCheckpoint?(checkpoint:JsonValue):void
+  setHistoryLimits?(limits:{items:number;codepoints:number}):void
   /** Fresh-session seed only, before any request; never merges unresolved tool calls. */
   restoreHistory?(history:readonly CommittedConversationPair[],signal:AbortSignal):Promise<void>
   stream(input: {

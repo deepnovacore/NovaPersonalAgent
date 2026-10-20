@@ -224,6 +224,7 @@ export class AcpTransport implements CodexAppServerTransport {
   }
 
   async run(input: RunInput, observer: TransportObserver, deadline: TransportDeadline, completionDeadline?: TransportDeadline | null): Promise<TransportOutcome> {
+    input={...input,workOrder:approvedPlanWorkOrder(input)}
     if (this.#running) return {classification: 'refused', code: 'busy', turnStartWritten: false, completion: null}
     this.#running = true
     this.#observer = observer
@@ -708,3 +709,4 @@ export function createAcpBackendRouting(options: {
     create: (binding: AcpProjectBinding) => createAcpProjectTransport(factory, binding),
   })
 }
+import {approvedPlanWorkOrder} from '../codex/app-server-transport.js'

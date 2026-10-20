@@ -59,6 +59,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:orb-menu:show',
     'nova:orb:dormant',
     'nova:personal:article',
+    'nova:personal:build-directory',
     'nova:personal:collapsed',
     'nova:personal:connector-authorization',
     'nova:personal:directory',

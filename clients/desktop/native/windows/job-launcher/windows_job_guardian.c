@@ -290,7 +290,7 @@ static int nova_exit_frame(HANDLE output, int have_code, DWORD process_code) {
 
 static int nova_wait_for_tree(HANDLE job, HANDLE completion, HANDLE leader,
                               HANDLE stop_event, DWORD *leader_code,
-                              int *have_code) {
+                              int *have_code, int terminate_on_leader_exit) {
   int force_sent = 0;
   ULONGLONG deadline = 0;
   for (;;) {
@@ -301,6 +301,13 @@ static int nova_wait_for_tree(HANDLE job, HANDLE completion, HANDLE leader,
     }
     if (!*have_code && WaitForSingleObject(leader, 0) == WAIT_OBJECT_0) {
       *have_code = GetExitCodeProcess(leader, leader_code) != FALSE;
+      /* Preserve the real command exit before removing lingering build servers.
+         Long-lived executor hosts retain their existing whole-tree lifetime. */
+      if (*have_code && terminate_on_leader_exit && !force_sent) {
+        force_sent = 1;
+        deadline = GetTickCount64() + NOVA_TREE_EXIT_TIMEOUT_MS;
+        (void)TerminateJobObject(job, 1);
+      }
     }
     DWORD message = 0;
     ULONG_PTR key = 0;
@@ -329,8 +336,12 @@ static void nova_stop_watcher(HANDLE thread, HANDLE source) {
 
 static int nova_guardian(int argc, WCHAR **argv) {
   if (!nova_utf8_command_is_bounded() || argc < 7 ||
-      wcscmp(argv[1], L"--target") != 0 || wcscmp(argv[3], L"--cwd") != 0 ||
-      wcscmp(argv[5], L"--") != 0)
+      wcscmp(argv[1], L"--target") != 0 || wcscmp(argv[3], L"--cwd") != 0)
+    return 0;
+  int terminate_on_leader_exit =
+      wcscmp(argv[5], L"--terminate-on-leader-exit") == 0;
+  int separator = terminate_on_leader_exit ? 6 : 5;
+  if (argc <= separator + 1 || wcscmp(argv[separator], L"--") != 0)
     return 0;
   WCHAR target[NOVA_PATH_CAPACITY];
   WCHAR cwd[NOVA_PATH_CAPACITY];
@@ -338,8 +349,8 @@ static int nova_guardian(int argc, WCHAR **argv) {
       !nova_canonical_existing(argv[4], 1, cwd))
     return 0;
   WCHAR command[NOVA_PATH_CAPACITY];
-  if (!nova_build_command_line(argc - 6, argv + 6, command) ||
-      _wcsicmp(argv[6], target) != 0)
+  if (!nova_build_command_line(argc - separator - 1, argv + separator + 1, command) ||
+      _wcsicmp(argv[separator + 1], target) != 0)
     return 0;
 
   HANDLE control = nova_descriptor_handle(NOVA_CONTROL_FD);
@@ -442,7 +453,7 @@ static int nova_guardian(int argc, WCHAR **argv) {
   DWORD leader_code = 0;
   int have_code = 0;
   if (!nova_wait_for_tree(job, completion, process.hProcess, stop_event,
-                          &leader_code, &have_code))
+                          &leader_code, &have_code, terminate_on_leader_exit))
     goto cleanup;
   if (!have_code &&
       WaitForSingleObject(process.hProcess, 1000) == WAIT_OBJECT_0) {

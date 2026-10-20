@@ -1720,7 +1720,7 @@ export function buildDesktopRealtimeComposition(
     conversationService:id=>realtime.personalAgent.conversationService(id),
     voiceService:()=>realtime.personalAgent.voiceService(),
     sendConversationAudio:(id,pcm)=>realtime.personalAgent.sendConversationAudio(id,pcm),
-    submitConversationText:(id,text,requestId,sourceTodo)=>realtime.personalAgent.submitConversationText(id,text,requestId,sourceTodo),
+    submitConversationText:(id,text,requestId,sourceTodo)=>realtime.personalAgent.submitConversationText(id,text,requestId,sourceTodo,{local_desktop:side==='desktop'}),
     validateConversationInput:(kind,id)=>{if(presentation.get(side)==='background'||realtime.personalAgent.presentationMode==='background')throw Error('presentation_hidden');const state=realtime.personalAgent.conversationSnapshot();if(id!==undefined&&!state.items.some(item=>item.id===id))throw Error('conversation_not_found');if(kind==='audio'&&((id!==undefined&&state.voice_id!==id)||(id===undefined&&state.voice_id!==null)))throw Error('voice_not_owned');if(kind==='dictation'&&state.voice_id!==null)throw Error('voice_active');if(kind==='audio'){if(side==='desktop'&&id===undefined&&presentation.get(side)==='workbench')throw Error('voice_not_owned');if(side==='phone'&&id===undefined)throw Error('conversation_required');claimAudio(side)}},
     personalCommand: (input,context) => command(side,input,context),
     personalSnapshot: () => realtime.personalAgent.snapshot(),

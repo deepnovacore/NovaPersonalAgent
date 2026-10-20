@@ -14,6 +14,7 @@
     "test": "npm run build && node --test && node scripts/source-startup-smoke.mjs",
     "test:camera-file": "npm run build --workspace @nova-personal-agent/runtime && electron scripts/camera-file-integration.mjs",
     "test:camera-file:mutations": "node scripts/camera-file-integration-mutations.mjs",
+    "test:workbench-agent": "electron scripts/workbench-agent-integration.mjs",
     "smoke:node-backend": "npm run build && electron scripts/utility-runtime-smoke.mjs",
     "smoke:capability-status": "npm run build && electron scripts/utility-runtime-smoke.mjs --capability-status",
     "finalize:mac-notarization": "node scripts/finalize-mac-notarization.mjs --dist-root dist",

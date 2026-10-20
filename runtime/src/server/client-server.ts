@@ -20,6 +20,11 @@ const MOBILE_METHODS = new Set([...SCHEDULE_METHODS,'state', 'life.mutate', 'fee
 function mobileSnapshot(value: Record<string, unknown>): Record<string, unknown> {
   const keys = ['type', 'revision', 'reload_required', 'life', 'schedules', 'tasks', 'conversations', 'feed', 'memory', 'pending_approvals', 'pending_confirmations']
   const result = Object.fromEntries(keys.filter(key => key in value).map(key => [key, value[key]]))
+  if(value.conversations&&typeof value.conversations==='object'){
+    const conversations=value.conversations as Record<string,unknown>,items=Array.isArray(conversations.items)?conversations.items as Record<string,unknown>[]:[],visible=items.filter(item=>item.kind!=='build'),ids=new Set(visible.map(item=>item.id))
+    result.conversations={...conversations,items:visible.map(item=>Object.fromEntries(Object.entries(item).filter(([key])=>!['build','plan','mode'].includes(key)))),selected_id:ids.has(conversations.selected_id)?conversations.selected_id:'chat:main',messages:(Array.isArray(conversations.messages)?conversations.messages:[]).filter(message=>ids.has((message as Record<string,unknown>).conversation_id)),home_messages:(Array.isArray(conversations.home_messages)?conversations.home_messages:[]).filter(message=>ids.has((message as Record<string,unknown>).conversation_id))}
+  }
+  if(Array.isArray(value.tasks))result.tasks=value.tasks.map((task:Record<string,unknown>)=>Object.fromEntries(Object.entries(task).filter(([key])=>key!=='approved_plan')))
   // Mobile displays the same ranked/saved articles without source configuration.
   if (value.news && typeof value.news === 'object' && !Array.isArray(value.news)) {
     const news = value.news as Record<string, unknown>
@@ -135,6 +140,7 @@ export class ClientServer {
     const connection = this.#requireActive()
     const value = JSON.parse(raw) as Record<string, unknown> | null
     if (!value || typeof value.type !== 'string') throw new DesktopProtocolError('invalid client output')
+    if(value.local_build===true)return
     if (this.#options.sharedWorkbench && !connection.personal && (value.type.startsWith('personal.') || value.type.startsWith('conversation.'))) return
     if (this.#options.sharedWorkbench && !connection.personal && value.type === 'caption' && value.conversation_id !== connection.legacyConversationId) return
     const personal = connection.personal && ['personal.state', 'personal.result'].includes(value.type)
@@ -147,6 +153,16 @@ export class ClientServer {
         if (pending && Number(pending.revision) <= Number((data as Record<string,unknown>).revision)) {
           clearTimeout(connection.snapshotTimer); connection.snapshotTimer=undefined; connection.snapshot=undefined
         }
+      }
+      if(frame.data&&typeof frame.data==='object'){
+        const publicData=(input:unknown):unknown=>{
+          if(Array.isArray(input))return input.filter(item=>!(item&&typeof item==='object'&&(item as Record<string,unknown>).kind==='build')).map(publicData)
+          if(!input||typeof input!=='object')return input
+          const item=input as Record<string,unknown>
+          if(Array.isArray(item.items)&&typeof item.selected_id==='string')return mobileSnapshot({conversations:item}).conversations
+          return Object.fromEntries(Object.entries(item).filter(([key])=>!['approved_plan','plan','build','local_tool_approval'].includes(key)).map(([key,value])=>[key,publicData(value)]))
+        }
+        frame.data=publicData(frame.data)
       }
       raw = JSON.stringify(frame)
       if (Buffer.byteLength(raw) > MAX_PERSONAL_BYTES) {

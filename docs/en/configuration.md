@@ -4,6 +4,12 @@ Environment names now omit the former `NOVA_PERSONAL_AGENT_` prefix: for example
 
 Use desktop Settings to select models and enter credentials. When running from source, you can also edit the project `.env`; restart the desktop afterwards.
 
+On Windows, desktop Codex discovery searches PATH, a custom npm prefix and `%APPDATA%\npm`, including npm installations managed by nvm-windows. You can also select an npm-installed `codex.cmd` by its full path in Settings, even outside PATH. Discovery uses the packaged native binary when available, or validates the official npm package and launches `node.exe` with `codex.js` as a separate argument. Node must be beside the shim or on PATH. The `.cmd` file is not executed through a shell. Direct runtime launches still require a native `CODEX_BIN`; shim resolution is provided by the desktop host.
+
+Codex authentication accepts the existing saved login or the API key configured in Nova. If the login check fails for a session sharing your local Codex configuration, Nova also checks the selected `model_providers.<model_provider>` entry in `~/.codex/config.toml`: it must have a non-empty `base_url` and either `experimental_bearer_token`, or a non-empty `OPENAI_API_KEY` in the same Codex home's `auth.json`. Such a provider can work even when `codex login status` reports `Not logged in`. Credentials stay in the existing files; Nova does not copy them into task records, logs or command arguments.
+
+This provider-config alternative uses the ordinary CLI's compatible parsing of legacy configuration fields. Nova still validates the effective permissions, disabled features and MCP configuration before starting a turn. Saved-login and explicit-key launches retain strict configuration parsing.
+
 ## Minimal setup
 
 The default Qwen realtime pipeline needs one key:
@@ -25,6 +31,7 @@ Set only what you need to change. Keep credentials out of Git.
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | Variable | Default | Purpose |
 |---|---|---|
+| `NOVA_LOCAL_TOOL_APPROVAL` | ask | Local Build file writes, edits and shell approval: ask or never; independent of executor approval. |
 | `PIPELINE_MODE` | integrated | Product pipeline shape: integrated or cascaded. |
 | `PROMPT_LANGUAGE` | zh-CN | AI system prompt language: zh-CN or en; desktop supplies its saved preference. |
 | `INTEGRATED_PROVIDER` | qwen | Integrated realtime provider. |
