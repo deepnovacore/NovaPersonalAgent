@@ -1,11 +1,11 @@
-import {mkdtemp, rm} from 'node:fs/promises'
+import {mkdtemp, realpath, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {executeLocalShell} from '../runtime/dist/src/personal-agent/local-shell.js'
 import {loadWindowsGuardianFactoryFromResources} from '../runtime/dist/src/executors/native-process.js'
 import {prepareWorkbenchTestResources} from '../clients/desktop/scripts/workbench-test-resources.mjs'
 
-const root = await mkdtemp(join(tmpdir(), 'nova-shell-diagnostic-'))
+const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-shell-diagnostic-'))
 try {
   const resourcesPath = await prepareWorkbenchTestResources(join(root, 'resources'))
   const native = loadWindowsGuardianFactoryFromResources({resourcesPath, platform: process.platform, arch: process.arch})
