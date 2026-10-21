@@ -13,7 +13,7 @@ import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voicepri
 import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-personal-agent/runtime/desktop'
 import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,installAcceptanceSessionGate,acceptanceWakeSettings,acceptanceBackendSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
 import {writeFileSync as writeAcceptanceFile} from 'node:fs'
-import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
+import {updateTrayUnread, resetTrayUnreadForBackend, trayClickAction} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
@@ -241,9 +241,10 @@ function enterBackground(){
   nativeAudio?.setPlaybackMuted(true)
   void nativeAudio?.deactivate().catch(()=>{})
 }
-const requestPresentation = mode => {
+let trayUnread = 0
+const requestPresentation = (mode, options = {}) => {
   if(mode==='background')enterBackground()
-  sendToOrb('nova:personal:presentation-request',mode)
+  sendToOrb('nova:personal:presentation-request',mode,options.attention===true)
 }
 let bootstrap = null
 let activeLaunchId = null
@@ -1047,12 +1048,15 @@ function createTray() {
   const next = new Tray(trayImage())
   next.setToolTip('Nova Personal Agent Desktop')
   next.setContextMenu(Menu.buildFromTemplate([
-    { label: t('Nova Visor · 展开 / 收起'), click: toggleVisor },
     ...[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
     { label: t("退出"), click: () => app.quit() },
   ]))
-  next.on('click', () => mainWindow?.isVisible() ? hideOrb() : requestPresentation('workbench'))
+  next.on('click', () => {
+    const action = trayClickAction(backendStatus.state === 'connected' ? trayUnread : 0, Boolean(mainWindow?.isVisible()))
+    if (action === 'hide') hideOrb()
+    else requestPresentation('workbench', {attention: action === 'attention'})
+  })
   return next
 }
 
@@ -1522,6 +1526,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   ipcMain.handle('nova:personal:unread', (event, value) => {
     if (event.sender !== mainWindow.webContents || !Number.isSafeInteger(value) || value < 0 || value > 1000000) throw new Error('unread request rejected')
+    trayUnread = value
     updateTrayUnread(tray, backendStatus.state === 'connected' ? value : 0)
   })
   ipcMain.handle('nova:personal:wake', event => {

@@ -15,6 +15,7 @@ import {mountTaskDetail} from './task-detail.mjs'
 import {renderTasksPage,activeTaskCount} from './tasks-page.mjs'
 import {renderSourceSuggestions} from './workbench-suggestions.mjs'
 import {disposeSources} from './source-popover.mjs'
+import {attentionTarget} from './attention-target.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 const PAGE_TITLE=Object.fromEntries(WORKSPACE_PAGES.map(item=>[item.id,item.label===item.title?item.label:`${item.label} · ${item.title}`]))
 /** The workbench keeps Nova on the left and switches contextual pages on the right. */
@@ -193,8 +194,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   if(renderedPageKey!==pageKey())renderPanel()
   syncPending()
  }
+ async function focusAttention(){const target=attentionTarget(c.snapshot);if(!target)return;if(target.taskId){await openTask(target.taskId,true);return}if(target.conversationId!==c.selectedId)await c.select(target.conversationId);chat.reveal()}
  async function collapse(value){await c.setPresentation(value?'orb':'workbench');if(!value)await showHome()}
  function receive(frame){chat.receive(frame);c.receive(frame);computerUse?.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
- api.personal.onPresentationRequest?.(mode=>run(()=>c.setPresentation(mode)));
+ api.personal.onPresentationRequest?.((mode,options)=>run(async()=>{await c.setPresentation(mode);if(options?.attention&&mode==='workbench')await focusAttention()}));
  api.personal.onCollapsed?.(value=>c.collapse(value));const dateClock=setInterval(()=>{if(c.presentationMode==='workbench')update()},60000);dateClock.unref?.();update();renderPanel();return {controller:c,receive,identity:value=>chat.identity(value),refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }
