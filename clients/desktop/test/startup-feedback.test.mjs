@@ -233,7 +233,7 @@ test('configuration commits start phone independently and keep its failures out 
 test('supervisor reconnecting status is nonterminal and does not offer competing startup retry', () => {
   const start=source.lastIndexOf('    onStatus: status => {')
   const handler=source.slice(start+'    onStatus: '.length,source.indexOf('\n    },\n  })',start)+6)
-  const context=vm.createContext({resetTrayUnreadForBackend:()=>{},tray:null,backendStatus:{state:'connected'},backendGeneration:0,runtimeCapabilities:null,
+  const context=vm.createContext({computerOverlay:null,resetTrayUnreadForBackend:()=>{},tray:null,backendStatus:{state:'connected'},backendGeneration:0,runtimeCapabilities:null,
     sendToSettings:()=>{},settingsView:()=>({}),sendToOrb:()=>{},smokeChannel:null,backendEverConnected:false,
     publishStartup:(stage,code)=>{context.startup={stage,code}},startup:{stage:'ready'}})
   const receive=vm.runInContext(`(${handler})`,context)
