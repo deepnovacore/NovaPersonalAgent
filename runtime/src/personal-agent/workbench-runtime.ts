@@ -6,14 +6,19 @@ import type {CascadedLlmFactory,CascadedLlmSession,CascadedLlmTool} from '../rea
 import {LOCAL_TOOLS,executeLocalTool,isLocalTool,localPathEscapesProject,localToolArguments,projectResourceKey} from './local-tools.js'
 import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources} from '../executors/task-resources.js'
 import {localShellProcessGone,type LocalShellOptions} from './local-shell.js'
+import type {JsonValue} from '../core/events.js'
 import type {WorkbenchCall} from './workbench-store.js'
+import type {ComputerSession,ComputerSessionOptions} from './computer-use/session.js'
+import {computerTools} from './computer-use/tools.js'
+import {computerUseSkill} from './computer-use/skill.js'
+import {isComputerTool,computerToolArguments,COMPUTER_WRITE_TOOLS,type ToolImage} from './computer-use/contract.js'
 
 const publishArguments=z.object({title:z.string().min(1).max(120),content:z.string().min(1).max(131072)}).strict()
 const publishTool:CascadedLlmTool={name:'publish_plan',description:'Publish the complete detailed plan for the user to review and choose local Build or executor Build. This does not authorize or start execution. Call again to publish an amended version.',parameters:{type:'object',properties:{title:{type:'string',minLength:1,maxLength:120},content:{type:'string',minLength:1,maxLength:131072}},required:['title','content'],additionalProperties:false}}
 const finishArguments=z.object({summary:z.string().min(1).max(12000)}).strict()
 const finishTool:CascadedLlmTool={name:'finish_build',description:'End this Build conversation after the confirmed work and verification are complete. Provide the final user-facing summary. This permanently locks the conversation; use only when no further Build interaction is needed.',parameters:{type:'object',properties:{summary:{type:'string',minLength:1,maxLength:12000}},required:['summary'],additionalProperties:false}}
 const RESUME_CHECK='Resume the confirmed plan. Inspect actual state before continuing any cancelled, timed-out or unknown operation. Never replay a completed call.'
-export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never';shell?:LocalShellOptions;onDiagnostic?:(message:string)=>void}):Promise<ConversationRuntime>{
+export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never';shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'screenshot'|'action'|'close'>;onDiagnostic?:(message:string)=>void}):Promise<ConversationRuntime>{
  const {conversation,host}=options,build=conversation.kind==='build',store=host.workbench
  const turnToolLimit=build?128:24
  const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
@@ -23,6 +28,24 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  const workspaceContext=confirmedPlan?JSON.stringify({confirmed_plan:{id:confirmedPlan.id,version:confirmedPlan.version,title:confirmedPlan.title,content:confirmedPlan.content},project:conversation.build!.project}):null
  let session:CascadedLlmSession|undefined,bridgeRuntime:ConversationRuntime|undefined
  let closed=false,controller:AbortController|undefined,active:Promise<{assistant:string;turn_id?:string}>|undefined,version=state.run_version
+ let computer:Pick<ComputerSession,'screenshot'|'action'|'close'>|undefined
+ let currentComputerCall:WorkbenchCall|undefined
+ let observeRequired=true
+ let coordinateObservationRequired=true
+ let verificationRequired=false
+ for(const call of state.calls){
+  if(isComputerTool(call.name)&&call.started_at&&(COMPUTER_WRITE_TOOLS.includes(call.name)||call.name==='computer_run'))verificationRequired=true
+  if((call.name==='computer_screenshot'||call.name==='computer_run')&&(call.result as {image_ref?:string}|undefined)?.image_ref)verificationRequired=false
+ }
+ if(state.reason==='cleanup_unknown')verificationRequired=true
+ const computerState=()=>build?host.computerUseState(conversation.id):{enabled:false,direct:false}
+ let computerVisible=false
+ const computerFrame=(state:'active'|'acting'|'delegated'|'idle',action?:string,point?:{x:number;y:number})=>{
+  if(state==='idle'&&!computerVisible)return
+  computerVisible=state!=='idle'
+  options.emit({type:'computer_use',conversation_id:conversation.id,state,...(action?{action}:{}),...(point?{point}:{})})
+ }
+ const closeComputer=async()=>{const previous=computer;computer=undefined;observeRequired=true;try{await previous?.close()}finally{computerFrame('idle')}}
  let approval:{id:string;call:WorkbenchCall;resolve:(approved:boolean)=>void}|undefined
  const model=()=>{if(!session){session=options.factory.open();session.setHistoryLimits?.({items:2048,codepoints:16*1024*1024});if(state.model!==null){if(!session.restoreCheckpoint)throw Error('model_checkpoint_unsupported');session.restoreCheckpoint(state.model)}else session.checkpoint?.()}return session}
  const bridge=async()=>{bridgeRuntime??=await options.createBridge();if(!bridgeRuntime.toolBridge)throw Error('conversation_tools_unavailable');return bridgeRuntime.toolBridge}
@@ -39,9 +62,9 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
   }
   state.status=state.pending_calls.some(call=>(call.result as {status?:string}|undefined)?.status==='outcome_unknown')?'outcome_unknown':'paused';state.reason='restart_requires_resume';await save()
  }
- async function ask(call:WorkbenchCall,signal:AbortSignal):Promise<boolean>{
+ async function ask(call:WorkbenchCall,signal:AbortSignal,preview?:Pick<WorkbenchCall,'name'|'arguments'>):Promise<boolean>{
   const id=randomUUID();call.approval_id=id;call.state='awaiting_approval';state.status='awaiting_approval'
-  let resolve!:(value:boolean)=>void;const promise=new Promise<boolean>(done=>{resolve=done});approval={id,call,resolve};await save()
+  let resolve!:(value:boolean)=>void;const promise=new Promise<boolean>(done=>{resolve=done});approval={id,call:preview?{...call,...preview}:call,resolve};await save()
   const cancel=()=>resolve(false);signal.addEventListener('abort',cancel,{once:true})
   try{if(signal.aborted)return false;return await promise}finally{signal.removeEventListener('abort',cancel);approval=undefined;delete call.approval_id}
  }
@@ -62,7 +85,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
     else if(!state.inputs.length&&!state.pending_calls.length)state.inputs.push({kind:'user_text',text:RESUME_CHECK})
     if(context?.resume&&state.reason==='approval_denied')return {assistant:'上次操作已拒绝，请补充新的要求后继续。'}
     state.status='running';state.reason=null;state.assistant='';delete state.model_failure;await save()
-    const toolBridge=await bridge(),tools=build?[...toolBridge.tools,...LOCAL_TOOLS,finishTool]:[...toolBridge.tools.filter(tool=>toolBridge.readonlyNames.includes(tool.name)),publishTool]
+    const toolBridge=await bridge(),enabled=computerState(),tools=build?[...toolBridge.tools,...LOCAL_TOOLS,...(enabled.enabled?computerTools(enabled.direct):[]),finishTool]:[...toolBridge.tools.filter(tool=>toolBridge.readonlyNames.includes(tool.name)),publishTool]
     const allowed=new Set(tools.map(tool=>tool.name));if(allowed.size!==tools.length||tools.length>128)throw Error('workbench_tool_configuration')
     let toolRounds=0,finishedReply:string|undefined
     while(true){
@@ -73,7 +96,64 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
       if(!wasCompleted&&toolRounds>=turnToolLimit)return
       if(call.state!=='completed'){
        toolRounds++
-       if(!allowed.has(call.name)){call.result={code:'tool_not_authorized',state:'refused'};call.state='completed'}
+       if(isComputerTool(call.name)&&!computerState().enabled){call.result={code:'computer_use_disabled',message:'在 Build 会话里打开 Computer Use 后才能操作电脑'};call.state='completed'}
+       else if(!allowed.has(call.name)){call.result={code:'tool_not_authorized',state:'refused'};call.state='completed'}
+       else if(isComputerTool(call.name)){
+        const name=call.name,validation=computerToolArguments[name].safeParse(call.arguments)
+        if(!validation.success){call.result={code:'invalid_params'};call.state='completed'}
+        else if(!computerState().direct&&name!=='computer_run'){call.result={code:'vision_model_required'};call.state='completed'}
+        else if((observeRequired&&COMPUTER_WRITE_TOOLS.includes(name))||(coordinateObservationRequired&&(name==='computer_click'||name==='computer_scroll'))){call.result={code:'observe_required'};call.state='completed'}
+        else{
+         if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
+         call.state='running';call.started_at=new Date().toISOString();state.status='running';await save()
+         currentComputerCall=call
+         const getComputer=async()=>{
+          if(computer)return computer
+          const Session=options.computerSession?undefined:(await import('./computer-use/session.js')).ComputerSession
+          const create=options.computerSession??((settings:ComputerSessionOptions)=>new Session!(settings))
+          computer=create({
+           signal,approve:async(action,params)=>{
+            if(action!=='Connect'&&options.approval==='never')return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
+            const current=currentComputerCall!
+            const approved=await ask(current,signal,{name:action==='Connect'?'computer_connect':current.name,arguments:{action,params:JSON.parse(JSON.stringify(params)) as JsonValue}})
+            if(!approved&&!signal.aborted)state.reason='approval_denied'
+            state.status='running';current.state='running';await save()
+            return approved&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
+           },acting:(action,point)=>{signal.throwIfAborted();if(!computerState().enabled||!host.localBuildAuthorized(conversation.id))throw Error('computer_use_disabled');computerFrame('acting',action,point)},
+          })
+          return computer
+         }
+         const capture=async():Promise<string>=>{
+          const image=await (await getComputer()).screenshot()
+          const ref=await store.saveImage(conversation.id,conversation.generation,image)
+          observeRequired=false;coordinateObservationRequired=false;computerFrame('active',name)
+          return ref
+         }
+         try{
+          signal.throwIfAborted()
+          if(!computerState().enabled)throw Error('computer_use_disabled')
+          if(name==='computer_screenshot'){call.result={image_ref:await capture()};verificationRequired=false}
+          else if(name==='computer_run'){
+           verificationRequired=true;await closeComputer();computerFrame('delegated',name)
+           if(!toolBridge.computerRun)throw Error('computer_executor_unavailable')
+           const result=await toolBridge.computerRun(state.last_user,call,signal)
+           signal.throwIfAborted()
+           call.result={result,image_ref:await capture()}
+           verificationRequired=false
+          }else{
+           verificationRequired=true
+           await (await getComputer()).action(name,call.arguments);coordinateObservationRequired=true
+           call.result={status:'completed',verified:false};computerFrame('active',name)
+          }
+         }catch(error){
+          let code=error instanceof Error?error.message:'action_failed'
+          try{await closeComputer()}catch{code='cleanup_unknown'}
+          call.result={code,status:signal.aborted||code==='cleanup_unknown'?'outcome_unknown':'failed'}
+          observeRequired=true
+         }
+         call.state='completed';call.finished_at=new Date().toISOString();await save()
+        }
+       }
        else if(isLocalTool(call.name)){
         if(!build)throw Error('local_tools_not_authorized')
         const validation=localToolArguments[call.name].safeParse(call.arguments)
@@ -95,8 +175,11 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
        }else if(call.name==='finish_build'){
         const q=finishArguments.safeParse(call.arguments)
         if(!build||!q.success){call.result={code:'invalid_params',state:'refused'};call.state='completed'}
+        else if(verificationRequired){call.result={code:'verification_required'};call.state='completed'}
         else{
          call.state='running';call.started_at=new Date().toISOString();await save();signal.throwIfAborted()
+         await closeComputer();signal.throwIfAborted()
+         if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
          const finished=await host.finishLocalBuild(conversation.id,conversation.generation,context?.user_message_id)
          call.result={finished,...(!finished?{reason:'new_user_input_received'}:{})};call.state='completed';call.finished_at=new Date().toISOString()
          if(finished){state.status='finished';state.reason=null;finishedReply=q.data.summary}
@@ -153,14 +236,18 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
      if(state.pending_calls.some(call=>call.state!=='completed')){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
      if(state.pending_calls.length){
       const uncertain=state.pending_calls.some(call=>['outcome_unknown','timed_out','cancelled'].includes((call.result as {status?:string}|undefined)?.status??''))
-      state.inputs.unshift(...state.pending_calls.map(call=>({kind:'tool_result' as const,call_id:call.id,output:call.result??{status:'outcome_unknown'}})))
+      state.inputs.unshift(...await Promise.all(state.pending_calls.map(async call=>{
+       const ref=isComputerTool(call.name)?(call.result as {image_ref?:string}|undefined)?.image_ref:undefined
+       const images:ToolImage[]|undefined=ref&&computerState().direct?[await store.loadImage(conversation.id,conversation.generation,ref)]:undefined
+       return {kind:'tool_result' as const,call_id:call.id,output:call.result??{status:'outcome_unknown'},...(images?{images}:{})}
+      })))
       if(uncertain)state.inputs.push({kind:'host_context',content:RESUME_CHECK})
       state.pending_calls=[];await save()
      }
      if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
      const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[],turn=randomUUID();let assistant='',completed=false
      try{
-      for await(const event of llm.stream({language:options.language,inputs,tools,workspaceContext,signal})){
+      for await(const event of llm.stream({language:options.language,inputs,tools,workspaceContext:enabled.enabled?[workspaceContext,computerUseSkill(enabled.direct)].filter(Boolean).join('\n'):workspaceContext,signal})){
        signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale')
        if(event.kind==='text_delta'){
         assistant+=event.text
@@ -193,14 +280,22 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
     approval=undefined
     const reason=error instanceof Error?error.message:'build_failed',modelInterrupted=build&&reason.startsWith('model_')
     if(/^model_[a-z_]{1,96}$/u.test(reason))options.onDiagnostic?.('[workbench-diagnostic] '+JSON.stringify({mode:build?'build':'plan',conversation_id:conversation.id,generation:conversation.generation,reason,...(state.model_failure?{model_failure:state.model_failure}:{})}))
-    state.status=signal.aborted||modelInterrupted?'paused':'failed';state.reason=signal.aborted?'stopped':reason;await save();if(signal.aborted)return {assistant:'Build 已暂停。'}
+    if(reason==='cleanup_unknown')verificationRequired=true
+    state.status=reason==='cleanup_unknown'?'outcome_unknown':signal.aborted||modelInterrupted?'paused':'failed';state.reason=signal.aborted?'stopped':reason;await save();if(signal.aborted)return {assistant:'Build 已暂停。'}
     if(modelInterrupted){
      const label=options.language==='en'?({model_timeout:'The model stopped returning data',model_overflow:'The model response exceeded the stream capacity',model_http:'The model service returned an error',model_network:'The model connection was interrupted'} as Record<string,string>)[reason]??'The model response was interrupted':({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_http:'模型服务返回错误',model_network:'模型连接中断'} as Record<string,string>)[reason]??'模型回复中断'
      return {assistant:options.language==='en'?`Build paused: ${label} (${reason}). Click Resume to continue. Completed operations will not be replayed.`:`Build 已暂停：${label}（${reason}）。点击 Resume 继续，已完成的操作不会重放。`}
     }
     throw error
    }
-   finally{release?.();controller=undefined}
+   finally{
+    try{await closeComputer()}catch(error){
+     verificationRequired=true;state.status='outcome_unknown';state.reason='cleanup_unknown'
+     const last=state.calls.findLast(call=>isComputerTool(call.name)&&call.started_at)
+     if(last)last.result={status:'outcome_unknown',code:'cleanup_unknown'}
+     await save();throw error
+    }finally{release?.();controller=undefined}
+   }
   }
   const operation=execute();active=operation
   try{return await operation}finally{if(active===operation)active=undefined}

@@ -364,3 +364,51 @@ test('Ark fresh seed uses independent committed history without provider continu
     await assert.rejects(session.restoreHistory([{user:'replace',assistant:'bad'}],signal))
   }finally{await session.close()}
 })
+
+test('Responses tool screenshots follow tool output as host observations', {timeout:5000}, async () => {
+  const requests: Record<string,unknown>[]=[]
+  const llm=createArkCascadedLlmSession({
+    async *stream(input) {
+      await Promise.resolve()
+      requests.push(input as unknown as Record<string,unknown>)
+      yield {kind:'response_started',response_id:'r'}
+      if(requests.length===1)yield {kind:'tool_call',response_id:'r',item_id:'screen',call_id:'screen',name:'computer_screenshot',arguments:{}}
+      else yield {kind:'text_delta',response_id:'r',text:'done'}
+      yield {kind:'response_completed',response_id:'r'}
+    },close:()=>Promise.resolve(),
+  })
+  const signal=new AbortController().signal
+  await collect(llm.stream({inputs:[{kind:'user_text',text:'look'}],tools:[],signal}))
+  const input={kind:'tool_result' as const,call_id:'screen',output:{ok:true},images:[{media_type:'image/png' as const,data_base64:'aGVsbG8=',width:100,height:100,captured_at:'2026-10-21T00:00:00Z'}]}
+  await collect(llm.stream({inputs:[input],tools:[],signal}))
+  const items=requests[1]!.inputItems as {type?:string;role?:string;content?:unknown}[]
+  assert.equal(items[0]?.type,'function_call_output')
+  assert.equal(items[1]?.role,'user')
+  assert.match(JSON.stringify(items[1]?.content),/host_observation/u)
+  assert.match(JSON.stringify(items[1]?.content),/data:image\/png;base64,aGVsbG8=/u)
+  await llm.close()
+})
+
+test('Responses computer images survive checkpoints but evict older screenshots without text overflow', {timeout:5000}, async () => {
+  const requests:Record<string,unknown>[]=[];let call=0
+  const factory=createArkCascadedLlmFactory({baseUrl:'https://example.test',apiKey:'test',model:'test',instructions:'test',protocol:'openai-compatible',maxToolCallsPerResponse:2,fetchImpl:(_url,init)=>{
+    requests.push(JSON.parse(init?.body as string) as Record<string,unknown>);call++
+    return Promise.resolve(sse({type:'response.created',response:{id:`r-${call}`}},
+      ...(call<=2?[0,1].map(index=>({type:'response.output_item.done',item:{type:'function_call',id:`item-${call}-${index}`,call_id:`call-${call}-${index}`,name:'computer_screenshot',arguments:'{}'}})):[{type:'response.output_text.delta',delta:'done'}]),
+      {type:'response.completed',response:{id:`r-${call}`,output:call<=2?[0,1].map(index=>({type:'function_call',id:`item-${call}-${index}`,call_id:`call-${call}-${index}`,name:'computer_screenshot',arguments:'{}'})):[{type:'message',role:'assistant',content:[{type:'output_text',text:'done'}]}]}}))
+  }})
+  let session=factory.open();const signal=new AbortController().signal
+  const image={media_type:'image/jpeg' as const,data_base64:Buffer.alloc(160_000,1).toString('base64'),width:100,height:100,captured_at:'2026-10-21T00:00:00Z'}
+  try {
+    await collect(session.stream({inputs:[{kind:'user_text',text:'look'}],tools:[],signal}))
+    for(let turn=1;turn<=2;turn++) {
+      await collect(session.stream({inputs:[0,1].map(index=>({kind:'tool_result' as const,call_id:`call-${turn}-${index}`,output:{ok:true},images:[image]})),tools:[],signal}))
+      const checkpoint=session.checkpoint!();await session.close();session=factory.open();session.restoreCheckpoint!(checkpoint)
+    }
+    await collect(session.stream({inputs:[{kind:'user_text',text:'next'}],tools:[],signal}))
+    for(const request of requests.slice(1))assert.equal((JSON.stringify(request).match(/data:image\/jpeg;base64/g)??[]).length,2)
+    const items=requests[1]!.input as {type?:string;role?:string}[],index=items.findIndex(item=>item.type==='function_call_output')
+    assert.equal(items[index+1]?.type,'function_call_output');assert.equal(items[index+2]?.role,'user')
+    assert.match(JSON.stringify(requests[2]),/older computer screenshot omitted/)
+  }finally{await session.close()}
+})

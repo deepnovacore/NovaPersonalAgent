@@ -826,3 +826,58 @@ test('scheduled host task uses a marked provider activation without becoming use
  const session=createQwenCascadedLlmFactory({baseUrl:'https://example.test',apiKey:'synthetic',model:'test',instructions:'scheduled',fetchImpl:(_url,init)=>{assert.equal(typeof init?.body,'string');body=JSON.parse(init?.body as string) as typeof body;return Promise.resolve(new Response('data: {"id":"r","choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}}))}}).open()
  try{await collect(session.stream({inputs:[{kind:'host_task',content:'{"run_id":"real-run","goal":"read authorized batch"}'}],tools:[],signal:new AbortController().signal}));const activation=body!.messages.find(message=>message.role==='user')!;assert.match(activation.content,/host_scheduled_task/u);assert.match(activation.content,/real-run/u);assert.doesNotMatch(activation.content,/text_to_say/u)}finally{await session.close()}
 })
+
+test('tool screenshots are host observations immediately after their tool receipt', {timeout:5000}, async () => {
+  const requests: {messages: {role:string;content:unknown;tool_call_id?:string}[]}[]=[]
+  const llm=createQwenCascadedLlmFactory({baseUrl:'https://example.test',apiKey:'test',model:'test',instructions:'test',fetchImpl:(_url,init)=>{
+    requests.push(JSON.parse(init?.body as string) as typeof requests[number])
+    return Promise.resolve(sse([{id:'r',choices:[requests.length===1
+      ? {delta:{tool_calls:[{index:0,id:'screen',function:{name:'computer_screenshot',arguments:'{}'}}]},finish_reason:'tool_calls'}
+      : {delta:{content:'done'},finish_reason:'stop'}]}]))
+  }}).open()
+  const signal=new AbortController().signal
+  await collect(llm.stream({inputs:[{kind:'user_text',text:'look'}],tools:[],signal}))
+  const input={kind:'tool_result' as const,call_id:'screen',output:{ok:true},images:[{media_type:'image/png' as const,data_base64:'aGVsbG8=',width:100,height:100,captured_at:'2026-10-21T00:00:00Z'}]}
+  await collect(llm.stream({inputs:[input],tools:[],signal}))
+  const messages=requests[1]!.messages,index=messages.findIndex(item=>item.tool_call_id==='screen')
+  assert.equal(messages[index+1]?.role,'user')
+  assert.match(JSON.stringify(messages[index+1]?.content),/host_observation/u)
+  assert.match(JSON.stringify(messages[index+1]?.content),/data:image\/png;base64,aGVsbG8=/u)
+  assert.doesNotMatch(JSON.stringify(messages[index]?.content),/base64/u)
+  await llm.close()
+})
+
+test('computer screenshot history retains two images across checkpoint and parallel tool results', {timeout:5000}, async () => {
+  const requests:{messages:{role:string;content:unknown;tool_call_id?:string}[]}[]=[]
+  let calls=0
+  const factory=createQwenCascadedLlmFactory({baseUrl:'https://example.test',apiKey:'test',model:'test',instructions:'test',maxToolCallsPerResponse:2,fetchImpl:(_url,init)=>{
+    requests.push(JSON.parse(init?.body as string) as typeof requests[number]);calls++
+    return Promise.resolve(sse([{id:'r',choices:[calls<=2
+      ? {delta:{tool_calls:[0,1].map(index=>({index,id:`call-${calls}-${index}`,function:{name:'computer_screenshot',arguments:'{}'}}))},finish_reason:'tool_calls'}
+      : {delta:{content:'done'},finish_reason:'stop'}]}]))
+  }})
+  let session=factory.open();const signal=new AbortController().signal
+  const image={media_type:'image/png' as const,data_base64:Buffer.alloc(160_000,1).toString('base64'),width:100,height:100,captured_at:'2026-10-21T00:00:00Z'}
+  try {
+    await collect(session.stream({inputs:[{kind:'user_text',text:'look'}],tools:[],signal}))
+    for (let turn=1;turn<=2;turn++) {
+      await collect(session.stream({inputs:[0,1].map(index=>({kind:'tool_result' as const,call_id:`call-${turn}-${index}`,output:{ok:true},images:[image]})),tools:[],signal}))
+      const checkpoint=session.checkpoint!();await session.close();session=factory.open();session.restoreCheckpoint!(checkpoint)
+    }
+    await collect(session.stream({inputs:[{kind:'user_text',text:'continue'}],tools:[],signal}))
+    for (const request of requests.slice(1)) assert.equal((JSON.stringify(request).match(/data:image\/png;base64/g)??[]).length,2)
+    const first=requests[1]!.messages,index=first.findIndex(item=>item.tool_call_id==='call-1-0')
+    assert.equal(first[index+1]!.role,'tool');assert.equal(first[index+2]!.role,'user')
+    assert.match(JSON.stringify(requests[2]),/older computer screenshot omitted/)
+  }finally{await session.close()}
+})
+
+test('tool screenshot validation rejects malformed metadata and payloads', {timeout:1000}, async () => {
+  const {validateToolImage}=await import('../src/realtime/cascaded/llm.js')
+  const image={media_type:'image/jpeg' as const,data_base64:'/9j/2Q==',width:100,height:100,captured_at:'2026-10-21T00:00:00Z'}
+  assert.equal(validateToolImage(image),image)
+  assert.doesNotThrow(()=>validateToolImage({...image,data_base64:Buffer.alloc(4*1024*1024,1).toString('base64')}))
+  for (const change of [{data_base64:''},{data_base64:'not base64'},{data_base64:'Zh=='},{width:0},{height:1281},{width:1.5},{captured_at:'invalid'},{media_type:'text/html'}]) {
+    assert.throws(()=>validateToolImage({...image,...change} as typeof image),/invalid tool image/)
+  }
+})

@@ -2,7 +2,7 @@ import {selfHostedEndpoint} from '../../config/self-hosted.js'
 import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
 import {translateSystemPrompt, type PromptLanguage} from '../prompt-language.js'
 import {cascadedNarrationInstructions} from './llm.js'
-import {originalImageUrl} from './llm.js'
+import {originalImageUrl, toolObservations, trimToolImages, isToolObservation, imageFreeMessage} from './llm.js'
 import {beginModelUsage,mergeModelUsage} from '../../usage/model-call.js'
 import type {UsageReporter} from '../usage.js'
 import type { Clock } from '../../core/clock.js'
@@ -65,13 +65,14 @@ class Session implements CascadedLlmSession {
       if(!Array.isArray(unit))throw fail('protocol')
       const outstanding=new Set<string>()
       for(const msg of unit){
-        if(!object(msg)||typeof msg.role!=='string'||!['system','user','assistant','tool'].includes(msg.role)||!(typeof msg.content==='string'||msg.content===null))throw fail('protocol')
+        if(!object(msg)||typeof msg.role!=='string'||!['system','user','assistant','tool'].includes(msg.role)||!(typeof msg.content==='string'||msg.content===null||isToolObservation(msg)&&Array.isArray(msg.content)&&msg.content.every(part=>object(part)&&(part.type==='text'&&typeof part.text==='string'||part.type==='image_url'&&object(part.image_url)&&typeof part.image_url.url==='string'&&/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/u.test(part.image_url.url)))))throw fail('protocol')
         if(Array.isArray(msg.tool_calls))for(const call of msg.tool_calls){if(!object(call)||!id(call.id)||!object(call.function)||!id(call.function.name)||typeof call.function.arguments!=='string'||outstanding.has(call.id))throw fail('protocol');outstanding.add(call.id)}
         if(msg.role==='tool'&&(typeof msg.tool_call_id!=='string'||!outstanding.delete(msg.tool_call_id)))throw fail('protocol')
       }
       if(unit!==checkpoint.pending&&outstanding.size)throw fail('protocol')
     }
     this.#history=structuredClone(checkpoint.history) as unknown as Message[][];this.#unresolved=structuredClone(checkpoint.pending) as unknown as Message[]|null;this.#seeded=true
+    trimToolImages([...this.#history.flat(),...(this.#unresolved??[])])
   }
   readonly #provider: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted' | 'openai-compatible'
   readonly #onUsage: UsageReporter | undefined
@@ -94,7 +95,8 @@ class Session implements CascadedLlmSession {
   async *stream(input: {readonly language?: PromptLanguage; readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
     if (this.#closed) throw fail('closed'); if (input.signal.aborted) throw fail('aborted')
     this.#started = true
-    const current = input.inputs.map(message), unresolved = this.#unresolved
+    const current = wireMessages(input.inputs), unresolved = this.#unresolved
+    trimToolImages([...this.#history.flat(), ...(unresolved ?? []), ...current])
     if (unresolved === null && input.inputs.some(item => item.kind === 'tool_result')) throw fail('protocol')
     if (unresolved !== null) this.#checkResults(input.inputs, unresolved)
     this.#trim(unresolved ?? [])
@@ -107,7 +109,7 @@ class Session implements CascadedLlmSession {
     // Tool-call/result pairs stay intact; the full turn is still recorded for the next user turn.
     const context = factOnly
       ? [...(unresolved?.slice(-1) ?? []),
-        ...input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result').map(message)]
+        ...wireMessages(input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result'))]
       : [...this.#history.flat(), ...(unresolved ?? []), ...current]
     // Self-hosted Qwen chat templates accept system messages only at the beginning.
     const messages = this.#provider === 'self-hosted'
@@ -163,7 +165,7 @@ class Session implements CascadedLlmSession {
               if (fragments.size > 0) throw protocol('tool_finish_reason')
               // With tools enabled, wait for the response kind before publishing speech.
               if (input.tools.length > 0 && text !== '') yield {kind: 'text_delta', text}
-              this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text}].map(withoutImage))
+              this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text}].map(item => isToolObservation(item) ? item : withoutImage(item)))
               this.#unresolved = null; terminal = true
               yield {kind: 'response_completed', response_id: responseId}; return
             } else if (choice.finish_reason === 'tool_calls') {
@@ -189,7 +191,7 @@ class Session implements CascadedLlmSession {
       // Receipt of a matching tool result survives interruption of its narration.
       // Preserve the resolved pair; the next user turn must not owe that result again.
       if (!terminal && unresolved !== null) {
-        this.#history.push([...unresolved, ...current].map(withoutImage))
+        this.#history.push([...unresolved, ...current].map(item => isToolObservation(item) ? item : withoutImage(item)))
         this.#unresolved = null
       }
       const finish = async (): Promise<void> => {
@@ -302,6 +304,9 @@ class Session implements CascadedLlmSession {
 }
 export function createChatCompletionsLlmFactory(options: ChatCompletionsLlmFactoryOptions): CascadedLlmFactory { return {open: input => new Session(options,input?.history)} }
 
-function withoutImage(message: Message): Message {
-  return Array.isArray(message.content) ? {...message, content: (message.content as readonly JsonObject[]).filter(part => part.type === 'text').map(part => typeof part.text === 'string' ? part.text : '').join('\n')} : message
+function withoutImage(message: Message): Message { return imageFreeMessage(message) }
+function wireMessages(inputs: readonly CascadedLlmInput[]): Message[] {
+  if (!inputs.some(input=>input.kind==='tool_result'&&input.images?.length)) return inputs.map(message)
+  const results=inputs.filter(input=>input.kind==='tool_result'),other=inputs.filter(input=>input.kind!=='tool_result')
+  return [...results.map(message),...toolObservations(results) as unknown as Message[],...other.map(message)]
 }

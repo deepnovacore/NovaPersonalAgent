@@ -9,9 +9,10 @@ import type {ScheduledRunGrant} from './scheduled-run-authority.js'
 import type {CascadedLlmTool} from '../realtime/cascaded/llm.js'
 import type {JsonValue} from '../core/events.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
+import {computerUseStateSchema} from './computer-use/contract.js'
 import {buildStatusSchema} from './workbench-store.js'
 export const planReferenceSchema=z.object({id:z.string(),version:z.number().int().positive(),title:z.string().max(120)}).strict()
-export const localBuildSchema=z.object({project:z.string(),plan_id:z.string(),plan_version:z.number().int().positive(),source_conversation_id:z.string(),status:buildStatusSchema,reason:z.string().nullable().default(null),log_revision:z.number().int().nonnegative().default(0),approval:z.object({id:z.string(),call_id:z.string(),name:z.string(),preview:z.string().max(1800)}).strict().nullable().default(null)}).strict()
+export const localBuildSchema=z.object({computer_use:computerUseStateSchema.optional(),project:z.string(),plan_id:z.string(),plan_version:z.number().int().positive(),source_conversation_id:z.string(),status:buildStatusSchema,reason:z.string().nullable().default(null),log_revision:z.number().int().nonnegative().default(0),approval:z.object({id:z.string(),call_id:z.string(),name:z.string(),preview:z.string().max(1800)}).strict().nullable().default(null)}).strict()
 export const sourceTodoSchema=z.object({id:z.string().min(1).max(512),version:z.number().int().nonnegative()}).strict()
 export interface ConversationTurnContext {user_message_id?:string;local_desktop?:boolean;resume?:boolean;source_todo?:z.infer<typeof sourceTodoSchema>; prepared?:PreparedContent; references?:DiscussionReference[]; refresh?:()=>Promise<ConversationTurnContext>}
 export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),schedule_ref:scheduleReferenceSchema.optional(),references:z.array(discussionReferenceSchema).max(2).optional(),source_todo:sourceTodoSchema.optional(),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),full_text_ref:z.boolean().optional(),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
@@ -24,7 +25,7 @@ export function createConversation(kind:Conversation['kind'],title:string,subjec
 export function nextConversationTitle(items:readonly Pick<Conversation,'title'>[]):string{const titles=new Set(items.map(item=>item.title));let number=1;while(titles.has(`新对话 ${number}`))number++;return `新对话 ${number}`}
 export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat',nextConversationTitle([]),null,'chat:main'),createConversation('proactive','主动提醒',null,'chat:proactive')],work_owners:{},approval_owners:{}}}
 export interface ConversationRuntime {
- toolBridge?:{readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
+ toolBridge?:{computerRun?:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal)=>Promise<JsonValue>;readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
  stopBuild?():Promise<void>
  localApproval?(id:string,approved:boolean):Promise<void>
  retainTasks?():boolean

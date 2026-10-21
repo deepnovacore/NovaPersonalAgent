@@ -1,34 +1,18 @@
-import {homedir} from 'node:os'
-import {join} from 'node:path'
+import type {ComputerConfig} from './computer-config.js'
+export {loadComputerConfig,type ComputerConfig} from './computer-config.js'
 import type {HostApprovalController} from '../core/approval.js'
 import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../core/causal-runtime.js'
 import type {AgentController, AgentRuntimeDispatchPort} from './agent-controller.js'
 import {startComputerBackend} from './computer-backend.js'
 import {GuiExecutionLifecycle} from './gui-execution.js'
-import {runGui, validGuiConfig, type GuiModelConfig, type GuiProgress} from './gui-runner.js'
+import {runGui, validGuiConfig, type GuiProgress} from './gui-runner.js'
 import {guardComputerDevice, guiApproval, computerForeground, validComputerDisplayId} from './computer-device.js'
 
-export interface ComputerConfig extends GuiModelConfig {displayId: string; lockRoot: string; resourcesPath?: string; clickHoldMs?: number; macWindow?: {pid: number; windowId: number}}
 interface ComputerOptions {beforeWrite?: () => void; capture?: (image: string, steps: number) => void; diagnostic?: (message: string) => void; signal: AbortSignal; recordProcess?: (pid: number) => Promise<void>; approve: (name: string, params: unknown) => Promise<boolean>; progress: (event?: GuiProgress) => void}
 export const COMPUTER_DESCRIPTOR = Object.freeze({name: 'computer', summary:
   'Operates the explicitly configured local macOS or Windows display, or an opt-in background Safari key window, using screenshots and coordinates under user supervision. Each input needs approval; model completion still needs verification.',
   ownedChannels: Object.freeze(['computer'])})
 
-export function loadComputerConfig(env: NodeJS.ProcessEnv): ComputerConfig {
-  const config = {...(env.CODEX_RESOURCES_PATH ? {resourcesPath: env.CODEX_RESOURCES_PATH} : {}), displayId: env.COMPUTER_DISPLAY_ID ?? '', baseUrl: env.COMPUTER_BASE_URL ?? '', model: env.COMPUTER_MODEL ?? '',
-    modelFamily: env.COMPUTER_MODEL_FAMILY ?? '', apiKey: env.COMPUTER_API_KEY ?? '', maxSteps: Number(env.COMPUTER_MAX_STEPS ?? 30),
-    budgetMs: Number(env.COMPUTER_TIMEOUT_SECONDS ?? 600) * 1000, settleMs: Number(env.COMPUTER_SETTLE_MS ?? 4000), clickHoldMs: Number(env.COMPUTER_CLICK_HOLD_MS ?? 100),
-    lockRoot: join(homedir(), '.nova-audio-agent', 'gui-devices')}
-  const windowPid = env.COMPUTER_MAC_WINDOW_PID === '' ? undefined : env.COMPUTER_MAC_WINDOW_PID, windowId = env.COMPUTER_MAC_WINDOW_ID === '' ? undefined : env.COMPUTER_MAC_WINDOW_ID
-  let macWindow: ComputerConfig['macWindow']
-  if (windowPid !== undefined || windowId !== undefined) {
-    if (process.platform !== 'darwin' || !/^[1-9]\d{0,9}$/u.test(windowPid ?? '') || !/^[1-9]\d{0,9}$/u.test(windowId ?? '')
-      || Number(windowPid) > 2147483647 || Number(windowId) > 4294967295) throw Error('invalid_computer_configuration')
-    macWindow = {pid: Number(windowPid), windowId: Number(windowId)}
-  }
-  if (!Number.isSafeInteger(config.clickHoldMs) || config.clickHoldMs < 10 || config.clickHoldMs > 1000 || !validComputerDisplayId(config.displayId) || !validGuiConfig(config, 'validate')) throw new Error('invalid_computer_configuration')
-  return {...config, ...(macWindow ? {macWindow} : {})}
-}
 
 export async function runComputer(config: ComputerConfig, instruction: string, options: ComputerOptions): Promise<{code: string; steps: number}> {
   if (options.signal.aborted) return {code: 'cancelled', steps: 0}

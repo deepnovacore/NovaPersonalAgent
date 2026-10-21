@@ -3,7 +3,7 @@ export function computerUseSkill(direct:boolean):string{
  return [
   'Computer Use is enabled for this Build. The user can see an on-screen indicator and can Stop at any time.',
   direct
-   ? 'Take computer_screenshot before acting and after every input; coordinates refer to the latest screenshot. Click a field before computer_type. Prefer one input per step.'
+   ? 'Take computer_screenshot before each click/scroll and before finish; coordinates refer to the latest screenshot. After clicking a field, computer_type and computer_key may follow directly.'
    : 'This model cannot see images; use computer_run for interface work and inspect its returned result.',
   'Use computer_run to hand a whole interface task to the computer agent; it returns after the task ends.',
   'After changing code that affects an interface, start the app with shell_execute, operate it, and fix what you observe; repeat until it works.',
