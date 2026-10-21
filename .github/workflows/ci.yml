@@ -37,6 +37,9 @@ jobs:
       - run: npm install --global npm@11.6.0
       - run: npm ci
       - run: npm run check
+        env:
+          # tsc + eslint over runtime can exceed the default ~2 GB heap on the macOS runner.
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run test:runtime
         if: runner.os != 'Windows'
       # Full runtime regression runs on macOS/Linux; Windows keeps platform
