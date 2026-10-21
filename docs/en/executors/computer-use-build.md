@@ -12,7 +12,7 @@ Enable Computer Use from the local desktop Build conversation. Preflight reports
 
 ## Tools and models
 
-A vision-capable Build model receives screenshot, click, type, scroll and key tools, plus `computer_run` for synchronous delegation. Coordinates refer to the latest returned screenshot, scaled to a longest edge of 1280 pixels. Take a new screenshot before further input.
+A vision-capable Build model receives screenshot, click, type, scroll and key tools, plus `computer_run` for synchronous delegation. Coordinates refer to the latest returned screenshot, scaled to a longest edge of 1280 pixels. Each click or scroll needs a fresh screenshot; typing and keys may follow a click directly.
 
 The current Build vision allowlist is:
 
