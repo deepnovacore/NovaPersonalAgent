@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import {test,before,after} from 'node:test'
-import {mkdtemp,readFile,writeFile,mkdir,rm,stat,realpath,readdir} from 'node:fs/promises'
+import {mkdtemp,readFile,writeFile,mkdir,rm,stat,realpath,readdir,symlink} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join,resolve} from 'node:path'
 import {pathToFileURL} from 'node:url'
-import {executeLocalTool,localPath,LOCAL_OUTPUT_BYTES,LOCAL_FILE_BYTES,canonicalProject} from '../src/personal-agent/local-tools.js'
+import {executeLocalTool,localPath,localPathEscapesProject,LOCAL_OUTPUT_BYTES,LOCAL_FILE_BYTES,canonicalProject} from '../src/personal-agent/local-tools.js'
 import {executeLocalShell,localShellEnvironment,localShellProcessGone,type LocalShellProcess} from '../src/personal-agent/local-shell.js'
 import type {JsonValue} from '../src/core/events.js'
 
@@ -141,4 +141,17 @@ test('native shell persists its process identity before the execution gate opens
   assert.ok(owner);assert.equal(result.cleanup_confirmed,true);assert.equal(localShellProcessGone(owner),true)
   await assert.rejects(readFile(join(root,'side-effect')))
  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('local path escape check follows links and treats the project root and its children as inside',async()=>{
+ const root=await fixture(),outside=await fixture()
+ try{
+  await mkdir(join(root,'src'));await writeFile(join(root,'src','a.txt'),'a');await writeFile(join(outside,'secret.txt'),'s')
+  for(const inside of ['.','src','src/a.txt','src/missing.txt','./src/../src/a.txt'])assert.equal(await localPathEscapesProject(root,inside),false,inside)
+  for(const escaping of ['..','../x',join(outside,'secret.txt'),join(root,'..')])assert.equal(await localPathEscapesProject(root,escaping),true,escaping)
+  if(process.platform!=='win32'){
+   await symlink(outside,join(root,'link'));await symlink(join(outside,'secret.txt'),join(root,'file-link'))
+   for(const linked of ['link','link/secret.txt','link/new.txt','file-link'])assert.equal(await localPathEscapesProject(root,linked),true,linked)
+  }
+ }finally{await rm(root,{recursive:true,force:true});await rm(outside,{recursive:true,force:true})}
 })

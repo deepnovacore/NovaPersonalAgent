@@ -34,6 +34,16 @@ export function localPath(project:string,path:string,platform:NodeJS.Platform=pr
  }
  return posix.resolve(project,path)
 }
+/** True when the path resolves, after following existing links, outside the project. The host asks before such reads. */
+export async function localPathEscapesProject(project:string,path:string,platform:NodeJS.Platform=process.platform):Promise<boolean>{
+ const target=localPath(project,path,platform),flavor=platform==='win32'?win32:posix
+ const real=await realpath(target).catch(async()=>{
+  // A missing leaf cannot be a link; judge its nearest existing parent so `link/new.txt` is still seen through `link`.
+  const parent=flavor.dirname(target);return parent===target?target:flavor.join(await realpath(parent).catch(()=>parent),flavor.basename(target))
+ })
+ const relative=flavor.relative(project,real)
+ return relative===''?false:relative==='..'||relative.startsWith('..'+flavor.sep)||flavor.isAbsolute(relative)
+}
 export async function canonicalProject(path:string):Promise<string>{
  if(!isAbsolute(path)||path.includes('\0'))throw Error('invalid_project_directory')
  const canonical=await realpath(localPath(dirname(path),path))

@@ -223,6 +223,27 @@ test('Build requires approval before side effects, stops on denial and does not 
  }finally{await f.close()}
 })
 
+test('Build reads inside the project without approval',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step===0?{call:{name:'file_read',arguments:{path:'inside.txt'}}}:{text:'已读取'})
+ try{
+  await writeFile(join(f.root,'inside.txt'),'内容')
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.notEqual(buildView(f.host,id).status,'awaiting_approval');assert.equal(f.script.requests.length,2)
+ }finally{await f.close()}
+})
+
+test('Build asks before a read leaves the project and stops on denial',{skip:!supported},async()=>{
+ const outside=await mkdtemp(join(await realpath(tmpdir()),'nova-outside-'))
+ const f=await fixture((_request,step)=>step===0?{call:{name:'file_read',arguments:{path:join(outside,'secret.txt')}}}:{text:'完成'})
+ try{
+  await writeFile(join(outside,'secret.txt'),'secret')
+  const id=await f.build(),view=await until(()=>buildView(f.host,id),view=>view.status==='awaiting_approval')
+  assert.ok(view.approval)
+  await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).reason,'approval_denied');assert.equal(f.script.requests.length,1)
+ }finally{await f.close();await rm(outside,{recursive:true,force:true})}
+})
+
 test('approval is scoped to exact call, native Build stays separate and local authority is rechecked',{skip:!supported},async()=>{
  const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'new.txt',content:'批准后写入'}}}:{text:'已完成'})
  try{

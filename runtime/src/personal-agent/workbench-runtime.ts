@@ -3,7 +3,7 @@ import {z} from 'zod'
 import type {Conversation,ConversationRuntime,ConversationTurnContext} from './conversations.js'
 import type {PersonalAgentHost} from './host.js'
 import type {CascadedLlmFactory,CascadedLlmSession,CascadedLlmTool} from '../realtime/cascaded/llm.js'
-import {LOCAL_TOOLS,executeLocalTool,isLocalTool,localToolArguments,projectResourceKey} from './local-tools.js'
+import {LOCAL_TOOLS,executeLocalTool,isLocalTool,localPathEscapesProject,localToolArguments,projectResourceKey} from './local-tools.js'
 import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources} from '../executors/task-resources.js'
 import {localShellProcessGone,type LocalShellOptions} from './local-shell.js'
 import type {WorkbenchCall} from './workbench-store.js'
@@ -80,7 +80,9 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
         if(!validation.success){call.result={code:'invalid_params',issues:validation.error.issues.map(issue=>({path:issue.path.map(String).join('.'),message:issue.message}))};call.state='completed'}
         else{
          if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
-         if(call.name!=='file_read'&&options.approval==='ask'&&!await ask(call,signal)){
+         // Reads inside the project stay free; a read that leaves it needs the same consent as a write.
+         const needsApproval=options.approval==='ask'&&(call.name!=='file_read'||await localPathEscapesProject(conversation.build!.project,(validation.data as {path:string}).path).catch(()=>true))
+         if(needsApproval&&!await ask(call,signal)){
           call.result={status:'denied',message:'This call was not executed. Wait for new user instructions.'};call.state='completed';state.reason=signal.aborted?'stopped':'approval_denied';await save();return
          }
          signal.throwIfAborted();if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
@@ -117,7 +119,13 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
       }
       if(!wasCompleted&&(call.result as {status?:string}|undefined)?.status==='outcome_unknown'){state.reason='outcome_unknown';if(build&&call.name==='shell_execute'&&(call.result as {cleanup_confirmed?:boolean}).cleanup_confirmed===false){quarantineTaskResources([projectResourceKey(conversation.build!.project)]);release=undefined}}
      }
-     const concurrent=(call:WorkbenchCall)=>allowed.has(call.name)&&(call.name==='file_read'||toolBridge.readonlyNames.includes(call.name))
+     // The approval slot is single; a read that must ask therefore runs alone like a write.
+     const askingReads=new Set<string>()
+     if(build&&options.approval==='ask')for(const call of state.pending_calls)if(call.name==='file_read'&&call.state!=='completed'){
+      const q=localToolArguments.file_read.safeParse(call.arguments)
+      if(!q.success||await localPathEscapesProject(conversation.build!.project,q.data.path).catch(()=>true))askingReads.add(call.id)
+     }
+     const concurrent=(call:WorkbenchCall)=>allowed.has(call.name)&&(call.name==='file_read'&&!askingReads.has(call.id)||toolBridge.readonlyNames.includes(call.name))
      for(let index=0;index<state.pending_calls.length;){
       const call=state.pending_calls[index]!
       if(call.state==='completed'){index++;continue}
