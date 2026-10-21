@@ -263,3 +263,10 @@ test('a failed independent card request never replaces an existing draft referen
  assert.equal(h.c.submitText('Plan B','chat:main',[b]),true);const request=h.sent.at(-1);h.c.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'stale_reference'});await new Promise(resolve=>setImmediate(resolve))
  assert.equal(h.c.draft,'Draft about A');assert.deepEqual(h.c.state().references,[a]);assert.equal(h.c.state().failed_card.text,'Plan B');assert.deepEqual(h.c.state().failed_card.references,[b]);h.c.disconnect()
 })
+
+test('every finished Build is locked, not just the first one in the list',()=>{
+ const {c}=harness()
+ const item=(id,status)=>({id,kind:'build',build:{status}})
+ c.receive({type:'personal.state',revision:1000,feed:[],memory:{entries:[]},conversations:{selected_id:'b2',voice_id:null,items:[item('b1','finished'),item('b2','finished'),item('b3','running'),{id:'chat',kind:'chat'}]}})
+ assert.deepEqual(['b1','b2','b3','chat'].map(id=>c.isBuildFinished(id)),[true,true,false,false])
+})

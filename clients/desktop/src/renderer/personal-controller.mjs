@@ -26,7 +26,7 @@ export class PersonalController {
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get selectedConversation(){return this.snapshot?.conversations?.items?.find(item=>item.id===this.selectedId)??null}
   get activeBuild(){return this.snapshot?.conversations?.items?.find(item=>item.kind==='build'&&['running','awaiting_approval'].includes(item.build?.status))??null}
-  get finishedBuild(){return this.snapshot?.conversations?.items?.find(item=>item.kind==='build'&&item.build?.status==='finished')??null}
+  isBuildFinished(id){return this.snapshot?.conversations?.items?.some(item=>item.id===id&&item.kind==='build'&&item.build?.status==='finished')===true}
   get buildWaitingApproval(){return this.selectedConversation?.kind==='build'&&this.selectedConversation.build?.status==='awaiting_approval'}
   async guardBuildSwitch(){const active=this.activeBuild;if(!active)return true;if(!await this.confirmBuildSwitch())return false;await this.command('build.stop',{id:active.id});return true}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
@@ -223,7 +223,7 @@ export class PersonalController {
   }
   async submit(){
     const id=this.selectedId,state=this.state(id)
-    if(!this.presentationReady||!id||state.submission||this.finishedBuild?.id===id||(this.buildWaitingApproval&&this.selectedId===id)||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
+    if(!this.presentationReady||!id||state.submission||this.isBuildFinished(id)||(this.buildWaitingApproval&&this.selectedId===id)||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
     const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,...(state.references?.length?{references:structuredClone(state.references)}:{}),...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
     state.submission=request;state.draft='';state.source_todo=null;state.references=[];state.error='';this.changed();return true
@@ -233,7 +233,7 @@ export class PersonalController {
   submitText(text,id=this.selectedId,references=[]){
     const state=this.state(id),keep=()=>{if(!state.draft){state.draft=text;state.references=references;}this.changed();return false}
     if(!id||!text.trim()||text.length>4000)return false
-    if(!this.presentationReady||state.submission||this.finishedBuild?.id===id||(this.buildWaitingApproval&&this.selectedId===id)||(id===this.selectedId?this.isVoiceConversation:this.voiceId===id)||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input'))return keep()
+    if(!this.presentationReady||state.submission||this.isBuildFinished(id)||(this.buildWaitingApproval&&this.selectedId===id)||(id===this.selectedId?this.isVoiceConversation:this.voiceId===id)||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input'))return keep()
     const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false,independent:true,...(references.length?{references:structuredClone(references)}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';return keep()}
     state.submission=request;state.error='';this.changed();return true
