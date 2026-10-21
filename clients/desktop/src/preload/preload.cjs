@@ -41,6 +41,15 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
       return () => ipcRenderer.removeListener('nova:personal:collapsed', listener)
     },
   }),
+  computerUse: Object.freeze({
+    overlay: frame => ipcRenderer.send('nova:computer-overlay:frame', frame),
+    clear: () => ipcRenderer.send('nova:computer-overlay:clear'),
+    onStop: callback => {
+      const listener = (_event, id) => { if (typeof id === 'string') callback(id) }
+      ipcRenderer.on('nova:computer-overlay:stop-request', listener)
+      return () => ipcRenderer.removeListener('nova:computer-overlay:stop-request', listener)
+    },
+  }),
   language: process.argv.includes('--nova-language=en') ? 'en' : 'zh-CN',
   wakeWord: Object.freeze({
     sleep: () => ipcRenderer.send('nova:wake-word:sleep'),

@@ -26,6 +26,8 @@ const RENDERER_ENTRY_PATHS = Object.freeze([
   '/setup.html',
   '/visor.html',
   '/visor-controls.html',
+  '/computer-edge.html',
+  '/computer-bar.html',
 ])
 
 function relativeRendererRoute(from, specifier) {

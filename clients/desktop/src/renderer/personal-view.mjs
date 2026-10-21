@@ -1,4 +1,5 @@
 import {renderScheduledTasksPage} from './scheduled-tasks-page.mjs'
+import {createComputerUseIndicator} from './computer-use-indicator.mjs'
 import {renderTimeline,timelineDate} from './timeline-view.mjs'
 import {summarizeTasks} from './task-banner.mjs'
 import {createStartupNotice} from './startup-notice.mjs'
@@ -47,11 +48,13 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const run=async(action)=>{try{c.error='';await action()}catch(e){c.error=e.message==='version_conflict'?'内容已在其他操作中更新，请核对最新状态后重试。':e.message;if(c.presentationMode==='background')void api.personal.showPresentationError?.(c.error);update();if(/conflict|version/i.test(e.message)&&c.connected)await c.command('state').catch(()=>{})}update()}
  const button=(label,action,parent,key=Symbol())=>{const b=el('button',label);b.type='button';bindPending(b,key,action);parent.append(b);return b}
  const chips=(parent,values)=>{const row=el('div',undefined,'chips');for(const value of values.filter(Boolean))row.append(el('span',value));parent.append(row)}
+ let computerUse=null
  const c=new PersonalController({send,start,stop,applyPresentation,changed:update,confirmBuildSwitch:()=>new Promise(resolve=>{
   const modal=el('dialog',undefined,'build-switch-dialog');modal.append(el('h2',t('Build 正在执行')),el('p',t('停止并保存进度后再切换，返回时点击 Resume 继续。')))
   const stay=el('button',t('继续执行')),leave=el('button',t('停止并切换'));stay.type=leave.type='button';modal.append(stay,leave)
   const done=value=>{modal.close();modal.remove();resolve(value)};stay.addEventListener('click',()=>done(false));leave.addEventListener('click',()=>done(true));modal.addEventListener('cancel',event=>{event.preventDefault();done(false)});document.body.append(modal);modal.showModal();stay.focus()
  })})
+ computerUse=createComputerUseIndicator({c,api})
  const openSettings=category=>api.orbMenu.openSettings?.(category)
  // The conversation and workspace keep independent state.
  let selected='timeline',initialHome=false,inspector=null,inspectedId=null,returnFocus=null,openSequence=0
@@ -183,7 +186,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const unreadTotal=(c.snapshot?.conversations?.items??[]).reduce((sum,item)=>sum+(item.unread_count??0),0)
   const unreadDot=document.querySelector('#unread-indicator');if(unreadDot)unreadDot.hidden=!unreadTotal
   if(!initialHome&&c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main')){initialHome=true;void run(()=>c.home())}
-  syncLayout();chat.update()
+  syncLayout();chat.update();computerUse?.update()
   if(!c.connected)unreadProjection=null
   const unread=c.connected&&c.snapshot?((c.snapshot.conversations?.unread_count??0)+(c.snapshot.notifications?.local===false?0:pending.reduce((sum,item)=>sum+1+(item.queued??0),0))):undefined
   if(Number.isSafeInteger(unread)&&unread>=0&&unreadProjection!==unread){unreadProjection=unread;void api.personal.setUnread?.(unread)}
@@ -191,7 +194,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   syncPending()
  }
  async function collapse(value){await c.setPresentation(value?'orb':'workbench');if(!value)await showHome()}
- function receive(frame){chat.receive(frame);c.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
+ function receive(frame){chat.receive(frame);c.receive(frame);computerUse?.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.(mode=>run(()=>c.setPresentation(mode)));
  api.personal.onCollapsed?.(value=>c.collapse(value));const dateClock=setInterval(()=>{if(c.presentationMode==='workbench')update()},60000);dateClock.unref?.();update();renderPanel();return {controller:c,receive,identity:value=>chat.identity(value),refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }

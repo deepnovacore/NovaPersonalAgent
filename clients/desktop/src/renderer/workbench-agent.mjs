@@ -1,5 +1,6 @@
 import {t} from './locale.mjs'
 import {renderMarkdown} from './markdown.mjs'
+import {mountComputerUseControl} from './computer-use-control.mjs'
 
 /** Bounded snapshots carry only status. Full plans and logs are fetched in small pages. */
 export function mountWorkbenchAgent(parent,{c,el,run,api}){
@@ -8,6 +9,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  for(const value of ['chat','plan','build']){const option=el('option',value[0].toUpperCase()+value.slice(1));option.value=value;option.disabled=value==='build';mode.append(option)}
  bar.append(mode);mode.addEventListener('change',()=>run(()=>c.command('conversations.mode',{id:c.selectedId,mode:mode.value})))
  const status=el('span','','workbench-build-status');status.setAttribute('role','status');bar.append(status)
+ const computerUse=mountComputerUseControl(bar,root,{c,el,run,api})
  const stop=el('button',t('停止')),resume=el('button','Resume'),details=el('button',t('执行记录'));for(const button of [stop,resume,details]){button.type='button';bar.append(button)}
  stop.addEventListener('click',()=>run(()=>c.command('build.stop',{id:c.selectedId})));resume.addEventListener('click',()=>run(()=>c.command('build.resume',{id:c.selectedId})))
  const log=el('pre',undefined,'workbench-tool-log');log.hidden=true;root.append(log)
@@ -64,6 +66,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  local.addEventListener('click',()=>run(async()=>{const ref=reference();if(!ref||!directories.value||busy)return;busy=true;update();try{await c.command('build.start',{...ref,project:directories.value})}finally{busy=false;update()}}))
  delegate.addEventListener('click',()=>run(async()=>{const ref=reference();if(!ref||!executors.value||busy)return;busy=true;update();try{await c.command('plans.delegate',{...ref,executor:executors.value})}finally{busy=false;update()}}))
  function update(){
+  computerUse.update()
   const item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status)
   root.hidden=!item||item.kind==='proactive';mode.value=item?.kind==='build'?'build':item?.mode??'chat';mode.disabled=item?.kind==='build'||!c.connected||c.isVoiceConversation
   status.textContent=build?t('Build · {0} · {1}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status),build.project):item?.mode==='plan'?t('澄清需求，发布计划后选择执行方式。'):''

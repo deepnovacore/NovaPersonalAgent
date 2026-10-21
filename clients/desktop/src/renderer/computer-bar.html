@@ -1,0 +1,7 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'"><title>Nova Computer Use</title><link rel="stylesheet" href="./computer-overlay.css"></head><body class="computer-bar-page">
+<section id="bar" class="computer-bar" data-state="idle" aria-label="Nova 正在操作电脑">
+<span class="computer-pulse" aria-hidden="true"><i></i></span>
+<span class="computer-copy"><strong>Nova 正在操作电脑</strong><span id="detail" role="status" aria-live="polite">观察屏幕中</span></span>
+<button id="stop" type="button" title="停止 Build 并收回电脑控制"><span aria-hidden="true" class="computer-stop-icon"></span><span>停止</span></button>
+</section>
+<script type="module" src="./computer-bar.mjs"></script></body></html>

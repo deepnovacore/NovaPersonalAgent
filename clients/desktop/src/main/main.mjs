@@ -7,6 +7,7 @@ import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
 import {isEndpointSecret} from '../renderer/compatible-providers.mjs'
 import {installWelcomeIpc} from './welcome-ipc.mjs'
 import {createVisor} from './visor.mjs'
+import {createComputerOverlay} from './computer-overlay.mjs'
 import {parseVoicePreset, exportVoicePreset, MAX_PRESET_BYTES} from '../renderer/voice-preset.mjs'
 import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
 import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-personal-agent/runtime/desktop'
@@ -222,6 +223,7 @@ let settingsApplyStatus = 'idle'
 let settingsRestartPending = false
 let settingsRecoveryAvailable = false
 let visor = null
+let computerOverlay = null
 let visorAI = {state:'idle',muted:false,activated:false}
 let mainWindow = null
 let windowsPresentation = null
@@ -945,6 +947,26 @@ function initializeVisor(launchId) {
     visor.start()
     if (!globalShortcut.register('CommandOrControl+Shift+J',toggleVisor)) console.warn('[nova-visor] Shortcut unavailable; use Themes or tray menu')
   }
+}
+
+function initializeComputerOverlay(launchId) {
+  computerOverlay = createComputerOverlay({partition:`nova-orb-${launchId}`,preload:resolve(packageRoot,'src/preload/computer-overlay.cjs'),
+    onStop:id=>sendToOrb('nova:computer-overlay:stop-request',id),
+    onError:message=>console.error(`[nova-computer-overlay] ${message}`)})
+  const orbSender = event => event.sender===mainWindow?.webContents && event.senderFrame===event.sender.mainFrame
+  ipcMain.on('nova:computer-overlay:frame',(event,frame)=>{if (orbSender(event)) computerOverlay.update(frame)})
+  ipcMain.on('nova:computer-overlay:clear',event=>{if (orbSender(event)) computerOverlay.clear()})
+  ipcMain.handle('nova:computer-overlay:get',event=>{
+    if (!computerOverlay.owns(event.sender) || event.senderFrame!==event.sender.mainFrame) throw new Error('Computer Use overlay access denied')
+    return computerOverlay.snapshot()
+  })
+  ipcMain.handle('nova:computer-overlay:stop',event=>{
+    if (!computerOverlay.barOwns(event.sender) || event.senderFrame!==event.sender.mainFrame) throw new Error('Computer Use overlay access denied')
+    computerOverlay.stop()
+  })
+  // The indicator only reflects a live renderer; a reload or crash must not leave the screen marked as controlled.
+  mainWindow?.webContents.on('did-start-loading',()=>computerOverlay?.clear())
+  mainWindow?.webContents.on('render-process-gone',()=>computerOverlay?.clear())
 }
 
 function toggleVisor() {
@@ -2242,6 +2264,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   await rendererLoaded
   activeLaunchId = launchId
   initializeVisor(launchId)
+  initializeComputerOverlay(launchId)
   if (settingsReady) {
     try { await lifecycleCoordinator.run('startup', async () => {
       await paintStartup('configuration')
@@ -2315,6 +2338,8 @@ async function startSelectedCamera(camera, smokeChannel) {
       } else if (status.state !== 'starting' && status.state !== 'stopped') {
         sendToOrb('nova:backend-exit')
       }
+      // The runtime owns the lease; without a connected runtime nothing is acting on the screen.
+      if (status.state !== 'connected') computerOverlay?.clear()
     },
   })
   if (settingsReady && configurationReady) void managedWorkspaceBackendRecovery.start()
@@ -2490,6 +2515,7 @@ app.on('before-quit', event => {
   if (quitDrained) return
   app.isQuitting = true
   visor?.dispose()
+  computerOverlay?.dispose()
   releaseSmokeChannel?.close()
   globalShortcut.unregisterAll()
   wakeWord?.stop()
