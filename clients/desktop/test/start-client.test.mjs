@@ -172,6 +172,36 @@ test('client resolves an npm Windows shim directory to its native Codex binary',
   assert.equal(attempted.some(candidate => candidate.endsWith('codex.cmd')), false)
 })
 
+test('client skips the extensionless npm shell shim on Windows and finds the nvm native binary', () => {
+  const npmRoot = 'C:\\nvm4w\\nodejs'
+  const native = `${npmRoot}\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe`
+  const attempted = []
+  const selected = resolveClientCodexBinary({
+    platform: 'win32', arch: 'x64', home: 'C:\\Users\\nova', pathValue: npmRoot,
+    canonicalize: candidate => {
+      attempted.push(candidate)
+      return candidate === `${npmRoot}\\codex` || candidate === native ? candidate : null
+    },
+  })
+  assert.equal(selected, native)
+  assert.ok(attempted.includes(`${npmRoot}\\codex`))
+  assert.equal(attempted.some(candidate => candidate.endsWith('codex.cmd')), false)
+})
+
+test('client resolves only the configured absolute native binary before desktop startup', () => {
+  for (const [platform, configured, native] of [
+    ['win32', 'C:\\Tools\\codex.exe', 'C:\\Real\\codex.exe'],
+    ['darwin', '/opt/bin/codex', '/real/bin/codex'],
+  ]) {
+    const attempted = []
+    assert.equal(resolveClientCodexBinary({
+      configured, platform, pathValue: platform === 'win32' ? 'C:\\Other' : '/other',
+      canonicalize: candidate => { attempted.push(candidate); return native },
+    }), native)
+    assert.deepEqual(attempted, [configured])
+  }
+})
+
 test('client launch plan installs when needed, builds once, and forces the Node desktop backend', () => {
   const plan = planClientLaunch({
     argv: [],

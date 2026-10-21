@@ -26,7 +26,7 @@ function waitForText(stream, predicate, timeoutMs = 10_000) {
     }
     const onClose = () => {
       cleanup()
-      rejectWait(new Error('Windows guardian output closed early'))
+      rejectWait(new Error(`Windows guardian output closed early: ${JSON.stringify(output)}; stderr: ${stream.guardianStderr ?? ''}`))
     }
     const cleanup = () => {
       clearTimeout(timeout)
@@ -55,16 +55,18 @@ async function waitProcessGone(pid) {
   assert.equal(processGone(pid), true)
 }
 
-async function launchGuardian(guardian, cwd, targetArguments) {
+async function launchGuardian(guardian, cwd, targetArguments, terminateOnLeaderExit = false) {
+  const target = await realpath(process.execPath)
   const environment = {...process.env}
   // A Node target launched by the guardian is a product process, not another
   // worker in the surrounding `node --test` control plane.
   delete environment.NODE_TEST_CONTEXT
   delete environment.NODE_TEST_WORKER_ID
   const child = spawn(guardian, [
-    '--target', process.execPath,
+    '--target', target,
     '--cwd', cwd,
-    '--', process.execPath,
+    ...(terminateOnLeaderExit ? ['--terminate-on-leader-exit'] : []),
+    '--', target,
     ...targetArguments,
   ], {
     cwd,
@@ -74,8 +76,41 @@ async function launchGuardian(guardian, cwd, targetArguments) {
   })
   const control = child.stdio[3]
   assert.ok(child.stdin && child.stdout && child.stderr && control)
+  child.stderr.on('data', chunk => { control.guardianStderr = (control.guardianStderr ?? '') + String(chunk) })
   return {child, control}
 }
+
+test('Windows command guardian returns the real leader exit and removes lingering descendants', {
+  skip: process.platform !== 'win32',
+  timeout: 60_000,
+}, async () => {
+  const outputRoot = await mkdtemp(resolve(tmpdir(), 'nova-windows-command-build-'))
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'nova-windows-command-fixture-'))
+  const marker = resolve(fixtureRoot, 'grandchild-alive')
+  await writeFile(marker, '')
+  let child = null
+  let control = null
+  try {
+    const guardian = await buildWindowsJobGuardian({packageRoot, outputRoot, platform: process.platform, arch: process.arch})
+    ;({child, control} = await launchGuardian(guardian, await realpath(packageRoot), [targetFixture, 'leader-first', marker], true))
+    const ready = await waitForText(control, value => value.includes('\n'))
+    const targetPid = Number(/"targetPid":(\d+)/u.exec(ready)?.[1])
+    const exitPromise = waitForText(control, value => value.includes('"treeEmpty":true}\n'))
+    const targetLine = await waitForText(child.stdout, value => value.includes('\n'))
+    const grandchildPid = Number(/^grandchild:(\d+)\n/u.exec(targetLine)?.[1])
+    assert.ok(targetPid > 0 && grandchildPid > 0)
+    const exited = await exitPromise
+    assert.match(exited, /\{"type":"exit","version":1,"leaderExitCode":0,"treeEmpty":true\}\n/u)
+    assert.equal(await new Promise(resolveExit => child.once('exit', resolveExit)), 0)
+    await waitProcessGone(targetPid)
+    await waitProcessGone(grandchildPid)
+  } finally {
+    if (child?.exitCode === null) child.kill()
+    control?.destroy()
+    await rm(fixtureRoot, {recursive: true, force: true})
+    await rm(outputRoot, {recursive: true, force: true})
+  }
+})
 
 test('Windows Job guardian keeps leader-first descendants owned and force-closes the complete tree', {
   skip: process.platform !== 'win32',

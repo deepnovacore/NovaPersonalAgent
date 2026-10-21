@@ -325,7 +325,7 @@ test('Qwen rejects mixed text/tool output, malformed arguments, and mismatched t
     delta: {tool_calls: [{index: 0, id: 'call', function: {name: 't', arguments: '{'}}]},
     finish_reason: 'tool_calls',
   }]}).stream(request))
-  assert.deepEqual(malformed.at(-1), {kind: 'response_failed', response_id: 'resp', code: 'protocol'})
+  assert.deepEqual(malformed.at(-1), {kind: 'response_failed', response_id: 'resp', code: 'protocol',detail:'tool_arguments_json'})
 
   const session = createQwenCascadedLlmFactory({
     baseUrl: 'https://dashscope.example/v1', apiKey: 'dash-secret', model: 'qwen-flash',
@@ -418,19 +418,19 @@ test('Qwen rejects nonzero or multiple tool indexes and pins its first response 
     delta: {tool_calls: [{index, id: `call-${index}`, function: {name: 't', arguments: '{}'}}]},
     finish_reason: 'tool_calls',
   })
-  for (const [calls, ids] of [
-    [[tool(1)], ['resp']] as const,
+  for (const [calls, ids, detail] of [
+    [[tool(1)], ['resp'], 'tool_call_limit'] as const,
     [[{delta: {tool_calls: [
       {index: 0, id: 'call-0', function: {name: 'a', arguments: '{}'}},
       {index: 1, id: 'call-1', function: {name: 'b', arguments: '{}'}},
-    ]}, finish_reason: 'tool_calls'}], ['resp']] as const,
-    [[{delta: {content: 'x'}}, {delta: {}, finish_reason: 'stop'}], ['resp-1', 'resp-2']] as const,
+    ]}, finish_reason: 'tool_calls'}], ['resp'], 'tool_call_limit'] as const,
+    [[{delta: {content: 'x'}}, {delta: {}, finish_reason: 'stop'}], ['resp-1', 'resp-2'], 'response_id'] as const,
   ]) {
     const events = await collect(invalid(calls, ids).stream({
       inputs: [{kind: 'user_text', text: 'private prompt'}], tools: [], signal: new AbortController().signal,
     }))
     assert.equal(events[0]?.kind, 'response_started')
-    assert.deepEqual(events.at(-1), {kind: 'response_failed', response_id: ids[0], code: 'protocol'})
+    assert.deepEqual(events.at(-1), {kind: 'response_failed', response_id: ids[0], code: 'protocol',detail})
   }
 })
 
@@ -478,7 +478,7 @@ test('Qwen emits safe response_failed events and bounds a noncooperative cancel'
   }).open()
   const failed = await collect(failure.stream({inputs: [{kind: 'user_text', text: 'prompt-secret'}],
     tools: [], signal: new AbortController().signal}))
-  assert.deepEqual(failed, [{kind: 'response_failed', response_id: 'resp-safe', code: 'protocol'}])
+  assert.deepEqual(failed, [{kind: 'response_failed', response_id: 'resp-safe', code: 'protocol',detail:'incomplete_stream'}])
   assert.doesNotMatch(JSON.stringify(failed), /api-secret|prompt-secret|transcript-secret|provider-body-secret|tool-argument-secret|private/u)
 
   const hanging = createQwenCascadedLlmFactory({

@@ -5,13 +5,23 @@ import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
-import {PersonalStore,initialState,acquirePersonalLock,type PersonalState} from '../src/personal-agent/store.js';
+import {PersonalStore,initialState,acquirePersonalLock,renamePersonalStoreFile,type PersonalState} from '../src/personal-agent/store.js';
 import {createConversation} from '../src/personal-agent/conversations.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js';
 import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js';
 
 const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done});return {promise,resolve}};
+
+test('personal store replacement retries only transient Windows sharing failures',async()=>{
+ let attempts=0
+ await renamePersonalStoreFile('temporary','personal.json',()=>{attempts++;return attempts<4?Promise.reject(Object.assign(Error('sharing_violation'),{code:'EPERM'})):Promise.resolve()},'win32')
+ assert.equal(attempts,4)
+ attempts=0
+ await assert.rejects(renamePersonalStoreFile('temporary','personal.json',()=>{attempts++;return Promise.reject(Object.assign(Error('permission_denied'),{code:'EPERM'}))},'linux'),/permission_denied/)
+ assert.equal(attempts,1)
+});
+
 async function fixture(){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-restore-')),path=join(dir,'personal.json');
  const state=initialState();state.user_scope='fixture';state.revision=12;

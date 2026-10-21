@@ -44,9 +44,21 @@ test('directory and connector authorization IPC accept both windows and reject o
  let handler;new Function('ipcMain','mainWindow','settingsWindow','shell','connectorAuthorizationUrl',connector)({handle:(_,fn)=>{handler=fn}},mainWindow,settingsWindow,{openExternal:async url=>opened.push(url)},url=>url)
  await assert.rejects(handler({sender:{}},'https://x'),/rejected/)
  await handler({sender:mainWindow.webContents},'https://a');await handler({sender:settingsWindow.webContents},'https://b');assert.deepEqual(opened,['https://a','https://b'])
- const directory=source.slice(source.indexOf("  ipcMain.handle('nova:personal:directory'"),source.indexOf('  const bindPresentationClose ='))
+ const directory=source.slice(source.indexOf("  ipcMain.handle('nova:personal:directory'"),source.indexOf("  ipcMain.handle('nova:personal:build-directory'"))
  new Function('ipcMain','mainWindow','settingsWindow','dialog',directory)({handle:(_,fn)=>{handler=fn}},mainWindow,settingsWindow,{showOpenDialog:async(owner)=>{dialogs.push(owner);return {canceled:false,filePaths:['/p']}}})
  await assert.rejects(handler({sender:{}}),/rejected/)
  assert.equal(await handler({sender:mainWindow.webContents}),'/p');assert.equal(await handler({sender:settingsWindow.webContents}),'/p')
  assert.deepEqual(dialogs,[mainWindow,settingsWindow],'the dialog is parented to the requesting window')
+})
+
+test('Build directory IPC is translated and accepts only the workbench window', async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const block=source.slice(source.indexOf("  ipcMain.handle('nova:personal:build-directory'"),source.indexOf('  const bindPresentationClose ='))
+ const mainWindow={webContents:{}},settingsWindow={webContents:{}},dialogs=[]
+ let handler
+ new Function('ipcMain','mainWindow','dialog','t',block)({handle:(_,fn)=>{handler=fn}},mainWindow,{showOpenDialog:async(owner,options)=>{dialogs.push({owner,options});return {canceled:false,filePaths:['/project']}}},text=>'translated:'+text)
+ await assert.rejects(handler({sender:{}}),/rejected/)
+ await assert.rejects(handler({sender:settingsWindow.webContents}),/rejected/)
+ assert.equal(await handler({sender:mainWindow.webContents}),'/project')
+ assert.deepEqual(dialogs,[{owner:mainWindow,options:{title:'translated:选择本地 Build 项目目录',properties:['openDirectory']}}])
 })

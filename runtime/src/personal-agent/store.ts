@@ -28,6 +28,28 @@ export interface PersonalState {
 export const initialState = (): PersonalState => ({ notification_task_baseline:[],notification_intents:{},notification_fingerprints:{},notifications_initialized:false,conversations:initialConversations(), user_scope: null, revision: 0, feed: [], dedupe: [], brief_runs: {}, settings: { discovery_enabled: true, discovery_interval_minutes: 30 }, receipts: {} });
 // ponytail: bounded JSON ledger; move to the existing Worker if 10000 retained matters are needed.
 const MAX_STORE_BYTES = 16 * 1024 * 1024;
+const WINDOWS_RENAME_RETRY_DELAYS_MS = [25, 50, 75, 100, 125, 150, 175, 200] as const;
+/** Windows can briefly deny replacing a file while another process closes its handle. */
+export async function renamePersonalStoreFile(
+    source: string,
+    destination: string,
+    renameFn: (source: string, destination: string) => Promise<void> = rename,
+    platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            await renameFn(source, destination);
+            return;
+        }
+        catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            const delay = WINDOWS_RENAME_RETRY_DELAYS_MS[attempt];
+            if (platform !== 'win32' || (code !== 'EPERM' && code !== 'EBUSY') || delay === undefined)
+                throw error;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
 const stateSchema = z.object({ notification_task_baseline:z.array(z.string()).default([]),notification_intents:z.record(z.string(),notificationSchema).default({}),notification_fingerprints:z.record(z.string(),z.string()).default({}),notifications_initialized:z.boolean().default(false),conversations:conversationsStateSchema.default(initialConversations), user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), brief_runs:z.record(z.string().max(128),z.object({status:z.enum(['processing','success','failed','empty']),attempts:z.number().int().min(1).max(3),last_attempt_at:z.iso.datetime()})).default({}), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
 export class PersonalStore {
     constructor(readonly path: string) { }
@@ -76,7 +98,7 @@ export class PersonalStore {
             await file.close();
         }
         try {
-            await rename(tmp, this.path);
+            await renamePersonalStoreFile(tmp, this.path);
             // Node cannot fsync directories on Windows; the file was synced before rename.
             if (process.platform !== 'win32') {
                 const directory = await open(dirname(this.path), constants.O_RDONLY);

@@ -138,6 +138,7 @@ export const settingsSchema = z.object({
   suggestion_cooldown: z.number().finite().nonnegative().nullable().default(null),
   fresh_window: z.number().finite().nonnegative().nullable().default(null),
   codex_approval_mode: executorApprovalModeSchema.default('ask'),
+  local_tool_approval: z.enum(['ask','never']).default('ask'),
   clarification_depth: clarificationDepthSchema.default('balanced'),
   plan_readback: planReadbackSchema.default('summary'),
   generate_plan: z.boolean().default(true),
@@ -813,6 +814,7 @@ const EXECUTOR_OWNED_SETTINGS: Readonly<Record<string, (environment: NodeJS.Proc
     codex_approval_mode: parseExecutorApprovalMode(
       environment.CODEX_APPROVAL_MODE,
     ),
+    local_tool_approval: environment.NOVA_LOCAL_TOOL_APPROVAL,
   }),
 }
 

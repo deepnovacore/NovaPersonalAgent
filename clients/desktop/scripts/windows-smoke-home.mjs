@@ -45,10 +45,24 @@ export function prepareWindowsSmokeHomeOwnership({
     : null
   if (identity?.status !== 0 || identity?.error !== undefined || identity?.signal !== null
     || match === null) throw new Error('installed_candidate_invalid')
+  const powershell = win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  // Use the framework directly: a PowerShell 7 parent can pass a PSModulePath that prevents
+  // Windows PowerShell 5 from loading Get-Acl's security module.
+  const script = `$ErrorActionPreference = 'Stop'; $path = '${home.replaceAll("'", "''")}'; $section = [System.Security.AccessControl.AccessControlSections]::Owner; if ([System.IO.Directory]::Exists($path)) { $acl = [System.IO.Directory]::GetAccessControl($path, $section) } else { $acl = [System.IO.File]::GetAccessControl($path, $section) }; $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value`
+  const readOwner = () => {
+    const result = run(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], options)
+    if (result?.status !== 0 || result?.error !== undefined || result?.signal !== null
+      || typeof result.stdout !== 'string' || !/^S-1-(?:[0-9]+-){1,15}[0-9]+$/u.test(result.stdout.trim())) throw new Error('installed_candidate_invalid')
+    return result.stdout.trim()
+  }
+  // Ordinary users can own a fixture without holding WRITE_OWNER. Do not request an unnecessary
+  // ownership change; still verify the actual SID rather than treating access denied as success.
+  if (readOwner() === match[1]) return
   const ownership = run(win32.join(systemRoot, 'System32', 'icacls.exe'), [
     home, '/setowner', `*${match[1]}`, '/Q',
   ], options)
-  if (ownership?.status !== 0 || ownership?.error !== undefined || ownership?.signal !== null) {
+  if (ownership?.status !== 0 || ownership?.error !== undefined || ownership?.signal !== null
+    || readOwner() !== match[1]) {
     throw new Error('installed_candidate_invalid')
   }
 }

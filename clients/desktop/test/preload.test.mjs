@@ -100,6 +100,14 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   assert.equal(typeof exposed.settings.onChanged(null), 'function')
 })
 
+test('preload exposes the local Build directory chooser through the personal bridge', async () => {
+  const {exposed, invokes} = await loadPreload()
+
+  assert.equal(typeof exposed.personal.chooseBuildDirectory, 'function')
+  await exposed.personal.chooseBuildDirectory()
+  assert.deepEqual(invokes, [{channel: 'nova:personal:build-directory', payload: undefined}])
+})
+
 test('preload exposes first-run setup as a fixed set of channels', async () => {
   const { exposed, ipcRenderer, invokes, sends } = await loadPreload()
 

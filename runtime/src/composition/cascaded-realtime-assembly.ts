@@ -57,6 +57,7 @@ import {
 } from './realtime-assembly.js'
 import {createArkCascadedLlmFactory} from '../realtime/cascaded/ark-llm.js'
 import {type CascadedLlmFactory} from '../realtime/cascaded/llm.js'
+import type {LlmTransportOptions} from '../realtime/cascaded/llm-stream-limits.js'
 import {
   type AsrClient,
   type AsrFactory,
@@ -104,6 +105,7 @@ export type CascadedTtsClientFactory = (input: {
 }) => TtsClient
 
 export type QwenCascadedFactory = (input: {
+  readonly transport?:LlmTransportOptions
   readonly onUsage?: UsageReporter
   readonly config: QwenCascadedLlmConfig
   readonly clock: Clock
@@ -112,6 +114,7 @@ export type QwenCascadedFactory = (input: {
 }) => CascadedLlmFactory
 
 export type ArkCascadedFactory = (input: {
+  readonly transport?:LlmTransportOptions
   readonly onUsage?: UsageReporter
   readonly config: ArkCascadedLlmConfig
   readonly instructions: string
@@ -153,6 +156,7 @@ export interface VolcengineAsrFactoryInput {
 }
 
 export interface QwenLlmFactoryInput {
+  readonly transport?:LlmTransportOptions
   readonly onUsage?: UsageReporter
   readonly config: QwenCascadedLlmConfig
   readonly clock: Clock
@@ -162,6 +166,7 @@ export interface QwenLlmFactoryInput {
 }
 
 export interface ArkLlmFactoryInput {
+  readonly transport?:LlmTransportOptions
   readonly onUsage?: UsageReporter
   readonly config: ArkCascadedLlmConfig
   readonly clock: Clock
@@ -223,6 +228,7 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
     qwen: (input: QwenLlmFactoryInput) => (
       input.factory ?? defaultQwenLlmFactory
     )({
+      ...(input.transport?{transport:input.transport}:{}),
       ...(input.onUsage === undefined ? {} : {onUsage: input.onUsage}),
       config: input.config,
       clock: input.clock,
@@ -232,6 +238,7 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
     ark: (input: ArkLlmFactoryInput) => (
       input.factory ?? defaultArkLlmFactory
     )({
+      ...(input.transport?{transport:input.transport}:{}),
       ...(input.onUsage === undefined ? {} : {onUsage: input.onUsage}),
       config: input.config,
       instructions: input.instructions,
@@ -474,10 +481,11 @@ const defaultTtsClient: CascadedTtsClientFactory = input => new DoubaoTtsClient(
 })
 
 const defaultQwenLlmFactory: QwenCascadedFactory = input => input.config.provider==='openai-compatible' && input.config.protocol==='responses'
-  ? createArkCascadedLlmFactory({baseUrl:input.config.baseUrl,apiKey:input.config.apiKey,model:input.config.model,instructions:input.instructions,protocol:'openai-compatible',...(input.onUsage?{onUsage:input.onUsage}:{})})
+  ? createArkCascadedLlmFactory({baseUrl:input.config.baseUrl,apiKey:input.config.apiKey,model:input.config.model,instructions:input.instructions,protocol:'openai-compatible',...input.transport,...(input.onUsage?{onUsage:input.onUsage}:{})})
   : createQwenCascadedLlmFactory({
   ...(input.onUsage === undefined ? {} : {onUsage: input.onUsage}),
   ...input.config,
+  ...input.transport,
   instructions: input.instructions,
   clock: input.clock,
   idFactory: input.idFactory,
@@ -486,6 +494,7 @@ const defaultQwenLlmFactory: QwenCascadedFactory = input => input.config.provide
 const defaultArkLlmFactory: ArkCascadedFactory = input => createArkCascadedLlmFactory({
   ...(input.onUsage === undefined ? {} : {onUsage: input.onUsage}),
   ...input.config,
+  ...input.transport,
   instructions: input.instructions,
 })
 

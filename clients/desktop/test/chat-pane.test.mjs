@@ -26,7 +26,7 @@ test('workbench chrome and composer follow the selected language without transla
   setLanguage(language);const m=mount()
   m.view.receive({type:'personal.state',revision:1,memory:{entries:[]},feed:[],tasks:[],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat',title:'stored title'}],messages:[{id:'u',conversation_id:'chat:main',role:'user',text:'保留原文 Settings'}]}})
   assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,title)
-  assert.equal(m.all().find(n=>n.tag==='textarea').placeholder,placeholder)
+   assert.equal(m.all().find(n=>n.tag==='textarea'&&n.attrs['aria-label']===t('消息草稿')).placeholder,placeholder)
   assert.equal(m.all().find(n=>n.className==='workbench-status').textContent,status)
   assert(m.all().some(n=>n.textContent==='保留原文 Settings'||n.text==='保留原文 Settings'))
  }}finally{setLanguage('zh-CN')}

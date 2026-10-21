@@ -289,7 +289,7 @@ export class CodexAdapterCore {
       let rawOutcome: TransportOutcome
       try {
         rawOutcome = await awaitCodexPhase(
-          () => this.#transport.run({workOrder}, observer, context.beforeWrite?{...deadline.transport,beforeWrite:context.beforeWrite}:deadline.transport, null),
+          () => this.#transport.run({workOrder,...(context.approvedPlan?{approvedPlan:context.approvedPlan}:{})}, observer, context.beforeWrite?{...deadline.transport,beforeWrite:context.beforeWrite}:deadline.transport, null),
           deadline, false,
         )
       } catch (error) {

@@ -20,6 +20,7 @@ import type {ProfileInput,ProfileDraft,ProfileObservation} from './profile-warmu
 
 const batchResult=z.object({batch:z.custom<ProcessingBatch>(),valid:z.boolean(),observed:z.boolean().optional(),published:z.boolean().optional()})
 const originalSchema=z.object({items:z.array(processingRefSchema.and(z.object({source_key:z.string(),text:z.string(),version:z.string(),source_kind:z.string(),observed_at:z.string(),locator:z.string(),source_metadata:z.record(z.string(),z.unknown()).nullable()})))})
+function accountId(value:unknown){return value&&typeof value==='object'&&'account_id' in value?value.account_id:undefined}
 
 /** Uses the existing ScheduleRun/Task ledgers and scheduler wake; owns no timer. */
 export class SourceProcessingAgent{
@@ -37,10 +38,10 @@ export class SourceProcessingAgent{
  async reload(){
   if(!this.enabled)return
   const revision=++this.#revision
-  const account=(this.host.snapshot().feishu as {account_id?:unknown}|null)?.account_id
-  try{const products=await this.operation({action:'products',presentation:true,...(typeof account==='string'?{account_scope:account}: {})}) as UnderstandingSnapshot;const current=(this.host.snapshot().feishu as {account_id?:unknown}|null)?.account_id;if(revision!==this.#revision||current!==account)return;this.#products=products;this.#presentationAccount=typeof account==='string'?account:undefined;this.#error=false
+  const account=accountId(this.host.snapshot().feishu)
+  try{const products=await this.operation({action:'products',presentation:true,...(typeof account==='string'?{account_scope:account}: {})}) as UnderstandingSnapshot;const current=accountId(this.host.snapshot().feishu);if(revision!==this.#revision||current!==account)return;this.#products=products;this.#presentationAccount=typeof account==='string'?account:undefined;this.#error=false
    if(products.news_cleanup_pending)try{await this.host.news.clearSeededInterests();await this.operation({action:'confirm_cleanup'});this.#products.news_cleanup_pending=false}catch{/* Durable marker survives a failed write; retry on the next wake. */}}
-  catch{if(revision!==this.#revision)return;const current=(this.host.snapshot().feishu as {account_id?:unknown}|null)?.account_id;const retained=(typeof current==='string'?current:undefined)===this.#presentationAccount?this.#products.last_success:null;this.#products={...emptyUnderstanding(),last_success:retained??null};this.#error=true}
+  catch{if(revision!==this.#revision)return;const current=accountId(this.host.snapshot().feishu);const retained=(typeof current==='string'?current:undefined)===this.#presentationAccount?this.#products.last_success:null;this.#products={...emptyUnderstanding(),last_success:retained??null};this.#error=true}
  }
  profileSnapshot(){const latest=this.host.schedules.terminalRuns().filter(run=>run.processing).sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at))[0];return {status:this.host.schedules.activeRuns().some(run=>run.processing)?'working':this.#error||latest?.terminal_summary?.outcome==='failed'?'failed':this.#products.profile_pending?'working':this.#products.draft?'ready':'idle',draft:this.#products.draft,last_success:this.#products.last_success,needs_update:this.#products.profile_needs_update===true,sources:this.#products.sources,processing:[...this.host.schedules.activeRuns(),...this.host.schedules.terminalRuns()].filter(run=>run.processing).sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at)).slice(0,5).map(run=>({started_at:run.claimed_at,status:run.terminal_summary?.outcome??'running',model_calls:run.processing?.model_calls??0,tool_calls:run.processing?.calls.length??0}))}}
  contextSnapshot():ReturnType<WorkbenchContext['snapshot']>{

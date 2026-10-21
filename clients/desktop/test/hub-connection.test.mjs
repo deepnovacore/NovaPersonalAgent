@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
+const posixService={skip:process.platform==='win32'?'LaunchAgent service fixtures require POSIX ownership and Unix sockets':false}
+
 const status = {BackendState:'Running',Self:{DNSName:'mac.example.ts.net.'}}
 const mapping = {TCP:{'8443':{HTTPS:true}},Web:{'mac.example.ts.net:8443':{Handlers:{'/':{Proxy:'http://127.0.0.1:8787'}}}}}
 
@@ -63,7 +65,7 @@ test('network configuration and removal touch only the verified Hub port', async
  assert.deepEqual(calls.filter(args=>args.includes('--bg')), [['serve','--bg','--https=8443','http://127.0.0.1:8787'],['serve','--bg','--https=8443','http://127.0.0.1:8787','off']])
 })
 
-test('LaunchAgent survives app recreation, upgrades once, stops persistently and keeps data', async () => {
+test('LaunchAgent survives app recreation, upgrades once, stops persistently and keeps data', posixService, async () => {
  const {createHubService}=await import('../src/main/hub-service.mjs')
  const {mkdtemp,readFile,writeFile,access,rm}=await import('node:fs/promises')
  const root=await mkdtemp('/tmp/nova-hub-service-');let running=false,starts=0
@@ -87,7 +89,7 @@ test('LaunchAgent survives app recreation, upgrades once, stops persistently and
  }finally{await rm(root,{recursive:true,force:true})}
 })
 
-test('failed service bootstrap does not leave an enabled login job', async () => {
+test('failed service bootstrap does not leave an enabled login job', posixService, async () => {
  const {createHubService}=await import('../src/main/hub-service.mjs')
  const {mkdtemp,access,rm}=await import('node:fs/promises')
  const root=await mkdtemp('/tmp/nova-hub-service-fail-')
@@ -136,7 +138,7 @@ test('successful cleanup clears its ownership record after stopping', async () =
 })
 
 for (const action of ['stop','remove']) {
- test(`pending startup restore cannot undo ${action}`, async () => {
+ test(`pending startup restore cannot undo ${action}`, posixService, async () => {
   const {createHubService}=await import('../src/main/hub-service.mjs')
   const {mkdtemp,access,rm}=await import('node:fs/promises')
   const root=await mkdtemp('/tmp/nova-hub-race-')
@@ -172,7 +174,7 @@ for (const action of ['stop','remove']) {
  })
 }
 
-test('enable rejects a loaded foreign label without an ownership manifest', async () => {
+test('enable rejects a loaded foreign label without an ownership manifest', posixService, async () => {
  const {createHubService}=await import('../src/main/hub-service.mjs')
  const {mkdtemp,access,rm}=await import('node:fs/promises')
  const root=await mkdtemp('/tmp/nova-hub-foreign-');const calls=[]
@@ -188,7 +190,7 @@ test('enable rejects a loaded foreign label without an ownership manifest', asyn
  }finally{await rm(root,{recursive:true,force:true})}
 })
 
-test('service rejects socket paths beyond the managed runtime limit before launch', async () => {
+test('service rejects socket paths beyond the managed runtime limit before launch', posixService, async () => {
  const {createHubService}=await import('../src/main/hub-service.mjs')
  const {mkdtemp,rm}=await import('node:fs/promises')
  const root=await mkdtemp('/tmp/nova-hub-path-')
@@ -222,7 +224,7 @@ test('pending network cleanup stays visible after service removal and polling', 
  assert.equal((await connection.action('status')).network_cleanup_pending,true)
 })
 
-test('upgrade waits until launchd removes a terminating job before bootstrap', async () => {
+test('upgrade waits until launchd removes a terminating job before bootstrap', posixService, async () => {
  const {createHubService}=await import('../src/main/hub-service.mjs')
  const {mkdtemp,rm}=await import('node:fs/promises')
  const root=await mkdtemp('/tmp/nova-launchd-')

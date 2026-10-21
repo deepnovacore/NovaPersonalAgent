@@ -39,6 +39,68 @@ test('Windows candidates include PATH executables and npm native package layouts
     && candidate.prefixArgs[0].endsWith('bin\\codex.js')))
 })
 
+test('Windows PATH npm prefixes discover both the packaged binary and codex.cmd shim', () => {
+  const fixture = {
+    platform: 'win32',
+    arch: 'x64',
+    env: {
+      APPDATA: 'C:\\Users\\nova\\AppData\\Roaming',
+      PATH: 'C:\\nvm4w\\nodejs;C:\\Windows\\System32',
+    },
+    home: 'C:\\Users\\nova',
+    pathApi: win32,
+  }
+  const candidates = codexCandidates(fixture)
+  const packageRoot = 'C:\\nvm4w\\nodejs\\node_modules\\@openai\\codex'
+
+  assert.ok(candidates.some(candidate => candidate.kind === 'native'
+    && candidate.command === `${packageRoot}\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe`))
+  assert.ok(candidates.some(candidate => candidate.kind === 'npm-launcher'
+    && candidate.command === 'C:\\nvm4w\\nodejs\\node.exe'
+    && candidate.launcherPath === 'C:\\nvm4w\\nodejs\\codex.cmd'
+    && candidate.packageRoot === packageRoot
+    && candidate.prefixArgs[0] === `${packageRoot}\\bin\\codex.js`))
+})
+
+test('automatic and manual Windows discovery use a PATH codex.cmd as a verified Node invocation', async () => {
+  const fixture = {
+    platform: 'win32',
+    arch: 'x64',
+    env: {PATH: 'C:\\nvm4w\\nodejs'},
+    home: 'C:\\Users\\nova',
+    pathApi: win32,
+  }
+  const candidates = codexCandidates(fixture)
+  const launcher = candidates.find(candidate => candidate.kind === 'npm-launcher'
+    && candidate.launcherPath === 'C:\\nvm4w\\nodejs\\codex.cmd')
+  assert.ok(launcher)
+  const inspected = []
+  const resolve = config => codexDiscovery.resolveDesktopCodex({
+    config,
+    automaticCandidates: candidates,
+    canonicalize: candidate => candidate.kind === 'npm-launcher'
+      ? {command: candidate.command, prefixArgs: candidate.prefixArgs}
+      : null,
+    inspect: async invocation => {
+      inspected.push(invocation)
+      return {version: 'codex-cli 0.163.0'}
+    },
+  })
+
+  const automatic = await resolve({codexBinaryMode: 'auto', codexBinaryPath: ''})
+  const manual = await resolve({
+    codexBinaryMode: 'manual', codexBinaryPath: launcher.launcherPath,
+  })
+  const expected = {
+    command: 'C:\\nvm4w\\nodejs\\node.exe',
+    prefixArgs: ['C:\\nvm4w\\nodejs\\node_modules\\@openai\\codex\\bin\\codex.js'],
+  }
+  assert.deepEqual(automatic.status.invocation, expected)
+  assert.deepEqual(manual.status.invocation, expected)
+  assert.equal(manual.status.source, 'npm-launcher')
+  assert.deepEqual(inspected, [expected, expected])
+})
+
 test('POSIX candidates preserve PATH order before reviewed common locations', () => {
   const candidates = codexCandidates({
     platform: 'linux',

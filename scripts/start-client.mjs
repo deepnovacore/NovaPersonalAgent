@@ -92,7 +92,7 @@ export function resolveClientCodexBinary({
     || environment.HOME
     || (platform === 'win32' ? 'C:\\' : '/')
   const candidates = pathApi.isAbsolute(requested)
-    ? [{ path: requested, source: 'manual' }]
+    ? [{ kind: 'native', command: requested, prefixArgs: [], source: 'manual' }]
     : requested === 'codex'
       ? codexCandidates({
         platform,
@@ -105,7 +105,8 @@ export function resolveClientCodexBinary({
   for (const candidate of candidates) {
     if (candidate.kind !== 'native') continue
     const canonical = canonicalize(candidate.command)
-    if (typeof canonical === 'string' && pathApi.isAbsolute(canonical)) return canonical
+    if (typeof canonical === 'string' && pathApi.isAbsolute(canonical)
+      && (platform !== 'win32' || canonical.toLowerCase().endsWith('.exe'))) return canonical
   }
   return null
 }

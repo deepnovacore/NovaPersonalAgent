@@ -115,6 +115,87 @@ test('validated npm launcher becomes direct Node argv without executing the cmd 
   })
 })
 
+test('Windows startup resolves npm shims with Node installed separately, including manual paths outside PATH', async t => {
+  const npmRoot = 'D:\\Codex Tools & (npm)'
+  const nodeRoot = 'C:\\Program Files\\nodejs'
+  const launcher = win32.join(npmRoot, 'codex.cmd')
+  const packageRoot = win32.join(npmRoot, 'node_modules', '@openai', 'codex')
+  const entry = win32.join(packageRoot, 'bin', 'codex.js')
+  const node = win32.join(nodeRoot, 'node.exe')
+  const files = new Set([launcher, node, entry, win32.join(packageRoot, 'package.json')])
+  const dependencies = {
+    platform: 'win32', pathApi: win32,
+    realpath: value => {
+      if (files.has(value) || value === packageRoot) return value
+      throw new Error('ENOENT')
+    },
+    stat: value => ({isFile: () => files.has(value), isDirectory: () => value === packageRoot}),
+    readFile: () => JSON.stringify({name: '@openai/codex', bin: {codex: 'bin/codex.js'}}),
+  }
+  const manualSettings = {codexBinaryMode: 'manual', codexBinaryPath: launcher}
+  for (const [name, settings, environment] of [
+    ['automatic PATH discovery', {}, {PATH: `${npmRoot};${nodeRoot}`}],
+    ['manual PATH shim', manualSettings, {PATH: `${npmRoot};${nodeRoot}`}],
+    ['manual shim outside PATH', manualSettings, {PATH: nodeRoot}],
+    ['environment shim outside PATH', {}, {PATH: nodeRoot, CODEX_BIN: launcher}],
+    ['custom npm prefix', {}, {PATH: nodeRoot, NPM_CONFIG_PREFIX: npmRoot}],
+  ]) {
+    await t.test(name, async () => {
+      const inspected = []
+      const result = await desktopStartup.prepareDesktopStartup({
+        settings, environment, home: 'C:\\Users\\nova', platform: 'win32', arch: 'x64',
+        pathApi: win32, canonicalizePath: value => value, mkdir: async () => {},
+        canonicalizeInvocation: candidate => desktopStartup.canonicalInstalledInvocation(candidate, dependencies),
+        inspectCodex: async invocation => {
+          inspected.push(invocation)
+          return {version: 'codex-cli 0.163.0'}
+        },
+      })
+      const invocation = {command: node, prefixArgs: [entry]}
+      assert.equal(result.codexStatus.status, 'ready')
+      assert.deepEqual(result.codexStatus.invocation, invocation)
+      assert.equal(result.config.codexBinaryPath, node)
+      assert.deepEqual(result.config.codexBinaryPrefixArgs, [entry])
+      assert.deepEqual(inspected, [invocation])
+    })
+  }
+})
+
+test('Windows startup rejects missing npm shims and unrecognized package entries before probing', async () => {
+  const npmRoot = 'D:\\Codex Tools'
+  const packageRoot = win32.join(npmRoot, 'node_modules', '@openai', 'codex')
+  const launcher = win32.join(npmRoot, 'codex.cmd')
+  const manifest = win32.join(packageRoot, 'package.json')
+  const entry = win32.join(packageRoot, 'bin', 'codex.js')
+  const node = win32.join(npmRoot, 'node.exe')
+  for (const variant of ['missing shim', 'wrong package', 'wrong entry', 'redirected entry']) {
+    const files = new Set([node, manifest, entry, ...(variant === 'missing shim' ? [] : [launcher])])
+    let inspected = false
+    const result = await desktopStartup.prepareDesktopStartup({
+      settings: {}, environment: {PATH: npmRoot}, home: 'C:\\Users\\nova',
+      platform: 'win32', arch: 'x64', pathApi: win32,
+      canonicalizePath: value => value, mkdir: async () => {},
+      canonicalizeInvocation: candidate => desktopStartup.canonicalInstalledInvocation(candidate, {
+        platform: 'win32', pathApi: win32,
+        realpath: value => {
+          if (!files.has(value) && value !== packageRoot) throw new Error('ENOENT')
+          return variant === 'redirected entry' && value === entry ? 'D:\\outside\\codex.js' : value
+        },
+        stat: value => ({isFile: () => files.has(value), isDirectory: () => value === packageRoot}),
+        readFile: () => JSON.stringify({
+          name: variant === 'wrong package' ? 'other-package' : '@openai/codex',
+          bin: {codex: variant === 'wrong entry' ? '../other.js' : 'bin/codex.js'},
+        }),
+      }),
+      inspectCodex: async () => { inspected = true; return {version: 'codex-cli 0.163.0'} },
+    })
+    assert.equal(result.codexStatus.status, 'missing', variant)
+    assert.equal(inspected, false, variant)
+    assert.equal(result.config.codexBinaryPath, '', variant)
+    assert.deepEqual(result.config.codexBinaryPrefixArgs, [], variant)
+  }
+})
+
 test('a macOS npm launcher resolves to its validated platform-native Codex binary', () => {
   const packageRoot = '/prefix/lib/node_modules/@openai/codex'
   const platformRoot = `${packageRoot}/node_modules/@openai/codex-darwin-arm64`

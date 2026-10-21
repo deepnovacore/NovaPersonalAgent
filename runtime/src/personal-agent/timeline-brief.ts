@@ -110,7 +110,7 @@ export class TimelineBrief {
   if(this.#run)return this.#run
   if(!this.#access?.allowed||this.#pendingValidation||!this.#opened||!this.generate||!this.#inputs.some(input=>!input.history_only))return
   clearTimeout(this.#timer);this.#timer=undefined
-  const key=this.#key(),inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only)).map(({account_scope:_scope,...input})=>input)),context={local_date:this.#date,timezone:this.#timezone},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
+  const key=this.#key(),inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only)).map(source=>{const input={...source};delete input.account_scope;return input})),context={local_date:this.#date,timezone:this.#timezone},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
   this.#status='working';this.#error=null;this.changed()
   const publish=async(generated:TimelineGenerated,done:boolean)=>{
    if(signal.aborted||!this.#compatible(inputs,context.local_date,context.timezone)||!this.#opened)return

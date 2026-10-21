@@ -19,7 +19,7 @@ import type {AgentDescriptor} from '../executors/agent-controller.js'
 import type { JsonValue } from './events.js'
 import type {ExecutorManifest, ExecutorRole, OpSpec} from './ports.js'
 import {stripLikePython} from '../text/python-text.js'
-import {CONFIRM_TOOL_SPEC, cancelToolSpec, dispatchToolSpec, type HostToolSpec} from './work-tools.js'
+import {CONFIRM_TOOL_SPEC, ENTER_PLAN_MODE_TOOL_SPEC, cancelToolSpec, dispatchToolSpec, type HostToolSpec} from './work-tools.js'
 
 const WIRE_PART = /^[A-Za-z0-9_-]+$/u
 const MAX_WIRE_NAME = 64
@@ -60,7 +60,7 @@ export class ToolSchemaError extends Error {
 
 export function compileToolSchema(
   manifests: readonly ExecutorManifest[],
-  options: {readonly includeExplicitMemory?:boolean;readonly includeSchedules?:boolean; readonly includeSourceProcessing?: boolean
+  options: {readonly includeExplicitMemory?:boolean;readonly includeSchedules?:boolean; readonly includeSourceProcessing?: boolean;readonly includeEnterPlanMode?:boolean
   readonly includeAppContext?:boolean; readonly includeTasks?: boolean; readonly includeMemoryRecall?: boolean; readonly agentDescriptors?: readonly AgentDescriptor[]} = {},
 ): CompiledTools {
   const schemas: Readonly<Record<string, JsonValue>>[] = []
@@ -165,7 +165,7 @@ export function compileToolSchema(
     }
   }
   {
-    for (const spec of [...(agents.length > 0 ? [dispatchToolSpec(agents), cancelToolSpec(agents), CONFIRM_TOOL_SPEC] : []), ...(options.includeTasks ? [TASK_TOOL_SPEC] : []), ...(options.includeSchedules?[SCHEDULE_TOOL_SPEC]:[])]) {
+    for (const spec of [...(agents.length > 0 ? [dispatchToolSpec(agents), cancelToolSpec(agents), CONFIRM_TOOL_SPEC] : []), ...(options.includeEnterPlanMode?[ENTER_PLAN_MODE_TOOL_SPEC]:[]), ...(options.includeTasks ? [TASK_TOOL_SPEC] : []), ...(options.includeSchedules?[SCHEDULE_TOOL_SPEC]:[])]) {
       if (bindings.has(spec.name)) throw new ToolSchemaError(`工具 wire name 重复：${spec.name}`)
       schemas.push(compileHostTool(spec))
       bindings.set(spec.name, toolBindingSchema.parse({kind: 'host', logical_name: `host.${spec.name}`}))
