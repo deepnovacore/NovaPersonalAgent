@@ -22,7 +22,7 @@ try {
       return native.spawn({...spec, environment}, control)
     }}
     const started = Date.now()
-    const result = await executeLocalShell({command: "[Console]::Out.Write('NOVA_SHELL_READY'); exit 0", cwd: root, timeout: 10}, new AbortController().signal, {factory})
+    const result = await executeLocalShell({command: "[Console]::Out.Write('NOVA_SHELL_READY'); exit 0", cwd: root, timeout: 10}, new AbortController().signal, {factory}).catch(error => ({error: error.code ?? error.name}))
     console.log(JSON.stringify({name, elapsed: Date.now()-started, ...result}))
   }
 } finally {await rm(root, {recursive:true, force:true})}
