@@ -7,6 +7,7 @@ export const WORKSPACE_PAGES=Object.freeze([
  Object.freeze({id:'goals',label:'目标',title:'目标',icon:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'}),
  Object.freeze({id:'feeds',label:'资讯',title:'资讯',icon:'M4 4h16v16H4zM8 8h8M8 12h8M8 16h5'}),
  Object.freeze({id:'tasks',label:'任务',title:'Agent 执行',icon:'M13 2L4 14h7l-1 8 9-12h-7z'}),
+ Object.freeze({id:'skills',label:'技能',title:'技能',icon:'M12 2l9 5v10l-9 5-9-5V7zM12 12l9-5M12 12v10M12 12L3 7'}),
  Object.freeze({id:'profile',label:'个人资料',title:'个人资料',icon:'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0'}),
 ])
 export const PAGE_IDS=WORKSPACE_PAGES.map(item=>item.id)

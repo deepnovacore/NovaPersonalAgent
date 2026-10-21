@@ -211,7 +211,7 @@ test('Nova stays visible while all contextual tabs live in the right topbar',asy
  for(const page of ['todos','profile','timeline']){await body.querySelectorAll('button').find(node=>node.dataset.page===page).listeners.click();assert.equal(pane.hidden,false);assert.equal(pane.parentElement,parent)}
  assert.equal(body.querySelectorAll('button').some(node=>node.className==='chat-toggle'||node.className==='chat-close'),false)
  const tabs=body.querySelectorAll('button').filter(node=>node.className==='workspace-tab').map(node=>node.children.find(c=>c.className==='workspace-tab-label')?.textContent)
- assert.deepEqual(tabs,['时间线','待办','想法','目标','资讯','任务','个人资料']);assert.equal(calls.length,0)
+ assert.deepEqual(tabs,['时间线','待办','想法','目标','资讯','任务','技能','个人资料']);assert.equal(calls.length,0)
 })
 
 test('guide progress follows actual application and OAuth state, with an explicit waiting handoff',()=>{
