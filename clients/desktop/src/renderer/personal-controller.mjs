@@ -12,6 +12,12 @@ const MODEL_FAILURES={
   model_http:'模型服务返回错误，请重试。',
   model_network:'模型连接中断，请重试。',
 }
+function conversationSnapshot(value){
+  if(!value||typeof value.selected_id!=='string'||!value.selected_id||!Array.isArray(value.items))return false
+  const ids=new Set()
+  for(const item of value.items){if(!item||typeof item.id!=='string'||!item.id||ids.has(item.id))return false;ids.add(item.id)}
+  return ids.has(value.selected_id)
+}
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{}}) {
     this.confirmBuildSwitch=confirmBuildSwitch
@@ -140,7 +146,9 @@ export class PersonalController {
     }
     if(frame.type==='personal.result'){
       const entry=this.pending.get(frame.request_id)
-      if(frame.ok&&frame.data?.selected_id&&Array.isArray(frame.data.items)&&this.snapshot)this.snapshot={...this.snapshot,conversations:frame.data}
+      // Opening task progress returns its owner for draft preparation. Selection remains owned by
+      // the revisioned state broadcast; an old or malformed receipt cannot replace that snapshot.
+      if(entry&&entry.method!=='conversations.open_work'&&frame.ok&&conversationSnapshot(frame.data)&&this.snapshot)this.snapshot={...this.snapshot,conversations:frame.data}
       if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(Object.assign(new Error(frame.error||'操作失败'),{input_status:frame.input_status}));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
     }
     if(frame.type==='input.transcription'&&frame.id===this.dictationId&&(!frame.conversation_id||frame.conversation_id===this.dictationConversationId)){
@@ -159,11 +167,11 @@ export class PersonalController {
     const request_id=options.request_id??crypto.randomUUID()
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{this.pending.delete(request_id);reject(new Error('操作超时，请刷新状态后重试'))},30000)
-      this.pending.set(request_id,{resolve,reject,timer})
+      this.pending.set(request_id,{resolve,reject,timer,method})
       if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(notSent('发送失败'))}
     })
   }
-  async select(id){if(id!==this.selectedId&&this.activeBuild&&!await this.guardBuildSwitch())return;const result=await this.command('conversations.select',{id});if(this.snapshot&&result?.selected_id===id){this.snapshot={...this.snapshot,conversations:result};this.changed()}return result}
+  async select(id){if(id!==this.selectedId&&this.activeBuild&&!await this.guardBuildSwitch())return;const result=await this.command('conversations.select',{id});if(this.snapshot&&result?.selected_id===id&&conversationSnapshot(result)){this.snapshot={...this.snapshot,conversations:result};this.changed()}return result}
   async home(){if(this.selectedId!=='chat:main')await this.select('chat:main');if(this.selectedId!=='chat:main')throw Error('主对话尚未就绪，请稍后重试')}
   async create(){if(this.activeBuild&&!await this.guardBuildSwitch())return;return this.command('conversations.create',{})}
   async openFeed(id,label){if(this.activeBuild&&!await this.guardBuildSwitch())return;return this.command('conversations.open_feed',{feed_id:id,label})}

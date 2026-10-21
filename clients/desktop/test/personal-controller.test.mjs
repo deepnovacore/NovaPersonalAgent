@@ -24,6 +24,25 @@ test('opening and changing text conversations never starts capture; drafts stay 
  const h=harness();h.c.draft='A draft';h.snapshot('b');assert.equal(h.c.draft,'');h.c.draft='B draft';h.snapshot('a');assert.equal(h.c.draft,'A draft');assert.equal(h.starts,0)
  const revision=h.c.snapshot.revision;h.c.receive({type:'personal.state',revision:revision-1,conversations:{selected_id:'stale'}});assert.equal(h.c.selectedId,'a')
 })
+test('only owned valid conversation receipts update the snapshot, while task progress waits for state',async()=>{
+ const {c,sent}=harness();c.draft='keep current draft'
+ const original=c.snapshot
+ for(const data of [{selected_id:'b',items:[null]},{selected_id:'missing',items:[{id:'a'}]},{selected_id:'b',items:[{id:'b'},{id:'b'}]}]){
+  const pending=c.command('conversations.mode',{id:'a',mode:'plan'})
+  c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:true,data});await pending
+  assert.equal(c.snapshot,original)
+ }
+ const data={...original.conversations,selected_id:'b'}
+ c.receive({type:'personal.result',request_id:'unowned',ok:true,data});assert.equal(c.snapshot,original)
+ const opening=c.command('conversations.open_work',{work_id:'work'})
+ c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:true,data});assert.deepEqual(await opening,data)
+ assert.equal(c.selectedId,'a');assert.equal(c.draft,'keep current draft')
+ const updating=c.command('build.stop',{id:'a'})
+ const updated={...original.conversations,items:[{id:'a',kind:'build',build:{status:'paused'}}]}
+ c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:true,data:updated});await updating
+ assert.equal(c.selectedConversation.build.status,'paused','valid Build receipts still update controls without waiting for a broadcast')
+ c.disconnect()
+})
 test('two text conversations send concurrently and receipts affect only their own drafts',async()=>{
  const {c,sent,snapshot}=harness();c.draft='A request';await c.submit();const a=sent.at(-1);assert.equal(a.conversation_id,'a')
  snapshot('b');c.draft='B request';await c.submit();const b=sent.at(-1);assert.equal(b.conversation_id,'b');assert.notEqual(a.request_id,b.request_id)

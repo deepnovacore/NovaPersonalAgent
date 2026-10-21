@@ -147,7 +147,7 @@ function archivePublication(db:LedgerDatabase,prefix:string,provider:string,payl
   sources.push({id:ref.entry_id,version:String(ref.version),label:record.locator,observed_at:record.observed_at,type:record.source_kind})
  }
  if(!sources.length)return
- const published={draft:content.draft,projects:content.products?.projects??[],suggestions:(content.products?.suggestions??[]).map(({anchor,date_evidence,...item})=>item),generation_version:content.generation_version??null,generated_at:content.generated_at??null,sources}
+ const published={draft:content.draft,projects:content.products?.projects??[],suggestions:(content.products?.suggestions??[]).map(suggestion=>{const item={...suggestion};delete item.anchor;delete item.date_evidence;return item}),generation_version:content.generation_version??null,generated_at:content.generated_at??null,sources}
  db.prepare('INSERT OR IGNORE INTO processing_publications VALUES(?,?,?,?,?)').run(prefix,provider,key,canonicalJson([...accounts].sort()),canonicalJson(published))
 }
 function lastPublication(db:LedgerDatabase,prefix:string,consumer:string,accountScope:string|undefined){

@@ -287,7 +287,7 @@ test('retained citations survive the generation selection cap and historical ori
 
 test('deleted originals leave durable history but cannot be discussed or sent for synthesis',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-deleted-'));let calls=0
- const make=()=>new TimelineBrief(join(dir,'timeline.json'),async()=>{calls++;return reply},()=>undefined)
+  const make=()=>new TimelineBrief(join(dir,'timeline.json'),()=>{calls++;return Promise.resolve(reply)},()=>undefined)
  let brief=make()
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
@@ -305,7 +305,7 @@ test('deleted originals leave durable history but cannot be discussed or sent fo
 test('historical cards remain isolated to their published account even after all sources are deleted',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-accounts-'))
  const access=(scope:string,refs:string[]=[])=>({scope,allowed:true,legacy_refs:refs})
- const brief=new TimelineBrief(join(dir,'timeline.json'),async()=>reply,()=>undefined)
+  const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(reply),()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC',access('account-a',[input.id]));await brief.refresh()
   brief.update([],'2026-10-18','UTC',access('account-b'));assert.equal(brief.snapshot().cards.length,0)
@@ -319,7 +319,7 @@ test('historical cards remain isolated to their published account even after all
 test('identical local-source cards and dismissals remain independent between account spaces',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-scoped-dismiss-'))
  const access=(scope:string)=>({scope,allowed:true,legacy_refs:[input.id]})
- const brief=new TimelineBrief(join(dir,'timeline.json'),async()=>reply,()=>undefined)
+  const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(reply),()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC',access('a'));await brief.refresh()
   const id=brief.snapshot().cards[0]!.id;await brief.dismiss(id)
