@@ -39,7 +39,7 @@ afterEach(()=>{disposeSources();globalThis.document=previousDocument})
 function render(state,options={}){
  const parent=new Element('main'),calls=[],el=(...args)=>new Element(...args)
  const button=(text,click,host)=>{const node=el('button',text);node.addEventListener('click',click);host.append(node);return node}
- renderTimeline(parent,{snapshot:state,el,button,discuss:(...args)=>calls.push(args),openTodos(){},now:new Date('2026-10-11T18:00:00Z'),...options})
+ renderTimeline(parent,{snapshot:{settings:snapshot.settings,...state},el,button,discuss:(...args)=>calls.push(args),openTodos(){},now:new Date('2026-10-11T18:00:00Z'),...options})
  return {parent,calls}
 }
 test('dated cards share chronological date nodes while undated and completed cards stay off the axis',()=>{
@@ -213,6 +213,8 @@ test('ongoing cards show bounded report span rather than implying they lasted un
  const labels=parent.querySelectorAll('.timeline-time-label').map(n=>n.textContent).join(' ')
  assert.match(labels,/记录跨度 3 天/);assert.match(labels,/当前状态待更新/);assert.doesNotMatch(labels,/持续 4 天/)
  assert.equal(parent.querySelectorAll('.timeline-current').length,0,'an empty today placeholder does not precede the latest real briefing')
+ const today=render({settings:{timezone:'UTC'},life:{todos:[],goals:[]},timeline:{cards:[datedBrief('incident',time)]}}).parent
+ assert.ok(today.querySelectorAll('.timeline-time-label').every(node=>!node.textContent.includes('当前状态待更新')))
 })
 
 test('pending and timed out briefing do not claim no relevant items',()=>{

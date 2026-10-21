@@ -3,7 +3,6 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import type {CodexProcessOwnerFactory,OwnedCodexProcess} from '../executors/native-process.js'
 import type {JsonValue} from '../core/events.js'
-import {environmentContract} from '../config/environment-contract.js'
 import type {Readable} from 'node:stream'
 
 export interface LocalShellProcess {platform:'darwin'|'win32';pid:number}
@@ -13,13 +12,18 @@ export function localShellProcessGone(owner:LocalShellProcess):boolean{
  if(owner.platform!==process.platform)return false
  try{process.kill(owner.platform==='darwin'?-owner.pid:owner.pid,0);return false}catch(error){return (error as NodeJS.ErrnoException).code==='ESRCH'}
 }
-/** Keep user development configuration; never forward Nova's credentials or process controls. */
+/** Ambient credentials and shell startup controls never enter model-driven commands. */
+const SHELL_ENVIRONMENT = new Set([
+ 'PATH','HOME','USER','LOGNAME','SHELL','TMPDIR','TMP','TEMP','LANG','LC_ALL','LC_CTYPE','TERM','COLORTERM',
+ 'SYSTEMROOT','WINDIR','COMSPEC','PATHEXT','USERPROFILE','HOMEDRIVE','HOMEPATH','APPDATA','LOCALAPPDATA',
+ 'DEVELOPER_DIR','SDKROOT','VIRTUAL_ENV',
+])
 export function localShellEnvironment(source:NodeJS.ProcessEnv=process.env):Record<string,string>{
  const result:Record<string,string>={}
- const privateNames=new Set(environmentContract.filter(entry=>entry.secret||entry.owner==='host_private'&&!['HOME','DEVELOPER_DIR'].includes(entry.name)).map(entry=>entry.name.toUpperCase()))
- for(const [name,value] of Object.entries(source))if(value!==undefined&&!privateNames.has(name.toUpperCase())&&!/^(?:NOVA_|CODEX_|CASCADE_|CASCAD(?:ED|ING)_|QWEN_|ARK_|DEEPSEEK_|DASHSCOPE_|VOLCENGINE_|OPENAI_|GEMINI_|TAVILY_|SELF_HOSTED_|SUPPORT_MODEL|FAST_MODEL|PLANNER_MODEL|PERSONAL_|MEM0_|ELECTRON_|REALTIME_|DESKTOP_|SERVER_|NODE_OPTIONS$|NODE_EXTRA_CA_CERTS$)/iu.test(name))result[name]=value
+ for(const [name,value] of Object.entries(source))if(value!==undefined&&SHELL_ENVIRONMENT.has(name.toUpperCase()))result[name]=value
  return result
 }
+
 function drain(stream:Readable):Promise<boolean>{
  if(stream.readableEnded)return Promise.resolve(true)
  return new Promise(resolve=>{
@@ -65,7 +69,7 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
     '$global:LASTEXITCODE = 0',
     'if ([Console]::ReadLine() -ne "nova-start") { exit 125 }',
     'try {',input.command,
-    'if (-not $?) { exit 1 }',
+    'if (-not $?) { if ($global:LASTEXITCODE -ne 0) { exit $global:LASTEXITCODE }; exit 1 }',
     'exit $global:LASTEXITCODE',
     '} catch { [Console]::Error.WriteLine($_.ToString()); exit 1 }',
    ].join('\r\n'),'utf8')

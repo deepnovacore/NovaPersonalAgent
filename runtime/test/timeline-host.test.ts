@@ -30,7 +30,9 @@ test('host synthesizes ordinary signals without Life writes and revalidates conv
   assert.equal(host.snapshot().life.todos.length,0)
   await host.submitConversationText('chat:main','Remember to review my plan');await host.waitConversation('chat:main')
   assert.equal(understandingCalls,1,'ordinary user messages still reach understanding')
-  inputs=[];await host.sourceChanged();assert.equal(host.snapshot().timeline.cards.length,0)
+  inputs=[];await host.sourceChanged();await host.refreshTimeline()
+  const historical=host.snapshot().timeline.cards;assert.equal(historical.length,1);assert.equal(historical[0]!.historical,true);assert.equal(historical[0]!.sources_available,false)
+  assert.equal(await host.timelineAuthorized(card.id,card.version,'allowed'),false)
   await assert.rejects(host.discussionContext([reference]),/stale_reference/)
   assert.equal(host.snapshot().life.todos.length,0)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
@@ -50,6 +52,9 @@ test('host forwards checked batch progress only after reauthorizing original sou
   await host.open({deferBackground:true});await host.refreshTimeline();const run=host.timeline.refresh()
   for(let i=0;i<1000&&!finished;i++)await new Promise(resolve=>setTimeout(resolve,1))
   assert.equal(finished,true);assert.equal(host.snapshot().timeline.cards.length,1);assert.equal(host.snapshot().timeline.status,'working')
-  release();await run;assert.equal(host.snapshot().timeline.cards.length,0,'revoked progress disappears immediately, before another refresh')
+  const card=host.snapshot().timeline.cards[0]!
+  release();await run
+  const historical=host.snapshot().timeline.cards;assert.equal(historical.length,1);assert.equal(historical[0]!.historical,true);assert.equal(historical[0]!.sources_available,false,'revoked progress becomes unusable immediately, before another refresh')
+  assert.throws(()=>host.timeline.discussion(card.id,card.version),/stale_reference/)
  }finally{release?.();await host.close();await rm(dir,{recursive:true,force:true})}
 })

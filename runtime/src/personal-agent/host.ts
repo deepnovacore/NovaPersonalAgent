@@ -228,8 +228,23 @@ export class PersonalAgentHost {
         if(existing){await this.#conversationCommand('conversations.select',{id:existing.id});return this.conversationSnapshot()}
         if(this.activeLocalBuild())throw Error('build_stop_required');if(!q.project)throw Error('project_directory_required');const project=await canonicalProject(q.project);if(taskResourcesBusy([projectResourceKey(project)]))throw Error('project_busy');
         const item=createConversation('build',plan.title.slice(0,120));item.build={project,plan_id:plan.id,plan_version:plan.version,source_conversation_id:source.id,status:'idle',reason:null,approval:null,log_revision:0};
-        await this.#serial(async()=>{const next=structuredClone(this.#state);if(next.conversations.items.filter(item=>item.kind!=='schedule').length>=128)throw Error('conversation_limit');next.conversations.items.push(item);next.conversations.selected_id=item.id;await this.#commit(next)});
-        this.#localBuildAuthority.add(item.id);await this.submitConversationText(item.id,'执行已确认的完整计划。',undefined,undefined,{local_desktop:true});return this.conversationSnapshot();
+        let previousSelection=this.#state.conversations.selected_id;
+        await this.#serial(async()=>{const next=structuredClone(this.#state);previousSelection=next.conversations.selected_id;if(next.conversations.items.filter(item=>item.kind!=='schedule').length>=128)throw Error('conversation_limit');next.conversations.items.push(item);next.conversations.selected_id=item.id;await this.#commit(next)});
+        this.#localBuildAuthority.add(item.id);
+        try{await this.submitConversationText(item.id,'执行已确认的完整计划。',undefined,undefined,{local_desktop:true})}
+        catch(error){
+            this.#localBuildAuthority.delete(item.id);
+            const checkpoint=await this.workbench.checkpoint(item.id,item.generation);
+            await this.#serial(async()=>{
+                const next=structuredClone(this.#state),created=next.conversations.items.find(value=>value.id===item.id);
+                if(!created||created.messages.length||checkpoint.calls.length||this.#conversationRuns.has(item.id))return;
+                next.conversations.items=next.conversations.items.filter(value=>value.id!==item.id);
+                if(next.conversations.selected_id===item.id)next.conversations.selected_id=next.conversations.items.some(value=>value.id===previousSelection)?previousSelection:'chat:main';
+                await this.#commit(next);
+            });
+            throw error;
+        }
+        return this.conversationSnapshot();
     }
     async #delegatePlan(source:Conversation,plan:WorkbenchPlan,executor:string,previous?:TaskRecord):Promise<unknown>{
         const pool=this.#conversationPool!;

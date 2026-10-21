@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test,before,after} from 'node:test'
-import {mkdtemp,readFile,writeFile,mkdir,rm,stat,realpath,readdir,symlink} from 'node:fs/promises'
+import {mkdtemp,readFile,writeFile,mkdir,rm,stat,realpath,readdir,symlink,lstat,readlink} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join,resolve} from 'node:path'
 import {pathToFileURL} from 'node:url'
@@ -154,4 +154,66 @@ test('local path escape check follows links and treats the project root and its 
    for(const linked of ['link','link/secret.txt','link/new.txt','file-link'])assert.equal(await localPathEscapesProject(root,linked),true,linked)
   }
  }finally{await rm(root,{recursive:true,force:true});await rm(outside,{recursive:true,force:true})}
+})
+
+
+test('file pages reconstruct UTF-8 text when the byte limit cuts through a line',async()=>{
+ const root=await fixture()
+ try{
+  for(const text of ['x'.repeat(LOCAL_OUTPUT_BYTES+13), '\ufeffshort\r\n'+'中文😀'.repeat(15000)+'\r\nlast', 'a\n'.repeat(40000)]){
+   await writeFile(join(root,'pages'),text)
+   let content='',offset=1,byteOffset: number|undefined
+   for(let page=0;page<50;page++){
+    const result=record(await executeLocalTool('file_read',{path:'pages',offset,limit:2000,...byteOffset===undefined?{}:{byte_offset:byteOffset}},root,signal()))
+    assert.equal(result.type,'file');assert.equal(typeof result.content,'string')
+    assert.ok(Buffer.byteLength(result.content as string)<=LOCAL_OUTPUT_BYTES)
+    content+=result.content as string
+    if(!result.truncated)break
+    assert.equal(typeof result.next_byte_offset,'number')
+    assert.ok((result.next_byte_offset as number)>(byteOffset??0))
+    byteOffset=result.next_byte_offset as number;offset=result.next_offset as number
+   }
+   assert.equal(content,text)
+  }
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('file writes follow live links and reject dangling links without replacing them',{skip:process.platform==='win32'},async()=>{
+ const root=await fixture()
+ try{
+  await writeFile(join(root,'target'),'old');await symlink('target',join(root,'live'))
+  await executeLocalTool('file_write',{path:'live',content:'new'},root,signal())
+  assert.equal(await readFile(join(root,'target'),'utf8'),'new');assert.ok((await lstat(join(root,'live'))).isSymbolicLink())
+  await symlink('absent',join(root,'dangling'))
+  await assert.rejects(executeLocalTool('file_write',{path:'dangling',content:'bad'},root,signal()),/dangling_symlink/)
+  assert.equal(await readlink(join(root,'dangling')),'absent');await assert.rejects(lstat(join(root,'absent')),/ENOENT/)
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('shell environment admits only explicit system and development variables',()=>{
+ const allowed={Path:'tools',SystemRoot:'C:\\Windows',COMSPEC:'cmd.exe',PATHEXT:'.EXE',USERPROFILE:'profile',APPDATA:'app',LOCALAPPDATA:'local',TMP:'tmp',LANG:'en_US.UTF-8',LC_ALL:'en_US.UTF-8',TERM:'xterm',VIRTUAL_ENV:'venv',DEVELOPER_DIR:'xcode',SDKROOT:'sdk'}
+ const secrets={GITHUB_TOKEN:'fake',AWS_ACCESS_KEY_ID:'fake',AWS_SECRET_ACCESS_KEY:'fake',UNKNOWN_VENDOR_SECRET:'fake',HTTPS_PROXY:'https://user:secret@example.test',NODE_OPTIONS:'--require malicious',PYTHONPATH:'inject',ZDOTDIR:'inject',BASH_ENV:'inject'}
+ assert.deepEqual(localShellEnvironment({...allowed,...secrets}),allowed)
+})
+
+test('Windows shell distinguishes native exit codes from PowerShell failures',{skip:process.platform!=='win32',timeout:30000},async()=>{
+ const root=await fixture()
+ try{
+  for(const [command,exit] of [['cmd /c exit 0',0],['cmd /c exit 5',5],["throw 'expected test failure'",1]] as const){
+   const result=record(await executeLocalShell({command,cwd:root,timeout:10},signal(),shellOptions()))
+   assert.equal(result.exit_code,exit,command);assert.equal(result.status,exit===0?'completed':'failed');assert.equal(result.cleanup_confirmed,true)
+  }
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+
+
+test('file byte cursors reject split UTF-8 characters and out-of-range positions',async()=>{
+ const root=await fixture()
+ try{
+  await writeFile(join(root,'utf8'),'中😀\nend')
+  for(const byte_offset of [1,2,4,5,6,100])await assert.rejects(executeLocalTool('file_read',{path:'utf8',byte_offset},root,signal()),/invalid_byte_offset/)
+  assert.equal(record(await executeLocalTool('file_read',{path:'utf8',byte_offset:3},root,signal())).content,'😀\nend')
+  assert.equal(record(await executeLocalTool('file_read',{path:'utf8',byte_offset:11},root,signal())).content,'')
+  await assert.rejects(executeLocalTool('file_read',{path:'.',byte_offset:0},root,signal()),/byte_offset_requires_file/)
+ }finally{await rm(root,{recursive:true,force:true})}
 })

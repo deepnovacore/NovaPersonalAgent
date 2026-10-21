@@ -87,7 +87,10 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
          }
          signal.throwIfAborted();if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
          state.status='running';call.state='running';call.started_at=new Date().toISOString();await save() // intent must reach disk first
-         signal.throwIfAborted();if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
+         if(signal.aborted||!host.localBuildAuthorized(conversation.id)){
+          call.result={status:'cancelled_before_execution'};call.state='completed';call.finished_at=new Date().toISOString();
+          signal.throwIfAborted();throw Error('local_build_not_authorized')
+         }
          try{call.result=await executeLocalTool(call.name,call.arguments,conversation.build!.project,signal,{...options.shell,onStarted:async owner=>{call.process=owner;await save();await options.shell?.onStarted?.(owner)}})}
          catch(error){call.result={status:signal.aborted?'outcome_unknown':'failed',code:error instanceof Error?error.message:'tool_failed'}}
          call.state='completed';call.finished_at=new Date().toISOString();await save()

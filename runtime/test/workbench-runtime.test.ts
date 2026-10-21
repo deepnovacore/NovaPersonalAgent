@@ -219,6 +219,7 @@ test('Build requires approval before side effects, stops on denial and does not 
   assert.equal(buildView(f.host,id).reason,'approval_denied');await f.command('build.resume',{id});await f.host.waitConversation(id)
   await assert.rejects(readFile(join(f.root,'new.txt')));assert.equal(f.script.requests.length,1)
   await f.host.submitConversationText(id,'请重新写入',undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
+  assert.deepEqual(f.script.requests[1]!.inputs.filter(input=>input.kind==='user_text').map(input=>input.text),['请重新写入'])
   assert.equal(f.host.tasks.list().length,0);assert.equal(f.host.life.snapshot().todos.length,0)
  }finally{await f.close()}
 })
@@ -437,4 +438,50 @@ test('checkpoint read preserves shared call identity and treats crash receipts c
   state.calls=[call];state.pending_calls=[call];state.status='running';await store.saveCheckpoint(state)
   const loaded=await store.checkpoint('build',0);assert.equal(loaded.calls[0],loaded.pending_calls[0])
  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+
+test('failed Build admission removes its empty conversation and allows the same plan to retry',{skip:!supported},async context=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  const plan=await f.plan(),before=f.host.conversationSnapshot(),params={id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root}
+  let failedId=''
+  const submission=context.mock.method(f.host,'submitConversationText',(id:string)=>{failedId=id;return Promise.reject(Error('injected_admission_failure'))})
+  assert.equal((await f.raw('build.start',params)).error,'injected_admission_failure')
+  assert.deepEqual(f.host.conversationSnapshot().items.map(item=>item.id),before.items.map(item=>item.id))
+  assert.equal(f.host.conversationSnapshot().selected_id,before.selected_id);assert.equal(f.host.localBuildAuthorized(failedId),false)
+  submission.mock.restore()
+  await f.command('build.start',params);const id=f.host.conversationSnapshot().selected_id
+  assert.notEqual(id,failedId);await f.host.waitConversation(id);assert.equal(f.script.requests.length,1)
+ }finally{await f.close()}
+})
+
+test('authority lost after durable intent records an unexecuted call rather than an unknown outcome',{skip:!supported},async context=>{
+ const f=await fixture(()=>({call:{name:'file_write',arguments:{path:'must-not-exist',content:'bad'}}}),'never')
+ try{
+  let revoked=false
+  const authorized=f.host.localBuildAuthorized.bind(f.host),save=f.host.workbench.saveCheckpoint.bind(f.host.workbench)
+  context.mock.method(f.host,'localBuildAuthorized',(id:string)=>!revoked&&authorized(id))
+  context.mock.method(f.host.workbench,'saveCheckpoint',async (state:Parameters<WorkbenchStore['saveCheckpoint']>[0])=>{await save(state);if(state.pending_calls.some(call=>call.state==='running'))revoked=true})
+  const id=await f.build();await f.host.waitConversation(id)
+  await assert.rejects(readFile(join(f.root,'must-not-exist')),/ENOENT/)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.equal((checkpoint.calls[0]!.result as {status:string}).status,'cancelled_before_execution')
+ }finally{await f.close()}
+})
+
+
+test('Build admission errors preserve a conversation once its user message is durable',{skip:!supported},async context=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  const plan=await f.plan(),submit=f.host.submitConversationText.bind(f.host)
+  let id=''
+  context.mock.method(f.host,'submitConversationText',async (...args:Parameters<PersonalAgentHost['submitConversationText']>)=>{
+   id=args[0];await submit(...args);throw Error('injected_after_admission')
+  })
+  assert.equal((await f.raw('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})).error,'injected_after_admission')
+  await f.host.waitConversation(id)
+  const saved=f.host.conversationSnapshot().items.find(item=>item.id===id)
+  assert.ok(saved);assert.ok(f.host.conversationSnapshot().messages.some(message=>message.role==='user'));assert.equal(f.host.localBuildAuthorized(id),false)
+ }finally{await f.close()}
 })

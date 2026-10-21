@@ -3,8 +3,9 @@ import assert from 'node:assert/strict'
 import {spawn,type ChildProcessWithoutNullStreams} from 'node:child_process'
 import {request} from 'node:http'
 import {createServer as createNetServer} from 'node:net'
-import {mkdtempSync,rmSync,unlinkSync,statSync,symlinkSync,writeFileSync,existsSync,readFileSync} from 'node:fs'
+import {mkdtempSync,realpathSync,rmSync,unlinkSync,statSync,symlinkSync,writeFileSync,existsSync,readFileSync} from 'node:fs'
 import {join} from 'node:path'
+import {tmpdir} from 'node:os'
 import {fileURLToPath} from 'node:url'
 import {HubStore} from '../src/hub/store.js'
 
@@ -31,7 +32,7 @@ function admin(dir:string,body:unknown,headers:Record<string,string>={}):Promise
  })
 }
 test('managed daemon owns private state, survives restart, scopes admin operations and refuses a second daemon',async()=>{
- const dir=mkdtempSync('/private/tmp/nova-hub-')
+ const dir=mkdtempSync(join(realpathSync(tmpdir()),'nova-hub-'))
  let daemon=launch(dir)
  try{
   await daemon.ready
@@ -66,7 +67,7 @@ test('managed daemon owns private state, survives restart, scopes admin operatio
  }finally{await stop(daemon.child);rmSync(dir,{recursive:true,force:true})}
 })
 test('managed daemon rejects symlink state and never adopts a preexisting CLI database',async()=>{
- const root=mkdtempSync('/private/tmp/nova-hub-')
+ const root=mkdtempSync(join(realpathSync(tmpdir()),'nova-hub-'))
  try{
   const store=new HubStore(join(root,'hub.sqlite'));store.enroll('cli-account','Existing CLI');store.close()
   const before=readFileSync(join(root,'hub.sqlite'))
@@ -82,7 +83,7 @@ test('managed daemon rejects symlink state and never adopts a preexisting CLI da
 })
 
 test('managed crash recovery preserves identity and invalidates previously displayed invitations',async()=>{
- const dir=mkdtempSync('/private/tmp/nova-hub-')
+ const dir=mkdtempSync(join(realpathSync(tmpdir()),'nova-hub-'))
  let daemon=launch(dir)
  try{
   await daemon.ready
@@ -99,7 +100,7 @@ test('managed crash recovery preserves identity and invalidates previously displ
 })
 
 test('two crash restarters preserve the winning daemon socket',async()=>{
- const dir=mkdtempSync('/private/tmp/nova-hub-'),initial=launch(dir)
+ const dir=mkdtempSync(join(realpathSync(tmpdir()),'nova-hub-')),initial=launch(dir)
  const restarters:ReturnType<typeof launch>[]=[]
  try{
   await initial.ready
@@ -113,7 +114,7 @@ test('two crash restarters preserve the winning daemon socket',async()=>{
 })
 
 test('an active existing socket is preserved even without a daemon lock',async()=>{
- const dir=mkdtempSync('/private/tmp/nova-hub-'),path=join(dir,'admin.sock'),server=createNetServer(socket=>socket.end())
+ const dir=mkdtempSync(join(realpathSync(tmpdir()),'nova-hub-')),path=join(dir,'admin.sock'),server=createNetServer(socket=>socket.end())
  await new Promise<void>(resolve=>server.listen(path,resolve))
  const inode=statSync(path).ino,daemon=launch(dir)
  try{

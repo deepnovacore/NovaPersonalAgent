@@ -1004,8 +1004,9 @@ test('README version replacement survives touch and A-B-A without overriding exp
   } finally {await f.close()}
 })
 
-test('nested documents retain project context and unavailable observations retry after restart', async () => {
-  const f=await fixture(true)
+test('nested documents retain project context and unavailable observations retry after restart', async t => {
+  const f=await fixture(true);let now=Date.now()
+  t.mock.method(Date,'now',()=>now)
   try {
     await mkdir(join(f.folder,'Alpha'))
     await mkdir(join(f.folder,'Beta'))
@@ -1018,6 +1019,7 @@ test('nested documents retain project context and unavailable observations retry
     assert.equal(f.sources.list()[0]!.health,'degraded')
     assert.equal(f.sources.list()[0]!.failures[0]!.stage,'observe')
     f.setMemoryAvailable(true)
+    now+=110
     await f.reopen()
     const entries=f.memory!.list().entries
     assert.equal(entries.length,2)

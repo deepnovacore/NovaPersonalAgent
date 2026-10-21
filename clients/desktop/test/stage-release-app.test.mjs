@@ -3,10 +3,11 @@ import assert from 'node:assert/strict'
 import {mkdtemp,mkdir,writeFile,readFile,access,rm} from 'node:fs/promises'
 import {createRequire} from 'node:module'
 import {join} from 'node:path'
+import {tmpdir} from 'node:os'
 import {stageReleaseApplication} from '../scripts/stage-release-app.mjs'
 
 test('staging reuses the nearest matching ancestor for cyclic peer dependencies', async () => {
- const root=await mkdtemp('/tmp/nova-stage-')
+ const root=await mkdtemp(join(tmpdir(),'nova-stage-'))
  async function pkg(path,name,version,dependencies={},peerDependencies={}) {
   await mkdir(path,{recursive:true})
   await writeFile(join(path,'package.json'),JSON.stringify({name,version,dependencies,peerDependencies,main:'index.cjs'}))

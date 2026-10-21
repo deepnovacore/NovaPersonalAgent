@@ -16,7 +16,7 @@ const item = (seq: number, text: string) => memoryItemSchema.parse({
   channel: 'conversation', seq, ts: 1, trust: 'trusted_user', priority: 100, content: {text},
 })
 
-test('private SQLite sidecars secure the opened file without following symlinks', {skip: process.platform === 'win32'}, async () => {
+test('private SQLite sidecars reject unsafe permissions without following symlinks', {skip: process.platform === 'win32'}, async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-blackboard-'))
   try {
     const database = join(directory, 'board.sqlite')
@@ -28,6 +28,9 @@ test('private SQLite sidecars secure the opened file without following symlinks'
     assert.equal((await stat(target)).mode & 0o777, 0o640)
     await writeFile(`${database}-shm`, 'ordinary sidecar')
     await chmod(`${database}-shm`, 0o644)
+    assert.throws(() => secureSidecar(database, '-shm'))
+    assert.equal((await stat(`${database}-shm`)).mode & 0o777, 0o644)
+    await chmod(`${database}-shm`, 0o600)
     secureSidecar(database, '-shm')
     assert.equal((await stat(`${database}-shm`)).mode & 0o777, 0o600)
   } finally { await rm(directory, {recursive: true, force: true}) }

@@ -9,7 +9,7 @@ import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {parseEnv} from 'node:util'
 import { app, utilityProcess } from 'electron'
-import {mkdtempSync, rmSync} from 'node:fs'
+import {existsSync, mkdtempSync, realpathSync, rmSync} from 'node:fs'
 import {createServer} from 'node:https'
 import {randomBytes} from 'node:crypto'
 import vm from 'node:vm'
@@ -30,7 +30,7 @@ import {
 } from '../src/main/backend.mjs'
 
 // Keep macOS Unix socket paths short; other platforms use their own temporary directory.
-const smokeTmp = process.platform === 'darwin' ? '/private/tmp' : tmpdir()
+const smokeTmp = process.env.NOVA_ACCEPTANCE_ROOT ?? (process.platform === 'darwin' ? '/private/tmp' : tmpdir())
 const TOKEN = 'abcdef0123456789abcdef0123456789'
 const capabilityMode = process.argv.includes('--capability-status')
 const memoryClearMode = capabilityMode && process.argv.includes('--memory-clear')
@@ -273,7 +273,8 @@ async function runCapabilityStatus() {
       const context = vm.createContext({readCapabilityDocument, describeMissingBlockingEnvironment, classifyBackendFailure, createBackendDiagnosticCollector, createBackendControl,
         createReadinessListener: options => createReadinessListener({...options, onTimeout: () => {
           readinessTimeouts++; trace('readiness timeout requests child cleanup'); options.onTimeout?.()
-        }}), shutdownBackend, shutdownBackendBestEffort, watchBackendExit, waitForBackendReadiness, validateBootstrap, backendLaunchSpec, randomBytes, resolve,
+        }}), shutdownBackend, shutdownBackendBestEffort, watchBackendExit, waitForBackendReadiness, validateBootstrap, backendLaunchSpec, randomBytes, resolve, realpathSync, existsSync,
+        chatGptFile: () => resolve(root, 'chatgpt-accounts.json'), refreshRuntimeUsage: () => {},
         acceptance: null, acceptanceBackendSettings, allowAcceptanceLoopback, preferredLanguage, configWarnings, startupErrors, searchProxyUrlFromRules,
         accessCredentials: action => action(), refreshCapabilityEditor: () => {}, feishuSetupOwner: {release: async () => {}},
         tray: null, resetTrayUnreadForBackend, backendEverConnected: false, publishStartup: () => {}, startup: null,
@@ -306,7 +307,8 @@ async function runCapabilityStatus() {
         await context.backendSupervisor.start()
         trace(`supervisor=${context.backendSupervisor.status().state}; events=${events.join(',')}`)
         const value = context.runtimeCapabilities
-        assert.equal(value.toolCount, 3) // memory recall, evidence, and the fixture MCP tool.
+        assert.ok(value, `missing capabilities: ${JSON.stringify(context.backendSupervisor.status())}`)
+        assert.equal(value.toolCount, 5) // Four memory tools plus the fixture MCP tool.
         assert.equal(value.toolBudget, budget)
         assert.equal(value.diskGeneration, 9)
         let memoryClear

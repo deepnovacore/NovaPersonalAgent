@@ -5,6 +5,7 @@ class Node{constructor(tag,text){this.tag=tag;this.children=[];this.listeners={}
  get innerHTML(){throw new Error('innerHTML read')}set innerHTML(_){throw new Error('innerHTML write')}
  get text(){return this.children.length?this.children.map(c=>c.text).join(''):(this.textContent??'')}}
 const dom={createElement:tag=>new Node(tag),createTextNode:text=>new Node('#text',text)}
+const cpuMs=start=>{const elapsed=process.cpuUsage(start);return (elapsed.user+elapsed.system)/1000}
 const all=node=>[node,...node.children.flatMap(all)]
 const render=(text,openLink)=>renderMarkdown(text,{document:dom,openLink})
 test('headings, lists, code blocks and inline marks become structured nodes',()=>{
@@ -40,16 +41,16 @@ test('unclosed fences, empty input and CRLF are bounded',()=>{
 })
 test('adversarial delimiter runs parse in linear time and unmatched openers never drop characters',()=>{
  for(const ch of ['[','*','x`','![','**','](','[a](']){
-  const text=ch.repeat(20000),t0=performance.now(),root=render(text);const spent=performance.now()-t0
+  const text=ch.repeat(20000),t0=process.cpuUsage(),root=render(text);const spent=cpuMs(t0)
   assert.ok(spent<200,`${JSON.stringify(ch)} took ${spent.toFixed(0)}ms`)
   if(ch!=='x`')assert.equal(root.children.map(c=>c.text).join(''),text,`${JSON.stringify(ch)} kept verbatim`)
  }
  assert.equal(all(render('x`'.repeat(200))).filter(n=>n.tag==='code').length,100,'paired backticks still form code spans')
- const fence='`'.repeat(20000),t0=performance.now(),block=render(fence);assert.ok(performance.now()-t0<200);assert.equal(block.children[0].tag,'pre','a bare backtick run is an unclosed fence, kept as one code block')
+ const fence='`'.repeat(20000),t0=process.cpuUsage(),block=render(fence);assert.ok(cpuMs(t0)<200);assert.equal(block.children[0].tag,'pre','a bare backtick run is an unclosed fence, kept as one code block')
  const nested='*'.repeat(50)+'x'+'*'.repeat(50);assert.equal(render(nested).children[0].text.replace(/\*/g,'').length,1)
 })
 test('invalid emphasis closers are scanned once, and valid emphasis still resolves afterwards',()=>{
- const text='x '+'*a '.repeat(16000),t0=performance.now(),root=render(text);const spent=performance.now()-t0
+ const text='x '+'*a '.repeat(16000),t0=process.cpuUsage(),root=render(text);const spent=cpuMs(t0)
  assert.ok(spent<200,`took ${spent.toFixed(0)}ms`);assert.equal(root.children[0].text,text)
  const mixed=render('*a *b *c* and *ok*');assert.equal(all(mixed).filter(n=>n.tag==='em').length,2)
  assert.equal(render('**unclosed strong').children[0].text,'**unclosed strong')
@@ -57,9 +58,9 @@ test('invalid emphasis closers are scanned once, and valid emphasis still resolv
 
 test('large unmatched link delimiters do not repeatedly scan the remaining reply',()=>{
  for(const text of ['['.repeat(320000),'[a]( '.repeat(60000)+')']){
-  const start=performance.now(),root=render(text)
+  const start=process.cpuUsage(),root=render(text)
   assert.equal(root.children[0].text,text)
-  assert.ok(performance.now()-start<500,'malformed link parsing exceeded 500ms')
+  assert.ok(cpuMs(start)<500,'malformed link parsing exceeded 500ms')
  }
  assert.equal(all(render('[[bad [ok](https://example.com)',()=>{})).filter(n=>n.tag==='button').length,1)
 })

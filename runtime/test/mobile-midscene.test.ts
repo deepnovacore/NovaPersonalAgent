@@ -45,16 +45,28 @@ else process.exit(2);
   t.after(()=>{server.closeAllConnections();server.close()})
   const address = server.address();assert.ok(address && typeof address!=='string')
   const controller = new AbortController()
+  let expireBudget: (() => void) | undefined
+  if (scenario === 'timeout') {
+    const realSetTimeout = globalThis.setTimeout
+    // Trigger the runner budget only after approval is reached, independent of host load.
+    t.mock.method(globalThis, 'setTimeout').mock.mockImplementationOnce(Object.assign((callback: () => void) => {
+      expireBudget = callback
+      return realSetTimeout(callback, 30_000)
+    }, {__promisify__: realSetTimeout.__promisify__}))
+  }
   const result = await runMobileIos({deviceId:'test-phone',deviceType:'android',wdaUrl:'http://127.0.0.1:8100',
     baseUrl:`http://127.0.0.1:${address.port}/v1`,model:'scripted',modelFamily:'auto-glm',apiKey:'local',maxSteps:scenario === 'step_limit' ? 1 : 3,
-    budgetMs:scenario === 'timeout' ? 3000 : 30_000,settleMs:0,lockRoot:root},'Home twice',{
+    budgetMs:30_000,settleMs:0,lockRoot:root},'Home twice',{
     signal:controller.signal,approve:async()=>{
       if (++approvals === 1) {
         await writeFile(join(root,'state'),'2')
         if (scenario === 'window_after') await writeFile(join(root,'focus'),'com.example.app/.Other')
       }
       if (scenario === 'cancel') controller.abort()
-      if (scenario === 'timeout') return new Promise<boolean>(() => undefined)
+      if (scenario === 'timeout') {
+        assert.ok(expireBudget);expireBudget()
+        return new Promise<boolean>(() => undefined)
+      }
       return scenario !== 'decline'
     },progress:()=>undefined,
   })
