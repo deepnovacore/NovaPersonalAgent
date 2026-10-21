@@ -52,7 +52,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "项目目录": "Project folder",
   "选择本地目录…": "Choose local folder…",
   "计划 · {0} · v{1}": "Plan · {0} · v{1}",
-  "Build · {0} · {1}": "Build · {0} · {1}",
+  "Build · {0}": "Build · {0}",
   "执行中": "Running",
   "结果不确定": "Outcome unknown",
   "就绪": "Ready",
