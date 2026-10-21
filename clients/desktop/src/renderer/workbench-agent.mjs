@@ -5,9 +5,10 @@ import {mountComputerUseControl} from './computer-use-control.mjs'
 /** Bounded snapshots carry only status. Full plans and logs are fetched in small pages. */
 export function mountWorkbenchAgent(parent,{c,el,run,api}){
  const root=el('section',undefined,'workbench-agent'),bar=el('div',undefined,'workbench-mode-bar');parent.append(root);root.append(bar)
- const status=el('span','','workbench-build-status');status.setAttribute('role','status');bar.append(status)
- const computerUse=mountComputerUseControl(bar,root,{c,el,run,api})
- const stop=el('button',t('停止')),resume=el('button','Resume'),details=el('button',t('执行记录'));for(const button of [stop,resume,details]){button.type='button';bar.append(button)}
+ const info=el('div',undefined,'workbench-build-info'),status=el('span','','workbench-build-status'),project=el('span','','workbench-build-project'),reason=el('span','','workbench-build-reason'),buildActions=el('div',undefined,'workbench-build-actions')
+ status.setAttribute('role','status');info.append(status,project,reason);bar.append(info,buildActions)
+ const computerUse=mountComputerUseControl(buildActions,root,{c,el,run,api})
+ const stop=el('button',t('停止')),resume=el('button','Resume'),details=el('button',t('执行记录'));for(const button of [stop,resume,details]){button.type='button';buildActions.append(button)}
  stop.addEventListener('click',()=>run(()=>c.command('build.stop',{id:c.selectedId})));resume.addEventListener('click',()=>run(()=>c.command('build.resume',{id:c.selectedId})))
  const log=el('pre',undefined,'workbench-tool-log');log.hidden=true;root.append(log)
  details.addEventListener('click',()=>run(async()=>{
@@ -66,8 +67,11 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   computerUse.update()
   const item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status)
   root.hidden=!item||item.kind==='proactive'
-  status.textContent=build?t('Build · {0} · {1}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status),build.project):''
-  if(build?.reason&&build.reason!=='stopped')status.textContent+=' · '+t(({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',restart_requires_resume:'重启后等待恢复'})[build.reason]??build.reason)
+  status.textContent=build?t('Build · {0}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status)):''
+  status.setAttribute('data-state',build?.status??'')
+  // The path is one ellipsized line; the full value stays reachable on hover.
+  project.textContent=build?.project??'';project.title=build?.project??''
+  reason.textContent=build?.reason&&build.reason!=='stopped'?t(({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',restart_requires_resume:'重启后等待恢复'})[build.reason]??build.reason):'';reason.hidden=!reason.textContent
   stop.hidden=!build||!active;resume.hidden=!build||active||['completed','finished'].includes(build.status);details.hidden=!build
   approval.hidden=!build?.approval;deny.disabled=!c.connected;approve.disabled=!c.connected||loadedApproval!==build?.approval?.id
   if(build?.approval&&loadedApproval!==build.approval.id){if(loadingApproval!==build.approval.id)preview.textContent=build.approval.name+'\n'+build.approval.preview;void loadApproval(build.approval,item.id).catch(error=>{c.error=error.message;c.changed()})}

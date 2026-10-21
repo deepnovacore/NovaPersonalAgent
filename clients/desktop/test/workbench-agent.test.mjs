@@ -123,3 +123,25 @@ test('published Plan enables local Build after the personal directory picker ret
   ])
  }finally{globalThis.document=previousDocument}
 })
+
+test('Build status bar keeps state, project path and restart reason as separate lines',()=>{
+ class Element{
+  constructor(name,text){this.name=name;this.textContent=text??'';this.children=[];this.listeners={};this.hidden=false;this.disabled=false;this.value='';this.attributes={}}
+  append(...children){this.children.push(...children)}
+  replaceChildren(...children){this.children=[...children]}
+  setAttribute(name,value){this.attributes[name]=value}
+  addEventListener(name,callback){this.listeners[name]=callback}
+  focus(){}
+ }
+ const project='/Volumes/External/nova-builds/build-cu-example/demo'
+ const item={id:'build',kind:'build',build:{status:'paused',project,reason:'restart_requires_resume'}}
+ const c={connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})}
+ const parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}})
+ agent.update()
+ const walk=node=>[node,...node.children.flatMap(walk)]
+ const status=walk(agent.element).find(node=>node.attributes.role==='status')
+ assert.equal(status.textContent,'Build · 已暂停');assert.equal(status.attributes['data-state'],'paused')
+ const info=walk(agent.element).find(node=>node.children.includes(status)),[, path, reason]=info.children
+ assert.equal(path.textContent,project);assert.equal(path.title,project)
+ assert.equal(reason.textContent,'重启后等待恢复');assert.equal(reason.hidden,false)
+})

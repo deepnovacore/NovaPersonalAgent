@@ -657,7 +657,16 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-mode-bar,.workbench-plan-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .workbench-mode-bar select,.workbench-agent button,.workbench-agent select{font:inherit;min-height:28px;max-width:100%}
 .workbench-mode-bar>select{width:auto;flex:0 0 auto}
-.workbench-build-status{overflow-wrap:anywhere;flex:1;min-width:100px}
+.workbench-mode-bar{flex-wrap:nowrap;align-items:flex-start;justify-content:space-between}
+.workbench-build-info{display:grid;gap:2px;flex:1 1 0;min-width:0}
+.workbench-build-status{display:inline-flex;align-items:center;gap:7px;font-weight:600;color:var(--ink)}
+.workbench-build-status::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--ink-faint)}
+.workbench-build-status[data-state="running"]::before,.workbench-build-status[data-state="completed"]::before{background:var(--ok,#2f9e6b)}
+.workbench-build-status[data-state="paused"]::before,.workbench-build-status[data-state="awaiting_approval"]::before{background:var(--warn)}
+.workbench-build-status[data-state="failed"]::before,.workbench-build-status[data-state="outcome_unknown"]::before{background:var(--danger,#d4483b)}
+.workbench-build-project,.workbench-build-reason{padding-left:14px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workbench-build-project{direction:rtl;text-align:left;font:11px/1.5 var(--mono)}
+.workbench-build-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;flex-wrap:wrap}
 .workbench-plan,.workbench-local-approval{margin-top:10px;padding:10px;border:1px solid var(--line,#555);border-radius:8px}
 .workbench-plan h3,.workbench-local-approval h3{font-size:13px;margin:0 0 8px}
 .workbench-plan-body{max-height:24vh;overflow:auto;user-select:text}
@@ -713,7 +722,10 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .build-tool-content{padding:4px 12px 12px 20px;border-left:1px solid var(--line)}
 .workbench .build-tool-content h4{font-size:11px;font-weight:500;color:var(--ink-faint);margin:10px 0 4px}
 .workbench .build-tool-content pre{margin:0;padding:8px;border-radius:var(--radius-sm);background:var(--surface-inset);white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 var(--mono);max-height:180px;overflow:auto}
-.build-log-notice{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--warn)}
+.build-log-notice{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:8px 12px;border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);border-radius:var(--radius);background:color-mix(in srgb,var(--warn-wash) 70%,var(--surface-raised));font-size:12px;line-height:1.5;color:var(--ink-dim)}
+.build-log-notice>span{flex:1;min-width:0}
+.build-log-notice>button{flex-shrink:0;border:0;background:transparent;color:var(--accent);font-weight:500;cursor:pointer}
+.build-log-notice>button:hover{text-decoration:underline}
 @media(max-width:600px){.workbench .build-tool-call>summary{flex-wrap:wrap}.build-tool-target{flex-basis:35%}.build-tool-time{display:none}}
 .build-full-reply{margin-top:8px;color:var(--ink-dim)}
 .build-full-reply>summary{cursor:pointer;font-size:12px;color:var(--ink-faint)}
