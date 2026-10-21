@@ -1,7 +1,7 @@
 import {mkdtemp,writeFile,rm,stat} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {PosixCodexProcessOwnerFactory,takeUnconfirmedCodexProcessOwner,loadWindowsGuardianFactoryFromResources,type CodexProcessOwnerFactory,type OwnedCodexProcess} from '../executors/native-process.js'
+import type {CodexProcessOwnerFactory,OwnedCodexProcess} from '../executors/native-process.js'
 import type {JsonValue} from '../core/events.js'
 import {environmentContract} from '../config/environment-contract.js'
 import type {Readable} from 'node:stream'
@@ -34,7 +34,9 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
  if(platform!=='win32'&&platform!=='darwin')throw Error('local_tools_platform_unsupported')
  signal.throwIfAborted();if(!(await stat(input.cwd)).isDirectory())throw Error('invalid_cwd')
  const resources=options.resourcesPath??process.env.CODEX_RESOURCES_PATH
- const factory=options.factory??(platform==='darwin'?new PosixCodexProcessOwnerFactory():resources?loadWindowsGuardianFactoryFromResources({resourcesPath:resources,platform,arch:process.arch}):null)
+ // Loaded on first use so generic host imports never pull in the concrete coding package.
+ const native=await import('../executors/native-process.js')
+ const factory=options.factory??(platform==='darwin'?new native.PosixCodexProcessOwnerFactory():resources?native.loadWindowsGuardianFactoryFromResources({resourcesPath:resources,platform,arch:process.arch}):null)
  if(!factory)throw Error('windows_process_guardian_required')
  let temporary:string|undefined,child:OwnedCodexProcess|undefined
  let stdout=Buffer.alloc(0),stderr=Buffer.alloc(0),retained=0,truncated=false,status='completed',exitCode:number|null=null,cleanupConfirmed=true,outputIncomplete=false
@@ -88,7 +90,7 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
   const drained=await Promise.all([drain(child.stdout),drain(child.stderr)])
   outputIncomplete=drained.some(value=>!value)
  }catch(error){
-  const unconfirmed=takeUnconfirmedCodexProcessOwner(error)
+  const unconfirmed=native.takeUnconfirmedCodexProcessOwner(error)
   if(unconfirmed){child=unconfirmed;cleanupConfirmed=false;await stopTree()}
   if(child){status='outcome_unknown';await stopTree()}else if(signal.aborted)status='cancelled';else throw error
  }finally{

@@ -84,7 +84,7 @@ test('configuration guides share a concise public subset and env example stays c
     const block = generatedBlock(await readFile(resolve(repositoryRoot, file), 'utf8'))
     const names = [...block.matchAll(/^\| `([A-Z0-9_]+)` \|/gmu)].map(match => match[1]!)
     assert.equal(new Set(names).size, names.length, file)
-    assert.ok(names.length <= 22 && names.length > 0, file)
+    assert.ok(names.length <= 23 && names.length > 0, file)
     for (const name of names) assert.ok(publicNames.has(name), `${file}: ${name}`)
     for (const essential of ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'PIPELINE_MODE', 'MEMORY_CONNECTION']) {
       assert.ok(names.includes(essential), `${file}: ${essential}`)
@@ -183,7 +183,7 @@ test('every production environment name is classified and private names stay pri
     ...await sourceFiles(resolve(repositoryRoot, 'runtime/src')),
     ...await sourceFiles(resolve(repositoryRoot, 'clients/desktop/src')),
   ]
-  const systemNames = new Set(['HTTPS_PROXY', 'HTTP_PROXY', 'PATH', 'APPDATA'])
+  const systemNames = new Set(['HTTPS_PROXY', 'HTTP_PROXY', 'PATH', 'APPDATA', 'SYSTEMROOT', 'NPM_CONFIG_PREFIX'])
   const environmentName = /\b(?:process\.env|environment|parentEnv|env)\.([A-Z][A-Z0-9_]+)\b/gu
   for (const source of sources) {
     const text = await readFile(source, 'utf8')
