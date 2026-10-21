@@ -165,7 +165,7 @@ export class PersonalAgentHost {
         }
     }
     #refreshLocalProcessFences():void{for(const [key,owners] of this.#localProcessFences)if(owners.every(localShellProcessGone)){releaseQuarantinedTaskResources([key]);this.#localProcessFences.delete(key)}}
-    activeLocalBuild():Conversation|undefined{return this.#state.conversations.items.find(item=>item.kind==='build'&&item.build&&(this.#admittingBuilds.has(item.id)||['running','awaiting_approval'].includes(item.build.status)))}
+    activeLocalBuild():Conversation|undefined{return this.#state.conversations.items.find(item=>item.kind==='build'&&item.build&&item.build.status!=='finished'&&(this.#admittingBuilds.has(item.id)||['running','awaiting_approval'].includes(item.build.status)))}
     localBuildAuthorized(id:string):boolean{return this.#localBuildAuthority.has(id)&&this.#presentationMode==='workbench'&&this.#state.conversations.selected_id===id&&this.#state.conversations.items.find(item=>item.id===id)?.build?.status!=='finished'}
     async stopLocalBuild(id:string):Promise<void>{this.#localBuildAuthority.delete(id);await this.#conversationPool?.stopBuild(id);await this.#conversationRuns.get(id);const item=this.#state.conversations.items.find(item=>item.id===id);if(item?.build&&['running','awaiting_approval'].includes(item.build.status))await this.updateLocalBuild(id,item.generation,{status:'paused',reason:'stopped',approval:null})}
     async stopLocalBuilds():Promise<void>{for(const item of this.#state.conversations.items.filter(item=>item.kind==='build'))await this.stopLocalBuild(item.id)}
