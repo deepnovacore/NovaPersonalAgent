@@ -16,6 +16,7 @@ import {renderTasksPage,activeTaskCount} from './tasks-page.mjs'
 import {renderSourceSuggestions} from './workbench-suggestions.mjs'
 import {disposeSources} from './source-popover.mjs'
 import {attentionTarget} from './attention-target.mjs'
+import {renderSkillsPage} from './skills-page.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 const PAGE_TITLE=Object.fromEntries(WORKSPACE_PAGES.map(item=>[item.id,item.label===item.title?item.label:`${item.label} · ${item.title}`]))
 /** The workbench keeps Nova on the left and switches contextual pages on the right. */
@@ -114,11 +115,21 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const card=(title,summary)=>{const a=el('article',undefined,'card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
  const continueChat=text=>chat.focusDraft(`关于「${text}」：`)
  let renderedPageKey=null,sourceDetailsOpen=false
+ const skillsLocal={status:null,loading:false,error:'',loaded:false,group:'system',query:'',avatar:''}
+ async function loadSkills(){
+  if(skillsLocal.loading)return
+  if(!api.settings?.get){skillsLocal.loaded=true;skillsLocal.error='暂时无法读取技能，请稍后刷新。';return}
+  skillsLocal.loading=true;skillsLocal.error='';renderPanel()
+  try{const view=await api.settings.get();skillsLocal.status=view?.capabilities?.status??null;if(!skillsLocal.status)skillsLocal.error='暂时无法读取技能，请稍后刷新。'}
+  catch{skillsLocal.status=null;skillsLocal.error='暂时无法读取技能，请稍后刷新。'}
+  finally{skillsLocal.loading=false;skillsLocal.loaded=true;if(selected==='skills')renderPanel()}
+ }
  const pageKey=()=>{
   const s=c.snapshot,sourceStates=s?.sources?.map(source=>[source.id,source.state,source.health,source.processing_consent_required])
   if(['todos','ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
   if(selected==='timeline')return JSON.stringify([selected,s?.life,s?.timeline,s?.settings?.timezone,s?.derived_understanding,s?.profile_preparation?.status,s?.sources,c.connected,timelineDate(c.snapshot)])
   if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.life,s?.profile_preparation,c.connected])
+  if(selected==='skills')return JSON.stringify([selected,skillsLocal.status,skillsLocal.loading,skillsLocal.error,skillsLocal.avatar,c.connected])
   if(selected==='tasks')return JSON.stringify([selected,taskTab,s?.schedules,s?.capabilities?.schedules,durableTasks(),tasks(),results(),c.connected])
   return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.derived_understanding,s?.news,s?.capabilities,c.connected])
  }
@@ -160,6 +171,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
     if(draft.length>4000)throw Error(t('追加后草稿超过 4000 字符，原有草稿已保留，请先缩短内容。'))
     target.draft=draft;chat.reveal()
    }})
+  }else if(selected==='skills'){
+   renderSkillsPage(panel,{el,button,state:skillsLocal,avatar:skillsLocal.avatar,refresh:loadSkills,manage:async()=>api.orbMenu?.openSettings?.('capabilities')})
+   if(!skillsLocal.loaded&&!skillsLocal.loading)queueMicrotask(()=>void loadSkills())
   }else if(selected==='profile'){
    renderProfile(panel,{products:s?.derived_understanding,state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
@@ -198,5 +212,5 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  async function collapse(value){await c.setPresentation(value?'orb':'workbench');if(!value)await showHome()}
  function receive(frame){chat.receive(frame);c.receive(frame);computerUse?.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.((mode,options)=>run(async()=>{await c.setPresentation(mode);if(options?.attention&&mode==='workbench')await focusAttention()}));
- api.personal.onCollapsed?.(value=>c.collapse(value));const dateClock=setInterval(()=>{if(c.presentationMode==='workbench')update()},60000);dateClock.unref?.();update();renderPanel();return {controller:c,receive,identity:value=>chat.identity(value),refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
+ api.personal.onCollapsed?.(value=>c.collapse(value));const dateClock=setInterval(()=>{if(c.presentationMode==='workbench')update()},60000);dateClock.unref?.();update();renderPanel();return {controller:c,receive,identity:value=>{skillsLocal.avatar=value?.profile?.avatar??value?.defaultAvatar??'';chat.identity(value)},refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }
