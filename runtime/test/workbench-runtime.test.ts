@@ -239,7 +239,7 @@ test('Build asks before a read leaves the project and stops on denial',{skip:!su
   await writeFile(join(outside,'secret.txt'),'secret')
   const id=await f.build(),view=await until(()=>buildView(f.host,id),view=>view.status==='awaiting_approval')
   assert.ok(view.approval)
-  await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+  await f.command('build.approve',{id,approval_id:view.approval.id,approved:false});await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).reason,'approval_denied');assert.equal(f.script.requests.length,1)
  }finally{await f.close();await rm(outside,{recursive:true,force:true})}
 })
