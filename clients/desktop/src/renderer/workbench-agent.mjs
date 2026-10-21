@@ -5,9 +5,6 @@ import {mountComputerUseControl} from './computer-use-control.mjs'
 /** Bounded snapshots carry only status. Full plans and logs are fetched in small pages. */
 export function mountWorkbenchAgent(parent,{c,el,run,api}){
  const root=el('section',undefined,'workbench-agent'),bar=el('div',undefined,'workbench-mode-bar');parent.append(root);root.append(bar)
- const mode=el('select');mode.setAttribute('aria-label',t('对话模式'))
- for(const value of ['chat','plan','build']){const option=el('option',value[0].toUpperCase()+value.slice(1));option.value=value;option.disabled=value==='build';mode.append(option)}
- bar.append(mode);mode.addEventListener('change',()=>run(()=>c.command('conversations.mode',{id:c.selectedId,mode:mode.value})))
  const status=el('span','','workbench-build-status');status.setAttribute('role','status');bar.append(status)
  const computerUse=mountComputerUseControl(bar,root,{c,el,run,api})
  const stop=el('button',t('停止')),resume=el('button','Resume'),details=el('button',t('执行记录'));for(const button of [stop,resume,details]){button.type='button';bar.append(button)}
@@ -68,18 +65,24 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  function update(){
   computerUse.update()
   const item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status)
-  root.hidden=!item||item.kind==='proactive';mode.value=item?.kind==='build'?'build':item?.mode??'chat';mode.disabled=item?.kind==='build'||!c.connected||c.isVoiceConversation
-  status.textContent=build?t('Build · {0} · {1}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status),build.project):item?.mode==='plan'?t('澄清需求，发布计划后选择执行方式。'):''
+  root.hidden=!item||item.kind==='proactive'
+  status.textContent=build?t('Build · {0} · {1}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status),build.project):''
   if(build?.reason&&build.reason!=='stopped')status.textContent+=' · '+t(({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',restart_requires_resume:'重启后等待恢复'})[build.reason]??build.reason)
   stop.hidden=!build||!active;resume.hidden=!build||active||['completed','finished'].includes(build.status);details.hidden=!build
   approval.hidden=!build?.approval;deny.disabled=!c.connected;approve.disabled=!c.connected||loadedApproval!==build?.approval?.id
   if(build?.approval&&loadedApproval!==build.approval.id){if(loadingApproval!==build.approval.id)preview.textContent=build.approval.name+'\n'+build.approval.preview;void loadApproval(build.approval,item.id).catch(error=>{c.error=error.message;c.changed()})}
   const hasPlan=item?.mode==='plan'&&item.plan;planCard.hidden=!hasPlan
+  // The mode lives in the composer; this strip appears only for a Build session or a published plan.
+  bar.hidden=!build;if(!build&&!hasPlan&&!root.hidden)root.hidden=true
   if(lastSelected!==c.selectedId){lastSelected=c.selectedId;log.hidden=true;sequence++;loading=false;planKey='';failedKey='';plan=null;retry.hidden=true;body.replaceChildren()}
   if(hasPlan)void load().catch(error=>{c.error=error.message;c.changed()})
   local.hidden=!localBuildSupported;pick.hidden=!localBuildSupported;directories.hidden=!localBuildSupported
   local.disabled=!localBuildSupported||busy||!plan||!directories.value||!c.connected||JSON.stringify(reference())!==planKey
   delegate.disabled=busy||!plan||!executors.value||!c.connected;save.disabled=busy;editButton.disabled=busy||!plan;pick.disabled=busy;directories.disabled=busy
+  // The composer's Build/Delegate choice makes that action the primary one; both stay available.
+  const preferred=item?c.state?.(item.id)?.execution:undefined
+  planCard.setAttribute('data-execution',preferred??'')
+  local.setAttribute('data-primary',String(preferred==='build'));delegate.setAttribute('data-primary',String(preferred==='delegate'))
  }
  return {update,element:root}
 }

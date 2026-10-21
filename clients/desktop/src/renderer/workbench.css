@@ -231,6 +231,34 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .composer-actions button{height:30px;border:0;background:transparent;color:var(--ink-dim);padding:0 8px;border-radius:var(--radius-sm)}
 .composer-actions button:hover:not(:disabled){background:var(--surface-inset)}
 .composer-actions [hidden]{display:none}
+/* Composer mode: one segmented control, a sliding thumb that takes each mode's colour. */
+.composer-mode{--mode-ink:var(--ink-dim);--mode-fill:var(--surface-raised);--mode-glow:transparent;display:flex;align-items:center;gap:8px;min-width:0;flex:0 1 auto}
+.composer-mode[hidden]{display:none}
+.composer-mode[data-mode="plan"]{--mode-ink:#fff;--mode-fill:linear-gradient(135deg,#3f7bf0,#5b8cff);--mode-glow:rgba(63,123,240,.32)}
+.composer-mode[data-mode="build"]{--mode-ink:#fff;--mode-fill:linear-gradient(135deg,#5b6cff,#9b7bff);--mode-glow:rgba(120,110,255,.34)}
+.composer-mode[data-mode="delegate"]{--mode-ink:#fff;--mode-fill:linear-gradient(135deg,#14a39a,#2fc6c0);--mode-glow:rgba(20,163,154,.32)}
+.composer-mode-track{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:2px;border-radius:999px;background:var(--surface-inset);box-shadow:inset 0 0 0 1px var(--line)}
+.composer-mode-thumb{--mode-index:0;position:absolute;top:2px;bottom:2px;left:2px;width:calc((100% - 4px) / 4);border-radius:999px;background:var(--mode-fill);box-shadow:0 1px 2px rgba(15,20,30,.12),0 3px 10px var(--mode-glow);transform:translateX(calc(var(--mode-index) * 100%));transition:transform .26s cubic-bezier(.3,.8,.3,1),background .26s,box-shadow .26s}
+/* Positioned from data-mode: the workbench CSP forbids inline style attributes. */
+.composer-mode[data-mode="plan"] .composer-mode-thumb{--mode-index:1}.composer-mode[data-mode="build"] .composer-mode-thumb{--mode-index:2}.composer-mode[data-mode="delegate"] .composer-mode-thumb{--mode-index:3}
+.composer-mode[data-mode="chat"] .composer-mode-thumb{box-shadow:0 1px 2px rgba(15,20,30,.14),inset 0 0 0 1px var(--line)}
+.composer-actions .composer-mode-option{position:relative;z-index:1;height:24px;min-width:0;padding:0 11px;border-radius:999px;background:transparent;color:var(--ink-faint);font:600 11.5px/24px var(--font);letter-spacing:.01em;white-space:nowrap;cursor:pointer;transition:color .2s}
+.composer-actions .composer-mode-option:hover:not(:disabled){background:transparent;color:var(--ink)}
+.composer-actions .composer-mode-option[aria-checked="true"]{color:var(--mode-ink)}
+.composer-mode[data-mode="chat"] .composer-mode-option[aria-checked="true"]{color:var(--ink)}
+.composer-actions .composer-mode-option:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.composer-actions .composer-mode-option:disabled{cursor:default}
+.composer-mode[aria-disabled="true"] .composer-mode-track{opacity:.6}
+.composer-mode-key{flex-shrink:0;padding:0 5px;border-radius:4px;border:1px solid var(--line-strong);border-bottom-width:2px;color:var(--ink-faint);font:10.5px/16px var(--mono);background:var(--surface-raised)}
+.composer-mode-caption{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-faint);font-size:11.5px}
+.composer:focus-within .composer-mode-key{color:var(--ink-dim);border-color:color-mix(in srgb,var(--accent) 40%,var(--line-strong))}
+@media(max-width:720px){.composer-mode-caption{display:none}}
+@media(max-width:520px){.composer-mode-key{display:none}.composer-actions .composer-mode-option{padding:0 7px}}
+@media(prefers-reduced-motion:reduce){.composer-mode-thumb{transition:none}}
+/* The composer's execution choice promotes one plan action without hiding the other. */
+.workbench-plan-actions button[data-primary="true"]{border:0;border-radius:var(--radius-sm);padding:0 12px;color:#fff;font-weight:600;background:linear-gradient(135deg,#5b6cff,#9b7bff);box-shadow:0 2px 8px rgba(120,110,255,.3)}
+.workbench-plan[data-execution="delegate"] .workbench-plan-actions button[data-primary="true"]{background:linear-gradient(135deg,#14a39a,#2fc6c0);box-shadow:0 2px 8px rgba(20,163,154,.3)}
+.workbench-plan-actions button[data-primary="true"]:disabled{opacity:.55;box-shadow:none}
 .composer-actions .composer-dictate{flex:0 0 32px;width:32px;height:32px;padding:0;margin-left:auto;display:grid;place-items:center;color:var(--ink-dim);border-radius:50%}
 .composer-actions .composer-dictate:hover:not(:disabled){color:var(--ink)}
 .composer-actions .composer-dictate[aria-pressed="true"]{background:var(--accent-wash);color:var(--accent)}

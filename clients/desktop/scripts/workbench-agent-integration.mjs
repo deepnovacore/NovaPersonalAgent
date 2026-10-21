@@ -78,7 +78,10 @@ const click=async label=>{
  if(label==='允许本次'){const value=await state();previousApproval=value.items.find(item=>item.id===value.selected)?.build?.approval?.id}
  return evaluate(`(()=>{const button=[...document.querySelectorAll('button')].find(node=>!node.hidden&&!node.disabled&&node.textContent.trim()===${JSON.stringify(label)});if(!button)throw Error('Missing enabled button: '+${JSON.stringify(label)});const menu=button.closest('details');if(menu)menu.open=true;button.click()})()`)
 }
-const choose=value=>evaluate(`(()=>{const node=document.querySelector('[aria-label="对话模式"]');node.value=${JSON.stringify(value)};node.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+const choose=async value=>{
+ await until(()=>evaluate(`(()=>{const node=document.querySelector('[role="radiogroup"][aria-label="对话模式"] [data-mode=${JSON.stringify(value)}]');return Boolean(node&&!node.disabled)})()`),Boolean,'mode '+value)
+ return evaluate(`document.querySelector('[role="radiogroup"][aria-label="对话模式"] [data-mode=${JSON.stringify(value)}]').click()`)
+}
 const approval=async name=>{
  await until(state,value=>{const pending=value?.items.find(item=>item.id===value.selected)?.build?.approval;return pending?.name===name&&pending.id!==previousApproval},'approval '+name)
  await until(()=>evaluate(`(()=>{const node=[...document.querySelectorAll('button')].find(node=>node.textContent==='允许本次');return node&&!node.disabled})()`),Boolean,'complete approval preview')
@@ -119,6 +122,13 @@ try{
  await until(()=>evaluate('document.querySelector(".workbench-plan-body").textContent.length'),value=>value>10000,'paged full plan')
  await click('修改计划');await evaluate(`(()=>{const edit=document.querySelector('[aria-label="计划内容"]');edit.value+=${JSON.stringify('\n用户补充的验收要求。')}})()`);await click('保存计划')
  await until(state,value=>value.items[0].plan.version===2,'edited plan version')
+ // Shift+Tab in the draft picks Build as the plan's execution; it promotes the local action and starts nothing.
+ const modeKey=()=>evaluate(`(()=>{const draft=document.querySelector('[aria-label="消息草稿"]');draft.focus();const event=new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true});draft.dispatchEvent(event);return event.defaultPrevented})()`)
+ assert.equal(await modeKey(),true)
+ await until(()=>evaluate(`document.querySelector('.composer-mode').dataset.mode`),value=>value==='build','Shift+Tab Build mode')
+ await until(()=>evaluate(`[...document.querySelectorAll('.workbench-plan-actions button')].find(node=>node.dataset.primary==='true')?.textContent`),value=>value==='在当前项目 Build','Build is the primary plan action')
+ assert.equal((await state()).items[0].mode,'plan');assert.equal((await state()).items.some(item=>item.kind==='build'),false)
+ await choose('plan');await until(()=>evaluate(`document.querySelector('.composer-mode').dataset.mode`),value=>value==='plan','Plan mode restored')
  await click('选择本地目录…');await until(()=>evaluate('document.querySelector("[aria-label=项目目录]").value'),Boolean,'local directory')
  await click('在当前项目 Build');await approval('file_edit')
  const buildId=(await state()).selected

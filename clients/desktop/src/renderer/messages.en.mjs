@@ -1740,4 +1740,10 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "截图暂不可用。": "Screenshot unavailable.",
   "操作后的屏幕": "Screen after the action",
   "操作后的屏幕截图": "Screenshot of the screen after the action",
+  "直接对话": "Talk directly",
+  "澄清需求，发布计划后选择执行方式": "Clarify the request, then choose how to run the published plan",
+  "发布计划后在本地项目里 Build": "Build in a local project after the plan is published",
+  "发布计划后交给执行器": "Hand the published plan to an executor",
+  "Build 会话进行中": "Build session in progress",
+  "Shift+Tab 切换模式": "Shift+Tab switches mode",
 })
