@@ -192,7 +192,7 @@ test('file writes follow live links and reject dangling links without replacing 
 
 test('shell environment admits only explicit system and development variables',()=>{
  const allowed={Path:'tools',SystemRoot:'C:\\Windows',COMSPEC:'cmd.exe',PATHEXT:'.EXE',USERPROFILE:'profile',APPDATA:'app',LOCALAPPDATA:'local',TMP:'tmp',LANG:'en_US.UTF-8',LC_ALL:'en_US.UTF-8',TERM:'xterm',VIRTUAL_ENV:'venv',DEVELOPER_DIR:'xcode',SDKROOT:'sdk'}
- const secrets={GITHUB_TOKEN:'fake',AWS_ACCESS_KEY_ID:'fake',AWS_SECRET_ACCESS_KEY:'fake',UNKNOWN_VENDOR_SECRET:'fake',HTTPS_PROXY:'https://user:secret@example.test',NODE_OPTIONS:'--require malicious',PYTHONPATH:'inject',ZDOTDIR:'inject',BASH_ENV:'inject'}
+ const secrets={GITHUB_TOKEN:'fake',AWS_ACCESS_KEY_ID:'fake',AWS_SECRET_ACCESS_KEY:'fake',UNKNOWN_VENDOR_SECRET:'fake',HTTPS_PROXY:'https://user:secret@example.test',NODE_OPTIONS:'--require malicious',PYTHONPATH:'inject',ZDOTDIR:'inject',BASH_ENV:'inject',PSModulePath:'inject'}
  assert.deepEqual(localShellEnvironment({...allowed,...secrets}),allowed)
 })
 
@@ -215,5 +215,15 @@ test('file byte cursors reject split UTF-8 characters and out-of-range positions
   assert.equal(record(await executeLocalTool('file_read',{path:'utf8',byte_offset:3},root,signal())).content,'😀\nend')
   assert.equal(record(await executeLocalTool('file_read',{path:'utf8',byte_offset:11},root,signal())).content,'')
   await assert.rejects(executeLocalTool('file_read',{path:'.',byte_offset:0},root,signal()),/byte_offset_requires_file/)
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+
+
+test('Windows shell resolves built-in cmdlets without inheriting module search paths',{skip:process.platform!=='win32',timeout:30000},async()=>{
+ const root=await fixture()
+ try{
+  const result=record(await executeLocalShell({command:"[Console]::Out.Write((Get-Date -Date '2000-01-02' -Format 'yyyy-MM-dd')); [Console]::Error.Write($env:PSModulePath)",cwd:root,timeout:10},signal(),{...shellOptions(),environment:{...process.env,PSModulePath:join(root,'untrusted-modules')}}))
+  assert.equal(result.status,'completed',JSON.stringify(result));assert.equal(result.stdout,'2000-01-02')
+  assert.equal(result.stderr,join(process.env.SystemRoot??process.env.SYSTEMROOT??'C:\\Windows','System32','WindowsPowerShell','v1.0','Modules'))
  }finally{await rm(root,{recursive:true,force:true})}
 })

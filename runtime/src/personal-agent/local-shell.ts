@@ -1,6 +1,6 @@
 import {mkdtemp,writeFile,rm,stat} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
-import {join} from 'node:path'
+import {dirname,join} from 'node:path'
 import type {CodexProcessOwnerFactory,OwnedCodexProcess} from '../executors/native-process.js'
 import type {JsonValue} from '../core/events.js'
 import type {Readable} from 'node:stream'
@@ -63,6 +63,8 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
    // -File avoids command-line re-escaping and PowerShell 5's ANSI script default.
    await writeFile(script,'\ufeff'+[
     '$ErrorActionPreference = "Stop"',
+    // PowerShell adds machine module paths at startup; constrain discovery again before commands run.
+    '$env:PSModulePath = [IO.Path]::Combine($PSHOME, "Modules")',
     '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
     '[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)',
     '$OutputEncoding = [Console]::OutputEncoding',
@@ -74,6 +76,8 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
     '} catch { [Console]::Error.WriteLine($_.ToString()); exit 1 }',
    ].join('\r\n'),'utf8')
    binary=join(environment.SystemRoot??environment.SYSTEMROOT??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe')
+   // Resolve built-in cmdlets without inherited module paths or profile-directory discovery.
+   environment.PSModulePath=join(dirname(binary),'Modules')
    argv=['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script]
   }
   signal.throwIfAborted()
