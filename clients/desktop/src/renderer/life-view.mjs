@@ -45,14 +45,13 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
 }
 export function renderProfile(panel,{products,state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate}){
  panel.append(el('h2',t('个人资料')))
- const history=warmup?.last_success,displayDraft=history?.draft??warmup?.draft
- if(history){const date=history.generated_at?new Date(history.generated_at).toLocaleDateString():null;panel.append(el('p',date?t('上次整理于 {0}',date):t('上次整理的资料'),'preference-caption'));if(history.unavailable_sources)panel.append(el('p','部分原始来源已不可用，已整理的历史内容仍保留。','preference-caption'))}
+ const displayDraft=warmup?.draft
  renderWarmup(panel,{warmup,command,button})
  if(warmup)panel.append(el('p',warmup.automatic_available===false?'今日自动更新次数已用完，如需再次更新可手动触发。':'每天最多自动更新一次，额外更新可手动触发。'))
  const card=el('section');card.className='preference-card';panel.append(card)
  const confirmed=state?.profile?.about??'',suggested=state?.profile?.version>0?'':displayDraft?.about?.text??'',about=confirmed||suggested
  const work=state?.profile?.version>0?[]:displayDraft?.work??[]
- const sources=new Map((history?.sources??warmup?.sources??[]).map(source=>[source.id,source.label+(source.available===false?' · 来源已不可用':'')]))
+ const sources=new Map((warmup?.sources??[]).map(source=>[source.id,source.label+(source.available===false?' · 来源已不可用':'')]))
  const sourceDetails=(host,refs)=>attachSources(host,refs?.map(ref=>sources.get(ref.entry_id)),{title:'查看来源'})
  card.append(el('h3','关于我'))
  if(local.profile){
@@ -61,7 +60,7 @@ export function renderProfile(panel,{products,state,news,warmup,command,button,l
   button('保存介绍',async()=>{await command('life.mutate',{op:'profile',expected_version:draft.version,about:draft.about});delete local.profile;rerender()},actions,'profile:save').className='page-add'
   button('取消编辑',()=>{delete local.profile;rerender()},actions,'profile:save')
  }else{
-  const caption=el('p',confirmed?'你写下的介绍':state?.profile?.version>0?'你已清空个人介绍，可以随时重新写一段。':suggested||work.length?history?'上次整理的个人资料，随时可以改':'我照你最近的工作写的，随时可以改':warmup?.needs_update?'个人资料需要更新，原有资料仍保存在本机。':'我还不太了解你。看完你的资料会先写一版，你也可以自己写一段。');caption.className='preference-caption';card.append(caption)
+  const caption=el('p',confirmed?'你写下的介绍':state?.profile?.version>0?'你已清空个人介绍，可以随时重新写一段。':suggested||work.length?'我照你最近的工作写的，随时可以改':warmup?.needs_update?'个人资料需要更新，原有资料仍保存在本机。':'我还不太了解你。看完你的资料会先写一版，你也可以自己写一段。');caption.className='preference-caption';card.append(caption)
   if(about){const holder=el('div');holder.className='profile-about';const preview=el('p',about);preview.className='profile-preview';holder.append(preview);card.append(holder);if(state?.profile?.version===0&&displayDraft?.about)sourceDetails(holder,displayDraft.about.refs)}
   if(work.length){const grid=el('div');grid.className='profile-work';card.append(grid);for(const item of work){const block=el('article');block.className='profile-work-item';block.append(el('h4',item.title),el('p',item.text));sourceDetails(block,item.refs);grid.append(block)}}
   const actions=el('div');actions.className='preference-actions';card.append(actions)
@@ -70,7 +69,7 @@ export function renderProfile(panel,{products,state,news,warmup,command,button,l
   // The draft is only on screen until the user writes their own; a first draft that is still working or has failed shows its own status box above.
   if(warmup){const working=warmup.status==='working',update=button(working?'正在更新…':'立即更新',()=>command('profile.refresh',{}),actions);update.disabled=working;if(working)update.setAttribute('aria-busy','true')}
  }
- const displayedProjects=history?.projects??products?.projects??[]
+ const displayedProjects=products?.projects??[]
  if(displayedProjects.length){
   const section=el('section',undefined,'profile-projects');section.append(el('h3','项目与参与'));panel.append(section)
   for(const project of displayedProjects){const row=el('article',undefined,'profile-project');row.append(el('h4',project.name),el('p',project.summary));const controls=el('div',undefined,'card-actions');row.append(controls)
@@ -78,7 +77,5 @@ export function renderProfile(panel,{products,state,news,warmup,command,button,l
    section.append(row)
   }
  }
- if(history?.draft?.interests?.length){const section=el('section',undefined,'preference-card');section.append(el('h3','上次整理的兴趣'));for(const interest of history.draft.interests){const item=el('p',interest.text);sourceDetails(item,interest.refs);section.append(item)}panel.append(section)}
- if(history?.suggestions?.length){const section=el('section',undefined,'preference-card');section.append(el('h3','上次整理的建议'),el('p','以下是当时整理的记录。','preference-caption'));for(const suggestion of history.suggestions){const item=el('article',undefined,'profile-work-item');item.append(el('h4',suggestion.title),el('p',suggestion.body));sourceDetails(item,suggestion.refs);section.append(item)}panel.append(section)}
  renderInterests(panel,{news,warmup,command,button,local:preferencesLocal,rerender,delegate})
 }

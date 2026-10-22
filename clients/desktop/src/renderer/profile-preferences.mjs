@@ -12,8 +12,8 @@ export function renderWarmup(parent,{warmup,command,button}){
  if(warmup?.status!=='working'&&warmup?.status!=='failed')return
  const busy=warmup.status==='working',box=el('section',undefined,'warmup-status');box.setAttribute('role','status');box.setAttribute('aria-live','polite');box.setAttribute('aria-busy',String(busy));parent.append(box)
  if(busy){const spinner=el('span',undefined,'warmup-spinner');spinner.setAttribute('aria-hidden','true');box.append(spinner)}
- box.append(el('p',busy?'正在后台更新画像，不影响对话和其他功能。':warmup.draft||warmup.last_success?.draft?'画像暂时未能更新，现有内容仍可使用。':warmup.needs_update?'个人资料尚未更新，原有资料仍保存在本机。':'画像暂未生成，不影响对话和其他功能。'))
- if(busy&&!warmup.draft&&!warmup.last_success?.draft){const skeleton=el('div',undefined,'warmup-skeleton');skeleton.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)skeleton.append(el('span'));box.append(skeleton)}
+ box.append(el('p',busy?'正在后台更新画像，不影响对话和其他功能。':warmup.draft?'画像暂时未能更新，现有内容仍可使用。':warmup.needs_update?'个人资料尚未更新，原有资料仍保存在本机。':'画像暂未生成，不影响对话和其他功能。'))
+ if(busy&&!warmup.draft){const skeleton=el('div',undefined,'warmup-skeleton');skeleton.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)skeleton.append(el('span'));box.append(skeleton)}
  if(!busy)button('重试',()=>command('profile.refresh',{}),box)
 }
 export function renderInterests(parent,{news,warmup,command,button,local,rerender,delegate}){

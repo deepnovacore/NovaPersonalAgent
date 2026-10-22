@@ -96,9 +96,6 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "停止后台同步？已连接手机可继续在本机使用。": "Stop background sync? Connected phones can still work locally.",
   "移除后台服务？Hub 数据将保留，可再次启用。": "Remove the background service? Hub data will be kept so you can enable it again.",
 
-  '上次整理于 {0}': 'Last prepared on {0}',
-  '上次整理的资料': 'Previously saved profile',
-  '部分原始来源已不可用，已整理的历史内容仍保留。': 'Some original sources are unavailable. Your saved results are kept.',
   '原始来源已不可用': 'Original sources are no longer available',
   '个人资料需要更新，原有资料仍保存在本机。': 'Your profile needs an update. Previous results remain stored on this device.',
   '个人资料尚未更新，原有资料仍保存在本机。': 'Your profile has not been updated. Previous results remain stored on this device.',
