@@ -10,6 +10,11 @@ const PATHS=Object.freeze({
  refresh:'M20 11a8 8 0 1 0-2.4 5.6M20 4.5V11h-6.5',
  search:'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM20.5 20.5l-4.2-4.2',
  monitor:'M4 5h16v11H4zM9 20h6M12 16v4',
+ globe:'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM3.5 12h17M12 3.5c2.4 2.4 3.5 5.3 3.5 8.5s-1.1 6.1-3.5 8.5c-2.4-2.4-3.5-5.3-3.5-8.5s1.1-6.1 3.5-8.5z',
+ camera:'M4 8h3l1.5-2.5h7L17 8h3v11H4zM12 10.5a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5z',
+ code:'M8.5 7L3.5 12l5 5M15.5 7l5 5-5 5M13.5 5l-3 14',
+ book:'M5 4.5h10.5a3 3 0 0 1 3 3V19.5H8a3 3 0 0 1-3-3zM5 16.5a3 3 0 0 1 3-3h10.5',
+ plug:'M9 3.5v5M15 3.5v5M6.5 8.5h11v3.5a5.5 5.5 0 0 1-11 0zM12 17.5v3',
 })
 export function iconNode(name,document=globalThis.document){
  const d=PATHS[name]

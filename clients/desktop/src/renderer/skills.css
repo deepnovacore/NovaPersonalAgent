@@ -12,7 +12,8 @@
 .skills-grid>.empty-state{grid-column:1/-1}
 .skill-card{display:flex;align-items:center;gap:12px;min-width:0;padding:10px 12px;border-radius:var(--radius);transition:background .15s}
 .skill-card:hover{background:var(--surface-raised)}
-.skill-icon{flex:0 0 36px;width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--surface-raised)}
+.skill-icon{flex:0 0 36px;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--accent-wash);color:var(--accent)}
+#skills-panel .skill-icon .ui-icon{width:18px;height:18px}
 .skill-copy{flex:1;min-width:0}
 .skill-copy h3{margin:0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .skill-copy p{margin:2px 0 0;color:var(--ink-dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
