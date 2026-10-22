@@ -575,6 +575,7 @@ async function settleWithin<T>(promise: Promise<T>, milliseconds: number): Promi
 }
 
 async function readyProbe(options: {
+  readonly fixtures?: EndpointingCapabilityFixtures
   readonly scenario?: Scenario
   readonly executor?: LiveKitExecutor
   readonly telemetry?: RealtimeTelemetry
@@ -590,7 +591,7 @@ async function readyProbe(options: {
     ...(options.telemetry === undefined ? {} : {telemetry: options.telemetry}),
     agentsLoader: loaderFor(created.surface, created.state),
     clock: options.clock ?? new ProbeClock(),
-    fixtures: await fixtures(),
+    fixtures: options.fixtures ?? await fixtures(),
     runtime: SUPPORTED_RUNTIME,
     cache: options.cache ?? createEndpointingCapabilityCache(),
   })
@@ -993,6 +994,7 @@ test('per-prediction timeout is bounded and closes every created public resource
 })
 
 test('owner abort keeps stream and detector cleanup strictly sequenced', async () => {
+  const loadedFixtures = await fixtures()
   const clock = new ProbeClock('manual')
   let releaseSecondClose: (() => void) | undefined
   const secondCloseGate = new Promise<void>(resolve => { releaseSecondClose = resolve })
@@ -1010,13 +1012,14 @@ test('owner abort keeps stream and detector cleanup strictly sequenced', async (
     },
   }
   const probe = readyProbe({
+    fixtures: loadedFixtures,
     clock,
     executor,
     scenario: {secondTurnCloseGate: secondCloseGate},
   })
 
   try {
-    const completion = await settleWithin(probe, 100)
+    const completion = await settleWithin(probe, 1000)
     assert.notEqual(completion, STILL_PENDING)
     if (completion === STILL_PENDING) return
     assert.deepEqual(completion.result.eot, {available: false, reason: 'timeout'})

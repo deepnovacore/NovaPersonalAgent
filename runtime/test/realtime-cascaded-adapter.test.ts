@@ -2203,7 +2203,7 @@ test('a missing target cannot consume recovery context or start LLM', async () =
 })
 
 test('event queue overflow preserves every prior event, surfaces one stable failure, and terminates',
-  async () => {
+  {timeout: 5_000}, async () => {
     class FloodAsrSession implements AsrSession {
       #release: (() => void) | null = null
       readonly #finished = new Promise<void>(resolve => { this.#release = resolve })
@@ -2215,7 +2215,14 @@ test('event queue overflow preserves every prior event, surfaces one stable fail
       }
       close(): Promise<void> { this.#release?.(); return Promise.resolve() }
     }
-    const llm = new FakeLlm([])
+    const cleanup = deferred<void>()
+    class ClosingLlm extends FakeLlm {
+      override async close(): Promise<void> {
+        await super.close()
+        cleanup.resolve(undefined)
+      }
+    }
+    const llm = new ClosingLlm([])
     const adapter = new CascadedRealtimeAdapter({
       endpointing: new ScriptedEndpointing(
         [{kind: 'speech_start', pcm: new Uint8Array([0, 0])}],
@@ -2236,7 +2243,8 @@ test('event queue overflow preserves every prior event, surfaces one stable fail
     if (!firstResult.done) assert.equal(firstResult.value.kind, 'user_speech_started')
 
     await adapter.sendAudio(new Uint8Array([0, 0]), new AbortController().signal)
-    await waitFor('overflow cleanup', () => llm.closed)
+    // Observe completion directly: polling can lose to its timer after an event-loop stall.
+    await cleanup.promise
     const drained: RealtimeProviderEvent[] = []
     while (true) {
       const result = await settleWithin('overflow queue drain', iterator.next())

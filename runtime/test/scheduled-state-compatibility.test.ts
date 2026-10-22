@@ -27,7 +27,7 @@ test('persisted model accounting survives schedule startup, updates and restart'
     await recovered.close()
     await reopened.open()
     assert.deepEqual(reopened.getRun(run.run_id).processing, {
-      batch_id: 'batch', recipe: 'recipe', exhausted: false, calls: [],
+      batch_id: 'batch', recipe: 'recipe', attempts: [], exhausted: false, calls: [],
       model_calls: 4, reserved_output_tokens: 29288,
     })
     assert.equal(reopened.getRun(run.run_id).terminal_summary?.published, true)

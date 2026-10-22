@@ -1,7 +1,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm} from 'node:fs/promises'
+import {mkdtemp,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {Memory,makeMemoryRef} from '../src/core/memory.js'
@@ -48,7 +48,7 @@ test('model tool saves through the real ledger and a fresh conversation reads it
 })
 
 test('production composition delivers explicit tool receipts across two service sessions', {timeout:30000}, async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-explicit-service-'))
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-explicit-service-'))
  const gateway={async *stream(){await Promise.reject(Error('no model'))},complete(){throw Error('no model')}}
  const createResource=()=>new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'ledger.sqlite')),userId:'test',model:'fixture',gateway,inputConsent:true,conversationProviders:['chat']})
  let resource=createResource()

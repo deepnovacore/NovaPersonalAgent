@@ -127,11 +127,15 @@ test('invented references are dropped, and a draft with nothing grounded fails a
   await until(()=>outcomes.length===2);assert.deepEqual(outcomes,['evidence','ok'])
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
-test('a timed-out automatic generation waits for a manual retry',async()=>{
+test('a timed-out automatic generation waits for a manual retry',async t=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let calls=0;const outcomes:ProfileOutcome['outcome'][]=[]
+ const deadlines:AbortController[]=[]
+ t.mock.method(AbortSignal,'timeout',(milliseconds:number)=>{assert.equal(milliseconds,20);const deadline=new AbortController();deadlines.push(deadline);return deadline.signal})
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>++calls===1?new Promise(()=>{/* ignores its signal */}):Promise.resolve(draft),()=>{/* observer fixture */},{timeoutMs:20,backoffMs:[20],report:r=>outcomes.push(r.outcome)})
  try{
   await service.open();service.update(entries)
+  // Expire after durable admission reaches the model, independent of disk speed.
+  await until(()=>calls===1);deadlines[0]!.abort(new DOMException('Test deadline','TimeoutError'))
   await until(()=>service.snapshot().status==='failed');assert.equal(calls,1);assert.equal(service.snapshot().automatic_available,false)
   await service.refresh(true)
   assert.equal(calls,2);assert.deepEqual(outcomes,['timeout','ok'])
@@ -260,7 +264,7 @@ test('a draft written by an older pipeline stays visible, is regenerated at once
  try{
   await service.open();service.update([fileA,fileB]);await service.refresh();assert.equal(service.snapshot().draft?.work.length,1);await service.close()
   const disk=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;assert.equal(disk.generation_version,PROFILE_GENERATION_VERSION)
-  await writeFile(path,JSON.stringify({...disk,generation_version:'a-previous-pipeline'}))
+  await writeFile(path,JSON.stringify({...disk,generation_version:'understanding-v8'}))
   phase=2;let release:(()=>void)|undefined
   service=new ProfileWarmup(path,async()=>{await new Promise<void>(resolve=>{release=resolve});return reply()},()=>{/* snapshot observer */})
   await service.open();service.update([fileA,fileB])

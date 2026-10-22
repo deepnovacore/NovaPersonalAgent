@@ -24,6 +24,8 @@ export default tseslint.config(
     },
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
+      // Dropping fields by rest-destructuring is the intended way to omit them from a copy.
+      '@typescript-eslint/no-unused-vars': ['error', {ignoreRestSiblings: true}],
       '@typescript-eslint/no-confusing-void-expression': 'off',
     },
   },
