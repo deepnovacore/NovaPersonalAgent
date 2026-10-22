@@ -248,3 +248,36 @@ test('reading many Unicode documents uses a bounded number of Git processes',t=>
  assert.deepEqual(repo.read().revisions,[...entries].sort((a,b)=>a.entry_id.localeCompare(b.entry_id)))
  assert.ok(calls.length<=3,`a scan must not spawn Git per file: ${calls.length} processes`)
 })
+
+function countGit(t:{mock:{method:(...args:never[])=>unknown}},repo:MarkdownRepository):string[][]{
+ const calls:string[][]=[],original=Reflect.get(repo,'git') as (...args:unknown[])=>string
+ ;(t.mock.method as (object:unknown,name:string,fn:(...args:unknown[])=>string)=>unknown)(repo,'git',function(...args:unknown[]){calls.push(args[0] as string[]);return original.apply(repo,args)})
+ return calls
+}
+
+test('an unchanged repository is read again without Git and never shares the cached snapshot',t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root);repo.open([first,next])
+ const warm=repo.read(),calls=countGit(t,repo)
+ const again=repo.read()
+ assert.equal(calls.length,0,`an unchanged read must not spawn Git: ${calls.length} processes`)
+ assert.deepEqual(again,warm)
+ again.revisions.length=0;again.edits.push({entry_id:'forged',expected_revision:1,content:{text:'forged'},path:'entries/forged.md',hash:'forged'});again.baselines.forged='forged'
+ assert.deepEqual(repo.read(),warm)
+})
+
+test('every input of a cached read invalidates it',t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root);repo.open([first]);repo.read()
+ const calls=countGit(t,repo),file=document(root),original=readFileSync(file,'utf8')
+ writeFileSync(file,original.replace(/Prefer concise replies\n$/u,'Hand edit\n'))
+ assert.equal(repo.read().edits[0]?.content.text,'Hand edit')
+ writeFileSync(file,original);assert.deepEqual(repo.read().edits,[])
+ const user=join(root,'USER.md'),profile=readFileSync(user,'utf8')
+ // A stale cached success would hide this malformed semantic document.
+ writeFileSync(user,profile+'\n');assert.throws(()=>repo.read(),/FORMAT/u)
+ writeFileSync(user,profile);repo.read()
+ const tree=git(root,'rev-parse','HEAD^{tree}'),head=git(root,'rev-parse','HEAD')
+ const commit=git(root,'-c','user.name=Fixture','-c','user.email=fixture@localhost','commit-tree',tree,'-p',head,'-m','External commit')
+ calls.length=0;git(root,'update-ref','HEAD',commit);repo.read();assert.ok(calls.length>0,'a moved HEAD must be re-read')
+ calls.length=0;writeFileSync(join(root,'entries','unexpected.md'),'stray');assert.throws(()=>repo.read(),/CONFLICT|UNSAFE_PATH/u);rmSync(join(root,'entries','unexpected.md'))
+ repo.read();repo.prepare([first,next]);assert.throws(()=>repo.read(),/PENDING_OPERATION/u)
+})

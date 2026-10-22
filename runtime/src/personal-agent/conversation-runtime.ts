@@ -217,7 +217,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
      if(event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending))emit({delivery_class:taskResponseItems.has(event.response_id)?'task_output':graph.service.isProactiveResponse(event.response_id)?'proactive':'reply',type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true})
      if(hasTools&&event.status==='completed'){taskResponseItems.delete(event.response_id);taskResponses.delete(event.response_id);taskForegroundResponses.delete(event.response_id)}
      else if(mode==='text'||event.status!=='completed'||externalTask)void settleTaskResponse(event.response_id,assistant,event.status==='completed',externalTask?'generated':'delivered').then(async()=>{if(externalTask)await graph.service.session.quarantineActiveOrAwaitingResponse()}).finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)})
-     if(pending&&(event.status!=='completed'||(!hasTools&&assistant.trim()!==''))){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{})});else current.reject(Error('response_'+event.status))}
+     if(pending&&(event.status!=='completed'||(!hasTools&&assistant.trim()!==''))){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{})});else current.reject(Object.assign(Error('response_'+event.status),{reason:event.reason}))}
     }
    },
   })

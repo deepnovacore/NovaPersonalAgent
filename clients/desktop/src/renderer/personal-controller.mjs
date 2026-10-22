@@ -11,6 +11,9 @@ const MODEL_FAILURES={
   model_timeout:'等待模型回复超时，请重试。',
   model_http:'模型服务返回错误，请重试。',
   model_network:'模型连接中断，请重试。',
+  model_http_auth:'模型服务密钥无效或没有权限，请在设置中检查 API Key。',
+  model_http_quota:'模型服务账户余额不足或已欠费，请充值或在设置中更换密钥后重试。',
+  model_http_rate_limited:'模型服务请求过于频繁，请稍后重试。',
 }
 function conversationSnapshot(value){
   if(!value||typeof value.selected_id!=='string'||!value.selected_id||!Array.isArray(value.items))return false

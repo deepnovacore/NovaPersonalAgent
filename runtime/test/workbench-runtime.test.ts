@@ -76,6 +76,33 @@ test('production Plan factory admits batched wire calls through the real convers
  }finally{await host.close();await rm(root,{recursive:true,force:true})}
 })
 
+test('a provider account failure reaches the conversation as a specific reason without its body',async()=>{
+ for(const [body,status,reason] of [[{error:{code:'Arrearage',message:'Access denied secret prompt'}},400,'model_http_quota'],[{error:{code:'invalid_api_key'}},401,'model_http_auth'],[{},429,'model_http_rate_limited'],[{error:{code:'leak me'}},500,'model_http']] as const){
+  const factory=createChatCompletionsLlmFactory({provider:'qwen',baseUrl:'https://example.test',apiKey:'test',model:'test',instructions:'Plan',...PLAN_LLM_TRANSPORT,fetchImpl:()=>Promise.resolve(new Response(JSON.stringify(body),{status}))})
+  const f=await fixture(()=>({}),'ask',factory)
+  try{
+   await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+   await f.host.submitConversationText('chat:main','请制定计划');await f.host.waitConversation('chat:main')
+   const error=f.frames.find(frame=>frame.type==='conversation.error')
+   assert.equal(error?.reason,reason);assert.doesNotMatch(JSON.stringify(f.frames),/Access denied|secret prompt|leak me/u)
+  }finally{await f.close()}
+ }
+})
+
+test('a trickling provider error body is abandoned quickly and classified by status',async()=>{
+ let timer:ReturnType<typeof setInterval>|undefined
+ const body=new ReadableStream<Uint8Array>({start(controller){timer=setInterval(()=>controller.enqueue(new Uint8Array([32])),20)},cancel(){clearInterval(timer)}})
+ const factory=createChatCompletionsLlmFactory({provider:'qwen',baseUrl:'https://example.test',apiKey:'test',model:'test',instructions:'Plan',...PLAN_LLM_TRANSPORT,fetchImpl:()=>Promise.resolve(new Response(body,{status:402}))})
+ const f=await fixture(()=>({}),'ask',factory)
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const started=performance.now()
+  await f.host.submitConversationText('chat:main','请制定计划');await f.host.waitConversation('chat:main')
+  assert.ok(performance.now()-started<10_000,'a slow error body must not hold the turn')
+  assert.equal(f.frames.find(frame=>frame.type==='conversation.error')?.reason,'model_http_quota')
+ }finally{clearInterval(timer);await f.close()}
+})
+
 test('Plan recovers from malformed wire arguments, accepts a batch and continues to publish_plan',async()=>{
  let requests=0
  const factory=createChatCompletionsLlmFactory({provider:'deepseek',baseUrl:'https://example.test',apiKey:'test',model:'test',instructions:'Plan',...PLAN_LLM_TRANSPORT,fetchImpl:(_url,init)=>{

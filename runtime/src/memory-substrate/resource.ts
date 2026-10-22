@@ -19,7 +19,7 @@ import type {JsonValue} from '../core/events.js'
 import {createHash, randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {ModelGateway} from '../model/model-gateway.js'
-import {MemoryLedgerClientError,type MemoryLedgerClient} from '../memory-ledger/store-client.js'
+import {MemoryLedgerClientError,runInMemoryBackground,type MemoryLedgerClient} from '../memory-ledger/store-client.js'
 import {MemoryObservationSchema, MemoryListOptionsSchema, MemorySourceRefSchema, LifeMemorySchema, type MemoryEntry, type MemoryObservation, type MemorySourceRef, type MemoryVersion} from '../memory/entry.js'
 import type {PersonalMemoryResource, PersonalMemoryRememberTurn, PersonalMemoryResponseAdaptation, PersonalMemoryPurgeResult} from '../memory/personal-memory.js'
 import {CandidateSchema, EntryRevisionSchema, EvidenceRecordSchema, contentHash, type Candidate,type EntryRevision, type EvidenceRecord} from './store.js'
@@ -115,7 +115,8 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   startBackgroundWork():void{
     if(!this.#opened||this.#backgroundStarted)return
     this.#backgroundStarted=true
-    const maintain=()=>{if(!this.#opened||this.#maintenanceRun)return;this.#maintenanceRun=this.#maintain().catch(()=>{/* Durable work retries at the next tick. */}).finally(()=>{this.#maintenanceRun=undefined})}
+    // Indexing and extraction yield the memory worker to conversation and UI reads.
+    const maintain=()=>{if(!this.#opened||this.#maintenanceRun)return;this.#maintenanceRun=runInMemoryBackground(()=>this.#maintain()).catch(()=>{/* Durable work retries at the next tick. */}).finally(()=>{this.#maintenanceRun=undefined})}
     maintain();this.#maintenance=setInterval(maintain,60000);this.#maintenance.unref()
   }
   async close():Promise<void>{this.#opened=false;this.#backgroundStarted=false;this.#preparedSignatures.clear();this.#snapshotSignature='';clearInterval(this.#maintenance);this.#abort.abort();await this.#maintenanceRun;await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;await this.#consolidating;this.#adaptation={revision:0,replyPreferences:[]};if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}}
@@ -139,7 +140,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   }
   async lookupExplicit(query:ExplicitMemoryLookup,consumer:string):Promise<ExplicitMemoryPage>{
     this.#ready();if(this.options.personalMemoryEnabled===false)throw Error('personal_memory_disabled')
-    return await this.options.client.memory('explicit_lookup',{prefix:this.prefix,query,consumer}) as ExplicitMemoryPage
+    return await this.options.client.memory('explicit_lookup',{prefix:this.prefix,query,consumer},{priority:'interactive'}) as ExplicitMemoryPage
   }
   capabilities(){return {list:true,get:true,correct:true,forgetEntry:true,forgetSource:true,observeSource:true}}
   async profileSources(ids?:readonly string[]):Promise<ProfileInput[]>{
@@ -209,7 +210,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const workEpoch=this.#memoryWorkEpoch
     // The Worker reconciles Markdown and filters current evidence + the actual recipient grant in one transaction.
     // A cached extraction snapshot is never authority to send content to a conversational model.
-    const rows=z.array(EntryRevisionSchema).parse(await this.options.client.memory('conversation_snapshot',{entry_prefix:this.prefix,consumer}))
+    const rows=z.array(EntryRevisionSchema).parse(await this.options.client.memory('conversation_snapshot',{entry_prefix:this.prefix,consumer},{priority:'interactive'}))
     signal?.throwIfAborted();this.#ready()
     if(workEpoch!==this.#memoryWorkEpoch)return {revision:++this.#preparedRevision,replyPreferences:[],memoryContext:{text:'',voice:''}}
     const summary=rows.find(row=>row.entry_id===this.prefix+'summary:daily')??null,now=new Date()
@@ -470,7 +471,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   }
   /** Wait for currently admitted extraction work; admission itself only waits for persistence. */
   async flush():Promise<void>{await this.#sourceWork;await this.#pending;await this.#notifySources();await this.#indexing;this.#queueIndex();await this.#indexing;await this.#consolidating}
-  #queue(evidence:EvidenceRecord):void{if(this.options.personalMemoryEnabled===false||this.#queued.has(evidence.id)||this.#queued.size>=20)return;this.#queued.add(evidence.id);const work=(async()=>{if(this.#opened)await this.#extract(evidence)})().catch(()=>{ /* durable pending evidence is retried by maintenance */ }).finally(()=>{this.#queued.delete(evidence.id)});this.#pending=Promise.all([this.#pending,work]).then(()=>undefined)}
+  #queue(evidence:EvidenceRecord):void{if(this.options.personalMemoryEnabled===false||this.#queued.has(evidence.id)||this.#queued.size>=20)return;this.#queued.add(evidence.id);const work=runInMemoryBackground(async()=>{if(this.#opened)await this.#extract(evidence)}).catch(()=>{ /* durable pending evidence is retried by maintenance */ }).finally(()=>{this.#queued.delete(evidence.id)});this.#pending=Promise.all([this.#pending,work]).then(()=>undefined)}
   async #extract(evidence:EvidenceRecord,topic?:string,force=false):Promise<void>{
     const raw=await this.options.client.memory('extraction_ticket',{evidence_id:evidence.id,provider:this.#extractionFingerprint(),force})
     if(raw===null)return
