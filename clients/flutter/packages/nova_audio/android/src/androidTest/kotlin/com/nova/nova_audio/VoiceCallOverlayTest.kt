@@ -1,6 +1,9 @@
 package com.nova.nova_audio
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
+import android.widget.ImageView
 import android.graphics.Canvas
 import android.graphics.Color
 import android.view.View
@@ -13,6 +16,19 @@ import org.junit.Test
 import java.io.File
 
 class VoiceCallOverlayTest {
+    @Test fun orbUsesBundledPetPortrait() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            val context = instrumentation.targetContext
+            val overlay = VoiceCallOverlay(context, {}, {})
+            val avatar = VoiceCallOverlay::class.java.getDeclaredMethod("avatarView").apply { isAccessible = true }.invoke(overlay) as ImageView
+            val expected = BitmapFactory.decodeResource(context.resources, R.drawable.nova_orb_avatar)
+            assertTrue((avatar.drawable as BitmapDrawable).bitmap.sameAs(expected))
+            assertEquals(ImageView.ScaleType.CENTER_CROP, avatar.scaleType)
+            assertTrue(avatar.clipToOutline)
+        }
+    }
+
     @Test fun expandedControlsKeepHangupVisibleAndDispatchActions() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.runOnMainSync {

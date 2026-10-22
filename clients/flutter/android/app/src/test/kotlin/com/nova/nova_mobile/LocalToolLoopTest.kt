@@ -148,6 +148,24 @@ class LocalToolLoopTest {
         assertNotEquals(host.attemptedActions[0], host.attemptedActions[1])
         assertTrue(host.verified)
     }
+    @Test fun captureTransitionBeforeDispatchReplansWithoutReplayingAnAction() {
+        val host = Host()
+        val frames = mutableListOf<String>()
+        LocalToolLoop(host, { observation, turn ->
+            frames.add(observation.getString("fingerprint"))
+            host.executeError = if(turn == 0) IllegalStateException("screen_changed_during_capture") else null
+            when(turn) {
+                0 -> action()
+                1 -> ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Tap moved fixture","action":{"type":"tap","x":0.7,"y":0.6}}"""))
+                else -> ToolDecision.parse(JSONObject("""{"kind":"complete","summary":"Visible result"}"""))
+            }
+        }).run()
+        assertEquals(listOf("frame-1", "frame-2", "frame-3"), frames)
+        assertEquals(1, host.writes)
+        assertEquals(2, host.attemptedActions.size)
+        assertNotEquals(host.attemptedActions[0], host.attemptedActions[1])
+        assertTrue(host.verified)
+    }
     @Test fun successfulDispatchResetsConsecutiveStalePlanBudget() {
         val host = Host()
         LocalToolLoop(host, { _, turn ->

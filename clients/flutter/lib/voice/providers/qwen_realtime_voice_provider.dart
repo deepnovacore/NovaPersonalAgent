@@ -74,7 +74,11 @@ class QwenRealtimeVoiceProvider extends RealtimeSocketProvider {
         'role': item.role,
         'content': [
           {
-            'type': item.role == 'user' ? 'input_text' : 'text',
+            'type': item.role == 'user'
+                ? 'input_text'
+                : profile == IntegratedVoiceProfile.qwen
+                ? 'output_text'
+                : 'text',
             'text': RealtimeSocketProvider.boundedText(item.text),
           },
         ],
@@ -421,7 +425,12 @@ class QwenRealtimeVoiceProvider extends RealtimeSocketProvider {
         }
         return;
       }
-      fail('provider_error');
+      final code = error['code'];
+      fail(
+        code is String && RegExp(r'^[a-z_]{1,60}$').hasMatch(code)
+            ? 'provider_$code'
+            : 'provider_error',
+      );
       return;
     }
     if (type == 'input_audio_buffer.speech_started' ||

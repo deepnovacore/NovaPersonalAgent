@@ -22,11 +22,13 @@ import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executors
 
 /** Android owns observation and input; no ADB, host process or Hub is used. */
 class LocalGuiService : AccessibilityService() {
     companion object { @Volatile var current: LocalGuiService?=null }
     private val main=Handler(Looper.getMainLooper())
+    private val observations=Executors.newSingleThreadExecutor()
     private var stopButton: Button?=null
     private var nextScreenshotAt=0L
     var onStop: (() -> Unit)?=null
@@ -34,7 +36,7 @@ class LocalGuiService : AccessibilityService() {
     override fun onServiceConnected(){ current=this }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt(){onUnavailable?.invoke()}
-    override fun onDestroy(){onUnavailable?.invoke();hideStop();current=null;super.onDestroy()}
+    override fun onDestroy(){onUnavailable?.invoke();hideStop();current=null;observations.shutdownNow();super.onDestroy()}
 
     private fun <T> onMain(run: () -> T): T {
         check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
@@ -71,11 +73,11 @@ class LocalGuiService : AccessibilityService() {
         }
         if(delay>0)Thread.sleep(delay)
         val result=CompletableFuture<JSONObject>()
-        main.post {
-            try {
+        // Accessibility IPC and image encoding must not starve voice platform messages.
+        try {
                 val observed=screen()
                 check(expectedPackage==null||observed.getString("package")==expectedPackage){"outside_target_app"}
-                takeScreenshot(Display.DEFAULT_DISPLAY,mainExecutor,object:TakeScreenshotCallback {
+                takeScreenshot(Display.DEFAULT_DISPLAY,observations,object:TakeScreenshotCallback {
                     override fun onFailure(errorCode: Int){result.completeExceptionally(IllegalStateException("screenshot_unavailable_$errorCode"))}
                     override fun onSuccess(screenshot: ScreenshotResult){
                         val hardware=screenshot.hardwareBuffer
@@ -93,8 +95,7 @@ class LocalGuiService : AccessibilityService() {
                         }catch(error:Exception){result.completeExceptionally(error)}finally{hardware.close()}
                     }
                 })
-            }catch(error:Exception){result.completeExceptionally(error)}
-        }
+        }catch(error:Exception){result.completeExceptionally(error)}
         return result.get(10,TimeUnit.SECONDS)
     }
     fun launch(packageName: String) = onMain {

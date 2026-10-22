@@ -56,6 +56,29 @@ Future<({AgentCoreHost host, FakeAudio audio})> openChat(
 }
 
 void main() {
+  testWidgets('voice progress does not rebuild the hidden chat tree', (
+    tester,
+  ) async {
+    await openChat(tester);
+    await tester.tap(find.byTooltip('Live voice'));
+    await tester.pumpAndSettle();
+    final session = tester
+        .widget<PhoneVoicePanel>(find.byType(PhoneVoicePanel))
+        .session;
+    final before = tester.widget<LocalChatPanel>(
+      find.byType(LocalChatPanel, skipOffstage: false),
+    );
+    // Simulate caption/playback progress without changing call lifecycle.
+    // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    session.notifyListeners();
+    await tester.pump();
+    expect(
+      tester.widget<LocalChatPanel>(
+        find.byType(LocalChatPanel, skipOffstage: false),
+      ),
+      same(before),
+    );
+  });
   for (final useBack in [false, true]) {
     testWidgets(
       'fullscreen call hides chat and tabs; ${useBack ? 'back' : 'minimize'} preserves mounted draft',

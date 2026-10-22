@@ -280,10 +280,28 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                         _notice(
                           _actionError ??
                               widget.startupError ??
-                              t(
-                                '请检查语音设置或网络，再重新通话。',
-                                'Check voice settings or your connection, then try again.',
-                              ),
+                              switch (session.error) {
+                                'audio_playback_stalled' => t(
+                                  '音频播放暂时卡住，请重新开始通话。',
+                                  'Audio playback stalled. Please restart the call.',
+                                ),
+                                'audio_capture_stalled' => t(
+                                  '音频采集暂时卡住，请重新开始通话。',
+                                  'Audio capture stalled. Please restart the call.',
+                                ),
+                                'audio_stopped' || 'audio_failed' => t(
+                                  '手机音频已中断，请重新开始通话。',
+                                  'Device audio was interrupted. Please restart the call.',
+                                ),
+                                'provider_invalid_value' => t(
+                                  '语音服务拒绝了本次请求，请重试或检查模型配置。',
+                                  'The voice service rejected this request. Retry or check the model configuration.',
+                                ),
+                                _ => t(
+                                  '请检查语音设置或网络，再重新通话。',
+                                  'Check voice settings or your connection, then try again.',
+                                ),
+                              },
                         ),
                       if (session.active && !session.supportsVoiceDelegation)
                         _notice(
@@ -431,10 +449,8 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
     return Material(
       color: const Color(0xffeef2ed),
       borderRadius: BorderRadius.circular(16),
-      child: ExpansionTile(
+      child: ListTile(
         key: const ValueKey('voice-task'),
-        shape: const Border(),
-        collapsedShape: const Border(),
         leading: const Icon(
           CupertinoIcons.sparkles,
           color: Nova.mint,
@@ -444,28 +460,10 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
           _taskLabel(delegate.activeTool),
           style: const TextStyle(fontSize: 13),
         ),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        children: [
-          if (delegate.activeTool != null)
-            Text(
-              '${t('工具', 'Tool')}: ${delegate.activeTool}',
-              style: const TextStyle(fontSize: 12, color: Nova.secondary),
-            ),
-          if (delegate.draft.isNotEmpty)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 120),
-              child: SingleChildScrollView(
-                child: Text(
-                  delegate.draft,
-                  style: const TextStyle(fontSize: 13),
-                ),
-              ),
-            ),
-          TextButton(
-            onPressed: session.cancelDelegate,
-            child: Text(t('停止任务', 'Stop task')),
-          ),
-        ],
+        trailing: TextButton(
+          onPressed: session.cancelDelegate,
+          child: Text(t('停止任务', 'Stop task')),
+        ),
       ),
     );
   }

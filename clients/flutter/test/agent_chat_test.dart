@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:nova_mobile/agent_core/tool_registry.dart';
 import 'package:nova_mobile/personal/life_reducer.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +12,15 @@ import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/conversation/local_chat_panel.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
+
+class DelayedPersistence extends MemoryPersistence {
+  Completer<void>? gate;
+  @override
+  Future<void> write(String data) async {
+    await gate?.future;
+    await super.write(data);
+  }
+}
 
 class FakeNative implements LocalAgent {
   Map<String, dynamic>? saved;
@@ -88,6 +98,110 @@ class InjectedWebModel extends ModelClient {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  for (final fail in [false, true]) {
+    testWidgets(
+      'sent message renders before persistence and restores failed draft ($fail)',
+      (tester) async {
+        final persistence = DelayedPersistence();
+        final store = ConversationStore(persistence);
+        await store.open();
+        final id = await store.create();
+        final settings = ModelSettings(native: FakeNative());
+        await settings.save(
+          endpoint: 'https://example.com',
+          model: 'm',
+          key: 'secret',
+        );
+        final host = AgentCoreHost(
+          store: store,
+          settings: settings,
+          clientFactory: FakeModel.new,
+        );
+        addTearDown(host.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LocalChatPanel(host: host, conversationId: id),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        persistence.gate = Completer<void>();
+        await tester.enterText(find.byType(TextField), 'hello');
+        await tester.pump();
+        await tester.tap(find.byTooltip('发送'));
+        await tester.pump();
+        expect(find.text('hello', findRichText: true), findsOneWidget);
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          isEmpty,
+        );
+        expect(store.conversation(id)['messages'], isEmpty);
+        if (fail) {
+          persistence.gate!.completeError(StateError('disk unavailable'));
+        } else {
+          persistence.gate!.complete();
+        }
+        await tester.pumpAndSettle();
+        expect(host.pendingUserText, isEmpty);
+        expect(
+          (store.conversation(id)['messages'] as List).where(
+            (m) => m['role'] == 'user',
+          ),
+          hasLength(fail ? 0 : 1),
+        );
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          fail ? 'hello' : '',
+        );
+      },
+    );
+  }
+  testWidgets(
+    'chat shows final answer without internal tool narration or receipts',
+    (tester) async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      await store.append(id, {
+        'role': 'tool',
+        'content': jsonEncode({
+          'status': 'outcome_unknown',
+          'error': 'blocked_by_unresolved_prior_action',
+        }),
+      });
+      await store.append(id, {
+        'role': 'assistant',
+        'content': 'internal tool plan',
+        'tool_calls': [],
+      });
+      await store.append(id, {
+        'role': 'tool',
+        'content': jsonEncode({
+          'status': 'completed',
+          'data': 'raw tool receipt',
+        }),
+      });
+      await store.append(id, {'role': 'assistant', 'content': '已搜索今天天气。'});
+      final host = AgentCoreHost(store: store, settings: ModelSettings());
+      addTearDown(host.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(host: host, conversationId: id),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('执行结果待核实'), findsNothing);
+      expect(find.byType(ExpansionTile), findsNothing);
+      expect(find.text('internal tool plan', findRichText: true), findsNothing);
+      expect(find.text('操作返回结果'), findsNothing);
+      expect(find.text('已搜索今天天气。', findRichText: true), findsOneWidget);
+      expect(store.conversation(id)['messages'], hasLength(4));
+    },
+  );
+
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
   test(
     'Dart settings project to native; blank key preserves only same endpoint',
@@ -173,7 +287,7 @@ void main() {
           return false;
         },
       );
-      expect(host.error, isNull);
+      expect(host.error, 'tool_denied');
       expect(model.calls, 2);
       expect(approvals, 1);
       expect(writes, 0);
@@ -205,11 +319,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: LocalChatPanel(
-              host: host,
-              conversationId: id,
-
-            ),
+            body: LocalChatPanel(host: host, conversationId: id),
           ),
         ),
       );

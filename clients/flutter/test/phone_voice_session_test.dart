@@ -35,6 +35,7 @@ class VoiceAudio extends FakeAudio {
     await super.stop();
   }
 
+  Object enqueueFailure = StateError('native');
   final frames = <AudioFrame>[];
   final cleared = <PlaybackIdentity>[];
   @override
@@ -55,7 +56,7 @@ class VoiceAudio extends FakeAudio {
   Future<void> enqueue(Uint8List f) async {
     if (failEnqueueOnce) {
       failEnqueueOnce = false;
-      throw StateError('native');
+      throw enqueueFailure;
     }
     frames.add(Wire.audio(f));
   }
@@ -226,6 +227,23 @@ void main() {
   Future<void> start() =>
       session.start(provider: provider, conversation: conversation);
 
+  for (final reason in ['Capture handoff stalled', 'Call ended']) {
+    test('native stop preserves reason: $reason', () async {
+      await start();
+      audio.controller.add({
+        'kind': 'stopped',
+        'generation': audio.generation,
+        'reason': reason,
+      });
+      await settle();
+      expect(session.active, false);
+      expect(
+        session.error,
+        reason == 'Call ended' ? null : 'audio_capture_stalled',
+      );
+    });
+  }
+
   test(
     'automatic response uses real NOVA frame and render receipt, never creates duplicate response',
     () async {
@@ -386,6 +404,19 @@ void main() {
     await session.stop();
     await next.controller.close();
   });
+  test(
+    'native playback timeout is reported as audio rather than network',
+    () async {
+      audio.failEnqueueOnce = true;
+      audio.enqueueFailure = TimeoutException('fixture');
+      await start();
+      provider.emit(VoiceEventKind.responseStart, id: 'timeout');
+      provider.emit(VoiceEventKind.audio, id: 'timeout', pcm: Uint8List(480));
+      await settle();
+      expect(session.active, false);
+      expect(session.error, 'audio_playback_stalled');
+    },
+  );
   test('native enqueue failure does not poison the next call', () async {
     audio.failEnqueueOnce = true;
     await start();
@@ -944,8 +975,16 @@ void main() {
       expect(session.isUserSpeaking, false);
       expect(session.status, 'thinking');
       provider.emit(VoiceEventKind.responseStart, id: 'r1');
+      await settle();
+      var audioNotifications = 0;
+      session.addListener(() => audioNotifications++);
       provider.emit(VoiceEventKind.audio, id: 'r1', pcm: Uint8List(480));
       await settle();
+      expect(
+        audioNotifications,
+        0,
+        reason: 'PCM arrival must not rebuild the app',
+      );
       expect(session.isPlaying, false);
       expect(session.status, 'thinking');
       final identity = audio.frames.single.identity;
@@ -1167,7 +1206,7 @@ void main() {
   );
 
   test(
-    'frontbrain describes local Linux execution and delegates tool work',
+    'frontbrain delegates native app actions and local Linux tool work',
     () async {
       await start();
       expect(provider.instructions, contains('Use Simplified Chinese'));
@@ -1183,6 +1222,12 @@ void main() {
       expect(provider.instructions, contains('Linux'));
       expect(provider.instructions, contains('Python'));
       expect(provider.instructions, contains('package installation'));
+      expect(provider.instructions, contains('mobile-use'));
+      expect(provider.instructions, contains('打开小红书'));
+      expect(
+        voiceDelegateTools.first['function']['description'],
+        contains('opening an app'),
+      );
     },
   );
 }

@@ -72,7 +72,7 @@ void main() {
     },
   );
   test(
-    'host explains file and Linux tools with browser checks through shell',
+    'host explains native app actions alongside file and Linux tools',
     () async {
       final store = ConversationStore(MemoryPersistence());
       await store.open();
@@ -105,6 +105,19 @@ void main() {
       expect(model.instructions, contains('Linux'));
       expect(model.instructions, contains('Python'));
       expect(model.instructions, contains('package installation'));
+      expect(model.instructions, contains('device_run_task'));
+      expect(model.instructions, contains('opening Android apps'));
+      final nativeTool = ToolRegistry(
+        snapshot: () => {},
+        mutate: (_, {required operationId}) async => {},
+        hasConflict: () => false,
+        fetch: (_) async => {},
+        requestDeviceTask: (_, _) async => {},
+      ).definitions.singleWhere((t) => t.name == 'device.run_task');
+      expect(
+        nativeTool.wire['function']['description'],
+        contains('opening Android apps'),
+      );
       expect(model.instructions, contains('nova-file:///workspace/'));
       expect(
         model.instructions,

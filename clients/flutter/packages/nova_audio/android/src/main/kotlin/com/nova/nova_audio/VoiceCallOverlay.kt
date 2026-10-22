@@ -100,18 +100,13 @@ internal class VoiceCallOverlay(
         } catch (_: RuntimeException) { view = null; orb = null; orbRing = null; mutedBadge = null; false }
     }
 
-    /**
-     * The otter portrait when the host app ships it as `nova_orb_avatar`; otherwise a
-     * mint disc with a microphone, so the bubble never depends on an optional asset.
-     */
     private fun avatarView(): ImageView = ImageView(context).apply {
-        val id = context.resources.getIdentifier("nova_orb_avatar", "drawable", context.packageName)
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(190, 232, 212)) }
         outlineProvider = ViewOutlineProvider.BACKGROUND
         clipToOutline = true
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        if (id != 0) { scaleType = ImageView.ScaleType.CENTER_CROP; setImageResource(id) }
-        else { scaleType = ImageView.ScaleType.CENTER_INSIDE; setImageDrawable(IconDrawable(Icon.MIC, Color.rgb(20, 45, 35), dp(2).toFloat() * 0.9f, inset = dp(12))) }
+        scaleType = ImageView.ScaleType.CENTER_CROP
+        setImageResource(R.drawable.nova_orb_avatar)
     }
 
     private fun maxX() = (context.resources.displayMetrics.widthPixels - (params.width.takeIf { it > 0 } ?: boxWidth)).coerceAtLeast(0)
