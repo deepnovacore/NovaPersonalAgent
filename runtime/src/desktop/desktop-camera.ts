@@ -1,4 +1,5 @@
 import {CAMERA_CAPTURE, CAMERA_PERMISSION} from './desktop-wire.js'
+import {isRecord} from '../core/guards.js'
 export const CAMERA_FRAME_MAGIC = new Uint8Array([
   0x4e, 0x56, 0x43, 0x41, 0x4d, 0x01, 0x0d, 0x0a,
 ])
@@ -166,7 +167,7 @@ export function serializeCameraCapture(input: CameraCaptureInput): string {
 
 export function parseCameraCapture(raw: string): CameraCapture {
   const {value, integerSources} = parseCameraJson(raw, ['position_ms'])
-  if (!isPlainObject(value) || value.type !== CAMERA_CAPTURE) invalid()
+  if (!isRecord(value) || value.type !== CAMERA_CAPTURE) invalid()
   validateRequestId(value.request_id)
   if (value.source === 'local') {
     if (!hasExactKeys(value, value.session_id === undefined ? localCaptureKeys : ['device_id', 'request_id', 'session_id', 'source', 'type'])) invalid()
@@ -309,15 +310,11 @@ function parseCameraJson(raw: string, integerFields: readonly string[]): {
   return {value, integerSources}
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function isExactObject<const Keys extends readonly string[]>(
   value: unknown,
   keys: Keys,
 ): value is Record<Keys[number], unknown> {
-  return isPlainObject(value) && hasExactKeys(value, keys)
+  return isRecord(value) && hasExactKeys(value, keys)
 }
 
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {

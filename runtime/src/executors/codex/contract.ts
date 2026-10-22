@@ -8,6 +8,7 @@ import {hasOtherCategory as hasPinnedOtherCategory} from '../../text/unicode-tab
 import {normalizeNfcPinned} from '../../text/unicode-normalize.js'
 import {isPythonSpace, isWellFormed, stripLikePython} from '../../text/python-text.js'
 import {executorManifestSchema, type ExecutorManifest, type OpSpec} from '../../core/ports.js'
+import {isPlainRecord} from '../../core/guards.js'
 
 export const CODEX_STARTUP_DEADLINE = 540
 export const MAX_CODEX_EVENTS = 16_384
@@ -362,7 +363,7 @@ export function sanitizeCodexPreflightReport(value: unknown): Readonly<Record<st
 function sanitizeCodexPreflightReportChecked(
   value: unknown,
 ): Readonly<Record<string, unknown>> | null {
-  if (!isPlainObject(value)) return null
+  if (!isPlainRecord(value)) return null
   // An ACP handshake has its own exact shape and never borrows the sandbox fields below.
   if (Object.hasOwn(value, 'protocol')) return sanitizeAcpPreflightReport(value)
   const result: Record<string, unknown> = {}
@@ -382,7 +383,7 @@ function sanitizeCodexPreflightReportChecked(
     result[name] = expected
   }
   if (Object.hasOwn(value, 'credential')) {
-    if (!isPlainObject(value.credential)) return null
+    if (!isPlainRecord(value.credential)) return null
     const credential: Record<string, unknown> = {}
     if (Object.hasOwn(value.credential, 'present')) {
       if (typeof value.credential.present !== 'boolean') return null
@@ -406,7 +407,7 @@ function sanitizeCodexPreflightReportChecked(
     result.credential = credential
   }
   if (Object.hasOwn(value, 'limits')) {
-    if (!isPlainObject(value.limits)) return null
+    if (!isPlainRecord(value.limits)) return null
     const limits: Record<string, string> = {}
     for (const [name, classification] of Object.entries(value.limits)) {
       if (
@@ -431,7 +432,7 @@ export function sanitizeCodexEvidence(value: unknown): Readonly<Record<string, u
 }
 
 function sanitizeCodexEvidenceChecked(value: unknown): Readonly<Record<string, unknown>> | null {
-  if (!isPlainObject(value)) return null
+  if (!isPlainRecord(value)) return null
   const keys = Object.keys(value)
   if (!sameKeySet(keys, ['events', 'protocol', 'process'])
     && !sameKeySet(keys, ['events', 'protocol', 'process', 'result'])) return null
@@ -454,7 +455,7 @@ function sanitizeEvents(value: unknown): readonly Readonly<Record<string, unknow
   const result: Readonly<Record<string, unknown>>[] = []
   let activitySeen = false
   for (const event of value) {
-    if (!isPlainObject(event) || typeof event.type !== 'string') return null
+    if (!isPlainRecord(event) || typeof event.type !== 'string') return null
     if (event.type === 'internal_activity') {
       if (
         activitySeen
@@ -475,7 +476,7 @@ function sanitizeEvents(value: unknown): readonly Readonly<Record<string, unknow
 }
 
 function sanitizeProtocol(value: unknown): Readonly<Record<string, unknown>> | null {
-  if (!isPlainObject(value) || !sameKeySet(Object.keys(value), [
+  if (!isPlainRecord(value) || !sameKeySet(Object.keys(value), [
     'thread_started', 'turn_started', 'terminal', 'transport_closed', 'unknown_event_count',
   ])) return null
   if (typeof value.thread_started !== 'boolean' || typeof value.turn_started !== 'boolean') return null
@@ -492,7 +493,7 @@ function sanitizeProtocol(value: unknown): Readonly<Record<string, unknown>> | n
 }
 
 function sanitizeProcess(value: unknown): Readonly<Record<string, unknown>> | null {
-  if (!isPlainObject(value) || !sameKeySet(Object.keys(value), ['started', 'exit_code', 'stop'])) {
+  if (!isPlainRecord(value) || !sameKeySet(Object.keys(value), ['started', 'exit_code', 'stop'])) {
     return null
   }
   if (value.started !== true) return null
@@ -502,9 +503,9 @@ function sanitizeProcess(value: unknown): Readonly<Record<string, unknown>> | nu
 }
 
 function sanitizeResult(value: unknown): Readonly<Record<string, unknown>> | null {
-  if (!isPlainObject(value) || !sameKeySet(Object.keys(value), ['final_message'])) return null
+  if (!isPlainRecord(value) || !sameKeySet(Object.keys(value), ['final_message'])) return null
   const message = value.final_message
-  if (!isPlainObject(message) || !sameKeySet(Object.keys(message), [
+  if (!isPlainRecord(message) || !sameKeySet(Object.keys(message), [
     'text', 'original_chars', 'truncated', 'sha256',
   ])) return null
   const text = message.text
@@ -604,12 +605,6 @@ function defineJsonProperty(target: Record<string, unknown>, key: string, value:
     configurable: true,
     writable: true,
   })
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value) as object | null
-  return prototype === Object.prototype || prototype === null
 }
 
 function deepFreeze<T>(value: T): T {

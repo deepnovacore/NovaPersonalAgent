@@ -27,6 +27,7 @@ import {
   stripLikePython,
 } from '../text/python-text.js'
 import { isOtherCategory } from '../text/unicode-tables.js'
+import {isRecord} from '../core/guards.js'
 
 const PROVIDER = 'tavily'
 const ENDPOINT = 'https://api.tavily.com/search'
@@ -167,7 +168,7 @@ export class TavilyTransport implements SearchTransport {
       } catch {
         throw new TavilyTransportFailure('malformed_response')
       }
-      if (!isPlainObject(value)) throw new TavilyTransportFailure('malformed_response')
+      if (!isRecord(value)) throw new TavilyTransportFailure('malformed_response')
       return value
     } catch (cause) {
       if (cause instanceof TavilyTransportFailure) throw cause
@@ -382,7 +383,7 @@ function normalizeResults(
   for (const [index, raw] of value.entries()) {
     if (results.length >= options.maxResults) break
     const rank = index + 1
-    if (!isPlainObject(raw)) continue
+    if (!isRecord(raw)) continue
     const title = boundedText(raw.title, MAX_TITLE_CHARS)
     const snippet = boundedText(raw.content, MAX_SNIPPET_CHARS)
     const canonicalUrl = canonicalizeUrl(raw.url)
@@ -573,10 +574,6 @@ function renderDigestValue(value: DigestValue): string {
     return `${value.value}`
   }
   return pythonFloat(value.value)
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isAbortError(cause: unknown): boolean {

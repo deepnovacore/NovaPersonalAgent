@@ -7,19 +7,10 @@ export const USAGE_FIELDS = ['inputTokens', 'outputTokens', 'inputTextTokens', '
 export {PRICE_DATE,priceUsage} from '@nova-personal-agent/runtime/usage'
 import {PRICE_DATE,priceUsage} from '@nova-personal-agent/runtime/usage'
 export function publicUsageReport(value) {
-  if (!value || !['qwen', 'stepfun', 'ark', 'deepseek', 'volcengine', 'openai', 'gemini', 'openrouter', 'custom', 'codex', 'acp'].includes(value.provider)
-    || !['realtime', 'llm', 'asr', 'tts', 'embedding', 'agent'].includes(value.service) || !['complete', 'missing'].includes(value.status)
-    || typeof value.id !== 'string' || !value.id || value.id.length > 256
-    || typeof value.model !== 'string' || !value.model || value.model.length > 256) return null
-  const result = {id:value.id, provider:value.provider, service:value.service, model:value.model, status:value.status,
-    pricingRegion: ['cn-beijing', 'singapore'].includes(value.pricingRegion) ? value.pricingRegion : 'unknown'}
-  if (['audio', 'text'].includes(value.outputModality)) result.outputModality = value.outputModality
-  for (const field of USAGE_FIELDS) {
-    if (value[field] === undefined) continue
-    if (!Number.isSafeInteger(value[field]) || value[field] < 0) return null
-    result[field] = value[field]
-  }
-  return normalizeUsageReport({...value,...result})
+  if (!value || typeof value !== 'object') return null
+  // Provider, service, status and id/model limits are validated by normalizeUsageReport; reject corrupt meters instead of downgrading them.
+  for (const field of USAGE_FIELDS) if (value[field] !== undefined && (!Number.isSafeInteger(value[field]) || value[field] < 0)) return null
+  return normalizeUsageReport({...value, pricingRegion: ['cn-beijing', 'singapore'].includes(value.pricingRegion) ? value.pricingRegion : 'unknown'})
 }
 // Official CNY list prices (including Singapore), checked 2026-09-08; no FX conversion.
 // No credits, negotiated discounts or explicit-cache storage charges.

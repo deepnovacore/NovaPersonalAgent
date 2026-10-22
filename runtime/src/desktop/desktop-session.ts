@@ -73,6 +73,7 @@ import {type CameraPermissionStatus} from './desktop-camera.js'
 import {type RealtimeAssembly} from '../composition/realtime-assembly.js'
 import {type ProjectConfirmationView} from '../projects/project-confirmation.js'
 import {type Suggestion} from '../core/suggestions.js'
+import {isRecord} from '../core/guards.js'
 
 export const DEFAULT_MAX_OUTBOUND_FRAMES = 128
 
@@ -794,7 +795,7 @@ export class DesktopSocketBridge {
     } catch {
       return false
     }
-    if (!isPlainObject(payload)) return false
+    if (!isRecord(payload)) return false
     if (payload.type === 'caption') {
       const sequence = payload.sequence
       // Only the assistant's: a user caption describes what the *user* said, which a fence about the
@@ -977,7 +978,7 @@ export function parseClientMessage(
   }
   if (
     options.authenticated
-    && isPlainObject(preliminary)
+    && isRecord(preliminary)
     && preliminary.type === 'playback.telemetry'
   ) {
     try {
@@ -1039,7 +1040,7 @@ export function parseClientMessage(
     if (cause instanceof DesktopWireProtocolError) throw cause
     throw new DesktopWireProtocolError('desktop control frame is invalid JSON')
   }
-  if (!isPlainObject(value) || typeof value.type !== 'string') {
+  if (!isRecord(value) || typeof value.type !== 'string') {
     throw new DesktopWireProtocolError('desktop control frame has no type')
   }
   if (!options.authenticated) {
@@ -1290,10 +1291,6 @@ function sameApprovalView(
     && (left.held ?? false) === (right.held ?? false)
     && JSON.stringify(left.allowed_decisions) === JSON.stringify(right.allowed_decisions)
     && JSON.stringify(left.local_detail) === JSON.stringify(right.local_detail)
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
