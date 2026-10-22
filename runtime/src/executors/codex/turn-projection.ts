@@ -14,6 +14,7 @@ import {
   SUMMARY_PROSE_LIMIT,
   WORKING_INTERVAL,
 } from './protocol.js'
+import {isPlainRecord} from '../../core/guards.js'
 
 const observationSensitivity = new SensitiveContentPolicy()
 const artifactPathSensitivity = new SensitivePathPolicy()
@@ -204,7 +205,7 @@ export class AppServerTurnProjection {
   }
 
   #turnStarted(params: Readonly<Record<string, unknown>>): void {
-    if (params.threadId !== this.#threadId || !isPlainObject(params.turn)) return
+    if (params.threadId !== this.#threadId || !isPlainRecord(params.turn)) return
     const turnId = params.turn.id
     if (typeof turnId !== 'string' || turnId === '' || this.#notificationTurnId !== null) return
     if (this.#responseTurnId !== null && this.#responseTurnId !== turnId) {
@@ -305,14 +306,14 @@ export class AppServerTurnProjection {
     const status=typeof item.status==='string'&&['completed','failed','inProgress','declined'].includes(item.status)?item.status:null
     if(stage==='completed'&&item.type==='commandExecution')text=JSON.stringify({type:item.type,status,command:publicField(item.command),output:publicField(item.aggregatedOutput),exit_code:Number.isSafeInteger(item.exitCode)?item.exitCode:null})
     if(stage==='completed'&&item.type==='mcpToolCall'){
-      const result=isPlainObject(item.result)&&Array.isArray(item.result.content)?item.result.content:[]
-      const readback=result.filter((part):part is Record<string,unknown>=>isPlainObject(part)&&part.type==='text'&&typeof part.text==='string').map(part=>part.text as string).join('\n')
-      text=JSON.stringify({type:item.type,server:publicField(item.server),tool:publicField(item.tool),status,is_error:isPlainObject(item.result)&&typeof item.result.isError==='boolean'?item.result.isError:null,readback:publicField(readback)})
+      const result=isPlainRecord(item.result)&&Array.isArray(item.result.content)?item.result.content:[]
+      const readback=result.filter((part):part is Record<string,unknown>=>isPlainRecord(part)&&part.type==='text'&&typeof part.text==='string').map(part=>part.text as string).join('\n')
+      text=JSON.stringify({type:item.type,server:publicField(item.server),tool:publicField(item.tool),status,is_error:isPlainRecord(item.result)&&typeof item.result.isError==='boolean'?item.result.isError:null,readback:publicField(readback)})
     }
     this.#publicStages.add(key)
     const refs:string[]=[]
     if(item.type==='fileChange'&&Array.isArray(item.changes)&&this.#workspace)for(const change of item.changes){
-      if(!isPlainObject(change)||typeof change.path!=='string')continue
+      if(!isPlainRecord(change)||typeof change.path!=='string')continue
       const absolutePath=resolve(this.#workspace,change.path)
       const path=relative(this.#workspace,absolutePath)
       if(path&&!isAbsolute(path)&&path!=='..'&&!path.startsWith('../')&&!/[\p{C}]/u.test(path)&&path.length<=480&&artifactPathSensitivity.allows(absolutePath)&&observationSensitivity.scrub('artifact_path',path).kind==='clean')refs.push('workspace-file:'+path)
@@ -347,12 +348,12 @@ export class AppServerTurnProjection {
       && this.#activeTurnId !== null
       && params.threadId === this.#threadId
       && params.turnId === this.#activeTurnId
-      && isPlainObject(params.item)
+      && isPlainRecord(params.item)
   }
 
   #turnCompleted(params: Readonly<Record<string, unknown>>): TurnCompletion | null {
     if (params.threadId !== this.#threadId) return null
-    if (!isPlainObject(params.turn)) return null
+    if (!isPlainRecord(params.turn)) return null
     const turn = params.turn
     if (turn.id !== this.#activeTurnId) return null
     if (
@@ -361,9 +362,9 @@ export class AppServerTurnProjection {
     ) throw new CodexProtocolError('unsupported_protocol')
     let finalText: string | null = null
     for (const candidate of turn.items) {
-      if(isPlainObject(candidate))this.#publicItem(candidate,'completed')
+      if(isPlainRecord(candidate))this.#publicItem(candidate,'completed')
       if (
-        isPlainObject(candidate)
+        isPlainRecord(candidate)
         && candidate.type === 'agentMessage'
         && typeof candidate.text === 'string'
       ) finalText = clipCodePoints(candidate.text, MAX_FINAL_TEXT_INPUT)
@@ -431,17 +432,11 @@ function requireNonemptyString(value: unknown): string {
 }
 
 function requireObject(value: unknown): Record<string, unknown> {
-  if (!isPlainObject(value)) throw new TypeError('object')
+  if (!isPlainRecord(value)) throw new TypeError('object')
   return value
 }
 
 function safeTurnErrorCode(value: unknown): 'usage_limit_exceeded' | null {
-  if (!isPlainObject(value)) return null
+  if (!isPlainRecord(value)) return null
   return value.codexErrorInfo === 'usageLimitExceeded' ? 'usage_limit_exceeded' : null
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value) as object | null
-  return prototype === Object.prototype || prototype === null
 }

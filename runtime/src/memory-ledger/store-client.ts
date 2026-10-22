@@ -2,6 +2,7 @@ import type {MemoryOperation} from '../memory-substrate/store.js'
 import { Worker, type WorkerOptions } from 'node:worker_threads'
 
 import type {MemoryLedgerStoreErrorCode} from './store.js'
+import {hasOnlyKeys, isRecord} from '../core/guards.js'
 
 export interface MemoryLedgerWorker {
   postMessage(value: unknown): void
@@ -269,13 +270,4 @@ function parseWorkerResponse(message: unknown): WorkerResponse | undefined {
 
 function isStoreErrorCode(value: unknown): value is MemoryLedgerStoreErrorCode {
   return typeof value === 'string' && value in clientErrorMessages && value.startsWith('STORE_')
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  const allowedKeys = new Set(allowed)
-  return Object.keys(value).every(key => allowedKeys.has(key))
 }

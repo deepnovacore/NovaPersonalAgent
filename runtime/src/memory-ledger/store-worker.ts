@@ -7,6 +7,7 @@ import { isMainThread, parentPort, workerData } from 'node:worker_threads'
 import { DatabaseSync } from 'node:sqlite'
 
 import {MemoryLedgerStore, MemoryLedgerStoreError, type MemoryLedgerStoreErrorCode} from './store.js'
+import {isRecord} from '../core/guards.js'
 
 interface StoreWorkerData {
   readonly path: string
@@ -114,10 +115,6 @@ function stringField(request: StoreRequest, key: string): string {
 
 function safeErrorCode(error: unknown): MemoryLedgerStoreErrorCode {
   return error instanceof MemoryLedgerStoreError ? error.code : error instanceof Error&&error.message.startsWith('MEMORY_MARKDOWN_')?'STORE_MEMORY_CONFLICT':'STORE_WRITE_FAILED'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** Upgrade owner-held ledger files before they can receive raw personal evidence. */

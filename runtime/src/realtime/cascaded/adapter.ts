@@ -45,6 +45,7 @@ import type {
   TtsClient,
   TtsSession,
 } from './ports.js'
+import {throwIfAborted} from '../../core/guards.js'
 
 export const MAX_CASCADED_EVENT_QUEUE = 4_096
 export const MAX_CASCADED_QUEUED_AUDIO_BYTES = 16 * 1_024 * 1_024
@@ -1726,12 +1727,6 @@ function cloneEvent(event: RealtimeProviderEvent): RealtimeProviderEvent {
 
 function combineSignals(first: AbortSignal, second: AbortSignal): AbortSignal {
   return first === second ? first : AbortSignal.any([first, second])
-}
-
-function throwIfAborted(signal: AbortSignal): void {
-  if (!signal.aborted) return
-  if (signal.reason instanceof Error) throw signal.reason
-  throw new DOMException('This operation was aborted', 'AbortError')
 }
 
 async function settleWithin(task: Promise<unknown>, timeoutMs: number): Promise<boolean> {

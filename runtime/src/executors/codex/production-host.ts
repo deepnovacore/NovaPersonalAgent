@@ -57,6 +57,7 @@ import {
 import {stripLikePython} from '../../text/python-text.js'
 import {admitCodexCliVersion} from './version.js'
 import {hasLocalProviderCredential} from './local-provider-credential.js'
+import {exactKeys, isErrno, isPlainRecord} from '../../core/guards.js'
 
 const PROBE_ID = 'codex_sandbox_probe'
 const PROBE_PATH = 'native/codex-sandbox-probe'
@@ -973,21 +974,6 @@ function requireExactRecord(
   if (!isPlainRecord(value) || Object.keys(value).sort().join('\0') !== [...keys].sort().join('\0')) {
     throw new Error('native resource rejected')
   }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value) as object | null
-  return prototype === Object.prototype || prototype === null
-}
-
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && expected.every(key => Object.hasOwn(value, key))
-}
-
-function isErrno(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && Reflect.get(error, 'code') === code
 }
 
 function packagedResourcesPath(): string | null {

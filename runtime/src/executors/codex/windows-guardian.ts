@@ -12,6 +12,7 @@ import {
   type CodexProcessSpawnControl,
   type OwnedCodexProcess,
 } from './process-owner.js'
+import {exactKeys} from '../../core/guards.js'
 
 export const WINDOWS_GUARDIAN_FRAME_LIMIT = 4096
 export const WINDOWS_GUARDIAN_READY_TIMEOUT_MS = 5000
@@ -781,11 +782,6 @@ function validatePortableExecutable(
     )
   }
   if (!executableCodeSection) throw new CodexWindowsGuardianError()
-}
-
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && expected.every(key => Object.hasOwn(value, key))
 }
 
 function topLevelColonCount(raw: string): number {

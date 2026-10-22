@@ -24,6 +24,7 @@ import {
   type ApprovalLocalDetail as ExecutorApprovalLocalDetail,
   type ApprovalView as ExecutorApprovalView,
 } from '../core/approval-port.js'
+import {isRecord} from '../core/guards.js'
 
 /** Text frames produced on the orb socket (bootstrap, controls and camera requests). */
 export const WIRE_FRAME_TYPES = Object.freeze([
@@ -468,7 +469,7 @@ function validateExecutorApprovalLocalDetail(
     || rawChanges.length > 64
   ) throw new DesktopProtocolError('desktop executor approval view is invalid')
   for (const candidate of rawChanges) {
-    if (!isPlainObject(candidate)) {
+    if (!isRecord(candidate)) {
       throw new DesktopProtocolError('desktop executor approval view is invalid')
     }
     const change = candidate
@@ -603,7 +604,7 @@ function validatePlaybackFrame(frame: PlaybackFrame): void {
 }
 
 function readIdentifier(payload: unknown, field: string): string {
-  if (!isPlainObject(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
+  if (!isRecord(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
   try {
     return plainIdentifier(payload[field])
   } catch {
@@ -612,7 +613,7 @@ function readIdentifier(payload: unknown, field: string): string {
 }
 
 function readPositiveInteger(payload: unknown, field: string): number {
-  if (!isPlainObject(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
+  if (!isRecord(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
   try {
     return plainPositiveInteger(payload[field])
   } catch {
@@ -621,7 +622,7 @@ function readPositiveInteger(payload: unknown, field: string): number {
 }
 
 function readNonNegativeInteger(payload: unknown, field: string): number {
-  if (!isPlainObject(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
+  if (!isRecord(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
   const candidate = payload[field]
   if (typeof candidate !== 'number' || !Number.isInteger(candidate) || candidate < 0) {
     throw new DesktopProtocolError(`desktop ${field} is invalid`)
@@ -654,10 +655,6 @@ function plainPositiveInteger(value: unknown): number {
     throw new DesktopProtocolError('desktop generation is invalid')
   }
   return value
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
