@@ -793,3 +793,21 @@ for(const decision of ['allow','always','deny','remembered'] as const)test(`nati
   assert.equal(await persisted.computerApplicationAllowed({...app,bundleId:'test.other'}),false)
  }finally{await f.close()}
 })
+
+
+test('finished Build remains locked after restart',{skip:!supported},async()=>{
+ const f=await fixture(()=>({call:{name:'finish_build',arguments:{summary:'Verified and finished.'}}}),'never')
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).status,'finished');await f.host.close()
+  const reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+  try{
+   await reopened.open()
+   assert.equal(buildView(reopened,id).status,'finished');assert.equal(reopened.localBuildAuthorized(id),false)
+   await assert.rejects(reopened.submitConversationText(id,'run again'),/local_build_not_authorized/)
+   await reopened.command({type:'personal.command',request_id:'finished-presentation',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'})
+   const resumed=await reopened.command({type:'personal.command',request_id:'finished-resume',method:'build.resume',params:{id}},{client_id:'desktop:local'}) as {ok:boolean;error?:string}
+   assert.equal(resumed.ok,false);assert.equal(resumed.error,'build_finished')
+  }finally{await reopened.close()}
+ }finally{await f.close()}
+})
