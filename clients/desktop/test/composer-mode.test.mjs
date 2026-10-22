@@ -68,7 +68,7 @@ test('a Build session shows Build locked and other kinds hide the control',()=>{
  assert.equal(build.root.hidden,false);assert.equal(build.root.attributes['data-mode'],'build')
  assert.equal(build.button.disabled,true);assert.equal(build.button.textContent,'Build');assert.equal(build.control.cycle(),false)
  assert.equal(build.button.title,'Build 会话进行中');assert.equal(build.root.children.length,1)
- for(const kind of ['proactive','schedule'])assert.equal(fixture({id:kind,kind}).root.hidden,true)
+ for(const kind of ['schedule'])assert.equal(fixture({id:kind,kind}).root.hidden,true)
 })
 
 test('Shift+Tab on the mode button cycles without moving focus, but modified Tab passes through',async()=>{

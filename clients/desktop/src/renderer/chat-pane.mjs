@@ -14,7 +14,7 @@ import {createOrbVisualSafe} from './orb-visual.mjs'
 import {ORB_STATE_NAMES} from './state.mjs'
 
 /**
- * Confirms the proactive conversation as read only when the newest message is
+ * Confirms unread proactive messages as read only when the newest one is
  * actually on screen: pane open, workbench expanded, window visible and
  * focused, list scrolled to the bottom. The tray unread count is a host-side
  * projection of the same fact, so nothing here touches it directly.
@@ -22,19 +22,16 @@ import {ORB_STATE_NAMES} from './state.mjs'
 export function markVisibleRead({c,document,history,readMessages,chatOpen=true}){
  if(!chatOpen||!c.connected||c.collapsed||document.visibilityState!=='visible'||!document.hasFocus()||history.scrollHeight-history.scrollTop-history.clientHeight>24)return
  const data=c.snapshot?.conversations,messages=c.selectedId==='chat:main'?homeTranscript(data):data?.messages
- const ids=c.selectedId==='chat:main'?['chat:main','chat:proactive']:[c.selectedId]
- for(const id of ids){
- const item=data?.items?.find(row=>row.id===id)
- if(!item?.unread_count)continue
+ const id=c.selectedId,item=data?.items?.find(row=>row.id===id)
+ if(!item?.unread_count)return
  const message=messages?.filter(row=>row.conversation_id===id&&messageVisible(history,row.id)).at(-1)
- if(!message?.id||readMessages.has(message.id))continue
+ if(!message?.id||readMessages.has(message.id))return
  readMessages.add(message.id)
  void c.command('conversations.read',{id,through_message_id:message.id}).catch(()=>readMessages.delete(message.id))
- }
 }
 
 export function homeTranscript(conversations){
- const rows=[...(conversations?.messages??[]).filter(message=>['chat:main','chat:proactive'].includes(message.conversation_id)),...(conversations?.home_messages??[])];
+ const rows=[...(conversations?.messages??[]).filter(message=>message.conversation_id==='chat:main'),...(conversations?.home_messages??[])];
  return [...new Map(rows.map(message=>[message.id,message])).values()].sort((a,b)=>(a.created_at??'').localeCompare(b.created_at??''))
 }
 function messageVisible(history,id){
@@ -56,7 +53,7 @@ const GLYPH={
 /** Inline SVG: the page CSP allows no image sources. */
 function glyph(path){const svg=document.createElementNS(SVG_NS,'svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const p=document.createElementNS(SVG_NS,'path');p.setAttribute('d',path);svg.append(p);return svg}
 
-export const conversationTitle=item=>item?.id==='chat:main'?t('主对话'):item?.kind==='proactive'?t('主动提醒'):item?.title??t('对话')
+export const conversationTitle=item=>item?.id==='chat:main'?t('主对话'):item?.title??t('对话')
 
 /** The persistent Nova pane: conversation switcher, transcript, three-state composer. */
 export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSchedule,onOpenChange=()=>{},onHome=()=>{},speakingLevel=null}){
@@ -166,7 +163,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
      labels.set(item.id,times.indexOf(times[index])===times.lastIndexOf(times[index])?label:t('{0} ({1})',label,index+1))
     }
    }
-   for(const item of [...items].sort((a,b)=>Number(b.kind==='proactive')-Number(a.kind==='proactive'))){
+   for(const item of items){
     const label=labels.get(item.id),b=button(label,()=>{switcher.open=false;return c.select(item.id)},conversationList)
     b.className='conversation-item';b.setAttribute('aria-current',String(item.id===c.selectedId));b.disabled=!c.connected
     if(waiting.some(row=>row.conversation_id===item.id))b.append(el('span','待确认','conversation-badge'))

@@ -120,11 +120,12 @@ Actual provider transcript captions now optionally carry an opaque `turn_id` der
 
 `personal.state.conversations` contains `selected_id`, nullable `voice_id`,
 `unread_count`, `items` and the selected conversation's `messages`. Items expose
-`id`, `kind` (`chat`, `topic`, `proactive`), `title`, `subject_key`, timestamps,
+`id`, `kind` (`chat`, `topic`), `title`, `subject_key`, timestamps,
 `generation` and `unread_count`. Messages expose `id`, `conversation_id`, `role`,
-`text`, `created_at`, and optional `turn_id` / `reply_to`. Selection does not
-transfer voice ownership. The fixed `chat:proactive` conversation receives proactive
-reminders; only that conversation may speak them while it owns voice.
+`text`, `created_at`, and optional `turn_id` / `reply_to` / `origin`. Selection does not
+transfer voice ownership. Proactive reminders land in the main conversation
+`chat:main` with `origin: "proactive"`; `unread_count` counts only these messages and
+scheduled results, never replies to the user.
 
 Authenticated `personal.command` methods:
 

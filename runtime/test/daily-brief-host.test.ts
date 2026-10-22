@@ -17,8 +17,11 @@ test('brief host persists processing before preparation, survives restart, and o
  let host=make()
  try{
  await host.open();await Promise.all([host.scheduledTick(),host.scheduledTick()]);assert.equal(calls,1);assert.equal(host.snapshot().feed.length,1);assert.equal(host.conversationSnapshot().unread_count,1)
- await host.command({type:'personal.command',request_id:'show-brief',method:'conversations.select',params:{id:'chat:proactive'}})
- assert.equal(host.conversationSnapshot().messages[0]?.text,'今日前瞻\n'+material.prepared.text)
+ const brief=host.conversationSnapshot().messages[0]!
+ assert.equal(host.conversationSnapshot().selected_id,'chat:main');assert.equal(brief.conversation_id,'chat:main');assert.equal(brief.origin,'proactive');assert.equal(brief.text,'今日前瞻\n'+material.prepared.text)
+ assert.equal(host.conversationSnapshot().items.find(c=>c.id==='chat:main')?.unread_count,1,'the brief counts as unread in the main chat')
+ await host.command({type:'personal.command',request_id:'read-brief',method:'conversations.read',params:{id:'chat:main',through_message_id:brief.id}})
+ assert.equal(host.conversationSnapshot().unread_count,0,'reading the brief in the main chat clears it')
  const id=host.snapshot().feed[0]!.id
  await host.command({type:'personal.command',request_id:'open1',method:'conversations.open_feed',params:{feed_id:id}})
  assert.equal((await store.read()).conversations.items.find(c=>c.kind==='topic')?.prepared?.text,material.prepared.text)

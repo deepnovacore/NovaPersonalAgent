@@ -1447,7 +1447,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "确认删除本地数据": "Confirm local data deletion",
   "删除本地数据": "Delete local data",
   "每日简报": "Daily briefs",
-  "在主动提醒中查看当天安排和进展。": "See daily plans and progress in Proactive reminders.",
+  "在主对话中查看当天安排和进展。": "See daily plans and progress in the main conversation.",
   "早间简报": "Morning brief",
   "早间时间": "Morning time",
   "晚间简报": "Evening brief",

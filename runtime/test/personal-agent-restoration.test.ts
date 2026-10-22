@@ -29,7 +29,7 @@ async function fixture(){
  state.conversations.items.push(createConversation('chat','Project discussion',null,'project-chat'));
  state.conversations.selected_id='project-chat';
  for(const item of state.conversations.items)item.messages.push({id:item.id+'-message',conversation_id:item.id,role:'user',text:'Preserved '+item.id,created_at:'2026-09-20T00:00:00Z'});
- state.conversations.items[2]!.coding_target={workspace_id:'workspace',session_id:'session',project:'Fixture project',title:'Fixture session',executor:'codex'};
+ state.conversations.items[1]!.coding_target={workspace_id:'workspace',session_id:'session',project:'Fixture project',title:'Fixture session',executor:'codex'};
  state.conversations.work_owners.work='project-chat';state.conversations.approval_owners.approval='project-chat';
  state.feed=[{id:'saved-feed',kind:'notify',title:'Saved reminder',why_now:'Retain history',evidence_refs:['fixture-evidence'],memory_refs:[],source:{type:'file',ref:'fixture-evidence'},subject_key:'fixture',task_ref:null,suggestion_id:null,priority:40,created_at:'2026-09-20T00:00:00Z',updated_at:'2026-09-20T00:00:00Z',expires_at:null,user_state:'dismissed',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null}}];
  state.dedupe=['saved-dedupe'];state.receipts.saved={payload:'saved-payload',result:{ok:true}};

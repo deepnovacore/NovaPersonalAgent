@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {PersonalController} from '../src/renderer/personal-controller.mjs'
 function harness({start,autoVoice=true}={}){
  let starts=0,stops=0,revision=0;const sent=[];let c
- function snapshot(selected='a',voice=null){c.receive({type:'personal.state',revision:++revision,feed:[],memory:{entries:[]},conversations:{selected_id:selected,voice_id:voice,items:[{id:'a',kind:'chat',title:'A'},{id:'b',kind:'chat',title:'B'},{id:'proactive',kind:'proactive',title:'主动提醒'}],messages:[]}})}
+ function snapshot(selected='a',voice=null){c.receive({type:'personal.state',revision:++revision,feed:[],memory:{entries:[]},conversations:{selected_id:selected,voice_id:voice,items:[{id:'a',kind:'chat',title:'A'},{id:'b',kind:'chat',title:'B'}],messages:[]}})}
  c=new PersonalController({send:frame=>{sent.push(frame);if(autoVoice&&frame.method==='conversations.voice')queueMicrotask(()=>{snapshot(c.selectedId,frame.params.enabled?frame.params.id:null);c.receive({type:'personal.result',request_id:frame.request_id,ok:true})});return true},start:async()=>{starts++;await start?.()},stop:async()=>{stops++}})
  c.connect();c.receive({type:'desktop.capabilities',input_instance_id:'host-A',capabilities:['text_input','dictation']});snapshot()
  return {c,sent,snapshot,get starts(){return starts},get stops(){return stops}}
