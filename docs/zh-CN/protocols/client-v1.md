@@ -129,7 +129,7 @@ direct 模式和 provider 控制消息刻意未开放：把 provider 原始事�
 
 ### 会话范围内的桌面输入
 
-`personal.state.conversations` 包含 `selected_id`、可为 `null` 的 `voice_id`、`unread_count`、`items`，以及当前选中会话的 `messages`。`items` 中每项含 `id`、`kind`（`chat`、`topic`、`proactive`）、`title`、`subject_key`、时间戳、`generation` 和 `unread_count`。`messages` 中每条含 `id`、`conversation_id`、`role`、`text`、`created_at`，以及可选的 `turn_id` / `reply_to`。切换选中会话不会转移语音归属。固定的 `chat:proactive` 会话接收主动提醒；只有在该会话拥有语音归属时才能播报这些提醒。
+`personal.state.conversations` 包含 `selected_id`、可为 `null` 的 `voice_id`、`unread_count`、`items`，以及当前选中会话的 `messages`。`items` 中每项含 `id`、`kind`（`chat`、`topic`）、`title`、`subject_key`、时间戳、`generation` 和 `unread_count`。`messages` 中每条含 `id`、`conversation_id`、`role`、`text`、`created_at`，以及可选的 `turn_id` / `reply_to` / `origin`。切换选中会话不会转移语音归属。主动提醒落入主对话 `chat:main`，并带 `origin: "proactive"`；`unread_count` 只统计这类消息和定时任务结果，不统计对用户的回复。
 
 已鉴权的 `personal.command` 方法：
 

@@ -1,7 +1,7 @@
 import {attachFeedEvidence} from './feed-evidence.mjs'
 import {renderCardTags} from './card-tags.mjs'
 import {t} from './locale.mjs'
-// A feed item rendered inside the proactive conversation. The host mirrors every
+// A feed item rendered inside the main conversation. The host mirrors every
 // feed_item as a `feed:<id>` assistant message; the card adds the item's actions
 // on top of that message instead of a separate 动态 page.
 export const FEED_KIND_LABEL={question:'待回应'}

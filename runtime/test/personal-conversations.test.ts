@@ -202,15 +202,16 @@ test('voice belongs to one conversation while other conversations still accept t
  const audio:string[]=[],modes:string[]=[]
  try{await host.open();host.setConversationRuntime((conversation,_emit,mode)=>{modes.push(mode??'text');return Promise.resolve({runTurn:text=>Promise.resolve({assistant:text}),sendAudio:()=>{audio.push(conversation.id);return Promise.resolve()},close:()=>Promise.resolve()})},()=>{ /* no renderer */ })
  const command=(id:string,enabled:boolean)=>host.command({type:'personal.command',request_id:crypto.randomUUID(),method:'conversations.voice',params:{id,enabled}}) as Promise<{ok:boolean}>
+ const other=(await host.command({type:'personal.command',request_id:'other',method:'conversations.create',params:{title:'Other'}}) as {data:{selected_id:string}}).data.selected_id
  assert.equal((await command('chat:main',true)).ok,true)
  await assert.rejects(host.submitConversationText('chat:main','blocked'),/voice_active/)
- assert.equal((await command('chat:proactive',true)).ok,false)
+ assert.equal((await command(other,true)).ok,false)
  await host.sendConversationAudio('chat:main',new Uint8Array([0,0]));assert.deepEqual(audio,['chat:main'])
  await host.command({type:'personal.command',request_id:'hide',method:'presentation.set',params:{mode:'background'}})
  await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array([0,0])),/presentation_hidden/)
  assert.equal(host.conversationSnapshot().voice_id,'chat:main')
  await host.command({type:'personal.command',request_id:'show',method:'presentation.set',params:{mode:'workbench'}})
- await host.submitConversationText('chat:proactive','allowed');await host.waitConversation('chat:proactive')
+ await host.submitConversationText(other,'allowed');await host.waitConversation(other)
  assert.equal((await command('chat:main',false)).ok,true)
  await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array([0,0])),/voice_not_owned/)
  assert.deepEqual(modes,['voice','text'])
@@ -331,15 +332,16 @@ test('orb announcements use one output runtime without claiming microphone or ch
  await host.command({type:'personal.command',request_id:'mode-o',method:'presentation.set',params:{mode:'orb'}})
  host.routePersonalSuggestion(suggestion,reason);host.routePersonalSuggestion({...suggestion,id:'next'},reason)
  await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve))
- assert.deepEqual(created,['chat:proactive:voice']);assert.deepEqual(delivered,[suggestion.id,'next'])
+ assert.deepEqual(created,['chat:main:voice']);assert.deepEqual(delivered,[suggestion.id,'next'])
  assert.equal(host.conversationSnapshot().selected_id,'chat:main');assert.equal(host.conversationSnapshot().voice_id,null)
  await host.command({type:'personal.command',request_id:'voice-on',method:'conversations.voice',params:{id:'chat:main',enabled:true}})
  await host.command({type:'personal.command',request_id:'voice-off',method:'conversations.voice',params:{id:'chat:main',enabled:false}})
  host.routePersonalSuggestion({...suggestion,id:'after-voice'},reason)
  await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve))
- assert.equal(delivered.at(-1),'after-voice');assert.deepEqual(created,['chat:proactive:voice','chat:main:voice','chat:proactive:voice'])
- await host.submitConversationText('chat:proactive','Tell me more');await host.waitConversation('chat:proactive')
- assert.equal(created.at(-1),'chat:proactive:text')
+ assert.equal(delivered.at(-1),'after-voice');assert.deepEqual(created,['chat:main:voice','chat:main:voice','chat:main:voice'])
+ assert.equal(host.conversationSnapshot().voice_id,null,'the announcement runtime never claims voice ownership')
+ await host.submitConversationText('chat:main','Tell me more');await host.waitConversation('chat:main')
+ assert.equal(created.at(-1),'chat:main:text','typing into the main chat parks the announcement runtime')
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -437,7 +439,7 @@ test('open_work selects the persisted original conversation across task and feed
    assert.equal(result.ok,true,work);assert.equal(result.data?.selected_id,'chat:main')
    assert.equal(host.conversationSnapshot().voice_id,'chat:main');assert.deepEqual(host.conversationSnapshot().messages,[])
   }
-  assert.equal(turns,0);assert.equal(host.conversationSnapshot().items.length,3)
+  assert.equal(turns,0);assert.equal(host.conversationSnapshot().items.length,2)
   await command('conversations.voice',{id:'chat:main',enabled:false})
   await command('conversations.clear',{id:'chat:main'})
   await command('conversations.select',{id:'other'})
@@ -448,27 +450,27 @@ test('open_work selects the persisted original conversation across task and feed
 
 test('open_work rejects invalid parameters and absent or stale owners without changing selection',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-open-work-invalid-')),path=join(dir,'personal.json')
- const state=initialState();state.user_scope='test';state.conversations.work_owners.stale='removed';state.conversations.work_owners.valid='chat:proactive'
+ const state=initialState();state.user_scope='test';state.conversations.work_owners.stale='removed';state.conversations.work_owners.valid='chat:main'
  await new PersonalStore(path).write(state)
  const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  try{await host.open()
   for(const params of [{},{work_id:''},{work_id:'x'.repeat(129)},{work_id:1},{work_id:'valid',extra:true},{work_id:'missing'},{work_id:'stale'}]){
    const result=await host.command({type:'personal.command',request_id:crypto.randomUUID(),method:'conversations.open_work',params}) as {ok:boolean;error?:string}
    assert.equal(result.ok,false);if(['missing','stale'].includes(String(params.work_id)))assert.equal(result.error,'conversation_not_found')
-   assert.equal(host.conversationSnapshot().selected_id,'chat:main');assert.equal(host.conversationSnapshot().items.length,2)
+   assert.equal(host.conversationSnapshot().selected_id,'chat:main');assert.equal(host.conversationSnapshot().items.length,1)
   }
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('home transcript projects main and proactive messages without merging task history or ownership',async()=>{
+test('home transcript projects main replies and proactive messages without merging task history or ownership',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-home-'))
  const path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState()
- const add=(id:string,text:string)=>state.conversations.items.find(item=>item.id===id)!.messages.push({id:text,conversation_id:id,role:'assistant',text,created_at:'2026-10-11T08:00:00Z'})
- add('chat:main','main');add('chat:proactive','reminder')
+ const main=state.conversations.items.find(item=>item.id==='chat:main')!
+ main.messages.push({id:'main',conversation_id:main.id,role:'assistant',text:'main',created_at:'2026-10-11T08:00:00Z'},{id:'reminder',conversation_id:main.id,role:'assistant',origin:'proactive',text:'reminder',created_at:'2026-10-11T08:00:01Z'})
  const task=createConversation('topic','Scoped task',null,'task-chat');task.messages.push({id:'private-task-turn',conversation_id:task.id,role:'user',text:'scoped',created_at:'2026-10-11T08:00:00Z'});state.conversations.items.push(task);state.conversations.selected_id=task.id;state.conversations.work_owners.work=task.id
  await store.write(state)
  const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
- try{await host.open();const snapshot=host.conversationSnapshot();assert.deepEqual(snapshot.messages.map(m=>m.text),['scoped']);assert.deepEqual(snapshot.home_messages.map(m=>m.text),['main','reminder']);assert.equal(host.workConversation('work'),'task-chat');assert.equal(snapshot.home_messages[1]!.conversation_id,'chat:proactive')}
+ try{await host.open();const snapshot=host.conversationSnapshot();assert.deepEqual(snapshot.messages.map(m=>m.text),['scoped']);assert.deepEqual(snapshot.home_messages.map(m=>m.text),['main','reminder']);assert.equal(host.workConversation('work'),'task-chat');assert.deepEqual(snapshot.home_messages.map(m=>m.conversation_id),['chat:main','chat:main']);assert.equal(snapshot.unread_count,1)}
  finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -494,10 +496,10 @@ test('card discussion validates current identity, retains selected source and ad
 
 test('home projection fits a previously valid mobile-sized snapshot without duplicating main history',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-home-budget-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState();state.user_scope='test'
- const main=state.conversations.items[0]!,proactive=state.conversations.items[1]!
- for(let i=0;i<40;i++){main.messages.push({id:'main-'+i,conversation_id:main.id,role:'assistant',text:'M'.repeat(16000),created_at:'2026-10-11T08:00:00Z'});proactive.messages.push({id:'notice-'+i,conversation_id:proactive.id,role:'assistant',text:'N'.repeat(16000),created_at:'2026-10-11T08:00:00Z'})}
+ const main=state.conversations.items[0]!,other=createConversation('chat','Other',null,'other');state.conversations.items.push(other);state.conversations.selected_id=other.id
+ for(let i=0;i<40;i++){other.messages.push({id:'other-'+i,conversation_id:other.id,role:'assistant',text:'O'.repeat(16000),created_at:'2026-10-11T08:00:00Z'});main.messages.push({id:'notice-'+i,conversation_id:main.id,role:'assistant',origin:'proactive',text:'N'.repeat(16000),created_at:'2026-10-11T08:00:00Z'})}
  await store.write(state);const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
- try{await host.open();const snapshot=host.snapshot();assert.equal(snapshot.conversations.messages.length,40);assert.ok(Buffer.byteLength(JSON.stringify(snapshot))<1024*1024);assert.equal(snapshot.conversations.home_messages.some(m=>m.conversation_id==='chat:main'),false);assert.equal((snapshot.conversations as unknown as {home_truncated:boolean}).home_truncated,true)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
+ try{await host.open();const snapshot=host.snapshot();assert.equal(snapshot.conversations.messages.length,40);assert.ok(Buffer.byteLength(JSON.stringify(snapshot))<1024*1024);assert.equal(snapshot.conversations.home_messages.some(m=>m.conversation_id!=='chat:main'),false);assert.ok(snapshot.conversations.home_messages.length>0);assert.equal((snapshot.conversations as unknown as {home_truncated:boolean}).home_truncated,true)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
 test('a queued card request revalidates source versions after runtime startup',async()=>{

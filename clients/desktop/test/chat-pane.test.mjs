@@ -20,7 +20,7 @@ function mount(options={}){
  if(!options.defaultHome)all(body).find(n=>n.dataset.page==='todos').listeners.click()
  return {body,sent,view,callbacks,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
-const feedState=(revision,selected='chat:proactive',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:proactive',kind:'proactive',title:'主动提醒',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'T\n## 前瞻\n- 一条'}]},...extra})
+const feedState=(revision,selected='chat:main',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:main',kind:'chat',title:'主对话',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'T\n## 前瞻\n- 一条'}]},...extra})
 test('workbench chrome and composer follow the selected language without translating conversation content',()=>{
  try{for(const [language,title,placeholder,status]of [['zh-CN','主对话','输入消息…','运行中 · 0 个后台任务'],['en','Main conversation','Type a message…','Running · 0 background tasks']]){
   setLanguage(language);const m=mount()
@@ -242,21 +242,21 @@ const resultFor=(id,summary)=>({delegateId:id,executor:'codex',outcome:'ok',summ
 test('task progress fills only the original draft, preserves voice and pending state, and never sends',async()=>{
  const m=mount({tasks:()=>({connected:true,tasks:[taskRow('a','completed')]})}),c=m.view.controller
  try{
-  m.view.receive(feedState(1,'c',{feed:[]}));c.state('chat:proactive').draft='原有内容';c.state('c').draft='别的草稿'
-  const pending={request_id:'kept',text:'sending'};c.state('chat:proactive').submission=pending
+  m.view.receive(feedState(1,'c',{feed:[]}));c.state('chat:main').draft='原有内容';c.state('c').draft='别的草稿'
+  const pending={request_id:'kept',text:'sending'};c.state('chat:main').submission=pending
   selectPage(m,'任务')
   clickProgress(m,'a');const request=m.sent.findLast(f=>f.method==='conversations.open_work')
   assert.ok(request);assert.deepEqual(request.params,{work_id:'a'})
-  const owner=feedState(2,'chat:proactive',{feed:[]});owner.conversations.voice_id='chat:proactive';m.view.receive(owner)
+  const owner=feedState(2,'chat:main',{feed:[]});owner.conversations.voice_id='chat:main';m.view.receive(owner)
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
-  const filled=c.state('chat:proactive').draft
+  const filled=c.state('chat:main').draft
   assert.equal(filled,'原有内容\n请告诉我「任务 a」（任务 a）的最新进展。')
-  assert.equal(c.state('c').draft,'别的草稿');assert.equal(c.state('chat:proactive').submission,pending)
-  assert.equal(c.voiceId,'chat:proactive');assert.equal(m.all().find(n=>n.id==='chat-pane').hidden,false)
+  assert.equal(c.state('c').draft,'别的草稿');assert.equal(c.state('chat:main').submission,pending)
+  assert.equal(c.voiceId,'chat:main');assert.equal(m.all().find(n=>n.id==='chat-pane').hidden,false)
   assert.equal(m.all().find(n=>n.attrs['aria-label']==='消息草稿').disabled,true)
   clickProgress(m,'a');const repeated=m.sent.findLast(f=>f.method==='conversations.open_work')
   m.view.receive({type:'personal.result',request_id:repeated.request_id,ok:true,data:owner.conversations});await tick()
-  assert.equal(c.state('chat:proactive').draft,filled,'repeat click must not duplicate the trailing prompt')
+  assert.equal(c.state('chat:main').draft,filled,'repeat click must not duplicate the trailing prompt')
   assert.equal(m.sent.some(f=>f.type==='input.text'||['conversations.create','conversations.open_feed'].includes(f.method)),false)
  }finally{c.disconnect();await tick()}
 })
@@ -266,32 +266,32 @@ test('task progress races and failures remain scoped to the owning draft and ori
  try{
   m.view.receive(feedState(1,'c',{feed:[]}));selectPage(m,'任务');c.state('c').draft='Other draft'
   clickProgress(m,'a');let request=m.sent.findLast(f=>f.method==='conversations.open_work');assert.ok(request)
-  const owner=feedState(2,'chat:proactive',{feed:[]});m.view.receive(owner)
+  const owner=feedState(2,'chat:main',{feed:[]});m.view.receive(owner)
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations})
   m.view.receive(feedState(3,'c',{feed:[]}));await tick()
-  assert.equal(c.selectedId,'c');assert.equal(c.state('c').draft,'Other draft');assert.match(c.state('chat:proactive').draft,/任务 a/u)
-  for(const response of [{ok:false,error:'conversation_not_found'},{ok:false,error:'network failed'},{ok:true},{ok:true,data:{selected_id:''}},{ok:true,data:{selected_id:'missing'}},{ok:true,data:{selected_id:'chat:proactive',items:{}}},{ok:true,data:{selected_id:'chat:proactive',items:[null]}}]){
-   const before=c.state('chat:proactive').draft
+  assert.equal(c.selectedId,'c');assert.equal(c.state('c').draft,'Other draft');assert.match(c.state('chat:main').draft,/任务 a/u)
+  for(const response of [{ok:false,error:'conversation_not_found'},{ok:false,error:'network failed'},{ok:true},{ok:true,data:{selected_id:''}},{ok:true,data:{selected_id:'missing'}},{ok:true,data:{selected_id:'chat:main',items:{}}},{ok:true,data:{selected_id:'chat:main',items:[null]}}]){
+   const before=c.state('chat:main').draft
    clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
    m.view.receive({type:'personal.result',request_id:request.request_id,...response});await tick()
    const errors=descendants(taskCard(m,'a')).filter(n=>n.attrs.role==='alert')
    assert.equal(errors.length,1);assert.ok(errors[0].textContent)
    assert.equal(descendants(taskCard(m,'b')).some(n=>n.attrs.role==='alert'),false)
-   assert.equal(c.state('chat:proactive').draft,before);assert.equal(c.state('c').draft,'Other draft')
+   assert.equal(c.state('chat:main').draft,before);assert.equal(c.state('c').draft,'Other draft')
   }
-  c.state('chat:proactive').draft='x'.repeat(4000)
+  c.state('chat:main').draft='x'.repeat(4000)
   clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
-  assert.equal(c.state('chat:proactive').draft,'x'.repeat(4000));assert.match(textOf(taskCard(m,'a')),/4000/u)
+  assert.equal(c.state('chat:main').draft,'x'.repeat(4000));assert.match(textOf(taskCard(m,'a')),/4000/u)
   const prompt='请告诉我「任务 a」（任务 a）的最新进展。'
-  c.state('chat:proactive').draft='x'.repeat(4000-prompt.length-1)
+  c.state('chat:main').draft='x'.repeat(4000-prompt.length-1)
   clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
-  assert.equal(c.state('chat:proactive').draft.length,4000);assert.ok(c.state('chat:proactive').draft.endsWith(prompt))
-  c.state('chat:proactive').draft='😀'.repeat(2000)
+  assert.equal(c.state('chat:main').draft.length,4000);assert.ok(c.state('chat:main').draft.endsWith(prompt))
+  c.state('chat:main').draft='😀'.repeat(2000)
   clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
-  assert.equal(c.state('chat:proactive').draft,'😀'.repeat(2000));assert.match(textOf(taskCard(m,'a')),/4000/u)
+  assert.equal(c.state('chat:main').draft,'😀'.repeat(2000));assert.match(textOf(taskCard(m,'a')),/4000/u)
   assert.equal(c.drafts.has(undefined),false);assert.equal(c.drafts.has('missing'),false)
  }finally{c.disconnect();await tick()}
 })
@@ -361,7 +361,7 @@ test('new task result text and progress drafts use English UI translations witho
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'conversation_not_found'});await tick()
   assert.match(textOf(taskCard(m,'a')),/original task conversation no longer exists/u)
   clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
-  const owner=feedState(2,'chat:proactive',{feed:[]});m.view.receive(owner)
+  const owner=feedState(2,'chat:main',{feed:[]});m.view.receive(owner)
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
   assert.equal(c.draft,'Please update me on “任务 a” (task a).')
   results.push(resultFor('a','User summary 中文'));m.view.refresh()
@@ -396,13 +396,15 @@ test('task progress accepts the command owner snapshot before a later state broa
  const m=mount({tasks:()=>({connected:true,tasks:[taskRow('a')]})}),c=m.view.controller
  try{
   m.view.receive(feedState(1,'c',{feed:[]}));c.draft='Keep current draft';selectPage(m,'任务')
+  // The first snapshot's one-time return to the main chat is not part of this flow.
+  const before=m.sent.length
   clickProgress(m,'a');const request=m.sent.findLast(f=>f.method==='conversations.open_work')
   const owner=feedState(2,'late-owner',{feed:[]});owner.conversations.items.push({id:'late-owner',kind:'chat',title:'Original owner'})
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
   assert.equal(c.state('late-owner').draft,'请告诉我「任务 a」（任务 a）的最新进展。')
   assert.equal(c.selectedId,'c');assert.equal(c.draft,'Keep current draft')
   m.view.receive(owner);assert.equal(c.draft,'请告诉我「任务 a」（任务 a）的最新进展。')
-  assert.equal(m.sent.some(f=>f.type==='input.text'||['conversations.select','conversations.create'].includes(f.method)),false)
+  assert.equal(m.sent.slice(before).some(f=>f.type==='input.text'||['conversations.select','conversations.create'].includes(f.method)),false)
  }finally{c.disconnect();await tick()}
 })
 test('routine startup keeps the text notice hidden; failed start exposes settings',()=>{
@@ -521,13 +523,13 @@ test('goal adoption and status changes use the shared pending guard; conflicts r
 })
 
  test('the permanent Nova conversation opens beside the full Timeline and keeps reminder identity',async()=>{
- const m=mount({defaultHome:true});const main={id:'chat:main',kind:'chat',title:'Historical main',unread_count:0};
- m.view.receive(feedState(1,'chat:main',{life:{todos:[],goals:[]},conversations:{selected_id:'chat:main',items:[main,{id:'chat:proactive',kind:'proactive',unread_count:1}],messages:[],home_messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'Reminder'}]}}));
+ const m=mount({defaultHome:true});const main={id:'chat:main',kind:'chat',title:'Historical main',unread_count:1};
+ m.view.receive(feedState(1,'chat:main',{life:{todos:[],goals:[]},conversations:{selected_id:'chat:main',items:[main],messages:[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'Reminder'}],home_messages:[]}}));
  assert.equal(m.all().find(n=>n.dataset.page==='timeline').attrs['aria-selected'],'true');
  assert.ok(m.all().some(n=>n.className==='timeline-axis'),'default right pane renders a date axis');assert.ok(m.all().some(n=>n.className==='feed-card'));
  assert.equal(m.all().some(n=>n.dataset.page==='nova'),false);
  assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,'主对话');
- const request=m.sent.find(f=>f.method==='conversations.read');assert.equal(request.params.id,'chat:proactive');
+ const request=m.sent.find(f=>f.method==='conversations.read');assert.equal(request.params.id,'chat:main','the unread reminder is acknowledged in the main chat');
  assert.equal(request.params.through_message_id,'feed:f1');
  })
 
@@ -599,7 +601,7 @@ test('an unchanged Feed keeps its open evidence and focus when another message a
  info.listeners.click({stopPropagation(){}})
  const popover=m.all().find(node=>node.className==='source-popover'),read=m.all().find(node=>node.className==='feed-evidence-read')
  read.focus();const pending=read.listeners.click(),request=m.sent.findLast(frame=>frame.method==='memory.evidence')
- const next=structuredClone(state);next.revision=2;next.memory.entries=[{id:'unrelated',version:1,status:'active',content:'New independent memory'}];next.conversations.messages.push({id:'new',conversation_id:'chat:proactive',role:'assistant',text:'New message'})
+ const next=structuredClone(state);next.revision=2;next.memory.entries=[{id:'unrelated',version:1,status:'active',content:'New independent memory'}];next.conversations.messages.push({id:'new',conversation_id:'chat:main',role:'assistant',text:'New message'})
  m.view.receive(next)
  assert.ok(m.all().includes(card),'unchanged card survives transcript update')
  assert.equal(popover.hidden,false);assert.equal(document.activeElement,read)

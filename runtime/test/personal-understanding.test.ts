@@ -38,7 +38,7 @@ test('superseded and switched conversations abort background capture even if mod
  try{await host.open();host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'好'}),close:()=>Promise.resolve()}),()=>{/* test observer */})
   await host.submitConversationText('chat:main','记下旧计划');await host.waitConversation('chat:main');await host.submitConversationText('chat:main','记下新计划');await host.waitConversation('chat:main');assert.equal(pending.length,2);assert.equal(pending[0]!.signal.aborted,true)
   pending[0]!.resolve([record(pending[0]!.source)]);await tick();assert.equal(host.life.snapshot().todos.length,0)
-  await host.command({type:'personal.command',request_id:'switch',method:'conversations.select',params:{id:'chat:proactive'}});assert.equal(pending[1]!.signal.aborted,true);pending[1]!.resolve([record(pending[1]!.source)]);await tick();assert.equal(host.life.snapshot().todos.length,0);assert.equal(host.understanding.snapshot().items.length,0)
+  await host.command({type:'personal.command',request_id:'switch',method:'conversations.create',params:{title:'Other'}});assert.equal(pending[1]!.signal.aborted,true);pending[1]!.resolve([record(pending[1]!.source)]);await tick();assert.equal(host.life.snapshot().todos.length,0);assert.equal(host.understanding.snapshot().items.length,0)
  }finally{for(const p of pending)p.resolve([]);await host.close();await rm(dir,{recursive:true,force:true})}
 })
 test('voice partial and duplicate final never capture; final captures once and edited records cannot be undone',async()=>{

@@ -1,7 +1,7 @@
 import {t} from './locale.mjs'
 /** Edits host-owned scheduling settings through the existing personal command. */
 export function renderDailyBrief({settings={},connected,card,el,button,command}) {
- const a=card(t('每日简报'),t('在主动提醒中查看当天安排和进展。')),fields={}
+ const a=card(t('每日简报'),t('在主对话中查看当天安排和进展。')),fields={}
  const field=(key,title,type,value)=>{
   const label=el('label',undefined,'im-field'),input=el('input');input.type=type;input.setAttribute('aria-label',title);input.disabled=!connected
   if(type==='checkbox'){input.checked=value;input.setAttribute('role','switch')}else input.value=value
