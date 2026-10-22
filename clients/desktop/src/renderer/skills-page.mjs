@@ -1,4 +1,5 @@
 import {t} from './locale.mjs'
+import {iconNode,withIcon} from './icons.mjs'
 
 const MODULES=[
  ['search','联网搜索','搜索网页并附上来源'],
@@ -31,10 +32,10 @@ export function filterSkills(entries,group,query){
 }
 
 export function renderSkillsPage(panel,{el,button,state,avatar,refresh,manage}){
- const head=el('div',undefined,'skills-head'),search=el('input',undefined,'skills-search')
+ const head=el('div',undefined,'skills-head'),field=el('label',undefined,'skills-search-field'),search=el('input',undefined,'skills-search')
  search.type='search';search.placeholder=t('搜索技能');search.setAttribute('aria-label',t('搜索技能'));search.value=state.query
- head.append(el('p',t('让 Nova 按需使用的能力'),'hint'),search)
- const refreshButton=button(t('刷新'),refresh,head,'skills-refresh');refreshButton.className='ghost';refreshButton.disabled=state.loading
+ {const glass=iconNode('search');if(glass)field.append(glass)};field.append(search);head.append(el('p',t('让 Nova 按需使用的能力'),'hint'),field)
+ const refreshButton=button(t('刷新'),refresh,head,'skills-refresh');refreshButton.className='ghost';withIcon(refreshButton,'refresh');refreshButton.disabled=state.loading
  const groups=el('div',undefined,'skills-tabs');groups.setAttribute('role','group')
  const grid=el('div',undefined,'skills-grid')
  const entries=skillEntries(state.status)
