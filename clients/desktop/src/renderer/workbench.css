@@ -34,7 +34,7 @@ body[data-personal-collapsed="false"]{background:transparent;overflow:hidden}
 .workbench,.workbench *{box-sizing:border-box}
 .workbench{position:relative;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));height:100vh;border:1px solid var(--frame);border-radius:var(--radius-window);background:var(--surface);color:var(--ink);font:13px/1.6 var(--font);text-align:left;user-select:text;overflow:hidden}
 /* An opaque plate (NOVA_ORB_OPAQUE) cannot show rounded corners: the square window backing would show behind them. */
-body[data-opaque="1"] .workbench{border-radius:0}
+body[data-opaque="1"] .workbench,body[data-maximized="1"] .workbench{border-radius:0}
 /* Windows clips the opaque workbench to the system window corners. */
 body[data-platform="win32"] .workbench{border-radius:0}
 .page-head,.chat-head{-webkit-app-region:drag}

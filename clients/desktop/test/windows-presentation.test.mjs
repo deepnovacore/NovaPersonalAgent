@@ -120,7 +120,7 @@ test('Windows mode switches preserve workbench bounds at fractional DPI and hidd
   const area = {x: 0, y: 0, width: 1920, height: 1080}
   const screen = {getCursorScreenPoint: () => ({x: 0, y: 0}), getDisplayNearestPoint: () => ({workArea: area}), getDisplayMatching: () => ({workArea: area})}
   let syncs = 0
-  const fixture = new Function('mainWindow', 'windowsPresentation', 'screen', 'orbWindow', 'sendToOrb', 'createWorkbenchFrame', `${body};return {set:setPersonalCollapsed,frame:workbenchFrame,window:()=>mainWindow}`)(shells.orb, shells, screen, {sync: () => syncs++}, () => {}, createWorkbenchFrame)
+  const fixture = new Function('mainWindow', 'windowsPresentation', 'screen', 'orbWindow', 'sendToOrb', 'createWorkbenchFrame', 'currentSettings', 'settingsReady', 'settingsWriter', `${body};return {set:setPersonalCollapsed,frame:workbenchFrame,window:()=>mainWindow}`)(shells.orb, shells, screen, {sync: () => syncs++}, () => {}, createWorkbenchFrame, {workbenchMaximized: false}, false, async () => {})
   fixture.set(false)
   const natural = shells.workbench.getBounds()
   assert.equal(shells.workbench.isVisible(), false)
