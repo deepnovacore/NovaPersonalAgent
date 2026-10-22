@@ -16,15 +16,16 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   const id=c.selectedId;let offset=0,text='';do{const page=await c.command('build.details',{id,offset});if(id!==c.selectedId)return;text+=page.text;offset=page.next_offset}while(offset!==null);log.textContent=text
  }))
  const approval=el('section',undefined,'workbench-local-approval');approval.hidden=true;root.append(approval)
- const approvalTitle=el('h3',t('本地工具待确认')),preview=el('pre'),approve=el('button',t('允许本次')),deny=el('button',t('拒绝')),always=el('button',t('始终允许'));approve.type=deny.type=always.type='button';always.hidden=true;approval.append(approvalTitle,preview,always,approve,deny)
+ const approvalTitle=el('h3',t('本地工具待确认')),preview=el('pre'),approve=el('button',t('允许本次')),deny=el('button',t('拒绝')),always=el('button',t('始终允许'));approve.type=deny.type=always.type='button';always.hidden=true;deny.className='ghost';approve.className='soft'
+ const approvalActions=el('div',undefined,'workbench-approval-actions');approvalActions.append(deny,always,approve);approval.append(approvalTitle,preview,approvalActions)
  let loadedApproval=null,loadingApproval=null
  async function loadApproval(pending,id){
   if(loadingApproval===pending.id||loadedApproval===pending.id)return
   if(pending.name==='computer_connect'){
    let app;try{app=JSON.parse(pending.preview)?.params?.application}catch{}
-   if(app?.name){preview.textContent=t('允许 Nova 操作 {0}？',app.name);approvalTitle.textContent=t('应用控制授权');always.hidden=false;loadedApproval=pending.id;approve.disabled=always.disabled=!c.connected;return}
+   if(app?.name){preview.textContent=t('允许 Nova 操作 {0}？',app.name);approvalTitle.textContent=t('应用控制授权');always.hidden=false;approval.setAttribute('data-kind','app');loadedApproval=pending.id;approve.disabled=always.disabled=!c.connected;return}
   }
-  always.hidden=true;approvalTitle.textContent=t('本地工具待确认')
+  always.hidden=true;approval.setAttribute('data-kind','tool');approvalTitle.textContent=t('本地工具待确认')
   loadingApproval=pending.id
   try {
    let offset=0,text=''

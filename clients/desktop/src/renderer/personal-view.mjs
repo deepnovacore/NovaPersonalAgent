@@ -53,8 +53,8 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  let computerUse=null
  const c=new PersonalController({send,start,stop,applyPresentation,changed:update,confirmBuildSwitch:()=>new Promise(resolve=>{
   const modal=el('dialog',undefined,'build-switch-dialog');modal.append(el('h2',t('Build 正在执行')),el('p',t('停止并保存进度后再切换，返回时点击 Resume 继续。')))
-  const stay=el('button',t('继续执行')),leave=el('button',t('停止并切换'));stay.type=leave.type='button';modal.append(stay,leave)
-  const done=value=>{modal.close();modal.remove();resolve(value)};stay.addEventListener('click',()=>done(false));leave.addEventListener('click',()=>done(true));modal.addEventListener('cancel',event=>{event.preventDefault();done(false)});document.body.append(modal);modal.showModal();stay.focus()
+  const stay=el('button',t('继续执行'),'soft'),leave=el('button',t('停止并切换')),actions=el('div',undefined,'build-switch-actions');stay.type=leave.type='button';actions.append(stay,leave);modal.append(actions)
+  const done=value=>{modal.close();modal.remove();resolve(value)};stay.addEventListener('click',()=>done(false));leave.addEventListener('click',()=>done(true));modal.addEventListener('cancel',event=>{event.preventDefault();done(false)});root.append(modal);modal.showModal();stay.focus()
  })})
  computerUse=createComputerUseIndicator({c,api})
  const openSettings=category=>api.orbMenu.openSettings?.(category)

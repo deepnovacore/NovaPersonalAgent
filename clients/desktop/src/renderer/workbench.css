@@ -652,6 +652,11 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-build-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;flex-wrap:wrap}
 .workbench-plan,.workbench-local-approval{margin-top:10px;padding:10px;border:1px solid var(--line,#555);border-radius:8px}
 .workbench-plan h3,.workbench-local-approval h3{font-size:13px;margin:0 0 8px}
+/* A pending decision is the user's to make, not a fault: accent edge like the Computer Use preflight, one primary action. */
+.workbench-local-approval{padding:12px 14px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent-wash) 60%,var(--surface-raised))}
+.workbench-local-approval h3{font-size:13px;font-weight:600;color:var(--ink)}
+.workbench-local-approval[data-kind="app"] pre{margin:0;font-family:inherit;font-size:13px;line-height:1.5;color:var(--ink);white-space:normal}
+.workbench-approval-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:12px;flex-wrap:wrap}
 .workbench-plan-body{max-height:24vh;overflow:auto;user-select:text}
 .workbench-plan textarea{box-sizing:border-box;width:100%;min-height:180px;resize:vertical;font:12px/1.6 monospace}
 .workbench-plan select{margin:6px 4px 6px 0}.workbench-plan-actions{margin-top:8px}
@@ -681,8 +686,12 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .computer-shot{display:block;margin:6px 0 0;max-width:min(100%,360px);border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-inset);cursor:zoom-in}
 .computer-shot[hidden]{display:none}
 .computer-shot.expanded{max-width:100%;cursor:zoom-out}
-.build-switch-dialog{max-width:420px;padding:24px;border:1px solid var(--line,#555);border-radius:12px;background:var(--panel,#202024);color:inherit}
-.build-switch-dialog::backdrop{background:#0008}.build-switch-dialog h2{font-size:18px}.build-switch-dialog button{margin:12px 8px 0 0;padding:8px 12px}
+.build-switch-dialog{width:min(380px,calc(100vw - 48px));padding:22px 24px 18px;border:1px solid var(--line-strong);border-radius:var(--radius-window,14px);background:var(--surface-raised);color:var(--ink);box-shadow:0 18px 48px rgba(0,0,0,.22)}
+.build-switch-dialog::backdrop{background:rgba(15,18,22,.38)}
+.build-switch-dialog h2{margin:0 0 8px;font-size:16px;font-weight:600}
+.build-switch-dialog p{margin:0;color:var(--ink-dim);font-size:13px;line-height:1.6}
+.build-switch-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.build-switch-actions button{min-height:30px;padding:0 14px}
 /* Native details retain expansion and keyboard focus as tool receipts stream in. */
 .workbench .tool-message{align-self:stretch;max-width:100%;padding:0;background:transparent;border:0;min-width:0}
 .workbench .tool-message-group{align-self:stretch;max-width:100%;padding:0;background:transparent;border:0;min-width:0;color:var(--ink-dim)}
