@@ -35,7 +35,6 @@ export const SYNC_RESULT_TITLE_CHARS = 120
 export const SYNC_RESULT_SNIPPET_CHARS = 400
 /** Longest a user may hold the floor before the hold is treated as stale and released. */
 export const USER_HOLD_MAX_S = 30
-export const STALE_DELIVERY_RETRY_S = 1
 /** Below this priority a host item waits its turn; at or above it may interrupt the agent. */
 export const PREEMPT_MIN_PRIORITY = 80
 /** Ordinary progress older than this is stale operational narration, not a current user fact. */

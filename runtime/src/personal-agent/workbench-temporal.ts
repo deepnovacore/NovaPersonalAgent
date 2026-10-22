@@ -8,7 +8,6 @@ export const temporalReplySchema=z.object({groups:z.array(z.object({
  state:z.enum(['open','completed','cancelled','uncertain']),
  current:z.string(),basis:z.array(z.string()).min(1).max(8),
 }).strict()).max(512)}).strict()
-export type TemporalReply=z.infer<typeof temporalReplySchema>
 export interface TemporalGroup {id:string;members:WorkbenchMatter[];state:WorkbenchMatter['state'];current:WorkbenchMatter;basis:WorkbenchMatter[]}
 /** Coverage and closure are code gates; semantic identity still requires evidence review. */
 export function resolveWorkbenchGroups(matters:readonly WorkbenchMatter[],raw:unknown):TemporalGroup[]{

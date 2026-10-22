@@ -32,7 +32,6 @@ export interface ToolImage {readonly media_type:'image/png'|'image/jpeg';readonl
 /** Result codes returned in tool results (JSON `code`). */
 export const COMPUTER_CODES = ['computer_use_disabled','vision_model_required','observe_required','verification_required',
  'computer_resource_busy','screen_changed','declined','cancelled','action_failed','cleanup_unknown','invalid_params'] as const
-export type ComputerCode = typeof COMPUTER_CODES[number]
 
 /** Per-conversation switch, stored on `conversation.build.computer_use`. */
 export const computerUseStateSchema = z.object({enabled:z.boolean(),enabled_at:z.string().optional(),
