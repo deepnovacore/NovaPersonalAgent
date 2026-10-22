@@ -65,7 +65,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    const meta=el('div',undefined,'timeline-brief-meta'),topic=el('span',undefined,'timeline-topic')
    const glyph=el('span',{attention:'!',deadline:'◷',progress:'✓',insight:'◇'}[kind],'timeline-topic-icon');glyph.setAttribute('aria-hidden','true');topic.append(glyph,el('span',item.category));meta.append(topic)
    if(item.status_label)meta.append(el('span',historical?t('当时状态：{0}',item.status_label):item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
-   if(historical)card.append(el('p',t('整理于 {0}',item.time.as_of),'hint timeline-history-note'))
+   if(historical&&item.time?.as_of)card.append(el('p',t('整理于 {0}',formatDate(item.time.as_of)),'hint timeline-history-note'))
    if(item.people?.length){const people=renderCardTags(card,item.people.map(person=>({label:person.name,tone:'person'})),{el});people.className+=' timeline-people';people.setAttribute('aria-label',t('相关同事'))}
    const timeMeta=el('div',undefined,'timeline-card-time'),time=item.time,label=text=>timeMeta.append(el('span',text,'timeline-time-label'))
    if(time?.anchor_date){
