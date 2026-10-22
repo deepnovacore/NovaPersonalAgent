@@ -205,15 +205,6 @@
       "scope": "Actual isolated Electron renderer and host: explicit news conversion, source display, local date/status controls and restart; synthetic, no model/audio/account."
     },
     {
-      "id": "personal-understanding",
-      "layer": "model-runtime",
-      "entry": "scripts/live/personal-understanding.mjs",
-      "structuredReport": true,
-      "requires": [],
-      "timeoutMs": 600000,
-      "scope": "Real configured extraction/resolution model and Jev with isolated Substrate: cross-turn deduplication, anchored reschedule, completion/cancellation, evidence and restart. Fixed conversation acknowledgement; no GUI, microphone or personal data."
-    },
-    {
       "id": "directory-snapshot",
       "layer": "runtime-live",
       "entry": "scripts/live/directory-snapshot.mjs",

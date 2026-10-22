@@ -32,7 +32,7 @@ Before starting new work, Nova can propose an execution place: a new Workspace, 
 
 ## Delegating and following up
 
-From a Todo, "Send to executor" turns it into a Task. "View task and results" opens the Task's detail view; asking about progress drops a prompt into the conversation draft referencing the Task by name, so you can just send it.
+In a Task's detail view, "Send to executor" sends your message to the executor working on it. "View task and results" opens the Task's detail view; asking about progress drops a prompt into the conversation draft referencing the Task by name, so you can just send it.
 
 ## Limits
 
