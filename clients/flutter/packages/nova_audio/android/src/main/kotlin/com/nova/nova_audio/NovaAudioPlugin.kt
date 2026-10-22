@@ -87,7 +87,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
  private lateinit var context:android.content.Context
  private var aoq:AoqAudio?=null
  private val main=Handler(Looper.getMainLooper())
- private var generation:Long?=null
+ @Volatile private var generation:Long?=null
  private var activity:Activity?=null
  private var binding:ActivityPluginBinding?=null
  private var permission:MethodChannel.Result?=null
@@ -104,19 +104,24 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
  }
  private fun event(kind:String,fields:Map<String,Any>){
   val id=generation ?: return
-  channel.invokeMethod("event",fields+mapOf("kind" to kind,"generation" to id))
+  val report=Runnable{if(generation==id)channel.invokeMethod("event",fields+mapOf("kind" to kind,"generation" to id))}
+  if(Looper.myLooper()==main.looper)report.run() else main.post(report)
  }
  private fun resetHandoff(){serial++;pending=null}
  private fun deliver(data:ByteArray){
   val id=generation ?: return
+  main.post {if(generation==id)deliverCurrent(data,id)}
+ }
+ private fun deliverCurrent(data:ByteArray,id:Long){
   if(pending!=null){if(SystemClock.elapsedRealtime()-pendingAt>=1000)fail("Capture handoff stalled");return}
   val ticket=++serial;pending=ticket;pendingAt=SystemClock.elapsedRealtime()
   val buffer=ByteBuffer.allocateDirect(8+data.size).order(ByteOrder.BIG_ENDIAN)
   buffer.putLong(id);buffer.put(data)
-  pcm.send(buffer){main.post{if(generation==id && pending==ticket)pending=null}}
+  // Replies run on the platform thread; posting cleanup can let overdue capture checks win.
+  pcm.send(buffer){if(generation==id && pending==ticket)pending=null}
   main.postDelayed({if(generation==id && pending==ticket)fail("Capture handoff stalled")},1100)
  }
- private fun fail(reason:String){aoq?.stop();aoq=null;audio.disconnect();stopCompanion();resetHandoff();event("stopped",mapOf("reason" to reason));generation=null}
+ private fun fail(reason:String){android.util.Log.w("NovaAudio","Stopped: $reason");aoq?.stop();aoq=null;audio.disconnect();stopCompanion();resetHandoff();event("stopped",mapOf("reason" to reason));generation=null}
  override fun onMethodCall(call:MethodCall,result:MethodChannel.Result){
   try {
    when(call.method){
@@ -173,7 +178,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
  override fun onReattachedToActivityForConfigChanges(value:ActivityPluginBinding){onAttachedToActivity(value)}
  override fun onDetachedFromActivity(){detachActivity()}
  private fun detachActivity(){if(backgroundCall)fail("Activity detached");binding?.removeRequestPermissionsResultListener(this);activity?.application?.unregisterActivityLifecycleCallbacks(this);binding=null;activity=null;permission?.success(false);permission=null;if(audio.running || aoq?.running==true)fail("Activity detached")}
- override fun onDetachedFromEngine(engine:FlutterPlugin.FlutterPluginBinding){stopCompanion();companion.setMethodCallHandler(null);detachActivity();audio.disconnect();channel.setMethodCallHandler(null);generation=null;resetHandoff()}
+ override fun onDetachedFromEngine(engine:FlutterPlugin.FlutterPluginBinding){stopCompanion();companion.setMethodCallHandler(null);detachActivity();audio.dispose();channel.setMethodCallHandler(null);generation=null;resetHandoff()}
  override fun onActivityStopped(value:Activity){
   if(value!=activity)return
   if(backgroundCall && audio.running)VoiceCallService.current?.showOrb()
