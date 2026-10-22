@@ -64,13 +64,27 @@ function publicEventSummary(event) {
     return null
   }
 }
+/** First line or sentence of a goal, short enough to act as a card heading. */
+export function taskHeadline(goal = '') {
+  const first = String(goal).trim().split(/\n|(?<=[。！？.!?])\s/, 1)[0]
+  return first.length > 48 ? first.slice(0, 47) + '…' : first
+}
 /** A persistent inspector. Only receipted host control opens the separate executor composer. */
 export function mountTaskDetail(root, { command, onClose, onViewed = () => { }, after = 0, history = { items: new Map(), cursor: 0, incomplete: false, truncated: false }, storage = globalThis.localStorage }) {
   let cursor = history.cursor, viewedCursor = after, visible = true, incomplete = history.incomplete, truncated = history.truncated
   const publicEvents = history.items
   let detail = null, session = '', draftState = {}, busy = false, disposed = false, eventKey = '', approvalKey = '', refreshing = null, refreshAgain = false
-  const changes = el('p'), title = el('h2', t('任务详情')), goal = el('p'), criteriaTitle = el('h3', t('验收条件')), status = el('p'), summary = el('ul'), recipient = el('p'), notice = el('p'), error = el('p'), activity = el('section'), activityMore = el('div'), artifacts = el('section'), approvals = el('section'), controls = el('div'), composer = el('div')
+  const changes = el('p'), title = el('h2'), goal = el('p'), goalDetails = el('details'), meta = el('div'), criteria = el('section'), criteriaTitle = el('h3', t('验收条件')), status = el('p'), summary = el('ul'), recipient = el('p'), notice = el('p'), error = el('p'), activity = el('section'), activityMore = el('div'), artifacts = el('section'), approvals = el('section'), controls = el('div'), composer = el('div')
   root.className = 'task-detail'
+  title.className = 'task-title'
+  status.className = 'task-status'
+  changes.className = 'task-changes'
+  notice.className = 'task-notice'
+  meta.className = 'task-meta'
+  criteria.className = 'task-section task-criteria-section'
+  goalDetails.className = 'task-goal-details'
+  for (const section of [activity, artifacts, approvals, composer])
+    section.className = 'task-section'
   goal.className = 'task-goal'
   summary.className = 'task-criteria'
   status.setAttribute('role', 'status')
@@ -216,12 +230,18 @@ export function mountTaskDetail(root, { command, onClose, onViewed = () => { }, 
     }
   }, composer)
   composer.append(recipient, draft)
-  root.append(title, goal, status, changes, criteriaTitle, summary, select, notice, controls, approvals, activity, activityMore, artifacts, composer, error)
+  goalDetails.append(el('summary', t('完整任务描述')), goal)
+  meta.append(changes, select)
+  criteria.append(criteriaTitle, summary)
+  root.append(title, status, goalDetails, meta, notice, criteria, controls, approvals, activity, activityMore, artifacts, composer, error)
   function render() {
     if (!detail)
       return
     const caps = detail.capabilities ?? {}, terminal = ['completed', 'cancelled'].includes(detail.phase)
     goal.textContent = detail.goal
+    title.textContent = taskHeadline(detail.goal)
+    goalDetails.hidden = title.textContent === detail.goal
+    criteria.hidden = !(detail.acceptance ?? []).length
     summary.replaceChildren(...(detail.acceptance ?? []).map((text, index) => criterionItem(text, detail.criteria_evidence?.find(item => item.index === index)?.evidence_refs)))
     summary.hidden = criteriaTitle.hidden = !(detail.acceptance ?? []).length
     status.setAttribute('aria-busy', String(busy))

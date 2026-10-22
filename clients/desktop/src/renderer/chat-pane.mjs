@@ -88,6 +88,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   else if(e.key==='Tab'&&e.shiftKey&&!e.isComposing&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&composerMode.cycle())e.preventDefault()
  })
  const inputActions=el('div',undefined,'composer-actions');const composerMode=mountComposerMode(inputActions,{c,el,run});const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
+ const hint=el('p','','hint composer-hint');inputActions.append(hint)
  inputActions.addEventListener('keydown',event=>{if(!event.defaultPrevented&&event.key==='Tab'&&event.shiftKey&&!event.isComposing&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&composerMode.cycle())event.preventDefault()})
  const dictate=el('button',undefined,'composer-dictate');dictate.type='button';dictate.append(glyph(GLYPH.mic));inputActions.append(dictate)
  const recordingHere=()=>Boolean(c.dictationId)&&c.dictationConversationId===c.selectedId
@@ -119,7 +120,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
    const chip=button(t('引用 · {0} ×',title),()=>{c.state().references=c.state().references.filter(item=>item!==ref);renderSource()},referenceChips);chip.className='reference-chip';chip.setAttribute('aria-label',t('移除引用：{0}',title))
   }
  }
- const hint=el('p','','hint composer-hint');composer.append(draft,inputActions,hint);pane.append(composer)
+ composer.append(draft,inputActions);pane.append(composer)
 
  /** The floating orb of a continuous conversation lives only while it is visible: a hidden pane must not keep an animation loop running. */
  let orb=null,orbState={name:'idle',statusLine:'',codexWorking:false}
@@ -247,7 +248,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   renderSource()
   const tasks=(c.snapshot?.tasks??[]).filter(t=>!isSourceProcessingTask(t)&&(c.selectedId==='chat:main'||t.conversation_id===c.selectedId))
   for(const [id,node]of cardNodes)if(!tasks.some(t=>t.id===id)){node.remove?.();cardNodes.delete(id)}
-  for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}const criteria=task.acceptance??[];node.title=[task.goal,...(criteria.length?[t('验收条件'),...criteria.map(item=>'• '+item)]:[])].join('\n');node.textContent=`${task.goal.length>60?task.goal.slice(0,59)+'…':task.goal} · ${t(TASK_PHASE_LABEL[task.phase]??task.phase)} · ${taskNextStep(task)}${criteria.length?' · '+t('验收 {0} 条',criteria.length):''}`}
+  for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}const criteria=task.acceptance??[];node.title=[task.goal,...(criteria.length?[t('验收条件'),...criteria.map(item=>'• '+item)]:[])].join('\n');node.dataset.phase=task.phase;node.textContent=`${task.goal.length>60?task.goal.slice(0,59)+'…':task.goal} · ${t(TASK_PHASE_LABEL[task.phase]??task.phase)} · ${taskNextStep(task)}${criteria.length?' · '+t('验收 {0} 条',criteria.length):''}`}
   if(draft.value!==c.draft)draft.value=c.draft
   const localDictation=c.dictationConversationId===c.selectedId&&Boolean(c.dictationId)
   draft.disabled=!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isBuildFinished(c.selectedId)||(c.buildWaitingApproval&&c.selectedConversation?.id===c.selectedId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')
@@ -255,7 +256,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   dictate.disabled=!c.presentationReady||!c.connected||!c.selectedId||Boolean(c.voiceId)||(c.mode!=='text'&&c.dictationConversationId!==c.selectedId)||c.mode==='transcribing'||!c.capabilities.includes('dictation')
   voice.disabled=!c.presentationReady||!c.connected||!c.selectedId||(Boolean(c.voiceId)&&!c.isVoiceConversation)||(c.mode!=='text'&&!c.isVoiceConversation)
   syncActions();syncStage()
-  hint.textContent=t(!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 再点一下麦克风结束'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行')
+  hint.textContent=t(!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 再点一下麦克风结束'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行');hint.title=hint.textContent
   targetMenu.update();if(c.selectedId==='chat:main'||c.selectedConversation?.kind==='build')targetMenu.element.hidden=true;if(c.selectedConversation?.kind==='build'||c.selectedConversation?.mode==='plan')dictate.disabled=true;executionCard.update((c.snapshot?.pending_confirmations??[]).find(item=>item.proposal_id&&item.workspace&&item.conversation_id===c.selectedId)??null,c.selectedId);renderConversations();renderHistory();deliverPresented();read()
  }
  async function focusDraft(text,source=null){
