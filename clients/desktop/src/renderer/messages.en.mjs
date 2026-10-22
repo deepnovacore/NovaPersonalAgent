@@ -607,6 +607,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "此对话的任务": "Tasks in this conversation",
   "查看任务与结果": "View task and results",
   "任务详情": "Task details",
+  "完整任务描述": "Full task description",
   "拒绝": "Decline",
   "允许一次": "Allow once",
   "等待审批": "Awaiting approval",
