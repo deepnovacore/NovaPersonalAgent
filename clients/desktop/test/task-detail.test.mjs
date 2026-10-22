@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mountTaskDetail,taskDraftKey} from '../src/renderer/task-detail.mjs'
+import {mountTaskDetail,taskDraftKey,taskHeadline} from '../src/renderer/task-detail.mjs'
 class Node {
  constructor(tag){this.tagName=tag.toUpperCase();this.children=[];this.listeners={};this.dataset={};this.scrollTop=0}
  append(...nodes){this.children.push(...nodes)} replaceChildren(...nodes){this.children=nodes} setAttribute(k,v){this[k]=v} addEventListener(k,f){this.listeners[k]=f} removeEventListener(k){delete this.listeners[k]} focus(){document.activeElement=this}
@@ -54,19 +54,19 @@ test('missing and truncated public history remains visibly incomplete after incr
 
 test('Nova-only detail uses a normal goal paragraph, criteria list and no empty executor controls',()=>{
  const m=mount(),goal='Long delegated goal '.repeat(30);m.view.update(task({goal,execution_route:'nova',session_ids:[],acceptance:['First criterion','Second criterion'],capabilities:{detail:'summary-only',input:false}}))
- assert.equal(m.all().find(n=>n.tagName==='H2').textContent,'任务详情');assert.ok(m.all().some(n=>n.tagName==='P'&&n.textContent===goal));assert.equal(m.all().filter(n=>n.tagName==='LI').length,2)
+ assert.equal(m.all().find(n=>n.tagName==='H2').textContent,taskHeadline(goal));assert.ok(m.all().some(n=>n.tagName==='P'&&n.textContent===goal));assert.equal(m.all().filter(n=>n.tagName==='LI').length,2)
  assert.equal(m.find('执行器会话').hidden,true);assert.ok(m.find('回复执行器'));assert.ok(m.all().find(n=>n.children.includes(m.find('回复执行器'))).hidden);assert.ok(m.find('接管任务'))
 })
 
 test('verification status is readable while its exact public receipt and refs remain expandable',()=>{
  const m=mount(),raw=JSON.stringify({kind:'correct',instruction:'Add the missing regression',evidence_refs:['evidence:1']});m.view.update(task({phase:'waiting',waiting_reason:'task_check_unavailable',events:{items:[{seq:1,kind:'verification',text:raw,refs:['evidence:1']}],next:1}}))
  assert.ok(m.all().some(n=>n.textContent?.includes('暂时无法验证任务结果')));assert.ok(m.all().some(n=>n.textContent==='需要修正：Add the missing regression'))
- const receipt=m.all().find(n=>n.tagName==='DETAILS');assert.ok(receipt);assert.ok(receipt.children.some(n=>n.tagName==='PRE'&&n.textContent.includes(raw)&&n.textContent.includes('evidence:1')))
+ const receipt=m.all().find(n=>n.tagName==='DETAILS'&&n.children.some(c=>c.tagName==='PRE'));assert.ok(receipt);assert.ok(receipt.children.some(n=>n.tagName==='PRE'&&n.textContent.includes(raw)&&n.textContent.includes('evidence:1')))
 })
 
 test('long task cards have a bounded scrolling area and cannot shrink the Nova composer',async()=>{
  const {readFile}=await import('node:fs/promises'),css=await readFile(new URL('../src/renderer/workbench.css',import.meta.url),'utf8')
- assert.match(css,/\.conversation-task-cards\s*\{[^}]*max-height:[^}]*overflow:\s*auto/);assert.match(css,/\.conversation-task-cards \.task-card\s*\{[^}]*-webkit-line-clamp:\s*2/);assert.match(css,/\.composer\s*\{[^}]*flex-shrink:\s*0/)
+ assert.match(css,/\.conversation-task-cards\s*\{[^}]*max-height:[^}]*overflow:\s*auto/);assert.match(css,/\.conversation-task-cards \.task-card\s*\{[^}]*white-space:\s*nowrap/);assert.match(css,/\.composer\s*\{[^}]*flex-shrink:\s*0/)
 })
 
 test('quiet completed task can load public activity beyond the first hundred events',async()=>{
