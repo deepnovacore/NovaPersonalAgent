@@ -162,6 +162,57 @@ void main() {
   }
   for (final profile in IntegratedVoiceProfile.values) {
     test(
+      '$profile restores both roles using its accepted history format',
+      () async {
+        final wire = Wire();
+        await wire.open();
+        final provider = QwenRealtimeVoiceProvider(
+          endpoint: wire.endpoint,
+          model: 'test',
+          apiKey: 'test',
+          voice: 'voice',
+          profile: profile,
+        );
+        final subscription = provider.events.listen((_) {});
+        addTearDown(() async {
+          await provider.close();
+          await subscription.cancel();
+          await wire.close();
+        });
+        await provider.connect(
+          epoch: 1,
+          instructions: 'Continue the conversation.',
+          history: const [
+            VoiceHistoryItem('user', 'Remember 43.'),
+            VoiceHistoryItem('assistant', '43.'),
+          ],
+        );
+        final items = wire.frames
+            .where((frame) => frame['type'] == 'conversation.item.create')
+            .map((frame) => frame['item'] as Map)
+            .toList();
+        expect(items.map((item) => item['role']), ['user', 'assistant']);
+        expect(items[0]['content'], [
+          {'type': 'input_text', 'text': 'Remember 43.'},
+        ]);
+        expect(items[1]['content'], [
+          {
+            'type': profile == IntegratedVoiceProfile.qwen
+                ? 'output_text'
+                : 'text',
+            'text': '43.',
+          },
+        ]);
+        expect(
+          wire.frames.where((frame) => frame['type'] == 'response.create'),
+          isEmpty,
+        );
+      },
+    );
+  }
+
+  for (final profile in IntegratedVoiceProfile.values) {
+    test(
       '$profile setup, audio and completed tool calls; cancel fences late frames',
       () async {
         final wire = Wire();

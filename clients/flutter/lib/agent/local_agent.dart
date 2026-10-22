@@ -21,3 +21,13 @@ class NativeLocalAgent implements LocalAgent {
     return reply == null ? null : jsonDecode(reply);
   }
 }
+
+// These native loop stages only read; an interrupted dispatch keeps an unknown outcome.
+bool isNativeReadFailure(Map task) {
+  final reason = task['reason'];
+  return task['phase'] == 'interrupted' &&
+      reason is String &&
+      (reason.startsWith('observation_') ||
+          reason.startsWith('model_') ||
+          reason == 'tool_screen_changed_during_capture');
+}

@@ -146,6 +146,48 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
+
+  testWidgets('capture failure is not mislabeled as a network failure', (
+    tester,
+  ) async {
+    final session = PanelSession()..error = 'audio_capture_stalled';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PhoneVoicePanel(
+            session: session,
+            onSettings: () {},
+            onStart: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('音频采集暂时卡住，请重新开始通话。'), findsOneWidget);
+    expect(find.text('请检查语音设置或网络，再重新通话。'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    session.dispose();
+  });
+  testWidgets('playback failure is not mislabeled as a network failure', (
+    tester,
+  ) async {
+    final session = PanelSession()..error = 'audio_playback_stalled';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PhoneVoicePanel(
+            session: session,
+            onSettings: () {},
+            onStart: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('音频播放暂时卡住，请重新开始通话。'), findsOneWidget);
+    expect(find.text('请检查语音设置或网络，再重新通话。'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    session.dispose();
+  });
+
   for (final layout in [
     (size: const Size(320, 700), scale: 1.0),
     (size: const Size(390, 844), scale: 1.0),
@@ -357,7 +399,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('task shows human progress with technical tool only in details', (
+  testWidgets('task shows human progress and stop without technical details', (
     tester,
   ) async {
     final primary = AgentCoreHost(
@@ -383,7 +425,8 @@ void main() {
     expect(find.textContaining('file_write'), findsNothing);
     await tester.tap(find.text('正在编写文件'));
     await tester.pumpAndSettle();
-    expect(find.text('工具: file_write'), findsOneWidget);
+    expect(find.textContaining('file_write'), findsNothing);
+    expect(find.text('正在整理内容'), findsNothing);
     expect(find.text('停止任务'), findsOneWidget);
   });
 }

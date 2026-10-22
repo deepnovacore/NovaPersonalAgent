@@ -5,6 +5,10 @@ import android.media.*
 import android.media.audiofx.AcousticEchoCanceler
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ExecutionException
 import android.os.Looper
 import android.os.SystemClock
 import java.nio.ByteBuffer
@@ -13,10 +17,20 @@ import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
 
-/** All playback and control state belongs to the main handler; capture has one reader. */
+/** Playback and control state belong to one audio handler, independent of UI work. */
 @Suppress("DEPRECATION")
 class RelayAudio(private val context:Context, private val emit:(String,Map<String,Any>)->Unit, private val onPCM:(ByteArray)->Unit) {
- private val main=Handler(Looper.getMainLooper())
+ private val worker=HandlerThread("nova-audio",android.os.Process.THREAD_PRIORITY_AUDIO).apply{start()}
+ private val audioHandler=Handler(worker.looper)
+ private fun onAudio(run:()->Unit) {
+  if(Looper.myLooper()==audioHandler.looper){run();return}
+  val task=FutureTask{run()}
+  check(audioHandler.post(task)){"Audio thread closed"}
+  try {task.get(5,TimeUnit.SECONDS)}
+  catch(error:ExecutionException){throw error.cause ?: error}
+  catch(error:Exception){task.cancel(false);throw error}
+ }
+ fun dispose(){try{disconnect()}finally{worker.quitSafely()}}
  private val manager=context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
  private val live=AtomicBoolean(false)
  private var recorder:AudioRecord?=null
@@ -45,7 +59,7 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
   override fun onAudioDevicesRemoved(removed:Array<out AudioDeviceInfo>){if(routeReady && live.get())fail("Audio route changed")}
  }
  val running get()=live.get()
- fun start(capture:Boolean,threshold:Double){
+ fun start(capture:Boolean,threshold:Double)=onAudio {
   stop();this.capture=capture;this.threshold=threshold
   try {
    ownsRouting=true
@@ -56,7 +70,7 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
    player=AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(AudioFormat.Builder().setSampleRate(24000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build()).setBufferSizeInBytes(maxOf(min,4800)).setTransferMode(AudioTrack.MODE_STREAM).build()
    check(player!!.state==AudioTrack.STATE_INITIALIZED){"Playback initialization failed"}
    val granted=if(Build.VERSION.SDK_INT>=26){
-    focus=AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(attrs).setOnAudioFocusChangeListener(focusListener,main).build()
+    focus=AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(attrs).setOnAudioFocusChangeListener(focusListener,audioHandler).build()
     manager.requestAudioFocus(focus!!)
    }else{manager.requestAudioFocus(focusListener,AudioManager.STREAM_VOICE_CALL,AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)}
    check(granted==AudioManager.AUDIOFOCUS_REQUEST_GRANTED){"Audio focus unavailable"}
@@ -70,11 +84,11 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
     emit("aec",mapOf("available" to AcousticEchoCanceler.isAvailable(),"enabled" to (aec?.enabled==true),"has_control" to (aec?.hasControl()==true)))
    }
    live.set(true);muted=false;captureEpoch++;val epoch=captureEpoch
-   manager.registerAudioDeviceCallback(routes,main)
-   main.postDelayed({if(captureEpoch==epoch && live.get())routeReady=true},300)
+   manager.registerAudioDeviceCallback(routes,audioHandler)
+   audioHandler.postDelayed({if(captureEpoch==epoch && live.get())routeReady=true},300)
    recorder?.startRecording()
    if(capture){reader=Thread({readCapture(epoch)},"nova-capture").also{it.start()}}
-   main.post(tick)
+   audioHandler.post(tick)
   }catch(e:Exception){stop();throw e}
  }
  private fun readCapture(epoch:Long){
@@ -83,15 +97,15 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
    val buffer=ByteArray(640)
    val size=try{input.read(buffer,0,buffer.size,AudioRecord.READ_BLOCKING)}catch(_:Exception){-1}
    if(!live.get() || captureEpoch!=epoch)return
-   if(size<=0){main.post{if(live.get() && captureEpoch==epoch)fail("Microphone read failed")};return}
+   if(size<=0){audioHandler.post{if(live.get() && captureEpoch==epoch)fail("Microphone read failed")};return}
    val now=SystemClock.elapsedRealtime()
    if(!posted.compareAndSet(false,true)){
-    if(now-postedAt>1000){main.post{if(captureEpoch==epoch)fail("Capture handoff stalled")};return}
+    if(now-postedAt>1000){audioHandler.post{if(captureEpoch==epoch)fail("Capture handoff stalled")};return}
     continue
    }
    postedAt=now
    val data=if(muted)ByteArray(size)else buffer.copyOf(size)
-   main.post{
+   audioHandler.post{
     try{
      if(!live.get() || captureEpoch!=epoch)return@post
      if(!muted){
@@ -123,16 +137,16 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
     // Missing native timestamps must not be replaced with queued-time guesses.
     if(terminalAt!=null && queue.isEmpty() && SystemClock.elapsedRealtime()-terminalAt!!>65000 && !ledger.finished){fail("Playback presentation could not be verified");return}
    }catch(_:Exception){fail("Playback failed");return}
-   main.postDelayed(this,20)
+   audioHandler.postDelayed(this,20)
   }
  }
- fun receive(frame:AudioFrame){
+ fun receive(frame:AudioFrame)=onAudio {
   updateRendered()
-  if(!live.get()){if(ledger.accept(frame))clearCurrent("playback.stopped");return}
-  if(!ledger.accept(frame)){if(ledger.current==frame.identity)clearCurrent("playback.stopped");return}
+  if(!live.get()){if(ledger.accept(frame))clearCurrent("playback.stopped");return@onAudio}
+  if(!ledger.accept(frame)){if(ledger.current==frame.identity)clearCurrent("playback.stopped");return@onAudio}
   queue.add(Chunk(frame.pcm));player?.play()
  }
- fun terminal(identity:PlaybackIdentity){ledger.terminal(identity);terminalAt=SystemClock.elapsedRealtime();updateRendered()}
+ fun terminal(identity:PlaybackIdentity)=onAudio {ledger.terminal(identity);terminalAt=SystemClock.elapsedRealtime();updateRendered()}
  private var lastProgressMS = 0L
  private fun updateRendered(){
   val id=ledger.current ?: return;val track=player ?: return
@@ -141,8 +155,8 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
   if(ledger.playedMS-lastProgressMS>=100){lastProgressMS=ledger.playedMS;report("playback.progress",id,ledger.playedMS)}
   if(ledger.finished && queue.isEmpty()){report("playback.done",id,ledger.playedMS);ledger.clear(id);resetPlayer()}
  }
- fun clear(identity:PlaybackIdentity){
-  if(ledger.current!=null && ledger.current!=identity)return
+ fun clear(identity:PlaybackIdentity)=onAudio {
+  if(ledger.current!=null && ledger.current!=identity)return@onAudio
   if(ledger.current!=null)clearCurrent("playback.cleared") else {ledger.clear(identity);report("playback.cleared",identity,0)}
  }
  private fun clearCurrent(type:String){updateRendered();val id=ledger.current ?: return;val played=ledger.playedMS;ledger.clear(id);resetPlayer();report(type,id,played)}
@@ -150,16 +164,16 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
  private fun report(type:String,id:PlaybackIdentity,played:Long?=null){val event=mutableMapOf<String,Any>("type" to type,"utterance_id" to id.utteranceId,"generation_epoch" to id.epoch,"t_render_ms" to renderMS());if(played!=null)event["played_ms"]=played;control(event)}
  private fun control(value:Map<String,Any>)=emit("control",mapOf("control" to value))
  private fun renderMS()=SystemClock.elapsedRealtimeNanos()/1e6
- fun mute(value:Boolean){muted=value;attack=0.0;silence=0.0;speaking=false;emit("level",mapOf("level" to 0.0))}
- fun speaker(enabled:Boolean){
+ fun mute(value:Boolean)=onAudio {muted=value;attack=0.0;silence=0.0;speaking=false;emit("level",mapOf("level" to 0.0))}
+ fun speaker(enabled:Boolean)=onAudio {
   if(Build.VERSION.SDK_INT>=31){
    val type=if(enabled)AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
    val device=manager.availableCommunicationDevices.firstOrNull{it.type==type}
    if(device!=null)check(manager.setCommunicationDevice(device)){"Audio route unavailable"}else if(!enabled)manager.clearCommunicationDevice()else error("Speaker unavailable")
   }else{manager.isSpeakerphoneOn=enabled}
  }
- fun stop(){
-  live.set(false);captureEpoch++;routeReady=false;main.removeCallbacks(tick)
+ fun stop()=onAudio {
+  live.set(false);captureEpoch++;routeReady=false;audioHandler.removeCallbacks(tick)
   try{recorder?.stop()}catch(_:Exception){}
   reader?.join(200);reader=null;recorder?.release();recorder=null;aec?.release();aec=null
   try{clearCurrent("playback.stopped");player?.stop()}catch(_:Exception){}
@@ -173,6 +187,6 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
   }
   muted=false
  }
- fun disconnect(){stop();ledger.disconnect()}
- private fun fail(reason:String){if(!live.get())return;disconnect();emit("stopped",mapOf("reason" to reason))}
+ fun disconnect()=onAudio {stop();ledger.disconnect()}
+ private fun fail(reason:String){if(!live.get())return;android.util.Log.w("NovaAudio","Stopped: $reason");disconnect();emit("stopped",mapOf("reason" to reason))}
 }
