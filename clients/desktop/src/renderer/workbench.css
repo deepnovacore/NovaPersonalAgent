@@ -60,13 +60,14 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .workbench details>summary::-webkit-details-marker{display:none}
 
 /* Window controls and workspace tabs */
-.window-controls{position:absolute;top:18px;left:14px;z-index:20;display:flex;gap:6px;-webkit-app-region:no-drag}
+.window-controls{position:absolute;top:18px;left:14px;z-index:20;display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag}
 :is(.workbench,.welcome-screen) .window-control{position:relative;width:12px;height:12px;padding:0;border:0;border-radius:50%;font-size:0;line-height:0;-webkit-app-region:no-drag}
 :is(.workbench,.welcome-screen) .window-control::before{content:'';position:absolute;inset:-4px -2px}
 :is(.workbench,.welcome-screen) .window-control::after{position:absolute;inset:0;display:grid;place-items:center;font:700 9px/1 var(--font);color:rgba(0,0,0,.55);opacity:0}
 :is(.workbench,.welcome-screen) .window-controls:hover .window-control::after,:is(.workbench,.welcome-screen) .window-control:focus-visible::after{opacity:1}
 :is(.workbench,.welcome-screen) .window-close{background:#ff5f57}.window-close::after{content:'×'}
 :is(.workbench,.welcome-screen) .window-minimize{background:#febc2e}.window-minimize::after{content:'−'}
+:is(.workbench,.welcome-screen) .window-maximize{background:#28c840}.window-maximize::after{content:'+'}
 :is(.workbench,.welcome-screen) .window-control:hover:not(:disabled){filter:brightness(.92)}
 .window-grip{flex:1 1 auto;align-self:stretch;min-width:24px;margin:-8px 0;-webkit-app-region:no-drag}
 .window-grip.native-window-drag{-webkit-app-region:drag}
