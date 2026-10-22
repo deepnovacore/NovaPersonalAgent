@@ -100,22 +100,23 @@ test('blank optional window settings preserve the existing display mode', () => 
   assert.equal(configured.macWindow, undefined)
 })
 
-test('Connect never moves the pointer after approved task authority expires', {skip: !['darwin', 'win32'].includes(process.platform)}, async t => {
+for (const cleanupThrows of [false,true]) test(`Connect fences expired authority and retains cleanup uncertainty: ${cleanupThrows}`,  {skip: !['darwin', 'win32'].includes(process.platform)}, async t => {
   const root = await mkdtemp(join(tmpdir(), 'nova-connect-fence-'))
   t.after(() => rm(root, {recursive: true, force: true}))
   const backendUrl = pathToFileURL(join(root, 'backend.mjs')).href
   const deviceUrl = pathToFileURL(join(root, 'device.mjs')).href
   const realDevice = new URL('../src/executors/computer-device.js', import.meta.url).href
-  await writeFile(join(root, 'backend.mjs'), `export let connects=0, closes=0;export async function startComputerBackend(){return {pid:1,listDisplays:async()=>[{id:'1'}],connect:async()=>{connects++},close:async()=>{closes++;return true},device:{size:async()=>({width:800,height:600})}}}`)
-  await writeFile(join(root, 'device.mjs'), `export {guardComputerDevice,guiApproval,validComputerDisplayId} from ${JSON.stringify(realDevice)};export async function computerForeground(){return {target:'fixture',width:800,height:600}}`)
+  await writeFile(join(root, 'backend.mjs'), `export let connects=0, closes=0;export async function startComputerBackend(){return {pid:1,listDisplays:async()=>[{id:'1'}],connect:async()=>{connects++},close:async()=>{closes++;if(${cleanupThrows})throw Error("lost cleanup");return true},device:{size:async()=>({width:800,height:600})}}}`)
+  await writeFile(join(root, 'device.mjs'), `export {connectComputerDevice,validComputerDisplayId} from ${JSON.stringify(realDevice)};export async function computerForeground(){return {target:'fixture',width:800,height:600}}`)
   const sourceUrl = new URL('../src/executors/computer.js', import.meta.url)
   const source = (await readFile(sourceUrl, 'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu, (_match, path: string) => `from ${JSON.stringify(path === './computer-backend.js' ? backendUrl : path === './computer-device.js' ? deviceUrl : new URL(path, sourceUrl).href)}`)
   await writeFile(join(root, 'computer.mjs'), source)
   const {runComputer} = await import(pathToFileURL(join(root, 'computer.mjs')).href) as {runComputer: typeof RunComputer}
   let checked = 0
-  await runComputer(loadComputerConfig(env), 'tap center', {signal: new AbortController().signal, approve: () => Promise.resolve(true), progress: () => undefined, beforeWrite: () => {checked++; throw Error('superseded')}})
+  const result = await runComputer(loadComputerConfig(env), 'tap center', {signal: new AbortController().signal, approve: () => Promise.resolve(true), progress: () => undefined, beforeWrite: () => {checked++; throw Error('superseded')}})
   const backend = await import(backendUrl) as {connects: number; closes: number}
   assert.equal(checked, 1)
   assert.equal(backend.connects, 0)
   assert.equal(backend.closes, 1)
+  if(cleanupThrows)assert.equal(result.code,'cleanup_unknown')
 })

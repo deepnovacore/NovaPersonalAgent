@@ -12,7 +12,7 @@ export const COMPUTER_HISTORY_IMAGES = 2
 export const COMPUTER_RESOURCE = 'desktop:local-input'
 
 export const computerToolArguments = {
- computer_screenshot: z.object({}).strict(),
+ computer_screenshot: z.object({application:z.string().trim().min(1).max(200).optional()}).strict(),
  computer_click: z.object({x:z.number().int().min(0),y:z.number().int().min(0)}).strict(),
  computer_type: z.object({text:z.string().min(1).max(4000)}).strict(),
  computer_scroll: z.object({x:z.number().int().min(0),y:z.number().int().min(0),direction:z.enum(['up','down','left','right']),amount:z.number().int().min(1).max(10).default(3)}).strict(),
@@ -27,7 +27,7 @@ export const COMPUTER_VISION_TOOLS:readonly ComputerToolName[] = ['computer_scre
 export function isComputerTool(name:string):name is ComputerToolName{return Object.hasOwn(computerToolArguments,name)}
 
 /** Image attached to a tool result. The wire sends it as a host observation right after the tool message. */
-export interface ToolImage {readonly media_type:'image/png'|'image/jpeg';readonly data_base64:string;readonly width:number;readonly height:number;readonly captured_at:string}
+export interface ToolImage {readonly media_type:'image/png'|'image/jpeg';readonly data_base64:string;readonly width:number;readonly height:number;readonly captured_at:string;readonly native_ui?:{source:'accessibility';content:{role:string;text:string;url:string}[];truncated:boolean};readonly native_editor?:{role:string;value:string;source:'accessibility'}}
 
 /** Result codes returned in tool results (JSON `code`). */
 export const COMPUTER_CODES = ['computer_use_disabled','vision_model_required','observe_required','verification_required',
@@ -59,3 +59,5 @@ export interface ComputerUseFrame {
  readonly point?:{readonly x:number;readonly y:number}
  readonly summary?:string
 }
+
+export const computerApplicationSchema=z.object({name:z.string().min(1).max(200),bundleId:z.string().min(1).max(300),path:z.string().min(1).max(4096)}).strict()

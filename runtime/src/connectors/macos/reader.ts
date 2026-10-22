@@ -26,7 +26,7 @@ export class MacNativeReader {
    let bytes=0;const chunks:Buffer[]=[]
    child.on('error',()=>reject(new ComposioFailure('native_unavailable')))
    child.stdout.on('data',(chunk:Buffer)=>{bytes+=chunk.length;if(bytes>(this.resource==='macos_gui'?50:2)*1024*1024){child.kill();reject(new ComposioFailure('response_too_large'))}else chunks.push(chunk)})
-   child.on('close',code=>{try{if(code!==0)throw new ComposioFailure('native_unavailable');const result=record.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));if(result.error)throw new ComposioFailure(z.enum(['native_unavailable','permission_denied','calendar_unavailable','mailbox_unavailable','snapshot_expired','response_too_large','timeout','scope_denied','invalid_request']).catch('native_unavailable').parse(result.error));resolve(result)}catch(error){reject(error instanceof ComposioFailure?error:new ComposioFailure('invalid_contract'))}})
+   child.on('close',code=>{try{const result=record.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));if(this.resource==='macos_gui'&&typeof result.error==='string'&&/^[a-z_]{1,80}$/u.test(result.error))throw new ComposioFailure('native_gui:'+result.error);if(code!==0)throw new ComposioFailure('native_unavailable');if(result.error)throw new ComposioFailure(z.enum(['native_unavailable','permission_denied','calendar_unavailable','mailbox_unavailable','snapshot_expired','response_too_large','timeout','scope_denied','invalid_request']).catch('native_unavailable').parse(result.error));resolve(result)}catch(error){reject(error instanceof ComposioFailure?error:new ComposioFailure('invalid_contract'))}})
    child.stdin.on('error',()=>{ /* child failure is reported on close/error */ });child.stdin.end(body)
   })
  }

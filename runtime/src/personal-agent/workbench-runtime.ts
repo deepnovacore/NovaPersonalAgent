@@ -1,3 +1,4 @@
+import {computerApplicationSchema} from './computer-use/contract.js'
 import {randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {Conversation,ConversationRuntime,ConversationTurnContext} from './conversations.js'
@@ -113,11 +114,15 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
           if(computer)return computer
           const Session=options.computerSession?undefined:(await import('./computer-use/session.js')).ComputerSession
           const create=options.computerSession??((settings:ComputerSessionOptions)=>new Session!(settings))
+          let applicationAuthorized=false
           computer=create({
            signal,approve:async(action,params)=>{
-            if(action!=='Connect'&&options.approval==='never')return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
+            if(action!=='Connect'&&(applicationAuthorized||options.approval==='never'))return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
+            const app=action==='Connect'?computerApplicationSchema.safeParse((params as {application?:unknown})?.application):undefined
+            if(app?.success&&await store.computerApplicationAllowed(app.data)){applicationAuthorized=true;return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)}
             const current=currentComputerCall!
             const approved=await ask(current,signal,{name:action==='Connect'?'computer_connect':current.name,arguments:{action,params:JSON.parse(JSON.stringify(params)) as JsonValue}})
+            if(approved&&app?.success)applicationAuthorized=true
             if(!approved&&!signal.aborted)state.reason='approval_denied'
             state.status='running';current.state='running';await save()
             return approved&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
@@ -125,24 +130,24 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
           })
           return computer
          }
-         const capture=async():Promise<string>=>{
+         const capture=async(application?:string)=>{
           computerFrame('active',name)
-          const image=await (await getComputer()).screenshot()
+          const image=await (await getComputer()).screenshot(application)
           const ref=await store.saveImage(conversation.id,conversation.generation,image)
           observeRequired=false;coordinateObservationRequired=false
-          return ref
+          return {image_ref:ref,...(image.native_ui?{native_ui:image.native_ui}:{}),...(image.native_editor?{native_editor:image.native_editor}:{})}
          }
          try{
           signal.throwIfAborted()
           if(!computerState().enabled)throw Error('computer_use_disabled')
-          if(name==='computer_screenshot'){call.result={image_ref:await capture()};verificationRequired=false}
+          if(name==='computer_screenshot'){call.result=await capture('application' in validation.data?validation.data.application:undefined);verificationRequired=false}
           else if(name==='computer_run'){
            verificationRequired=true;await closeComputer();computerFrame('delegated',name)
            if(!toolBridge.computerRun)throw Error('computer_executor_unavailable')
            computerInputStarted=true
            const result=await toolBridge.computerRun(state.last_user,call,signal)
            signal.throwIfAborted()
-           call.result={result,image_ref:await capture()}
+           call.result={result,...await capture()}
            verificationRequired=false
           }else{
            verificationRequired=true
@@ -152,7 +157,8 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
          }catch(error){
           let code=error instanceof Error?error.message:'action_failed'
           try{await closeComputer()}catch{code='cleanup_unknown'}
-          call.result={code,status:code==='cleanup_unknown'||(signal.aborted&&computerInputStarted)?'outcome_unknown':signal.aborted?'cancelled_before_execution':'failed'}
+          let cause:unknown=error,detail:string|undefined;for(let depth=0;depth<4&&cause instanceof Error;depth++){if(/^native_gui:[a-z_]{1,80}$/u.test(cause.message))detail=cause.message;cause=cause.cause}
+          call.result={code,...(detail?{detail}:{}),status:code==='cleanup_unknown'||(signal.aborted&&computerInputStarted)?'outcome_unknown':signal.aborted?'cancelled_before_execution':'failed'}
           observeRequired=true
          }
          call.state='completed';call.finished_at=new Date().toISOString();await save()
@@ -297,7 +303,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
     try{await closeComputer()}catch(error){
      verificationRequired=true;state.status='outcome_unknown';state.reason='cleanup_unknown'
      const last=state.calls.findLast(call=>isComputerTool(call.name)&&call.started_at)
-     if(last)last.result={status:'outcome_unknown',code:'cleanup_unknown'}
+     if(last)last.result={...(last.result&&typeof last.result==='object'&&!Array.isArray(last.result)?last.result:{}),status:'outcome_unknown',code:'cleanup_unknown'}
      await save();throw error
     }finally{release?.();controller=undefined}
    }
@@ -308,7 +314,17 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  return {
   runTurn:run,canSwitch:()=>!active,
   stopBuild:async()=>{controller?.abort();approval?.resolve(false);await active},
-  localApproval:(id,approved)=>{if(approval?.id!==id||!active)throw Error('local_approval_stale');const current=approval;approval=undefined;current.resolve(approved);return Promise.resolve()},
+  localApproval:async(id,approved,always)=>{
+   if(approval?.id!==id||!active||controller?.signal.aborted)throw Error('local_approval_stale')
+   const current=approval
+   if(always){
+    if(!approved||current.call.name!=='computer_connect')throw Error('invalid_application_consent')
+    const params=current.call.arguments.params as {application?:unknown}|undefined
+    await store.allowComputerApplication(computerApplicationSchema.parse(params?.application))
+   }
+   if(approval!==current||controller?.signal.aborted)throw Error('local_approval_stale')
+   approval=undefined;current.resolve(approved)
+  },
   close:async()=>{if(closed)return;closed=true;controller?.abort();approval?.resolve(false);await active;await session?.close();await bridgeRuntime?.close()},
   approvalDecision:async(id,approved)=>{if(!bridgeRuntime?.approvalDecision)throw Error('approval_unavailable');await bridgeRuntime.approvalDecision(id,approved)},
   retainTasks:()=>bridgeRuntime?.retainTasks?.()??false,

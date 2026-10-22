@@ -226,7 +226,7 @@ export class PersonalAgentHost {
             return {ok:true,state,missing} satisfies ComputerUseCommandResult;
         }
         if(method==='build.stop'){const q=z.object({id:z.string()}).strict().parse(p);await this.stopLocalBuild(q.id);return this.conversationSnapshot()}
-        if(method==='build.approve'){const q=z.object({id:z.string(),approval_id:z.string(),approved:z.boolean()}).strict().parse(p);if(!this.localBuildAuthorized(q.id))throw Error('local_build_not_authorized');await this.#conversationPool?.localApproval(q.id,q.approval_id,q.approved);return {accepted:true}}
+        if(method==='build.approve'){const q=z.object({id:z.string(),approval_id:z.string(),approved:z.boolean(),always:z.boolean().optional()}).strict().parse(p);if(!this.localBuildAuthorized(q.id))throw Error('local_build_not_authorized');await this.#conversationPool?.localApproval(q.id,q.approval_id,q.approved,q.always);return {accepted:true}}
         if(method==='build.details'){
             const q=z.object({id:z.string(),call_id:z.string().optional(),message_id:z.string().max(128).optional(),view:z.enum(['calls','reply','image']).optional(),image_ref:z.string().min(1).optional(),offset:z.number().int().nonnegative().default(0)}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);if(item?.kind!=='build')throw Error('build_not_found');
             if(q.view==='image'){if(!q.image_ref)throw Error('workbench_image_not_found');return this.workbench.thumbnail(q.id,item.generation,q.image_ref)}

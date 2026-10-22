@@ -77,19 +77,22 @@ test('native window binding cannot silently change between target and connect', 
 })
 
 
-test('background Tap restores focus outside a killed worker group before releasing ownership', {skip:process.platform !== 'darwin'}, async t => {
+for (const actionName of ['Tap', 'KeyboardPress', 'Input']) test(`background ${actionName} releases targeted input outside a killed worker group`, {skip:process.platform !== 'darwin'}, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-focus-recovery-')))
   await mkdir(join(root, 'native'))
   const restored = join(root, 'restored')
-  const helper = `#!/usr/bin/env node\nlet b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);if(r.op==="Tap"){process.kill(process.ppid,"SIGKILL");setInterval(()=>{},1000);return}if(r.op==="focusRestore"){require("node:fs").writeFileSync(${JSON.stringify(restored)},"restored");console.log(JSON.stringify({restored:true}));return}console.log(JSON.stringify(r.op==="focusSnapshot"?{focus:{pid:222,windowId:333,started:100},targetStarted:200}:{target:"approved",width:800,height:600,keyWindowMatches:true}))})`
+  const helper = `#!/usr/bin/env node\nlet b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);if(r.op===${JSON.stringify(actionName)}){process.kill(process.ppid,"SIGKILL");setInterval(()=>{},1000);return}if(r.op==="focusRestore"){require("node:fs").writeFileSync(${JSON.stringify(restored)},JSON.stringify(r));console.log(JSON.stringify({restored:true}));return}console.log(JSON.stringify(r.op==="focusSnapshot"?{focus:{pid:222,windowId:333,started:100},targetStarted:200}:{target:"approved",width:800,height:600,keyWindowMatches:true}))})`
   await writeFile(join(root, 'native/macos_gui'),helper);await chmod(join(root, 'native/macos_gui'),0o755)
   await writeFile(join(root, 'native-resources-v1.json'),JSON.stringify({schema_version:1,target:'darwin-'+process.arch,resources:[{logical_id:'macos_gui',relative_path:'native/macos_gui',kind:'executable',platform:'darwin',architecture:process.arch,byte_size:Buffer.byteLength(helper),sha256:createHash('sha256').update(helper).digest('hex'),build_contract_version:1}]}))
   const backend=await startComputerBackend('0',new AbortController().signal,10000,undefined,root,100,{pid:12345,windowId:678})
   t.after(async()=>{await backend.close();await rm(root,{recursive:true,force:true})})
   await backend.windowTarget();await backend.connect()
-  await assert.rejects(async () => {await backend.device.actionSpace().find(a=>a.name==='Tap')!.call({locate:{center:[10,10]}})},/cleanup_unknown/u)
+  await assert.rejects(async () => {await backend.device.actionSpace().find(a=>a.name===actionName)!.call(actionName === 'Tap' ? {locate:{center:[10,10]}} : actionName === 'Input' ? {value:'test'} : {keyName:'Command+A'})},/cleanup_unknown/u)
   assert.equal(await backend.close(),true)
-  assert.equal(await readFile(restored,'utf8'),'restored')
+  const cleanup = JSON.parse(await readFile(restored,'utf8'))
+  assert.equal(cleanup.releasePointer, actionName === 'Tap')
+  assert.equal(cleanup.releaseKey, actionName === 'Input' ? 'unicode' : actionName === 'KeyboardPress' ? 'Command+A' : undefined)
+  assert.equal(cleanup.targetStarted, 200)
 })
 
 for (const actionName of ['Tap', 'KeyboardPress']) for (const cleanupFails of [false, true]) test(`killed display ${actionName} releases input after tree exit; cleanup failure=${cleanupFails}`, {skip: process.platform === 'win32'}, async t => {
@@ -106,7 +109,7 @@ for (const actionName of ['Tap', 'KeyboardPress']) for (const cleanupFails of [f
 test('display Input uses sequential Unicode typing without replacing the clipboard', {skip: process.platform === 'win32'}, async t => {
   const root = await mkdtemp(join(tmpdir(), 'nova-computer-input-'))
   const worker = join(root, 'worker.mjs'), typed = join(root, 'typed')
-  await writeFile(worker, `import {ComputerDevice} from ${JSON.stringify(import.meta.resolve('@midscene/computer'))};import {writeFileSync} from 'node:fs';ComputerDevice.prototype.typeViaClipboard=async()=>writeFileSync(${JSON.stringify(typed)},'clipboard');ComputerDevice.prototype.typeStringWithDelay=async text=>writeFileSync(${JSON.stringify(typed)},text);await import(${JSON.stringify(new URL('../src/executors/computer-worker.js', import.meta.url).href)})`)
+  await writeFile(worker, `import {ComputerDevice} from ${JSON.stringify(import.meta.resolve('@midscene/computer'))};import {writeFileSync} from 'node:fs';ComputerDevice.prototype.typeViaClipboard=async()=>writeFileSync(${JSON.stringify(typed)},'clipboard');ComputerDevice.prototype.typeStringWithDelay=async function(text){if(process.platform==='darwin'&&this.useAppleScript)throw Error('unicode_uses_applescript');writeFileSync(${JSON.stringify(typed)},text)};await import(${JSON.stringify(new URL('../src/executors/computer-worker.js', import.meta.url).href)})`)
   const backend = await startComputerBackend('1', new AbortController().signal, 10000, pathToFileURL(worker))
   t.after(async () => {await backend.close(); await rm(root, {recursive: true, force: true})})
   await backend.device.actionSpace().find(action => action.name === 'Input')!.call({value: '中文🙂'})

@@ -717,3 +717,32 @@ for(const operation of ['computer_screenshot','computer_click'] as const){
   }finally{await f.close()}
  })
 }
+
+for(const decision of ['allow','always','deny','remembered'] as const)test(`native application consent ${decision} is scoped to binding and app identity`,{skip:!supported,timeout:15000},async()=>{
+ const app={name:'Fixture Editor',bundleId:'test.fixture.editor',path:'/Applications/Fixture Editor.app'}
+ let actions=0,observations=0
+ const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{application:app.name}}}:step===1?{call:{name:'computer_type',arguments:{text:'test'}}}:{text:'done'},'ask',undefined,options=>({
+  screenshot:async application=>{
+   assert.equal(application,app.name);observations++
+   if(!await options.approve('Connect',{mode:'background',application:app,window:{pid:123,windowId:456}}))throw Error('declined')
+   return {media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString(),native_editor:{role:'AXTextField',value:'今日美食',source:'accessibility'},native_ui:{source:'accessibility',content:Array.from({length:80},()=>({role:'AXStaticText',text:'x'.repeat(300),url:'https://example.test/results'})),truncated:true}}
+  },action:async()=>{assert.equal(await options.approve('Input',{value:'test'}),true);actions++},close:()=>Promise.resolve(),
+ }))
+ f.host.computerUseState=()=>({enabled:true,direct:true})
+ try{
+  if(decision==='remembered')await f.host.workbench.allowComputerApplication(app)
+  const id=await f.build()
+  if(decision!=='remembered'){
+   const pending=await until(()=>buildView(f.host,id).approval,value=>!!value)
+   assert.equal(pending!.name,'computer_connect');assert.equal(actions,0)
+   await f.command('build.approve',{id,approval_id:pending!.id,approved:decision!=='deny',...(decision==='always'?{always:true}:{})})
+  }
+  await f.host.waitConversation(id)
+  assert.equal(observations,1);assert.equal(actions,decision==='deny'?0:1)
+  if(decision!=='deny'){const checkpoint=await f.host.workbench.checkpoint(id,0);assert.deepEqual((checkpoint.calls[0]?.result as {native_editor:unknown}).native_editor,{role:'AXTextField',value:'今日美食',source:'accessibility'});assert.equal((checkpoint.calls[0]?.result as {native_ui:{content:{url:string}[]}}).native_ui.content[0]?.url,'https://example.test/results')}
+  const persisted=new WorkbenchStore(f.host.workbench.root)
+  assert.equal(await persisted.computerApplicationAllowed(app),decision==='always'||decision==='remembered')
+  assert.equal(await persisted.computerApplicationAllowed({...app,path:'/Other/Fixture Editor.app'}),false)
+  assert.equal(await persisted.computerApplicationAllowed({...app,bundleId:'test.other'}),false)
+ }finally{await f.close()}
+})
