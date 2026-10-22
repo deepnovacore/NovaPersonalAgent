@@ -13,7 +13,7 @@ import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import * as settingsController from '../src/renderer/settings-controller.mjs'
 import {createSecretRevisions} from '../src/renderer/secret-revisions.mjs'
 import * as voiceChoice from '../src/renderer/voice-choice.mjs'
-
+import {moduleStatusNote} from '../src/renderer/capabilities-editor.mjs'
 const { createSettingsController, mergePatch, settingsButtonState } = settingsController
 
 const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
@@ -76,7 +76,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage, moduleStatusNote,
     createSkinPanel: () => ({render() {}, destroy() {}}),
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
@@ -620,6 +620,19 @@ test('every API key is a password field with a badge, hint, and clear button', (
   assert.equal((html.match(/type="password"/g) || []).length, 16)
 })
 
+test('only the selected pipeline key stays in view; the rest fold into 高级 with one-line fallbacks', () => {
+  for (const key of ['compatibleAsrApiKey', 'selfHostedAsrApiKey', 'openaiCompatibleApiKey', 'selfHostedLlmApiKey', 'compatibleTtsApiKey', 'selfHostedTtsApiKey']) {
+    assert.match(html, new RegExp(`<details class="advanced-keys custom-endpoint" data-endpoint="${key}"><summary>自定义端点密钥</summary>\\s*<div class="secret" data-key="${key}">`))
+  }
+  const primary = html.slice(html.indexOf('id="secrets-primary"'), html.indexOf('id="secrets-advanced"'))
+  assert.doesNotMatch(primary, /type="password"/)
+  assert.match(html, /<details id="secrets-advanced" class="advanced-keys"><summary>高级：其他供应商与增强项<\/summary>/)
+  assert.doesNotMatch(html, /id="(doubaoAsr|model)ApiKey"/)
+  assert.match(script, /arrangeSecrets\(usage\)/)
+  assert.match(script, /不配则新闻只按时间线/)
+  assert.match(script, /不配则回退百炼联网搜索/)
+})
+
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {
   assert.match(html, /<details id="secrets" class="secret-disclosure">/)
   assert.match(html, /<summary>[\s\S]*API 密钥[\s\S]*留空保留[\s\S]*<\/summary>/)
@@ -1057,7 +1070,7 @@ test('every settings block belongs to exactly one sidebar category', () => {
   // table would be hidden permanently by applyCategory.
   const blocks = [...html.matchAll(/<(?:section|details) (?:class="[^"]*" )?id="([^"]+)"/g)]
     .map(match => match[1])
-    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced'].includes(id))
+    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced', 'secrets-advanced'].includes(id))
   for (const id of blocks) assert.ok(sections.includes(id), `${id} is missing from a category`)
 })
 

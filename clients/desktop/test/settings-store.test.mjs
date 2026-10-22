@@ -101,7 +101,7 @@ test('the default settings are the documented schema', () => {
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
-    pipelineMode: 'cascaded',
+    pipelineMode: 'integrated',
     integratedProvider: 'qwen',
     integratedModel: 'qwen-audio-3.0-realtime-plus',
     integratedVoice: 'longanqian',

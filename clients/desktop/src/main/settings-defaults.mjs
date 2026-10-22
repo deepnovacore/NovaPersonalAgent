@@ -5,7 +5,7 @@
 export const RUNTIME_DEFAULTS = Object.freeze({
   proactivity: 'balanced',
   codexHeartbeatSeconds: 30,
-  pipelineMode: 'cascaded',
+  pipelineMode: 'integrated',
   integratedProvider: 'qwen',
   integratedModel: 'qwen-audio-3.0-realtime-plus',
   integratedVoice: 'longanqian',

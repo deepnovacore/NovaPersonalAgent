@@ -1209,3 +1209,7 @@ footer {
 select{height:36px;min-height:36px;padding:0 36px 0 12px;border-radius:8px;line-height:1.4;background-color:var(--surface);text-overflow:ellipsis;box-shadow:0 1px 2px rgba(0,0,0,.025)}
 select option{color:var(--ink);background:var(--surface)}
 #category-skills{--nav-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linejoin='round'%3E%3Cpath d='M12 2l9 5v10l-9 5-9-5V7zM12 12l9-5M12 12v10M12 12L3 7'/%3E%3C/svg%3E")}
+
+.advanced-keys { margin: 10px 0 0; }
+.advanced-keys > summary { cursor: pointer; color: var(--ink-dim); font-size: 12px; padding: 6px 2px; }
+.custom-endpoint { margin: 4px 0 0; }
