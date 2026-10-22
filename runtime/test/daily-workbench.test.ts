@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath,readFile} from 'node:fs/promises'
+import {mkdtemp,rm,realpath,readFile,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {DailyWorkbench} from '../src/personal-agent/daily-workbench.js'
@@ -12,8 +12,8 @@ import {SuggestionPool} from '../src/core/suggestions.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 
 const input=(id='m1'):TimelineInput=>({id,version:'1',text:'我会整理发布材料。长期目标是让助手成为每日工作入口。',kind:'im',group:'chat:a',relation:'self',author:{key:'me',kind:'person',is_user:true},observed_at:'2026-10-18T01:00:00Z'})
-const matter=(i:TimelineInput,kind:'todo'|'goal'|'topic'='todo')=>({kind,title:kind==='goal'?'助手成为每日工作入口':'整理发布材料',summary:'准备本轮发布',ownership:'user' as const,assertion:'direct' as const,state:'open' as const,due:null,due_quote:null,refs:[{entry_id:i.id,version:i.version,quote:i.text}]})
-const generate:WorkbenchGenerator=request=>Promise.resolve(request.phase==='reconcile'?{groups:request.matters.map(m=>({members:[m.id],state:m.state,current:m.id,basis:[m.id]}))}:request.phase==='extract'?{matters:request.inputs.flatMap(i=>[matter(i),matter(i,'goal'),matter(i,'topic')])}:{matches:request.matters.filter(m=>m.kind!=='topic').map(m=>({matter_id:m.id,target_id:request.existing.find(e=>e.kind===m.kind)?.id??null,same_as:null,capture:'record'})),suggestions:[{tab:'ideas',title:'先做一个发布预检清单',body:'可以把发布检查变成一键预检，减少重复操作。',why:null,next:null,matter_ids:[request.matters[0]!.id]}]})
+const matter=(i:TimelineInput,kind:'goal'|'topic'='goal')=>({kind,title:kind==='goal'?'助手成为每日工作入口':'整理发布材料',summary:'准备本轮发布',ownership:'user' as const,assertion:'direct' as const,state:'open' as const,due:null,due_quote:null,refs:[{entry_id:i.id,version:i.version,quote:i.text}]})
+const generate:WorkbenchGenerator=request=>Promise.resolve(request.phase==='reconcile'?{groups:request.matters.map(m=>({members:[m.id],state:m.state,current:m.id,basis:[m.id]}))}:request.phase==='extract'?{matters:request.inputs.flatMap(i=>[matter(i),matter(i,'topic')])}:{matches:request.matters.filter(m=>m.kind!=='topic').map(m=>({matter_id:m.id,target_id:request.existing.find(e=>e.kind===m.kind)?.id??null,same_as:null,capture:'record'})),suggestions:[{tab:'ideas',title:'先做一个发布预检清单',body:'可以把发布检查变成一键预检，减少重复操作。',why:null,next:null,matter_ids:[request.matters[0]!.id]}]})
 async function fixture(run:(f:{daily:DailyWorkbench;life:LifeService;setInputs:(i:TimelineInput[])=>void;nextDay:()=>void;calls:string[];reads:()=>number;failure:()=>Promise<string|null>;reopen:()=>Promise<void>})=>Promise<void>,generator:(r:Exclude<WorkbenchRequest,{phase:'reconcile'}>,s:AbortSignal)=>Promise<unknown>=generate,reconcile:WorkbenchGenerator=generate){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-workbench-'));const life=new LifeService(join(dir,'life.json'));await life.open()
  let inputs=[input()],now=new Date('2026-10-18T03:00:00Z');const calls:string[]=[];let reads=0
@@ -21,9 +21,9 @@ async function fixture(run:(f:{daily:DailyWorkbench;life:LifeService;setInputs:(
  await daily.open()
  try{await run({daily,life,setInputs:i=>{inputs=i},nextDay:()=>{now=new Date(now.getTime()+86400000)},calls,reads:()=>reads,failure:async()=>(JSON.parse(await readFile(join(dir,'daily.json'),'utf8')) as {failure:string|null}).failure,reopen:async()=>{await daily.close();await daily.open()}})}finally{await daily.close();await life.close();await rm(dir,{recursive:true,force:true})}
 }
-test('one shared run records explicit todos/goals and produces grounded inspiration',()=>fixture(async({daily,life,calls})=>{
- await daily.refresh(true);assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,1);assert.equal(life.snapshot().goals.length,1)
- assert.equal(life.snapshot().todos[0]!.auto_recorded,true);assert.equal(daily.snapshot().cards[0]!.tab,'ideas');assert.deepEqual(calls,['extract','reconcile','compose'])
+test('one shared run records explicit goals, never todos, and produces grounded inspiration',()=>fixture(async({daily,life,calls})=>{
+ await daily.refresh(true);assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,0);assert.equal(life.snapshot().goals.length,1)
+ assert.equal(life.snapshot().goals[0]!.auto_recorded,true);assert.equal(daily.snapshot().cards[0]!.tab,'ideas');assert.deepEqual(calls,['extract','reconcile','compose'])
  await daily.refresh();assert.equal(calls.length,3);await daily.adopt(daily.snapshot().cards[0]!.id);assert.equal(life.snapshot().ideas.length,1)
 }))
 test('daily attempt survives restart; manual refresh only extracts changed batches',()=>fixture(async({daily,setInputs,calls,reopen,nextDay})=>{
@@ -50,7 +50,7 @@ test('invalid evidence and forwarded/other/completed statements cannot auto-reco
  assert.equal(automaticWorkbenchMatter({...m,kind:'goal'},[{...i,relation:'addressed',author:{key:'other',kind:'person',is_user:false}}]),false)
 })
 test('identity candidates include completed and undone records without disclosing unrelated long notes',()=>{
- const m:WorkbenchMatter={...matter(input()),id:'a',group:'c'},rows=workbenchExistingCandidates([m],[{id:'old',kind:'todo',title:m.title,note:'x'.repeat(1000),status:'cancelled',version:1}])
+ const m:WorkbenchMatter={...matter(input()),id:'a',group:'c'},rows=workbenchExistingCandidates([m],[{id:'old',kind:'goal',title:m.title,note:'x'.repeat(1000),status:'cancelled',version:1}])
  assert.equal(rows[0]!.id,'old');assert.equal(rows[0]!.note.length,300)
 })
 
@@ -70,7 +70,7 @@ test('host wires the shared generator and rejects direct automatic write injecti
  const memory={timelineEvidence:()=>Promise.resolve([input()])} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:generate})
  host.setSources({list:()=>[{scope:'computer',scan_pending:true,indexed:2000}],command:()=>Promise.resolve({})})
- try{await host.open();await host.workbenchContext.refresh();assert.equal(host.snapshot().life.todos.length,1);assert.equal(host.snapshot().life.goals.length,1)
+ try{await host.open();await host.workbenchContext.refresh();assert.equal(host.snapshot().life.todos.length,0);assert.equal(host.snapshot().life.goals.length,1)
   const result=await host.command({type:'personal.command',request_id:'forged',method:'life.mutate',params:{op:'from_workbench'}})
   assert.equal((result as {ok:boolean}).ok,false)
   const card=host.snapshot().workbench_context.cards[0]!
@@ -79,8 +79,8 @@ test('host wires the shared generator and rejects direct automatic write injecti
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('two commitments in one quote retain separate identities',()=>fixture(async({daily,life})=>{
- await daily.refresh();assert.equal(daily.snapshot().error,null);assert.deepEqual(life.snapshot().todos.map(t=>t.title),['整理发布材料','准备演示'])
+test('two goals in one quote retain separate identities',()=>fixture(async({daily,life})=>{
+ await daily.refresh();assert.equal(daily.snapshot().error,null);assert.deepEqual(life.snapshot().goals.map(t=>t.title),['助手成为每日工作入口','准备演示'])
 },(r,s)=>r.phase==='extract'?Promise.resolve({matters:[matter(r.inputs[0]!),{...matter(r.inputs[0]!),title:'准备演示'}]}):generate(r,s)))
 
 test('dated explicit goals preserve the date in notes without a todo-only due field',()=>fixture(async({daily,life,setInputs})=>{
@@ -91,8 +91,8 @@ test('dated explicit goals preserve the date in notes without a todo-only due fi
 test('zero-overlap paraphrase still checks durable undo identities before adding',async()=>{
  let revised=false,identityCalls=0
  await fixture(async({daily,life,setInputs})=>{
-  await daily.refresh();await daily.undo(life.snapshot().todos[0]!.id);revised=true
-  setInputs([{...input('new'),text:'交周报'}]);await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,0);assert.ok(identityCalls>0)
+  await daily.refresh();await daily.undo(life.snapshot().goals[0]!.id);revised=true
+  setInputs([{...input('new'),text:'交周报'}]);await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().goals.length,0);assert.ok(identityCalls>0)
  },(r,s)=>{
   if(r.phase==='extract')return Promise.resolve({matters:[{...matter(r.inputs[0]!),title:revised?'交周报':'提交报告',summary:revised?'交周报':'提交报告'}]})
   if(r.identity_only)identityCalls++
@@ -126,23 +126,23 @@ test('small source batches share extraction while preserving incremental caches'
 }))
 
 test('a malformed extracted item does not discard other strictly validated evidence',()=>fixture(async({daily,life})=>{
- await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,1);assert.equal(daily.snapshot().diagnostics.rejected,1)
-},(r,s)=>r.phase==='extract'?Promise.resolve({matters:[matter(r.inputs[0]!),{...matter(r.inputs[0]!,'goal'),title:'x'.repeat(161)}]}):generate(r,s)))
+ await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().goals.length,1);assert.equal(daily.snapshot().diagnostics.rejected,1)
+},(r,s)=>r.phase==='extract'?Promise.resolve({matters:[matter(r.inputs[0]!),{...matter(r.inputs[0]!),title:'x'.repeat(161)}]}):generate(r,s)))
 
 test('malformed inspiration is filtered without weakening automatic identity validation',()=>fixture(async({daily,life})=>{
- await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,1);assert.equal(daily.snapshot().cards.length,0);assert.equal(daily.snapshot().diagnostics.rejected,1)
+ await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().goals.length,1);assert.equal(daily.snapshot().cards.length,0);assert.equal(daily.snapshot().diagnostics.rejected,1)
 },async(r,s)=>{const result=await generate(r,s);return r.phase==='extract'?result:{...(result as object),suggestions:[{tab:'ideas',title:'x'.repeat(81),body:'body',why:null,next:null,matter_ids:[r.matters[0]!.id]}]}}))
 
 test('extra topic matches cannot block or authorize automatic records',()=>fixture(async({daily,life})=>{
- await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,1)
+ await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().goals.length,1)
 },async(r,s)=>{const result=await generate(r,s) as {matches:unknown[]};return r.phase==='extract'?result:{...result,matches:[...result.matches,...r.matters.filter(m=>m.kind==='topic').map(m=>({matter_id:m.id,target_id:null,same_as:null,capture:'record'}))]}}))
 
 for(const reason of ['count','duplicate_matter','unknown_matter','invalid_target','invalid_same_as'] as const)test('invalid matches fail closed with a bounded diagnostic: '+reason,()=>fixture(async({daily,life,failure})=>{
  await daily.refresh();assert.equal(daily.snapshot().error,'invalid_workbench_matches');assert.equal(life.snapshot().todos.length,0);assert.equal(life.snapshot().goals.length,0);assert.equal(daily.snapshot().cards.length,0)
  assert.equal(await failure(),'invalid_workbench_matches_'+reason)
 },async(r,s)=>{
+ if(r.phase==='extract')return reason==='duplicate_matter'?{matters:[matter(r.inputs[0]!),{...matter(r.inputs[0]!),title:'第二个目标'}]}:generate(r,s)
  const result=await generate(r,s) as {matches:{matter_id:string;target_id:string|null;same_as:string|null}[]}
- if(r.phase==='extract')return result
  if(reason==='count')result.matches.pop()
  if(reason==='duplicate_matter')result.matches[1]!.matter_id=result.matches[0]!.matter_id
  if(reason==='unknown_matter')result.matches[0]!.matter_id='untrusted-model-id'
@@ -157,7 +157,7 @@ test('composition uses compact identifiers and restores only known identities',a
   const p=JSON.parse(request.prompt) as {matters:{id:string}[];existing:{id:string}[];required_match_ids:string[]};assert.equal(p.matters[0]!.id,'m0');assert.equal(p.existing[0]!.id,'e0');assert.deepEqual(p.required_match_ids,['m0'])
   return Promise.resolve({text:JSON.stringify({matches:[{matter_id:'m0',target_id:'e0',same_as:null,capture:'skip'}],suggestions:[{tab:'ideas',title:'标题',body:'建议',why:null,next:null,matter_ids:['m0','unknown']}]})})
  }},'model')
- const result=await writer({phase:'compose',matters:[{...matter(input()),id:'long-matter',group:'chat:a'}],existing:[{id:'long-existing',kind:'todo',title:'标题',note:'',status:'open',version:1}],date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal) as {matches:{matter_id:string;target_id:string}[];suggestions:{matter_ids:string[]}[]}
+ const result=await writer({phase:'compose',matters:[{...matter(input()),id:'long-matter',group:'chat:a'}],existing:[{id:'long-existing',kind:'goal',title:'标题',note:'',status:'open',version:1}],date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal) as {matches:{matter_id:string;target_id:string}[];suggestions:{matter_ids:string[]}[]}
  assert.equal(result.matches[0]!.matter_id,'long-matter');assert.equal(result.matches[0]!.target_id,'long-existing');assert.deepEqual(result.suggestions[0]!.matter_ids,['long-matter','invalid:unknown'])
 })
 
@@ -183,41 +183,41 @@ test('a failed composition batch does not prevent later batches from producing s
  })
 })
 
-test('cross-date completion as topic prevents stale todos and produces a versioned update',async()=>{
+test('cross-date completion as topic prevents stale goals and produces a versioned update',async()=>{
  const groupAll:WorkbenchGenerator=r=>r.phase==='reconcile'?Promise.resolve({groups:[{members:r.matters.map(m=>m.id),state:r.matters.some(m=>m.state==='completed')?'completed':'open',current:r.matters.at(-1)!.id,basis:[r.matters.at(-1)!.id]}]}):generate(r,new AbortController().signal)
  const extract:WorkbenchGenerator=(r,s)=>r.phase==='extract'?Promise.resolve({matters:r.inputs.map(i=>i.id==='done'?{...matter(i,'topic'),state:'completed'}:matter(i))}):generate(r,s)
  await fixture(async({daily,life,setInputs,calls})=>{
   const old={...input('old'),observed_at:'2026-10-04T01:00:00Z'}
-  setInputs([old]);await daily.refresh();assert.equal(life.snapshot().todos.length,1)
+  setInputs([old]);await daily.refresh();assert.equal(life.snapshot().goals.length,1)
   setInputs([old,{...input('done'),group:'another-chat',text:'发布材料已整理完成。'}]);await daily.refresh()
-  assert.equal(life.snapshot().todos.length,1);assert.equal(life.snapshot().todos[0]!.status,'open')
-  const update=daily.snapshot().cards.find(c=>c.update);assert.ok(update);assert.equal(update.update!.status,'done')
-  await daily.adopt(update.id);assert.equal(life.snapshot().todos.length,1);assert.equal(life.snapshot().todos[0]!.status,'done')
+  assert.equal(life.snapshot().goals.length,1);assert.equal(life.snapshot().goals[0]!.status,'active')
+  const update=daily.snapshot().cards.find(c=>c.update);assert.ok(update);assert.equal(update.update!.status,'completed')
+  await daily.adopt(update.id);assert.equal(life.snapshot().goals.length,1);assert.equal(life.snapshot().goals[0]!.status,'completed')
   const n=calls.length;await daily.refresh();assert.equal(calls.length,n)
  },extract,groupAll)
 })
 test('late completion across three dates is never auto-saved even if compose asks to record',()=>fixture(async({daily,life,setInputs})=>{
- setInputs([{...input('old'),observed_at:'2026-10-04T00:00:00Z'},{...input('progress'),observed_at:'2026-10-11T00:00:00Z'},input('done')]);await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,0)
+ setInputs([{...input('old'),observed_at:'2026-10-04T00:00:00Z'},{...input('progress'),observed_at:'2026-10-11T00:00:00Z'},input('done')]);await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().goals.length,0)
 },(r,s)=>r.phase==='extract'?Promise.resolve({matters:r.inputs.map(i=>({...matter(i),state:i.id==='done'?'completed':'open'}))}):generate(r,s),r=>Promise.resolve(r.phase==='reconcile'?{groups:[{members:r.matters.map(m=>m.id),state:'completed',current:r.matters.at(-1)!.id,basis:[r.matters.at(-1)!.id]}]}:{})))
 test('failed or incomplete global reconciliation cannot save a partial old commitment',()=>fixture(async({daily,life})=>{
- await daily.refresh();assert.equal(daily.snapshot().status,'failed');assert.equal(life.snapshot().todos.length,0)
+ await daily.refresh();assert.equal(daily.snapshot().status,'failed');assert.equal(life.snapshot().goals.length,0)
 },generate,()=>Promise.resolve({groups:[]})))
-test('status update rejects concurrent user editing without creating a new todo',()=>fixture(async({daily,life,setInputs})=>{
- await life.mutate({op:'create',kind:'todo',title:'整理发布材料'},'existing')
+test('status update rejects concurrent user editing without creating a new goal',()=>fixture(async({daily,life,setInputs})=>{
+ await life.mutate({op:'create',kind:'goal',title:'助手成为每日工作入口'},'existing')
  setInputs([input('done')]);await daily.refresh();const card=daily.snapshot().cards.find(c=>c.update);assert.ok(card)
- const todo=life.snapshot().todos[0]!;await life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,note:'用户更正'},'edit')
- await assert.rejects(daily.adopt(card.id),/version_conflict/);assert.equal(life.snapshot().todos.length,1);assert.equal(life.snapshot().todos[0]!.note,'用户更正')
+ const goal=life.snapshot().goals[0]!;await life.mutate({op:'update',kind:'goal',id:goal.id,expected_version:goal.version,note:'用户更正'},'edit')
+ await assert.rejects(daily.adopt(card.id),/version_conflict/);assert.equal(life.snapshot().goals.length,1);assert.equal(life.snapshot().goals[0]!.note,'用户更正')
 },(r,s)=>r.phase==='extract'?Promise.resolve({matters:[{...matter(r.inputs[0]!),state:'completed'}]}):generate(r,s)))
 
 test('a new source hides old actionable suggestions until temporal coverage is refreshed',()=>fixture(async({daily,life,setInputs})=>{
- await life.mutate({op:'create',kind:'todo',title:'整理发布材料'},'existing')
+ await life.mutate({op:'create',kind:'goal',title:'助手成为每日工作入口'},'existing')
  await daily.refresh();const card=daily.snapshot().cards.find(c=>c.update);assert.ok(card)
  setInputs([input(),input('newer')]);await daily.sync();assert.equal(daily.snapshot().cards.some(c=>c.id===card.id),false)
- await assert.rejects(daily.adopt(card.id));assert.equal(life.snapshot().todos[0]!.status,'open')
+ await assert.rejects(daily.adopt(card.id));assert.equal(life.snapshot().goals[0]!.status,'active')
 },(r,s)=>r.phase==='extract'?Promise.resolve({matters:[{...matter(r.inputs[0]!),state:'completed'}]}):generate(r,s)))
 
 test('status updates beyond the visible three remain available after the first is dismissed',()=>fixture(async({daily,life})=>{
- for(let i=0;i<4;i++)await life.mutate({op:'create',kind:'todo',title:'交付'+i},'existing'+i)
+ for(let i=0;i<4;i++)await life.mutate({op:'create',kind:'goal',title:'交付'+i},'existing'+i)
  await daily.refresh();assert.equal(daily.snapshot().cards.filter(c=>c.update).length,4)
  await daily.dismiss(daily.snapshot().cards[0]!.id);assert.equal(daily.snapshot().cards.filter(c=>c.update).length,3)
 },r=>Promise.resolve(r.phase==='extract'?{matters:Array.from({length:4},(_,i)=>({...matter(r.inputs[0]!),title:'交付'+i,state:'completed'}))}:{matches:r.matters.map(m=>({matter_id:m.id,target_id:r.existing.find(e=>e.title===m.title)!.id,same_as:null,capture:'skip'})),suggestions:[]})))
@@ -274,7 +274,7 @@ test('automatic recording waits for its source revalidation before keeping batch
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-record-revalidate-'))
  const life=new LifeService(join(dir,'life.json'),()=>daily.suspend());await life.open()
  const daily=new DailyWorkbench({path:join(dir,'daily.json'),life:()=>life,inputs:()=>Promise.resolve([input()]),timezone:()=>'Asia/Shanghai',now:()=>new Date('2026-10-18T03:00:00Z'),ready:()=>true,changed:()=>undefined,generate})
- try{await daily.open();await daily.refresh();assert.equal(life.snapshot().todos.length,1);assert.equal(daily.snapshot().status,'ready');assert.equal(daily.snapshot().cards.filter(c=>c.tab==='ideas').length,1,'own record notification must not discard otherwise grounded inspiration')}
+ try{await daily.open();await daily.refresh();assert.equal(life.snapshot().goals.length,1);assert.equal(daily.snapshot().status,'ready');assert.equal(daily.snapshot().cards.filter(c=>c.tab==='ideas').length,1,'own record notification must not discard otherwise grounded inspiration')}
  finally{await daily.close();await life.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -292,3 +292,26 @@ test('suggestions cannot expose compact model references unless the source actua
  await daily.refresh();assert.equal(daily.snapshot().cards.length,0,'model-only compact identifiers must not leak into product copy')
  setInputs([{...input(),version:'2',text:'我会整理发布材料，接口型号为 m0。'}]);await daily.refresh();assert.equal(daily.snapshot().cards.length,1,'real source identifiers remain usable')
 },r=>Promise.resolve(r.phase==='extract'?{matters:[matter(r.inputs[0]!,'topic')]}:{matches:[],suggestions:[{tab:'ideas',title:'整理接口说明',body:'参考 m0 的资料编写说明。',why:null,next:null,matter_ids:[r.matters[0]!.id]}]})))
+
+test('a model that still returns a todo matter cannot create a todo or a card',()=>fixture(async({daily,life})=>{
+ await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,0);assert.equal(life.snapshot().goals.length,0)
+ assert.equal(daily.snapshot().diagnostics.rejected,1);assert.ok(daily.snapshot().cards.every(c=>(c.tab as string)!=='todos'))
+},(r,s)=>r.phase==='extract'?Promise.resolve({matters:[{...matter(r.inputs[0]!),kind:'todo'}]}):generate(r,s)))
+
+test('opening a cache that still holds todo matters, todo cards or recorded todos clears it',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-todo-purge-'));const path=join(dir,'daily.json')
+ const life=new LifeService(join(dir,'life.json'));await life.open()
+ let calls=0;const options={path,life:()=>life,inputs:()=>Promise.resolve([input()]),timezone:()=>'Asia/Shanghai',now:()=>new Date('2026-10-18T03:00:00Z'),ready:()=>true,changed:()=>undefined,generate:((r,s)=>{calls++;return generate(r,s)}) as WorkbenchGenerator}
+ try{
+  let daily=new DailyWorkbench(options);await daily.open();await daily.refresh();await daily.close()
+  const stale=JSON.parse(await readFile(path,'utf8')) as {cache:{matters:unknown[]}[];cards:unknown[];recorded:unknown[];key:string;automatic_day:string;dismissed:string[]}
+  const oldMatter={id:'old-todo',group:'chat:a',observed_at:'2026-10-18T01:00:00Z',...matter(input())}
+  stale.cache[0]!.matters.push({...oldMatter,kind:'todo'});stale.cards.push({id:'old-card',candidate_id:'old-card',tab:'todos',title:'旧待办',body:'旧',why:null,next:null,refs:[],sources:[]})
+  stale.recorded.push({matter:{id:'old-todo',kind:'todo',title:'旧待办',summary:'旧'},id:'x',version:1,undone:false});stale.dismissed.push('keep-me')
+  await writeFile(path,JSON.stringify(stale))
+  const before=calls;daily=new DailyWorkbench(options);await daily.open();assert.deepEqual(daily.snapshot().cards.filter(c=>(c.tab as string)==='todos'),[]);assert.equal(daily.snapshot().error,null)
+  await daily.refresh();assert.ok(calls>before,'the cleared cache is regenerated');await daily.close()
+  const clean=await readFile(path,'utf8');assert.doesNotMatch(clean,/"todo"|"todos"|old-card/u);assert.match(clean,/keep-me/u)
+  await assert.rejects(daily.adopt('old-card'),/card_not_found/)
+ }finally{await life.close();await rm(dir,{recursive:true,force:true})}
+})

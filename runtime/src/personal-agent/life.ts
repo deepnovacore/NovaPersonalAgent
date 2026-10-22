@@ -32,8 +32,7 @@ export type LifeBackendSource=LifeBackend|(()=>LifeBackend|undefined)
 export const emptyLifeState=():LifeState=>({todos:[],ideas:[],goals:[],profile:{about:'',version:0},receipts:{}})
 const kind=z.enum(['todo','idea','goal'])
 export const lifeInputSchema=z.discriminatedUnion('op',[
- z.object({op:z.literal('from_workbench'),kind,title:z.string().trim().min(1).max(200),note:z.string().max(4000),due:z.string().date().nullable(),success_criteria:z.string().max(2000),automatic:z.boolean(),source:workbenchSourceSchema,sources:z.array(sourceTagSchema).max(8),proof:workbenchMatterSchema.optional(),evidence:z.array(workbenchEvidenceSchema).min(1).max(8)}).strict(),
- z.object({op:z.literal('from_context'),title:z.string().trim().min(1).max(200),note:z.string().max(4000),source:contextSourceSchema}).strict(),
+ z.object({op:z.literal('from_workbench'),kind:z.enum(['idea','goal']),title:z.string().trim().min(1).max(200),note:z.string().max(4000),due:z.string().date().nullable(),success_criteria:z.string().max(2000),automatic:z.boolean(),source:workbenchSourceSchema,sources:z.array(sourceTagSchema).max(8),proof:workbenchMatterSchema.optional(),evidence:z.array(workbenchEvidenceSchema).min(1).max(8)}).strict(),
  z.object({op:z.literal('from_suggestion'),source:workbenchSourceSchema.optional(),kind:kind.default('todo'),suggestion_id:z.string().min(1).max(128),title:z.string().min(1).max(200),note:z.string().max(4000),due:z.string().date().nullable(),todo_id:z.string().nullable(),sources:z.array(sourceTagSchema).max(64),provenance_refs:z.array(z.string()).min(1).max(64)}).strict(),
  z.object({op:z.literal('from_news'),kind,title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),article:newsArticleSchema}).strict(),
  z.object({op:z.literal('create'),kind,importance:importanceSchema.optional(),title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
@@ -71,20 +70,13 @@ export function applyLifeMutation(state:LifeState,raw:unknown,requestId:string,n
    else{const todo={...base(p.title,p.note),status:'open' as const,due:p.due,goal_id:null,idea_id:null,source_suggestion_id:p.suggestion_id,...(p.source?{suggestion_source:p.source}:{}),sources:p.sources,provenance_refs:p.provenance_refs};next.todos.push(todo);result=todo}
   }else if(p.op==='undo_create'){const rows=p.kind==='goal'?next.goals:next.todos,old=rows.find(r=>r.id===p.id);if(!old)throw Error('item_not_found');if(old.version!==p.expected_version)throw Error('version_conflict');if(p.kind==='goal'){if(next.todos.some(r=>r.goal_id===p.id)||next.ideas.some(r=>r.goal_id===p.id))throw Error('goal_has_links');next.goals=next.goals.filter(r=>r.id!==p.id)}else next.todos=next.todos.filter(r=>r.id!==p.id);result={id:p.id,version:old.version}}
   else if(p.op==='profile'){if(next.profile.version!==p.expected_version)throw Error('version_conflict');next.profile={about:p.about,version:p.expected_version+1};result={id:'profile',version:next.profile.version}}
-  else if(p.op==='from_context'){
-   // The object retains its adoption identity after bounded request receipts are evicted.
-   const existing=next.todos.find(todo=>todo.context_source?.candidate_id===p.source.candidate_id)
-   if(existing)result=existing
-   else{const b={...base(p.title,p.note),context_source:p.source};next.todos.push({...b,status:'open',due:null,goal_id:null,idea_id:null});result=b}
-  }
   else if(p.op==='from_workbench'){
    if(!p.source.refs.every(ref=>p.evidence.some(input=>input.id===ref.entry_id&&input.version===ref.version&&input.text.includes(ref.quote))))throw Error('workbench_invalid_evidence')
    if(p.automatic&&(!p.proof||!p.evidence||p.proof.kind!==p.kind||p.proof.title!==p.title||p.proof.summary!==p.note||p.proof.due!==p.due||JSON.stringify(p.proof.refs)!==JSON.stringify(p.source.refs)||!automaticWorkbenchMatter({...p.proof,id:p.source.candidate_id,group:''},p.evidence)))throw Error('workbench_capture_not_explicit')
-   const rows=p.kind==='todo'?next.todos:p.kind==='idea'?next.ideas:next.goals
+   const rows=p.kind==='idea'?next.ideas:next.goals
    const existing=rows.find(row=>row.workbench_source?.candidate_id===p.source.candidate_id||lifeEvidenceMatches(p.source.refs,row.suggestion_source?.refs??[]))
    if(existing)result=existing
    else{const b={...base(p.title,p.note),workbench_source:{candidate_id:p.source.candidate_id,refs:p.source.refs},sources:p.sources,provenance_refs:p.source.refs.map(ref=>ref.entry_id),auto_recorded:p.automatic}
-    if(p.kind==='todo')next.todos.push({...b,status:'open',due:p.due,goal_id:null,idea_id:null})
     if(p.kind==='idea')next.ideas.push({...b,status:'active',goal_id:null})
     if(p.kind==='goal')next.goals.push({...b,status:'active',success_criteria:p.success_criteria,idea_id:null})
     result=b
