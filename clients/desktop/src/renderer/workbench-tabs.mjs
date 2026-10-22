@@ -2,7 +2,6 @@ import {t} from './locale.mjs'
 // The right workspace pages share horizontal keyboard navigation.
 export const WORKSPACE_PAGES=Object.freeze([
  Object.freeze({id:'timeline',label:'时间线',title:'时间线',icon:'M7 3v18M7 6h10M7 12h7M7 18h10M4 6h0M4 12h0M4 18h0'}),
- Object.freeze({id:'todos',label:'待办',title:'待办',icon:'M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9'}),
  Object.freeze({id:'ideas',label:'想法',title:'想法',icon:'M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.5h6c0-1.2.4-1.9 1-2.5A6 6 0 0 0 12 3z'}),
  Object.freeze({id:'goals',label:'目标',title:'目标',icon:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'}),
  Object.freeze({id:'feeds',label:'资讯',title:'资讯',icon:'M4 4h16v16H4zM8 8h8M8 12h8M8 16h5'}),
