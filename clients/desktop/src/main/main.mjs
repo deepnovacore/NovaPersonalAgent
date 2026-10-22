@@ -660,7 +660,7 @@ function openSettingsWindow(launchId, { category } = {}) {
   }
   // Held for the cold-open path, where no push can reach the panel yet.
   pendingSettingsCategory = category ?? null
-  const window = new BrowserWindow(localizedWindowOptions(settingsWindowOptions(preload, launchId)))
+  const window = new BrowserWindow(localizedWindowOptions(settingsWindowOptions(preload, launchId, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workAreaSize)))
   // The shared session keeps its orb owner; it grants audio to this exact panel
   // only while main has an active voiceprint recording lease.
   window.webContents.setWindowOpenHandler(apiKeyWindowOpenHandler(url => shell.openExternal(url)))

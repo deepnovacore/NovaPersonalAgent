@@ -1,0 +1,27 @@
+/* Skill Hub: a two-column catalogue; every card carries the Nova avatar as its icon. */
+.skills-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.skills-head>.hint{flex:1 1 100%;margin:0}
+.skills-search-field{position:relative;display:flex;align-items:center;flex:1 1 180px;min-width:0;color:var(--ink-faint)}
+.skills-search-field>svg{position:absolute;left:11px;width:14px;height:14px;pointer-events:none}
+.skills-search{width:100%;min-height:32px;padding:0 12px 0 32px;border:1px solid var(--line-strong);border-radius:999px;background:var(--surface-raised);color:var(--ink);font:inherit}
+.skills-search:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.skills-tabs{display:inline-flex;gap:4px;margin-top:14px;padding:3px;border-radius:999px;background:var(--surface-inset)}
+.skills-tabs>button{min-height:28px;padding:0 14px;border:0;border-radius:999px;background:transparent;color:var(--ink-dim);font:inherit;cursor:pointer}
+.skills-tabs>button[aria-pressed="true"]{background:var(--surface-raised);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.skills-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin-top:12px}
+.skills-grid>.empty-state{grid-column:1/-1}
+.skill-card{display:flex;align-items:center;gap:12px;min-width:0;padding:10px 12px;border-radius:var(--radius);transition:background .15s}
+.skill-card:hover{background:var(--surface-inset)}
+.skill-icon{flex:0 0 36px;width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--surface-inset)}
+.skill-copy{flex:1;min-width:0}
+.skill-copy h3{margin:0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.skill-copy p{margin:2px 0 0;color:var(--ink-dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.skill-state{flex-shrink:0;padding:0 8px;border-radius:999px;background:var(--surface-inset);color:var(--ink-faint);font-size:11px;line-height:20px}
+.skill-state[data-state="on"]{background:var(--accent-wash);color:var(--accent)}
+.skill-state[data-state="failed"],.skill-state[data-state="degraded"]{background:var(--warn-wash);color:var(--warn)}
+.skills-grid+.link-button{margin-top:14px}
+@media (max-width:720px){.skills-grid{grid-template-columns:1fr}}
+
+
+#skills-panel .ui-icon{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#skills-panel button.has-icon{display:inline-flex;align-items:center;gap:6px}

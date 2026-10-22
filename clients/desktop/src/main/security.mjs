@@ -98,12 +98,12 @@ export function boardWindowOptions(preload, launchId) {
   })
 }
 
-export function settingsWindowOptions(preload, launchId) {
+export function settingsWindowOptions(preload, launchId, workArea = {width: 952, height: 752}) {
   return panelWindowOptions(preload, launchId, {
-    width: 1140,
-    height: 930,
-    minWidth: 620,
-    minHeight: 520,
+    width: Math.min(920, Math.max(1, workArea.width - 32)),
+    height: Math.min(720, Math.max(1, workArea.height - 32)),
+    minWidth: Math.min(620, Math.max(1, workArea.width - 32)),
+    minHeight: Math.min(520, Math.max(1, workArea.height - 32)),
     title: t("设置"),
   })
 }

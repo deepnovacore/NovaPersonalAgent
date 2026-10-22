@@ -403,7 +403,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .message{width:min(100%,760px);align-self:center;font-size:14px;line-height:1.8}
 .workbench .message.user{width:auto;max-width:min(88%,680px);align-self:flex-end;border-radius:16px 16px 4px 16px;padding:12px 18px;background:var(--accent-wash)}
 .workbench .message.assistant{padding:0;background:transparent;border:0}
-.workbench .message.assistant:not(.message-feed)>.md{align-self:flex-start;min-width:0;max-width:100%;padding:14px 18px;border-radius:4px 18px 18px 18px;background:var(--surface-inset);border:1px solid var(--line)}
+.workbench .message.assistant:not(.message-feed)>.md{min-width:0;max-width:100%;padding:0;background:transparent;border:0}
 .workbench .message-role{margin-bottom:8px;letter-spacing:.04em;color:var(--ink-dim)}
 .workbench .chat-intro{margin:auto 0;max-width:520px;padding:24px 0}
 .workbench .chat-intro h1{font-size:25px;line-height:1.4;font-weight:600;margin-bottom:12px}
@@ -723,30 +723,6 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .build-full-reply{margin-top:8px;color:var(--ink-dim)}
 .build-full-reply>summary{cursor:pointer;font-size:12px;color:var(--ink-faint)}
 .build-full-reply-content{max-height:70vh;overflow:auto;user-select:text}
-
-/* Skill Hub: a two-column catalogue; every card carries the Nova avatar as its icon. */
-.skills-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.skills-head>.hint{flex:1 1 100%;margin:0}
-.skills-search-field{position:relative;display:flex;align-items:center;flex:1 1 180px;min-width:0;color:var(--ink-faint)}
-.skills-search-field>svg{position:absolute;left:11px;width:14px;height:14px;pointer-events:none}
-.skills-search{width:100%;min-height:32px;padding:0 12px 0 32px;border:1px solid var(--line-strong);border-radius:999px;background:var(--surface-raised);color:var(--ink);font:inherit}
-.skills-search:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.skills-tabs{display:inline-flex;gap:4px;margin-top:14px;padding:3px;border-radius:999px;background:var(--surface-inset)}
-.skills-tabs>button{min-height:28px;padding:0 14px;border:0;border-radius:999px;background:transparent;color:var(--ink-dim);font:inherit;cursor:pointer}
-.skills-tabs>button[aria-pressed="true"]{background:var(--surface-raised);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
-.skills-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin-top:12px}
-.skills-grid>.empty-state{grid-column:1/-1}
-.skill-card{display:flex;align-items:center;gap:12px;min-width:0;padding:10px 12px;border-radius:var(--radius);transition:background .15s}
-.skill-card:hover{background:var(--surface-inset)}
-.skill-icon{flex:0 0 36px;width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--surface-inset)}
-.skill-copy{flex:1;min-width:0}
-.skill-copy h3{margin:0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.skill-copy p{margin:2px 0 0;color:var(--ink-dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.skill-state{flex-shrink:0;padding:0 8px;border-radius:999px;background:var(--surface-inset);color:var(--ink-faint);font-size:11px;line-height:20px}
-.skill-state[data-state="on"]{background:var(--accent-wash);color:var(--accent)}
-.skill-state[data-state="failed"],.skill-state[data-state="degraded"]{background:var(--warn-wash);color:var(--warn)}
-.skills-grid+.link-button{margin-top:14px}
-@media (max-width:720px){.skills-grid{grid-template-columns:1fr}}
 
 /* Shared icon set: icons inherit the label colour and sit before the text. */
 .workbench .ui-icon{width:14px;height:14px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
