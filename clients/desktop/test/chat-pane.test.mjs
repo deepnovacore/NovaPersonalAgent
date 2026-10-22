@@ -17,7 +17,7 @@ function mount(options={}){
  const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{},onPresentationRequest:fn=>{callbacks.presentation=fn},onCollapsed:fn=>{callbacks.collapsed=fn}}},...options})
  controllers.push(view.controller);view.controller.connect();view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input']})
  const all=n=>[n,...n.children.flatMap(all)]
- if(!options.defaultHome)all(body).find(n=>n.dataset.page==='todos').listeners.click()
+ if(!options.defaultHome)all(body).find(n=>n.dataset.page==='ideas').listeners.click()
  return {body,sent,view,callbacks,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
 const feedState=(revision,selected='chat:proactive',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:proactive',kind:'proactive',title:'主动提醒',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'T\n## 前瞻\n- 一条'}]},...extra})
@@ -144,7 +144,7 @@ test('durable cards browse a persistent central detail through snapshots, execut
  m.all().find(n=>n.className==='task-detail').listeners.keydown({key:'Escape',preventDefault(){}});assert.equal(document.activeElement,cards[0]);assert.equal(m.sent.some(f=>f.method==='tasks.control'),false)
 })
 test('suggestion body is an accessible control and remains expanded after a snapshot refresh',()=>{
- const m=mount();const context={cards:[{id:'s1',tab:'todos',title:'Review',body:'A long recommendation '.repeat(30),refs:[]}],status:'ready'}
+ const m=mount();const context={cards:[{id:'s1',tab:'ideas',title:'Review',body:'A long recommendation '.repeat(30),refs:[]}],status:'ready'}
  m.view.receive(feedState(1,'c',{workbench_context:context,sources:[{id:'local'}]}))
  const body=()=>m.all().find(n=>n.className==='card-body')
  assert.equal(body().tag,'button')
@@ -156,9 +156,9 @@ test('suggestion body is an accessible control and remains expanded after a snap
  assert.equal(body().attrs['aria-expanded'],'true')
  assert.equal(document.activeElement,body())
 })
-test('a personal todo with a long note can expand its four-line body',()=>{
- const m=mount();m.view.receive(feedState(1,'c',{sources:[{id:'local'}],life:{todos:[{id:'todo1',title:'Prepare',note:'Detailed note '.repeat(30),status:'open',version:1}],ideas:[],goals:[]}}))
- const note=m.all().find(n=>n.className==='card-body'&&n.dataset.cardBodyId==='life:todo:todo1')
+test('a personal idea with a long note can expand its four-line body',()=>{
+ const m=mount();m.view.receive(feedState(1,'c',{sources:[{id:'local'}],life:{todos:[],ideas:[{id:'idea1',title:'Prepare',note:'Detailed note '.repeat(30),status:'active',version:1}],goals:[]}}))
+ const note=m.all().find(n=>n.className==='card-body'&&n.dataset.cardBodyId==='life:idea:idea1')
  assert.equal(note?.tag,'button')
  note.listeners.click()
  assert.equal(note.attrs['aria-expanded'],'true')
@@ -314,7 +314,7 @@ test('native task details isolate results, preserve expansion across refresh/res
   m.view.refresh();assert.equal(details('b').open,true);assert.match(textOf(details('b')),/B result/u)
   assert.match(textOf(details('b')),/<b>literal<\/b>/u);assert.equal(descendants(details('b')).some(n=>n.tag==='b'),false)
   assert.match(textOf(details('b')),/2/u);assert.match(textOf(details('b')),/耗时：10\.0 秒/u)
-  selectPage(m,'待办');selectPage(m,'任务');assert.equal(details('b').open,true)
+  selectPage(m,'想法');selectPage(m,'任务');assert.equal(details('b').open,true)
   results=[];m.view.refresh();assert.equal(details('b').open,true);assert.match(textOf(details('b')),/暂无结果/u)
   assert.doesNotMatch(textOf(details('b')),/B result/u)
   details('a').open=true;details('a').listeners.toggle()
@@ -477,10 +477,10 @@ test('continuous voice shows the orb stage with its status line and removes it w
  }finally{m.view.controller.disconnect();await tick()}
 })
 test('pending suggestion actions survive refresh, reject double clicks and recover after failure',async()=>{
- const m=mount(),context={cards:[{id:'s1',tab:'todos',title:'Review',body:'Details',next:'Start',refs:[]}],status:'ready'}
+ const m=mount(),context={cards:[{id:'s1',tab:'ideas',title:'Review',body:'Details',next:'Start',refs:[]}],status:'ready'}
  const state=revision=>feedState(revision,'c',{workbench_context:context,sources:[{id:'local',health:String(revision)}],conversations:{selected_id:'c',voice_id:'c',items:[{id:'c',title:'C'}],messages:[]}})
  m.view.receive(state(1))
- const action=()=>m.all().find(n=>n.textContent==='帮我做')
+ const action=()=>m.all().find(n=>n.textContent==='聊聊这个')
  const first=action();first.listeners.click();const request=m.sent.at(-1)
  assert.equal(request.method,'conversations.create');assert.equal(first.attrs['aria-busy'],'true');assert.equal(first.disabled,true)
  first.listeners.click();m.view.receive(state(2));assert.notEqual(action(),first)
@@ -491,17 +491,17 @@ test('pending suggestion actions survive refresh, reject double clicks and recov
  assert.match(m.view.controller.error,/超时/)
 })
 test('life status shows saving, survives refresh and does not restore an obsolete focused value',async()=>{
- const m=mount(),row={id:'todo1',title:'Prepare',note:'',status:'open',version:1}
- const state=(revision,item)=>feedState(revision,'c',{life:{todos:[item],ideas:[],goals:[]}})
- m.view.receive(state(1,row));const select=()=>m.all().find(n=>n.attrs['aria-label']==='Prepare状态')
- select().focus();select().value='doing';select().listeners.change();const request=m.sent.at(-1)
+ const m=mount(),row={id:'goal1',kind:'goal',title:'Prepare',note:'',status:'active',version:1,progress:{total:0,done:0}}
+ const state=(revision,item)=>feedState(revision,'c',{life:{todos:[],ideas:[],goals:[item]}})
+ m.view.receive(state(1,row));m.all().find(n=>n.dataset.page==='goals').listeners.click();const select=()=>m.all().find(n=>n.attrs['aria-label']==='Prepare状态')
+ select().focus();select().value='paused';select().listeners.change();const request=m.sent.at(-1)
  assert.equal(request.method,'life.mutate');assert.equal(select().attrs['aria-busy'],'true')
  assert.equal(m.all().find(n=>n.textContent==='正在保存…').hidden,false)
  m.view.receive(state(2,{...row,note:'Updated elsewhere'}));assert.equal(select().disabled,true);select().listeners.change()
  assert.equal(m.sent.filter(f=>f.method==='life.mutate').length,1)
- m.view.receive(state(3,{...row,status:'doing',version:2}));m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick()
- assert.equal(select().disabled,false);assert.equal(select().value,'doing')
- select().focus();m.view.receive(state(4,{...row,status:'waiting',version:3}));assert.equal(select().value,'waiting')
+ m.view.receive(state(3,{...row,status:'paused',version:2}));m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick()
+ assert.equal(select().disabled,false);assert.equal(select().value,'paused')
+ select().focus();m.view.receive(state(4,{...row,status:'active',version:3}));assert.equal(select().value,'active')
 })
 test('goal adoption and status changes use the shared pending guard; conflicts refresh with readable feedback',async()=>{
  const m=mount(),goal={id:'g1',kind:'goal',title:'Goal',note:'',status:'active',version:1,progress:{total:0,done:0}}
@@ -557,15 +557,6 @@ test('adding a Timeline reference preserves the draft and earlier references; li
  assert.deepEqual(c.state().references.map(ref=>ref.id),['a','b']);assert.equal(c.draft,'Existing draft');assert.match(c.error,/2/)
 })
 
-test('an oversized Todo assistance append leaves draft references unchanged',async()=>{
- const m=mount(),c=m.view.controller,todos=['a','b'].map(id=>({id,title:'Item '+id,status:'open',due:null,version:1,note:''}))
- m.view.receive(feedState(1,'chat:main',{feed:[],life:{todos,goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
- c.draft='x'.repeat(4000);c.state().references=[{kind:'todo',id:'a',version:1}]
- await m.all().filter(n=>n.textContent==='请 Nova 协助')[1].listeners.click();await tick()
- assert.equal(c.draft,'x'.repeat(4000));assert.deepEqual(c.state().references,[{kind:'todo',id:'a',version:1}]);assert.equal(c.state().source_todo??null,null)
-})
-
-
 test('right pane switches keep Nova mounted, visible, and preserve the main draft at every window width',async()=>{
  const previous=globalThis.matchMedia
  try{
@@ -578,7 +569,7 @@ test('right pane switches keep Nova mounted, visible, and preserve the main draf
    assert.equal(m.all().find(n=>n.dataset.page==='timeline').attrs['aria-selected'],'true')
    assert.ok(m.all().some(n=>n.className==='timeline-axis'))
    const commandCount=m.sent.length
-   for(const page of ['todos','ideas','profile','timeline']){
+   for(const page of ['goals','ideas','profile','timeline']){
     await m.all().find(n=>n.dataset.page===page).listeners.click()
     assert.equal(pane.hidden,false,String(width));assert.equal(pane.parentElement,parent)
     assert.equal(c.selectedId,'chat:main');assert.equal(c.draft,'Keep this thought')

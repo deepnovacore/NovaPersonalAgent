@@ -18,14 +18,14 @@ const entry = (id = 'plan', version = 1): MemoryEntry => ({ id, version, content
 const proposal = (id = 'plan', version = 1) => ({ kind: 'question' as const, summary: 'Check demo materials?', why_now: 'You said the demo is today', evidence_refs: [] as string[], memory_refs: [{ entry_id: id, version }] });
 test('acceptance source-to-card proof requires a current source ref and version',()=>{
  const cards=[
-  {tab:'todos' as const,refs:[{entry_id:'source:file-a',version:'v2'}]},
+  {tab:'goals' as const,refs:[{entry_id:'source:file-a',version:'v2'}]},
   {tab:'ideas' as const,refs:[{entry_id:'source:file-a',version:'v1'}]},
   {tab:'ideas' as const,refs:[{entry_id:'memory:unrelated',version:3}]},
   {tab:'ideas' as const,refs:[{entry_id:'memory:stated',version:4},{entry_id:'source:file-b',version:'v7'}]},
  ];
  const entries=[{kind:'file' as const,id:'source:file-a',version:'v2',content:'Current'}, {kind:'file' as const,id:'source:file-b',version:'v7',content:'Current'}];
- assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,todos:1,ideas:1,goals:0});
- assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,todos:0,ideas:0,goals:0});
+ assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,ideas:1,goals:1});
+ assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,ideas:0,goals:0});
 });
 test('discovery prioritizes dated open Life objects and excludes inactive objects without hiding history',async()=>{
  const f=await fixture()

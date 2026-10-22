@@ -44,12 +44,13 @@ try{
  await click('转为个人事项');await field('个人事项类型','todo','change');await field('个人事项标题','Synthetic read article');await field('我的补充说明','My own plan')
  assert.equal(host.life.snapshot().todos.length,0);await screenshot('conversion-draft');await click('保存个人事项');await wait('window.view.controller.snapshot.life.todos.length===1')
  const id=host.life.snapshot().todos[0].id;assert.equal(host.life.snapshot().todos[0].title,'Synthetic read article');await check('renderer conversion waits for explicit save and preserves user-authored title')
- await click('Todos');await wait("document.querySelector('.workbench-page').textContent.includes('由你从公开资讯保存')");await screenshot('source-visible')
- await click('编辑');await field('到期日期','2026-10-03');await click('保存修改');await wait("window.view.controller.snapshot.life.todos[0].due==='2026-10-03'")
- await field('Synthetic read article状态','done','change');await wait("window.view.controller.snapshot.life.todos[0].status==='done'")
+ // The Todos tab is gone: an article-sourced todo is edited through the backend and read back from the Timeline and the host.
+ {const row=host.life.snapshot().todos[0];await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,due:'2026-10-03'},'live-due');await wait("window.view.controller.snapshot.life.todos[0].due==='2026-10-03'")}
+ await click('Timeline');await new Promise(resolve=>setTimeout(resolve,300));await screenshot('source-visible')
+ {const row=host.life.snapshot().todos[0];await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,status:'done'},'live-done');await wait("window.view.controller.snapshot.life.todos[0].status==='done'")}
  assert.equal((await host.discoverySnapshot()).memory.some(row=>row.life?.id===id),false)
- await click('显示已完成／归档');await wait("document.querySelector('.workbench-page').textContent.includes('Synthetic read article')");await screenshot('completed');await check('native date/status controls persist same object and remove it from discovery')
- await close();await open();await window.loadFile(html);await wait('window.ready===true');await click('Todos');await click('显示已完成／归档');await wait("document.querySelector('.workbench-page').textContent.includes('Synthetic read article')")
+ await screenshot('completed');await check('date/status changes persist the same object and remove it from discovery')
+ await close();await open();await window.loadFile(html);await wait('window.ready===true');await click('Timeline')
  const todo=host.life.snapshot().todos[0];assert.equal(todo.id,id);assert.equal(todo.status,'done');assert.equal(todo.due,'2026-10-03');assert.equal(todo.news_source.url,'https://example.com/synthetic');await screenshot('reopened');await check('host/resource and renderer restart retain source, date, completion and stable ID')
  await close();host=undefined;memory=undefined
  assert.equal(modelCalls,0);assert.deepEqual(report.errors,[]);await check('zero model calls or external navigation');report.status='passed'

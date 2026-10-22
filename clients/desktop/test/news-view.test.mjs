@@ -57,13 +57,16 @@ test('disconnected Feeds does not present a false news-loading state',t=>{
  assert.doesNotMatch(copy,/正在连接资讯/u)
 })
 test('life forms start collapsed behind an add button and reopen for edits',async t=>{
- const h=harness(t);renderLife(h.panel,{...h,kind:'todo',state:{todos:[{id:'t',kind:'todo',title:'A',note:'',version:1,status:'open'}],ideas:[],goals:[]},delegate(){}})
+ const goal=(over={})=>({id:'g',kind:'goal',title:'A',note:'',version:1,status:'active',progress:{total:0,done:0},...over})
+ const h=harness(t);renderLife(h.panel,{...h,kind:'goal',state:{todos:[],ideas:[],goals:[goal()]}})
  const flatten=node=>[node,...node.children.flatMap(flatten)];const form=()=>flatten(h.panel).find(n=>n.className==='life-form')
- assert.equal(form().hidden,true);assert.ok(h.buttons.find(b=>b.textContent==='添加待办'))
- await h.buttons.find(b=>b.textContent==='添加待办').action();assert.equal(h.local['todo:formOpen'],true)
- h.buttons.length=0;h.panel.children=[];renderLife(h.panel,{...h,kind:'todo',state:{todos:[],ideas:[],goals:[]},delegate(){}});assert.equal(form().hidden,false);assert.ok(h.buttons.find(b=>b.textContent==='收起表单'));assert.ok(h.buttons.find(b=>b.textContent==='保存'))
- h.local['todo:form']={id:'t',title:'A',note:'',version:1};delete h.local['todo:formOpen']
- h.buttons.length=0;h.panel.children=[];renderLife(h.panel,{...h,kind:'todo',state:{todos:[],ideas:[],goals:[]},delegate(){}});assert.equal(form().hidden,false,'an edit draft opens the form without the flag');assert.ok(h.buttons.find(b=>b.textContent==='保存修改'))
+ assert.equal(form().hidden,true);assert.ok(h.buttons.find(b=>b.textContent==='添加目标'))
+ await h.buttons.find(b=>b.textContent==='添加目标').action();assert.equal(h.local['goal:formOpen'],true)
+ h.buttons.length=0;h.panel.children=[];renderLife(h.panel,{...h,kind:'goal',state:{todos:[],ideas:[],goals:[]}});assert.equal(form().hidden,false);assert.ok(h.buttons.find(b=>b.textContent==='收起表单'));assert.ok(h.buttons.find(b=>b.textContent==='保存'))
+ h.local['goal:form']={id:'g',title:'A',note:'',version:1};delete h.local['goal:formOpen']
+ h.buttons.length=0;h.panel.children=[];renderLife(h.panel,{...h,kind:'goal',state:{todos:[],ideas:[],goals:[]}});assert.equal(form().hidden,false,'an edit draft opens the form without the flag');assert.ok(h.buttons.find(b=>b.textContent==='保存修改'))
+ const none=harness(t);renderLife(none.panel,{...none,kind:'goal',state:{todos:[{id:'t',kind:'todo',title:'Stale todo',note:'',version:1,status:'open'}],ideas:[],goals:[goal()]}})
+ assert.ok(!flatten(none.panel).some(n=>n.textContent==='请 Nova 协助'||n.textContent==='Stale todo'),'todo rows never render in a life list')
 })
 
 test('profile starts with a readable preview and editing is optional',async t=>{

@@ -5,7 +5,7 @@ import {attachSources,attachSourceTags} from './source-popover.mjs'
 const el=(tag,text,className)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n}
 const labels={todo:'待办',idea:'想法',goal:'目标'}
 const statuses={idea:{active:'保留',archived:'已归档'},goal:{active:'推进中',paused:'已暂停',completed:'已达成',archived:'已归档'}}
-export function renderLife(panel,{kind,state,command,button,local,rerender,delegate,openArticle,suggested=0,clampable,bindPending,run=action=>action()}){
+export function renderLife(panel,{kind,state,command,button,local,rerender,openArticle,suggested=0,clampable,bindPending,run=action=>action()}){
  const rows=state?.[kind==='idea'?'ideas':'goals']??[]
  panel.append(el('h2',t(labels[kind])))
  const toolbar=el('div',undefined,'page-toolbar'),toolbarActions=el('div',undefined,'page-toolbar-actions');panel.append(toolbar)

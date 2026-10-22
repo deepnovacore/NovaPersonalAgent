@@ -39,7 +39,7 @@ afterEach(()=>{disposeSources();globalThis.document=previousDocument})
 function render(state,options={}){
  const parent=new Element('main'),calls=[],el=(...args)=>new Element(...args)
  const button=(text,click,host)=>{const node=el('button',text);node.addEventListener('click',click);host.append(node);return node}
- renderTimeline(parent,{snapshot:{settings:snapshot.settings,...state},el,button,discuss:(...args)=>calls.push(args),openTodos(){},now:new Date('2026-10-11T18:00:00Z'),...options})
+ renderTimeline(parent,{snapshot:{settings:snapshot.settings,...state},el,button,discuss:(...args)=>calls.push(args),now:new Date('2026-10-11T18:00:00Z'),...options})
  return {parent,calls}
 }
 test('dated cards share chronological date nodes while undated and completed cards stay off the axis',()=>{
@@ -148,7 +148,7 @@ test('briefing retains Today and the date axis while loading without pending sug
  assert.equal(commands.length,0)
 })
 
-test('briefing does not repeat todos from the separate todo tab',()=>{
+test('briefing does not repeat existing todos beyond the date axis',()=>{
  const state={...snapshot,timeline:{status:'ready',cards:[]}}
  const {parent}=render(state,{now:new Date('2026-10-11T08:00:00Z')})
  assert.equal(parent.querySelectorAll('.timeline-current').length,1)
@@ -156,6 +156,19 @@ test('briefing does not repeat todos from the separate todo tab',()=>{
  assert.equal(parent.querySelectorAll('.timeline-title').length,0)
  assert.equal(parent.querySelectorAll('.timeline-undated').length,0)
  assert.equal(state.life.todos.length,4)
+})
+
+test('existing todo entries are discussed in place: no card offers a jump to a todo page, done ones included',()=>{
+ const state=structuredClone(snapshot)
+ state.life.todos.push({id:'done',title:'Finished',status:'done',due:'2026-10-20',version:1})
+ const {parent,calls}=render(state)
+ const labels=parent.querySelectorAll('button').map(n=>n.textContent)
+ assert.ok(!labels.includes('查看事项'));assert.ok(!labels.includes('查看待办'))
+ const doneCard=parent.querySelectorAll('article').find(n=>n.dataset.objectId==='done')
+ doneCard.querySelectorAll('.timeline-title')[0].listeners.click()
+ assert.deepEqual(calls,[[[{kind:'todo',id:'done',version:1}]]],'a completed entry opens a discussion, not a todo list')
+ const empty=render({life:{todos:[],goals:[]},timeline:{status:'ready',cards:[]}},{compact:true})
+ assert.ok(!empty.parent.querySelectorAll('button').some(n=>/待办/u.test(n.textContent)),'the empty timeline has no todo shortcut')
 })
 
 test('timeline renders synthesized attention cards even with zero todos and no direct mentions',()=>{
