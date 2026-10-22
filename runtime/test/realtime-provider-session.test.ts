@@ -587,22 +587,46 @@ test('an asynchronous memory read for an aborted session never replaces a later 
 })
 
 for (const mode of ['text','audio'] as const) {
- test(`required memory refresh gates ${mode} input and blocks it on read failure`,async()=>{
-  let sentText=0, delayed=false
+ test(`required memory refresh gates ${mode} input and withdraws stale memory before input on read failure`,async()=>{
+  const order:string[]=[];let delayed=false
   let rejectRead: (error:Error)=>void = ()=>undefined
   const gate={promise:new Promise<{revision:number;content:string|null}>((_,reject)=>{rejectRead=reject})}
-  const provider=Object.assign(new FakeProvider(),{submitText:()=>{sentText++;return Promise.resolve()}})
-  const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,responseAdaptation:()=>delayed?gate.promise:Promise.resolve({revision:1,content:'allowed'})})
+  const provider=Object.assign(new FakeProvider(),{submitText:()=>{order.push('input');return Promise.resolve()}})
+  const replace=provider.replaceResponseAdaptation.bind(provider)
+  provider.replaceResponseAdaptation=(context,signal)=>{order.push(`memory:${context.content}`);return replace(context,signal)}
+  const sendAudio=provider.sendAudio.bind(provider)
+  provider.sendAudio=(pcm,signal)=>{order.push('input');return sendAudio(pcm,signal)}
+  const diagnostics:string[]=[]
+  const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,onDiagnostic:value=>diagnostics.push(value.reason),responseAdaptation:()=>delayed?gate.promise:Promise.resolve({revision:1,content:'allowed'})})
   await session.connect();delayed=true
   const pending=mode==='text'?session.submitText('hello'):session.sendAudio(new Uint8Array(2))
   await new Promise<void>(resolve=>setImmediate(resolve))
-  assert.equal(sentText,0);assert.equal(provider.sentAudio.length,0)
+  assert.deepEqual(order,['memory:allowed'])
   rejectRead(Error('fresh_authorization_unavailable'))
-  await assert.rejects(pending);assert.equal(session.state,'closed')
-  assert.equal(sentText,0);assert.equal(provider.sentAudio.length,0)
+  await pending
+  // Unverified memory leaves the model before the input does; the conversation continues without it.
+  assert.deepEqual(order,['memory:allowed','memory:null','input'])
+  assert.deepEqual(provider.responseAdaptations.at(-1),{revision:1,content:null})
+  assert.equal(session.state,'connected');assert.deepEqual(diagnostics,['read_failed'])
+  await session.close()
  })
 }
 
+test('a first connection whose memory read fails connects without memory and reports it',async()=>{
+ const provider=new FakeProvider(),diagnostics:string[]=[]
+ const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,onDiagnostic:value=>diagnostics.push(value.reason),responseAdaptation:()=>Promise.reject(Error('memory_worker_busy'))})
+ await session.connect()
+ assert.equal(session.state,'connected');assert.deepEqual(provider.responseAdaptations,[]);assert.deepEqual(diagnostics,['read_failed'])
+ await session.ensureResponse();assert.equal(provider.ensured,1)
+ await session.close()
+})
+
+test('memory that cannot be withdrawn after a failed read still closes the session',async()=>{
+ const provider=new FakeProvider();let fail=false
+ const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,responseAdaptation:()=>{if(fail)throw Error('revoked');return {revision:1,content:'allowed'}}})
+ await session.connect();fail=true;provider.adaptationFailure=Error('withdrawal_failed')
+ await assert.rejects(session.ensureResponse());assert.equal(provider.ensured,0);assert.equal(session.state,'closed')
+})
 
 test('requested-response audio does not read memory per frame but response admission revalidates it',async()=>{
  const provider=Object.assign(new FakeProvider(),{userResponseMode:'requested' as const})
@@ -611,5 +635,7 @@ test('requested-response audio does not read memory per frame but response admis
  await session.connect();const before=reads;fail=true
  for(let i=0;i<50;i++)await session.sendAudio(new Uint8Array(640))
  assert.equal(provider.sentAudio.length,50);assert.equal(reads,before)
- await assert.rejects(session.ensureResponse());assert.equal(provider.ensured,0);assert.equal(session.state,'closed')
+ await session.ensureResponse();assert.equal(reads,before+1)
+ assert.deepEqual(provider.responseAdaptations.at(-1),{revision:1,content:null});assert.equal(provider.ensured,1)
+ await session.close()
 })

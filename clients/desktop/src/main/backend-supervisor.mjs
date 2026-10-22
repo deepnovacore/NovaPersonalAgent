@@ -124,7 +124,10 @@ export function createBackendSupervisor({
     } catch (error) {
       if (cleanupStarted) throw error
       if (returnedBackend !== null && !cleanupStarted) await stopConfirmed(returnedBackend)
-      handleFailure(earlyFailure ?? error, expectedGeneration)
+      // A failed start that stops its own child also observes that exit. A generic disconnect adds
+      // nothing to the start's own verdict (a readiness timeout, say); a specific exit still wins.
+      const generic = earlyFailure?.code === 'backend_disconnected' && failureOf(error).code !== 'backend_disconnected'
+      handleFailure(earlyFailure !== null && !generic ? earlyFailure : error, expectedGeneration)
     }
   }
   const runAttempt = expectedGeneration => {
