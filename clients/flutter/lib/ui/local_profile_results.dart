@@ -625,10 +625,7 @@ class LocalProfileResults extends StatelessWidget {
           (current?['available_evidence_ids'] as List? ?? []).toSet(),
         );
         final messages = available
-            ? host.sources.sources
-                  .expand(host.sources.messages)
-                  .where((m) => refs.contains(m['evidence_id']))
-                  .toList()
+            ? host.sources.messagesByEvidenceIds(refs)
             : <Map<String, dynamic>>[];
         messages.sort(
           (a, b) => (a['created_at'] as int).compareTo(b['created_at'] as int),
@@ -787,9 +784,8 @@ class _ProfileScopeState extends State<_ProfileScope> {
           .expand((e) => e['evidence_ids'] as List)
           .toSet();
       final dates =
-          widget.host.sources.sources
-              .expand(widget.host.sources.messages)
-              .where((m) => refs.contains(m['evidence_id']))
+          widget.host.sources
+              .messagesByEvidenceIds(refs)
               .map((m) => sourceAccessExpiry(m).millisecondsSinceEpoch)
               .where((deadline) => deadline > now.millisecondsSinceEpoch)
               .toList()

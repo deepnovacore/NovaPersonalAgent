@@ -702,7 +702,9 @@ class TimelinePipeline {
       final reviewed = await _validated<String>(
         'timeline_review',
         '$_composeInstructions\n独立审查并直接返回修正后的完整timeline：逐句核对主体、事实、最新来源状态、'
-            '日期与引用；删除无个人联系的整卡及无据推测，不用润色掩盖事实错误。'
+            '日期与引用；把每句拆成具体断言，逐一对照所引原文的对象与状态，删除原文未支持的部分。'
+            '审查可以缩短或删除，不能为补足篇幅新增行为、因果、能力或状态；'
+            '删除无个人联系的整卡及无据推测，不用润色掩盖事实错误。'
             '已完成事项不要凑下一步，不能因没有更新说今天仍未完成。保留有依据的独立事项，允许空timeline。',
         {...material, 'draft': draft},
         (response, _) => _writing(response, messages, batchTopics),

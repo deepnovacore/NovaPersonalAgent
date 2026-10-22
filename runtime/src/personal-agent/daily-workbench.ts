@@ -20,6 +20,9 @@ type State=z.infer<typeof stateSchema>
 const diagnostics=()=>({inputs:0,cache_hits:0,extraction_calls:0,composition_calls:0,received:0,rejected:0,recorded:0})
 const empty=():State=>({version:1,failure:null,temporal:null,legacy_imported:false,legacy_dismissed:[],automatic_day:'',key:'',updated_at:null,cache:[],compositions:[],cards:[],dismissed:[],recorded:[],diagnostics:diagnostics()})
 const RECIPE='workbench-daily-v1'
+function invalidMatches(reason:'count'|'unknown_matter'|'duplicate_matter'|'invalid_target'|'invalid_same_as'):never{
+ throw Object.assign(Error('invalid_workbench_matches'),{classification:'invalid_workbench_matches_'+reason})
+}
 function unresolvedWorkbenchReference(card:{title:string;body:string;why:string|null;next:string|null;refs:readonly {quote:string}[]}):boolean{
  const references=(text:string)=>text.match(/\b[me]\d+\b/gu)??[];const quoted=new Set(card.refs.flatMap(ref=>references(ref.quote)));
  return references([card.title,card.body,card.why,card.next].join(' ')).some(id=>!quoted.has(id));
@@ -156,7 +159,15 @@ export class DailyWorkbench {
     const pending=batch.filter(m=>m.kind!=='topic'),ids=new Set<string>()
     // Topic rows cannot authorize writes; tolerate models returning these extra matches.
     result.matches=result.matches.filter(match=>!batch.some(m=>m.kind==='topic'&&m.id===match.matter_id))
-    if(result.matches.length!==pending.length||result.matches.some(match=>{const matter=pending.find(m=>m.id===match.matter_id);if(!matter||ids.has(match.matter_id))return true;ids.add(match.matter_id);return match.target_id!==null&&!candidates.some(c=>c.id===match.target_id&&c.kind===matter.kind)||match.same_as!==null&&(!pending.some(m=>m.id===match.same_as&&m.kind===matter.kind)||match.same_as===matter.id||result.matches.some(other=>other.matter_id===match.same_as&&other.same_as!==null))}))throw Error('invalid_workbench_matches')
+    if(result.matches.length!==pending.length)invalidMatches('count')
+    for(const match of result.matches){
+     const matter=pending.find(m=>m.id===match.matter_id)
+     if(!matter)invalidMatches('unknown_matter')
+     if(ids.has(match.matter_id))invalidMatches('duplicate_matter')
+     ids.add(match.matter_id)
+     if(match.target_id!==null&&!candidates.some(c=>c.id===match.target_id&&c.kind===matter.kind))invalidMatches('invalid_target')
+     if(match.same_as!==null&&(!pending.some(m=>m.id===match.same_as&&m.kind===matter.kind)||match.same_as===matter.id||result.matches.some(other=>other.matter_id===match.same_as&&other.same_as!==null)))invalidMatches('invalid_same_as')
+    }
     this.#state.compositions=[...this.#state.compositions.filter(c=>c.key!==compositionKey),{key:compositionKey,result}].slice(-256);await this.#save()
     result=structuredClone(result)
     // A lexical shortlist cannot prove absence. Check the remaining compact records before any automatic add.

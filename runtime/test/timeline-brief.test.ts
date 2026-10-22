@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath,readFile,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import {createHash} from 'node:crypto'
 import {TimelineBrief,type TimelineInput} from '../src/personal-agent/timeline-brief.js'
 const input:TimelineInput={id:'message',version:'v1',kind:'im',text:'Synthetic node is still down',observed_at:'2026-10-17T01:00:00Z',relation:'participant'}
 const reply={cards:[{category:'需要关注',title:'Check the node',why_now:'Repeated alert needs checking',facts:[{text:'The node is down',quote:'node is still down',ref:'message'}],uncertainty:'No recovery confirmed',actions:[{label:'Draft a question',kind:'draft' as const}],refs:['message']}]}
@@ -20,6 +21,21 @@ test('timeline uses ordinary evidence, caches across restart, preserves changed-
   assert.equal(brief.snapshot().diagnostics?.published,0)
   brief.update([],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a timeline cached before claim scope review is regenerated with unchanged sources',async(t)=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-claim-scope-')),path=join(dir,'timeline.json');let calls=0
+ const make=()=>new TimelineBrief(path,()=>{calls++;return Promise.resolve(reply)},()=>undefined)
+ let brief=make()
+ try{
+  await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');await brief.refresh();await brief.close()
+  const disk=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>
+  const key=createHash('sha256').update(JSON.stringify(['timeline-scope-v14','2026-10-17','Asia/Shanghai',[{id:'message',version:'v1'}]])).digest('hex')
+  await writeFile(path,JSON.stringify({...disk,key,last_attempt:0}))
+  brief=make();await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai')
+  t.mock.timers.enable({apis:['setTimeout']});brief.startGeneration();t.mock.timers.tick(1000)
+  assert.equal(brief.snapshot().status,'working','the old synthesis must be reviewed again even when its sources have not changed')
+  await brief.refresh();assert.equal(calls,2)
+ }finally{t.mock.timers.reset();await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 test('timeline drops a late model result after revocation and close cancels non-cooperative generation',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-revoke-'));let release!:(value:typeof reply)=>void
@@ -287,7 +303,7 @@ test('retained citations survive the generation selection cap and historical ori
 
 test('deleted originals leave durable history but cannot be discussed or sent for synthesis',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-deleted-'));let calls=0
- const make=()=>new TimelineBrief(join(dir,'timeline.json'),async()=>{calls++;return reply},()=>undefined)
+ const make=()=>new TimelineBrief(join(dir,'timeline.json'),()=>{calls++;return Promise.resolve(reply)},()=>undefined)
  let brief=make()
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
@@ -305,7 +321,7 @@ test('deleted originals leave durable history but cannot be discussed or sent fo
 test('historical cards remain isolated to their published account even after all sources are deleted',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-accounts-'))
  const access=(scope:string,refs:string[]=[])=>({scope,allowed:true,legacy_refs:refs})
- const brief=new TimelineBrief(join(dir,'timeline.json'),async()=>reply,()=>undefined)
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(reply),()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC',access('account-a',[input.id]));await brief.refresh()
   brief.update([],'2026-10-18','UTC',access('account-b'));assert.equal(brief.snapshot().cards.length,0)
@@ -319,7 +335,7 @@ test('historical cards remain isolated to their published account even after all
 test('identical local-source cards and dismissals remain independent between account spaces',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-scoped-dismiss-'))
  const access=(scope:string)=>({scope,allowed:true,legacy_refs:[input.id]})
- const brief=new TimelineBrief(join(dir,'timeline.json'),async()=>reply,()=>undefined)
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(reply),()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC',access('a'));await brief.refresh()
   const id=brief.snapshot().cards[0]!.id;await brief.dismiss(id)

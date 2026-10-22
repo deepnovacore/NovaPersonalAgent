@@ -40,7 +40,7 @@ class ProfileGenerationSnapshot {
 }
 
 /// One foreground application owner. Navigation never creates another scheduler.
-/// Durable attempts are written before work; reads/wakes never grant consent.
+/// Durable attempts are written before work; input policy owns model access.
 class ProfileGenerationCoordinator extends ChangeNotifier
     with WidgetsBindingObserver {
   ProfileGenerationCoordinator({

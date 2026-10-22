@@ -547,15 +547,22 @@ test('published profile is a display-only last success across recipe changes and
  }finally{db.close()}
 })
 
-test('published account scope survives deleted sources and never follows another Feishu account',()=>{
+test('published discussion profile survives logout and file drafts but never follows another Feishu account',()=>{
  const {db,process,bind}=setup();const id=prefix+'account-message',source_id=prefix+'chat',now=new Date().toISOString()
  try{
   memoryOperation(db,'append_evidence',{id,source_id,source_kind:'im',locator:'message',raw_text:'I manage a team',hash:'account-hash',observed_at:now,recorded_at:now,trust:'untrusted_external',source_metadata:{sender_id:'self',recipient_id:'self',account_id:'original-account',mention:'direct'}})
   memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null,conversation_providers:[]}})
   const batch=process({action:'claim'})!;bind(batch);process({action:'read',batch_id:batch.id});process({action:'publish',batch_id:batch.id,task_id:'task:'+batch.id,run_id:'run:'+batch.id,expected_revision:0,refs:batch.items,draft:{about:{text:'You manage a team.',refs:[{entry_id:id,version:'account-hash'}]},work:[],interests:[]}})
   const read=(account_scope?:string)=>process({action:'products',presentation:true,...(account_scope?{account_scope}: {})}) as {last_success:unknown}
-  assert.ok(read('original-account').last_success);assert.equal(read('other-account').last_success,null);assert.equal(read().last_success,null)
+  assert.ok(read('original-account').last_success);assert.equal(read('other-account').last_success,null);assert.ok(read().last_success,'local published prose remains readable while logged out')
+  const archived=db.prepare('SELECT payload_json FROM processing_publications').get()!
+  const fileDraft=JSON.parse(String(archived.payload_json)) as {draft:{about:{text:string}};sources:{type:string}[]};fileDraft.draft.about.text='New file-derived draft';for(const source of fileDraft.sources)source.type='file'
+  db.prepare('INSERT INTO processing_publications VALUES(?,?,?,?,?)').run(prefix,'file-recipe','file-publication','[]',JSON.stringify(fileDraft))
+  assert.equal((read().last_success as typeof fileDraft).draft.about.text,'You manage a team.','discussion portrait takes priority over a later file-only draft')
   memoryOperation(db,'delete_source',{source_id});initializeMemory(db)
-  assert.ok(read('original-account').last_success);assert.equal(read('other-account').last_success,null)
+  assert.ok(read('original-account').last_success);assert.ok(read().last_success)
+  assert.equal((read('other-account').last_success as typeof fileDraft).draft.about.text,'New file-derived draft')
+  db.prepare('INSERT INTO processing_publications VALUES(?,?,?,?,?)').run(prefix,'other-recipe','other-publication','["other-account"]',String(archived.payload_json))
+  assert.equal((read().last_success as typeof fileDraft).draft.about.text,'New file-derived draft','logged-out fallback does not guess between different saved accounts')
  }finally{db.close()}
 })

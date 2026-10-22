@@ -453,8 +453,8 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
         ),
         content: Text(
           t(
-            '所选聊天中已同步的文字消息会发送给以下模型，用于生成近况和个人信息：\n\n$providerLabel\n\n新增消息后会再次征求同意。此操作不会发送飞书消息，也不会上传到 Hub。',
-            'Synced text from the selected chats will be sent to this model to generate updates and personal info:\n\n$providerLabel\n\nNew messages require your consent again. This does not send Feishu messages or upload content to Hub.',
+            '所选聊天中已同步的文字消息会发送给以下模型，用于生成近况和个人信息：\n\n$providerLabel\n\n新增消息会自动继续整理，可随时停止模型使用。此操作不会发送飞书消息，也不会上传到 Hub。',
+            'Synced text from the selected chats will be sent to this model to generate updates and personal info:\n\n$providerLabel\n\nNew messages are processed automatically. You can stop model access at any time. This does not send Feishu messages or upload content to Hub.',
           ),
         ),
         actions: [

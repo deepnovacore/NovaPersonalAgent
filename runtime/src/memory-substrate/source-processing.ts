@@ -151,10 +151,12 @@ function archivePublication(db:LedgerDatabase,prefix:string,provider:string,payl
  db.prepare('INSERT OR IGNORE INTO processing_publications VALUES(?,?,?,?,?)').run(prefix,provider,key,canonicalJson([...accounts].sort()),canonicalJson(published))
 }
 function lastPublication(db:LedgerDatabase,prefix:string,consumer:string,accountScope:string|undefined){
- const rows=db.prepare('SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY rowid DESC').all(prefix)
+ const rows=db.prepare("SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY EXISTS(SELECT 1 FROM json_each(payload_json,'$.sources') WHERE json_extract(value,'$.type')='im') DESC,rowid DESC").all(prefix)
+ const savedAccounts=new Set(rows.flatMap(row=>JSON.parse(String(row.scope_json)) as string[]))
  for(const row of rows){
   const accounts=JSON.parse(String(row.scope_json)) as string[]
-  if(accounts.some(account=>account!==accountScope))continue
+  // Offline history is unambiguous only for one saved account; explicit account switches remain fenced.
+  if(accounts.length&&(accountScope===undefined?savedAccounts.size!==1:accounts.some(account=>account!==accountScope)))continue
   const saved=JSON.parse(String(row.payload_json)) as {draft:z.infer<typeof profileDraftSchema>;projects:unknown[];suggestions:unknown[];generation_version:string|null;generated_at:string|null;sources:{id:string;version:string;label:string;observed_at:string;type:string}[]}
   const sources=saved.sources.map(item=>{const record=effectiveEvidence(db,item.id,{purpose:'extraction',provider:consumer});return {...item,available:!!record&&record.hash===item.version}})
   return {...saved,sources,read_only:true as const,unavailable_sources:sources.filter(source=>!source.available).length}

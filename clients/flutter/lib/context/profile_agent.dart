@@ -158,7 +158,7 @@ class ProfileAgent extends ChangeNotifier {
   Map<String, int> lastCoverage = {};
   Map<String, dynamic>? lastPipelineValidation;
 
-  /// Only inspect already-authorized inputs. Never create grants or refresh sources.
+  /// Apply the configured model's default, preserving explicit user stops.
   Future<ProfileGenerationSnapshot?> inspectGeneration() async {
     if (_disposed ||
         busy ||
@@ -193,6 +193,8 @@ class ProfileAgent extends ChangeNotifier {
     final model = await models.read();
     if (model == null) throw const AgentFailure('model_required');
     final provider = '${model.endpoint}|${model.model}';
+    if (connector.sources.sources.isEmpty) return null;
+    await connector.sources.enableDefaultProcessing(provider);
     final consent = connector.sources.processingRevision;
     connector.sources.validateProcessing(provider, 'profile', consent);
     await repository.open();
@@ -238,8 +240,8 @@ class ProfileAgent extends ChangeNotifier {
   ) {
     return ProfileObservationCheckpoint.digest({
       'result_recipe': useTimelinePipeline
-          ? 'timeline-batched-v5'
-          : 'timeline-brief-v4',
+          ? 'timeline-batched-v6'
+          : 'timeline-brief-v5',
       'provider': '${model.endpoint}|${model.model}',
       'protocol': model.protocol.name,
       'account': connector.sources.identity,
@@ -397,8 +399,9 @@ class ProfileAgent extends ChangeNotifier {
     final model = await models.read();
     if (model == null) throw const AgentFailure('model_required');
     if (!connector.ready) throw const AgentFailure('connector_unavailable');
-    final provider = '${model.endpoint}|${model.model}',
-        epoch = authority.epoch,
+    final provider = '${model.endpoint}|${model.model}';
+    await connector.sources.enableDefaultProcessing(provider);
+    final epoch = authority.epoch,
         generation = connector.auth.generation,
         authorityGeneration = authority.publicationGeneration,
         sourceRevision = connector.sources.revision,

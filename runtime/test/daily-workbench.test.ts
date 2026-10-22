@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath} from 'node:fs/promises'
+import {mkdtemp,rm,realpath,readFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {DailyWorkbench} from '../src/personal-agent/daily-workbench.js'
@@ -14,12 +14,12 @@ import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 const input=(id='m1'):TimelineInput=>({id,version:'1',text:'我会整理发布材料。长期目标是让助手成为每日工作入口。',kind:'im',group:'chat:a',relation:'self',author:{key:'me',kind:'person',is_user:true},observed_at:'2026-10-18T01:00:00Z'})
 const matter=(i:TimelineInput,kind:'todo'|'goal'|'topic'='todo')=>({kind,title:kind==='goal'?'助手成为每日工作入口':'整理发布材料',summary:'准备本轮发布',ownership:'user' as const,assertion:'direct' as const,state:'open' as const,due:null,due_quote:null,refs:[{entry_id:i.id,version:i.version,quote:i.text}]})
 const generate:WorkbenchGenerator=request=>Promise.resolve(request.phase==='reconcile'?{groups:request.matters.map(m=>({members:[m.id],state:m.state,current:m.id,basis:[m.id]}))}:request.phase==='extract'?{matters:request.inputs.flatMap(i=>[matter(i),matter(i,'goal'),matter(i,'topic')])}:{matches:request.matters.filter(m=>m.kind!=='topic').map(m=>({matter_id:m.id,target_id:request.existing.find(e=>e.kind===m.kind)?.id??null,same_as:null,capture:'record'})),suggestions:[{tab:'ideas',title:'先做一个发布预检清单',body:'可以把发布检查变成一键预检，减少重复操作。',why:null,next:null,matter_ids:[request.matters[0]!.id]}]})
-async function fixture(run:(f:{daily:DailyWorkbench;life:LifeService;setInputs:(i:TimelineInput[])=>void;nextDay:()=>void;calls:string[];reads:()=>number;reopen:()=>Promise<void>})=>Promise<void>,generator:(r:Exclude<WorkbenchRequest,{phase:'reconcile'}>,s:AbortSignal)=>Promise<unknown>=generate,reconcile:WorkbenchGenerator=generate){
+async function fixture(run:(f:{daily:DailyWorkbench;life:LifeService;setInputs:(i:TimelineInput[])=>void;nextDay:()=>void;calls:string[];reads:()=>number;failure:()=>Promise<string|null>;reopen:()=>Promise<void>})=>Promise<void>,generator:(r:Exclude<WorkbenchRequest,{phase:'reconcile'}>,s:AbortSignal)=>Promise<unknown>=generate,reconcile:WorkbenchGenerator=generate){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-workbench-'));const life=new LifeService(join(dir,'life.json'));await life.open()
  let inputs=[input()],now=new Date('2026-10-18T03:00:00Z');const calls:string[]=[];let reads=0
  const daily=new DailyWorkbench({path:join(dir,'daily.json'),life:()=>life,inputs:()=>{reads++;return Promise.resolve(inputs)},timezone:()=>'Asia/Shanghai',now:()=>now,ready:()=>true,changed:()=>undefined,generate:async(r,s)=>{calls.push(r.phase);return r.phase==='reconcile'?reconcile(r,s):generator(r,s)}})
  await daily.open()
- try{await run({daily,life,setInputs:i=>{inputs=i},nextDay:()=>{now=new Date(now.getTime()+86400000)},calls,reads:()=>reads,reopen:async()=>{await daily.close();await daily.open()}})}finally{await daily.close();await life.close();await rm(dir,{recursive:true,force:true})}
+ try{await run({daily,life,setInputs:i=>{inputs=i},nextDay:()=>{now=new Date(now.getTime()+86400000)},calls,reads:()=>reads,failure:async()=>(JSON.parse(await readFile(join(dir,'daily.json'),'utf8')) as {failure:string|null}).failure,reopen:async()=>{await daily.close();await daily.open()}})}finally{await daily.close();await life.close();await rm(dir,{recursive:true,force:true})}
 }
 test('one shared run records explicit todos/goals and produces grounded inspiration',()=>fixture(async({daily,life,calls})=>{
  await daily.refresh(true);assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,1);assert.equal(life.snapshot().goals.length,1)
@@ -136,6 +136,20 @@ test('malformed inspiration is filtered without weakening automatic identity val
 test('extra topic matches cannot block or authorize automatic records',()=>fixture(async({daily,life})=>{
  await daily.refresh();assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,1)
 },async(r,s)=>{const result=await generate(r,s) as {matches:unknown[]};return r.phase==='extract'?result:{...result,matches:[...result.matches,...r.matters.filter(m=>m.kind==='topic').map(m=>({matter_id:m.id,target_id:null,same_as:null,capture:'record'}))]}}))
+
+for(const reason of ['count','duplicate_matter','unknown_matter','invalid_target','invalid_same_as'] as const)test('invalid matches fail closed with a bounded diagnostic: '+reason,()=>fixture(async({daily,life,failure})=>{
+ await daily.refresh();assert.equal(daily.snapshot().error,'invalid_workbench_matches');assert.equal(life.snapshot().todos.length,0);assert.equal(life.snapshot().goals.length,0);assert.equal(daily.snapshot().cards.length,0)
+ assert.equal(await failure(),'invalid_workbench_matches_'+reason)
+},async(r,s)=>{
+ const result=await generate(r,s) as {matches:{matter_id:string;target_id:string|null;same_as:string|null}[]}
+ if(r.phase==='extract')return result
+ if(reason==='count')result.matches.pop()
+ if(reason==='duplicate_matter')result.matches[1]!.matter_id=result.matches[0]!.matter_id
+ if(reason==='unknown_matter')result.matches[0]!.matter_id='untrusted-model-id'
+ if(reason==='invalid_target')result.matches[0]!.target_id='untrusted-model-id'
+ if(reason==='invalid_same_as')result.matches[0]!.same_as=result.matches[0]!.matter_id
+ return result
+}))
 
 test('composition uses compact identifiers and restores only known identities',async()=>{
  const {createWorkbenchGenerator}=await import('../src/model/workbench-writer.js')

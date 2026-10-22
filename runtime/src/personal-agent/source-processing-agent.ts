@@ -31,16 +31,17 @@ export class SourceProcessingAgent{
   const life=this.host.life.snapshot(),rows=item.kind==='goal'?life.goals:item.kind==='idea'?life.ideas:life.todos,source=this.#source(item)
   return rows.find(row=>row.source_suggestion_id===item.id||(!item.todo_id&&source&&lifeEvidenceMatches(source.refs,[...(row.workbench_source?.refs??[]),...(row.suggestion_source?.refs??[])])))
  }
+ #account(){const feishu:unknown=this.host.snapshot().feishu;return typeof feishu==='object'&&feishu!==null&&'account_id' in feishu?feishu.account_id:undefined}
  snapshot(){const products=structuredClone(this.#products);products.suggestions=products.suggestions.filter(item=>!this.#captured(item));return products}
  #presentationAccount:string|undefined
  setPresentationAccount(account:string|undefined){if(account!==this.#presentationAccount){this.#products=emptyUnderstanding();this.#presentationAccount=account}}
  async reload(){
   if(!this.enabled)return
   const revision=++this.#revision
-  const account=(this.host.snapshot().feishu as {account_id?:unknown}|null)?.account_id
-  try{const products=await this.operation({action:'products',presentation:true,...(typeof account==='string'?{account_scope:account}: {})}) as UnderstandingSnapshot;const current=(this.host.snapshot().feishu as {account_id?:unknown}|null)?.account_id;if(revision!==this.#revision||current!==account)return;this.#products=products;this.#presentationAccount=typeof account==='string'?account:undefined;this.#error=false
+  const account=this.#account()
+  try{const products=await this.operation({action:'products',presentation:true,...(typeof account==='string'?{account_scope:account}: {})}) as UnderstandingSnapshot;const current=this.#account();if(revision!==this.#revision||current!==account)return;this.#products=products;this.#presentationAccount=typeof account==='string'?account:undefined;this.#error=false
    if(products.news_cleanup_pending)try{await this.host.news.clearSeededInterests();await this.operation({action:'confirm_cleanup'});this.#products.news_cleanup_pending=false}catch{/* Durable marker survives a failed write; retry on the next wake. */}}
-  catch{if(revision!==this.#revision)return;const current=(this.host.snapshot().feishu as {account_id?:unknown}|null)?.account_id;const retained=(typeof current==='string'?current:undefined)===this.#presentationAccount?this.#products.last_success:null;this.#products={...emptyUnderstanding(),last_success:retained??null};this.#error=true}
+  catch{if(revision!==this.#revision)return;const current=this.#account();const retained=(typeof current==='string'?current:undefined)===this.#presentationAccount?this.#products.last_success:null;this.#products={...emptyUnderstanding(),last_success:retained??null};this.#error=true}
  }
  profileSnapshot(){const latest=this.host.schedules.terminalRuns().filter(run=>run.processing).sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at))[0];return {status:this.host.schedules.activeRuns().some(run=>run.processing)?'working':this.#error||latest?.terminal_summary?.outcome==='failed'?'failed':this.#products.profile_pending?'working':this.#products.draft?'ready':'idle',draft:this.#products.draft,last_success:this.#products.last_success,needs_update:this.#products.profile_needs_update===true,sources:this.#products.sources,processing:[...this.host.schedules.activeRuns(),...this.host.schedules.terminalRuns()].filter(run=>run.processing).sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at)).slice(0,5).map(run=>({started_at:run.claimed_at,status:run.terminal_summary?.outcome??'running',model_calls:run.processing?.model_calls??0,tool_calls:run.processing?.calls.length??0}))}}
  contextSnapshot():ReturnType<WorkbenchContext['snapshot']>{
@@ -117,7 +118,8 @@ export class SourceProcessingAgent{
   if(consumer!==undefined&&(!consumer||consumer!==this.host.options.memory()?.sourceProcessingConsumer?.()))return false
   try{const result=batchResult.parse(await this.operation({action:'batch',batch_id:run.processing.batch_id}));return result.valid&&result.batch.provider===run.processing.recipe&&result.batch.run_id===run.run_id&&result.batch.task_id===run.task_id&&['bound','completed'].includes(result.batch.status)}catch{return false}
  }
- async validate(grant:ScheduledRunGrant){return !this.host.sourceProcessingForegroundBusy()&&await this.valid(this.host.schedules.getRun(grant.run_id),grant.consumer)}
+ // Foreground activity gates admission, but does not revoke an already authorized batch.
+ async validate(grant:ScheduledRunGrant){return this.valid(this.host.schedules.getRun(grant.run_id),grant.consumer)}
  async call(grant:ScheduledRunGrant,callId:string,value:unknown){
   this.host.scheduledAuthority.assert(grant,grant.fence)
   if(!await this.validate(grant))throw Error('processing_context_unavailable')

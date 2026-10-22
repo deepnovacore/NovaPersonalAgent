@@ -8,6 +8,27 @@ import {SuggestionPool} from '../src/core/suggestions.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import type {TimelineInput} from '../src/personal-agent/timeline-brief.js'
 
+test('restart restores the saved account before presenting cached timeline without generation',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-account-restart-'));
+ const input={id:'personal:restored',version:'1',kind:'im',text:'Release passed',observed_at:new Date().toISOString(),account_scope:'saved-account'};
+ let calls=0;
+ const memory={timelineEvidence:()=>Promise.resolve([input])} as unknown as PersonalMemoryResource;
+ const create=()=>{
+  let account:string|undefined;
+  const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateTimeline:()=>{calls++;return Promise.resolve({cards:[{category:'Release',title:'Release passed',why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.id}],uncertainty:'',actions:[],refs:[input.id]}]})}});
+  const connector={restore:()=>{account='saved-account';return Promise.resolve()},snapshot:()=>({account_id:account}),open:()=>Promise.reject(Error('network must not be needed')),close:()=>Promise.resolve(),command:()=>Promise.resolve(null)};
+  host.setFeishu(connector);return host;
+ };
+ let host=create();
+ try{
+  await host.open({deferBackground:true});
+  assert.equal((host.snapshot().feishu as {account_id?:string}).account_id,'saved-account');
+  await host.refreshTimeline();await host.timeline.refresh();assert.equal(host.snapshot().timeline.cards.length,1);
+  await host.close();host=create();await host.open({deferBackground:true});await host.refreshTimeline();
+  assert.equal(host.snapshot().timeline.cards.length,1);assert.equal(calls,1,'restart reads the saved result without another model call');
+ }finally{await host.close();await rm(dir,{recursive:true,force:true});}
+})
+
 test('host synthesizes ordinary signals without Life writes and revalidates conversation recipient and source withdrawal',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-host-'))
  let inputs:TimelineInput[]=[{id:'personal:test:ordinary',version:'v1',kind:'im',text:'Synthetic approval is pending',observed_at:new Date().toISOString(),relation:'participant'}],calls=0,understandingCalls=0
@@ -30,7 +51,11 @@ test('host synthesizes ordinary signals without Life writes and revalidates conv
   assert.equal(host.snapshot().life.todos.length,0)
   await host.submitConversationText('chat:main','Remember to review my plan');await host.waitConversation('chat:main')
   assert.equal(understandingCalls,1,'ordinary user messages still reach understanding')
-  inputs=[];await host.sourceChanged();assert.equal(host.snapshot().timeline.cards.length,0)
+  inputs=[];await host.sourceChanged()
+  const historical=host.snapshot().timeline.cards
+  assert.equal(historical.length,1);assert.equal(historical[0]!.id,card.id)
+  assert.equal(historical[0]!.sources_available,false);assert.equal(historical[0]!.historical,true)
+  assert.equal(await host.timelineAuthorized(card.id,card.version,'allowed'),false)
   await assert.rejects(host.discussionContext([reference]),/stale_reference/)
   assert.equal(host.snapshot().life.todos.length,0)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
@@ -50,6 +75,12 @@ test('host forwards checked batch progress only after reauthorizing original sou
   await host.open({deferBackground:true});await host.refreshTimeline();const run=host.timeline.refresh()
   for(let i=0;i<1000&&!finished;i++)await new Promise(resolve=>setTimeout(resolve,1))
   assert.equal(finished,true);assert.equal(host.snapshot().timeline.cards.length,1);assert.equal(host.snapshot().timeline.status,'working')
-  release();await run;assert.equal(host.snapshot().timeline.cards.length,0,'revoked progress disappears immediately, before another refresh')
+  const card=host.snapshot().timeline.cards[0]!
+  release();await run
+  const historical=host.snapshot().timeline.cards
+  assert.equal(historical.length,1);assert.equal(historical[0]!.id,card.id)
+  assert.equal(historical[0]!.sources_available,false,'revoked progress loses source access immediately, before another refresh')
+  assert.equal(historical[0]!.historical,true)
+  assert.throws(()=>host.timeline.discussion(card.id,card.version),/stale_reference/)
  }finally{release?.();await host.close();await rm(dir,{recursive:true,force:true})}
 })

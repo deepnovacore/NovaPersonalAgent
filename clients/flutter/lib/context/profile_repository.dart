@@ -288,13 +288,14 @@ class ProfileRepository {
             current['consent_revision'] == sources.processingRevision;
       }
     }
-    final originals = {
-      for (final m in sources.sources.expand(sources.messages))
-        if (evidenceAllowed && m['status'] == 'available') m['evidence_id']: m,
-    };
     final refs = (current['entries'] as List)
         .expand((entry) => entry['evidence_ids'] as List)
         .toSet();
+    final originals = {
+      if (evidenceAllowed)
+        for (final m in sources.messagesByEvidenceIds(refs))
+          if (m['status'] == 'available') m['evidence_id']: m,
+    };
     final available = refs
         .where(
           (id) =>

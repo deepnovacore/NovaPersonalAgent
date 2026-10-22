@@ -65,7 +65,7 @@ export class TimelineBrief {
  suspend(){this.#pendingValidation=true;this.changed()}
  invalidate(){this.update([],this.#date,this.#timezone,this.#access?{...this.#access,legacy_refs:[]}:{scope:'local',allowed:true,legacy_refs:[]})}
  unavailable(){this.invalidate();this.#status='failed';this.#error='timeline_sources_unavailable';this.changed()}
- #key(){return hash(['timeline-scope-v14',this.#date,this.#timezone,this.#inputs.map(({id,version})=>({id,version}))])}
+ #key(){return hash(['timeline-scope-v15',this.#date,this.#timezone,this.#inputs.map(({id,version})=>({id,version}))])}
  #compatible(basis:readonly {id:string;version:string}[],date:string,timezone:string|null){
   if(date!==this.#date||timezone!==this.#timezone)return false
   const versions=new Map(this.#inputs.map(input=>[input.id,input.version]))

@@ -413,6 +413,27 @@ class SourceStore extends ChangeNotifier {
       )
       .map((m) => copyJson(m))
       .toList();
+
+  /// Resolve only the referenced originals, rechecking access on every read.
+  List<Map<String, dynamic>> messagesByEvidenceIds(Iterable<Object?> ids) {
+    final cutoff = now()
+        .subtract(const Duration(days: 30))
+        .millisecondsSinceEpoch;
+    final stored = _data['messages'] as Map;
+    final selected = _data['sources'] as Map;
+    final result = <Map<String, dynamic>>[];
+    for (final id in ids.whereType<String>().toSet()) {
+      final message = stored[id];
+      if (message is Map<String, dynamic> &&
+          message['evidence_id'] == id &&
+          selected.containsKey(message['chat_id']) &&
+          sourceAccessTime(message) > cutoff) {
+        result.add(copyJson(message));
+      }
+    }
+    return result;
+  }
+
   Future<void> grantProcessing(String provider, String purpose, bool enabled) =>
       _write((data) {
         if (provider.isEmpty ||
@@ -421,13 +442,30 @@ class SourceStore extends ChangeNotifier {
           throw StateError('invalid_processing_grant');
         }
         final key = lifeFingerprint({'provider': provider, 'purpose': purpose});
+        // Explicitly stopping processing survives restarts and source changes.
+        // Older stores have no decision marker and use the product default.
+        data['processing_disabled'] = !enabled;
         if (enabled) {
           data['grants'][key] = {'provider': provider, 'purpose': purpose};
         } else {
-          (data['grants'] as Map).remove(key);
+          data['grants'] = {};
         }
         data['processing_revision'] = (data['processing_revision'] as int) + 1;
       });
+
+  /// Apply the default only to the configured model before starting a round.
+  /// Validation within a running round never creates or renews permissions.
+  Future<void> enableDefaultProcessing(String provider) => _write((data) {
+    if (provider.isEmpty) throw StateError('invalid_processing_grant');
+    if (data['processing_disabled'] == true ||
+        (data['sources'] as Map).isEmpty) {
+      return;
+    }
+    final key = lifeFingerprint({'provider': provider, 'purpose': 'profile'});
+    if ((data['grants'] as Map).containsKey(key)) return;
+    data['grants'][key] = {'provider': provider, 'purpose': 'profile'};
+    data['processing_revision'] = (data['processing_revision'] as int) + 1;
+  });
   void validateProcessing(String provider, String purpose, int expected) {
     if (expected != processingRevision ||
         !_data['grants'].containsKey(
