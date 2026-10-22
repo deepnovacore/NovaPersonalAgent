@@ -11,6 +11,7 @@ export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'themes', label: t("主题"), sections: Object.freeze(['visor-section','orb-skin-section'])}),
   Object.freeze({id: 'usage', label: t("用量"), sections: Object.freeze(['frontend-usage-section'])}),
   Object.freeze({id: 'pipeline', label: t("语音管线"), sections: Object.freeze(['pipeline'])}),
+  Object.freeze({id: 'skills', label: t('技能'), sections: Object.freeze(['skills-section'])}),
   Object.freeze({id: 'capabilities', label: t("执行器与 MCP"), sections: Object.freeze(['capabilities-section'])}),
   Object.freeze({id: 'im', label: t("IM 渠道"), sections: Object.freeze(['im-section'])}),
   Object.freeze({id: 'connections', label: t("连接与权限"), sections: Object.freeze(['desktop-permissions-section','connections-section'])}),

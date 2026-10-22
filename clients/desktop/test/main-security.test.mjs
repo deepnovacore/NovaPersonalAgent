@@ -325,7 +325,7 @@ test('the settings window is a singleton that never rebinds the shared permissio
 
   assert.match(source, /let settingsWindow = null/)
   assert.match(body, /if \(settingsWindow\) \{\n\s*settingsWindow\.show\(\)\n\s*settingsWindow\.focus\(\)[\s\S]*refreshManagedWorkspaceCapabilities\(\)[\s\S]*return\n\s*\}/)
-  assert.match(body, /settingsWindowOptions\(preload, launchId\)/)
+  assert.match(body, /settingsWindowOptions\(preload, launchId, screen\.getDisplayNearestPoint/)
   assert.match(body, /setWindowOpenHandler\(apiKeyWindowOpenHandler\(url => shell\.openExternal\(url\)\)\)/)
   assert.match(body, /allowRendererNavigation\(url\)/)
   assert.match(body, /settingsWindow = null/)

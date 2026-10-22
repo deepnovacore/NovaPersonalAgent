@@ -1,4 +1,4 @@
-import {TASK_PHASE_LABEL,taskNextStep,isSourceProcessingTask} from './tasks-page.mjs'
+import {TASK_PHASE_LABEL,taskNextStep,isSourceProcessingTask,taskNotificationText} from './tasks-page.mjs'
 import {mountIdleAvatar} from './idle-avatar.mjs'
 import {mountAssistantWelcome} from './assistant-welcome.mjs'
 import {renderMarkdown} from './markdown.mjs'
@@ -88,6 +88,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   else if(e.key==='Tab'&&e.shiftKey&&!e.isComposing&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&composerMode.cycle())e.preventDefault()
  })
  const inputActions=el('div',undefined,'composer-actions');const composerMode=mountComposerMode(inputActions,{c,el,run});const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
+ inputActions.addEventListener('keydown',event=>{if(!event.defaultPrevented&&event.key==='Tab'&&event.shiftKey&&!event.isComposing&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&composerMode.cycle())event.preventDefault()})
  const dictate=el('button',undefined,'composer-dictate');dictate.type='button';dictate.append(glyph(GLYPH.mic));inputActions.append(dictate)
  const recordingHere=()=>Boolean(c.dictationId)&&c.dictationConversationId===c.selectedId
  dictate.addEventListener('click',()=>run(()=>recordingHere()?c.finish():c.dictate()))
@@ -190,7 +191,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
   if(feed){const {delivery,...content}=feed,memory=c.snapshot?.memory?.entries?.filter(entry=>feed.memory_refs?.some(ref=>ref.entry_id===entry.id)),key=JSON.stringify([message,content,memory,c.connected,Boolean(feed.expires_at&&Date.parse(feed.expires_at)<=Date.now()),Boolean(feed.snooze_until&&Date.parse(feed.snooze_until)>Date.now())]),cached=feedNodes.get(message.id);if(cached?.key===key)return cached.node;const holder=el('article',undefined,'message assistant message-feed');holder.dataset.messageId=message.id;holder.append(el('small',identityView?.profile.assistantName??'Nova','message-role'));renderFeedCard(holder,feed,{el,button,chips,command:(m,p)=>c.command(m,p),openFeed:(id,label)=>run(async()=>{const feed=c.snapshot?.feed?.find(item=>item.id===id);if(feed?.task_ref){const work=feed.task_ref.work_id,task=c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work)||work.startsWith('verified:'+task.id+':'));if(!task)throw Error(t('任务记录暂不可用，请在任务页核对。'));await openTask?.(task.id);return}await onHome();await focusReference([{kind:'feed',id,updated_at:feed.updated_at}])}),visible:false,presented,memory:c.snapshot?.memory?.entries,connected:c.connected,currentItem:()=>c.snapshot?.feed?.find(item=>item.id===feed.id),body:text=>renderMarkdown(text,{openLink})});feedNodes.set(message.id,{key,node:holder});return holder}
   const node=el('article',undefined,`message ${message.role==='user'?'user':'assistant'}`);node.dataset.messageId=message.id;node.append(el('small',message.role==='user'?'你':identityView?.profile.assistantName??'Nova','message-role'))
-  if(message.role==='user')node.append(el('p',message.text));else {node.append(renderMarkdown(message.text,{openLink}));if(message.full_text_ref&&c.selectedConversation?.kind==='build'){
+  if(message.role==='user')node.append(el('p',message.text));else {node.append(renderMarkdown(taskNotificationText(message),{openLink}));if(message.full_text_ref&&c.selectedConversation?.kind==='build'){
    const full=el('details',undefined,'build-full-reply'),summary=el('summary',t('展开完整回复')),content=el('div',undefined,'build-full-reply-content');full.append(summary,content)
    let loaded=false,loading=false
    full.addEventListener('toggle',()=>{if(!full.open||loaded||loading)return;loading=true;content.replaceChildren(el('p',t('正在加载完整回复…'),'hint'));void (async()=>{try{const id=c.selectedId;let offset=0,text='';do{const page=await c.command('build.details',{id,view:'reply',message_id:message.turn_id,offset});if(id!==c.selectedId)return;text+=page.text;offset=page.next_offset}while(offset!==null);if(id!==c.selectedId)return;content.replaceChildren(renderMarkdown(text,{openLink}));loaded=true}catch(error){content.replaceChildren(el('p',t('完整回复加载失败：{0}',error.message),'hint'))}finally{loading=false}})()})

@@ -8,7 +8,8 @@
     <link rel="stylesheet" href="./settings.css">
     <link rel="stylesheet" href="./welcome.css">
     <link rel="stylesheet" href="./feishu-guide.css">
-  </head>
+    <link rel="stylesheet" href="./skills.css">
+</head>
   <body>
     <header>
       <div class="title-lockup">
@@ -23,6 +24,7 @@
       <button type="button" class="nav-item" id="category-themes" data-category="themes" aria-current="false" tabindex="-1">主题</button>
       <button type="button" class="nav-item" id="category-usage" data-category="usage" aria-current="false" tabindex="-1">用量</button>
       <button type="button" class="nav-item" id="category-pipeline" data-category="pipeline" aria-current="false" tabindex="-1">语音管线</button>
+      <button type="button" class="nav-item" id="category-skills" data-category="skills" aria-current="false" tabindex="-1">技能</button>
       <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">执行器与 MCP</button>
       <button type="button" class="nav-item" id="category-im" data-category="im" aria-current="false" tabindex="-1">IM 渠道</button>
       <button type="button" class="nav-item" id="category-connections" data-category="connections" aria-current="false" tabindex="-1">连接与权限</button>
@@ -133,6 +135,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
         <p class="usage-note">包含对话与后台任务，费用为估算值。</p><p class="usage-note">部分外部工具的用量可能未计入。</p><label for="usage-group">统计维度</label><select id="usage-group"><option value="features">按功能</option><option value="models">按模型</option><option value="runs">按任务运行（最近 100 组）</option></select>
         <details id="usage-breakdown" open hidden><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
       </section>
+      <section class="setting-section" id="skills-section"><h2>技能</h2><div id="skills-panel"></div></section>
       <section class="setting-section" id="capabilities-section">
         <h2>能力</h2>
         <p id="capabilities-problems" class="warning" aria-live="polite"></p>

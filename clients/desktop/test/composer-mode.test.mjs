@@ -70,3 +70,20 @@ test('a Build session shows Build locked and other kinds hide the control',()=>{
  assert.equal(build.button.title,'Build 会话进行中');assert.equal(build.root.children.length,1)
  for(const kind of ['proactive','schedule'])assert.equal(fixture({id:kind,kind}).root.hidden,true)
 })
+
+test('Shift+Tab on the mode button cycles without moving focus, but modified Tab passes through',async()=>{
+ const {button,root}=fixture({id:'chat:main',kind:'chat',mode:'plan'})
+ let prevented=0
+ button.listeners.keydown({key:'Tab',shiftKey:true,preventDefault(){prevented++}});await flush()
+ assert.equal(root.attributes['data-mode'],'build');assert.equal(prevented,1)
+ button.listeners.keydown({key:'Tab',shiftKey:true,ctrlKey:true,preventDefault(){prevented++}});await flush()
+ assert.equal(root.attributes['data-mode'],'build');assert.equal(prevented,1)
+})
+
+test('switching keeps the focused mode button enabled while the host command is pending',async()=>{
+ const {c,button,control}=fixture({id:'chat:main',kind:'chat'})
+ let release;c.command=()=>new Promise(resolve=>{release=resolve})
+ const pending=control.select('plan')
+ assert.equal(button.disabled,false);assert.equal(button.attributes['aria-busy'],'true')
+ release();await pending;assert.equal(button.attributes['aria-busy'],'false')
+})
