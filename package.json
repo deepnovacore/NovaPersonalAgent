@@ -25,18 +25,13 @@
     "package:mac": "npm run package:mac --workspace @nova-personal-agent/desktop",
     "package:mac:candidate": "npm run package:mac:candidate --workspace @nova-personal-agent/desktop",
     "package:win": "npm run package:win --workspace @nova-personal-agent/desktop",
-    "runtime:demo": "npm run demo --workspace @nova-personal-agent/runtime",
-    "runtime:fixtures": "npm run fixtures:check --workspace @nova-personal-agent/runtime",
-    "runtime:smoke:qwen": "npm run smoke:qwen --workspace @nova-personal-agent/runtime",
     "test": "npm run test:runtime && npm run test:desktop && npm run test:cli && npm run test:server-cli",
     "test:cli": "npm test --workspace nova-personal-agent",
     "test:desktop": "npm test --workspace @nova-personal-agent/desktop",
     "test:runtime": "npm test --workspace @nova-personal-agent/runtime",
     "test:runtime:win": "npm run test:win --workspace @nova-personal-agent/runtime",
-    "runtime:smoke:search:mcp": "npm run smoke:search:mcp --workspace @nova-personal-agent/runtime",
     "test:runtime:win:platform": "npm run test:win:platform --workspace @nova-personal-agent/runtime",
-    "test:server-cli": "node --test server-cli/test/*.test.mjs",
-    "pack:server": "npm run build --workspace @nova-personal-agent/runtime && node scripts/pack-server.mjs"
+    "test:server-cli": "node --test server-cli/test/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
