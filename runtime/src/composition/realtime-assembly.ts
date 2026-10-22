@@ -25,7 +25,7 @@ import {compileContextView} from '../core/context-view.js'
 import {PersonalAgentHost} from '../personal-agent/host.js'
 import {tmpdir} from 'node:os'
 import {mkdtempSync, realpathSync} from 'node:fs'
-import {join} from 'node:path'
+import {join,dirname} from 'node:path'
 import type {MemoryInspectionQuery} from '../memory/personal-memory-inspection.js'
 import type {UsageReporter} from '../realtime/usage.js'
 import type {ApprovalController} from '../core/approval-port.js'
@@ -384,6 +384,8 @@ export class RealtimeAssembly {
     this.#unbindSuggestionSelected = input.unbindSuggestionSelected
     this.#sharedPersonal = input.sharedPersonal !== undefined
     this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
+      ...(input.core.personalAgentConfig?.path?{readingCopiesDirectory:dirname(memoryPath(input.core.personalAgentConfig.path))}:{}),
+      onDiagnostic:code=>this.#diagnose(code),
       newsLanguage: input.core.personalAgentConfig?.newsLanguage ?? 'en',
       profileParticipantMessages: input.core.personalAgentConfig?.profileParticipantMessages === true,
       path: input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),

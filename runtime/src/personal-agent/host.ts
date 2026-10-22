@@ -1,6 +1,7 @@
 import {computerUseCommandSchema,type ComputerUseState,type ComputerUseCommandResult,type ComputerPreflightItem} from './computer-use/contract.js'
 import {loadComputerConfig} from '../executors/computer-config.js'
 import {supportsVision} from '../model/vision-capability.js'
+import {ReadingCopies} from './reading-copies.js'
 import {createPreferredNameSync} from './preferred-name-sync.js'
 import {WorkbenchStore,type WorkbenchPlan} from './workbench-store.js'
 import {canonicalProject,projectResourceKey} from './local-tools.js'
@@ -103,6 +104,7 @@ export interface PersonalFeishu {
     close(): Promise<void>;
 }
 export interface HostOptions {
+    readingCopiesDirectory?: string;
     explicitMemoryConsumer?:()=>string|undefined;
     stopRevoker?: StopRevoker;
     onDiagnostic?: (code: string) => void;
@@ -855,7 +857,8 @@ export class PersonalAgentHost {
     #overviewRun: Promise<void> | undefined;
     #overviewAbort = new AbortController();
     #overviewCache: {key:string; value:MemoryOverview} | undefined;
-    #notify(): void { this.#projectionRevision = Math.max(this.#projectionRevision, this.#state.revision) + 1; for (const listener of this.#listeners) { try { listener(); } catch { /* observer only */ } } }
+    #readingCopies:ReadingCopies|undefined;
+    #notify(): void { this.#readingCopies?.schedule(); this.#projectionRevision = Math.max(this.#projectionRevision, this.#state.revision) + 1; for (const listener of this.#listeners) { try { listener(); } catch { /* observer only */ } } }
     #invalidateOverview(): void {
         this.#memoryRefresh++;
         this.#overviewKey = '';
@@ -891,6 +894,10 @@ export class PersonalAgentHost {
     }
     constructor(readonly options: HostOptions) {
       this.workbench=new WorkbenchStore(options.path+'.workbench-agent');
+      if(options.readingCopiesDirectory)this.#readingCopies=new ReadingCopies(options.readingCopiesDirectory,()=>{
+        const state=this.snapshot(),account=typeof state.feishu==='object'&&state.feishu!==null&&'account_id' in state.feishu&&typeof state.feishu.account_id==='string'?state.feishu.account_id:undefined;
+        return {scope:options.userScope+':'+(account??'local'),life:state.life,timeline:this.timeline.snapshot(true),timelineLoadFailed:this.timeline.loadFailed,profile:state.profile_preparation};
+      },code=>options.onDiagnostic?.(code));
       this.timeline=new TimelineBrief(options.path+'.timeline.json',options.generateTimeline?async(inputs,context,signal,progress)=>{
         const authorize=async()=>{signal.throwIfAborted();const allowed=await this.#timelineInputs();signal.throwIfAborted();if(inputs.some(input=>!allowed.some(current=>current.id===input.id&&current.version===input.version))){this.timeline.invalidate();throw Error('processing_consent_required')}}
         await authorize();const result=await options.generateTimeline!(inputs,context,signal,async partial=>{await authorize();await progress?.(partial)});await authorize();return result
@@ -959,6 +966,7 @@ export class PersonalAgentHost {
             for (const item of this.#state.feed) {
                 if (item.lifecycle === 'active' && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime())) this.#pool(item);
             }
+            this.#readingCopies?.start();
             if(!deferBackground)this.startBackgroundWork();
         } catch (error) {
             await this.#close().catch(() => { /* preserve primary lifecycle failure */ });
@@ -1048,6 +1056,7 @@ export class PersonalAgentHost {
             await this.#sourceDrain?.catch(() => { /* caller receives the source failure */ });
             await this.#commands;
             await this.#tail;
+            await this.#readingCopies?.close();
             this.#loaded = false;
             const release=this.#release;
             this.#loaded=false;
