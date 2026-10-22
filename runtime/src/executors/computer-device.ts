@@ -1,3 +1,5 @@
+import type {ComputerConfig} from './computer-config.js'
+import type {startComputerBackend} from './computer-backend.js'
 /** Local desktop binding. No accessibility/UI control tree, only display and foreground-window metadata. */
 import type {AbstractInterface} from '@midscene/core/device'
 import {z} from '@midscene/core'
@@ -49,7 +51,7 @@ export async function computerWrite(action: () => Promise<unknown>, budgetMs: nu
     await Promise.race([action(), new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('cleanup_unknown')), Math.min(budgetMs, 30_000))
     })])
-  } catch { throw new Error('cleanup_unknown') }
+  } catch(error) { throw new Error('cleanup_unknown',{cause:error}) }
   finally { clearTimeout(timer) }
 }
 
@@ -106,7 +108,7 @@ export async function guardComputerDevice(raw: AbstractInterface, target: () => 
       } catch (error) {
         const reason = error instanceof Error ? error.message : ''
         failure ??= ['cleanup_unknown', 'cancelled', 'step_limit', 'screen_changed', 'needs_user_action', 'declined'].includes(reason) ? reason : 'action_failed'
-        throw new Error(failure)
+        throw new Error(failure,{cause:error})
       }
     }}))
   const device: AbstractInterface = {interfaceType: raw.interfaceType, size: async () => {
@@ -183,4 +185,33 @@ export async function computerForeground(signal: AbortSignal): Promise<Omit<Comp
     || typeof value.width !== 'number' || !Number.isFinite(value.width) || value.width <= 0
     || typeof value.height !== 'number' || !Number.isFinite(value.height) || value.height <= 0) throw Error('invalid_configuration')
   return {target: JSON.stringify(value.target), width: value.width, height: value.height}
+}
+
+/** Both planners share connection consent and target checks; callers retain their resource lease. */
+export async function connectComputerDevice(backend: Awaited<ReturnType<typeof startComputerBackend>>, config: ComputerConfig,
+  options: Omit<ComputerGuardOptions, 'displayId' | 'maxSteps' | 'budgetMs'> & {
+    foreground?: typeof computerForeground; beforeConnect?: () => void
+  }) {
+  const target = async (): Promise<ComputerTarget> => {
+    options.signal.throwIfAborted()
+    if (config.macWindow) return {displayId: config.displayId, ...await backend.windowTarget()}
+    const displays = await backend.listDisplays()
+    if (displays.length !== 1 || displays[0]?.id !== config.displayId) throw Error('screen_changed')
+    return {displayId: config.displayId, ...await (options.foreground ?? computerForeground)(options.signal)}
+  }
+  const baseline = await target()
+  if (!await guiApproval(options.approve('Connect', config.macWindow
+    ? {window: config.macWindow, ...(config.macApplication?{application:config.macApplication}:{}), mode: 'background', healthCheck: 'window identity only', pointerInput: 'window-bound AX actions or targeted events; no foreground activation'}
+    : {displayId: config.displayId, healthCheck: 'moves and restores pointer'}), options.signal)) throw Error('declined')
+  const approved = await target()
+  // Whole-screen consent binds the display; the first screenshot binds the input target.
+  if (approved.width !== baseline.width || approved.height !== baseline.height
+    || (config.macWindow && approved.target !== baseline.target)) throw Error('screen_changed')
+  options.signal.throwIfAborted()
+  options.beforeConnect?.()
+  await backend.connect()
+  const size = await backend.device.size()
+  if (size.width !== baseline.width || size.height !== baseline.height) throw Error('screen_changed')
+  return guardComputerDevice(backend.device, target, {...options, displayId: config.displayId,
+    maxSteps: config.maxSteps, budgetMs: config.budgetMs})
 }

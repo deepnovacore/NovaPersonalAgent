@@ -3,7 +3,7 @@ import {join} from 'node:path'
 import {validGuiConfig,type GuiModelConfig} from './gui-runner.js'
 import {validComputerDisplayId} from './computer-device.js'
 
-export interface ComputerConfig extends GuiModelConfig {displayId: string; lockRoot: string; resourcesPath?: string; clickHoldMs?: number; macWindow?: {pid: number; windowId: number}}
+export interface ComputerConfig extends GuiModelConfig {displayId: string; lockRoot: string; resourcesPath?: string; clickHoldMs?: number; macWindow?: {pid: number; windowId: number}; macApplication?: {name:string;bundleId:string;path:string}}
 
 export function loadComputerConfig(env: NodeJS.ProcessEnv): ComputerConfig {
   const config = {...(env.CODEX_RESOURCES_PATH ? {resourcesPath: env.CODEX_RESOURCES_PATH} : {}), displayId: env.COMPUTER_DISPLAY_ID ?? '', baseUrl: env.COMPUTER_BASE_URL ?? '', model: env.COMPUTER_MODEL ?? '',

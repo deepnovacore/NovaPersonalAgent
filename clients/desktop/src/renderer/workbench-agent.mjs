@@ -16,10 +16,15 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   const id=c.selectedId;let offset=0,text='';do{const page=await c.command('build.details',{id,offset});if(id!==c.selectedId)return;text+=page.text;offset=page.next_offset}while(offset!==null);log.textContent=text
  }))
  const approval=el('section',undefined,'workbench-local-approval');approval.hidden=true;root.append(approval)
- const approvalTitle=el('h3',t('本地工具待确认')),preview=el('pre'),approve=el('button',t('允许本次')),deny=el('button',t('拒绝'));approve.type=deny.type='button';approval.append(approvalTitle,preview,approve,deny)
+ const approvalTitle=el('h3',t('本地工具待确认')),preview=el('pre'),approve=el('button',t('允许本次')),deny=el('button',t('拒绝')),always=el('button',t('始终允许'));approve.type=deny.type=always.type='button';always.hidden=true;approval.append(approvalTitle,preview,always,approve,deny)
  let loadedApproval=null,loadingApproval=null
  async function loadApproval(pending,id){
   if(loadingApproval===pending.id||loadedApproval===pending.id)return
+  if(pending.name==='computer_connect'){
+   let app;try{app=JSON.parse(pending.preview)?.params?.application}catch{}
+   if(app?.name){preview.textContent=t('允许 Nova 操作 {0}？',app.name);approvalTitle.textContent=t('应用控制授权');always.hidden=false;loadedApproval=pending.id;approve.disabled=always.disabled=!c.connected;return}
+  }
+  always.hidden=true;approvalTitle.textContent=t('本地工具待确认')
   loadingApproval=pending.id
   try {
    let offset=0,text=''
@@ -27,7 +32,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
    preview.textContent=text;loadedApproval=pending.id
   } finally {if(loadingApproval===pending.id)loadingApproval=null;approve.disabled=loadedApproval!==c.selectedConversation?.build?.approval?.id||!c.connected}
  }
- for(const [button,value] of [[approve,true],[deny,false]])button.addEventListener('click',()=>run(async()=>{const pending=c.selectedConversation?.build?.approval;if(pending)await c.command('build.approve',{id:c.selectedId,approval_id:pending.id,approved:value})}))
+ for(const [button,value] of [[approve,true],[always,true],[deny,false]])button.addEventListener('click',()=>run(async()=>{const pending=c.selectedConversation?.build?.approval;if(pending)await c.command('build.approve',{id:c.selectedId,approval_id:pending.id,approved:value,...(button===always?{always:true}:{})})}))
  const planCard=el('section',undefined,'workbench-plan');planCard.hidden=true;root.append(planCard)
  const planTitle=el('h3'),body=el('div',undefined,'workbench-plan-body'),edit=el('textarea');edit.hidden=true;edit.setAttribute('aria-label',t('计划内容'));edit.maxLength=131072
  const actions=el('div',undefined,'workbench-plan-actions'),editButton=el('button',t('修改计划')),save=el('button',t('保存计划')),local=el('button',t('在当前项目 Build')),delegate=el('button',t('交给执行器 Build'));local.hidden=true
@@ -73,7 +78,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   project.textContent=build?.project??'';project.title=build?.project??''
   reason.textContent=build?.reason&&build.reason!=='stopped'?t(({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',restart_requires_resume:'重启后等待恢复'})[build.reason]??build.reason):'';reason.hidden=!reason.textContent
   stop.hidden=!build||!active;resume.hidden=!build||active||['completed','finished'].includes(build.status);details.hidden=!build
-  approval.hidden=!build?.approval;deny.disabled=!c.connected;approve.disabled=!c.connected||loadedApproval!==build?.approval?.id
+  always.disabled=!c.connected||loadedApproval!==build?.approval?.id;approval.hidden=!build?.approval;deny.disabled=!c.connected;approve.disabled=!c.connected||loadedApproval!==build?.approval?.id
   if(build?.approval&&loadedApproval!==build.approval.id){if(loadingApproval!==build.approval.id)preview.textContent=build.approval.name+'\n'+build.approval.preview;void loadApproval(build.approval,item.id).catch(error=>{c.error=error.message;c.changed()})}
   const hasPlan=item?.mode==='plan'&&item.plan;planCard.hidden=!hasPlan
   // The mode lives in the composer; this strip appears only for a Build session or a published plan.

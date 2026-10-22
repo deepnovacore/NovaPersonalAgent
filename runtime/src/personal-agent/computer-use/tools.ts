@@ -3,7 +3,7 @@ import type {CascadedLlmTool} from '../../realtime/cascaded/llm.js'
 import {computerToolArguments,COMPUTER_VISION_TOOLS,type ComputerToolName} from './contract.js'
 
 const descriptions:Record<ComputerToolName,string>={
- computer_screenshot:'Observe the current screen. Coordinates of subsequent inputs refer to this image.',
+ computer_screenshot:'Observe the current screen, or on macOS pass application (exact running app name or bundle ID) to discover and bind its own focused window in the background without activating it. Coordinates of subsequent inputs refer to this image.',
  computer_click:'Click once at the screenshot point.',
  computer_type:'Type into the current focus. Click the field first.',
  computer_scroll:'Scroll once at the screenshot point.',

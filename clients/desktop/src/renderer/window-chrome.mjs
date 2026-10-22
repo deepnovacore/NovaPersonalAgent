@@ -4,10 +4,11 @@ import {OrbDragGesture} from './drag-gesture.mjs'
 const CONTROLS=[
  {action:'close',label:'关闭窗口',title:'关闭（转入后台）',className:'window-close'},
  {action:'minimize',label:'最小化',title:'最小化',className:'window-minimize'},
+ {action:'toggleMaximize',label:'最大化或还原',title:'最大化或还原',className:'window-maximize'},
 ]
 
 /**
- * Close and minimize controls for the frameless workbench (maximize is the topbar double-click), plus a drag strip that also maximizes on double-click.
+ * Window controls reuse the same maximize toggle as the topbar double-click.
  * Windows uses a native drag region to preserve physical window size at fractional DPI scales; main handles
  * its double-click. Other platforms use a no-drag strip with cursor polling so DOM `dblclick` still fires.
  */

@@ -19,7 +19,8 @@ const macWindow = process.argv[4] ? z.object({pid: z.number().int().positive().m
 if (macWindow && (process.platform !== 'darwin' || !process.argv[5])) throw Error('invalid_configuration')
 const native = macWindow ? new MacNativeReader(process.argv[5]!, 'macos_gui') : undefined
 let binding: string | undefined
-const device = macWindow ? undefined : new ComputerDevice({displayId, inputStrategy: 'sequential'})
+let editorPoint: [number,number] | undefined
+const device = macWindow ? undefined : new ComputerDevice({displayId, inputStrategy: 'sequential', ...(process.platform === 'darwin' ? {keyboardDriver: 'libnut' as const} : {})})
 // Public MouseAction avoids SDK Tap's automatic focus-follow-up click.
 interface Mouse {setMousePosition(point: {x: number; y: number}): Promise<void>; currentMousePosition(): Promise<{x: number; y: number}>; pressButton(button: number): Promise<void>; releaseButton(button: number): Promise<void>}
 const mouse = macWindow ? undefined : new (createRequire(import.meta.url)('@computer-use/libnut') as {DefaultMouseAction: new () => Mouse}).DefaultMouseAction()
@@ -37,6 +38,7 @@ input.on('line', (line: string) => {
         const point = params?.locate?.center
         const body: Record<string, unknown> = {...macWindow, op: request.op, target: binding}
         if (request.op === 'Tap') Object.assign(body, {x: point?.[0], y: point?.[1], holdMs: clickHoldMs, focus: params?.focusLease?.focus, targetStarted: params?.focusLease?.targetStarted, clickGroup: params?.focusLease?.clickGroup})
+        if (['Input','KeyboardPress'].includes(request.op) && editorPoint) body.editorPoint=editorPoint
         if (request.op === 'Input') body.value = params?.value
         if (request.op === 'KeyboardPress') body.keyName = params?.keyName
         if (request.op === 'Scroll') {
@@ -49,7 +51,9 @@ input.on('line', (line: string) => {
         }
         if (request.op === 'listDisplays') value = [{id: displayId}]
         else {
+          if(request.op==='Tap')editorPoint=undefined
           const result = await native.request(body)
+          if(request.op==='Tap'&&result.editor===true)editorPoint=z.tuple([z.number().finite(),z.number().finite()]).parse(point)
           if (request.op === 'target' || request.op === 'connect') {
             if (result.keyWindowMatches !== true || typeof result.target !== 'string' || (binding !== undefined && result.target !== binding)) throw Error('screen_changed')
             binding = result.target
@@ -91,7 +95,7 @@ input.on('line', (line: string) => {
         await action.call(request.op === 'Input' ? {...request.params as {value: string}, mode: 'typeOnly'} : request.params)
       }
       process.stdout.write(JSON.stringify({id: request.id, ok: true, value}) + '\n')
-    } catch {process.stdout.write(JSON.stringify({id: request.id, ok: false}) + '\n')}
+    } catch(error) {process.stdout.write(JSON.stringify({id: request.id, ok: false,...(error instanceof Error&&/^native_gui:[a-z_]{1,80}$/u.test(error.message)?{detail:error.message}:{})}) + '\n')}
   }).catch(() => {process.exitCode = 1; process.exit(1)})
 })
 input.on('close', () => process.exit())

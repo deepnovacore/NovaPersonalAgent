@@ -26,12 +26,12 @@ function mount(native=false){
  return {calls,chrome,root}
 }
 
-test('two buttons map to close and minimize; maximize is only the topbar double-click', () => {
+test('three window buttons map to close, minimize and maximize in that order', () => {
  const {calls,chrome}=mount()
  const buttons=chrome.controls.children
- assert.deepEqual(buttons.map(b=>b.className),['window-control window-close','window-control window-minimize'])
+ assert.deepEqual(buttons.map(b=>b.className),['window-control window-close','window-control window-minimize','window-control window-maximize'])
  for(const b of buttons)b.listeners.click()
- assert.deepEqual(calls,['close','minimize'])
+ assert.deepEqual(calls,['close','minimize','toggleMaximize'])
  assert.ok(buttons.every(b=>b.attrs['aria-label']))
 })
 
@@ -76,7 +76,7 @@ test('native window dragging sends no programmatic moves and keeps the window co
  chrome.grip.listeners.dblclick?.()
  assert.deepEqual(calls,[])
  for(const button of chrome.controls.children)button.listeners.click()
- assert.deepEqual(calls,['close','minimize'])
+ assert.deepEqual(calls,['close','minimize','toggleMaximize'])
 })
 
 for(const platform of ['darwin','linux'])test(`${platform} preload keeps pointer dragging and DOM double-click controls`, async () => {

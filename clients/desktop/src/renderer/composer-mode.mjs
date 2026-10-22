@@ -26,22 +26,15 @@ export function nextComposerMode(current,step=1){
 }
 
 export function mountComposerMode(parent,{c,el,run}){
- const root=el('div',undefined,'composer-mode');root.setAttribute('role','radiogroup');root.setAttribute('aria-label',t('对话模式'))
- const track=el('div',undefined,'composer-mode-track'),thumb=el('span',undefined,'composer-mode-thumb');thumb.setAttribute('aria-hidden','true');track.append(thumb)
- const buttons=new Map()
- for(const mode of COMPOSER_MODES){
-  const button=el('button',LABELS[mode],'composer-mode-option');button.type='button';button.setAttribute('role','radio');button.setAttribute('data-mode',mode)
-  button.addEventListener('click',()=>run(()=>select(mode)))
-  button.addEventListener('keydown',event=>{
-   const step=event.key==='ArrowRight'||event.key==='ArrowDown'?1:event.key==='ArrowLeft'||event.key==='ArrowUp'?-1:0
-   if(!step)return
-   event.preventDefault();const next=nextComposerMode(mode,step);void run(()=>select(next)).then(()=>buttons.get(next)?.focus?.())
-  })
-  buttons.set(mode,button);track.append(button)
- }
- const key=el('kbd','⇧⇥','composer-mode-key');key.title=t('Shift+Tab 切换模式');key.setAttribute('aria-hidden','true')
- const caption=el('span','','composer-mode-caption')
- root.append(track,key,caption);parent.append(root)
+ const root=el('div',undefined,'composer-mode');root.setAttribute('role','group');root.setAttribute('aria-label',t('对话模式'))
+ const button=el('button','','composer-mode-active');button.type='button'
+ button.setAttribute('aria-keyshortcuts','Shift+Tab')
+ button.addEventListener('click',()=>cycle())
+ button.addEventListener('keydown',event=>{
+  const step=event.key==='ArrowRight'||event.key==='ArrowDown'?1:event.key==='ArrowLeft'||event.key==='ArrowUp'?-1:0
+  if(step&&cycle(step))event.preventDefault()
+ })
+ root.append(button);parent.append(root)
  let busy=false
  const item=()=>c.selectedConversation
  const available=()=>{const current=item();return Boolean(current)&&MODE_KINDS.has(current.kind)&&c.connected&&!c.isVoiceConversation&&!busy}
@@ -58,16 +51,10 @@ export function mountComposerMode(parent,{c,el,run}){
   const current=item(),locked=current?.kind==='build',mode=composerMode(current,current?c.state(current.id):null)
   root.hidden=!current||!(MODE_KINDS.has(current.kind)||locked)
   root.setAttribute('data-mode',mode);root.setAttribute('aria-disabled',String(!available()&&!locked))
-  for(const [value,button] of buttons){
-   const checked=value===mode
-   button.setAttribute('aria-checked',String(checked));button.tabIndex=checked?0:-1
-   button.disabled=locked?!checked:!available()
-   button.title=t(CAPTIONS[value])
-  }
-  caption.textContent=t(locked?CAPTIONS.locked:CAPTIONS[mode])
+  button.textContent=LABELS[mode];button.disabled=locked||!available()
+  button.setAttribute('aria-label',`${t('对话模式')}：${LABELS[mode]}`)
+  button.title=locked?t(CAPTIONS.locked):`${t(CAPTIONS[mode])} · ${t('Shift+Tab 切换模式')}`
  }
- return {element:root,update,select,
-  /** Composer Shift+Tab. Returns false when the key should keep its normal focus behaviour. */
-  cycle(step=1){const current=item();if(!current||!available())return false;void run(()=>select(nextComposerMode(composerMode(current,c.state(current.id)),step)));return true},
- }
+ function cycle(step=1){const current=item();if(!current||!available())return false;void run(()=>select(nextComposerMode(composerMode(current,c.state(current.id)),step)));return true}
+ return {element:root,update,select,cycle}
 }
