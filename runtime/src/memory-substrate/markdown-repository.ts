@@ -27,10 +27,10 @@ export interface MarkdownEdit {entry_id:string;expected_revision:number;content:
 export type ApprovedMarkdownEdit=Pick<MarkdownEdit,'entry_id'|'expected_revision'|'path'|'hash'>
 export interface MarkdownSnapshot {revisions:EntryRevision[];edits:MarkdownEdit[];baselines:Record<string,string>}
 
-function history(revisions:readonly EntryRevision[]):Map<string,EntryRevision[]> {
+function history(revisions:readonly EntryRevision[],validated=false):Map<string,EntryRevision[]> {
  if(revisions.length>100_000)throw failure('LIMIT')
  const result=new Map<string,EntryRevision[]>()
- for(const value of revisions){const revision=EntryRevisionSchema.parse(value);const list=result.get(revision.entry_id)??[];list.push(revision);result.set(revision.entry_id,list)}
+ for(const value of revisions){const revision=validated?value:EntryRevisionSchema.parse(value);const list=result.get(revision.entry_id)??[];list.push(revision);result.set(revision.entry_id,list)}
  if(result.size>MAX_ENTRIES)throw failure('LIMIT')
  for(const list of result.values()){
   list.sort((a,b)=>a.revision-b.revision)
@@ -51,7 +51,7 @@ function decode(text:string):{revisions:EntryRevision[];content:EntryRevision['c
  const match=/^<!-- nova-memory-v1\n([^\n]+)\n-->\n# ([^\n]*)\n\n<!-- editable-current -->\n([\s\S]*)\n$/.exec(text)
  if(!match)throw failure('FORMAT')
  const metadata=z.object({format:z.literal(1),revisions:z.array(EntryRevisionSchema).min(1)}).strict().parse(JSON.parse(match[1]!))
- const grouped=history(metadata.revisions);if(grouped.size!==1)throw failure('FORMAT')
+ const grouped=history(metadata.revisions,true);if(grouped.size!==1)throw failure('FORMAT')
  const current=metadata.revisions.at(-1)!
  if(current.kind!==match[2])throw failure('FORMAT')
  const content=typeof current.content.text==='string'?{...current.content,text:match[3]!}:z.record(z.string(),z.json()).parse(JSON.parse(match[3]!))
@@ -62,6 +62,7 @@ function decode(text:string):{revisions:EntryRevision[];content:EntryRevision['c
 export class MarkdownRepository {
  readonly root:string
  private baseline:Record<string,string>|undefined
+ private cached:{fingerprint:string;snapshot:MarkdownSnapshot}|undefined
  private initialized=false
  private readonly lockWaitMs:number
  constructor(root:string,options:{lockWaitMs?:number}={}){this.root=resolve(root);this.lockWaitMs=options.lockWaitMs??0}
@@ -143,6 +144,50 @@ export class MarkdownRepository {
  read():MarkdownSnapshot {
   this.initialize()
   if(this.pendingOperationId())throw failure('PENDING_OPERATION')
+  // Every ledger operation reconciles first. A full scan spawns Git and decodes every document twice,
+  // so an unchanged repository returns the snapshot it already validated.
+  const fingerprint=this.fingerprint()
+  if(fingerprint!==null&&this.cached?.fingerprint===fingerprint){this.baseline={...this.cached.snapshot.baselines};return structuredClone(this.cached.snapshot)}
+  this.cached=undefined
+  const snapshot=this.readUncached()
+  if(fingerprint!==null)this.cached={fingerprint,snapshot:structuredClone(snapshot)}
+  return snapshot
+ }
+
+ /** Identifies the last validated snapshot; null when the latest read could not be cached. */
+ snapshotToken():string|null {return this.cached?.fingerprint??null}
+
+ /**
+  * Digest of every input a scan depends on: the marker, each entry and semantic document, and the
+  * Git refs. Objects are content-addressed, so a ref that has not moved names the same history.
+  * Lock files and untracked notes are excluded. Any doubt returns null and forces a full scan,
+  * which reports the canonical failure.
+  */
+ private fingerprint():string|null {
+  try{
+   const hash=createHash('sha256'),add=(relative:string)=>{hash.update(relative+'\0');hash.update(hasPath(join(this.root,relative))?this.readFile(relative):'\u0000absent');hash.update('\0')}
+   add(MARKER)
+   for(const name of ['USER.md','MEMORY.md'])add(name)
+   for(const folder of ['entries','goals','todos','ideas','memory','entities']){
+    const directory=join(this.root,folder);if(!hasPath(directory)){hash.update(folder+'\0absent\0');continue}
+    this.assertSafe(directory,true)
+    const names=readdirSync(directory).sort();if(names.length>MAX_ENTRIES)return null
+    hash.update(folder+'/\0'+names.join('\0')+'\0')
+    for(const name of names)add(`${folder}/${name}`)
+   }
+   const refs=(relative:string)=>{
+    const path=join(this.root,relative),stat=lstatSync(path,{throwIfNoEntry:false})
+    if(stat===undefined){hash.update(relative+'\0absent\0');return}
+    if(stat.isSymbolicLink())throw failure('UNSAFE_PATH')
+    if(stat.isDirectory()){for(const name of readdirSync(path).sort())refs(`${relative}/${name}`);return}
+    add(relative)
+   }
+   for(const name of ['.git/HEAD','.git/packed-refs','.git/refs'])refs(name)
+   return hash.digest('hex')
+  }catch{return null}
+ }
+
+ private readUncached():MarkdownSnapshot {
   const revisions:EntryRevision[]=[];const edits:MarkdownEdit[]=[];const baselines:Record<string,string>={}
   let documents=false
   if(hasPath(join(this.root,MARKER))){const marker=this.readFile(MARKER);if(marker!==markerText&&marker!==legacyMarkerText)throw failure('FORMAT');documents=marker===markerText;baselines[MARKER]=digest(marker)}
@@ -165,8 +210,9 @@ export class MarkdownRepository {
    if(path!==entryPath(current.entry_id))throw failure('FORMAT')
    if(head){
     if(!recordPaths.includes(path))throw failure('UNADMITTED_EDIT')
-    const committed=decode(committedFiles.get(path)!)
-    if(canonicalJson(parsed.revisions)!==canonicalJson(committed.revisions))throw failure('HISTORY_EDIT')
+    // Identical bytes carry identical history; only a changed file needs its committed header decoded.
+    const committedText=committedFiles.get(path)!
+    if(committedText!==text&&canonicalJson(parsed.revisions)!==canonicalJson(decode(committedText).revisions))throw failure('HISTORY_EDIT')
    }
    revisions.push(...parsed.revisions);baselines[path]=digest(text)
    // Legacy body edits still enter the same merge path; conflicting document edits are rejected below.

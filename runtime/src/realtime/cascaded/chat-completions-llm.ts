@@ -43,6 +43,10 @@ interface Message { readonly role: 'system' | 'user' | 'assistant' | 'tool'; rea
 interface Fragment { extra_content?: JsonObject; id: string | null; name: string; arguments: string }
 interface Active { completion: Promise<void> | null; usageDeadline: number | null; readonly controller: AbortController; reader: ReadableStreamDefaultReader<Uint8Array> | null; failureCode: ChatCompletionsLlmFailureCode | null }
 
+/** Provider account codes the user can act on; the rest of an error body is never kept. */
+const ACCOUNT_CODES: Readonly<Record<string, 'auth' | 'quota'>> = {Arrearage: 'quota', insufficient_quota: 'quota', InvalidApiKey: 'auth', invalid_api_key: 'auth'}
+const MAX_ERROR_BODY_BYTES = 4096
+const ERROR_BODY_DEADLINE_MS = 1000
 function fail(code: ChatCompletionsLlmFailureCode, statusCode: number | null = null): ChatCompletionsLlmFailure { return new ChatCompletionsLlmFailure(code, statusCode) }
 function protocol(detail:string):ChatCompletionsLlmFailure{return new ChatCompletionsLlmFailure('protocol',null,detail)}
 function object(value: unknown): value is Record<string, unknown> { return value !== null && !Array.isArray(value) && typeof value === 'object' }
@@ -135,7 +139,7 @@ class Session implements CascadedLlmSession {
       let response: Response
       try { response = await this.#timed(this.#fetch(this.#endpoint, {method: 'POST', redirect: ['self-hosted','openai-compatible'].includes(this.#provider) ? 'error' : 'follow', headers: {...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}), 'content-type': 'application/json', accept: 'text/event-stream'}, body: JSON.stringify(body), signal: active.controller.signal}), active) }
       catch (error) { if (error instanceof ChatCompletionsLlmFailure) throw error; throw fail(input.signal.aborted ? 'aborted' : this.#closed ? 'closed' : 'network') }
-      if (!response.ok) { await this.#cancel(response.body?.getReader() ?? null); throw fail('http', response.status) }
+      if (!response.ok) throw new ChatCompletionsLlmFailure('http', response.status, await this.#accountFailure(response, active))
       if (response.body === null || !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) { await this.#cancel(response.body?.getReader() ?? null); throw fail('protocol') }
       active.reader = response.body.getReader()
       let started = false, text = '', sawText = false
@@ -266,6 +270,37 @@ class Session implements CascadedLlmSession {
       let newline = buffered.indexOf(10); while (newline >= 0) { const event = line(buffered.subarray(0, newline)); buffered = buffered.slice(newline + 1); if (event === 'done') return; if (event !== null) yield event; newline = buffered.indexOf(10) }; if (buffered.length > this.#streamLimits.lineBytes) throw fail('overflow')
     }
   }
+  /** Reads at most a small error body for an allowlisted account code, then the status. */
+  async #accountFailure(response: Response, active: Active): Promise<'auth' | 'quota' | 'rate_limited' | null> {
+    const reader = response.body?.getReader() ?? null
+    let code: unknown, timer: ReturnType<typeof setTimeout> | undefined
+    // One absolute budget for the whole body: a per-read idle timeout would let a trickling body hold the turn.
+    const expired = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('error body deadline')), ERROR_BODY_DEADLINE_MS) })
+    try {
+      const chunks: Uint8Array[] = []
+      let size = 0
+      while (reader !== null && size <= MAX_ERROR_BODY_BYTES) {
+        const {done, value} = await Promise.race([this.#timed(reader.read(), active), expired])
+        if (done) break
+        chunks.push(value); size += value.byteLength
+      }
+      if (size <= MAX_ERROR_BODY_BYTES) {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {code?: unknown; error?: {code?: unknown}}
+        code = body.error?.code ?? body.code
+      }
+    } catch {
+      // A missing, slow or malformed body leaves only the status to classify.
+    } finally {
+      clearTimeout(timer)
+      await this.#cancel(reader)
+    }
+    if (typeof code === 'string' && Object.hasOwn(ACCOUNT_CODES, code)) return ACCOUNT_CODES[code]!
+    if (response.status === 401 || response.status === 403) return 'auth'
+    if (response.status === 402) return 'quota'
+    if (response.status === 429) return 'rate_limited'
+    return null
+  }
+
   async #cancel(reader: ReadableStreamDefaultReader<Uint8Array> | null): Promise<void> {
     if (reader === null) return
     let timer: ReturnType<typeof setTimeout> | undefined

@@ -33,3 +33,8 @@ test('normal startup uses the spinner; actionable credential and failure text re
  assert.match(startupMessage({stage:'credentials'}),/授权/)
  assert.match(startupMessage({stage:'failed',code:'credential_invalid'}),/密钥/)
 })
+
+test('initial automatic retries show progress without claiming a lost connection',()=>{
+ assert.match(startupMessage({stage:'backend',code:'backend_start_timeout'}),/自动重试/)
+ assert.doesNotMatch(startupMessage({stage:'backend',code:'backend_start_timeout'}),/连接已断开/)
+})

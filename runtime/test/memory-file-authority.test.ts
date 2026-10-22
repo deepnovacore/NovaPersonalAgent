@@ -133,6 +133,18 @@ test('a second already-open client automatically joins file authority before wri
  }finally{await first.close();await second.close();await reopened?.close();await rm(root,{recursive:true,force:true})}
 })
 
+test('an unchanged Markdown snapshot still rebuilds an index another connection rewrote',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-file-index-')),path=join(root,'ledger.sqlite')
+ const client=new MemoryLedgerClient(path)
+ try{
+  await client.open();await enable(client);await client.memory('append_evidence',evidence);await client.memory('merge',candidate)
+  assert.equal((await client.memory('list',{}) as EntryRevision[]).length,1)
+  const db=new DatabaseSync(path);db.exec('DELETE FROM memory_revisions');db.close()
+  const rows=await client.memory('list',{}) as EntryRevision[]
+  assert.equal(rows.length,1);assert.equal(rows[0]?.content.text,'我不吃辣')
+ }finally{await client.close();await rm(root,{recursive:true,force:true})}
+})
+
 test('two workers opening the same ledger together both start instead of failing on the path lock',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-file-concurrent-open-')),path=join(root,'ledger.sqlite')
  const first=new MemoryLedgerClient(path),second=new MemoryLedgerClient(path)

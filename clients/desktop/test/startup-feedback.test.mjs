@@ -239,6 +239,7 @@ test('supervisor reconnecting status is nonterminal and does not offer competing
   const receive=vm.runInContext(`(${handler})`,context)
   receive({state:'reconnecting',diagnostic:'assembly_failed'})
   assert.equal(context.startup.stage,'backend','a launch that never connected is still starting, not reconnecting')
+  assert.equal(context.startup.code,'assembly_failed')
   receive({state:'connected'})
   assert.equal(context.startup.stage,'ready')
   receive({state:'reconnecting',diagnostic:'backend_disconnected'})
@@ -256,4 +257,44 @@ test('recovery retry clears a prior credential failure before restarting restore
     commitDesktopConfiguration:()=>{},discardDesktopConfiguration:()=>{},restartSettingsBackend:()=>{},completeSettings:()=>{},publishSettingsApplyStatus:()=>{}})
   vm.runInContext(body,context)
   assert.equal((await handler({sender})).operationStatus,'applied')
+})
+
+test('normal startup waits for the window show event before requiring a visible paint', async () => {
+  const start = source.indexOf('  const windowShown =')
+  const end = source.indexOf('  configureWorkbenchNativeDrag(', start)
+  const listeners = new Map()
+  const context = vm.createContext({windowsPresentation:null,mainWindow:{isVisible:()=>false,once:(event,callback)=>listeners.set(event,callback)}})
+  const shown = vm.runInContext(`${source.slice(start,end)};windowShown`,context)
+  let resolved = false
+  shown.then(()=>{resolved=true})
+  await Promise.resolve()
+  assert.equal(resolved,false)
+  listeners.get('show')()
+  await shown
+  assert.equal(resolved,true)
+  assert.match(source,/await Promise\.all\(\[rendererLoaded, windowShown\]\)\s+activeLaunchId/)
+})
+
+test('readiness deadline is armed immediately before fork after asynchronous preparation', () => {
+  const launch = source.slice(source.indexOf('async function launchBackend('),source.indexOf('function initializeDesktopBootstrap('))
+  assert.match(launch,/deferTimeout: true/)
+  assert.match(launch,/listener\.startTimeout\(\)\s+spawnedBackend = utilityProcess\.fork/)
+  assert.ok(launch.indexOf('await feishuSetupOwner.release()') < launch.indexOf('listener.startTimeout()'))
+})
+
+test('window show fence follows the active Windows shell and observes an early close', async () => {
+  const start = source.indexOf('  const windowShown =')
+  const end = source.indexOf('  configureWorkbenchNativeDrag(',start)
+  const shell = () => {const listeners = new Map();return {isVisible:()=>false,once:(event,callback)=>listeners.set(event,callback),emit:event=>listeners.get(event)?.()}}
+  const orb = shell(), workbench = shell()
+  const context = vm.createContext({windowsPresentation:{windows:[orb,workbench]},mainWindow:orb})
+  const shown = vm.runInContext(`${source.slice(start,end)};windowShown`,context)
+  context.mainWindow = workbench
+  workbench.emit('show')
+  await shown
+  const closing = shell()
+  const closedContext = vm.createContext({windowsPresentation:null,mainWindow:closing})
+  const closed = vm.runInContext(`${source.slice(start,end)};windowShown`,closedContext)
+  closing.emit('closed')
+  await assert.rejects(closed,/startup_window_closed/)
 })

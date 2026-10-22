@@ -1,3 +1,4 @@
+import {ChatCompletionsLlmFailure} from '../src/realtime/cascaded/chat-completions-llm.js'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { RealtimeProviderEvent } from '../src/realtime/protocol.js'
@@ -1354,6 +1355,30 @@ test('a common LLM failure uses a provider-neutral stable owner code', async () 
   assert.equal(events.some(event => event.kind === 'provider_error'
     && event.code === 'cascaded_response_failed' && event.recoverable), true)
   assert.equal(terminalStatus(events), 'failed')
+  await adapter.close()
+})
+
+for (const [failure, reason] of [
+  [new ChatCompletionsLlmFailure('http', 400, 'quota'), 'provider_http_quota'],
+  [new ChatCompletionsLlmFailure('http', 401, 'auth'), 'provider_http_auth'],
+  [new ChatCompletionsLlmFailure('network'), 'provider_network'],
+  [new ChatCompletionsLlmFailure('http', 500), 'provider_failure'],
+] as const) test(`an LLM ${failure.code} failure names its user-actionable cause (${reason})`, async () => {
+  class FailingLlm extends FakeLlm {
+    override async *stream(): AsyncIterable<CascadedLlmEvent> { await Promise.resolve(); yield* []; throw failure }
+  }
+  const adapter = new CascadedRealtimeAdapter({
+    endpointing: new ScriptedEndpointing(), asr: new FakeAsrClient(), llm: new FailingLlm(),
+    tts: new FakeTtsClient(new FakeTtsSession()), idFactory: ids('session-account', 'provider-account'),
+  })
+  await adapter.connect({tools: [], signal: new AbortController().signal})
+  const item = hostItem('account-failure')
+  await adapter.injectHostItem(item, directOptions())
+  const collecting = collectThroughTerminal(adapter)
+  await adapter.createResponse({kind: 'host_fact', item, task_summary: null, origin_spoken: false}, new AbortController().signal)
+  const terminal = (await collecting).at(-1)
+  assert.equal(terminal?.kind === 'response_terminal' && terminal.status, 'failed')
+  assert.equal(terminal?.kind === 'response_terminal' && terminal.reason, reason)
   await adapter.close()
 })
 

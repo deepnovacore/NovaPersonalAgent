@@ -10,7 +10,9 @@ import {EntryRevisionSchema,type EntryRevision} from './store.js'
 
 type Snapshot=ReturnType<MarkdownRepository['read']>
 interface Pending {operation_id:string;revisions:EntryRevision[];baselines:Record<string,string>;approved_edits:ApprovedMarkdownEdit[]}
-const authorities=new WeakMap<LedgerDatabase,{repository:MarkdownRepository;snapshot:Snapshot}>()
+const authorities=new WeakMap<LedgerDatabase,{repository:MarkdownRepository;snapshot:Snapshot;indexed?:{token:string;dataVersion:number}|undefined}>()
+// Changes only when another connection commits; this connection's revision writes always publish files.
+const dataVersion=(db:LedgerDatabase)=>Number(db.prepare('PRAGMA data_version').get()?.data_version)
 export function storedRevisions(db:LedgerDatabase):EntryRevision[]{
  return db.prepare('SELECT payload_json FROM memory_revisions ORDER BY entry_id,revision').all().map(row=>EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))))
 }
@@ -81,7 +83,12 @@ export function enableMemoryFiles(db:LedgerDatabase,path:string,options:{already
 export function readMemoryFiles(db:LedgerDatabase):Snapshot|null{
  const state=authorities.get(db);if(!state)return null
  flushMemoryFiles(db)
- const snapshot=state.repository.read();replaceIndex(db,snapshot.revisions);state.snapshot=snapshot;return snapshot
+ const snapshot=state.repository.read(),token=state.repository.snapshotToken()
+ if(token===null||state.indexed?.token!==token||state.indexed.dataVersion!==dataVersion(db)){
+  state.indexed=undefined;replaceIndex(db,snapshot.revisions)
+  if(token!==null)state.indexed={token,dataVersion:dataVersion(db)}
+ }
+ state.snapshot=snapshot;return snapshot
 }
 
 export function withMemoryFilesLock<T>(db:LedgerDatabase,fn:()=>T):T {

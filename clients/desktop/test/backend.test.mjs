@@ -1431,3 +1431,33 @@ test('Gemini speech settings reach the runtime without borrowing the Volcengine 
  const env=nodeLaunchSpec({workspace:'/workspace',token:TOKEN,readyEndpoint:'127.0.0.1:49152',parentEnv:{},settings:{pipelineMode:'cascaded',cascadedAsrProvider:'gemini',cascadedTtsProvider:'gemini',geminiAsrModel:'asr-custom',geminiTtsModel:'tts-custom',geminiTtsVoice:'Puck'},decryptedSecrets:{geminiApiKey:'synthetic-gemini'}}).env
  assert.equal(env.GEMINI_API_KEY,'synthetic-gemini');assert.equal(env.GEMINI_ASR_MODEL,'asr-custom');assert.equal(env.GEMINI_TTS_MODEL,'tts-custom');assert.equal(env.GEMINI_TTS_VOICE,'Puck')
 })
+
+test('deferred readiness budget starts at child launch, not listener binding', async () => {
+  let cleanups = 0
+  const listener = createReadinessListener({token:TOKEN,timeoutMs:10,deferTimeout:true,onTimeout:()=>{cleanups++}})
+  await listener.endpoint
+  await new Promise(resolve=>setTimeout(resolve,30))
+  assert.equal(cleanups,0)
+  listener.startTimeout()
+  await assert.rejects(listener.readiness,/timed out/)
+  assert.equal(cleanups,1)
+  listener.startTimeout()
+  listener.close()
+})
+
+test('prelaunch failure closes a deferred listener without starting its timer', async () => {
+  const listener = createReadinessListener({token:TOKEN,timeoutMs:5,deferTimeout:true,onTimeout:()=>assert.fail('closed listener timed out')})
+  const endpoint = await listener.endpoint
+  listener.close(new Error('prelaunch failed'))
+  listener.startTimeout()
+  await assert.rejects(listener.readiness,/prelaunch failed/)
+  assert.equal((await dial(endpoint,readinessLine())).code,'ECONNREFUSED')
+})
+
+test('prelaunch cancellation before bind closes the late listener', async () => {
+  const listener = createReadinessListener({token:TOKEN,deferTimeout:true})
+  listener.close(new Error('prelaunch cancelled'))
+  await assert.rejects(listener.readiness,/prelaunch cancelled/)
+  const endpoint = await listener.endpoint
+  assert.equal((await dial(endpoint,readinessLine())).code,'ECONNREFUSED')
+})

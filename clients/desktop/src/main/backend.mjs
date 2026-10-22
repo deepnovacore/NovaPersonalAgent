@@ -380,6 +380,7 @@ export function createReadinessListener({
   timeoutMs = 60_000,
   socketAuthTimeoutMs = READINESS_SOCKET_AUTH_TIMEOUT_MS,
   onTimeout = () => {},
+  deferTimeout = false,
 } = {}) {
   if (!TOKEN_PATTERN.test(token)) throw new Error('128-bit token is required')
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -424,9 +425,12 @@ export function createReadinessListener({
         settleReadiness(error)
         return
       }
+      if (settled) shutdown()
       resolveEndpoint(`127.0.0.1:${address.port}`)
     })
   })
+
+  endpoint.catch(() => {})
 
   function shutdown() {
     if (server.listening) server.close()
@@ -466,14 +470,19 @@ export function createReadinessListener({
     })
   })
 
-  timer = setTimeout(() => {
-    onTimeout()
-    settleReadiness(new Error('desktop readiness timed out'))
-  }, timeoutMs)
+  const startTimeout = () => {
+    if (settled || timer !== undefined) return
+    timer = setTimeout(() => {
+      onTimeout()
+      settleReadiness(new Error('desktop readiness timed out'))
+    }, timeoutMs)
+  }
+  if (!deferTimeout) startTimeout()
 
   return {
     endpoint,
     readiness,
+    startTimeout,
     // Closing before the handshake fails it: a caller that already knows the
     // backend is gone should not wait out the full timeout. Idempotent, so the
     // success path can close the listener without disturbing the result.
