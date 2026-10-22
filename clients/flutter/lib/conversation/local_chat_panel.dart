@@ -936,7 +936,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                 'content': host.pendingUserText,
                               }),
                             if (host.draft.isNotEmpty &&
-                                host.activeTool == null &&
                                 host.activeConversationId ==
                                     widget.conversationId)
                               _message({
@@ -975,6 +974,46 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                 },
                                 startedAt: host.turnStartedAt ?? DateTime.now(),
                                 language: widget.language,
+                                details: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (host.activeTool != null)
+                                      Text(
+                                        host.activeTool!,
+                                        style: const TextStyle(
+                                          color: Nova.secondary,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    if (host.activeToolArguments.isNotEmpty)
+                                      ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxHeight: 220,
+                                        ),
+                                        child: SingleChildScrollView(
+                                          child: SelectableText(
+                                            host.activeToolArguments,
+                                            style: const TextStyle(
+                                              fontFamily: 'Menlo',
+                                              fontSize: 12,
+                                              height: 1.4,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      Text(
+                                        t(
+                                          '正在等待模型输出；收到内容后会显示在这里。',
+                                          'Waiting for model output; received content will appear here.',
+                                        ),
+                                        style: const TextStyle(
+                                          color: Nova.secondary,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ),
                           ],
                         ),
