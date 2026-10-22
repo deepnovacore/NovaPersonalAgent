@@ -89,7 +89,7 @@ for (const actionName of ['Tap', 'KeyboardPress', 'Input']) test(`background ${a
   await backend.windowTarget();await backend.connect()
   await assert.rejects(async () => {await backend.device.actionSpace().find(a=>a.name===actionName)!.call(actionName === 'Tap' ? {locate:{center:[10,10]}} : actionName === 'Input' ? {value:'test'} : {keyName:'Command+A'})},/cleanup_unknown/u)
   assert.equal(await backend.close(),true)
-  const cleanup = JSON.parse(await readFile(restored,'utf8'))
+  const cleanup = JSON.parse(await readFile(restored,'utf8')) as Record<string,unknown>
   assert.equal(cleanup.releasePointer, actionName === 'Tap')
   assert.equal(cleanup.releaseKey, actionName === 'Input' ? 'unicode' : actionName === 'KeyboardPress' ? 'Command+A' : undefined)
   assert.equal(cleanup.targetStarted, 200)

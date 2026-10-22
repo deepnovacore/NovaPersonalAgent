@@ -87,14 +87,14 @@ test('planner sees only bounded single scrolls, so it cannot request untilBottom
 for(const scenario of ['foreground_change','window_change','geometry_change','display_change','declined','revoked'] as const){
  test(`shared connection boundary: ${scenario}`,async()=>{
   let target='one',width=200,display='1',connects=0
-  const backend={pid:1,releaseInput:async()=>{},close:async()=>true,windowTarget:async()=>({target,width,height:300}),listDisplays:async()=>[{id:display}],
-   connect:async()=>{connects++},device:{interfaceType:'computer',size:async()=>({width,height:300}),screenshotBase64:async()=>'',actionSpace:()=>[]}}
+  const backend={pid:1,releaseInput:()=>Promise.resolve(),close:()=>Promise.resolve(true),windowTarget:()=>Promise.resolve({target,width,height:300}),listDisplays:()=>Promise.resolve([{id:display}]),
+   connect:()=>{connects++;return Promise.resolve()},device:{interfaceType:'computer',size:()=>Promise.resolve({width,height:300}),screenshotBase64:()=>Promise.resolve(''),actionSpace:()=>[]}}
   const config={displayId:'1',lockRoot:'/unused',baseUrl:'https://example.test',apiKey:'test',model:'test',modelFamily:'qwen3-vl',maxSteps:10,budgetMs:1000,
    ...(scenario==='window_change'?{macWindow:{pid:1,windowId:2}}:{})}
-  const connect=()=>connectComputerDevice(backend as Parameters<typeof connectComputerDevice>[0],config as Parameters<typeof connectComputerDevice>[1],{
-   signal:new AbortController().signal,progress:()=>{},foreground:async()=>({target,width,height:300}),
+  const connect=()=>connectComputerDevice(backend,config,{
+   signal:new AbortController().signal,progress:()=>{ /* No progress UI in this fixture. */ },foreground:()=>Promise.resolve({target,width,height:300}),
    beforeConnect:()=>{if(scenario==='revoked')throw Error('superseded')},
-   approve:async()=>{target='two';if(scenario==='geometry_change')width++;if(scenario==='display_change')display='2';return scenario!=='declined'},
+   approve:()=>{target='two';if(scenario==='geometry_change')width++;if(scenario==='display_change')display='2';return Promise.resolve(scenario!=='declined')},
   })
   if(scenario==='foreground_change'){await connect();assert.equal(connects,1)}
   else{await assert.rejects(connect,new RegExp(scenario==='declined'?'declined':scenario==='revoked'?'superseded':'screen_changed'));assert.equal(connects,0)}

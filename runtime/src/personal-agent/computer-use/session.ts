@@ -8,7 +8,7 @@ import {constrainBase64ImageToMaxSize,imageInfoOfBase64} from '@midscene/shared/
 import {setTimeout as delay} from 'node:timers/promises'
 import {loadComputerConfig,type ComputerConfig} from '../../executors/computer-config.js'
 import {startComputerBackend} from '../../executors/computer-backend.js'
-import {computerForeground,connectComputerDevice} from '../../executors/computer-device.js'
+import {type computerForeground,connectComputerDevice} from '../../executors/computer-device.js'
 import {acquireDeviceLock,recordDeviceProcess,releaseDeviceLock,quarantineDeviceLock,type DeviceLock} from '../../executors/device-lock.js'
 import {acquireTaskResources,quarantineTaskResources} from '../../executors/task-resources.js'
 import {computerApplicationSchema,COMPUTER_IMAGE_LONG_EDGE,COMPUTER_RESOURCE,computerToolArguments,type ComputerToolName,type ToolImage} from './contract.js'
