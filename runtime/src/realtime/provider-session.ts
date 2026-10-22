@@ -50,7 +50,7 @@ interface ConnectionOwner {
 export interface RealtimeProviderSessionOptions {
   /** A provider-specific asynchronous authorization refresh, or a legacy synchronous cache. */
   readonly responseAdaptation?: (signal?:AbortSignal) => ResponseAdaptationContext | undefined | Promise<ResponseAdaptationContext | undefined>
-  /** New memory contexts must fail closed; legacy reply-style advice remains advisory. */
+  /** New memory contexts are revalidated before input and withdrawn when unverifiable; legacy reply-style advice remains advisory. */
   readonly responseAdaptationRequired?:()=>boolean
   readonly onResponseAdaptationApplied?: (context: ResponseAdaptationContext, epoch: number) => void
   readonly onDiagnostic?: (diagnostic: {
@@ -62,6 +62,7 @@ export interface RealtimeProviderSessionOptions {
 }
 
 class InternalProtocolError extends RealtimeProtocolError {}
+const WITHDRAWN_SIGNATURE = JSON.stringify({content: null})
 
 export class RealtimeProviderSession {
   async setLanguage(language?: PromptLanguage): Promise<void> { await this.#provider.setLanguage?.(language) }
@@ -483,7 +484,23 @@ export class RealtimeProviderSession {
     const operation = this.#responseAdaptationTail.then(async () => {
       if (!this.#isCurrentConnection(owner)) return
       const required=this.#responseAdaptationRequired?.()===true
-      const failClosed=async()=>{if(required&&this.#isCurrentConnection(owner)){await this.close();throw new InternalProtocolError('memory authorization refresh failed; session closed')}}
+      // Unverified memory must never stay with the model, but the conversation itself may continue
+      // without memory. A fresh connection holds none; context sent earlier on this connection is
+      // replaced with an empty one at the same revision, which every provider accepts. Only a
+      // withdrawal that cannot be confirmed closes the session.
+      const failClosed=async()=>{
+        if(!required||!this.#isCurrentConnection(owner))return
+        const previous=this.#responseAdaptationAttempt
+        if(previous===null||previous.epoch!==owner.identity.epoch||previous.signature===WITHDRAWN_SIGNATURE)return
+        try{
+          await this.#provider.replaceResponseAdaptation!({revision:previous.revision,content:null},combinedSignal(owner.controller.signal,signal))
+          this.#assertCurrentConnection(owner)
+          this.#responseAdaptationAttempt={epoch:owner.identity.epoch,revision:previous.revision,signature:WITHDRAWN_SIGNATURE,confirmed:true}
+        }catch{
+          if(!this.#isCurrentConnection(owner))return
+          await this.close();throw new InternalProtocolError('memory authorization withdrawal failed; session closed')
+        }
+      }
       let raw: unknown
       const readSignal=AbortSignal.any([owner.controller.signal,...(signal?[signal]:[]),AbortSignal.timeout(10000)])
       let aborted:(()=>void)|undefined
