@@ -74,7 +74,11 @@ class QwenRealtimeVoiceProvider extends RealtimeSocketProvider {
         'role': item.role,
         'content': [
           {
-            'type': item.role == 'user' ? 'input_text' : 'text',
+            'type': item.role == 'user'
+                ? 'input_text'
+                : profile == IntegratedVoiceProfile.qwen
+                ? 'output_text'
+                : 'text',
             'text': RealtimeSocketProvider.boundedText(item.text),
           },
         ],
@@ -438,6 +442,10 @@ class QwenRealtimeVoiceProvider extends RealtimeSocketProvider {
               : VoiceEventKind.speechEnd,
           epoch: epoch,
           itemId: RealtimeSocketProvider.identifier(frame['item_id']),
+          code: type == 'input_audio_buffer.speech_stopped' &&
+                  frame['reason'] == 'turn_invalid'
+              ? 'turn_invalid'
+              : null,
         ),
       );
       return;

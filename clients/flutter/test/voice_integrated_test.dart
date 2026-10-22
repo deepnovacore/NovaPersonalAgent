@@ -87,6 +87,79 @@ const delegatedTools = <Map<String, dynamic>>[
   },
 ];
 void main() {
+  test('Qwen preserves invalid speech turn reason and item identity', () async {
+    final provider = QwenRealtimeVoiceProvider(
+      endpoint: 'ws://127.0.0.1/live',
+      model: 'qwen-audio-3.0-realtime-plus',
+      apiKey: 'synthetic-test-key',
+      voice: 'test',
+    );
+    final events = <VoiceEvent>[];
+    final subscription = provider.events.listen(events.add);
+    addTearDown(() async {
+      await provider.close();
+      await subscription.cancel();
+    });
+    provider.onFrame({
+      'type': 'input_audio_buffer.speech_stopped',
+      'item_id': 'invalid',
+      'reason': 'turn_invalid',
+    });
+    expect(events.single.kind, VoiceEventKind.speechEnd);
+    expect(events.single.itemId, 'invalid');
+    expect(events.single.code, 'turn_invalid');
+  });
+
+  for (final profile in IntegratedVoiceProfile.values) {
+    test(
+      '$profile restores both roles using its accepted history format',
+      () async {
+        final wire = Wire();
+        await wire.open();
+        final provider = QwenRealtimeVoiceProvider(
+          endpoint: wire.endpoint,
+          model: 'test',
+          apiKey: 'test',
+          voice: 'voice',
+          profile: profile,
+        );
+        final subscription = provider.events.listen((_) {});
+        addTearDown(() async {
+          await provider.close();
+          await subscription.cancel();
+          await wire.close();
+        });
+        await provider.connect(
+          epoch: 1,
+          instructions: 'Continue the conversation.',
+          history: const [
+            VoiceHistoryItem('user', 'Remember 43.'),
+            VoiceHistoryItem('assistant', '43.'),
+          ],
+        );
+        final items = wire.frames
+            .where((frame) => frame['type'] == 'conversation.item.create')
+            .map((frame) => frame['item'] as Map)
+            .toList();
+        expect(items.map((item) => item['role']), ['user', 'assistant']);
+        expect(items[0]['content'], [
+          {'type': 'input_text', 'text': 'Remember 43.'},
+        ]);
+        expect(items[1]['content'], [
+          {
+            'type': profile == IntegratedVoiceProfile.qwen
+                ? 'output_text'
+                : 'text',
+            'text': '43.',
+          },
+        ]);
+        expect(
+          wire.frames.where((frame) => frame['type'] == 'response.create'),
+          isEmpty,
+        );
+      },
+    );
+  }
   for (final profile in IntegratedVoiceProfile.values) {
     test(
       '$profile setup, audio and completed tool calls; cancel fences late frames',

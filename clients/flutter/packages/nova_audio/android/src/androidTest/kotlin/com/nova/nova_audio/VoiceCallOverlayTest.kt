@@ -11,6 +11,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
+import kotlin.math.abs
 
 class VoiceCallOverlayTest {
     @Test fun expandedControlsKeepHangupVisibleAndDispatchActions() {
@@ -47,14 +48,19 @@ class VoiceCallOverlayTest {
             assertTrue("End-call control must have a visible red background at rest; found $redPixels red pixels", redPixels > size * size / 3)
             var glyphLeft = size
             var glyphRight = 0
+            var glyphTop = size
+            var glyphBottom = 0
             for (x in size / 4 until size * 3 / 4) for (y in size / 4 until size * 3 / 4) {
                 val color = bitmap.getPixel(x, y)
                 if (Color.red(color) > 240 && Color.green(color) > 240 && Color.blue(color) > 240) {
                     glyphLeft = minOf(glyphLeft, x)
                     glyphRight = maxOf(glyphRight, x)
+                    glyphTop = minOf(glyphTop, y)
+                    glyphBottom = maxOf(glyphBottom, y)
                 }
             }
             assertTrue("Handset must remain recognizable at the real control size", glyphRight - glyphLeft >= size / 4)
+            assertTrue("Handset must sit on the vertical centre of the button, was ${(glyphTop + glyphBottom) / 2} of $size", abs((glyphTop + glyphBottom) / 2 - size / 2) <= size / 10)
             back.performClick(); assertTrue(opened)
             mute.performClick(); end.performClick()
             assertEquals(listOf("mute", "end"), actions)

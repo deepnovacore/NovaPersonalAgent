@@ -18,10 +18,11 @@ class PhoneVoicePanel extends StatefulWidget {
     this.startupError,
     this.onMinimize,
     this.onExpand,
+    this.onEnd,
   });
   final PhoneVoiceSession session;
   final VoidCallback onSettings, onStart;
-  final VoidCallback? onMinimize, onExpand;
+  final VoidCallback? onMinimize, onExpand, onEnd;
   final String language;
   final String? startupError;
   final bool compact;
@@ -68,8 +69,9 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
     if (_ending) return;
     setState(() => _ending = true);
     try {
-      await session.stop();
-      if (mounted) widget.onMinimize?.call();
+      final stopping = session.stop();
+      widget.onEnd?.call();
+      await stopping;
     } catch (_) {
       if (mounted) {
         setState(
@@ -280,10 +282,20 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                         _notice(
                           _actionError ??
                               widget.startupError ??
-                              t(
-                                '请检查语音设置或网络，再重新通话。',
-                                'Check voice settings or your connection, then try again.',
-                              ),
+                              (session.error == 'audio_capture_stalled'
+                                  ? t(
+                                      '音频采集暂时卡住，请重新开始通话。',
+                                      'Audio capture stalled. Please restart the call.',
+                                    )
+                                  : session.error == 'audio_stopped'
+                                  ? t(
+                                      '手机音频已中断，请重新开始通话。',
+                                      'Device audio was interrupted. Please restart the call.',
+                                    )
+                                  : t(
+                                      '请检查语音设置或网络，再重新通话。',
+                                      'Check voice settings or your connection, then try again.',
+                                    )),
                         ),
                       if (session.active && !session.supportsVoiceDelegation)
                         _notice(

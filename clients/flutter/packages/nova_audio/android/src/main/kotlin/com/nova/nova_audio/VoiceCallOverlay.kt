@@ -1,5 +1,6 @@
 package com.nova.nova_audio
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Canvas
@@ -15,6 +16,7 @@ import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.provider.Settings
 import android.view.*
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -35,6 +37,7 @@ internal class VoiceCallOverlay(
     private var orb: FrameLayout? = null
     private var orbRing: GradientDrawable? = null
     private var mutedBadge: View? = null
+    private var pulse: ValueAnimator? = null
     private var muted = false
     private var expanded = false
     private var dockedRight = false
@@ -97,7 +100,7 @@ internal class VoiceCallOverlay(
         return try {
             params.width = boxWidth
             alignDock(); windows.addView(box, params); update(muted); true
-        } catch (_: RuntimeException) { view = null; orb = null; orbRing = null; mutedBadge = null; false }
+        } catch (_: RuntimeException) { stopPulse(); view = null; orb = null; orbRing = null; mutedBadge = null; false }
     }
 
     /**
@@ -159,7 +162,7 @@ internal class VoiceCallOverlay(
 
     fun update(value: Boolean) {
         muted = value
-        orbRing?.setStroke(dp(3), if (muted) MUTED_RING else LIVE_RING)
+        if (muted) { stopPulse(); orbRing?.setStroke(dp(3), MUTED_RING) } else startPulse()
         mutedBadge?.visibility = if (muted) View.VISIBLE else View.GONE
         orb?.contentDescription = if (zh) "Nova 通话，${if (muted) "已静音" else "麦克风开启"}，${if (expanded) "点按收起" else "点按展开"}" else "Nova call, ${if (muted) "muted" else "microphone active"}, ${if (expanded) "tap to collapse controls" else "tap for controls"}"
         muteButton?.apply {
@@ -170,7 +173,26 @@ internal class VoiceCallOverlay(
         relayout()
     }
 
+    /** Live ring breathes while the microphone is open; it holds still when muted. */
+    private fun startPulse() {
+        val ring = orbRing ?: return
+        if (pulse?.isRunning == true) return
+        pulse = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1800; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                val alpha = (255 * (1f - 0.55f * t)).toInt()
+                ring.setStroke(dp(3) + (dp(1) * t).toInt(), Color.argb(alpha, Color.red(LIVE_RING), Color.green(LIVE_RING), Color.blue(LIVE_RING)))
+            }
+            start()
+        }
+    }
+
+    private fun stopPulse() { pulse?.cancel(); pulse = null }
+
     fun hide() {
+        stopPulse()
         view?.let { try { windows.removeView(it) } catch (_: RuntimeException) {} }
         view = null; orb = null; orbRing = null; mutedBadge = null; muteButton = null; expanded = false
     }
@@ -180,7 +202,7 @@ internal class VoiceCallOverlay(
     /** Stroked line glyphs on a 24-unit grid, so the overlay needs no bitmap or XML resources. */
     private class IconDrawable(private val icon: Icon, color: Int, private val strokePx: Float, private val inset: Int) : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+            this.color = color; style = if (icon == Icon.END) Paint.Style.FILL else Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
         }
         override fun draw(canvas: Canvas) {
             val b = bounds
@@ -199,8 +221,30 @@ internal class VoiceCallOverlay(
                     p.moveTo(6f, 11f); p.arcTo(RectF(6f, 5f, 18f, 17f), 180f, -180f); p.moveTo(12f, 17f); p.lineTo(12f, 21f)
                     if (icon == Icon.MIC_OFF) { p.moveTo(4f, 4f); p.lineTo(20f, 20f) }
                 }
-                // A handset drawn as a flat arch with short ear tips, the usual hang-up glyph.
-                Icon.END -> { p.moveTo(3f, 16f); p.quadTo(12f, 7f, 21f, 16f); p.moveTo(3f, 16f); p.lineTo(3f, 13.5f); p.moveTo(21f, 16f); p.lineTo(21f, 13.5f) }
+                // Filled handset (Material call_end), laid flat with both ear tips pointing down.
+                Icon.END -> {
+                    p.moveTo(12f, 9f)
+                    p.rCubicTo(-1.6f, 0f, -3.15f, .25f, -4.6f, .72f); p.rLineTo(0f, 3.1f)
+                    p.rCubicTo(0f, .39f, -.23f, .74f, -.56f, .9f)
+                    p.rCubicTo(-.98f, .49f, -1.87f, 1.12f, -2.66f, 1.85f)
+                    p.rCubicTo(-.18f, .18f, -.43f, .28f, -.7f, .28f)
+                    p.rCubicTo(-.28f, 0f, -.53f, -.11f, -.71f, -.29f)
+                    p.lineTo(.29f, 13.08f)
+                    p.rCubicTo(-.18f, -.17f, -.29f, -.42f, -.29f, -.7f)
+                    p.rCubicTo(0f, -.28f, .11f, -.53f, .29f, -.71f)
+                    p.cubicTo(3.34f, 8.78f, 7.46f, 7f, 12f, 7f)
+                    p.rCubicTo(4.54f, 0f, 8.66f, 1.78f, 11.71f, 4.67f)
+                    p.rCubicTo(.18f, .18f, .29f, .43f, .29f, .71f)
+                    p.rCubicTo(0f, .28f, -.11f, .53f, -.29f, .71f)
+                    p.rLineTo(-2.48f, 2.48f)
+                    p.rCubicTo(-.18f, .18f, -.43f, .29f, -.71f, .29f)
+                    p.rCubicTo(-.27f, 0f, -.52f, -.11f, -.7f, -.28f)
+                    p.rCubicTo(-.79f, -.74f, -1.69f, -1.36f, -2.67f, -1.85f)
+                    p.rCubicTo(-.33f, -.16f, -.56f, -.5f, -.56f, -.9f)
+                    p.rLineTo(0f, -3.1f)
+                    p.cubicTo(15.15f, 9.25f, 13.6f, 9f, 12f, 9f)
+                    p.close()
+                }
             }
             canvas.drawPath(p, paint)
             canvas.restore()

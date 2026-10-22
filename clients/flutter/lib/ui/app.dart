@@ -114,7 +114,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   final voiceSettings = VoiceSettings();
   bool _phoneVoiceShown = false, _phoneVoiceExpanded = false;
   bool _phoneVoiceStarting = false;
-  String? _phoneVoiceStartError;
+  bool _phoneVoiceWasActive = false, _phoneVoiceWasConnecting = false;
+  String? _phoneVoiceStartError, _reportedCleanupError;
   final localConversation = GlobalKey<LocalChatPanelState>();
   int _tab = 0;
   AgentCoreHost? agentCore;
@@ -289,7 +290,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           companion: audio is ChannelAudio ? NativeVoiceCompanion() : null,
           requestMicrophone: requestMicrophone,
           store: host.store,
-        )..addListener(_lifeChanged);
+        )..addListener(_phoneVoiceChanged);
       });
       unawaited(_openLocalSchedules(host));
       unawaited(_openProfileGeneration().catchError((Object _) {}));
@@ -389,6 +390,46 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     if (mounted) setState(() {});
   }
 
+  void _phoneVoiceChanged() {
+    final call = phoneVoice;
+    final active = call?.active == true, connecting = call?.connecting == true;
+    final lifecycleChanged =
+        active != _phoneVoiceWasActive ||
+        connecting != _phoneVoiceWasConnecting;
+    final ended =
+        _phoneVoiceWasActive &&
+        call != null &&
+        !call.active &&
+        !call.connecting;
+    _phoneVoiceWasActive = active;
+    _phoneVoiceWasConnecting = connecting;
+    if (mounted) {
+      if (lifecycleChanged) {
+        setState(() {
+          // Startup and call failures stay visible with their error and retry.
+          if (ended && call.error == null) {
+            _phoneVoiceShown = false;
+            _phoneVoiceExpanded = false;
+          }
+        });
+      }
+      final cleanupError = call?.cleanupError;
+      if (cleanupError != null && cleanupError != _reportedCleanupError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t(
+                '通话清理失败，麦克风或通话服务可能仍在运行。',
+                'Call cleanup failed. Your microphone or call service may still be running.',
+              ),
+            ),
+          ),
+        );
+      }
+      _reportedCleanupError = cleanupError;
+    }
+  }
+
   String _t(String zh, String en) => language == 'zh' ? zh : en;
 
   Future<void> _newChat() async {
@@ -467,6 +508,14 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   void _minimizePhoneVoice() {
     if (mounted) setState(() => _phoneVoiceExpanded = false);
+  }
+
+  void _dismissPhoneVoice() {
+    if (!mounted) return;
+    setState(() {
+      _phoneVoiceShown = false;
+      _phoneVoiceExpanded = false;
+    });
   }
 
   Future<void> _voiceSettings() async {
@@ -920,7 +969,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   @override
   void dispose() {
-    phoneVoice?.removeListener(_lifeChanged);
+    phoneVoice?.removeListener(_phoneVoiceChanged);
     phoneVoice?.dispose();
     voiceDelegates?.removeListener(_lifeChanged);
     voiceDelegates?.dispose();
@@ -1069,6 +1118,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                         compact: true,
                         onExpand: _expandPhoneVoice,
                         onMinimize: _minimizePhoneVoice,
+                        onEnd: _dismissPhoneVoice,
                         onSettings: () => unawaited(_voiceSettings()),
                         onStart: () => unawaited(_startPhoneVoice()),
                       ),
@@ -1184,6 +1234,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 startupError: _phoneVoiceStartError,
                 language: language,
                 onMinimize: _minimizePhoneVoice,
+                onEnd: _dismissPhoneVoice,
                 onExpand: _expandPhoneVoice,
                 onSettings: () => unawaited(_voiceSettings()),
                 onStart: () => unawaited(_startPhoneVoice()),

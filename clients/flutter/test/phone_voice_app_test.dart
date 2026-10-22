@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -13,11 +14,13 @@ import 'package:nova_mobile/voice/phone_voice_panel.dart';
 import 'package:nova_mobile/voice/voice_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
+import 'phone_voice_session_test.dart' show TestVoiceProvider;
 import 'support/fake_audio.dart';
 
 Future<({AgentCoreHost host, FakeAudio audio})> openChat(
   WidgetTester tester, {
   VoiceConfiguration? voiceConfiguration,
+  FakeAudio? testAudio,
 }) async {
   SharedPreferences.setMockInitialValues({'language': 'en'});
   final configuration =
@@ -31,7 +34,7 @@ Future<({AgentCoreHost host, FakeAudio audio})> openChat(
   FlutterSecureStorage.setMockInitialValues({
     VoiceSettings.storageKey: jsonEncode(configuration.toJson()),
   });
-  final audio = FakeAudio();
+  final audio = testAudio ?? FakeAudio();
   // Permission is denied before any provider connects or native capture starts.
   final audioConfig = (audio: audio, requestMicrophone: () async => false);
   final store = ConversationStore(MemoryLifePersistence());
@@ -55,7 +58,54 @@ Future<({AgentCoreHost host, FakeAudio audio})> openChat(
   return (host: host, audio: audio);
 }
 
+class DelayedStopAudio extends FakeAudio {
+  Completer<void>? stopGate;
+  bool failStop = false;
+
+  @override
+  Future<void> stop() async {
+    await super.stop();
+    await stopGate?.future;
+    if (failStop) throw StateError('native_stop_failed');
+  }
+}
+
 void main() {
+  testWidgets('voice controls do not rebuild the chat shell', (
+    tester,
+  ) async {
+    await openChat(tester);
+    await tester.tap(find.byTooltip('Live voice'));
+    await tester.pumpAndSettle();
+    final call = tester
+        .widget<PhoneVoicePanel>(find.byType(PhoneVoicePanel))
+        .session;
+    call.active = true;
+    call.error = null;
+    await call.toggleMute();
+    await tester.pump();
+    final chatFinder = find.byType(LocalChatPanel, skipOffstage: false);
+    final shellBefore = tester.widget<LocalChatPanel>(chatFinder);
+    expect(shellBefore.voiceBusy, isTrue);
+    expect(shellBefore.onVoiceText, isNotNull);
+    expect(find.byTooltip('Unmute'), findsOneWidget);
+    await call.toggleMute();
+    await tester.pump();
+    expect(find.byTooltip('Mute'), findsOneWidget);
+    expect(tester.widget<LocalChatPanel>(chatFinder), same(shellBefore));
+    await call.toggleSpeaker();
+    await tester.pump();
+    expect(tester.widget<LocalChatPanel>(chatFinder), same(shellBefore));
+    final stopping = call.stop();
+    await tester.pumpAndSettle();
+    await stopping;
+    final shellAfter = tester.widget<LocalChatPanel>(chatFinder);
+    expect(shellAfter.voiceBusy, isFalse);
+    expect(shellAfter.onVoiceText, isNull);
+    expect(find.byKey(const ValueKey('voice-fullscreen')), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final useBack in [false, true]) {
     testWidgets(
       'fullscreen call hides chat and tabs; ${useBack ? 'back' : 'minimize'} preserves mounted draft',
@@ -109,6 +159,182 @@ void main() {
       },
     );
   }
+
+  for (final compact in [false, true]) {
+    testWidgets(
+      '${compact ? 'compact' : 'fullscreen'} hangup returns to the draft before audio shutdown completes',
+      (tester) async {
+        final audio = DelayedStopAudio();
+        await openChat(tester, testAudio: audio);
+        final original = tester.state<LocalChatPanelState>(
+          find.byType(LocalChatPanel),
+        );
+        await tester.tap(find.byTooltip('Live voice'));
+        await tester.pumpAndSettle();
+        final call = tester
+            .widget<PhoneVoicePanel>(find.byType(PhoneVoicePanel))
+            .session;
+        call.active = true;
+        call.error = null;
+        await call.audio.startRelay(
+          generation: 1,
+          capture: true,
+          threshold: .045,
+        );
+        await call.toggleMute();
+        await tester.pump();
+        if (compact) {
+          await tester.tap(find.byTooltip('Minimize call'));
+          await tester.pumpAndSettle();
+          expect(call.active, isTrue);
+        }
+        final stoppedBefore = audio.stopCount;
+        final gate = audio.stopGate = Completer<void>();
+        addTearDown(() {
+          if (!gate.isCompleted) gate.complete();
+        });
+        await tester.tap(find.byTooltip('End call'));
+        await tester.pump();
+        expect(find.byKey(const ValueKey('voice-fullscreen')), findsNothing);
+        expect(find.byKey(const ValueKey('voice-compact-bar')), findsNothing);
+        expect(
+          tester.state<LocalChatPanelState>(find.byType(LocalChatPanel)),
+          same(original),
+        );
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'Keep this unsent draft',
+        );
+        expect(audio.stopCount, stoppedBefore + 1);
+        expect(gate.isCompleted, isFalse);
+        gate.complete();
+        await tester.pumpAndSettle();
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  testWidgets(
+    'external session hangup closes an active call before cleanup completes',
+    (tester) async {
+      final audio = DelayedStopAudio();
+      await openChat(tester, testAudio: audio);
+      await tester.tap(find.byTooltip('Live voice'));
+      await tester.pumpAndSettle();
+      final call = tester
+          .widget<PhoneVoicePanel>(find.byType(PhoneVoicePanel))
+          .session;
+      call.active = true;
+      call.error = null;
+      await call.audio.startRelay(
+        generation: 1,
+        capture: true,
+        threshold: .045,
+      );
+      await call.toggleMute();
+      await tester.pump();
+      final gate = audio.stopGate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      final stopping = call.stop();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('voice-fullscreen')), findsNothing);
+      expect(find.byKey(const ValueKey('voice-compact-bar')), findsNothing);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Keep this unsent draft',
+      );
+      expect(gate.isCompleted, isFalse);
+      gate.complete();
+      await stopping;
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'cleanup failure is visible after hangup and again on the next call',
+    (tester) async {
+      final audio = DelayedStopAudio();
+      await openChat(tester, testAudio: audio);
+      await tester.tap(find.byTooltip('Live voice'));
+      await tester.pumpAndSettle();
+      final call = tester
+          .widget<PhoneVoicePanel>(find.byType(PhoneVoicePanel))
+          .session;
+      call.active = true;
+      call.error = 'provider_failed';
+      await call.audio.startRelay(
+        generation: 1,
+        capture: true,
+        threshold: .045,
+      );
+      await call.toggleMute();
+      await tester.pump();
+      final gate = audio.stopGate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      audio.failStop = true;
+      await tester.tap(find.byTooltip('End call'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('voice-fullscreen')), findsNothing);
+      expect(find.byType(LocalChatPanel), findsOneWidget);
+      const message =
+          'Call cleanup failed. Your microphone or call service may still be running.';
+      expect(find.text(message), findsNothing);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(call.error, 'provider_failed');
+      expect(find.text(message), findsOneWidget);
+      final messenger = tester.state<ScaffoldMessengerState>(
+        find.byType(ScaffoldMessenger),
+      );
+      messenger.removeCurrentSnackBar();
+      await call.stop();
+      await tester.pumpAndSettle();
+      expect(find.text(message), findsNothing);
+
+      final next = TestVoiceProvider();
+      await call.start(
+        provider: next,
+        conversation: call.conversationId!,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(message), findsOneWidget);
+      audio.failStop = false;
+      await call.audio.stop();
+      await next.controller.close();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'an interrupted active call keeps its error and restart controls visible',
+    (tester) async {
+      await openChat(tester);
+      await tester.tap(find.byTooltip('Live voice'));
+      await tester.pumpAndSettle();
+      final call = tester
+          .widget<PhoneVoicePanel>(find.byType(PhoneVoicePanel))
+          .session;
+      call.active = true;
+      call.error = null;
+      await call.toggleMute();
+      await tester.pump();
+      call.error = 'audio_stopped';
+      await call.stop();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('voice-fullscreen')), findsOneWidget);
+      expect(
+        find.text('Device audio was interrupted. Please restart the call.'),
+        findsOneWidget,
+      );
+      expect(find.byTooltip('Voice settings'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets(
     'startup configuration failure is visible inside fullscreen call',

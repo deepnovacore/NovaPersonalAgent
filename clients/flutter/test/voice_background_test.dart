@@ -11,7 +11,7 @@ import 'phone_voice_session_test.dart'
 class FakeCompanion implements VoiceCompanion {
   final events = StreamController<String>.broadcast(sync: true);
   Completer<void>? acquiring;
-  bool fail = false;
+  bool fail = false, failStop = false;
   int starts = 0, stops = 0;
   final states = <bool>[];
   @override
@@ -26,6 +26,7 @@ class FakeCompanion implements VoiceCompanion {
   @override
   Future<void> stop() async {
     stops++;
+    if (failStop) throw StateError('native_stop_failed');
   }
 
   @override
@@ -76,6 +77,15 @@ void main() {
     expect(provider.closes, 0);
     await session.stop();
     expect(companion.stops, 1);
+    expect(provider.closes, 1);
+  });
+  test('companion cleanup failure preserves the original call error', () async {
+    await start();
+    companion.failStop = true;
+    provider.controller.addError(StateError('provider_failed'));
+    await session.stop();
+    expect(session.error, 'provider_failed');
+    expect(session.cleanupError, 'call_stop_failed');
     expect(provider.closes, 1);
   });
   test('stop during native acquisition cannot leak a late service', () async {

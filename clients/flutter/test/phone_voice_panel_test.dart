@@ -100,6 +100,7 @@ Widget panelHost(
   bool compact = false,
   VoidCallback? onMinimize,
   VoidCallback? onExpand,
+  VoidCallback? onEnd,
   ThemeData? theme,
 }) => MaterialApp(
   theme: theme ?? novaTheme(),
@@ -120,6 +121,7 @@ Widget panelHost(
           compact: compact,
           onMinimize: onMinimize,
           onExpand: onExpand,
+          onEnd: onEnd,
         ),
       ),
     ),
@@ -241,13 +243,19 @@ void main() {
   );
 
   testWidgets(
-    'controls separate playback interruption and task cancellation; end waits',
+    'controls separate playback interruption and task cancellation; end dismisses before cleanup',
     (tester) async {
       final session = PanelSession()..playing = true;
       addTearDown(session.dispose);
       var minimized = 0;
+      var ended = 0;
       await tester.pumpWidget(
-        panelHost(session, reduced: true, onMinimize: () => minimized++),
+        panelHost(
+          session,
+          reduced: true,
+          onMinimize: () => minimized++,
+          onEnd: () => ended++,
+        ),
       );
       await tester.tap(find.byTooltip('静音'));
       await tester.pump();
@@ -263,9 +271,12 @@ void main() {
       await tester.tap(find.byTooltip('结束通话'));
       await tester.pump();
       expect(minimized, 0);
+      expect(ended, 1);
+      expect(session.active, isTrue);
       session.finishStop!.complete();
       await tester.pump();
-      expect(minimized, 1);
+      expect(minimized, 0);
+      expect(ended, 1);
       expect(session.endings, 1);
     },
   );
