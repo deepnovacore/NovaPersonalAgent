@@ -23,22 +23,26 @@ class Node{
  constructor(tag,text){this.tag=tag;this.textContent=text??'';this.children=[];this.attrs={};this.listeners={};this.dataset={};this.value='';this.disabled=false;this.className=''}
  append(...nodes){this.children.push(...nodes)}
  replaceChildren(...nodes){this.children=[...nodes]}
+ prepend(...nodes){this.children.unshift(...nodes)}
+ get classList(){return {add(){}}}
  setAttribute(k,v){this.attrs[k]=v}
  addEventListener(k,f){this.listeners[k]=f}
 }
 const walk=node=>[node,...node.children.flatMap(walk)]
 function mount(state){
+ globalThis.document={createElementNS:(ns,tag)=>new Node(tag)}
  const el=(tag,text,className)=>Object.assign(new Node(tag,text),className?{className}:{})
  const calls=[],panel=new Node('section')
  const button=(label,action,parent)=>{const b=el('button',label);b.listeners.click=action;parent.append(b);return b}
- renderSkillsPage(panel,{el,button,state,avatar:'data:image/png;base64,AA==',refresh:()=>calls.push('refresh'),manage:()=>calls.push('manage')})
+ renderSkillsPage(panel,{el,button,state,refresh:()=>calls.push('refresh'),manage:()=>calls.push('manage')})
  return {panel,calls,cards:()=>walk(panel).filter(n=>n.className==='skill-card')}
 }
-test('cards use the Nova avatar as their icon and the group tabs and search re-filter without a rerender',()=>{
+test('each skill gets its own inline icon and the group tabs and search re-filter without a rerender',()=>{
  const state={status,loading:false,error:'',group:'system',query:''}
  const m=mount(state)
  assert.equal(m.cards().length,5)
- assert(m.cards().every(card=>card.children[0].src==='data:image/png;base64,AA=='))
+ const paths=m.cards().map(card=>card.children[0].children[0]?.children[0]?.attrs.d)
+ assert(paths.every(Boolean));assert.equal(new Set(paths).size,5)
  const [systemTab,personalTab]=walk(m.panel).find(n=>n.className==='skills-tabs').children
  personalTab.listeners.click();assert.equal(m.cards().length,3);assert.equal(personalTab.attrs['aria-pressed'],'true');assert.equal(systemTab.attrs['aria-pressed'],'false')
  const search=walk(m.panel).find(n=>n.className==='skills-search');search.value='bro';search.listeners.input();assert.deepEqual(m.cards().map(c=>c.children[1].children[0].textContent),['broken'])

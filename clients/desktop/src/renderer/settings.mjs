@@ -42,11 +42,11 @@ import {
 
 createChatGptPanel(document,window.novaPersonalAgentDesktop.chatgpt)
 const api = window.novaPersonalAgentDesktop.settings
-const skillsState={status:null,loading:false,error:'',group:'system',query:'',avatar:''}
+const skillsState={status:null,loading:false,error:'',group:'system',query:''}
 const skillElement=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
 function renderSettingsSkills(){
  const panel=document.querySelector('#skills-panel'),search=panel.querySelector('.skills-search'),focused=search===document.activeElement,selection=focused?[search.selectionStart,search.selectionEnd]:null;panel.replaceChildren()
- renderSkillsPage(panel,{el:skillElement,button:(label,action,parent)=>{const node=skillElement('button',label);node.type='button';node.addEventListener('click',()=>void action());parent.append(node);return node},state:skillsState,avatar:skillsState.avatar,refresh:async()=>{
+ renderSkillsPage(panel,{el:skillElement,button:(label,action,parent)=>{const node=skillElement('button',label);node.type='button';node.addEventListener('click',()=>void action());parent.append(node);return node},state:skillsState,refresh:async()=>{
   skillsState.loading=true;skillsState.error='';renderSettingsSkills()
   try{const view=await api.get();skillsState.status=view?.capabilities?.status??null;if(!skillsState.status)skillsState.error='暂时无法读取技能，请稍后刷新。'}catch{skillsState.error='暂时无法读取技能，请稍后刷新。'}finally{skillsState.loading=false;renderSettingsSkills()}
  },manage:()=>applyCategory('capabilities')})
@@ -56,7 +56,7 @@ const welcomeApi=window.novaPersonalAgentDesktop.welcome
 if(welcomeApi){
  const identity=mountIdentitySettings(document.querySelector('#assistant-identity-panel'),{api:welcomeApi,command:(method,params)=>api.personalCommand(method,params)})
  const permissions=mountPermissionCards(document.querySelector('#desktop-permissions-panel'),{api:welcomeApi})
- const update=value=>{identity.update(value);permissions.update(value.permissions);skillsState.avatar=value.profile?.avatar??value.defaultAvatar??'';for(const image of document.querySelectorAll('#skills-panel .skill-icon'))if(image.getAttribute('src')!==skillsState.avatar)image.src=skillsState.avatar}
+ const update=value=>{identity.update(value);permissions.update(value.permissions);}
  const load=()=>welcomeApi.get().then(update).catch(()=>identity.error())
  welcomeApi.onChanged(update);window.addEventListener('focus',()=>void load());void load()
 }
