@@ -50,7 +50,7 @@ interface Saved {
   deliveries: Record<string, { nonce: string; message?: string; chat?: string }>;
   actions: string[];
   generation: number; sources: string[]; mentionCaptureSince?: string;
-  /** Per chat: only mentions from this instant on may become Todos automatically; history never does. */
+  /** Per chat: only mentions from this instant on are flagged for automatic capture as timeline input; history never is. */
   captureFrom?: Record<string, string>; consentSince?: string;
 }
 export interface FeishuOptions {

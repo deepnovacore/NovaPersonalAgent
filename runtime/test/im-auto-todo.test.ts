@@ -8,9 +8,10 @@ import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import {LifeService} from '../src/personal-agent/life.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
 
-test('direct actionable IM becomes one sourced durable Todo without external execution; manual changes win',async()=>{
+test('a direct @me message never becomes a Todo and no model call is made for it, but stays timeline and daily-brief input',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-auto-im-'))
- const gateway={complete:(request:{system:string;prompt:string})=>{const text=request.system.includes('IM_ACTION')?JSON.stringify({action:{title:'提交材料',note:'请提交材料',due:null,quote:'请提交材料',assigned_to_me:true,requires_action:true,resolved:false}}):request.system.includes('IM_MATCH')?JSON.stringify({decisions:[{candidate_index:0,action:'add',target_id:null}]}):JSON.stringify({entries:[]});return Promise.resolve({text,model:'fixture',usage:{input_tokens:0,output_tokens:0}})}} as unknown as ModelGateway
+ const systems:string[]=[]
+ const gateway={complete:(request:{system:string;prompt:string})=>{systems.push(request.system);return Promise.resolve({text:JSON.stringify({entries:[]}),model:'fixture',usage:{input_tokens:0,output_tokens:0}})}} as unknown as ModelGateway
  const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(dir,'ledger.sqlite')),userId:'fixture',gateway,model:'fixture',inputConsent:true,consolidation:{enabled:false}})
  const life=new LifeService(join(dir,'life.json'),()=>{/* test observer */},()=>memory.lifeBackend())
  try{
@@ -20,12 +21,14 @@ test('direct actionable IM becomes one sourced durable Todo without external exe
   await memory.feishuProcessingConsent('apply',[input.sourceId],input.processingConsent)
   await memory.feishuProcessingConsent('activate',[input.sourceId],input.processingConsent)
   await memory.ingestEvidence(input);await memory.flush();await life.refresh()
-  let todo=life.snapshot().todos[0];assert.ok(todo);assert.equal(todo.title,'提交材料');assert.equal(todo.sources?.[0]?.type,'im');assert.equal(todo.sources?.[0]?.mentioned_me,true);assert.equal(todo.auto_recorded,true);assert.equal(todo.sources?.[0]?.url,im.source_url)
-  const entries=(await memory.list()).entries;assert.equal(entries.find(e=>e.kind==='todo')?.origin,'inferred')
-  await life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,title:'我改的标题',status:'cancelled'},'user-edit')
-  await memory.ingestEvidence(input);await memory.flush();await life.refresh();assert.equal(life.snapshot().todos.length,1);assert.equal(life.snapshot().todos[0]?.status,'cancelled');assert.equal(life.snapshot().todos[0]?.title,'我改的标题')
-  await memory.ingestEvidence({...input,locator:'feishu://message/om_other',im:{...im,message_id:'om_other',mention:'none'}});await memory.flush();await life.refresh();assert.equal(life.snapshot().todos.length,1,'a message that does not mention you never creates a Todo')
-  await memory.setProcessingConsent(input.sourceId,memory.processingGrant(false,2));await life.refresh();todo=life.snapshot().todos[0]!;assert.deepEqual(todo.sources,[])
+  assert.equal(life.snapshot().todos.length,0,'a mention is no longer turned into a Todo')
+  assert.equal(systems.some(system=>system.includes('IM_ACTION')||system.includes('IM_MATCH')),false)
+  assert.equal((await memory.list()).entries.some(entry=>entry.kind==='todo'),false)
+  const timeline=await memory.timelineEvidence();const row=timeline.find(item=>item.text==='@我 请提交材料')
+  assert.ok(row,'the mention is a timeline brief input');assert.equal(row.kind,'im')
+  const daily=await memory.dailyBriefEvidence({localDate:new Date().toLocaleDateString('en-CA'),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone})
+  assert.ok(daily.some(item=>item.text==='@我 请提交材料'),'and a daily brief input')
+  await memory.ingestEvidence({...input,locator:'feishu://message/om_other',im:{...im,message_id:'om_other',mention:'none'}});await memory.flush();await life.refresh();assert.equal(life.snapshot().todos.length,0)
  }finally{await life.close();await memory.close();await rm(dir,{recursive:true,force:true})}
 })
 
