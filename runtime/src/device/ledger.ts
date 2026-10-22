@@ -11,7 +11,6 @@ const bindings = z.object({
   data_version: integer, observation_version: integer, permission_scope: z.array(text).min(1),
   effect_class: text, proposal_digest: text, executable_digest: text, expires_at: integer,
 })
-const version = z.object({version: integer, base_version: integer, content: text})
 const attemptSchema: z.ZodType<AttemptState> = z.object({
   task_phase: phase,
   attempt: z.object({
@@ -42,17 +41,12 @@ export const deviceStateSchema = z.object({
     operation_id: text, receipt_key: text.optional(),
     state: attemptSchema,
   })),
-  todos: z.array(version.extend({
-    id: text, conflicts: z.array(version),
-    tombstones: z.array(z.object({entity_id: text, version: integer, permanent: z.literal(true)})),
-    projection_visible: z.boolean(),
-  })),
   pending_stops: z.array(text),
 })
 export type DeviceState = z.infer<typeof deviceStateSchema>
 export function emptyDeviceState(): DeviceState {
   return {authority: {lifecycle_generation: 0, tasks: [], grants: [], receipts: []},
-    ownership: {capacity: 10000, receipts: []}, attempts: [], todos: [], pending_stops: []}
+    ownership: {capacity: 10000, receipts: []}, attempts: [], pending_stops: []}
 }
 
 /** One ledger per path; caller holds the host process lock, as with LifeService. */
