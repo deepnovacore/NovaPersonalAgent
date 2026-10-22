@@ -32,7 +32,7 @@ export class SourceProcessingAgent{
   return rows.find(row=>row.source_suggestion_id===item.id||(!item.todo_id&&source&&lifeEvidenceMatches(source.refs,[...(row.workbench_source?.refs??[]),...(row.suggestion_source?.refs??[])])))
  }
  #account(){const feishu:unknown=this.host.snapshot().feishu;return typeof feishu==='object'&&feishu!==null&&'account_id' in feishu?feishu.account_id:undefined}
- snapshot(){const products=structuredClone(this.#products);products.suggestions=products.suggestions.filter(item=>!this.#captured(item));return products}
+ snapshot(){const products=structuredClone(this.#products);products.suggestions=products.suggestions.filter(item=>item.kind!=='action'&&!this.#captured(item));return products}
  #presentationAccount:string|undefined
  setPresentationAccount(account:string|undefined){if(account!==this.#presentationAccount){this.#products=emptyUnderstanding();this.#presentationAccount=account}}
  async reload(){
@@ -46,15 +46,15 @@ export class SourceProcessingAgent{
  profileSnapshot(){const latest=this.host.schedules.terminalRuns().filter(run=>run.processing).sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at))[0];return {status:this.host.schedules.activeRuns().some(run=>run.processing)?'working':this.#error||latest?.terminal_summary?.outcome==='failed'?'failed':this.#products.profile_pending?'working':this.#products.draft?'ready':'idle',draft:this.#products.draft,last_success:this.#products.last_success,needs_update:this.#products.profile_needs_update===true,sources:this.#products.sources,processing:[...this.host.schedules.activeRuns(),...this.host.schedules.terminalRuns()].filter(run=>run.processing).sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at)).slice(0,5).map(run=>({started_at:run.claimed_at,status:run.terminal_summary?.outcome??'running',model_calls:run.processing?.model_calls??0,tool_calls:run.processing?.calls.length??0}))}}
  contextSnapshot():ReturnType<WorkbenchContext['snapshot']>{
   const p=this.snapshot(),status=this.profileSnapshot().status
-  const cards=p.suggestions.map(item=>({id:item.id,candidate_id:item.id,tab:item.kind==='goal'?'goals' as const:item.kind==='idea'?'ideas' as const:'todos' as const,title:item.title,body:item.body,why:null,next:item.kind==='action'?item.title:null,refs:item.refs.map(ref=>({...ref,label:p.sources.find(source=>source.id===ref.entry_id)?.label??'来源'})),sources:understandingSourceTags(item.refs,p.sources)}))
-  return {status,candidate_count:cards.length,recap:{text:null,projects:p.projects.filter(item=>item.relation==='participating'&&item.status==='current').map(item=>({name:item.name,line:item.summary}))},empty_reason:cards.length?null:'no_eligible_sources',empty_reasons:{todos:cards.length?null:'no_eligible_sources',ideas:'no_eligible_sources',goals:'no_eligible_sources'},cards}
+  const cards=p.suggestions.filter(item=>item.kind==='goal'||item.kind==='idea').map(item=>({id:item.id,candidate_id:item.id,tab:item.kind==='goal'?'goals' as const:'ideas' as const,title:item.title,body:item.body,why:null,next:null,refs:item.refs.map(ref=>({...ref,label:p.sources.find(source=>source.id===ref.entry_id)?.label??'来源'})),sources:understandingSourceTags(item.refs,p.sources)}))
+  return {status,candidate_count:cards.length,recap:{text:null,projects:p.projects.filter(item=>item.relation==='participating'&&item.status==='current').map(item=>({name:item.name,line:item.summary}))},empty_reason:cards.length?null:'no_eligible_sources',empty_reasons:{ideas:'no_eligible_sources',goals:'no_eligible_sources'},cards}
  }
  async adopt(id:string){
   await this.host.life.refresh()
   const receipt=this.host.life.receipt('understanding-adopt:'+id);if(receipt)return receipt
   const life=this.host.life.snapshot(),prior=[...life.todos,...life.ideas,...life.goals].find(todo=>todo.source_suggestion_id===id)
   if(prior)return {id:prior.id,version:prior.version}
-  await this.reload();const item=this.#products.suggestions.find(item=>item.id===id);if(!item)throw Error('card_not_found')
+  await this.reload();const item=this.#products.suggestions.find(item=>item.id===id);if(!item||item.kind==='action')throw Error('card_not_found')
   const captured=this.#captured(item);if(captured){await this.operation({action:'dismiss',id});await this.reload();return {id:captured.id,version:captured.version}}
   const sources=understandingSourceTags(item.refs,this.#products.sources),source=this.#source(item)
   const guard=()=>{if(!this.#products.suggestions.some(current=>current.id===id&&canonicalJson(current)===canonicalJson(item)))throw Error('candidate_stale_source')}

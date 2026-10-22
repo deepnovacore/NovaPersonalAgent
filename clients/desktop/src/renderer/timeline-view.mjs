@@ -17,7 +17,7 @@ export function timelineGroups(snapshot,now=new Date()){
  }
  return [...grouped].filter(([,items])=>items.length).map(([id,items])=>({id,label:LABEL[id],items:items.sort((a,b)=>(a.date??'').localeCompare(b.date??'')||a.title.localeCompare(b.title))}))
 }
-export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,openArticle,openSettings,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
+export function renderTimeline(parent,{snapshot,el,button,discuss,openArticle,openSettings,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
  const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}${snapshot?.timeline?' timeline-briefing':''}`);parent.append(root)
  renderSourceStatus(root,{sources:snapshot?.sources??[],status:snapshot?.profile_preparation?.status,processing:snapshot?.profile_preparation?.processing,el,button,openSettings})
  const groups=snapshot?.timeline?[]:timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),currentDate=timelineDate(snapshot,now)
@@ -93,7 +93,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
   }
   if(!attention.cards?.length)section.append(el('p',t(attention.status==='working'?'正在结合近期信息整理…':attention.status==='queued'?'即将整理近期信息…':attention.status==='failed'?(attention.error==='timeline_generation_timeout'?'整理用时较长，尚未完成，可点击刷新重试。':'这次整理未完成，可稍后刷新。'):attention.input_count?'暂时没有足够明确的关注事项。':'已授权来源中暂时没有可整理的近期内容。'),'hint'))
  }
- if(!groups.length&&compact&&!attention){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,empty);root.append(empty)}
+ if(!groups.length&&compact&&!attention){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('有日期的事项会出现在这里。'),'hint'));root.append(empty)}
  let displayGroups=groups,axis
  if(!compact){
   const dates=new Map([[currentDate,{id:'current',date:currentDate,items:[]}]])
@@ -119,7 +119,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    if(group.briefs?.length)cards.append(...group.briefs)
    if(!group.items.length&&!group.briefs?.length){
     cards.append(el('p',t(attention?'今天暂无新的事项记录或到期安排':'今天没有到期事项'),'timeline-day-empty'))
-    if(!groups.length&&!attention){cards.append(el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,cards)}
+    if(!groups.length&&!attention){cards.append(el('p',t('有日期的事项会出现在这里。'),'hint'))}
    }
   }else{section.append(el('h3',`${t(group.label)} · ${group.items.length}`,'timeline-group-title'));root.append(section)}
   for(const item of group.items){
@@ -130,7 +130,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    const repeated=group.id==='current'||group.id==='waiting'||group.id==='completed'
    if(!repeated){const meta=el('div',pressure,'timeline-meta');card.append(meta);if(compact&&item.date){const time=el('time',formatDate(item.date));time.dateTime=item.date;meta.append(time)}}
    const dateLabel=item.date?formatDate(item.date):null
-   const title=item.suggested?el('h3',item.title,'timeline-title'):button(item.title,()=>item.status==='done'?openTodos(item.id):discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title';if(item.suggested)card.append(title)
+   const title=item.suggested?el('h3',item.title,'timeline-title'):button(item.title,()=>discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title';if(item.suggested)card.append(title)
    if(item.source_changed)card.append(el('p',t('来源内容已变化，请先核对。'),'timeline-caution'))
    const excerpt=item.note||item.sources?.find(source=>typeof source?.summary==='string'&&source.summary.trim())?.summary
    if(excerpt){const context=el('div',undefined,'timeline-context');context.append(el('span',t(item.note?'当前记录':'来源摘录'),'timeline-context-label'),el('p',excerpt,'timeline-note'));card.append(context)}
@@ -153,7 +153,6 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    const action=item.source_changed?'核对来源':item.status==='waiting'?'起草跟进':item.status==='doing'?'整理下一步':'拆成行动步骤'
    const prompt=item.source_changed?'请针对「{0}」核对已记录的来源内容，说明哪些已知、哪些需要进一步确认，再整理下一步行动。':item.status==='waiting'?'请针对「{0}」起草一条跟进消息，先给我草稿。':item.status==='doing'?'请针对「{0}」结合当前记录和真实截止日期，整理下一步行动和需要确认的问题。':'请针对「{0}」拆成可执行的行动步骤，结合真实截止日期，说明建议顺序。'
    const primary=item.status==='done'?null:button(t(action),()=>discuss([item.reference],t(prompt,item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
-   button(t('查看事项'),()=>openTodos(item.id),actions).className='ghost'
    if(!compact&&command&&item.status!=='done'){
     const label=t(item.importance==='high'?'取消重要标记':'标为重要'),star=button(label,()=>command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,importance:item.importance==='high'?'normal':'high'}),card,`life:${item.id}`)
     star.className='timeline-importance';star.textContent=item.importance==='high'?'★':'☆';star.title=label;star.setAttribute('aria-label',label);star.setAttribute('aria-pressed',String(item.importance==='high'))
@@ -170,7 +169,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
  if(!compact&&(attention?.cards?.length??0)>visibleCount){
   const more=button(t('继续查看进展（还有 {0} 条）',attention.cards.length-visibleCount),()=>{
    expanded.add(pageKey+pages);disposeSources(root)
-   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,openTodos,openArticle,openSettings,command,expanded,compact,connected,now})
+   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,openArticle,openSettings,command,expanded,compact,connected,now})
    const replacement=holder.children[0];root.replaceWith(replacement)
    replacement.querySelectorAll('.timeline-attention-card')[visibleCount]?.focus?.({preventScroll:true})
   },root,'timeline:more');more.className='soft timeline-load-more'

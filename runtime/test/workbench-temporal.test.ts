@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {resolveWorkbenchGroups,temporalIndex,compactTemporalIndex} from '../src/personal-agent/workbench-temporal.js'
 import type {WorkbenchMatter} from '../src/personal-agent/workbench-evidence.js'
-const m=(id:string,state:WorkbenchMatter['state']='open',kind:WorkbenchMatter['kind']='todo'):WorkbenchMatter=>({id,kind,state,title:'交付',summary:'原文说明',ownership:'user',assertion:'direct',due:null,due_quote:null,group:'chat:2026-10-18',observed_at:'2026-10-18T00:00:00Z',refs:[{entry_id:id,version:'1',quote:'原文说明'}]})
+const m=(id:string,state:WorkbenchMatter['state']='open',kind:WorkbenchMatter['kind']='goal'):WorkbenchMatter=>({id,kind,state,title:'交付',summary:'原文说明',ownership:'user',assertion:'direct',due:null,due_quote:null,group:'chat:2026-10-18',observed_at:'2026-10-18T00:00:00Z',refs:[{entry_id:id,version:'1',quote:'原文说明'}]})
 test('compact temporal authors retain all quotation text, timestamps and attribution',()=>{
  const inputs=Array.from({length:30},(_,i)=>({id:'e'+i,version:'1',kind:'message' as const,text:'原文说明',observed_at:'2026-10-18T00:00:00Z',author:{key:'person',name:'Example author',kind:'person' as const,is_user:true}}))
  inputs[0]!.author.name='Earlier display name'
@@ -32,11 +32,6 @@ test('a model cannot manufacture a terminal state from only open quotations',()=
  const result=resolveWorkbenchGroups([m('a')],{groups:[{members:['a'],state:'completed',current:'a',basis:['a']}]})
  assert.equal(result[0]!.state,'uncertain')
 })
-test('completing a todo cannot also close an unrelated long-term goal',()=>{
- const rows=[m('a','completed'),m('b','open','goal')]
- assert.equal(resolveWorkbenchGroups(rows,{groups:[{members:['a','b'],state:'completed',current:'a',basis:['a']} ]})[0]!.state,'uncertain')
-})
-
 test('reconciliation input does not imply that a source conversation is a matter identity',()=>{
  const rows=[m('ppt'),m('network')]
  const index=temporalIndex(rows)

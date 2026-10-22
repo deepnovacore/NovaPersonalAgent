@@ -167,7 +167,7 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
   const checked=validateCandidate(q.provenance.row.source,candidate)
   if(checked.id!==id)throw Error('candidate_id_mismatch')
   evaluated={...q.provenance.row,candidate:checked};assertAcceptable(evaluated,evaluated.source)
-  if(q.provenance.type==='explicit_candidate'&&((evaluated.candidate.kind!=='todo'&&evaluated.candidate.operation!=='update')||evaluated.decision.capture!=='explicit'))throw Error('candidate_not_explicit')
+  if(q.provenance.type==='explicit_candidate'&&(evaluated.candidate.operation!=='update'||evaluated.decision.capture!=='explicit'))throw Error('candidate_not_explicit')
   if((q.input.op==='profile'&&evaluated.candidate.kind!=='profile')||(q.input.op==='create'&&q.input.kind!==evaluated.candidate.kind)||(q.input.op==='update'&&q.input.kind!==evaluated.candidate.kind)||!['profile','create','update'].includes(q.input.op))throw Error('candidate_kind_mismatch')
   const resolution=q.provenance.resolution
   if(evaluated.candidate.operation==='update'&&(q.input.op!=='update'||!resolution))throw Error('candidate_update_no_match')
@@ -181,7 +181,7 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
     if(q.input.goal_id!==undefined||q.input.success_criteria!==undefined)throw Error('candidate_patch_mismatch')
     const patch=evaluated.candidate.patch??{}
     if(!Object.keys(patch).length)throw Error('candidate_empty_update')
-    for(const key of ['title','note','status','due'] as const)if(q.input[key]!==patch[key])throw Error('candidate_patch_mismatch')
+    for(const key of ['title','note','status'] as const)if(q.input[key]!==patch[key])throw Error('candidate_patch_mismatch')
    }
   }
 

@@ -18,14 +18,14 @@ const entry = (id = 'plan', version = 1): MemoryEntry => ({ id, version, content
 const proposal = (id = 'plan', version = 1) => ({ kind: 'question' as const, summary: 'Check demo materials?', why_now: 'You said the demo is today', evidence_refs: [] as string[], memory_refs: [{ entry_id: id, version }] });
 test('acceptance source-to-card proof requires a current source ref and version',()=>{
  const cards=[
-  {tab:'todos' as const,refs:[{entry_id:'source:file-a',version:'v2'}]},
+  {tab:'goals' as const,refs:[{entry_id:'source:file-a',version:'v2'}]},
   {tab:'ideas' as const,refs:[{entry_id:'source:file-a',version:'v1'}]},
   {tab:'ideas' as const,refs:[{entry_id:'memory:unrelated',version:3}]},
   {tab:'ideas' as const,refs:[{entry_id:'memory:stated',version:4},{entry_id:'source:file-b',version:'v7'}]},
  ];
  const entries=[{kind:'file' as const,id:'source:file-a',version:'v2',content:'Current'}, {kind:'file' as const,id:'source:file-b',version:'v7',content:'Current'}];
- assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,todos:1,ideas:1,goals:0});
- assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,todos:0,ideas:0,goals:0});
+ assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,ideas:1,goals:1});
+ assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,ideas:0,goals:0});
 });
 test('discovery prioritizes dated open Life objects and excludes inactive objects without hiding history',async()=>{
  const f=await fixture()
@@ -576,7 +576,7 @@ test('adopting a goal suggestion creates one goal even across retries and a fail
 test('source invalidation hides generated cards even when memory refresh fails',async()=>{
  const f=await fixture();await f.host.close();let available=true
  const host=new PersonalAgentHost({...f.host.options,generateContext:candidates=>Promise.resolve({cards:candidates.slice(0,1).map(candidate=>({candidate_id:candidate.candidate_id,tab:candidate.tab,title:'Review design',body:'Suggested from a local document.',why:null,next:null,refs:candidate.refs.map(ref=>({entry_id:ref.entry_id,version:ref.version}))}))})})
- const file:ContextInput={kind:'file',id:'source:document',version:'v1',content:'TODO: review the product design notes.',source_id:'source',file_id:'document',root:'/project',rel_path:'design.md',role:'document',mtime_ms:1,priority:2}
+ const file:ContextInput={kind:'file',id:'source:document',version:'v1',content:'An idea: review the product design notes.',source_id:'source',file_id:'document',root:'/project',rel_path:'design.md',role:'document',mtime_ms:1,priority:2}
  host.setSources({list:()=>[],contextEntries:()=>available?[file]:[],command:()=>Promise.resolve({})})
  try{
   await host.open();await host.workbenchContext.refresh();assert.equal(host.snapshot().workbench_context.cards.length,1)
@@ -631,23 +631,17 @@ test('a failed cleanup of guessed news interests is retried on the next start, n
  }finally{await host.close();await f.close()}
 })
 
-test('a source todo suggestion is adopted explicitly without inventing a deadline, dedupes completed items, and keeps refs',async()=>{
+test('a stale todo card from an earlier build cannot be adopted into a todo',async()=>{
  const f=await fixture()
  try{
   const card={id:'todo-source',candidate_id:'todo-source',tab:'todos',title:'Review the draft',body:'A grounded suggestion',why:null,next:'Check acceptance criteria',refs:[{entry_id:'source:doc',version:'v1'}]}
   const context=f.host.workbenchContext as unknown as {snapshot:()=>unknown;dismiss:(id:string)=>Promise<void>};const snapshot=context.snapshot.bind(context)
   context.snapshot=()=>({...snapshot() as object,cards:[card]});context.dismiss=()=>Promise.resolve()
   const adopt=(id:string)=>f.host.command({type:'personal.command',request_id:id,method:'context.adopt',params:{id:card.id}}) as Promise<{ok:boolean;error?:string}>
-  assert.equal((await adopt('adopt')).ok,true)
-  const todo=f.host.life.snapshot().todos[0]!
-  assert.equal(todo.due,null);assert.equal(todo.note,'A grounded suggestion\n下一步：Check acceptance criteria')
-  assert.deepEqual((todo as unknown as {context_source:unknown}).context_source,{candidate_id:card.id,refs:card.refs})
-  await f.host.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,status:'done'},'done')
-  for(let n=0;n<260;n++)await f.host.life.mutate({op:'profile',about:String(n),expected_version:n},'evict'+n)
-  assert.equal((await adopt('again')).ok,true)
-  assert.equal(f.host.life.snapshot().todos.length,1);assert.equal(f.host.life.snapshot().todos[0]!.status,'done')
-  context.snapshot=()=>({...snapshot() as object,cards:[]})
-  assert.equal((await adopt('stale')).ok,false)
+  const result=await adopt('adopt');assert.equal(result.ok,false);assert.equal(result.error,'card_not_found')
+  assert.equal(f.host.life.snapshot().todos.length,0)
+  const legacy=await f.host.command({type:'personal.command',request_id:'from-context',method:'life.mutate',params:{op:'from_context',title:'x',note:'',source:{candidate_id:'x',refs:[]}}}) as {ok:boolean}
+  assert.equal(legacy.ok,false);assert.equal(f.host.life.snapshot().todos.length,0)
  }finally{await f.close()}
 })
 

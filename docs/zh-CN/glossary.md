@@ -45,12 +45,12 @@
 | Endpointing | cascaded 模式下判断一句话是否结束的阶段（语义轮次检测器，或有界静音） |
 | Knowledge MCP | 内置的 `mcp__nova_knowledge__recall` 证据工具；可选的 Codex 回环还会通过 `get_chunk` 解析通过内容摘要标识并校验的分块，从不修改语料库 |
 | MyContext adapter | 可选的回环专用、只读证据提供方，位于 Nova 的严格能力握手之后；本仓库不附带任何 adapter |
-| Workbench | 桌面主窗口：左侧是图标导航栏，中间是个人对象页面，Nova 以可收起的对话栏出现在右侧 |
-| Rail | Workbench 左侧的图标导航栏，用于切换 Todos、Ideas、Goals、Feeds、Task 和 Profile |
+| Workbench | 桌面主窗口：左侧是 Nova 对话，右侧是个人对象页面组成的工作区 |
+| Workspace tabs | Workbench 工作区顶部的页签栏，用于切换 Timeline、Ideas、Goals、Feeds、Task 和 Profile |
 | Task | 由宿主持久跟踪的委派工作单元，带有目标与验收标准；与临时的 executor delegate 不同 |
 | Handback / takeover | 在 Nova 与用户之间转移 Task 的控制权：takeover 后用户可直接向执行器发消息，Nova 暂停自动修正；handback 后控制权交还给 Nova |
 | Acceptance criterion | Task 的目标必须满足的一条陈述，Nova 才能将其标记为完成；每条标准分别记录证据 |
-| Candidate | Nova 在对话中留意到、尚未确认的 Todo、Idea、Goal 或 Profile 候选内容，在用户确认后记录；明确说出的待办会直接记下，可以撤销 |
+| Candidate | Nova 在对话中留意到、尚未确认的 Idea、Goal 或 Profile 候选内容，在用户确认后记录 |
 | Source | 个人记忆与建议可以引用的、已获授权的文档、账号或信息流 |
 | Connector | 通过用户授予的只读范围暴露某个 Source 的集成（例如 Google、macOS 日历、Apple Mail 或飞书） |
 

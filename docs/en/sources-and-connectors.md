@@ -41,7 +41,7 @@ Required scopes cover reading your chat list, reading messages, reading message 
 
 Two consents are kept apart. Choosing chats asks you to allow Nova to read them and keep the messages on this computer. A second switch, which lets the model service in Settings process Feishu content, decides whether those messages may be sent to your configured model to build memory. It is off until you turn it on, belongs to the signed-in account, and is cleared when you switch account, when the sign-in expires or when the model service changes. Without it, Nova does not use the messages for memory.
 
-With both in place, a message in a chat you selected that @mentions you directly is recorded as a Todo, showing where it came from. Only mentions from the later of the moment you selected the chat and the moment you gave processing consent are captured, so older history does not become Todos. A Todo can be undone while it is unchanged.
+With both in place, a message in a chat you selected that @mentions you directly becomes input to the Timeline briefing and the daily briefs, showing where it came from. It is not turned into a Todo. Only mentions from the later of the moment you selected the chat and the moment you gave processing consent are used this way, so older history does not feed the briefing.
 
 If your Feishu sign-in expires, Nova pauses sync and bot reminders and offers a re-authorize button on the Feishu card. Your app binding, chat selection and local history are kept; you do not need to bind the app again.
 

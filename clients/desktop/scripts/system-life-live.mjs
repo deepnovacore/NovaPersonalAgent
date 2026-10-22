@@ -67,15 +67,16 @@ async function main(){
   assert.ok(key&&settings.openrouter_api_key,'configured model/Jev credentials required');report.configuration='Fixture selects Qwen text using the already configured DashScope key; configured default DeepSeek key is absent. No saved settings are changed.';report.models={extraction:settings.fast_model,conversation:settings.cascade_llm_model,judge:'typesafe/jev-1.13'}
   gateway=new OpenAIModelGateway({baseUrl:settings.model_base_url,apiKey:key,clock:new RealClock()});pipeline=createUnderstandingPipeline({gateway,model:settings.fast_model,judge:createJevJudge({apiKey:settings.openrouter_api_key})})
   await app.whenReady();await open();if(!restartDir){await check('real authenticated WebSocket and production renderer bootstrap')
-  await turn('create','请记下一条待办：校对合成灯塔报告，截止日期是2026年10月3日。')
-  await wait("window.view.controller.snapshot.life.todos.some(t=>t.title.includes('灯塔')) && window.view.controller.snapshot.understanding.status!=='working'",'Life automatic persistence')
+  // Todos are no longer captured from conversation: seed the object through the backend, then check recall, correction and restart.
+  await turn('hello','你好，请只回复“收到”。')
+  assert.equal(host.life.snapshot().todos.length,0,'a conversation turn never creates a todo');await host.life.mutate({op:'create',kind:'todo',title:'校对合成灯塔报告',note:'',due:'2026-10-03'},'live-seed');await memory.flush()
   let todo=host.life.snapshot().todos.find(t=>t.title.includes('灯塔'));assert.ok(todo);const id=todo.id;assert.equal(todo.due,'2026-10-03');assert.equal(host.life.snapshot().todos.length,1)
   const sent=await js("window.sent.filter(f=>f.type==='input.text').at(-1)");await js(`window.socket.send(JSON.stringify(${JSON.stringify(sent)}))`);await new Promise(r=>setTimeout(r,300));assert.equal(host.conversationSnapshot().messages.filter(m=>m.request_id===sent.request_id).length,1)
-  await check('UI input reaches real conversation model and Understanding; durable todo and duplicate transport receipt agree')
+  await check('UI input reaches the real conversation model without creating a todo; duplicate transport receipt agrees')
   await fresh();let answer=await turn('recall','请调用个人记忆检索，查询之前记录的校对合成灯塔报告这条待办，告诉我标题和完整截止日期。只查询，不新增或修改。');assert.match(answer,/灯塔/);assert.match(answer,/2026.{0,4}10.{0,4}3/);assert.ok(report.turns.at(-1).events.some(e=>e.kind==='provider.tool_call'&&String(e.name).includes('recall')))
   await check('fresh conversation uses production memory recall tool and generates a persisted date answer')
-  await click('Todos');await click('编辑');await field('到期日期','2026-10-05');await click('保存修改');await wait("window.view.controller.snapshot.life.todos[0].due==='2026-10-05'");todo=host.life.snapshot().todos[0]
-  await field(todo.title+'状态','done','change');await wait("window.view.controller.snapshot.life.todos[0].status==='done'");assert.equal((await host.discoverySnapshot()).memory.some(e=>e.life?.id===id),false);await check('UI date correction and completion update the same persisted object and exclude it from discovery')
+  todo=host.life.snapshot().todos[0];await host.life.mutate({op:'update',kind:'todo',id,expected_version:todo.version,due:'2026-10-05'},'live-due');await wait("window.view.controller.snapshot.life.todos[0].due==='2026-10-05'");todo=host.life.snapshot().todos[0]
+  await host.life.mutate({op:'update',kind:'todo',id,expected_version:todo.version,status:'done'},'live-done');await wait("window.view.controller.snapshot.life.todos[0].status==='done'");assert.equal((await host.discoverySnapshot()).memory.some(e=>e.life?.id===id),false);await check('date correction and completion update the same persisted object and exclude it from discovery')
   report.restart={life:host.life.snapshot(),messages:host.conversationSnapshot().messages,object_id:id,parent_pid:process.pid};await close();await persist();window.destroy();window=null
   const child=spawn(process.execPath,[fileURLToPath(import.meta.url)],{env:{...process.env,NOVA_SYSTEM_LIFE_RESTART_DIR:dir,NOVA_LIVE_MODULE_REPORT:output},stdio:'inherit'});const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',resolve)});handedOff=true;app.exit(code??1);return
   }

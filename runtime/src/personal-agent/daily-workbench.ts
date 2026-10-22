@@ -10,12 +10,19 @@ import {sourceTagSchema} from '../memory/provenance.js'
 import {automaticWorkbenchMatter,validWorkbenchMatter,workbenchBatches,workbenchCompositionSchema,workbenchExistingCandidates,workbenchHash,workbenchMatterSchema,workbenchRefSchema,workbenchSensitive,type WorkbenchExisting,type WorkbenchGenerator,type WorkbenchMatter} from './workbench-evidence.js'
 
 const matterSchema=workbenchMatterSchema.extend({id:z.string(),group:z.string(),observed_at:z.string().default('')})
-const cardSchema=z.object({id:z.string(),candidate_id:z.string(),tab:z.enum(['todos','ideas','goals']),title:z.string(),body:z.string(),why:z.string().nullable(),next:z.string().nullable(),refs:z.array(workbenchRefSchema),sources:z.array(sourceTagSchema),update:z.object({id:z.string(),kind:z.enum(['todo','goal']),version:z.number(),status:z.string()}).optional()})
+const cardSchema=z.object({id:z.string(),candidate_id:z.string(),tab:z.enum(['ideas','goals']),title:z.string(),body:z.string(),why:z.string().nullable(),next:z.string().nullable(),refs:z.array(workbenchRefSchema),sources:z.array(sourceTagSchema),update:z.object({id:z.string(),kind:z.literal('goal'),version:z.number(),status:z.string()}).optional()})
 const cacheSchema=z.object({key:z.string(),group:z.string(),basis:z.array(z.object({id:z.string(),version:z.string()})),matters:z.array(matterSchema)})
 const recordedSchema=z.object({matter: matterSchema.pick({id:true,kind:true,title:true,summary:true}),id:z.string(),version:z.number(),undone:z.boolean().default(false)})
 const legacyDismissedSchema=z.object({tab:z.string(),refs:z.array(z.object({entry_id:z.string(),version:z.union([z.string(),z.number()])}))})
-const stateSchema=z.object({version:z.literal(1),failure:z.string().nullable().default(null),temporal:z.object({key:z.string(),source_key:z.string().default(''),result:temporalReplySchema}).nullable().default(null),legacy_imported:z.boolean().default(false),legacy_dismissed:z.array(legacyDismissedSchema).default([]),automatic_day:z.string(),key:z.string(),updated_at:z.string().nullable(),cache:z.array(cacheSchema),compositions:z.array(z.object({key:z.string(),result:workbenchCompositionSchema})).default([]),cards:z.array(cardSchema),dismissed:z.array(z.string()),recorded:z.array(recordedSchema),
- diagnostics:z.object({inputs:z.number(),cache_hits:z.number(),extraction_calls:z.number(),composition_calls:z.number(),received:z.number(),rejected:z.number(),recorded:z.number()})})
+/** Todo generation is gone: a cache that still holds todo matters, todo cards or recorded todos is cleared, and the day is reopened for a fresh run. */
+const dropTodoState=(raw:unknown):unknown=>{
+ if(!raw||typeof raw!=='object')return raw
+ const state=raw as {cards?:{tab?:unknown;update?:{kind?:unknown}}[];cache?:{matters?:{kind?:unknown}[]}[];recorded?:{matter?:{kind?:unknown}}[]},todo=(row?:{kind?:unknown})=>row?.kind==='todo'
+ const stale=(state.cards??[]).some(card=>card.tab==='todos'||todo(card.update))||(state.cache??[]).some(entry=>(entry.matters??[]).some(todo))||(state.recorded??[]).some(row=>todo(row.matter))
+ return stale?{...state,temporal:null,compositions:[],cache:[],cards:[],key:'',updated_at:null,automatic_day:'',recorded:(state.recorded??[]).filter(row=>!todo(row.matter))}:raw
+}
+const stateSchema=z.preprocess(dropTodoState,z.object({version:z.literal(1),failure:z.string().nullable().default(null),temporal:z.object({key:z.string(),source_key:z.string().default(''),result:temporalReplySchema}).nullable().default(null),legacy_imported:z.boolean().default(false),legacy_dismissed:z.array(legacyDismissedSchema).default([]),automatic_day:z.string(),key:z.string(),updated_at:z.string().nullable(),cache:z.array(cacheSchema),compositions:z.array(z.object({key:z.string(),result:workbenchCompositionSchema})).default([]),cards:z.array(cardSchema),dismissed:z.array(z.string()),recorded:z.array(recordedSchema),
+ diagnostics:z.object({inputs:z.number(),cache_hits:z.number(),extraction_calls:z.number(),composition_calls:z.number(),received:z.number(),rejected:z.number(),recorded:z.number()})}))
 type State=z.infer<typeof stateSchema>
 const diagnostics=()=>({inputs:0,cache_hits:0,extraction_calls:0,composition_calls:0,received:0,rejected:0,recorded:0})
 const empty=():State=>({version:1,failure:null,temporal:null,legacy_imported:false,legacy_dismissed:[],automatic_day:'',key:'',updated_at:null,cache:[],compositions:[],cards:[],dismissed:[],recorded:[],diagnostics:diagnostics()})
@@ -75,16 +82,16 @@ export class DailyWorkbench {
  #temporalCurrent(){return this.#state.temporal?.source_key===workbenchHash(this.#inputs.map(i=>[i.id,i.version]))}
  snapshot(){
   const life=this.options.life().snapshot()
-  const cards=this.#state.cards.filter(card=>(card.tab==='ideas'||this.#temporalCurrent())&&(!card.update||[...life.todos,...life.goals].some(row=>row.id===card.update!.id&&row.version===card.update!.version&&row.status!==card.update!.status))&&!this.#pendingValidation&&!this.#state.dismissed.includes(card.id)&&this.#grounded(card.refs)&&!unresolvedWorkbenchReference(card)).map(card=>({...card,refs:card.refs.map(ref=>({...ref,label:ref.quote}))}))
+  const cards=this.#state.cards.filter(card=>(card.tab==='ideas'||this.#temporalCurrent())&&(!card.update||life.goals.some(row=>row.id===card.update!.id&&row.version===card.update!.version&&row.status!==card.update!.status))&&!this.#pendingValidation&&!this.#state.dismissed.includes(card.id)&&this.#grounded(card.refs)&&!unresolvedWorkbenchReference(card)).map(card=>({...card,refs:card.refs.map(ref=>({...ref,label:ref.quote}))}))
   const count=this.#state.cache.flatMap(c=>c.matters).filter(m=>this.#grounded(m.refs)).length
   const reason=this.#error?'generation_failed':!this.#inputs.length?'no_eligible_sources':this.#state.updated_at?this.#state.diagnostics.rejected&&!count?'validation_filtered':'model_abstained':null
   return {status:this.#status,candidate_count:count,recap:{text:null,projects:[] as {name:string;line:string}[]},cards,empty_reason:cards.length?null:reason,
-   empty_reasons:Object.fromEntries(['todos','ideas','goals'].map(tab=>[tab,cards.some(c=>c.tab===tab)?null:reason])) as Record<'todos'|'ideas'|'goals',string|null>,
+   empty_reasons:Object.fromEntries(['ideas','goals'].map(tab=>[tab,cards.some(c=>c.tab===tab)?null:reason])) as Record<'ideas'|'goals',string|null>,
    daily:true,automatic_available:this.#state.automatic_day<this.#day(),updated_at:this.#state.updated_at,error:this.#error,diagnostics:structuredClone(this.#state.diagnostics)}
  }
  async dismiss(id:string){if(!this.snapshot().cards.some(card=>card.id===id))throw Error('card_not_found');await this.#hide(id)}
  async #hide(id:string){this.#state.dismissed=[...new Set([...this.#state.dismissed,id])];await this.#save();this.options.changed()}
- #existing():WorkbenchExisting[]{const life=this.options.life().snapshot(),saved=[...life.todos,...life.ideas,...life.goals].map(row=>({id:row.id,kind:row.kind,title:row.title,note:row.note,status:row.status,version:row.version,...('due'in row?{due:row.due}:{})}));return [...saved,...this.#state.recorded.filter(r=>r.undone&&!saved.some(row=>row.id===r.id)).map(r=>({id:r.id,kind:r.matter.kind as 'todo'|'goal',title:r.matter.title,note:r.matter.summary,status:'cancelled',version:r.version}))]}
+ #existing():WorkbenchExisting[]{const life=this.options.life().snapshot(),saved=[...life.ideas,...life.goals].map(row=>({id:row.id,kind:row.kind,title:row.title,note:row.note,status:row.status,version:row.version}));return [...saved,...this.#state.recorded.filter(r=>r.undone&&!saved.some(row=>row.id===r.id)).map(r=>({id:r.id,kind:'goal' as const,title:r.matter.title,note:r.matter.summary,status:'cancelled',version:r.version}))]}
  #matterCurrent(matter:WorkbenchMatter){return !this.#pendingValidation&&this.#grounded(matter.refs)&&validWorkbenchMatter(matter,this.#inputs)}
  #composition(value:unknown){const raw=workbenchCompositionSchema.extend({suggestions:z.array(z.unknown()).max(9)}).parse(value);return {...raw,suggestions:raw.suggestions.flatMap(item=>{const parsed=workbenchCompositionSchema.shape.suggestions.element.safeParse(item);if(parsed.success)return [parsed.data];this.#state.diagnostics.rejected++;return []})}}
  async refresh(automatic=false):Promise<void>{
@@ -191,9 +198,9 @@ export class DailyWorkbench {
      if(target&&targetIds.size===1&&matter.kind!=='topic'&&(matter.state==='completed'||matter.state==='cancelled')&&!['done','completed','cancelled','archived'].includes(target.status)&&!this.#state.recorded.some(r=>r.id===target.id&&r.undone)){
       const refs=[...new Map(temporalGroup.basis.flatMap(m=>m.refs).map(ref=>[ref.entry_id,ref])).values()]
       if(refs.length<=8&&refs.length&&refs.every(ref=>this.#grounded([ref]))){
-       const status=matter.kind==='todo'?(matter.state==='completed'?'done':'cancelled'):(matter.state==='completed'?'completed':'archived')
+       const status=matter.state==='completed'?'completed':'archived'
        const id=workbenchHash(['status-update',target.id,target.version,status,refs])
-       if(!cards.some(card=>card.id===id))cards.push({id,candidate_id:id,tab:matter.kind==='todo'?'todos':'goals',title:target.title.slice(0,80),body: matter.state==='completed'?'后续资料显示这件事已完成，可以更新原记录。':'后续资料显示这件事已取消，可以更新原记录。',why:null,next:null,refs,sources:this.sourcesForRefs(refs),update:{id:target.id,kind:matter.kind,version:target.version,status}})
+       if(!cards.some(card=>card.id===id))cards.push({id,candidate_id:id,tab:'goals',title:target.title.slice(0,80),body: matter.state==='completed'?'后续资料显示这件事已完成，可以更新原记录。':'后续资料显示这件事已取消，可以更新原记录。',why:null,next:null,refs,sources:this.sourcesForRefs(refs),update:{id:target.id,kind:matter.kind,version:target.version,status}})
       }
      }
      if(match.capture!=='record'||match.target_id!==null||match.same_as!==null||incomplete.has(matter.id)||capturedGroups.has(temporalGroup.id)||!automaticWorkbenchMatter(matter,this.#inputs)||!this.#matterCurrent(matter)||this.#state.recorded.some(r=>r.matter.id===matter.id))continue
@@ -202,8 +209,8 @@ export class DailyWorkbench {
      // A concurrent edit invalidates the identity decision, rather than silently using stale context.
      if(workbenchHash(this.#existing())!==workbenchHash(existing))throw Error('workbench_records_changed')
      const check=()=>{guard();if(!this.#matterCurrent(matter))throw Error('candidate_stale_source')}
-     const recovered=[...life.snapshot().todos,...life.snapshot().goals].find(row=>row.workbench_source?.candidate_id===matter.id)
-     const saved=recovered??await life.mutate({op:'from_workbench',kind:matter.kind,title:matter.title,note:matter.summary,due:matter.kind==='todo'?matter.due:null,success_criteria:'',automatic:true,source:{candidate_id:matter.id,refs:matter.refs},proof:workbenchMatterSchema.parse(Object.fromEntries(Object.entries(matter).filter(([key])=>!['id','group','observed_at'].includes(key)))),evidence:this.#inputs.filter(input=>matter.refs.some(ref=>ref.entry_id===input.id)),sources:this.sourcesForRefs(matter.refs)},'workbench:'+matter.id,check)
+     const recovered=life.snapshot().goals.find(row=>row.workbench_source?.candidate_id===matter.id)
+     const saved=recovered??await life.mutate({op:'from_workbench',kind:matter.kind,title:matter.title,note:matter.summary,due:null,success_criteria:'',automatic:true,source:{candidate_id:matter.id,refs:matter.refs},proof:workbenchMatterSchema.parse(Object.fromEntries(Object.entries(matter).filter(([key])=>!['id','group','observed_at'].includes(key)))),evidence:this.#inputs.filter(input=>matter.refs.some(ref=>ref.entry_id===input.id)),sources:this.sourcesForRefs(matter.refs)},'workbench:'+matter.id,check)
      this.#state.recorded.push({matter:{id:matter.id,kind:matter.kind,title:matter.title,summary:matter.summary},id:saved.id,version:saved.version,undone:false});await this.#save();this.#state.diagnostics.recorded++
      capturedGroups.add(temporalGroup.id)
      existing.splice(0,existing.length,...this.#existing())
@@ -236,10 +243,10 @@ export class DailyWorkbench {
    const result=await life.mutate({op:'update',kind:update.kind,id:update.id,expected_version:update.version,status:update.status},'workbench-update:'+card.id,()=>{if(!this.#grounded(card.refs)||card.tab!=='ideas'&&!this.#temporalCurrent())throw Error('candidate_stale_source')})
    await this.#hide(id);return result
   }
-  const result=await this.options.life().mutate({op:'from_workbench',kind:card.tab==='todos'?'todo':card.tab==='ideas'?'idea':'goal',title:card.title,note:[card.body,card.next].filter(Boolean).join('\n'),due:null,success_criteria:card.tab==='goals'?card.body:'',automatic:false,source:{candidate_id:card.id,refs:card.refs.map(({entry_id,version,quote})=>({entry_id,version:String(version),quote}))},sources:card.sources,evidence:this.#inputs.filter(input=>card.refs.some(ref=>ref.entry_id===input.id))},'workbench-adopt:'+card.id,()=>{if(!this.#grounded(card.refs)||card.tab!=='ideas'&&!this.#temporalCurrent())throw Error('candidate_stale_source')});await this.#hide(id);return result
+  const result=await this.options.life().mutate({op:'from_workbench',kind:card.tab==='ideas'?'idea':'goal',title:card.title,note:[card.body,card.next].filter(Boolean).join('\n'),due:null,success_criteria:card.tab==='goals'?card.body:'',automatic:false,source:{candidate_id:card.id,refs:card.refs.map(({entry_id,version,quote})=>({entry_id,version:String(version),quote}))},sources:card.sources,evidence:this.#inputs.filter(input=>card.refs.some(ref=>ref.entry_id===input.id))},'workbench-adopt:'+card.id,()=>{if(!this.#grounded(card.refs)||card.tab!=='ideas'&&!this.#temporalCurrent())throw Error('candidate_stale_source')});await this.#hide(id);return result
  }
  async undo(id:string){const record=this.#state.recorded.find(r=>r.id===id);if(!record)throw Error('record_not_found')
-  const life=this.options.life();await life.refresh();const item=[...life.snapshot().todos,...life.snapshot().goals].find(r=>r.id===id);if(item?.version!==1)throw Error('version_conflict')
+  const life=this.options.life();await life.refresh();const item=life.snapshot().goals.find(r=>r.id===id);if(item?.version!==1)throw Error('version_conflict')
   // Persist suppression before removal so a crash cannot recreate an undone automatic record.
   record.undone=true;await this.#save();await life.mutate({op:'undo_create',id,kind:record.matter.kind,expected_version:1},'workbench-undo:'+id);this.options.changed()
  }

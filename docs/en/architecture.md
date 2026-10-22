@@ -1,14 +1,14 @@
 # How Nova works
 
-Nova connects conversation, authorized context and background execution. The Workbench keeps your todos, ideas, goals and delegated tasks beside the conversation; the host tracks permissions and task state, and results return with evidence.
+Nova connects conversation, authorized context and background execution. The Workbench keeps your timeline, ideas, goals and delegated tasks beside the conversation; the host tracks permissions and task state, and results return with evidence.
 
 [![Nova personal agent architecture: interaction, context, coordination, execution and expression](../../assets/architecture/nova-personal-agent.en.png)](../../assets/architecture/nova-personal-agent.en.png)
 
 ## Workbench and context
 
-Todos, Ideas, Goals, Feeds, Tasks and Profile share one window with voice and text conversation. You can switch to the orb or hide the window in background mode: the desktop microphone turns off while tasks keep running.
+Timeline, Ideas, Goals, Feeds, Tasks and Profile share one window with voice and text conversation. You can switch to the orb or hide the window in background mode: the desktop microphone turns off while tasks keep running.
 
-Authorized folders, mail, calendars and Feishu provide source evidence for personal memory, Profile and suggestions. Source access and permission for the configured model to process content are separate choices. Some Todos can be captured automatically under the enabled settings; direct Feishu mentions require both consents. Recording a Todo does not authorize executing it. See [Workbench](workbench.md) and [Sources and connectors](sources-and-connectors.md).
+Authorized folders, mail, calendars and Feishu provide source evidence for personal memory, Profile and suggestions. Source access and permission for the configured model to process content are separate choices. Direct Feishu mentions feed the Timeline briefing and require both consents; they are not turned into Todos. See [Workbench](workbench.md) and [Sources and connectors](sources-and-connectors.md).
 
 ## From a request to a result
 

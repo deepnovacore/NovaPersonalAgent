@@ -1,23 +1,22 @@
 # Workbench
 
-Workbench is Nova's main window. It opens a wide, persistent Nova conversation with a collapsible Timeline sidebar. The rail also opens Todos, Ideas, Goals, Feeds, Tasks and Profile.
+Workbench is Nova's main window. It opens a wide, persistent Nova conversation on the left, beside a workspace whose tabs run along the top: Timeline, Ideas, Goals, Feeds, Tasks and Profile.
 
 ## Layout
 
 [![Nova Workbench and suggested next steps](../../assets/features/workbench-original.en.png)](../../assets/features/workbench-original.en.png)
 
-| Rail item | Holds |
+| Workspace tab | Holds |
 |---|---|
 | Nova | Persistent main conversation with proactive reminders and task receipts |
-| Timeline | Todo due dates and a separate group for undated items |
-| Todos | Things to do, each open, doing, waiting, done or cancelled |
+| Timeline | Dated items and briefing cards, plus a separate group for undated items; entries that already exist as Todos stay here |
 | Ideas | Loose thoughts you may later turn into a Todo or a Goal |
 | Goals | Outcomes you're tracking, with success criteria and progress from their linked Todos |
 | Feeds | An interest-ranked reading list |
 | Tasks | Work you've delegated to an executor — see [Tasks](tasks.md) |
 | Profile | A short description of you that Nova can draw on |
 
-The conversation pane docks on the right and can be collapsed without leaving the page you're on. A status line reports whether Nova is connected and how many background tasks are active; while disconnected, anything you were drafting is kept for when it reconnects.
+The Nova conversation stays beside whichever tab is open, and the Collapse button shrinks the window to the orb. A status line reports whether Nova is connected and how many background tasks are active; while disconnected, anything you were drafting is kept for when it reconnects.
 
 ## Switching how Nova appears
 
@@ -41,15 +40,15 @@ The Build transcript shows every tool call, including file reads, writes, exact 
 
 Build has no 120-second overall turn deadline. A model connection pauses only after 10 minutes without incoming data, and uses larger streaming limits for long replies and code generation. Model timeouts, connection interruptions and capacity failures explain the reason and offer Resume without replaying completed tools. Each shell command retains its own timeout.
 
-## Todos, Ideas and Goals
+## Ideas and Goals
 
-These are yours to edit directly, but Nova also proposes changes. When something you say looks like a Todo, Idea, Goal or Profile addition, Nova shows it as a candidate quoting the line it based the suggestion on; you can edit the wording before accepting, or skip it. Some Todos are recorded automatically, and each one can still be undone while it hasn't changed since. Profile suggestions are appended to your existing text rather than replacing it.
+These are yours to edit directly, but Nova also proposes changes. When something you say looks like an Idea, Goal or Profile addition, Nova shows it as a candidate quoting the line it based the suggestion on; you can edit the wording before accepting, or skip it. Profile suggestions are appended to your existing text rather than replacing it. Nova does not generate Todos: there is no Todos tab, and nothing is recorded as a Todo on its own.
 
-Suggestion cards, drawn from the sources you've connected, offer to adopt something as a Goal, hand it to an executor, continue talking about it in chat, or dismiss it. A recap of what your recent project files show you've been working on can appear above the Todos suggestions.
+Suggestion cards, drawn from the sources you've connected, offer to adopt something as an Idea or a Goal, continue talking about it in chat, or dismiss it.
 
 Goal progress counts the Todos linked to it and excludes any that were cancelled; whether a Goal is actually done is always your call, never inferred automatically.
 
-Direct @mentions of you in the Feishu chats you selected can be recorded as Todos once you have given both Feishu consents; see [Sources and connectors](sources-and-connectors.md#feishu).
+Direct @mentions of you in the Feishu chats you selected feed the Timeline briefing once you have given both Feishu consents; they are not recorded as Todos. See [Sources and connectors](sources-and-connectors.md#feishu).
 
 ## Daily briefs
 
@@ -63,18 +62,18 @@ Articles ranked to your interests, split into "For you" and "Saved". Until Nova 
 
 [![Nova Profile overview and recent projects](../../assets/features/profile-original.en.png)](../../assets/features/profile-original.en.png)
 
-A short free-text description of you, edited directly or filled in gradually as Nova proposes additions from conversation.
+A short free-text description of you, edited directly or filled in gradually as Nova proposes additions from conversation. The page shows what you confirmed plus the current draft; when no current draft is available it asks for an update rather than showing an earlier result.
 
 [Tasks](tasks.md) · [Sources and connectors](sources-and-connectors.md) · [Personal memory](personal-memory.md) · [Features](features.md)
 
 ## Nova main conversation and Timeline
 
-Workbench opens Nova by default. The main conversation persists and displays proactive reminders and task receipts. Task details, dedicated conversations and voice ownership stay independent. Collapse the Timeline sidebar or open the full Timeline from the rail.
+Workbench opens Nova by default. The main conversation persists and displays proactive reminders and task receipts. Task details, dedicated conversations and voice ownership stay independent. Open the Timeline from the first tab.
 
-Timeline uses actual Todo due dates and separates undated waiting items. Blue labels indicate time, rose labels indicate importance explicitly marked by you, purple indicates waiting, green indicates progress and amber indicates conditions such as past due. Each color has a text label. Set importance in the Todo editor or full Timeline; it updates the original item. Calendar coverage has not been confirmed, so this view does not represent your complete schedule.
+Timeline uses the due dates of existing Todo entries and separates undated waiting items. Blue labels indicate time, rose labels indicate importance explicitly marked by you, purple indicates waiting, green indicates progress and amber indicates conditions such as past due. Each color has a text label. Set importance with the star on a Timeline card; it updates the original item. Calendar coverage has not been confirmed, so this view does not represent your complete schedule.
 
-Todo `due` is a nullable date (`YYYY-MM-DD`); creation and update timestamps are not deadlines. Direct-mention Todos from Feishu may carry extracted due dates and remain undated when no date is established. This view organizes dates and does not calculate conflicts between time slots.
+Todo `due` is a nullable date (`YYYY-MM-DD`); creation and update timestamps are not deadlines. Feishu @mentions are input to the briefing, not Todos. This view organizes dates and does not calculate conflicts between time slots.
 
-Select an item title to reference it in Nova. Draft plan and follow-up actions request a concrete deliverable using that item. References are removable and their versions are checked at send time; drafts and existing execution approvals are preserved. Discuss an article on its own or select a Todo or Goal to explore applications. Interest matching does not automatically create personal-item relationships.
+Select an item title to reference it in Nova and discuss it there; every card uses the same discussion action. Draft plan and follow-up actions request a concrete deliverable using that item. References are removable and their versions are checked at send time; drafts and existing execution approvals are preserved. Discuss an article on its own or select a Todo or Goal to explore applications. Interest matching does not automatically create personal-item relationships.
 
 Local shell commands inherit only essential system and development variables (such as PATH, temporary directories, locale, DEVELOPER_DIR, SDKROOT, and VIRTUAL_ENV). Host API keys, proxy settings, and script injection variables are not inherited automatically. Windows PowerShell searches the built-in system module directory instead of inheriting external module paths. Commands that depend on them need separate project configuration; this does not prevent commands from reading files accessible to the current user. File reads return a byte cursor to continue a page split within a line. Writing through a dangling symbolic link fails without replacing the link.
