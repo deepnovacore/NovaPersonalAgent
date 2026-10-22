@@ -543,7 +543,10 @@ export class RealtimeProviderSession {
         this.#onResponseAdaptationApplied?.(context, owner.identity.epoch)
         return
       }
-      if (previous !== null && previous.epoch === owner.identity.epoch
+      // Advisory guidance does not retry a failed attempt on every frame. Required memory never takes an
+      // unconfirmed attempt (one cancelled mid-delivery) as delivered: it is sent again, and a failure
+      // then closes the session, before any input can reach the provider.
+      if (!required && previous !== null && previous.epoch === owner.identity.epoch
         && previous.revision === context.revision && previous.signature === signature) return
       this.#responseAdaptationAttempt = {
         epoch: owner.identity.epoch, revision: context.revision, signature, confirmed: false,

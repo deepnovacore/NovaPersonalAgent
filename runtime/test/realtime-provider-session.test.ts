@@ -637,6 +637,23 @@ test('a failed replacement with an empty context still closes before input reach
  await assert.rejects(session.submitText('hello'));assert.equal(sent,0);assert.equal(session.state,'closed')
 })
 
+test('a cancelled memory replacement is retried before the next input instead of being deduplicated',async()=>{
+ const order:string[]=[];let content:string|null='private memory'
+ const provider=Object.assign(new FakeProvider(),{submitText:()=>{order.push('input');return Promise.resolve()}})
+ let hold:{resolve:()=>void}|undefined
+ const replace=provider.replaceResponseAdaptation.bind(provider)
+ provider.replaceResponseAdaptation=(context,signal)=>{order.push(`memory:${context.content}`);if(context.content===null&&hold===undefined)return new Promise<void>((_resolve,reject)=>{hold={resolve:()=>undefined};signal.addEventListener('abort',()=>reject(signal.reason),{once:true})});return replace(context,signal)}
+ const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,responseAdaptation:()=>({revision:content===null?2:1,content})})
+ await session.connect();content=null
+ const cancelled=new AbortController(),first=session.submitText('first',cancelled.signal)
+ await new Promise<void>(resolve=>setImmediate(resolve));cancelled.abort();await assert.rejects(first)
+ await session.submitText('second')
+ // The unconfirmed withdrawal is sent again and confirmed before any input reaches the model.
+ assert.deepEqual(order,['memory:private memory','memory:null','memory:null','input'])
+ assert.deepEqual(provider.responseAdaptations.at(-1),{revision:2,content:null})
+ await session.close()
+})
+
 test('requested-response audio does not read memory per frame but response admission revalidates it',async()=>{
  const provider=Object.assign(new FakeProvider(),{userResponseMode:'requested' as const})
  let reads=0,fail=false
