@@ -9,9 +9,11 @@ import 'phone_voice_session_test.dart'
     show VoiceAudio, TestVoiceProvider, settle;
 
 class FakeCompanion implements VoiceCompanion {
+  @override
+  Future<bool> Function()? onRestore;
   final events = StreamController<String>.broadcast(sync: true);
   Completer<void>? acquiring;
-  bool fail = false;
+  bool fail = false, failStop = false;
   int starts = 0, stops = 0;
   final states = <bool>[];
   @override
@@ -26,10 +28,15 @@ class FakeCompanion implements VoiceCompanion {
   @override
   Future<void> stop() async {
     stops++;
+    if (failStop) throw StateError('native_stop_failed');
   }
 
   @override
-  Future<void> update({required bool muted}) async {
+  Future<void> update({
+    required bool muted,
+    String status = 'listening',
+    String language = 'zh',
+  }) async {
     states.add(muted);
   }
 
@@ -68,6 +75,30 @@ void main() {
   });
   Future<void> start() =>
       session.start(provider: provider, conversation: conversation);
+  test(
+    'PiP restore opens only the active call and PiP failure does not end audio',
+    () async {
+      var restored = 0;
+      session.onRestorePresentation = () async {
+        restored++;
+        return true;
+      };
+      await start();
+      companion.events.add('pipSupported');
+      companion.events.add('pipActive');
+      expect(session.floatingSupported, isTrue);
+      expect(session.floatingActive, isTrue);
+      expect(await companion.onRestore!(), isTrue);
+      expect(restored, 1);
+      companion.events.add('pipFailed');
+      expect(session.floatingActive, isFalse);
+      expect(session.active, isTrue);
+      expect(provider.closes, 0);
+      await session.stop();
+      expect(await companion.onRestore!(), isFalse);
+      expect(restored, 1);
+    },
+  );
   test('background keeps capture and provider until explicit end', () async {
     await start();
     session.didChangeAppLifecycleState(AppLifecycleState.paused);
@@ -76,6 +107,15 @@ void main() {
     expect(provider.closes, 0);
     await session.stop();
     expect(companion.stops, 1);
+    expect(provider.closes, 1);
+  });
+  test('companion cleanup failure preserves the original call error', () async {
+    await start();
+    companion.failStop = true;
+    provider.controller.addError(StateError('provider_failed'));
+    await session.stop();
+    expect(session.error, 'provider_failed');
+    expect(session.cleanupError, 'call_stop_failed');
     expect(provider.closes, 1);
   });
   test('stop during native acquisition cannot leak a late service', () async {

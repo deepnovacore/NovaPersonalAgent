@@ -86,13 +86,30 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       if (action == 'mute') {
         unawaited(toggleMute().catchError((Object _) => _fail('audio_failed')));
       }
+      if (action.startsWith('pip')) {
+        if (action == 'pipSupported') floatingSupported = true;
+        if (action == 'pipUnsupported') floatingSupported = false;
+        if (action == 'pipActive') floatingActive = true;
+        if (action == 'pipInactive' || action == 'pipFailed') {
+          floatingActive = false;
+        }
+        if (!_disposed) notifyListeners();
+      }
     });
+    companion?.onRestore = () async {
+      if (_disposed || !active) return false;
+      final epoch = _epoch;
+      final restored = await onRestorePresentation?.call() ?? false;
+      return !_disposed && active && epoch == _epoch && restored;
+    };
   }
   final VoiceCompanion? companion;
   StreamSubscription<String>? _companionEvents;
   Future<void>? _startingCompanion;
   bool _companionAttempted = false, _backgroundReady = false;
-  bool? _publishedMute;
+  (bool, String)? _publishedPresentation;
+  bool floatingSupported = false, floatingActive = false;
+  Future<bool> Function()? onRestorePresentation;
   Future<bool> minimizeToFloating() async {
     if (!active || !_backgroundReady) return false;
     return await companion?.minimize() ?? false;
@@ -123,7 +140,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   int _epoch = 0, _capture = 0, _playbackEpoch = 0;
   bool active = false, connecting = false, muted = false, speaker = false;
   bool _disposed = false, _userSpeaking = false, _hostResponsePending = false;
-  String? conversationId, error;
+  String? conversationId, error, cleanupError;
   String _language = 'zh';
   String transcript = '', reply = '';
   String _captionText = '';
@@ -233,13 +250,19 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _changed() {
-    if (active && _backgroundReady && _publishedMute != muted) {
-      _publishedMute = muted;
+    if (active &&
+        _backgroundReady &&
+        _publishedPresentation != (muted, status)) {
+      _publishedPresentation = (muted, status);
       final epoch = _epoch;
       unawaited(
-        companion!.update(muted: muted).catchError((Object _) {
-          if (epoch == _epoch && active) return _fail('call_controls_failed');
-        }),
+        companion!
+            .update(muted: muted, status: status, language: _language)
+            .catchError((Object _) {
+              if (epoch == _epoch && active) {
+                return _fail('call_controls_failed');
+              }
+            }),
       );
     }
     if (!_disposed) notifyListeners();
@@ -256,6 +279,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     if (delegates?.primary.busy == true) throw StateError('text_turn_running');
     connecting = true;
     error = null;
+    cleanupError = null;
     conversationId = conversation;
     _language = language == 'zh' ? 'zh' : 'en';
     _eventsTail = Future.value();
@@ -429,6 +453,12 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
         if (canPresent) _beginCaption();
         if (event.itemId != null) _speechTurns[event.itemId!] = _turn;
       case VoiceEventKind.speechEnd:
+        if (event.code == 'turn_invalid') {
+          if (event.itemId == null || _speechTurns[event.itemId] != _turn) {
+            break;
+          }
+          _awaitingUserResponse = false;
+        }
         if (canPresent) _userSpeaking = false;
         // A response boundary closes the speaking floor, but is not an ASR
         // final or user authorization. Keep observed text explicitly tentative.
@@ -611,7 +641,8 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       case VoiceEventKind.hostAck:
         break;
     }
-    _changed();
+    // Native render progress, not packet arrival, drives the playback UI.
+    if (event.kind != VoiceEventKind.audio) _changed();
   }
 
   Future<void> _persist(_VoiceResponse response) async {
@@ -655,7 +686,17 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
             if (epoch == _epoch) _queuedCapture -= pcm.length;
           });
     } else if (event['kind'] == 'stopped') {
-      unawaited(_fail('audio_stopped'));
+      if (event['reason'] == 'Call ended') {
+        unawaited(stop());
+        return;
+      }
+      unawaited(
+        _fail(switch (event['reason']) {
+          'Capture handoff stalled' ||
+          'Audio handoff stalled' => 'audio_capture_stalled',
+          _ => 'audio_stopped',
+        }),
+      );
     } else if (event['kind'] == 'control' && event['control'] is Map) {
       _audioControl(Map<String, dynamic>.from(event['control'] as Map));
     }
@@ -1121,6 +1162,8 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     final startingAudio = _startingAudio;
     _provider = null;
     _providerEvents = null;
+    // Close call presentation before potentially slow native/provider teardown.
+    _changed();
     try {
       await subscription?.cancel();
     } catch (_) {}
@@ -1130,6 +1173,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     try {
       await audio.stop();
     } catch (_) {
+      cleanupError = 'audio_stop_failed';
       error ??= 'audio_stop_failed';
     }
     try {
@@ -1137,12 +1181,14 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     } catch (_) {}
     _startingCompanion = null;
     _backgroundReady = false;
-    _publishedMute = null;
+    _publishedPresentation = null;
+    floatingActive = floatingSupported = false;
     if (_companionAttempted) {
       _companionAttempted = false;
       try {
         await companion?.stop();
       } catch (_) {
+        cleanupError = 'call_stop_failed';
         error ??= 'call_stop_failed';
       }
     }
@@ -1170,6 +1216,8 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    onRestorePresentation = null;
+    companion?.onRestore = null;
     _disposed = true;
     _resetInputLevel();
     _audioLevel.dispose();

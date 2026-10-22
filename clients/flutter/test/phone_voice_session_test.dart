@@ -14,7 +14,7 @@ import 'agent_core_test.dart' show MemoryPersistence;
 
 class VoiceAudio extends FakeAudio {
   int? generation;
-  bool failEnqueueOnce = false;
+  bool failEnqueueOnce = false, failStop = false;
   Completer<void>? stopping, muting, switchingSpeaker;
   final muteRequests = <bool>[], speakerRequests = <bool>[];
   @override
@@ -33,6 +33,7 @@ class VoiceAudio extends FakeAudio {
   Future<void> stop() async {
     if (stopping != null) await stopping!.future;
     await super.stop();
+    if (failStop) throw StateError('native_stop_failed');
   }
 
   final frames = <AudioFrame>[];
@@ -225,6 +226,87 @@ void main() {
   });
   Future<void> start() =>
       session.start(provider: provider, conversation: conversation);
+
+  test('native Call ended is a normal hangup and not an audio error', () async {
+    await start();
+    audio.controller.add({
+      'kind': 'stopped',
+      'generation': audio.generation,
+      'reason': 'Call ended',
+    });
+    await session.stop();
+    expect(session.active, isFalse);
+    expect(session.error, isNull);
+    expect(provider.closes, 1);
+  });
+
+  test('cleanup failure preserves provider error and resets on start', () async {
+    await start();
+    audio.failStop = true;
+    provider.controller.addError(StateError('provider_failed'));
+    await session.stop();
+    expect(session.error, 'provider_failed');
+    expect(session.cleanupError, 'audio_stop_failed');
+    audio.failStop = false;
+    await start();
+    expect(session.cleanupError, isNull);
+    expect(session.error, isNull);
+  });
+
+  test('invalid current speech turn resumes listening without a response', () async {
+    await start();
+    provider.emit(VoiceEventKind.speechStart, item: 'invalid');
+    await settle();
+    provider.controller.add(
+      VoiceEvent(
+        VoiceEventKind.speechEnd,
+        epoch: provider.epoch,
+        itemId: 'invalid',
+        code: 'turn_invalid',
+      ),
+    );
+    await settle();
+    expect(session.active, isTrue);
+    expect(session.error, isNull);
+    expect(session.status, 'listening');
+    expect(provider.requests, 0);
+  });
+
+  test('late invalid speech turn cannot close a newer speaking turn', () async {
+    await start();
+    provider.emit(VoiceEventKind.speechStart, item: 'old');
+    await settle();
+    provider.emit(VoiceEventKind.speechStart, item: 'new');
+    await settle();
+    provider.controller.add(
+      VoiceEvent(
+        VoiceEventKind.speechEnd,
+        epoch: provider.epoch,
+        itemId: 'old',
+        code: 'turn_invalid',
+      ),
+    );
+    await settle();
+    expect(session.isUserSpeaking, isTrue);
+    provider.emit(VoiceEventKind.speechEnd, item: 'new');
+    await settle();
+    expect(session.status, 'thinking');
+  });
+
+  test(
+    'native capture stall is distinguished from connection failure',
+    () async {
+      await start();
+      audio.controller.add({
+        'kind': 'stopped',
+        'generation': audio.generation,
+        'reason': 'Capture handoff stalled',
+      });
+      await session.stop();
+      expect(session.error, 'audio_capture_stalled');
+      expect(session.active, isFalse);
+    },
+  );
 
   test(
     'automatic response uses real NOVA frame and render receipt, never creates duplicate response',
@@ -921,6 +1003,48 @@ void main() {
       expect(session.status, 'idle');
       expect(session.isPlaying, false);
       expect(session.isUserSpeaking, false);
+    },
+  );
+
+  test(
+    'audio packets preserve rendering without notifying UI listeners',
+    () async {
+      await start();
+      provider.emit(VoiceEventKind.responseStart, id: 'stream');
+      await settle();
+      var notifications = 0;
+      session.addListener(() => notifications++);
+      for (var i = 0; i < 40; i++) {
+        provider.emit(
+          VoiceEventKind.audio,
+          id: 'stream',
+          pcm: Uint8List(480),
+        );
+      }
+      await settle();
+      expect(audio.frames, hasLength(40));
+      expect(notifications, 0);
+      expect(session.status, 'thinking');
+      final identity = audio.frames.first.identity;
+      audio.controller.add({
+        'kind': 'control',
+        'generation': audio.generation,
+        'control': {
+          'type': 'playback.progress',
+          'utterance_id': identity.utteranceId,
+          'generation_epoch': identity.epoch,
+          'played_ms': 10,
+        },
+      });
+      expect(notifications, 1);
+      expect(session.status, 'speaking');
+      provider.emit(VoiceEventKind.text, id: 'stream', text: 'Still speaking');
+      await settle();
+      expect(notifications, 2);
+      expect(session.captionText, 'Still speaking');
+      await session.stop();
+      expect(session.active, isFalse);
+      expect(notifications, greaterThan(2));
     },
   );
 
