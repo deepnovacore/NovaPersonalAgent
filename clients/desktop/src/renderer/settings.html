@@ -44,14 +44,12 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
       <section class="setting-section" id="visor-section">
         <h2>Nova Visor · 桌面驾驶舱</h2>
         <p class="hint">在桌面上叠加一层半透明的 Nova 状态面板。</p>
-        <label><input id="visor-enabled" type="checkbox">启用桌面 HUD</label>
-        <label for="visor-mode">显示模式</label>
-        <select id="visor-mode"><option value="focus">专注 · 低动态</option><option value="showcase">展示 · 完整动画</option></select>
-        <label for="visor-opacity">界面亮度 / 不透明度</label>
-        <input id="visor-opacity" type="range" min="0.3" max="1" step="0.05" value="0.8">
-        <label><input id="visor-motion" type="checkbox">动态效果（跟随系统的减弱动态设置）</label>
-        <label><input id="visor-hardware" type="checkbox">显示电脑硬件数据</label>
-        <label><input id="visor-ai" type="checkbox">显示 Nova 状态与用量</label>
+        <label class="toggle-row"><input type="checkbox" role="switch" id="visor-enabled">启用桌面 HUD</label>
+        <div class="field"><label for="visor-mode">显示模式</label><select id="visor-mode"><option value="focus">专注 · 低动态</option><option value="showcase">展示 · 完整动画</option></select></div>
+        <div class="field"><label for="visor-opacity">界面亮度 / 不透明度</label><input id="visor-opacity" type="range" min="0.3" max="1" step="0.05" value="0.8"></div>
+        <label class="toggle-row"><input type="checkbox" role="switch" id="visor-motion">动态效果（跟随系统的减弱动态设置）</label>
+        <label class="toggle-row"><input type="checkbox" role="switch" id="visor-hardware">显示电脑硬件数据</label>
+        <label class="toggle-row"><input type="checkbox" role="switch" id="visor-ai">显示 Nova 状态与用量</label>
         <p class="hint">修改即时生效。⌘ / Ctrl + Shift + J 展开或收起。</p>
         <p id="visor-settings-status" role="status"></p>
       </section>
@@ -394,7 +392,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
               <div class="field"><label for="compatibleAsrBaseUrl">API Base URL</label><input id="compatibleAsrBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
               <div class="field"><label for="compatibleAsrModel">模型 ID</label><input id="compatibleAsrModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
               <p class="hint">说完一句后才显示识别结果。</p>
-              <label class="toggle-row"><input id="compatibleAsrOmitResponseFormat" type="checkbox">省略 ASR response_format 参数（Mistral、智谱）</label>
+              <label class="toggle-row"><input type="checkbox" role="switch" id="compatibleAsrOmitResponseFormat">省略 ASR response_format 参数（Mistral、智谱）</label>
               <div class="secret" data-key="compatibleAsrApiKey">
                 <label for="compatibleAsrApiKey">本阶段 API 密钥</label>
                 <span class="badge" id="badge-compatibleAsrApiKey">未设置</span><span class="key-usage" id="usage-compatibleAsrApiKey"></span>
@@ -489,7 +487,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
               <div class="field"><label for="compatibleTtsBaseUrl">API Base URL</label><input id="compatibleTtsBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
               <div class="field"><label for="compatibleTtsModel">模型 ID</label><input id="compatibleTtsModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
               <div class="field"><label for="compatibleTtsVoice">音色 ID</label><input id="compatibleTtsVoice" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
-              <label class="toggle-row"><input id="compatibleTtsSendSampleRate" type="checkbox">发送 24000 Hz 采样率参数</label>
+              <label class="toggle-row"><input type="checkbox" role="switch" id="compatibleTtsSendSampleRate">发送 24000 Hz 采样率参数</label>
               <p class="hint">仅在服务支持时开启。</p>
               <div class="secret" data-key="compatibleTtsApiKey">
                 <label for="compatibleTtsApiKey">本阶段 API 密钥</label>
@@ -527,8 +525,8 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
               <button type="button" id="chatgpt-refresh">刷新账号状态</button>
               <button type="button" id="chatgpt-logout">退出当前账号</button>
               <div class="field"><label for="chatgpt-model">ChatGPT 模型</label><select id="chatgpt-model"></select><button type="button" id="chatgpt-models">获取可用模型</button></div>
-              <label class="toggle-row"><input type="checkbox" id="chatgpt-use-models">主对话与辅助推理使用 ChatGPT</label>
-              <label class="toggle-row"><input type="checkbox" id="chatgpt-use-codex">Codex 执行器使用 ChatGPT</label>
+              <label class="toggle-row"><input type="checkbox" role="switch" id="chatgpt-use-models">主对话与辅助推理使用 ChatGPT</label>
+              <label class="toggle-row"><input type="checkbox" role="switch" id="chatgpt-use-codex">Codex 执行器使用 ChatGPT</label>
               <button type="button" id="chatgpt-apply">应用并重启服务</button>
               <button type="button" id="chatgpt-usage">ChatGPT 用量与授权</button>
               <p id="chatgpt-status" role="status" aria-live="polite"></p>

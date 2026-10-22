@@ -304,7 +304,8 @@ test('historical cards label prior status, assessment and suggestions without sh
  assert.equal(node.querySelectorAll('.timeline-status-tag')[0].textContent,'当时状态：今天截止')
  assert.equal(node.querySelectorAll('.timeline-attention-reason')[0].querySelectorAll('span')[0].textContent,'当时判断')
  assert.equal(node.querySelectorAll('.timeline-followups')[0].querySelectorAll('h4')[0].textContent,'当时建议')
- assert.ok(node.querySelectorAll('.timeline-history-note')[0].textContent.includes('2026-10-11'))
+ const historyNote=node.querySelectorAll('.timeline-history-note')[0].textContent
+ assert.ok(historyNote.startsWith('整理于 ')&&historyNote.includes('11')&&!historyNote.includes('2026-10-11'))
  assert.ok(node.querySelectorAll('.timeline-time-label').some(n=>n.textContent==='原截止已过 1 天，结果以最新记录为准'))
  assert.deepEqual(parent.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),['2026-10-11'])
 })
