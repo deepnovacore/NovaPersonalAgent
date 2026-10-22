@@ -392,7 +392,7 @@ test('actual desktop entry awaits discovery and owns cleanup when final exact fr
   }`
   const script = `import {register} from 'node:module'; register('data:text/javascript,'+encodeURIComponent(${JSON.stringify(hook)}),import.meta.url); await import(${JSON.stringify(new URL('../src/desktop-entry.js', import.meta.url).href)});`
   try {
-    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {stdio: ['ignore', 'pipe', 'pipe'], env: {PATH: process.env.PATH!, DESKTOP_TOKEN: 'a'.repeat(32)}})
+    const child = spawn(process.execPath, ['--preserve-symlinks', '--input-type=module', '-e', script], {stdio: ['ignore', 'pipe', 'pipe'], env: {PATH: process.env.PATH!, DESKTOP_TOKEN: 'a'.repeat(32)}})
     let stdout = ''; let stderr = ''
     child.stdout.on('data', chunk => {stdout += String(chunk)}); child.stderr.on('data', chunk => {stderr += String(chunk)})
     const result = await new Promise<number | null>((resolve, reject) => {child.on('error', reject); child.on('exit', resolve)})

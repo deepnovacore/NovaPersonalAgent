@@ -16,7 +16,7 @@ async function fixture(approve:(name:string)=>Promise<boolean>=()=>Promise.resol
  const root=await mkdtemp(join(tmpdir(),'computer-session-'))
  const image='data:image/png;base64,'+(await sharp({create:{width:2560,height:1440,channels:3,background:'white'}}).png().toBuffer()).toString('base64')
  let target='window-one',closed=0,connected=0,cleanup=true
- let closeGate=Promise.resolve(),writeFailure=false,afterWrite=()=>{}
+ let closeGate=Promise.resolve(),writeFailure=false,afterWrite=()=>{ /* Optional failure hook. */ }
  const acting:string[]=[],events:string[]=[],points:({x:number;y:number}|undefined)[]=[]
  const writes:{name:string;params:unknown}[]=[],approvals:string[]=[]
  const backend:Awaited<ReturnType<typeof startComputerBackend>>={
