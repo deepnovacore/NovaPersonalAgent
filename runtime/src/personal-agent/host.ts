@@ -89,6 +89,7 @@ export interface PersonalSources {
 }
 export interface PersonalFeishu {
     snapshot(): unknown;
+    restore?(): Promise<void>;
     command(method: string, params: unknown): Promise<unknown>;
     open(): Promise<void>;
     close(): Promise<void>;
@@ -701,6 +702,8 @@ export class PersonalAgentHost {
             this.#abort = new AbortController();
             this.#loaded = true;
             this.#opened = true;
+            // Cached account-scoped results must not wait for connector networking.
+            await this.#feishu?.restore?.().catch(()=>{/* Connector open reports invalid state without blocking other cached results. */});
             await this.synchronizePreferredName();
             this.understanding.reopen();
             await this.workbenchContext.open({deferGeneration:true});

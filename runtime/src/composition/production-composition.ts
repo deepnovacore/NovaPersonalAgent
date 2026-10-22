@@ -327,6 +327,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   }
   host.setFeishu({
     snapshot:()=>feishu.snapshot(),
+    restore:()=>feishu.restore(),
     command:async(method,params)=>{const result=await feishu.command(method,z.record(z.string(),z.unknown()).parse(params));await syncNotificationBinding();return result},
     open:async()=>{await feishu.open();await syncNotificationBinding();await host.notifications.migrate(feishu.snapshot().bot_enabled?'feishu':null)},
     close:async()=>{await feishu.close()},

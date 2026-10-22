@@ -218,14 +218,17 @@ export class FeishuConnector {
   private async json(args: string[], input?: string): Promise<Record<string, unknown>> {
     return parseFeishuJson(await this.run(args, { ...(input ? { input } : {}), ...(this.active ? { signal: this.active.signal } : {}) }));
   }
+  async restore(): Promise<void> {
+    try { this.saved = readSaved(JSON.parse(await readFile(this.options.statePath, 'utf8'))); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Cannot read Feishu state'); }
+    if (this.saved.chatDiscovery) this.view.chats=this.saved.chatDiscovery.chats.map(chat=>({...chat,selected:this.saved.selected.includes(chat.id)}));
+  }
   async open(): Promise<void> {
     this.closed = false;
     await this.serializeConsent(async()=>{
-      try { this.saved = readSaved(JSON.parse(await readFile(this.options.statePath, 'utf8'))); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Cannot read Feishu state'); }
+      await this.restore();
       await this.recoverProcessingConsent();
     });
-    if (this.saved.chatDiscovery) this.view.chats=this.saved.chatDiscovery.chats.map(chat=>({...chat,selected:this.saved.selected.includes(chat.id)}));
     try {
       const version = await this.run(['--version']);
       const match = /(\d+)\.(\d+)\.(\d+)/.exec(version);

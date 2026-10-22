@@ -20,6 +20,19 @@ test('unsupported CLI stays unavailable on subsequent status requests without ac
 import {abortable} from '../src/core/camera-session.js';
 import { structuredMention, FEISHU_SCOPES, FeishuConnector, type FeishuMessage } from '../src/connectors/feishu/index.js';
 
+test('saved account identity is restored without CLI or network initialization',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'nova-feishu-restore-')),statePath=join(directory,'state.json');
+ const saved={account:'saved-account',openId:'ou_self',name:'Saved user',paused:false,connected:true,bot:false,selected:[],cursors:{},deliveries:{},actions:[],generation:1,sources:[]};
+ await writeFile(statePath,JSON.stringify(saved));
+ const connector=new FeishuConnector({bootstrapOnly:true,executable:'unused',credentialRoot:directory,statePath,run:()=>{throw Error('restore must not initialize the CLI');}});
+ try{
+  const restore=Reflect.get(connector,'restore') as (()=>Promise<void>)|undefined;
+  assert.equal(typeof restore,'function');await restore!.call(connector);
+  assert.equal(connector.snapshot().account_id,'saved-account');
+  assert.equal(await readFile(statePath,'utf8'),JSON.stringify(saved));
+ }finally{await connector.close();await rm(directory,{recursive:true,force:true});}
+});
+
 test('a blocked chat does not stop another chat, and new history starts newest first', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nova-feishu-parallel-'));
   let release!: () => void;
