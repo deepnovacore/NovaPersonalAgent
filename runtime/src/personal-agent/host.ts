@@ -39,6 +39,7 @@ import {LifeService} from './life.js';
 import {NewsService} from '../news/service.js';
 import type {NewsRanker} from '../news/ranking.js';
 import type {SourceChange} from '../memory-substrate/source-state.js'
+import {runInMemoryBackground} from '../memory-ledger/store-client.js'
 import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
 import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool,nextConversationTitle,sourceTodoSchema, type ConversationRuntimeFactory,type ConversationRuntime,type ConversationTurnContext} from './conversations.js';
@@ -958,7 +959,8 @@ export class PersonalAgentHost {
             // The pending mark is on disk, so a failed cleanup (a full disk, say) is tried again on the next start instead of being forgotten.
             if(this.profileWarmup.newsCleanupPending())try{await this.news.clearSeededInterests();await this.profileWarmup.confirmNewsCleanup()}catch{/* still pending; the next start retries */}
             this.#seedNews();
-            await this.#sources?.open?.();
+            // Source sync and its timers index in the background; conversation and UI reads go first.
+            await runInMemoryBackground(()=>this.#sources?.open?.());
             if(acceptanceEnabled()){this.#acceptanceSample();this.#acceptanceTimer=setInterval(()=>this.#acceptanceSample(),1000);this.#acceptanceTimer.unref()}
             if(!deferBackground){await (this.#connectorsOpening=this.#openConnectors());await this.refreshMemory();}
             else this.#sourcePending.legacy=true;
@@ -977,7 +979,8 @@ export class PersonalAgentHost {
         if(acceptanceEnabled())return;
         await Promise.allSettled([this.#feishu?.open(),this.#connectors?.open()]);
     }
-    startBackgroundWork():void {
+    startBackgroundWork():void {runInMemoryBackground(()=>this.#startBackgroundWork())}
+    #startBackgroundWork():void {
         if(!this.#opened||!this.#loaded||this.#sourceReady)return;
         this.#sourceReady = true;
         this.#connectorsOpening??=this.#openConnectors().finally(()=>this.#notify());
