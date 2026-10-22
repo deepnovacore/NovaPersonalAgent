@@ -46,6 +46,7 @@ interface Active { completion: Promise<void> | null; usageDeadline: number | nul
 /** Provider account codes the user can act on; the rest of an error body is never kept. */
 const ACCOUNT_CODES: Readonly<Record<string, 'auth' | 'quota'>> = {Arrearage: 'quota', insufficient_quota: 'quota', InvalidApiKey: 'auth', invalid_api_key: 'auth'}
 const MAX_ERROR_BODY_BYTES = 4096
+const ERROR_BODY_DEADLINE_MS = 1000
 function fail(code: ChatCompletionsLlmFailureCode, statusCode: number | null = null): ChatCompletionsLlmFailure { return new ChatCompletionsLlmFailure(code, statusCode) }
 function protocol(detail:string):ChatCompletionsLlmFailure{return new ChatCompletionsLlmFailure('protocol',null,detail)}
 function object(value: unknown): value is Record<string, unknown> { return value !== null && !Array.isArray(value) && typeof value === 'object' }
@@ -272,12 +273,14 @@ class Session implements CascadedLlmSession {
   /** Reads at most a small error body for an allowlisted account code, then the status. */
   async #accountFailure(response: Response, active: Active): Promise<'auth' | 'quota' | 'rate_limited' | null> {
     const reader = response.body?.getReader() ?? null
-    let code: unknown
+    let code: unknown, timer: ReturnType<typeof setTimeout> | undefined
+    // One absolute budget for the whole body: a per-read idle timeout would let a trickling body hold the turn.
+    const expired = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('error body deadline')), ERROR_BODY_DEADLINE_MS) })
     try {
       const chunks: Uint8Array[] = []
       let size = 0
       while (reader !== null && size <= MAX_ERROR_BODY_BYTES) {
-        const {done, value} = await this.#timed(reader.read(), active)
+        const {done, value} = await Promise.race([this.#timed(reader.read(), active), expired])
         if (done) break
         chunks.push(value); size += value.byteLength
       }
@@ -286,8 +289,9 @@ class Session implements CascadedLlmSession {
         code = body.error?.code ?? body.code
       }
     } catch {
-      // A missing or malformed body leaves only the status to classify.
+      // A missing, slow or malformed body leaves only the status to classify.
     } finally {
+      clearTimeout(timer)
       await this.#cancel(reader)
     }
     if (typeof code === 'string' && Object.hasOwn(ACCOUNT_CODES, code)) return ACCOUNT_CODES[code]!
