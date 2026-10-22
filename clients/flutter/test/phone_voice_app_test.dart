@@ -71,9 +71,7 @@ class DelayedStopAudio extends FakeAudio {
 }
 
 void main() {
-  testWidgets('voice controls do not rebuild the chat shell', (
-    tester,
-  ) async {
+  testWidgets('voice controls do not rebuild the chat shell', (tester) async {
     await openChat(tester);
     await tester.tap(find.byTooltip('Live voice'));
     await tester.pumpAndSettle();
@@ -297,10 +295,7 @@ void main() {
       expect(find.text(message), findsNothing);
 
       final next = TestVoiceProvider();
-      await call.start(
-        provider: next,
-        conversation: call.conversationId!,
-      );
+      await call.start(provider: next, conversation: call.conversationId!);
       await tester.pumpAndSettle();
       expect(find.text(message), findsOneWidget);
       audio.failStop = false;
@@ -430,7 +425,18 @@ void main() {
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
       'Keep this unsent draft',
     );
+    final restored = call.onRestorePresentation!();
+    await tester.pumpAndSettle();
+    expect(await restored, isTrue);
+    expect(find.byKey(const ValueKey('voice-fullscreen')), findsOneWidget);
+    expect(
+      tester.widget<PhoneVoicePanel>(find.byType(PhoneVoicePanel)).session,
+      same(call),
+    );
+    await tester.tap(find.byTooltip('Minimize call'));
+    await tester.pumpAndSettle();
     call.active = false;
+    expect(await call.onRestorePresentation!(), isFalse);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });

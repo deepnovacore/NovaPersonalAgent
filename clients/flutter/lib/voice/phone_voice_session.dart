@@ -86,13 +86,30 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       if (action == 'mute') {
         unawaited(toggleMute().catchError((Object _) => _fail('audio_failed')));
       }
+      if (action.startsWith('pip')) {
+        if (action == 'pipSupported') floatingSupported = true;
+        if (action == 'pipUnsupported') floatingSupported = false;
+        if (action == 'pipActive') floatingActive = true;
+        if (action == 'pipInactive' || action == 'pipFailed') {
+          floatingActive = false;
+        }
+        if (!_disposed) notifyListeners();
+      }
     });
+    companion?.onRestore = () async {
+      if (_disposed || !active) return false;
+      final epoch = _epoch;
+      final restored = await onRestorePresentation?.call() ?? false;
+      return !_disposed && active && epoch == _epoch && restored;
+    };
   }
   final VoiceCompanion? companion;
   StreamSubscription<String>? _companionEvents;
   Future<void>? _startingCompanion;
   bool _companionAttempted = false, _backgroundReady = false;
-  bool? _publishedMute;
+  (bool, String)? _publishedPresentation;
+  bool floatingSupported = false, floatingActive = false;
+  Future<bool> Function()? onRestorePresentation;
   Future<bool> minimizeToFloating() async {
     if (!active || !_backgroundReady) return false;
     return await companion?.minimize() ?? false;
@@ -233,13 +250,19 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _changed() {
-    if (active && _backgroundReady && _publishedMute != muted) {
-      _publishedMute = muted;
+    if (active &&
+        _backgroundReady &&
+        _publishedPresentation != (muted, status)) {
+      _publishedPresentation = (muted, status);
       final epoch = _epoch;
       unawaited(
-        companion!.update(muted: muted).catchError((Object _) {
-          if (epoch == _epoch && active) return _fail('call_controls_failed');
-        }),
+        companion!
+            .update(muted: muted, status: status, language: _language)
+            .catchError((Object _) {
+              if (epoch == _epoch && active) {
+                return _fail('call_controls_failed');
+              }
+            }),
       );
     }
     if (!_disposed) notifyListeners();
@@ -1158,7 +1181,8 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     } catch (_) {}
     _startingCompanion = null;
     _backgroundReady = false;
-    _publishedMute = null;
+    _publishedPresentation = null;
+    floatingActive = floatingSupported = false;
     if (_companionAttempted) {
       _companionAttempted = false;
       try {
@@ -1192,6 +1216,8 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    onRestorePresentation = null;
+    companion?.onRestore = null;
     _disposed = true;
     _resetInputLevel();
     _audioLevel.dispose();

@@ -21,6 +21,7 @@ On 2026-10-19, the project owner explicitly approved the following exact version
 | `clients/desktop/src/main/nova-avatar.png` | `06d05cefc061a8f30d154f8a10e4c564d5c703f8d689f657c99d81e522b32469` |
 | `clients/desktop/src/renderer/assets/nova-idle.mp4` | `25ae979111e3334a8f08d54e7eb65b18c307834c506f8ae65e7cf7b9ee3ff33c` |
 | `clients/flutter/packages/nova_audio/android/src/main/res/drawable-nodpi/nova_orb_avatar.png` | `77fce72aae44c5da545f146c5a1162a05ccf13ed606f0c248e417400354fd1cf` |
+| `clients/flutter/packages/nova_audio/ios/nova_audio/Sources/nova_audio/Resources/nova_orb_avatar.png` (identical copy) | `77fce72aae44c5da545f146c5a1162a05ccf13ed606f0c248e417400354fd1cf` |
 
 The owner also explicitly approved the following five UI regression screenshots on 2026-10-19. They contain generic controls and synthetic test copy, with no character media or organization data.
 

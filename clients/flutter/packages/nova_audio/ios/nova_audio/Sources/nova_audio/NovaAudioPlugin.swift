@@ -2,10 +2,29 @@ import AVFoundation
 import Flutter
 import UIKit
 
+@MainActor private final class CallPiPViewFactory: NSObject, @preconcurrency FlutterPlatformViewFactory {
+    private let pip: CallPictureInPicture
+    init(pip: CallPictureInPicture) { self.pip = pip }
+    func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
+        CallPiPPlatformView(frame: frame, pip: pip)
+    }
+}
+
+@MainActor private final class CallPiPPlatformView: NSObject, @preconcurrency FlutterPlatformView {
+    private let source: CallPiPView
+    init(frame: CGRect, pip: CallPictureInPicture) {
+        source = CallPiPView(frame: frame)
+        super.init()
+        source.attached = { [weak pip] view in pip?.attach(view) }
+    }
+    func view() -> UIView { source }
+}
+
 @MainActor public final class NovaAudioPlugin: NSObject, FlutterPlugin {
     private let control: FlutterMethodChannel
     private let companion: FlutterMethodChannel
     private var backgroundCall = false
+    private let pip = CallPictureInPicture()
     private let pcm: FlutterBasicMessageChannel
     private let audio = VoiceAudio()
     private var aoq: AOQAudio?
@@ -21,6 +40,7 @@ import UIKit
         let pcm = FlutterBasicMessageChannel(name: "nova/audio/pcm", binaryMessenger: registrar.messenger(), codec: FlutterBinaryCodec.sharedInstance())
         let companion = FlutterMethodChannel(name: "nova/voice_companion", binaryMessenger: registrar.messenger())
         let instance = NovaAudioPlugin(control: channel, pcm: pcm, companion: companion)
+        registrar.register(CallPiPViewFactory(pip: instance.pip), withId: "nova/voice_pip_source")
         companion.setMethodCallHandler { [weak instance] call, result in
             guard let instance else { result(FlutterError(code: "unavailable", message: "Audio engine unavailable", details: nil)); return }
             MainActor.assumeIsolated { instance.handleCompanion(call, result: result) }
@@ -30,6 +50,15 @@ import UIKit
     private init(control: FlutterMethodChannel, pcm: FlutterBasicMessageChannel, companion: FlutterMethodChannel) {
         self.control = control; self.pcm = pcm; self.companion = companion
         super.init()
+        pip.event = { [weak self] id, action in
+            self?.companion.invokeMethod("action", arguments: ["callId": id, "action": action])
+        }
+        pip.restore = { [weak self] id, completion in
+            guard let self else { completion(false); return }
+            self.companion.invokeMethod("restore", arguments: ["callId": id]) { value in
+                completion((value as? Bool) == true)
+            }
+        }
         audio.onPCM = { [weak self] data in self?.deliver(data) }
         audio.onLevel = { [weak self] level in self?.event("level", ["level": level]) }
         audio.onControl = { [weak self] value in self?.event("control", ["control": value]) }
@@ -45,10 +74,18 @@ import UIKit
         control.invokeMethod("event", arguments: value)
     }
     private func fail(_ reason: String) {
-        if backgroundCall { backgroundCall = false; companion.invokeMethod("action", arguments: "end") }
+        if let id = pip.lifetime.id {
+            pip.stop(id)
+            if backgroundCall { companion.invokeMethod("action", arguments: ["callId": id, "action": "end"]) }
+        }
+        backgroundCall = false
         aoq?.stop(); aoq = nil; audio.disconnect(); handoff.reset(); event("stopped", ["reason": reason]); generation = nil
     }
     private func handleCompanion(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        let args = call.arguments as? [String: Any] ?? [:]
+        guard let id = args["callId"] as? String, !id.isEmpty, id.count <= 128 else {
+            result(FlutterError(code: "invalid_call", message: "Missing call identity", details: nil)); return
+        }
         switch call.method {
         case "start":
             guard UIApplication.shared.applicationState == .active,
@@ -56,11 +93,25 @@ import UIKit
                   (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])?.contains("audio") == true else {
                 result(FlutterError(code: "background_unavailable", message: "Start a call in the foreground with microphone permission", details: nil)); return
             }
-            backgroundCall = true; result(nil)
-        case "update": result(nil)
-        case "minimize": result(false)
-        case "stop": backgroundCall = false; result(nil)
+            backgroundCall = true; pip.start(id); result(nil)
+        case "update":
+            pip.update(id, muted: args["muted"] as? Bool ?? false,
+                       phase: args["status"] as? String ?? "listening",
+                       language: args["language"] as? String ?? "zh")
+            result(nil)
+        case "minimize": pip.minimize(id) { result($0) }
+        case "stop":
+            if pip.lifetime.id == id { backgroundCall = false; pip.stop(id) }
+            result(nil)
         default: result(FlutterMethodNotImplemented)
+        }
+    }
+    public nonisolated func detachFromEngine(for registrar: FlutterPluginRegistrar) {
+        MainActor.assumeIsolated {
+            if let id = pip.lifetime.id { pip.stop(id) }
+            backgroundCall = false
+            aoq?.stop(); aoq = nil; audio.disconnect()
+            companion.setMethodCallHandler(nil)
         }
     }
     private func deliver(_ data: Data) {

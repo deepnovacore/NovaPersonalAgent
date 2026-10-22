@@ -9,6 +9,8 @@ import 'phone_voice_session_test.dart'
     show VoiceAudio, TestVoiceProvider, settle;
 
 class FakeCompanion implements VoiceCompanion {
+  @override
+  Future<bool> Function()? onRestore;
   final events = StreamController<String>.broadcast(sync: true);
   Completer<void>? acquiring;
   bool fail = false, failStop = false;
@@ -30,7 +32,11 @@ class FakeCompanion implements VoiceCompanion {
   }
 
   @override
-  Future<void> update({required bool muted}) async {
+  Future<void> update({
+    required bool muted,
+    String status = 'listening',
+    String language = 'zh',
+  }) async {
     states.add(muted);
   }
 
@@ -69,6 +75,30 @@ void main() {
   });
   Future<void> start() =>
       session.start(provider: provider, conversation: conversation);
+  test(
+    'PiP restore opens only the active call and PiP failure does not end audio',
+    () async {
+      var restored = 0;
+      session.onRestorePresentation = () async {
+        restored++;
+        return true;
+      };
+      await start();
+      companion.events.add('pipSupported');
+      companion.events.add('pipActive');
+      expect(session.floatingSupported, isTrue);
+      expect(session.floatingActive, isTrue);
+      expect(await companion.onRestore!(), isTrue);
+      expect(restored, 1);
+      companion.events.add('pipFailed');
+      expect(session.floatingActive, isFalse);
+      expect(session.active, isTrue);
+      expect(provider.closes, 0);
+      await session.stop();
+      expect(await companion.onRestore!(), isFalse);
+      expect(restored, 1);
+    },
+  );
   test('background keeps capture and provider until explicit end', () async {
     await start();
     session.didChangeAppLifecycleState(AppLifecycleState.paused);
