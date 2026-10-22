@@ -70,6 +70,9 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  createVoiceProvider?:typeof buildConversationVoiceProvider;
  host:PersonalAgentHost; memory:()=>PersonalMemoryResource|undefined
 }):ConversationRuntimeFactory {
+ // Capability preflight must not make an unconfigured desktop fail to initialize.
+ try{const selected=requireSelectedCascadedLlmConfig(options.settings);options.host.setWorkbenchModel({provider:selected.provider,model:selected.config.model})}
+ catch{options.host.setWorkbenchModel({provider:'',model:''})}
  options.host.setWorkbenchExecutors([...(options.agentDescriptors??[]),...(options.codexResource?.agentDescriptor?[options.codexResource.agentDescriptor]:[])].map(agent=>agent.name))
  return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution)=>{
   if((conversation.kind==='build'||conversation.mode==='plan')&&!execution){
@@ -297,11 +300,12 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    },
   })
   const unsubscribeTaskCapture=options.host.subscribe(()=>{captureTaskResponse();const response=graph.playback.current?.response_id??currentResponse;if(response&&!options.host.localNotifications&&graph.service.isProactiveResponse(response))void graph.service.session.quarantineActiveOrAwaitingResponse().catch(()=>options.onDiagnostic?.('[runtime-diagnostic] notification_audio_fence_failed'))})
-  let closed=false
+  let closed=false,computerRuns=0
+  const toolBridge=conversationToolBridge(core,graph,active=>{computerRuns+=active?1:-1})
   const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();unsubscribeTaskCapture();detachTaskRuntime();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
-  const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
+  const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&computerRuns===0&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {
-   toolBridge:conversationToolBridge(core,graph),
+   toolBridge,
    retainTasks:ownsTask,
    parkVoice:async()=>{audioGeneration++;voiceEnabled=false;await graph.service.playbackDisconnected({resumeDelivery:false})},
    canSwitch:()=>!pending&&!approval?.pending&&!projectConfirmation?.pending&&core.runtime.core.activeDelegates().length===0&&(voiceEnabled?graph.service.pendingHostItemCount===0:true)&&graph.playback.current===null,

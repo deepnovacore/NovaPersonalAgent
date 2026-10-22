@@ -7,7 +7,7 @@
 |---|---|---|
 | [Coding](coding.md) | 在已批准的项目中写代码、修改文件、运行命令 | 已接入 Codex app-server |
 | [Loop Camera](loop-camera.md) | 观察指定摄像头，条件满足时上报 | 已接入原生摄像头与独立视觉模型 |
-| GUI-use | 操作跨应用的图形界面 | 计划中，暂无配置指南 |
+| [Computer Use](computer-use-build.md) | 在审批下操作图形界面 | 已接入电脑执行器；Build 集成与实机验收单独跟踪 |
 
 Loop Camera 是面向用户的功能名；运行时由 `vision` 控制器承载，内部使用 `watch` / `guard` 两个执行器。它与对话中的视觉能力相互独立，后者只针对一次提交的语音转写或文字输入抓取一帧。
 

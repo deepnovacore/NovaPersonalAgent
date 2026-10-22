@@ -1,5 +1,5 @@
-// Window-scoped Safari input. AX is used only for native key-window identity metadata.
-// No control tree, hit testing, AX actions/value writes, window raise, pointer warp or global input.
+// Window-bound background input: capability-based AX operations and process-targeted events.
+// Never raise a window, defocus the user's app, warp the pointer, or emit global input.
 import AppKit
 import ApplicationServices
 import Carbon
@@ -15,31 +15,7 @@ private struct Binding: Equatable {
 }
 
 @main @MainActor struct MacGUI {
-    private struct Front: Equatable {
-        let pid: Int32, windowID: UInt32, started: Double
-        var json: [String: Any] {["pid":pid,"windowId":windowID,"started":started]}
-    }
-    private static func frontApp() throws -> NSRunningApplication {
-        // WindowServer query stays current even while this helper's main runloop is sleeping.
-        guard let sky=dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",RTLD_NOW|RTLD_GLOBAL) else {try reject("needs_user_action")}
-        defer {dlclose(sky)}
-        typealias GetFront = @convention(c)(UnsafeMutableRawPointer)->Int32
-        typealias GetPID = @convention(c)(UnsafeRawPointer,UnsafeMutablePointer<Int32>)->Int32
-        guard let frontSymbol=dlsym(sky,"_SLPSGetFrontProcess"),let pidSymbol=dlsym(UnsafeMutableRawPointer(bitPattern:-2),"GetProcessPID") else {try reject("needs_user_action")}
-        let getFront=unsafeBitCast(frontSymbol,to:GetFront.self),getPID=unsafeBitCast(pidSymbol,to:GetPID.self)
-        var psn=ProcessSerialNumber(),pid:Int32=0
-        guard getFront(&psn)==0,getPID(&psn,&pid)==0,pid>0,let app=NSRunningApplication(processIdentifier:pid),!app.isTerminated else {try reject("needs_user_action")}
-        return app
-    }
-    private static func front() throws -> Front {
-        let app=try frontApp()
-        guard let started=app.launchDate?.timeIntervalSince1970 else {try reject("needs_user_action")}
-        var value: CFTypeRef?, wid: CGWindowID=0
-        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier),kAXFocusedWindowAttribute as CFString,&value)==AXError.success,
-              let value=value,CFGetTypeID(value)==AXUIElementGetTypeID(),
-              nativeWindowID(unsafeBitCast(value,to:AXUIElement.self),&wid)==AXError.success,wid>0 else {try reject("needs_user_action")}
-        return Front(pid:app.processIdentifier,windowID:wid,started:started)
-    }
+    private static let keys: [String:(CGKeyCode,CGEventFlags)] = ["command+a":(0,.maskCommand),"cmd+a":(0,.maskCommand),"meta+a":(0,.maskCommand),"return":(36,[]),"enter":(36,[]),"tab":(48,[]),"escape":(53,[]),"backspace":(51,[])]
     private static func focusRecord(_ pid: Int32,_ wid: UInt32,_ active: Bool) throws {
         guard let sky=dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",RTLD_NOW|RTLD_GLOBAL) else {try reject("needs_user_action")}
         defer {dlclose(sky)}
@@ -55,11 +31,20 @@ private struct Binding: Equatable {
         guard result==0 else {try reject("action_failed")}
     }
     private static func restoreFocus(_ request: [String: Any]) throws {
-        // Restoration follows the user's CURRENT front window, including an app switch during a click.
+        // Release only input sent to this process generation; never change foreground focus.
         guard let pid=request["pid"] as? Int32, pid>0,let wid=request["windowId"] as? UInt32,wid>0,
               let started=request["targetStarted"] as? Double,started.isFinite,started>0 else {try reject("invalid_configuration")}
-        let currentPid=try frontApp().processIdentifier
-        if let app=NSRunningApplication(processIdentifier:pid),app.bundleIdentifier=="com.apple.Safari",app.launchDate?.timeIntervalSince1970==started {
+        if let app=NSRunningApplication(processIdentifier:pid),app.bundleIdentifier != nil,app.launchDate?.timeIntervalSince1970==started {
+            if let key=request["releaseKey"] as? String {
+                let codes:[CGKeyCode]
+                if key=="unicode" {codes=[0]}
+                else if let (code,flags)=keys[key.lowercased()] {codes=flags.contains(.maskCommand) ? [code,55] : [code]}
+                else {try reject("invalid_configuration")}
+                for code in codes {
+                    guard let event=CGEvent(keyboardEventSource:nil,virtualKey:code,keyDown:false) else {try reject("action_failed")}
+                    event.flags=[];event.postToPid(pid)
+                }
+            }
             if request["releasePointer"] as? Bool==true {
                 guard let group=request["clickGroup"] as? Int64,(1...2147483647).contains(group) else {try reject("invalid_configuration")}
                 let windows=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],0) as? [[String:Any]] ?? []
@@ -83,24 +68,6 @@ private struct Binding: Equatable {
                     usleep(200000)
                 }
             }
-            if currentPid != pid {
-            // Always restore the current front window, even if target defocus fails.
-                do {try focusRecord(pid,wid,false)} catch {let current=try front();try focusRecord(current.pid,current.windowID,true);throw error}
-            }
-        }
-        let current=try front()
-        try focusRecord(current.pid,current.windowID,true)
-        guard try front()==current else {try reject("screen_changed")}
-    }
-    private static func beginFocus(_ request: [String: Any],_ binding: Binding) throws {
-        guard let previous=request["focus"] as? [String:Any],let pid=previous["pid"] as? Int32,
-              let wid=previous["windowId"] as? UInt32,let started=previous["started"] as? Double,
-              request["targetStarted"] as? Double==binding.started,
-              try front()==Front(pid:pid,windowID:wid,started:started) else {try reject("screen_changed")}
-        if pid != binding.pid {
-            try focusRecord(pid,wid,false)
-            try focusRecord(binding.pid,binding.windowID,true)
-            usleep(50000)
         }
     }
     private static func bind(_ request: [String: Any]) throws -> Binding {
@@ -108,7 +75,7 @@ private struct Binding: Equatable {
               pidNumber.doubleValue>0, pidNumber.doubleValue<=Double(Int32.max), pidNumber.doubleValue.rounded()==pidNumber.doubleValue,
               windowNumber.doubleValue>0, windowNumber.doubleValue<=Double(UInt32.max), windowNumber.doubleValue.rounded()==windowNumber.doubleValue else {try reject("invalid_configuration")}
         let pid=pidNumber.int32Value, wid=windowNumber.uint32Value
-        guard let app=NSRunningApplication(processIdentifier: pid), app.bundleIdentifier=="com.apple.Safari", !app.isTerminated,
+        guard let app=NSRunningApplication(processIdentifier: pid), app.bundleIdentifier != nil, !app.isTerminated,
               let started=app.launchDate?.timeIntervalSince1970 else {try reject("needs_user_action")}
         let windows=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],0) as? [[String: Any]] ?? []
         guard let window=windows.first(where: {($0[kCGWindowNumber as String] as? UInt32)==wid && ($0[kCGWindowOwnerPID as String] as? Int32)==pid}),
@@ -122,15 +89,149 @@ private struct Binding: Equatable {
         guard nativeWindowID(unsafeBitCast(focused,to:AXUIElement.self), &keyWindow)==AXError.success else {try reject("needs_user_action")}
         return Binding(pid:pid,windowID:wid,started:started,bounds:bounds,keyWindow:keyWindow)
     }
+    private static func attribute(_ element: AXUIElement,_ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element,name as CFString,&value) == .success else {return nil}
+        return value
+    }
+    private static func writable(_ element: AXUIElement,_ name: String) -> Bool {
+        var result: DarwinBoolean=false
+        return AXUIElementIsAttributeSettable(element,name as CFString,&result) == .success && result.boolValue
+    }
+    private static func ownerWindow(_ element: AXUIElement) -> UInt32? {
+        guard let value=attribute(element,kAXWindowAttribute),CFGetTypeID(value)==AXUIElementGetTypeID() else {return nil}
+        var id:CGWindowID=0
+        guard nativeWindowID(unsafeBitCast(value,to:AXUIElement.self),&id) == .success else {return nil}
+        return id
+    }
+    private static func receiver(_ binding: Binding) throws -> AXUIElement {
+        let app=AXUIElementCreateApplication(binding.pid)
+        AXUIElementSetMessagingTimeout(app,1)
+        let element:AXUIElement
+        if let value=attribute(app,kAXFocusedUIElementAttribute),CFGetTypeID(value)==AXUIElementGetTypeID() {
+            element=unsafeBitCast(value,to:AXUIElement.self)
+        } else {
+            // Some background apps expose focus only on the editor, not on the application.
+            guard let value=attribute(app,kAXFocusedWindowAttribute),CFGetTypeID(value)==AXUIElementGetTypeID() else {try reject("operation_unsupported")}
+            let window=unsafeBitCast(value,to:AXUIElement.self)
+            var id:CGWindowID=0
+            guard nativeWindowID(window,&id) == .success,id==binding.windowID else {try reject("screen_changed")}
+            var queue=[window],index=0,candidates:[AXUIElement]=[]
+            let deadline=Date().addingTimeInterval(1)
+            while index<queue.count {
+                guard index<2000,Date()<deadline else {try reject("operation_unsupported")}
+                let node=queue[index];index+=1
+                if [kAXTextFieldRole,kAXTextAreaRole,kAXComboBoxRole].contains(attribute(node,kAXRoleAttribute) as? String ?? ""),attribute(node,kAXFocusedAttribute) as? Bool == true {
+                    if !candidates.contains(where:{CFEqual($0,node)}) {candidates.append(node)}
+                    guard candidates.count==1 else {try reject("operation_unsupported")}
+                } else if let children=attribute(node,kAXChildrenAttribute) as? [AXUIElement] {queue.append(contentsOf:children.prefix(2001))}
+            }
+            guard let found=candidates.first else {try reject("operation_unsupported")}
+            element=found
+        }
+        guard ownerWindow(element)==binding.windowID else {try reject("screen_changed")}
+        guard attribute(element,kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole else {try reject("operation_unsupported")}
+        return element
+    }
+    private static func focusOrPress(_ binding: Binding,_ point: CGPoint,editorOnly: Bool=false) throws -> String? {
+        let app=AXUIElementCreateApplication(binding.pid)
+        AXUIElementSetMessagingTimeout(app,1)
+        var hit:AXUIElement?
+        guard AXUIElementCopyElementAtPosition(app,Float(point.x+binding.bounds.minX),Float(point.y+binding.bounds.minY),&hit) == .success,let element=hit else {return nil}
+        guard ownerWindow(element)==binding.windowID else {try reject("screen_changed")}
+        let role=attribute(element,kAXRoleAttribute) as? String
+        if [kAXTextFieldRole,kAXTextAreaRole,kAXComboBoxRole].contains(role ?? ""), writable(element,kAXFocusedAttribute) {
+            guard AXUIElementSetAttributeValue(element,kAXFocusedAttribute as CFString,kCFBooleanTrue) == .success else {try reject("action_failed")}
+            for _ in 0..<25 {
+                if let current=try? receiver(binding),CFEqual(current,element),attribute(element,kAXFocusedAttribute) as? Bool == true {return "editor"}
+                usleep(10000)
+            }
+            try reject("action_failed")
+        }
+        if editorOnly {try reject("operation_unsupported")}
+        var actions:CFArray?
+        guard AXUIElementCopyActionNames(element,&actions) == .success,(actions as? [String] ?? []).contains(kAXPressAction) else {return nil}
+        guard AXUIElementPerformAction(element,kAXPressAction as CFString) == .success else {try reject("action_failed")}
+        return "press"
+    }
+    private static func editNative(_ binding: Binding,_ text: String?,selectAll: Bool=false) throws -> Bool {
+        let element=try receiver(binding)
+        let textAttribute=kAXValueAttribute
+        guard let current=attribute(element,kAXValueAttribute) as? String,
+              let selection=attribute(element,kAXSelectedTextRangeAttribute),CFGetTypeID(selection)==AXValueGetTypeID() else {return false}
+        var range=CFRange()
+        guard AXValueGetValue(unsafeBitCast(selection,to:AXValue.self),.cfRange,&range),
+              range.location>=0,range.length>=0,range.location<=current.utf16.count,range.length<=current.utf16.count-range.location else {try reject("screen_changed")}
+        let selected=NSRange(location:range.location,length:range.length)
+        guard Range(selected,in:current) != nil else {try reject("operation_unsupported")}
+        if !writable(element,kAXSelectedTextRangeAttribute) || (!selectAll && !writable(element,textAttribute)) {return false}
+        guard CFEqual(try receiver(binding),element),attribute(element,kAXValueAttribute) as? String==current,
+              let latestSelection=attribute(element,kAXSelectedTextRangeAttribute),CFEqual(selection,latestSelection) else {try reject("screen_changed")}
+        if selectAll {range=CFRange(location:0,length:current.utf16.count)}
+        else {
+            let replacement=text ?? "",next=(current as NSString).replacingCharacters(in:selected,with:replacement)
+            let write=AXUIElementSetAttributeValue(element,textAttribute as CFString,next as CFString)
+            if write == .attributeUnsupported || write == .notImplemented {return false}
+            guard write == .success else {try reject("editor_write_rejected") }
+            guard CFEqual(try receiver(binding),element),attribute(element,kAXValueAttribute) as? String==next else {try reject("editor_readback_changed")}
+            range=CFRange(location:range.location+replacement.utf16.count,length:0)
+        }
+        guard CFEqual(try receiver(binding),element),let value=AXValueCreate(.cfRange,&range),
+              AXUIElementSetAttributeValue(element,kAXSelectedTextRangeAttribute as CFString,value) == .success else {try reject("action_failed")}
+        guard let readback=attribute(element,kAXSelectedTextRangeAttribute),CFEqual(value,readback) else {try reject("action_failed")}
+        return true
+    }
     private static func metadata(_ binding: Binding) -> [String: Any] {
         ["target":binding.identity,"width":binding.bounds.width,"height":binding.bounds.height,"keyWindowMatches":binding.keyWindow==binding.windowID]
     }
     static func execute(_ request: [String: Any]) async throws -> [String: Any] {
         if request["op"] as? String=="focusRestore" {try restoreFocus(request);return ["restored":true]}
+        if request["op"] as? String=="applicationTarget" {
+            guard let query=request["application"] as? String,!query.isEmpty,query.count<=200 else {try reject("invalid_configuration")}
+            let apps=NSWorkspace.shared.runningApplications.filter { !$0.isTerminated && ($0.bundleIdentifier==query || $0.localizedName==query) }
+            guard apps.count==1,let app=apps.first else {try reject("application_not_found_or_ambiguous")}
+            let ax=AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(ax,1)
+            guard let value=attribute(ax,kAXFocusedWindowAttribute),CFGetTypeID(value)==AXUIElementGetTypeID() else {try reject("needs_user_action")}
+            var id:CGWindowID=0
+            guard nativeWindowID(unsafeBitCast(value,to:AXUIElement.self),&id) == .success else {try reject("needs_user_action")}
+            let selected=try bind(["pid":app.processIdentifier,"windowId":id])
+            return ["pid":selected.pid,"windowId":selected.windowID,"target":selected.identity,"application":["name":app.localizedName ?? query,"bundleId":app.bundleIdentifier ?? "","path":app.bundleURL?.standardizedFileURL.path ?? ""]]
+        }
         let binding=try bind(request)
         guard let operation=request["op"] as? String else {try reject("invalid_configuration")}
         if operation=="target" || operation=="size" || operation=="connect" {return metadata(binding)}
-        if operation=="focusSnapshot" {return ["focus":try front().json,"targetStarted":binding.started]}
+        if operation=="editor" {
+            guard request["target"] as? String==binding.identity else {try reject("screen_changed")}
+            var result:[String:Any]=["available":false],content:[[String:String]]=[]
+            if let element=try? receiver(binding),let value=attribute(element,kAXValueAttribute) as? String {
+                result=["available":true,"role":attribute(element,kAXRoleAttribute) as? String ?? "","value":String(value.prefix(200)),"source":"accessibility"]
+            }
+            let app=AXUIElementCreateApplication(binding.pid)
+            AXUIElementSetMessagingTimeout(app,0.5)
+            if let value=attribute(app,kAXFocusedWindowAttribute),CFGetTypeID(value)==AXUIElementGetTypeID() {
+                let window=unsafeBitCast(value,to:AXUIElement.self)
+                var id:CGWindowID=0
+                guard nativeWindowID(window,&id) == .success,id==binding.windowID else {try reject("screen_changed")}
+                var queue=[window],index=0
+                let deadline=Date().addingTimeInterval(1)
+                while index<queue.count,index<500,content.count<80,Date()<deadline {
+                    let node=queue[index];index+=1
+                    if attribute(node,kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole {continue}
+                    let role=attribute(node,kAXRoleAttribute) as? String ?? ""
+                    if [kAXStaticTextRole,kAXButtonRole,kAXTextFieldRole,kAXTextAreaRole,"AXWebArea"].contains(role) {
+                        let text=(attribute(node,kAXValueAttribute) as? String) ?? (attribute(node,kAXTitleAttribute) as? String) ?? ""
+                        let url=(attribute(node,kAXURLAttribute) as? URL)?.absoluteString ?? ""
+                        if !text.isEmpty || !url.isEmpty {content.append(["role":role,"text":String(text.prefix(300)),"url":String(url.prefix(500))])}
+                    }
+                    if let children=attribute(node,kAXChildrenAttribute) as? [AXUIElement] {queue.append(contentsOf:children.prefix(501))}
+                }
+                result["native_ui"]=["source":"accessibility","content":content,"truncated":index<queue.count]
+            }
+            guard try bind(request)==binding else {try reject("screen_changed")}
+            return result
+        }
+        if operation=="focusSnapshot" {return ["focus":["pid":binding.pid,"windowId":binding.windowID,"started":binding.started],"targetStarted":binding.started]}
         if operation=="screenshot" {
             guard #available(macOS 14.0, *) else {try reject("needs_user_action")}
             let content=try await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:false)
@@ -171,43 +272,57 @@ private struct Binding: Equatable {
                   x>=0,y>=0,x<binding.bounds.width,y<binding.bounds.height else {try reject("needs_user_action")}
             return CGPoint(x:x,y:y)
         }
+        // Background apps can drop their editor focus between process-scoped actions.
+        if ["Input","KeyboardPress"].contains(operation),let point=request["editorPoint"] as? [Double],point.count==2 {
+            guard point.allSatisfy({$0.isFinite}),point[0]>=0,point[1]>=0,point[0]<binding.bounds.width,point[1]<binding.bounds.height,
+                  try focusOrPress(binding,CGPoint(x:point[0],y:point[1]),editorOnly:true)=="editor" else {try reject("operation_unsupported")}
+        }
         switch operation {
         case "Tap":
-            let local=try point(), screen=CGPoint(x:local.x+binding.bounds.minX,y:local.y+binding.bounds.minY)
+            let local=try point()
+            try fresh()
+            if let kind=try focusOrPress(binding,local) {try fresh();return ["posted":true,"restored":true,"delivery":"accessibility","editor":kind=="editor"]}
+            let screen=CGPoint(x:local.x+binding.bounds.minX,y:local.y+binding.bounds.minY)
             guard let hold=request["holdMs"] as? Int, (10...1000).contains(hold),(1...2147483647).contains(clickGroup),
                   let move=CGEvent(mouseEventSource:source,mouseType:.mouseMoved,mouseCursorPosition:screen,mouseButton:.left),
                   let down=CGEvent(mouseEventSource:source,mouseType:.leftMouseDown,mouseCursorPosition:screen,mouseButton:.left),
                   let up=CGEvent(mouseEventSource:source,mouseType:.leftMouseUp,mouseCursorPosition:screen,mouseButton:.left) else {try reject("needs_user_action")}
             down.flags=[]; up.flags=[]; move.flags=[]
             down.setIntegerValueField(.mouseEventClickState,value:1); up.setIntegerValueField(.mouseEventClickState,value:1)
-            var restored=false
-            defer {if !restored {var recovery=request;recovery["releasePointer"]=true;try? restoreFocus(recovery)}}
-            try fresh();try beginFocus(request,binding)
+            try fresh()
             send(move,point:local,phase:2);usleep(12000)
-            // Screen-off primer opens the browser activation gate without touching a page element.
-            let offscreen=CGPoint(x:-1,y:-1)
-            for (kind,phase) in [(CGEventType.leftMouseDown,Int64(1)),(.leftMouseUp,Int64(2))] {
-                guard let event=CGEvent(mouseEventSource:source,mouseType:kind,mouseCursorPosition:CGPoint(x:binding.bounds.minX-1,y:binding.bounds.minY-1),mouseButton:.left) else {try reject("action_failed")}
-                event.flags=[];event.setIntegerValueField(.mouseEventClickState,value:1)
-                send(event,point:offscreen,phase:phase);usleep(30000)
-            }
-            try fresh();send(down,point:local);usleep(useconds_t(hold*1000));send(up,point:local);usleep(200000)
-            try fresh();try restoreFocus(request);restored=true
-            return ["posted":true,"restored":true]
+            send(down,point:local);usleep(useconds_t(hold*1000));send(up,point:local);usleep(200000)
+            try fresh()
+            return ["posted":true,"restored":true,"delivery":"targeted_events"]
         case "Input":
             guard let text=request["value"] as? String, !text.isEmpty,text.utf16.count<=200 else {try reject("needs_user_action")}
+            try fresh()
+            if try editNative(binding,text) {try fresh();return ["posted":true,"delivery":"accessibility"]}
+            try focusRecord(binding.pid,binding.windowID,true)
             for scalar in text.unicodeScalars {
                 let units=Array(String(scalar).utf16)
                 guard let down=CGEvent(keyboardEventSource:source,virtualKey:0,keyDown:true),let up=CGEvent(keyboardEventSource:source,virtualKey:0,keyDown:false) else {try reject("action_failed")}
                 for event in [down,up] {event.flags=[];units.withUnsafeBufferPointer {event.keyboardSetUnicodeString(stringLength:units.count,unicodeString:$0.baseAddress!)}}
-                // ponytail: 200 UTF-16 units bound paced writes; split longer text across approved actions.
+                // shortcut: paced writes are limited to 200 UTF-16 units per action.
                 try fresh(); send(down); usleep(30000); send(up); usleep(30000)
             }
         case "KeyboardPress":
             guard let name=request["keyName"] as? String else {try reject("needs_user_action")}
-            let keys: [String:(CGKeyCode,CGEventFlags)] = ["Command+A":(0,.maskCommand),"Meta+A":(0,.maskCommand),"Return":(36,[]),"Enter":(36,[]),"Tab":(48,[]),"Escape":(53,[]),"Backspace":(51,[])]
-            guard let (code,flags)=keys[name],let down=CGEvent(keyboardEventSource:source,virtualKey:code,keyDown:true),let up=CGEvent(keyboardEventSource:source,virtualKey:code,keyDown:false) else {try reject("needs_user_action")}
-            down.flags=flags;up.flags=flags;try fresh();send(down);usleep(10000);send(up)
+            guard let (code,flags)=keys[name.lowercased()],let down=CGEvent(keyboardEventSource:source,virtualKey:code,keyDown:true),let up=CGEvent(keyboardEventSource:source,virtualKey:code,keyDown:false) else {try reject("needs_user_action")}
+            var modifierDown:CGEvent?,modifierUp:CGEvent?
+            if flags.contains(.maskCommand) {
+                modifierDown=CGEvent(keyboardEventSource:source,virtualKey:55,keyDown:true)
+                modifierUp=CGEvent(keyboardEventSource:source,virtualKey:55,keyDown:false)
+                modifierDown?.flags=flags;modifierUp?.flags=[]
+            }
+            try fresh()
+            if code==0 && flags == .maskCommand, try editNative(binding,nil,selectAll:true) {try fresh();return ["posted":true,"delivery":"accessibility"]}
+            _=try receiver(binding)
+            try focusRecord(binding.pid,binding.windowID,true)
+            down.flags=flags;up.flags=[];try fresh()
+            if let event=modifierDown {send(event);usleep(1000)}
+            send(down);usleep(10000);send(up)
+            if let event=modifierUp {send(event)}
         case "Scroll":
             let local=try point(), screen=CGPoint(x:local.x+binding.bounds.minX,y:local.y+binding.bounds.minY)
             guard let dx=request["dx"] as? Int32,let dy=request["dy"] as? Int32,abs(Int64(dx))<=8192,abs(Int64(dy))<=8192,

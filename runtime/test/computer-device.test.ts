@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import type {DeviceAction} from '@midscene/core'
-import {guardComputerDevice} from '../src/executors/computer-device.js'
+import {guardComputerDevice,connectComputerDevice} from '../src/executors/computer-device.js'
 
 for (const scenario of ['allowed', 'declined', 'cancelled', 'target_changed', 'geometry_changed', 'unknown_write', 'invalid_coordinate'] as const) {
   test(`computer action guard: ${scenario}`, async () => {
@@ -83,3 +83,20 @@ test('planner sees only bounded single scrolls, so it cannot request untilBottom
   assert.equal(schema.safeParse({scrollType: 'singleAction', direction: 'down', distance: 301}).success, false)
   assert.equal(schema.safeParse({scrollType: 'singleAction', direction: 'down', distance: 200}).success, true)
 })
+
+for(const scenario of ['foreground_change','window_change','geometry_change','display_change','declined','revoked'] as const){
+ test(`shared connection boundary: ${scenario}`,async()=>{
+  let target='one',width=200,display='1',connects=0
+  const backend={pid:1,releaseInput:async()=>{},close:async()=>true,windowTarget:async()=>({target,width,height:300}),listDisplays:async()=>[{id:display}],
+   connect:async()=>{connects++},device:{interfaceType:'computer',size:async()=>({width,height:300}),screenshotBase64:async()=>'',actionSpace:()=>[]}}
+  const config={displayId:'1',lockRoot:'/unused',baseUrl:'https://example.test',apiKey:'test',model:'test',modelFamily:'qwen3-vl',maxSteps:10,budgetMs:1000,
+   ...(scenario==='window_change'?{macWindow:{pid:1,windowId:2}}:{})}
+  const connect=()=>connectComputerDevice(backend as Parameters<typeof connectComputerDevice>[0],config as Parameters<typeof connectComputerDevice>[1],{
+   signal:new AbortController().signal,progress:()=>{},foreground:async()=>({target,width,height:300}),
+   beforeConnect:()=>{if(scenario==='revoked')throw Error('superseded')},
+   approve:async()=>{target='two';if(scenario==='geometry_change')width++;if(scenario==='display_change')display='2';return scenario!=='declined'},
+  })
+  if(scenario==='foreground_change'){await connect();assert.equal(connects,1)}
+  else{await assert.rejects(connect,new RegExp(scenario==='declined'?'declined':scenario==='revoked'?'superseded':'screen_changed'));assert.equal(connects,0)}
+ })
+}

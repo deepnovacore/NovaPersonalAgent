@@ -68,6 +68,8 @@ test('renderer graph follows future module re-exports and stylesheet imports wit
     ['/setup.html', '<link href="./setup.css"><script src="./setup.mjs"></script>'],
     ['/visor.html', ''],
     ['/visor-controls.html', ''],
+    ['/computer-edge.html', ''],
+    ['/computer-bar.html', ''],
     ['/index.css', '@import "./theme.css";'],
     ['/index.mjs', "import './camera.mjs'; export { visual } from './orb-visual.mjs'"],
     ['/audio.mjs', 'export const capture = true'],

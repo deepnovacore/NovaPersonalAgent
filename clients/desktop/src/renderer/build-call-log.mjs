@@ -1,14 +1,29 @@
 import {t} from './locale.mjs'
+import {iconNode,withIcon} from './icons.mjs'
 
 const labels={prepared:'等待执行',awaiting_approval:'待确认',running:'执行中',completed:'已完成',failed:'失败',denied:'已拒绝',refused:'已拒绝',timed_out:'已超时',cancelled:'已取消',cancelled_before_execution:'未执行',outcome_unknown:'结果不确定'}
 const failed=new Set(['failed','timed_out','outcome_unknown','refused'])
+const COMPUTER_LABELS={computer_screenshot:'截图',computer_click:'点击',computer_type:'输入',computer_scroll:'滚动',computer_key:'快捷键',computer_run:'电脑助手'}
+const SHOT_CACHE=12
+
+/** Computer calls read as actions ("点击 · 412, 220"), not as raw JSON arguments. */
+export function computerCallTarget(item){
+ if(!Object.hasOwn(COMPUTER_LABELS,item.name))return null
+ let args={};try{args=JSON.parse(item.input)}catch{ /* a truncated preview keeps only the label */ }
+ const detail=item.name==='computer_click'&&Number.isFinite(args.x)&&Number.isFinite(args.y)?`${args.x}, ${args.y}`
+  :item.name==='computer_scroll'&&typeof args.direction==='string'?t(({up:'向上',down:'向下',left:'向左',right:'向右'})[args.direction]??args.direction)
+  :item.name==='computer_type'&&typeof args.text==='string'?`“${args.text.length>40?args.text.slice(0,40)+'…':args.text}”`
+  :item.name==='computer_key'&&typeof args.keys==='string'?args.keys
+  :item.name==='computer_run'&&typeof args.instruction==='string'?args.instruction:''
+ return t(COMPUTER_LABELS[item.name])+(detail?' · '+detail:'')
+}
 
 /** Refresh only the changed tail of the durable tool journal; never ship the model checkpoint. */
 export function createBuildCallLog({c,el,changed}){
  let selected='',version=0,items=[],loading=null,loadedRevision=-1,failedRevision=-1,error='',timer=null,connected=false
- const nodes=new Map(),groups=new Map()
+ const nodes=new Map(),groups=new Map(),shots=new Map()
  const notice=el('div',undefined,'build-log-notice'),retry=el('button',t('重试')),errorText=el('span')
- retry.type='button';notice.append(errorText,retry)
+ retry.type='button';withIcon(retry,'refresh');{const alert=iconNode('alert');if(alert)notice.append(alert)};notice.append(errorText,retry)
  retry.addEventListener('click',()=>{failedRevision=-1;error='';update()})
  const current=()=>c.selectedConversation?.kind==='build'?c.selectedConversation:null
  const selection=()=>{const item=current();return item?JSON.stringify([item.id,item.generation??0]):''}
@@ -37,7 +52,7 @@ export function createBuildCallLog({c,el,changed}){
  }
  function update(){
   const next=selection()
-  if(next!==selected){selected=next;version++;loading=null;items=[];nodes.clear();groups.clear();loadedRevision=-1;failedRevision=-1;error=''}
+  if(next!==selected){selected=next;version++;loading=null;items=[];nodes.clear();groups.clear();shots.clear();loadedRevision=-1;failedRevision=-1;error=''}
   if(c.connected&&!connected)failedRevision=-1
   connected=c.connected
   const item=current(),revision=item?.build?.log_revision
@@ -45,6 +60,21 @@ export function createBuildCallLog({c,el,changed}){
   const active=item&&c.connected&&['running','awaiting_approval'].includes(item.build?.status)
   if(active&&!timer){timer=setInterval(()=>{for(const item of items)if(item?.state==='running'){const node=nodes.get(item.sequence);if(node)elapsed(item,node.time)}},1000);timer.unref?.()}
   else if(!active&&timer){clearInterval(timer);timer=null}
+ }
+ async function shot(ref){
+  if(shots.has(ref))return shots.get(ref)
+  const id=c.selectedId,pending=c.command('build.details',{id,view:'image',image_ref:ref}).then(image=>{
+   if(!image||!['image/png','image/jpeg'].includes(image.media_type)||typeof image.data_base64!=='string')throw Error(t('截图暂不可用。'))
+   return 'data:'+image.media_type+';base64,'+image.data_base64
+  })
+  shots.set(ref,pending);pending.catch(()=>shots.delete(ref))
+  while(shots.size>SHOT_CACHE)shots.delete(shots.keys().next().value)
+  return pending
+ }
+ function showShot(node){
+  const ref=node.imageRef;if(!ref||node.image.dataset.ref===ref||!node.details.open)return
+  node.image.dataset.ref=ref
+  void shot(ref).then(url=>{if(node.imageRef===ref){node.image.src=url;node.image.hidden=false}}).catch(()=>{if(node.imageRef===ref){delete node.image.dataset.ref;node.shotNote.hidden=false}})
  }
  function row(item){
   let node=nodes.get(item.sequence)
@@ -54,13 +84,21 @@ export function createBuildCallLog({c,el,changed}){
    const mark=el('span',undefined,'build-tool-mark'),name=el('code'),target=el('span',undefined,'build-tool-target'),state=el('span',undefined,'build-tool-state'),time=el('span',undefined,'build-tool-time')
    summary.append(mark,name,target,state,time)
    const content=el('div',undefined,'build-tool-content'),input=el('pre'),output=el('pre'),inputNote=el('p',t('输入已省略。'),'hint'),outputNote=el('p',t('输出已省略；完整内容见执行记录。'),'hint')
-   content.append(el('h4',t('输入')),input,inputNote,el('h4',t('输出')),output,outputNote)
+   const image=el('img',undefined,'computer-shot'),shotTitle=el('h4',t('操作后的屏幕')),shotNote=el('p',t('截图暂不可用。'),'hint')
+   image.hidden=true;image.alt=t('操作后的屏幕截图');shotTitle.hidden=true;shotNote.hidden=true
+   image.addEventListener('click',()=>image.classList.toggle('expanded'))
+   content.append(shotTitle,image,shotNote,el('h4',t('输入')),input,inputNote,el('h4',t('输出')),output,outputNote)
    details.append(summary,content);element.append(details)
-   node={element,details,mark,name,target,state,time,input,output,inputNote,outputNote};nodes.set(item.sequence,node)
+   node={element,details,mark,name,target,state,time,input,output,inputNote,outputNote,image,shotTitle,shotNote,imageRef:null};nodes.set(item.sequence,node)
+   details.addEventListener('toggle',()=>showShot(node))
   }
   node.element.dataset.toolStatus=item.status
   node.mark.textContent=item.status==='completed'?'✓':failed.has(item.status)?'!':item.status==='running'?'→':'·'
-  node.name.textContent=item.name;node.target.textContent=item.target;node.target.title=item.target
+  const action=computerCallTarget(item)
+  node.element.dataset.computer=String(action!==null)
+  node.name.textContent=item.name;node.target.textContent=action??item.target;node.target.title=action??item.target
+  node.imageRef=typeof item.image_ref==='string'?item.image_ref:null;node.shotTitle.hidden=!node.imageRef
+  if(!node.imageRef){node.image.hidden=true;node.shotNote.hidden=true}else showShot(node)
   node.state.textContent=t(labels[item.status]??item.status)+(item.exit_code!==null?' · '+t('退出码 {0}',item.exit_code):'')
   node.input.textContent=item.input;node.output.textContent=item.output||(item.state==='completed'?t('无输出'):t('等待执行结果…'))
   node.inputNote.hidden=!item.input_truncated;node.outputNote.hidden=!item.output_truncated

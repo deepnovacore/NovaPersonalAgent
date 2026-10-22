@@ -1,3 +1,6 @@
+import {computerUseCommandSchema,type ComputerUseState,type ComputerUseCommandResult,type ComputerPreflightItem} from './computer-use/contract.js'
+import {loadComputerConfig} from '../executors/computer-config.js'
+import {supportsVision} from '../model/vision-capability.js'
 import {createPreferredNameSync} from './preferred-name-sync.js'
 import {WorkbenchStore,type WorkbenchPlan} from './workbench-store.js'
 import {canonicalProject,projectResourceKey} from './local-tools.js'
@@ -154,6 +157,9 @@ export function announcedGoal(goal:string):string{const line=goal.trim().split(/
 export class PersonalAgentHost {
     readonly workbench:WorkbenchStore;
     readonly #localBuildAuthority=new Set<string>();
+    #workbenchModel:{provider:string;model:string}|undefined;
+    setWorkbenchModel(model:{provider:string;model:string}):void{this.#workbenchModel={...model}}
+    computerUseState(id:string):ComputerUseState{const state=this.#state.conversations.items.find(item=>item.id===id)?.build?.computer_use;return state?{...state,direct:state.enabled&&!!this.#workbenchModel&&supportsVision(this.#workbenchModel.provider,this.#workbenchModel.model)}:{enabled:false,direct:false}}
     readonly #admittingBuilds=new Set<string>();
     readonly #planEdits=new Map<string,{version:number;text:string}>();
     readonly #localProcessFences=new Map<string,LocalShellProcess[]>();
@@ -197,10 +203,34 @@ export class PersonalAgentHost {
             await this.#conversationPool?.clear(q.id);if(q.mode==='plan')await this.workbench.resetCheckpoint(q.id,item.generation);
             await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.items.find(item=>item.id===q.id)!.mode=q.mode;await this.#commit(next)});return this.conversationSnapshot();
         }
+        if(method==='build.computer_use'){
+            const q=computerUseCommandSchema.parse(p),item=this.#state.conversations.items.find(item=>item.id===q.conversation_id);
+            if(item?.kind!=='build'||!item.build)throw Error('build_not_found');
+            if(this.#state.conversations.selected_id!==item.id)throw Error('build_not_selected');
+            if(q.enabled&&item.build.status==='finished')throw Error('build_finished');
+            const missing:ComputerPreflightItem[]=[];
+            const direct=!!this.#workbenchModel&&supportsVision(this.#workbenchModel.provider,this.#workbenchModel.model);
+            if(q.enabled){
+                if(!['darwin','win32'].includes(process.platform))missing.push('platform');
+                try{loadComputerConfig(process.env)}catch{missing.push('configuration')}
+                if(process.platform==='darwin'){
+                    if(q.permissions?.screen!=='granted')missing.push('screen_permission');
+                    if(q.permissions?.accessibility!=='granted')missing.push('accessibility_permission');
+                }
+                if(!direct)missing.push('vision_model');
+            }
+            if(missing.some(value=>value!=='vision_model'))return {ok:false,state:this.computerUseState(item.id),missing} satisfies ComputerUseCommandResult;
+            const state:ComputerUseState=q.enabled?{enabled:true,direct,enabled_at:this.#now().toISOString()}:{enabled:false,direct:false};
+            // Revoke before awaiting Stop so no new computer call can enter during cleanup.
+            await this.#serial(async()=>{const next=structuredClone(this.#state),current=next.conversations.items.find(value=>value.id===item.id);if(current?.generation!==item.generation||!current.build)throw Error('build_not_found');current.build.computer_use=state;await this.#commit(next)});
+            if(!q.enabled)await this.stopLocalBuild(item.id);
+            return {ok:true,state,missing} satisfies ComputerUseCommandResult;
+        }
         if(method==='build.stop'){const q=z.object({id:z.string()}).strict().parse(p);await this.stopLocalBuild(q.id);return this.conversationSnapshot()}
-        if(method==='build.approve'){const q=z.object({id:z.string(),approval_id:z.string(),approved:z.boolean()}).strict().parse(p);if(!this.localBuildAuthorized(q.id))throw Error('local_build_not_authorized');await this.#conversationPool?.localApproval(q.id,q.approval_id,q.approved);return {accepted:true}}
+        if(method==='build.approve'){const q=z.object({id:z.string(),approval_id:z.string(),approved:z.boolean(),always:z.boolean().optional()}).strict().parse(p);if(!this.localBuildAuthorized(q.id))throw Error('local_build_not_authorized');await this.#conversationPool?.localApproval(q.id,q.approval_id,q.approved,q.always);return {accepted:true}}
         if(method==='build.details'){
-            const q=z.object({id:z.string(),call_id:z.string().optional(),message_id:z.string().max(128).optional(),view:z.enum(['calls','reply']).optional(),offset:z.number().int().nonnegative().default(0)}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);if(item?.kind!=='build')throw Error('build_not_found');
+            const q=z.object({id:z.string(),call_id:z.string().optional(),message_id:z.string().max(128).optional(),view:z.enum(['calls','reply','image']).optional(),image_ref:z.string().min(1).optional(),offset:z.number().int().nonnegative().default(0)}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);if(item?.kind!=='build')throw Error('build_not_found');
+            if(q.view==='image'){if(!q.image_ref)throw Error('workbench_image_not_found');return this.workbench.thumbnail(q.id,item.generation,q.image_ref)}
             if(q.view==='calls')return this.workbench.calls(q.id,item.generation,q.offset);
             if(q.view==='reply'){if(!q.message_id)throw Error('workbench_reply_not_found');return this.workbench.reply(q.id,item.generation,q.message_id,q.offset)}
             if(q.call_id){const state=await this.workbench.checkpoint(q.id,item.generation),call=state.calls.find(call=>call.id===q.call_id);if(!call)throw Error('tool_call_not_found');const text=JSON.stringify({name:call.name,arguments:call.arguments},null,2);return {text:text.slice(q.offset,q.offset+6000),next_offset:q.offset+6000<text.length?q.offset+6000:null}}
@@ -628,7 +658,7 @@ export class PersonalAgentHost {
     conversationSnapshot(maxHomeBytes=256*1024){
         const c=this.#state.conversations,selected=c.items.find(item=>item.id===c.selected_id),home=c.items.filter(item=>['chat:main','chat:proactive'].includes(item.id)).flatMap(item=>item.messages);
         const receipts=this.#state.feed.filter(feed=>feed.task_ref&&!home.some(message=>message.id==='feed:'+feed.id||message.turn_id==='task:'+feed.task_ref!.work_id)).map(feed=>({id:'feed:'+feed.id,conversation_id:c.work_owners[feed.task_ref!.work_id]??'chat:main',role:'assistant' as const,text:feed.title,created_at:feed.updated_at}));
-        const result={selected_id:c.selected_id,voice_id:c.voice_id,unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.filter(item=>item.kind!=='schedule').map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,mode:item.mode??'chat',plan:item.plan,build:item.build,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(selected?.messages??[]),home_messages:[] as typeof home,home_truncated:false};
+        const result={selected_id:c.selected_id,voice_id:c.voice_id,unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.filter(item=>item.kind!=='schedule').map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,mode:item.mode??'chat',plan:item.plan,build:item.build?{...item.build,computer_use:this.computerUseState(item.id)}:undefined,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(selected?.messages??[]),home_messages:[] as typeof home,home_truncated:false};
         // Schedule cleanup can remove a conversation while its work-owner mapping remains.
         const visibleIds=new Set(c.items.filter(item=>item.kind!=='schedule').map(item=>item.id));
         const selectedIds=new Set(result.messages.map(message=>message.id)),candidates=[...home,...receipts].filter(message=>visibleIds.has(message.conversation_id)&&!selectedIds.has(message.id)).sort((a,b)=>a.created_at.localeCompare(b.created_at));
