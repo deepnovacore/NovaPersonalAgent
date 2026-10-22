@@ -4,6 +4,7 @@ import {renderLife} from '../src/renderer/life-view.mjs'
 import {renderNews} from '../src/renderer/news-view.mjs'
 import {renderSourceSuggestions} from '../src/renderer/workbench-suggestions.mjs'
 import {mountPersonalView} from '../src/renderer/personal-view.mjs'
+import {setLanguage} from '../src/renderer/locale.mjs'
 
 class Node{constructor(tag){this.tag=tag;this.children=[];this.textContent='';this.dataset={};this.className=''}append(...nodes){this.children.push(...nodes)}setAttribute(k,v){this[k]=v}addEventListener(){}}
 const all=node=>[node,...node.children.flatMap(all)]
@@ -215,5 +216,37 @@ test('status changes offer updating the original record rather than adding anoth
   renderSourceSuggestions(h.panel,{tab,context:{daily:true,cards:[{id:'u',tab,title:'交付事项',body:'后续资料显示已完成',refs:[],update:{id:'existing',version:1,status:'done'}}]},sources:[],button:h.button,command:(...args)=>calls.push(args),continueChat:()=>{}})
   assert.doesNotMatch(text(h.panel),/加入待办|设为目标/)
   all(h.panel).find(n=>n.textContent==='更新原记录').action();assert.deepEqual(calls,[['context.adopt',{id:'u'}]])
+ }
+})
+
+test('suggestion chrome and empty states are fully translated in English',t=>{
+ setLanguage('en');t.after(()=>setLanguage('zh-CN'))
+ const card=tab=>({id:'c',tab,title:'Compare flows',body:'The note lists a next step.',why:'Because of the note.',next:'Draft the comparison',refs:[]})
+ const empty=reason=>({status:'ready',candidate_count:0,cards:[],empty_reason:reason,recap:{text:'Working on setup.',projects:[{name:'Nova',line:'In progress'}]}})
+ const scenarios=[
+  ['todos',{daily:true,status:'working',automatic_available:true,cards:[card('todos')],recap:{text:'Working on setup.',projects:[{name:'Nova',line:'In progress'}]}},[{state:'connected'}]],
+  ['ideas',{daily:true,status:'ready',cards:[card('ideas')]},[{state:'connected'}]],
+  ['goals',{daily:true,status:'ready',cards:[card('goals')]},[{state:'connected'}]],
+  ['todos',empty('digests_pending'),[{state:'connected'}]],
+  ['todos',empty('validation_filtered'),[{state:'connected'}]],
+  ['todos',empty('model_abstained'),[{state:'connected'}]],
+  ['todos',empty('no_eligible_sources'),[{state:'connected'}]],
+  ['todos',{status:'working',cards:[]},[{state:'connected'}]],
+  ['todos',{status:'failed',cards:[]},[{state:'connected'}]],
+  ['todos',{status:'idle',cards:[]},[]],
+  ['todos',{status:'idle',cards:[]},[{state:'paused'}]],
+  ['todos',{status:'idle',cards:[],candidate_count:0},[{state:'connected',processing_consent_required:true}]],
+  ['todos',{status:'idle',cards:[]},[{state:'error',scope:'computer'},{state:'error',path:'/tmp/notes'}]],
+  ['todos',{status:'idle',cards:[]},[{state:'connected',scan_pending:true}]],
+ ]
+ for(const [tab,context,sources] of scenarios){
+  const h=harness(t)
+  renderSourceSuggestions(h.panel,{tab,context,sources,button:h.button,command:h.command,continueChat:()=>{},openSettings:()=>{}})
+  assert.doesNotMatch(text(h.panel),/[\u4e00-\u9fff]/u,`${tab} ${JSON.stringify(context.empty_reason??context.status)}`)
+ }
+ for(const [connected,everConnected] of [[false,false],[false,true]]){
+  const h=harness(t)
+  renderSourceSuggestions(h.panel,{tab:'todos',context:null,sources:[],button:h.button,command:h.command,continueChat:()=>{},connected,everConnected})
+  assert.doesNotMatch(text(h.panel),/[\u4e00-\u9fff]/u,`connected=${connected}`)
  }
 })

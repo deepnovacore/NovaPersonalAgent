@@ -9,52 +9,52 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  if(tab==='goals'&&!context?.daily&&!(context?.cards??[]).some(item=>item.tab==='goals'))return
  const projects=tab==='todos'?(context?.recap?.projects??[]).slice(0,4):[]
  if(tab==='todos'&&(context?.recap?.text||projects.length)){
-  const recap=el('section',undefined,'workbench-recap');recap.setAttribute('aria-label','最近在忙');panel.append(recap)
-  recap.append(el('h2','最近在忙'))
+  const recap=el('section',undefined,'workbench-recap');recap.setAttribute('aria-label',t('最近在忙'));panel.append(recap)
+  recap.append(el('h2',t('最近在忙')))
   if(context.recap.text)recap.append(el('p',context.recap.text))
   if(projects.length){const list=el('ul',undefined,'recap-projects');for(const project of projects){const row=el('li');row.append(el('strong',project.name),el('span',project.line));row.setAttribute('aria-label',`${project.name} · ${project.line}`);list.append(row)}recap.append(list)}
  }
- const heading=tab==='todos'?'可以接着做':tab==='goals'?'可以定下的方向':'我想到的'
+ const heading=tab==='todos'?t('可以接着做'):tab==='goals'?t('可以定下的方向'):t('我想到的')
  const section=el('section',undefined,'workbench-suggestions');section.setAttribute('aria-label',heading);panel.append(section)
  section.append(el('h2',heading))
- if(context?.daily){section.append(el('p',context.automatic_available?'每天共同整理一次待办、想法和目标。':'今天已自动整理，新的资料会在下一轮更新。','hint'));button(context.status==='working'?'正在整理…':'重新整理',()=>command('context.refresh',{}),section,'context:refresh')}
+ if(context?.daily){section.append(el('p',context.automatic_available?t('每天共同整理一次待办、想法和目标。'):t('今天已自动整理，新的资料会在下一轮更新。'),'hint'));button(context.status==='working'?t('正在整理…'):t('重新整理'),()=>command('context.refresh',{}),section,'context:refresh')}
  const cards=(context?.cards??[]).filter(item=>item.tab===tab).slice(0,3)
  for(const item of cards){const card=el('article',undefined,'card');card.append(el('h3',item.title));section.append(card)
   const body=el(clampable?'button':'p',tab==='todos'?item.why||item.body:item.body,clampable?'card-body':undefined)
   if(clampable)clampable(body,item.id,item.title)
   card.append(body)
-  if(item.next)card.append(el('p',`${tab==='goals'?'先从':'下一步'}：${item.next}`,'workbench-next'))
+  if(item.next)card.append(el('p',tab==='goals'?t('先从：{0}',item.next):t('下一步：{0}',item.next),'workbench-next'))
   if(!attachSourceTags(card,item.sources,{openArticle}))attachSources(card,item.refs?.map(ref=>ref.label).filter(Boolean))
   const actions=el('div',undefined,'card-actions');card.append(actions)
-  if(item.update)button('更新原记录',()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
-  else if(tab==='todos')button('加入待办',()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
-  if(tab==='ideas'&&context?.daily)button('保存想法',()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
-  if(tab==='goals'&&!item.update)button('设为目标',()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
-  else if(tab==='todos'&&item.next&&!item.update)button('帮我做',()=>delegate(`请帮我推进「${item.title}」：${item.next}`),actions,`suggestion:${item.id}`)
-  else button('聊聊这个',()=>continueChat(`${item.title}：${item.body}`),actions,`suggestion:${item.id}`)
-  button('隐藏',()=>command('context.dismiss',{id:item.id}),actions,`suggestion:${item.id}`).className='quiet'
+  if(item.update)button(t('更新原记录'),()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
+  else if(tab==='todos')button(t('加入待办'),()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
+  if(tab==='ideas'&&context?.daily)button(t('保存想法'),()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
+  if(tab==='goals'&&!item.update)button(t('设为目标'),()=>command('context.adopt',{id:item.id}),actions,`suggestion:${item.id}`)
+  else if(tab==='todos'&&item.next&&!item.update)button(t('帮我做'),()=>delegate(t('请帮我推进「{0}」：{1}',item.title,item.next)),actions,`suggestion:${item.id}`)
+  else button(t('聊聊这个'),()=>continueChat(`${item.title}：${item.body}`),actions,`suggestion:${item.id}`)
+  button(t('隐藏'),()=>command('context.dismiss',{id:item.id}),actions,`suggestion:${item.id}`).className='quiet'
  }
- const failed=sources.filter(source=>source.state==='error'),sourceName=source=>source.scope==='computer'?'整机资料':source.path?.split(/[\\/]/u).filter(Boolean).pop()??'已连接目录'
+ const failed=sources.filter(source=>source.state==='error'),sourceName=source=>source.scope==='computer'?t('整机资料'):source.path?.split(/[\\/]/u).filter(Boolean).pop()??t('已连接目录')
  renderSourceStatus(section,{sources,status:context?.status,el,button,openSettings})
  if(cards.length)return
  const empty=el('div',undefined,'workbench-empty');section.append(empty)
  const reason=context?.empty_reasons?.[tab]??context?.empty_reason
- let title='暂时没什么要提的',body='想查资料里的东西，直接问我就行。'
+ let title=t('暂时没什么要提的'),body=t('想查资料里的东西，直接问我就行。')
  // Before the first connection this is ordinary startup, not an outage.
  if(!sources.length&&!connected&&!everConnected&&!startupFailed){title=t('正在连接后台');body=t('连上之后，我就来看看你的资料。')}
- else if(!sources.length&&!connected){title='暂时连不上后台';body='连上之后，我再看看你的资料。'}
- else if(!sources.length&&!context?.daily){title='还没给我看过资料';body='连一个文件夹进来，我读过之后就能帮你理出要做的事。'}
- else if(sources.length&&sources.every(source=>source.state==='paused'||source.state==='disconnected')){title='资料来源已暂停';body='恢复之后我再接着读。'}
- else if(sources.some(source=>source.processing_consent_required)&&context?.candidate_count===0){title='这些资料我还不能用';body='去来源设置里看看处理授权，允许之后我再读。'}
- else if(failed.length){title=`${failed.map(sourceName).join('、')}有一部分没读到`;body='读到的部分照常能用，详情在来源设置里。'}
- else if(context?.status==='working'){title='我在看你的资料';body='稍等一下，已有的记录照常能用。'}
- else if(context?.status==='failed'){title='这次没整理完';body='我过一会儿再试，已有的记录照常能用。'}
- else if(tab==='todos'&&reason==='digests_pending'){title='还在看你最近的项目';body='看完就把你在忙什么、接下来可以做什么放在这里。'}
- else if(sources.some(source=>source.scan_pending&&source.state==='connected')){title='资料索引仍在更新';body='已有内容可以继续查看，新资料整理后会出现在这里。'}
- else if(reason==='validation_filtered'){title='这次没有可靠的结果';body='生成的内容没有通过来源校验，可以稍后重新整理。'}
- else if(reason==='model_abstained'){title='暂时没什么要提的';body='资料我都看过了，没找到有把握的建议。'}
- else if(reason==='no_eligible_sources'){title='暂时没什么要提的';body='现有的资料里还没有适合放这里的事。'}
+ else if(!sources.length&&!connected){title=t('暂时连不上后台');body=t('连上之后，我再看看你的资料。')}
+ else if(!sources.length&&!context?.daily){title=t('还没给我看过资料');body=t('连一个文件夹进来，我读过之后就能帮你理出要做的事。')}
+ else if(sources.length&&sources.every(source=>source.state==='paused'||source.state==='disconnected')){title=t('资料来源已暂停');body=t('恢复之后我再接着读。')}
+ else if(sources.some(source=>source.processing_consent_required)&&context?.candidate_count===0){title=t('这些资料我还不能用');body=t('去来源设置里看看处理授权，允许之后我再读。')}
+ else if(failed.length){title=t('{0}有一部分没读到',failed.map(sourceName).join(t('、')));body=t('读到的部分照常能用，详情在来源设置里。')}
+ else if(context?.status==='working'){title=t('我在看你的资料');body=t('稍等一下，已有的记录照常能用。')}
+ else if(context?.status==='failed'){title=t('这次没整理完');body=t('我过一会儿再试，已有的记录照常能用。')}
+ else if(tab==='todos'&&reason==='digests_pending'){title=t('还在看你最近的项目');body=t('看完就把你在忙什么、接下来可以做什么放在这里。')}
+ else if(sources.some(source=>source.scan_pending&&source.state==='connected')){title=t('资料索引仍在更新');body=t('已有内容可以继续查看，新资料整理后会出现在这里。')}
+ else if(reason==='validation_filtered'){title=t('这次没有可靠的结果');body=t('生成的内容没有通过来源校验，可以稍后重新整理。')}
+ else if(reason==='model_abstained'){title=t('暂时没什么要提的');body=t('资料我都看过了，没找到有把握的建议。')}
+ else if(reason==='no_eligible_sources'){title=t('暂时没什么要提的');body=t('现有的资料里还没有适合放这里的事。')}
  empty.append(el('h3',title),el('p',body))
- if(!sources.length&&!context?.daily&&connected&&openSettings)button('连接资料',()=>openSettings('connections'),empty)
- else if(sources.some(source=>source.state==='error'||source.processing_consent_required)&&openSettings)button('查看来源',()=>openSettings('connections'),empty)
+ if(!sources.length&&!context?.daily&&connected&&openSettings)button(t('连接资料'),()=>openSettings('connections'),empty)
+ else if(sources.some(source=>source.state==='error'||source.processing_consent_required)&&openSettings)button(t('查看来源'),()=>openSettings('connections'),empty)
 }
