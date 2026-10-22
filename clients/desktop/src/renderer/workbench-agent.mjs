@@ -1,6 +1,7 @@
 import {t} from './locale.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {mountComputerUseControl} from './computer-use-control.mjs'
+import {iconNode,withIcon} from './icons.mjs'
 
 /** Bounded snapshots carry only status. Full plans and logs are fetched in small pages. */
 export function mountWorkbenchAgent(parent,{c,el,run,api}){
@@ -8,7 +9,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  const info=el('div',undefined,'workbench-build-info'),status=el('span','','workbench-build-status'),project=el('span','','workbench-build-project'),reason=el('span','','workbench-build-reason'),buildActions=el('div',undefined,'workbench-build-actions')
  status.setAttribute('role','status');info.append(status,project,reason);bar.append(info,buildActions)
  const computerUse=mountComputerUseControl(buildActions,root,{c,el,run,api})
- const stop=el('button',t('停止')),resume=el('button','Resume'),details=el('button',t('执行记录'));for(const button of [stop,resume,details]){button.type='button';buildActions.append(button)}
+ const stop=el('button',t('停止')),resume=el('button','Resume'),details=el('button',t('执行记录'));for(const [button,icon] of [[stop,'stop'],[resume,'play'],[details,'list']]){button.type='button';withIcon(button,icon);buildActions.append(button)}
  stop.addEventListener('click',()=>run(()=>c.command('build.stop',{id:c.selectedId})));resume.addEventListener('click',()=>run(()=>c.command('build.resume',{id:c.selectedId})))
  const log=el('pre',undefined,'workbench-tool-log');log.hidden=true;root.append(log)
  details.addEventListener('click',()=>run(async()=>{
@@ -17,7 +18,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  }))
  const approval=el('section',undefined,'workbench-local-approval');approval.hidden=true;root.append(approval)
  const approvalTitle=el('h3',t('本地工具待确认')),preview=el('pre'),approve=el('button',t('允许本次')),deny=el('button',t('拒绝')),always=el('button',t('始终允许'));approve.type=deny.type=always.type='button';always.hidden=true;deny.className='ghost';approve.className='soft'
- const approvalActions=el('div',undefined,'workbench-approval-actions');approvalActions.append(deny,always,approve);approval.append(approvalTitle,preview,approvalActions)
+ const approvalHead=el('div',undefined,'workbench-approval-head'),approvalIcon=iconNode('shield');if(approvalIcon)approvalHead.append(approvalIcon);approvalHead.append(approvalTitle);const approvalActions=el('div',undefined,'workbench-approval-actions');approvalActions.append(deny,always,approve);approval.append(approvalHead,preview,approvalActions)
  let loadedApproval=null,loadingApproval=null
  async function loadApproval(pending,id){
   if(loadingApproval===pending.id||loadedApproval===pending.id)return

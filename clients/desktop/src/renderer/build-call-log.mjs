@@ -1,4 +1,5 @@
 import {t} from './locale.mjs'
+import {iconNode,withIcon} from './icons.mjs'
 
 const labels={prepared:'等待执行',awaiting_approval:'待确认',running:'执行中',completed:'已完成',failed:'失败',denied:'已拒绝',refused:'已拒绝',timed_out:'已超时',cancelled:'已取消',cancelled_before_execution:'未执行',outcome_unknown:'结果不确定'}
 const failed=new Set(['failed','timed_out','outcome_unknown','refused'])
@@ -22,7 +23,7 @@ export function createBuildCallLog({c,el,changed}){
  let selected='',version=0,items=[],loading=null,loadedRevision=-1,failedRevision=-1,error='',timer=null,connected=false
  const nodes=new Map(),groups=new Map(),shots=new Map()
  const notice=el('div',undefined,'build-log-notice'),retry=el('button',t('重试')),errorText=el('span')
- retry.type='button';notice.append(errorText,retry)
+ retry.type='button';withIcon(retry,'refresh');{const alert=iconNode('alert');if(alert)notice.append(alert)};notice.append(errorText,retry)
  retry.addEventListener('click',()=>{failedRevision=-1;error='';update()})
  const current=()=>c.selectedConversation?.kind==='build'?c.selectedConversation:null
  const selection=()=>{const item=current();return item?JSON.stringify([item.id,item.generation??0]):''}
