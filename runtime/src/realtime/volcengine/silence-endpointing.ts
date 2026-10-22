@@ -1,6 +1,7 @@
 import {ConfigurationError, type VolcengineRealtimeConfig} from '../../config/config.js'
 import {volcengineInputPcm} from './audio.js'
 import type {EndpointingEvent, EndpointingPort} from '../cascaded/ports.js'
+import {throwIfAborted} from '../../core/guards.js'
 
 const SAMPLE_RATE = 16_000
 const BYTES_PER_SAMPLE = 2
@@ -246,10 +247,4 @@ function joinBytes(parts: readonly Uint8Array[]): Uint8Array {
     offset += part.byteLength
   }
   return result
-}
-
-function throwIfAborted(signal: AbortSignal): void {
-  if (!signal.aborted) return
-  if (signal.reason instanceof Error) throw signal.reason
-  throw new DOMException('This operation was aborted', 'AbortError')
 }

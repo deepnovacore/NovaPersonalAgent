@@ -9,6 +9,7 @@ import type {
   KnowledgeUnembedded,
   ReplaceKnowledgeSourceInput,
 } from './types.js'
+import {hasOnlyKeys, isRecord} from '../core/guards.js'
 
 export interface KnowledgeStoreClientOptions {
   readonly path: string
@@ -243,12 +244,4 @@ function isStoreCode(value: unknown): value is KnowledgeStoreErrorCode {
 
 function positiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(value).every(key => allowed.includes(key))
 }

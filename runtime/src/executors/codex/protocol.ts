@@ -1,5 +1,6 @@
 import type {ExecutorDiagnostic} from '../../core/executor-diagnostic.js'
 import {snapshotJsonValue} from './safe-json.js'
+import {isPlainRecord} from '../../core/guards.js'
 
 export const MAX_JSONL_LINE = 256 * 1024
 export const MAX_STDOUT = 2 * 1024 * 1024
@@ -271,7 +272,7 @@ export class JsonRpcConnection {
             || !Number.isSafeInteger(idSnapshot)
           ))
           || typeof methodSnapshot !== 'string'
-          || !isPlainObject(paramsSnapshot)
+          || !isPlainRecord(paramsSnapshot)
         ) throw new TypeError('invalid server request')
         requestId = idSnapshot
         method = methodSnapshot
@@ -316,7 +317,7 @@ export class JsonRpcConnection {
       const allowedKeys = new Set(['method', 'params', 'emittedAtMs'])
       if (
         typeof method !== 'string'
-        || !isPlainObject(params)
+        || !isPlainRecord(params)
         || keys.some(key => !allowedKeys.has(key))
         || (Object.hasOwn(message, 'emittedAtMs') && (
           typeof emittedAtMs !== 'number'
@@ -348,7 +349,7 @@ export class JsonRpcConnection {
         pending.resolve(message.result)
         return
       }
-      if (keys.length === 2 && isPlainObject(message.error)) {
+      if (keys.length === 2 && isPlainRecord(message.error)) {
         const remoteCode = message.error.code
         const serverCode = typeof remoteCode === 'number' && Number.isSafeInteger(remoteCode)
           ? remoteCode
@@ -522,7 +523,7 @@ export class JsonRpcConnection {
 function isResolvedServerRequest(
   value: JsonRpcServerRequestDisposition,
 ): value is {readonly resolved: true} {
-  if (!isPlainObject(value)) return false
+  if (!isPlainRecord(value)) return false
   const candidate: Record<string, unknown> = value
   return Object.keys(candidate).length === 1 && candidate.resolved === true
 }
@@ -530,10 +531,10 @@ function isResolvedServerRequest(
 function isServerResponse(
   value: JsonRpcServerRequestDisposition,
 ): value is Exclude<JsonRpcServerRequestDisposition, {readonly resolved: true}> {
-  if (!isPlainObject(value) || Object.keys(value).length !== 1) return false
+  if (!isPlainRecord(value) || Object.keys(value).length !== 1) return false
   const candidate: Record<string, unknown> = value
   if (Object.hasOwn(candidate, 'result')) return true
-  if (!Object.hasOwn(candidate, 'error') || !isPlainObject(candidate.error)) return false
+  if (!Object.hasOwn(candidate, 'error') || !isPlainRecord(candidate.error)) return false
   return Object.keys(candidate.error).length === 2
     && typeof candidate.error.code === 'number'
     && Number.isSafeInteger(candidate.error.code)
@@ -557,7 +558,7 @@ function decodeMessage(line: Uint8Array): Record<string, unknown> {
   try {
     const text = fatalDecoder.decode(line.subarray(0, line.byteLength - 1))
     const value = JSON.parse(text) as unknown
-    if (!isPlainObject(value) || Object.keys(value).length === 0) throw new TypeError('invalid')
+    if (!isPlainRecord(value) || Object.keys(value).length === 0) throw new TypeError('invalid')
     assertDecodedNumbers(value)
     return value
   } catch {
@@ -576,15 +577,9 @@ function assertDecodedNumbers(value: unknown): void {
     for (const item of value) assertDecodedNumbers(item)
     return
   }
-  if (isPlainObject(value)) {
+  if (isPlainRecord(value)) {
     for (const item of Object.values(value)) assertDecodedNumbers(item)
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value) as object | null
-  return prototype === Object.prototype || prototype === null
 }
 
 function isUint8Array(value: unknown): value is Uint8Array {

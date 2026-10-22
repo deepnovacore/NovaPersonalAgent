@@ -27,6 +27,7 @@ import type {
   VoiceMemResponseAdaptation,
   PersonalMemoryStoreErrorCode,
 } from './store-client.js'
+import {hasOnlyKeys, isRecord} from '../core/guards.js'
 
 const PERSONAL_SCOPE = 'personal'
 const MAX_LIMIT = 5
@@ -365,14 +366,6 @@ function nonempty(value: unknown, max: number): value is string {
 
 function boundedText(value: unknown, max: number): value is string {
   return typeof value === 'string' && value.length <= max && !value.includes('\0')
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(value).every(key => allowed.includes(key))
 }
 
 async function entryOperation(request:Request):Promise<unknown> {

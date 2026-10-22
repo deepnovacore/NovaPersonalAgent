@@ -4,6 +4,7 @@ import {memoryInspectionSchema, memoryInspectionQuerySchema, type MemoryInspecti
 import {Worker, type WorkerOptions} from 'node:worker_threads'
 
 import {PersonalMemoryError, type PersonalMemoryRecallScope, type PersonalMemoryRecallResult, type PersonalMemoryRecallHit, type PersonalMemoryAdmissionReceipt, type PersonalMemoryRememberTurn, type PersonalMemoryResource, type PersonalMemoryResponseAdaptation} from '../memory/personal-memory.js'
+import {hasOnlyKeys, isRecord} from '../core/guards.js'
 
 export interface PersonalMemoryEmbeddingConfig {
   readonly baseUrl: string
@@ -559,14 +560,6 @@ function boundedText(value: unknown, max: number): value is string {
 
 function nonempty(value: unknown, max: number): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= max && !value.includes('\0')
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(value).every(key => allowed.includes(key))
 }
 
 function projectHit(hit: VoiceMemRecallHit): PersonalMemoryRecallHit {

@@ -53,6 +53,7 @@ import { snapshotJsonRecord } from './safe-json.js'
 import { AppServerTurnProjection,type TurnCompletion } from './turn-projection.js'
 import { admitCodexVersion } from './version.js'
 import type { AcpPreflightReport } from '../acp/preflight.js'
+import {exactKeys, isPlainRecord} from '../../core/guards.js'
 
 export const CODEX_PREFLIGHT_LIMIT_MS = 20_000
 export const CODEX_INTERRUPT_GRACE_MS = 2_000
@@ -2108,17 +2109,6 @@ async function settleCleanupValue<T>(
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
-}
-
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && expected.every(key => Object.hasOwn(value, key))
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value) as object | null
-  return prototype === Object.prototype || prototype === null
 }
 
 function requireOwnedProcessContract(owner: OwnedCodexProcess): void {

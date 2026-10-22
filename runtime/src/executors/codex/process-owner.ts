@@ -25,6 +25,7 @@ codexAppServerArgv,
 resolveCodexLaunchProfile,
 type CodexLaunchProfile,
 } from './launch-profile.js'
+import {isErrno} from '../../core/guards.js'
 
 const hostBinaryBrand: unique symbol = Symbol('HostBinary')
 
@@ -462,10 +463,6 @@ function requireStringRecord(value: unknown): Readonly<Record<string, string>> {
     throw new CodexProcessOwnerError('spawn_failed')
   }
   return value as Record<string, string>
-}
-
-function isErrno(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && Reflect.get(error, 'code') === code
 }
 
 async function settlesWithin(work: Promise<unknown>, milliseconds: number): Promise<boolean> {
