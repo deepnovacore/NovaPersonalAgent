@@ -1,10 +1,11 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'local_agent.dart';
 
 /// Owns the lifetime of the native work performed for one chat tool call.
 /// The fixed chat policy comes from the app, never from model-supplied fields.
-class IosChatTaskRunner {
-  IosChatTaskRunner({
+class NativeChatTaskRunner {
+  NativeChatTaskRunner({
     this.agent = const NativeLocalAgent(),
     this.pollInterval = const Duration(milliseconds: 350),
     this.timeout = const Duration(minutes: 5),
@@ -29,6 +30,18 @@ class IosChatTaskRunner {
     Map<String, dynamic> request,
     String id,
   ) async {
+    if (request.containsKey('target_package')) {
+      try {
+        final apps =
+            await agent.call('apps').timeout(const Duration(seconds: 10))
+                as List;
+        if (!apps.any((app) => app['package'] == request['target_package'])) {
+          return {'status': 'failed', 'error': 'target_app_not_installed'};
+        }
+      } catch (_) {
+        return {'status': 'failed', 'error': 'installed_apps_unavailable'};
+      }
+    }
     if (_active != null) return {'status': 'failed', 'reason': 'task_busy'};
     _active = id;
     _cancelled = false;
@@ -40,7 +53,8 @@ class IosChatTaskRunner {
                   'id': id,
                   'goal': request['goal'],
                   'acceptance': request['acceptance'],
-                  'target_package': request['scope'],
+                  'target_package':
+                      request['target_package'] ?? request['scope'],
                   'interaction_mode': 'chat',
                 })
                 .timeout(const Duration(seconds: 15))
@@ -61,10 +75,30 @@ class IosChatTaskRunner {
             };
           case 'cancelled':
             return {'status': 'cancelled', 'task_id': id};
-          case 'interrupted':
           case 'verifying':
+            if (request.containsKey('target_package') &&
+                task['evidence'] is String &&
+                (task['evidence'] as String).isNotEmpty) {
+              return {
+                'status': 'completed',
+                'task_id': id,
+                'summary': task['summary'] ?? '',
+              };
+            }
             return {
               'status': 'outcome_unknown',
+              'task_id': id,
+              'summary': task['summary'] ?? '',
+            };
+          case 'interrupted':
+            debugPrint('[NovaAgent] native interrupted: ${task['reason']}');
+            return {
+              'status':
+                  request.containsKey('target_package') &&
+                      isNativeReadFailure(task)
+                  ? 'failed'
+                  : 'outcome_unknown',
+              if (task['reason'] is String) 'reason': task['reason'],
               'task_id': id,
               'summary': task['summary'] ?? '',
             };

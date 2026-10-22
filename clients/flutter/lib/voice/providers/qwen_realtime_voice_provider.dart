@@ -425,7 +425,12 @@ class QwenRealtimeVoiceProvider extends RealtimeSocketProvider {
         }
         return;
       }
-      fail('provider_error');
+      final code = error['code'];
+      fail(
+        code is String && RegExp(r'^[a-z_]{1,60}$').hasMatch(code)
+            ? 'provider_$code'
+            : 'provider_error',
+      );
       return;
     }
     if (type == 'input_audio_buffer.speech_started' ||

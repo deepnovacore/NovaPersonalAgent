@@ -72,10 +72,8 @@ class LocalToolLoop(
                 val throttled = cause.message == "screenshot_unavailable_3"
                 if((cause.message != "screen_changed_during_capture" && !throttled) || captureRetries++ >= 2) throw error
                 // Android's screenshot rate limit is a read failure with no effect.
-                if(throttled) {
-                    Thread.sleep(500)
-                    if(!host.active()) throw error
-                }
+                Thread.sleep(if(throttled) 500 else 200)
+                if(!host.active()) throw error
             }
         }
     }
@@ -109,11 +107,12 @@ class LocalToolLoop(
                         val outcome = try { host.execute(decision.action!!) } catch(error: Exception) {
                             val cause = rootCause(error)
                             if(!host.active()) return
-                            // The controller throws screen_changed only before beginAttempt.
+                            // Both capture changes and stale frames occur before beginAttempt.
                             // Observe and ask the model again; never retry the old action.
                             // Errors after journaling are returned as unknown and stop the run.
-                            if(cause is IllegalStateException && cause.message == "screen_changed" && stalePlans < 3) {
+                            if(cause is IllegalStateException && cause.message in setOf("screen_changed", "screen_changed_during_capture") && stalePlans < 3) {
                                 stalePlans++
+                                Thread.sleep(200)
                                 return@repeat
                             }
                             throw error

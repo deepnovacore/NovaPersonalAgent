@@ -634,6 +634,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     final text = input.text.trim();
     if (text.isEmpty) return;
     atBottom = true;
+    final before =
+        (host.store.conversation(widget.conversationId)['messages'] as List)
+            .length;
     input.clear();
     await host.send(widget.conversationId, text, approve: _approve);
     // Preserve a message that could not reach the conversation store.
@@ -642,8 +645,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     if (mounted &&
         host.error != null &&
         input.text.isEmpty &&
-        (messages.isEmpty || messages.last['content'] != text) &&
-        host.error == 'model_settings_required') {
+        !messages
+            .skip(before)
+            .any((m) => m['role'] == 'user' && m['content'] == text)) {
       input.text = text;
     }
   }
@@ -782,52 +786,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           ),
         );
       }
-      final label = switch (status) {
-        'completed' => switch (message['tool_name']) {
-          'shell_execute' => t('命令执行已返回', 'Command returned'),
-          'calendar_list' => t('系统日历读取已返回', 'Calendar returned'),
-          'reminders_list' => t('提醒事项读取已返回', 'Reminders returned'),
-          _ => t('操作返回结果', 'Operation returned a result'),
-        },
-        'denied' => t('已拒绝，未执行', 'Declined, not executed'),
-        'cancelled' => t('已取消', 'Cancelled'),
-        'outcome_unknown' => t('执行结果待核实', 'Outcome needs verification'),
-        'rejected' => t('操作未获准', 'Operation not allowed'),
-        _ => t('操作详情', 'Operation details'),
-      };
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: ExpansionTile(
-          tilePadding: EdgeInsets.zero,
-          childrenPadding: const EdgeInsets.only(bottom: 12),
-          dense: true,
-          shape: const Border(),
-          collapsedShape: const Border(),
-          leading: const Icon(
-            CupertinoIcons.doc_text,
-            size: 16,
-            color: Nova.secondary,
-          ),
-          title: Text(
-            label,
-            style: const TextStyle(color: Nova.secondary, fontSize: 13),
-          ),
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: SelectableText(
-                message['content'] as String,
-                style: const TextStyle(
-                  color: Nova.secondary,
-                  fontSize: 12,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
+      return const SizedBox.shrink();
     }
+    if (message['tool_calls'] != null) return const SizedBox.shrink();
     final text = message['content'] as String;
     if (text.isEmpty) return const SizedBox.shrink();
     final user = message['role'] == 'user';
@@ -967,7 +928,15 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                           children: [
                             for (final message in messages)
                               _message(message as Map),
+                            if (host.pendingUserText.isNotEmpty &&
+                                host.activeConversationId ==
+                                    widget.conversationId)
+                              _message({
+                                'role': 'user',
+                                'content': host.pendingUserText,
+                              }),
                             if (host.draft.isNotEmpty &&
+                                host.activeTool == null &&
                                 host.activeConversationId ==
                                     widget.conversationId)
                               _message({
@@ -1006,46 +975,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                 },
                                 startedAt: host.turnStartedAt ?? DateTime.now(),
                                 language: widget.language,
-                                details: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (host.activeTool != null)
-                                      Text(
-                                        host.activeTool!,
-                                        style: const TextStyle(
-                                          color: Nova.secondary,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    if (host.activeToolArguments.isNotEmpty)
-                                      ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxHeight: 220,
-                                        ),
-                                        child: SingleChildScrollView(
-                                          child: SelectableText(
-                                            host.activeToolArguments,
-                                            style: const TextStyle(
-                                              fontFamily: 'Menlo',
-                                              fontSize: 12,
-                                              height: 1.4,
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                    else
-                                      Text(
-                                        t(
-                                          '正在等待模型输出；收到内容后会显示在这里。',
-                                          'Waiting for model output; received content will appear here.',
-                                        ),
-                                        style: const TextStyle(
-                                          color: Nova.secondary,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                  ],
-                                ),
                               ),
                           ],
                         ),

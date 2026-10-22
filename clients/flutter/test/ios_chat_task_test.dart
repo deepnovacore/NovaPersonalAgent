@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent/local_agent.dart';
-import 'package:nova_mobile/agent/ios_chat_task.dart';
+import 'package:nova_mobile/agent/native_chat_task.dart';
 
 class NativeFixture implements LocalAgent {
   Map<String, dynamic>? runInput;
@@ -52,7 +52,7 @@ void main() {
   };
   test('chat task returns completion receipts, not merely started', () async {
     final native = NativeFixture();
-    final runner = IosChatTaskRunner(
+    final runner = NativeChatTaskRunner(
       agent: native,
       pollInterval: Duration.zero,
     );
@@ -74,7 +74,7 @@ void main() {
   });
   test('stop reaches native task and never reports completion', () async {
     final native = NativeFixture()..finish = false;
-    final runner = IosChatTaskRunner(
+    final runner = NativeChatTaskRunner(
       agent: native,
       pollInterval: const Duration(milliseconds: 1),
     );
@@ -87,7 +87,7 @@ void main() {
   });
   test('interrupted task remains unknown and is never restarted', () async {
     final native = NativeFixture()..phase = 'interrupted';
-    final runner = IosChatTaskRunner(
+    final runner = NativeChatTaskRunner(
       agent: native,
       pollInterval: Duration.zero,
     );
@@ -99,7 +99,7 @@ void main() {
   });
   test('timeout stops the native task instead of leaving it running', () async {
     final native = NativeFixture()..finish = false;
-    final runner = IosChatTaskRunner(
+    final runner = NativeChatTaskRunner(
       agent: native,
       pollInterval: Duration.zero,
       timeout: Duration.zero,

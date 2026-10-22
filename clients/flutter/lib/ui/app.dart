@@ -18,7 +18,7 @@ import '../voice/voice_settings.dart';
 import '../voice/voice_settings_sheet.dart';
 import '../voice/voice_provider_factory.dart';
 import '../agent/hub_tasks.dart';
-import '../agent/ios_chat_task.dart';
+import '../agent/native_chat_task.dart';
 import '../agent_core/agent_workspace.dart';
 import '../agent_core/workspace_shell.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
@@ -40,7 +40,6 @@ import 'workbench_page.dart';
 import 'components.dart';
 import 'theme.dart';
 import 'local_workspace.dart';
-import 'local_task_request.dart';
 import '../agent/local_agent.dart';
 import '../personal/life_host.dart';
 import '../agent_core/agent_core_host.dart';
@@ -111,6 +110,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   late final OwnedAudioPort phoneAudio;
   PhoneVoiceSession? phoneVoice;
   VoiceDelegateBridge? voiceDelegates;
+  (bool, bool, bool)? _voiceUiState;
   final voiceSettings = VoiceSettings();
   bool _phoneVoiceShown = false, _phoneVoiceExpanded = false;
   bool _phoneVoiceStarting = false;
@@ -193,8 +193,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   /// Phone chat owns execution; cross-device actions use the Hub.
   Future<void> _openAgentCore() async {
     try {
+      final nativeTasks = NativeChatTaskRunner();
       final iosTasks = defaultTargetPlatform == TargetPlatform.iOS
-          ? IosChatTaskRunner()
+          ? nativeTasks
           : null;
       final workspace =
           !AgentWorkspace.supportsPlatform(defaultTargetPlatform) ||
@@ -234,7 +235,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               mutate: lifeHost.mutate,
               hasConflict: () => lifeHost.hasConflict,
               fetch: SafeWebFetch().fetch,
-              automaticExecution: iosTasks != null,
+              automaticExecution: true,
               workspace: workspace,
               shell: workspace == null ? null : WorkspaceShell(workspace),
               queryNative: iosTasks == null
@@ -244,39 +245,17 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           as Map,
                     ),
               runChatTask: iosTasks?.run,
-              cancelChatTask: iosTasks?.cancel,
-              requestDeviceTask: (goal, operationId) async {
-                Map<String, dynamic>? snapshot;
-                try {
-                  snapshot = lifeHost.snapshot();
-                } catch (_) {
-                  // The dialog can still open while LifeHost is initializing.
-                }
-                final input = await requestLocalTask(
-                  context,
-                  agent: const NativeLocalAgent(),
-                  life: lifeHost.repo,
-                  lifeSnapshot: snapshot,
-                  goal: goal,
-                  taskId: operationId,
-                );
-                if (input == null || !mounted) return {'status': 'denied'};
-                final Object? task;
-                try {
-                  task = await const NativeLocalAgent()
-                      .call('run', input)
-                      .timeout(const Duration(seconds: 15));
-                } on TimeoutException {
-                  // The native host may still have started it: report an
-                  // unknown outcome and never retry.
-                  return {'status': 'outcome_unknown'};
-                }
-                return {
-                  'status': 'started',
-                  'task': task,
-                  'completion_requires_user_verification': true,
-                };
-              },
+              cancelChatTask: nativeTasks.cancel,
+              listDeviceApps: iosTasks != null
+                  ? null
+                  : () async => {
+                      'apps': await const NativeLocalAgent().call('apps'),
+                    },
+              readDeviceTasks: iosTasks != null
+                  ? null
+                  : () async =>
+                        await const NativeLocalAgent().call('tasks') as List,
+              requestDeviceTask: iosTasks != null ? null : nativeTasks.run,
             ),
           );
       if (!mounted) {
@@ -313,7 +292,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           return;
         }
         setState(() {
-          voiceDelegates = bridge..addListener(_lifeChanged);
+          voiceDelegates = bridge..addListener(_voiceChanged);
           phoneVoice?.attachDelegates(bridge);
         });
       } catch (_) {
@@ -394,6 +373,18 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       // Chat and voice remain available when a cold background engine owns the
       // scheduler or protected storage cannot be opened.
     }
+  }
+
+  void _voiceChanged() {
+    final state = (
+      phoneVoice?.active == true,
+      phoneVoice?.connecting == true,
+      voiceDelegates?.busy == true,
+    );
+    if (_voiceUiState == state) return;
+    _voiceUiState = state;
+    // Panels listen to streaming progress themselves; the app only needs lifecycle changes.
+    if (mounted) setState(() {});
   }
 
   void _lifeChanged() {
@@ -981,7 +972,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   void dispose() {
     phoneVoice?.removeListener(_phoneVoiceChanged);
     phoneVoice?.dispose();
-    voiceDelegates?.removeListener(_lifeChanged);
+    voiceDelegates?.removeListener(_voiceChanged);
     voiceDelegates?.dispose();
     unawaited(phoneAudio.dispose());
     lifeHost.removeListener(_lifeChanged);

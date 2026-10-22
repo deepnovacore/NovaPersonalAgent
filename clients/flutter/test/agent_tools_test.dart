@@ -16,6 +16,172 @@ class ObservedPersistence extends MemoryPersistence {
 
 void main() {
   test(
+    'barrier refreshes native evidence before a new explicit request',
+    () async {
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      const args = {
+        'goal': 'open',
+        'target_package': 'com.example.app',
+        'acceptance': 'visible',
+      };
+      var calls = 0;
+      String? priorId;
+      var evidenceReady = false;
+      final runner = ToolRunner(
+        journal: journal,
+        registry: ToolRegistry(
+          snapshot: emptyLife,
+          mutate: (_, {required operationId}) async => {},
+          hasConflict: () => false,
+          fetch: (_) async => {},
+          readDeviceTasks: () async => evidenceReady
+              ? [
+                  {
+                    ...args,
+                    'id': priorId,
+                    'phase': 'verifying',
+                    'evidence': 'screen',
+                  },
+                ]
+              : [],
+          requestDeviceTask: (_, id) async {
+            calls++;
+            priorId ??= id;
+            return {
+              'status': calls == 1
+                  ? 'outcome_unknown'
+                  : 'awaiting_verification',
+            };
+          },
+        ),
+      );
+      Future<Map<String, dynamic>> run(String turn) => runner.run(
+        turnId: turn,
+        callId: 'call',
+        name: 'device_run_task',
+        arguments: args,
+        approve: (_) async => false,
+      );
+      expect((await run('first'))['status'], 'outcome_unknown');
+      expect(
+        (await run('still-unresolved'))['error'],
+        'blocked_by_unresolved_prior_action',
+      );
+      expect(calls, 1);
+      evidenceReady = true;
+      expect(
+        (await run('new-request'))['data']['status'],
+        'awaiting_verification',
+      );
+      expect(calls, 2);
+      await run('new-request');
+      expect(calls, 2);
+    },
+  );
+
+  test(
+    'native evidence repairs legacy unknowns without clearing missing or interrupted tasks',
+    () async {
+      final persistence = MemoryPersistence();
+      final journal = ToolJournal(persistence);
+      await journal.open();
+      for (final id in [
+        'ready',
+        'verified',
+        'missing',
+        'interrupted',
+        'no-evidence',
+      ]) {
+        await journal.put('$id:fingerprint', {
+          'tool': 'device.run_task',
+          'operation_id': id,
+          'status': 'outcome_unknown',
+          'arguments': {
+            'goal': 'open',
+            'acceptance': 'visible',
+            'target_package': 'com.example.app',
+          },
+        });
+      }
+      expect(
+        await journal.reconcileNativeTasks([
+          {
+            'id': 'ready',
+            'goal': 'open',
+            'acceptance': 'visible',
+            'target_package': 'com.example.app',
+            'phase': 'verifying',
+            'evidence': 'screen-fingerprint',
+            'summary': 'Opened',
+          },
+          {
+            'id': 'verified',
+            'goal': 'open',
+            'acceptance': 'visible',
+            'target_package': 'com.example.app',
+            'phase': 'completed',
+            'verified_by': 'user',
+          },
+          {'id': 'interrupted', 'phase': 'interrupted', 'evidence': 'old'},
+          {'id': 'no-evidence', 'phase': 'verifying'},
+        ]),
+        2,
+      );
+      final restored = ToolJournal(persistence);
+      await restored.open();
+      expect(
+        restored.get('ready:fingerprint')!['result']['data']['status'],
+        'completed',
+      );
+      expect(
+        restored.get('verified:fingerprint')!['result']['data']['status'],
+        'completed',
+      );
+      for (final id in ['missing', 'interrupted', 'no-evidence']) {
+        expect(restored.get('$id:fingerprint')!['status'], 'outcome_unknown');
+      }
+    },
+  );
+  test(
+    'proven predispatch failure remains visible and does not poison a later request',
+    () async {
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      var calls = 0;
+      final runner = ToolRunner(
+        journal: journal,
+        registry: ToolRegistry(
+          snapshot: emptyLife,
+          mutate: (_, {required operationId}) async => {},
+          hasConflict: () => false,
+          fetch: (_) async => {},
+          requestDeviceTask: (_, _) async {
+            calls++;
+            return {'status': 'failed', 'error': 'installed_apps_unavailable'};
+          },
+        ),
+      );
+      for (final turn in ['first', 'new']) {
+        final result = await runner.run(
+          turnId: turn,
+          callId: 'call',
+          name: 'device_run_task',
+          arguments: {
+            'goal': 'open',
+            'target_package': 'com.example.app',
+            'acceptance': 'visible',
+          },
+          approve: (_) async => false,
+        );
+        expect(result['status'], 'failed');
+        expect(result['data']['error'], 'installed_apps_unavailable');
+      }
+      expect(calls, 2);
+    },
+  );
+
+  test(
     'unpublished profile may retry identical entries but success is cached',
     () async {
       var publications = 0;
@@ -246,7 +412,11 @@ void main() {
       turnId: turn,
       callId: 'c',
       name: 'device_run_task',
-      arguments: {'goal': 'test'},
+      arguments: {
+        'goal': 'test',
+        'target_package': 'com.example.app',
+        'acceptance': 'done',
+      },
       approve: (_) async => true,
     );
     expect((await run('t'))['status'], 'outcome_unknown');

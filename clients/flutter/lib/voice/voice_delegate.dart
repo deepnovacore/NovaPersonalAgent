@@ -135,7 +135,18 @@ class VoiceDelegateBridge extends ChangeNotifier {
     _lastProgress = '';
     notifyListeners();
     try {
-      final context = await worker.store.create();
+      final history =
+          primary.store.conversation(conversation)['messages'] as List;
+      final previous = history.reversed
+          .map((message) => message['delegate_context'])
+          .whereType<String>()
+          .firstOrNull;
+      // Follow-ups need the same tool receipts; other chats keep separate contexts.
+      final context =
+          previous != null &&
+              worker.store.conversations.any((c) => c['id'] == previous)
+          ? previous
+          : await worker.store.create();
       // Durable association before execution. Recovered intents are never replayed.
       await primary.store.append(conversation, {
         'role': 'assistant',
@@ -167,6 +178,8 @@ class VoiceDelegateBridge extends ChangeNotifier {
     String t(String zh, String en) => language == 'zh' ? zh : en;
     String result;
     try {
+      final before =
+          (worker.store.conversation(context)['messages'] as List).length;
       // The same registered tool policy controls writes; no blanket bypass.
       await worker.send(
         context,
@@ -176,12 +189,14 @@ class VoiceDelegateBridge extends ChangeNotifier {
             worker.tools?.registry.automaticExecution == true,
       );
       final messages = worker.store.conversation(context)['messages'] as List;
-      final finals = messages.where(
-        (m) =>
-            m['role'] == 'assistant' &&
-            m['tool_calls'] == null &&
-            (m['content'] as String).isNotEmpty,
-      );
+      final finals = messages
+          .skip(before)
+          .where(
+            (m) =>
+                m['role'] == 'assistant' &&
+                m['tool_calls'] == null &&
+                (m['content'] as String).isNotEmpty,
+          );
       result = finals.isNotEmpty ? finals.last['content'] as String : '';
       if (worker.error != null) {
         result = '$result\n${t('任务状态', 'Task status')}: ${worker.error}';

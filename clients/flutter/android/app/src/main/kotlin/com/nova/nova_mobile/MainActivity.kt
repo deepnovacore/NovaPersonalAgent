@@ -59,12 +59,16 @@ class MainActivity : FlutterActivity() {
                     "saveModelSettings" -> result.success(controller!!.saveModelSettings(args).toString())
                     "run" -> result.success(controller!!.runModel(args).toString())
                     "approve" -> result.success(JSONObject().put("accepted",false).toString())
-                    "apps" -> {
-                        val rows=JSONArray()
-                        packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
-                            .distinctBy {it.activityInfo.packageName}.sortedBy {it.loadLabel(packageManager).toString()}
-                            .forEach { rows.put(JSONObject().put("package",it.activityInfo.packageName).put("label",it.loadLabel(packageManager).toString())) }
-                        result.success(rows.toString())
+                    "apps" -> worker.execute {
+                        try {
+                            val rows=JSONArray()
+                            packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
+                                .distinctBy {it.activityInfo.packageName}.sortedBy {it.loadLabel(packageManager).toString()}
+                                .forEach { rows.put(JSONObject().put("package",it.activityInfo.packageName).put("label",it.loadLabel(packageManager).toString())) }
+                            runOnUiThread { result.success(rows.toString()) }
+                        } catch(error:Exception) {
+                            runOnUiThread { result.error("local_agent_error",error.message,null) }
+                        }
                     }
                     "accessibilitySettings" -> {startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));result.success(null)}
                     // Stop bypasses the worker, including a blocked observation.
@@ -84,7 +88,11 @@ class MainActivity : FlutterActivity() {
                     }
                     else -> result.notImplemented()
                 }
-            }catch(error:Exception){result.error("local_agent_error",error.message,null)}
+            }catch(error:Exception){
+                val reason=error.message?.takeIf{it.matches(Regex("[a-z_]{1,80}"))} ?: error.javaClass.simpleName
+                android.util.Log.w("NovaLocalAgent","${call.method} failed: $reason")
+                result.error("local_agent_error",error.message,null)
+            }
         }
     }
 }
