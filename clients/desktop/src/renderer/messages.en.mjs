@@ -671,6 +671,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "{0} ({1})": "{0} ({1})",
   "{0}，语音中": "{0}, voice active",
   "后台已连接": "Backend connected",
+  "后台启动尚未完成，正在自动重试。": "Backend startup has not completed. Retrying automatically.",
   "后台连接已断开，正在自动重连。": "Backend disconnected. Reconnecting automatically.",
   "请打开工作台或设置后重试，以便显示凭据授权提示。": "Open the workbench or Settings, then retry so the credential authorization prompt can be shown.",
   "已保存的凭据格式无效。请在设置中更新对应密钥后重试。": "A saved credential has an invalid format. Update the affected key in Settings, then retry.",
