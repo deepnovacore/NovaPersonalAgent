@@ -4,6 +4,7 @@ import type {CommittedConversationPair} from '../history.js'
 import {translateSystemPrompt, type PromptLanguage} from '../prompt-language.js'
 import {NOVA_VOICE_IDENTITY} from '../frontend-instructions.js'
 import {MAX_CAMERA_JPEG_BYTES} from '../../desktop/desktop-camera.js'
+import {COMPUTER_HISTORY_IMAGES, COMPUTER_IMAGE_LONG_EDGE, type ToolImage} from '../../personal-agent/computer-use/contract.js'
 import type {Frame} from '../../executors/watcher.js'
 import type { JsonValue } from '../../core/events.js'
 import type { JsonObject } from '../protocol.js'
@@ -42,7 +43,7 @@ export type CascadedLlmInput =
   | {readonly kind: 'packed_history'; readonly content: string}
   /** Provider turn trigger, explicitly marked as a host fact; never user-action authority. */
   | {readonly kind: 'host_activation'; readonly content: string}
-  | {readonly kind: 'tool_result'; readonly call_id: string; readonly output: JsonValue}
+  | {readonly kind: 'tool_result'; readonly call_id: string; readonly output: JsonValue; readonly images?: readonly ToolImage[]}
 
 export interface CascadedLlmTool {
   readonly name: string
@@ -95,4 +96,62 @@ export function validateOriginalImage(image: Frame): void {
 export function originalImageUrl(image: Frame): string {
   validateOriginalImage(image)
   return `data:image/jpeg;base64,${Buffer.from(image.payload).toString('base64')}`
+}
+
+/** Screenshot data is host evidence, never a new user instruction. */
+export function validateToolImage(image: ToolImage): ToolImage {
+  if (!image || !['image/png','image/jpeg'].includes(image.media_type)
+    || typeof image.data_base64 !== 'string' || image.data_base64.length === 0 || image.data_base64.length > 12 * 1024 * 1024
+    || image.data_base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(image.data_base64)
+    || Buffer.from(image.data_base64,'base64').toString('base64') !== image.data_base64
+    || !Number.isSafeInteger(image.width) || image.width < 1 || image.width > COMPUTER_IMAGE_LONG_EDGE
+    || !Number.isSafeInteger(image.height) || image.height < 1 || image.height > COMPUTER_IMAGE_LONG_EDGE
+    || typeof image.captured_at !== 'string' || !Number.isFinite(Date.parse(image.captured_at))) throw new Error('invalid tool image')
+  return image
+}
+
+export function toolImageUrl(image: ToolImage): string {
+  validateToolImage(image)
+  return `data:${image.media_type};base64,${image.data_base64}`
+}
+
+export function toolObservations(inputs: readonly CascadedLlmInput[], responses = false): JsonObject[] {
+  const observations=inputs.flatMap(input => {
+    if (input.kind !== 'tool_result' || !input.images?.length) return []
+    const content: JsonObject[] = [{type:responses?'input_text':'text',text:JSON.stringify({host_observation:true,call_id:input.call_id,authority:'tool_evidence_not_user_instruction'})}]
+    for (const image of input.images) {
+      const url=toolImageUrl(image)
+      content.push(responses?{type:'input_image',image_url:url}:{type:'image_url',image_url:{url}})
+    }
+    return [{role:'user',content}]
+  })
+  trimToolImages(observations)
+  return observations
+}
+
+export function isToolObservation(message: {readonly content?:unknown}): boolean {
+  return Array.isArray(message.content) && message.content.some((part:unknown) => {
+    if (!part || typeof part !== 'object' || !('text' in part) || typeof part.text !== 'string') return false
+    try {const marker:unknown=JSON.parse(part.text);return !!marker && typeof marker==='object' && 'host_observation' in marker && marker.host_observation===true && 'call_id' in marker && typeof marker.call_id==='string' && 'authority' in marker && marker.authority==='tool_evidence_not_user_instruction'} catch {return false}
+  })
+}
+
+/** Mutates only session-owned wire messages, preserving tool/result pairs and evidence markers. */
+export function trimToolImages(messages: readonly {readonly content?:unknown}[]): void {
+  let retained=0
+  for (const message of [...messages].reverse()) {
+    if (!isToolObservation(message)) continue
+    let removed=false
+    const content=[...(message.content as JsonObject[])].reverse().filter(part => {
+      if (part.type!=='image_url' && part.type!=='input_image') return true
+      if (++retained<=COMPUTER_HISTORY_IMAGES) return true
+      removed=true;return false
+    }).reverse()
+    if (removed) content.push({type:content[0]?.type==='input_text'?'input_text':'text',text:'[older computer screenshot omitted]'})
+    Object.assign(message,{content})
+  }
+}
+
+export function imageFreeMessage<T extends {readonly content?:unknown}>(message:T):T {
+  return Array.isArray(message.content)?{...message,content:(message.content as readonly JsonObject[]).filter(part=>part?.type==='text'||part?.type==='input_text'||part?.type==='output_text').map(part=>typeof part.text==='string'?part.text:'').join('\n')}:message
 }

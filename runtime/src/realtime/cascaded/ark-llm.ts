@@ -1,7 +1,7 @@
 import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
 import type {PromptLanguage} from '../prompt-language.js'
 import {cascadedNarrationInstructions} from './llm.js'
-import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
+import {originalImageUrl, toolObservations, trimToolImages, imageFreeMessage, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
 import {llmToolCallLimit} from './llm-stream-limits.js'
 import { jsonValueSchema, type JsonValue } from '../../core/events.js'
 import { codePointLengthLikePython, stripLikePython } from '../../text/python-text.js'
@@ -114,6 +114,7 @@ class Session implements CascadedLlmSession {
     }
     this.#history=structuredClone(checkpoint.history) as JsonObject[][];this.#turnItems=structuredClone(checkpoint.pending) as JsonObject[]
     this.#pendingCallIds=[...pendingIds];this.#pendingToolContinuation=this.#pendingCallIds.length>0;this.#previousResponseId=null;this.#portable=true;this.#seeded=true
+    trimToolImages([...this.#history.flat(),...this.#turnItems])
   }
   readonly #gateway: ArkResponsesGateway
   #started=false
@@ -160,14 +161,18 @@ class Session implements CascadedLlmSession {
       const expected=[...this.#pendingCallIds].sort(),actual=results.map(result=>result.call_id).sort()
       if(expected.length!==actual.length||expected.some((id,index)=>id!==actual[index])||input.inputs.slice(0,actual.length).some(item=>item.kind!=='tool_result'))throw fail('protocol')
     }
-    const current = input.inputs.map(inputItem)
+    const current = inputItems(input.inputs)
     const factOnly = input.inputs.some(item => item.kind === 'host_activation')
     if (input.inputs.some(item => item.kind === 'user_text' && item.image)) this.#visualHistory = true
+    // Local replay is required to actually evict old screenshots from provider context.
     const continuing = this.#pendingToolContinuation
     const localHistory = this.#stateless || this.#portable || (this.#visualHistory || (this.#previousResponseId === null && this.#history.length > 0)) && !continuing
+    if (input.inputs.some(item=>item.kind==='tool_result' && item.images?.length)) this.#portable=true
     if (!continuing) this.#turnItems = []
-    this.#turnItems.push(...input.inputs.map(item => item.kind === 'user_text' ? {role: 'user', content: item.text} : inputItem(item)))
-    if((this.#stateless||this.#portable) && (this.#turnItems.length>this.#historyLimits.items || codePointLengthLikePython(JSON.stringify(this.#turnItems))>this.#historyLimits.codepoints))throw fail('overflow')
+    this.#turnItems.push(...inputItems(input.inputs.map(item=>item.kind==='user_text'?{kind:'user_text',text:item.text}:item)))
+    trimToolImages([...this.#history.flat(),...this.#turnItems])
+    trimToolImages([...this.#history.flat(),...current])
+    if((this.#stateless||this.#portable) && (this.#turnItems.length>this.#historyLimits.items || codePointLengthLikePython(JSON.stringify(this.#turnItems.map(imageFreeMessage)))>this.#historyLimits.codepoints))throw fail('overflow')
     let outputText = ''
     let responseId: string | null = null
     let terminal = false
@@ -176,7 +181,7 @@ class Session implements CascadedLlmSession {
     try {
       for await (const event of this.#gateway.stream({
         ...(input.language === undefined ? {} : {language: input.language}),
-        inputItems: factOnly ? input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result').map(inputItem)
+        inputItems: factOnly ? inputItems(input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result'))
           : localHistory ? [...this.#history.flat(), ...((this.#stateless||this.#portable) && continuing ? this.#turnItems : current)] : current,
         tools: input.tools.map(toolSchema),
         previousResponseId: localHistory || (factOnly && !continuing) ? null : this.#previousResponseId,
@@ -221,7 +226,7 @@ class Session implements CascadedLlmSession {
           if (!pendingTools.length) {
             this.#history.push(portableOutput ? [...this.#turnItems] : [...this.#turnItems, {role: 'assistant', content: outputText}])
             this.#turnItems = []
-            while (this.#history.length && (this.#history.flat().length > this.#historyLimits.items || codePointLengthLikePython(JSON.stringify(this.#history)) > this.#historyLimits.codepoints)) this.#history.shift()
+            while (this.#history.length && (this.#history.flat().length > this.#historyLimits.items || codePointLengthLikePython(JSON.stringify(this.#history.map(unit=>unit.map(imageFreeMessage)))) > this.#historyLimits.codepoints)) this.#history.shift()
           }
           this.#previousResponseId = factOnly && !pendingTools.length ? null : event.response_id
           this.#pendingToolContinuation = pendingTools.length>0
@@ -284,4 +289,10 @@ export function createArkCascadedLlmFactory(
   options: ArkCascadedLlmFactoryOptions,
 ): CascadedLlmFactory {
   return {open: input => new Session(createFetchArkResponsesGateway(options),input?.history,options.protocol==='openai-compatible',llmToolCallLimit(options))}
+}
+
+function inputItems(inputs: readonly CascadedLlmInput[]): JsonObject[] {
+  if (!inputs.some(input=>input.kind==='tool_result'&&input.images?.length)) return inputs.map(inputItem)
+  const results=inputs.filter(input=>input.kind==='tool_result'),other=inputs.filter(input=>input.kind!=='tool_result')
+  return [...results.map(inputItem),...toolObservations(results,true),...other.map(inputItem)]
 }

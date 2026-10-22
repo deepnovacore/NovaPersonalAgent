@@ -60,13 +60,14 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .workbench details>summary::-webkit-details-marker{display:none}
 
 /* Window controls and workspace tabs */
-.window-controls{position:absolute;top:18px;left:14px;z-index:20;display:flex;gap:6px;-webkit-app-region:no-drag}
+.window-controls{position:absolute;top:18px;left:14px;z-index:20;display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag}
 :is(.workbench,.welcome-screen) .window-control{position:relative;width:12px;height:12px;padding:0;border:0;border-radius:50%;font-size:0;line-height:0;-webkit-app-region:no-drag}
 :is(.workbench,.welcome-screen) .window-control::before{content:'';position:absolute;inset:-4px -2px}
 :is(.workbench,.welcome-screen) .window-control::after{position:absolute;inset:0;display:grid;place-items:center;font:700 9px/1 var(--font);color:rgba(0,0,0,.55);opacity:0}
 :is(.workbench,.welcome-screen) .window-controls:hover .window-control::after,:is(.workbench,.welcome-screen) .window-control:focus-visible::after{opacity:1}
 :is(.workbench,.welcome-screen) .window-close{background:#ff5f57}.window-close::after{content:'×'}
 :is(.workbench,.welcome-screen) .window-minimize{background:#febc2e}.window-minimize::after{content:'−'}
+:is(.workbench,.welcome-screen) .window-maximize{background:#28c840}.window-maximize::after{content:'+'}
 :is(.workbench,.welcome-screen) .window-control:hover:not(:disabled){filter:brightness(.92)}
 .window-grip{flex:1 1 auto;align-self:stretch;min-width:24px;margin:-8px 0;-webkit-app-region:no-drag}
 .window-grip.native-window-drag{-webkit-app-region:drag}
@@ -231,6 +232,16 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .composer-actions button{height:30px;border:0;background:transparent;color:var(--ink-dim);padding:0 8px;border-radius:var(--radius-sm)}
 .composer-actions button:hover:not(:disabled){background:var(--surface-inset)}
 .composer-actions [hidden]{display:none}
+.composer-mode{flex:0 0 auto}
+.composer-mode[hidden]{display:none}
+.composer-actions .composer-mode-active{height:26px;padding:0 7px;font:500 12px/26px var(--mono);color:var(--ink-dim);white-space:nowrap}
+.composer-mode:not([data-mode="chat"]) .composer-mode-active{color:var(--accent)}
+.composer-actions .composer-mode-active:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.composer-actions .composer-mode-active:disabled{cursor:default}
+/* The composer's execution choice promotes one plan action without hiding the other. */
+.workbench-plan-actions button[data-primary="true"]{border:0;border-radius:var(--radius-sm);padding:0 12px;color:#fff;font-weight:600;background:linear-gradient(135deg,#5b6cff,#9b7bff);box-shadow:0 2px 8px rgba(120,110,255,.3)}
+.workbench-plan[data-execution="delegate"] .workbench-plan-actions button[data-primary="true"]{background:linear-gradient(135deg,#14a39a,#2fc6c0);box-shadow:0 2px 8px rgba(20,163,154,.3)}
+.workbench-plan-actions button[data-primary="true"]:disabled{opacity:.55;box-shadow:none}
 .composer-actions .composer-dictate{flex:0 0 32px;width:32px;height:32px;padding:0;margin-left:auto;display:grid;place-items:center;color:var(--ink-dim);border-radius:50%}
 .composer-actions .composer-dictate:hover:not(:disabled){color:var(--ink)}
 .composer-actions .composer-dictate[aria-pressed="true"]{background:var(--accent-wash);color:var(--accent)}
@@ -629,15 +640,58 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-mode-bar,.workbench-plan-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .workbench-mode-bar select,.workbench-agent button,.workbench-agent select{font:inherit;min-height:28px;max-width:100%}
 .workbench-mode-bar>select{width:auto;flex:0 0 auto}
-.workbench-build-status{overflow-wrap:anywhere;flex:1;min-width:100px}
+.workbench-mode-bar{flex-wrap:nowrap;align-items:flex-start;justify-content:space-between}
+.workbench-build-info{display:grid;gap:2px;flex:1 1 0;min-width:0}
+.workbench-build-status{display:inline-flex;align-items:center;gap:7px;font-weight:600;color:var(--ink)}
+.workbench-build-status::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--ink-faint)}
+.workbench-build-status[data-state="running"]::before,.workbench-build-status[data-state="completed"]::before{background:var(--ok,#2f9e6b)}
+.workbench-build-status[data-state="paused"]::before,.workbench-build-status[data-state="awaiting_approval"]::before{background:var(--warn)}
+.workbench-build-status[data-state="failed"]::before,.workbench-build-status[data-state="outcome_unknown"]::before{background:var(--danger,#d4483b)}
+.workbench-build-project,.workbench-build-reason{padding-left:14px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workbench-build-project{direction:rtl;text-align:left;font:11px/1.5 var(--mono)}
+.workbench-build-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;flex-wrap:wrap}
 .workbench-plan,.workbench-local-approval{margin-top:10px;padding:10px;border:1px solid var(--line,#555);border-radius:8px}
 .workbench-plan h3,.workbench-local-approval h3{font-size:13px;margin:0 0 8px}
+/* A pending decision is the user's to make, not a fault: accent edge like the Computer Use preflight, one primary action. */
+.workbench-local-approval{padding:12px 14px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent-wash) 60%,var(--surface-raised))}
+.workbench-local-approval h3{font-size:13px;font-weight:600;color:var(--ink)}
+.workbench-local-approval[data-kind="app"] pre{margin:0;font-family:inherit;font-size:13px;line-height:1.5;color:var(--ink);white-space:normal}
+.workbench-approval-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:12px;flex-wrap:wrap}
 .workbench-plan-body{max-height:24vh;overflow:auto;user-select:text}
 .workbench-plan textarea{box-sizing:border-box;width:100%;min-height:180px;resize:vertical;font:12px/1.6 monospace}
 .workbench-plan select{margin:6px 4px 6px 0}.workbench-plan-actions{margin-top:8px}
 .workbench-local-approval pre,.workbench-tool-log{max-height:24vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 monospace;user-select:text}
-.build-switch-dialog{max-width:420px;padding:24px;border:1px solid var(--line,#555);border-radius:12px;background:var(--panel,#202024);color:inherit}
-.build-switch-dialog::backdrop{background:#0008}.build-switch-dialog h2{font-size:18px}.build-switch-dialog button{margin:12px 8px 0 0;padding:8px 12px}
+/* Computer Use: a real switch, not a checkbox; the preflight lists exactly what is missing. */
+.workbench-agent .computer-use-toggle{display:inline-flex;align-items:center;gap:7px;padding:0 10px 0 4px;border:1px solid var(--line-strong);border-radius:999px;background:var(--surface-raised);color:var(--ink-dim);cursor:pointer;font-weight:500;transition:border-color .15s,background .15s,color .15s}
+.workbench-agent .computer-use-toggle:hover:not(:disabled){border-color:var(--accent);color:var(--ink)}
+.workbench-agent .computer-use-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.workbench-agent .computer-use-toggle:disabled{opacity:.55;cursor:default}
+.computer-use-knob{position:relative;width:26px;height:16px;border-radius:999px;background:var(--line-strong);transition:background .18s}
+.computer-use-knob::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .18s cubic-bezier(.3,.7,.4,1)}
+.computer-use-toggle[data-on="true"]{border-color:color-mix(in srgb,var(--accent) 55%,transparent);background:var(--accent-wash);color:var(--ink)}
+.computer-use-toggle[data-on="true"] .computer-use-knob{background:linear-gradient(135deg,#5b8cff,#9b7bff)}
+.computer-use-toggle[data-on="true"] .computer-use-knob::after{transform:translateX(10px)}
+.computer-use-badge{padding:0 6px;border-radius:var(--radius-sm);background:var(--surface-inset);color:var(--ink-faint);font:11px/18px var(--mono)}
+.computer-use-badge[hidden]{display:none}
+.computer-use-preflight{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);background:var(--surface-raised)}
+.computer-use-preflight[data-tone="blocked"]{border-left-color:var(--warn);background:color-mix(in srgb,var(--warn-wash) 60%,var(--surface-raised))}
+.computer-use-preflight h3{font-size:13px;font-weight:600;margin:0 0 6px}
+.computer-use-preflight ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.computer-use-missing{display:flex;align-items:center;gap:10px;justify-content:space-between;color:var(--ink-dim);line-height:1.5}
+.computer-use-missing::before{content:'';flex:0 0 6px;height:6px;border-radius:50%;background:var(--warn)}
+.computer-use-missing[data-item="vision_model"]::before{background:var(--accent)}
+.computer-use-missing>span{flex:1;min-width:0}
+.computer-use-missing>button,.computer-use-dismiss{flex-shrink:0}
+.computer-use-dismiss{margin-top:8px}
+.computer-shot{display:block;margin:6px 0 0;max-width:min(100%,360px);border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-inset);cursor:zoom-in}
+.computer-shot[hidden]{display:none}
+.computer-shot.expanded{max-width:100%;cursor:zoom-out}
+.build-switch-dialog{width:min(380px,calc(100vw - 48px));padding:22px 24px 18px;border:1px solid var(--line-strong);border-radius:var(--radius-window,14px);background:var(--surface-raised);color:var(--ink);box-shadow:0 18px 48px rgba(0,0,0,.22)}
+.build-switch-dialog::backdrop{background:rgba(15,18,22,.38)}
+.build-switch-dialog h2{margin:0 0 8px;font-size:16px;font-weight:600}
+.build-switch-dialog p{margin:0;color:var(--ink-dim);font-size:13px;line-height:1.6}
+.build-switch-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.build-switch-actions button{min-height:30px;padding:0 14px}
 /* Native details retain expansion and keyboard focus as tool receipts stream in. */
 .workbench .tool-message{align-self:stretch;max-width:100%;padding:0;background:transparent;border:0;min-width:0}
 .workbench .tool-message-group{align-self:stretch;max-width:100%;padding:0;background:transparent;border:0;min-width:0;color:var(--ink-dim)}
@@ -660,8 +714,43 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .build-tool-content{padding:4px 12px 12px 20px;border-left:1px solid var(--line)}
 .workbench .build-tool-content h4{font-size:11px;font-weight:500;color:var(--ink-faint);margin:10px 0 4px}
 .workbench .build-tool-content pre{margin:0;padding:8px;border-radius:var(--radius-sm);background:var(--surface-inset);white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 var(--mono);max-height:180px;overflow:auto}
-.build-log-notice{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--warn)}
+.build-log-notice{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:8px 12px;border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);border-radius:var(--radius);background:color-mix(in srgb,var(--warn-wash) 70%,var(--surface-raised));font-size:12px;line-height:1.5;color:var(--ink-dim)}
+.build-log-notice>span{flex:1;min-width:0}
+.build-log-notice>button{flex-shrink:0;border:0;background:transparent;color:var(--accent);font-weight:500;cursor:pointer}
+.build-log-notice>button:hover{text-decoration:underline}
 @media(max-width:600px){.workbench .build-tool-call>summary{flex-wrap:wrap}.build-tool-target{flex-basis:35%}.build-tool-time{display:none}}
 .build-full-reply{margin-top:8px;color:var(--ink-dim)}
 .build-full-reply>summary{cursor:pointer;font-size:12px;color:var(--ink-faint)}
 .build-full-reply-content{max-height:70vh;overflow:auto;user-select:text}
+
+/* Skill Hub: a two-column catalogue; every card carries the Nova avatar as its icon. */
+.skills-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.skills-head>.hint{flex:1 1 100%;margin:0}
+.skills-search-field{position:relative;display:flex;align-items:center;flex:1 1 180px;min-width:0;color:var(--ink-faint)}
+.skills-search-field>svg{position:absolute;left:11px;width:14px;height:14px;pointer-events:none}
+.skills-search{width:100%;min-height:32px;padding:0 12px 0 32px;border:1px solid var(--line-strong);border-radius:999px;background:var(--surface-raised);color:var(--ink);font:inherit}
+.skills-search:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.skills-tabs{display:inline-flex;gap:4px;margin-top:14px;padding:3px;border-radius:999px;background:var(--surface-inset)}
+.skills-tabs>button{min-height:28px;padding:0 14px;border:0;border-radius:999px;background:transparent;color:var(--ink-dim);font:inherit;cursor:pointer}
+.skills-tabs>button[aria-pressed="true"]{background:var(--surface-raised);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.skills-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin-top:12px}
+.skills-grid>.empty-state{grid-column:1/-1}
+.skill-card{display:flex;align-items:center;gap:12px;min-width:0;padding:10px 12px;border-radius:var(--radius);transition:background .15s}
+.skill-card:hover{background:var(--surface-inset)}
+.skill-icon{flex:0 0 36px;width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--surface-inset)}
+.skill-copy{flex:1;min-width:0}
+.skill-copy h3{margin:0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.skill-copy p{margin:2px 0 0;color:var(--ink-dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.skill-state{flex-shrink:0;padding:0 8px;border-radius:999px;background:var(--surface-inset);color:var(--ink-faint);font-size:11px;line-height:20px}
+.skill-state[data-state="on"]{background:var(--accent-wash);color:var(--accent)}
+.skill-state[data-state="failed"],.skill-state[data-state="degraded"]{background:var(--warn-wash);color:var(--warn)}
+.skills-grid+.link-button{margin-top:14px}
+@media (max-width:720px){.skills-grid{grid-template-columns:1fr}}
+
+/* Shared icon set: icons inherit the label colour and sit before the text. */
+.workbench .ui-icon{width:14px;height:14px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.workbench button.has-icon{display:inline-flex;align-items:center;gap:5px}
+.workbench-approval-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:var(--accent)}
+.workbench-approval-head>h3{margin:0}
+.build-log-notice>.ui-icon{color:var(--warn)}
+.workbench-build-actions button.has-icon .ui-icon{width:12px;height:12px}

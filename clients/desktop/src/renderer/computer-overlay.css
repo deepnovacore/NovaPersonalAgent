@@ -1,0 +1,87 @@
+/*
+ * Computer Use indicator. Two windows share this sheet:
+ *  - edge: click-through, covers the display; a living gradient frame plus input marks
+ *  - bar: the only interactive surface; status and Stop
+ * The palette is Nova's accent family so the frame reads as "Nova", not as a system alert.
+ */
+@property --cu-angle{syntax:'<angle>';initial-value:0deg;inherits:false}
+:root{
+ color-scheme:light dark;
+ --cu-a:#5b8cff;--cu-b:#9b7bff;--cu-c:#2fc6c0;
+ --cu-glow:rgba(91,140,255,.34);
+ --cu-bar-bg:rgba(255,255,255,.86);--cu-bar-line:rgba(20,24,31,.10);--cu-bar-ink:#141922;--cu-bar-dim:#5c6570;
+ --cu-stop:#d93a2b;--cu-stop-ink:#fff;--cu-approval:#c57a12;
+ --cu-font:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
+ --cu-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media(prefers-color-scheme:dark){:root{
+ --cu-glow:rgba(107,156,255,.42);
+ --cu-bar-bg:rgba(20,24,31,.82);--cu-bar-line:rgba(220,226,235,.14);--cu-bar-ink:#eef1f5;--cu-bar-dim:#a3adba;
+ --cu-stop:#ff5a4a;--cu-stop-ink:#160806;--cu-approval:#f0b25a;
+}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:transparent;overflow:hidden;font-family:var(--cu-font);-webkit-user-select:none;user-select:none}
+
+/* ---------- edge ---------- */
+.computer-edge{position:fixed;inset:0;pointer-events:none;border-radius:0;opacity:0;transition:opacity .35s ease}
+.computer-edge:not([data-state="idle"]){opacity:1}
+/* The frame: a rotating conic gradient, masked to a ring. */
+.computer-edge::before{content:'';position:absolute;inset:0;padding:4px;
+ background:conic-gradient(from var(--cu-angle),var(--cu-a),var(--cu-b),var(--cu-c),var(--cu-a));
+ -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;
+ animation:cu-spin 6s linear infinite}
+/* A soft inner bloom so the frame is visible over both light and dark content. */
+.computer-edge::after{content:'';position:absolute;inset:0;box-shadow:inset 0 0 28px 6px var(--cu-glow),inset 0 0 2px 1px rgba(255,255,255,.35);transition:box-shadow .3s ease}
+.computer-edge[data-state="acting"]::before{animation-duration:2.4s;padding:5px}
+.computer-edge[data-state="acting"]::after{box-shadow:inset 0 0 44px 10px var(--cu-glow),inset 0 0 2px 1px rgba(255,255,255,.45)}
+.computer-edge[data-state="delegated"]::before{animation-duration:9s;opacity:.85}
+.corner{position:absolute;width:26px;height:26px;border:0 solid #fff;opacity:.85;filter:drop-shadow(0 0 4px var(--cu-a))}
+.corner.tl{top:10px;left:10px;border-top-width:2px;border-left-width:2px;border-top-left-radius:6px}
+.corner.tr{top:10px;right:10px;border-top-width:2px;border-right-width:2px;border-top-right-radius:6px}
+.corner.bl{bottom:10px;left:10px;border-bottom-width:2px;border-left-width:2px;border-bottom-left-radius:6px}
+.corner.br{bottom:10px;right:10px;border-bottom-width:2px;border-right-width:2px;border-bottom-right-radius:6px}
+
+/* Input marks: where Nova clicked or scrolled, for a moment. */
+.computer-marks{position:fixed;inset:0;pointer-events:none}
+.computer-mark{position:absolute;width:0;height:0;animation:cu-mark-life 1.6s ease forwards}
+.computer-mark-ring{position:absolute;left:-28px;top:-28px;width:56px;height:56px;border-radius:50%;border:2px solid var(--cu-a);background:radial-gradient(circle,rgba(91,140,255,.28),rgba(91,140,255,0) 70%);box-shadow:0 0 18px var(--cu-glow);animation:cu-ripple .9s cubic-bezier(.2,.7,.3,1) forwards}
+.computer-mark b{position:absolute;left:-5px;top:-5px;width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px var(--cu-a),0 0 12px var(--cu-a)}
+.computer-mark span{position:absolute;left:16px;top:14px;padding:3px 8px;border-radius:999px;background:linear-gradient(135deg,var(--cu-a),var(--cu-b));color:#fff;font:600 11px/1.4 var(--cu-font);letter-spacing:.02em;white-space:nowrap;box-shadow:0 4px 14px rgba(20,30,60,.28)}
+.computer-mark[data-kind="scroll"] .computer-mark-ring{border-style:dashed;animation-duration:1.2s}
+.computer-mark[data-kind="type"] .computer-mark-ring,.computer-mark[data-kind="key"] .computer-mark-ring{border-radius:10px}
+
+/* ---------- bar ---------- */
+.computer-bar-page{display:flex;align-items:center;justify-content:center;padding:4px}
+.computer-bar{display:flex;align-items:center;gap:12px;width:100%;height:44px;padding:0 6px 0 14px;border-radius:999px;
+ background:var(--cu-bar-bg);color:var(--cu-bar-ink);border:1px solid var(--cu-bar-line);
+ -webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);
+ box-shadow:0 8px 28px rgba(15,20,35,.22),0 0 0 1px rgba(91,140,255,.18);
+ animation:cu-bar-in .32s cubic-bezier(.2,.8,.3,1) both}
+.computer-pulse{position:relative;flex:0 0 14px;width:14px;height:14px}
+.computer-pulse i,.computer-pulse::after{position:absolute;inset:0;border-radius:50%;background:linear-gradient(135deg,var(--cu-a),var(--cu-b))}
+.computer-pulse::after{content:'';animation:cu-pulse 1.8s ease-out infinite}
+.computer-bar[data-state="acting"] .computer-pulse::after{animation-duration:.9s}
+.computer-bar[data-state="approval"] .computer-pulse i,.computer-bar[data-state="approval"] .computer-pulse::after{background:var(--cu-approval)}
+.computer-copy{display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;line-height:1.25}
+.computer-copy strong{font-size:12.5px;font-weight:600;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.computer-copy span{font:11px/1.35 var(--cu-font);color:var(--cu-bar-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.computer-bar[data-state="approval"] .computer-copy span{color:var(--cu-approval);font-weight:500}
+#stop{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;height:32px;padding:0 14px 0 12px;border:0;border-radius:999px;
+ background:var(--cu-stop);color:var(--cu-stop-ink);font:600 12px/1 var(--cu-font);cursor:pointer;
+ box-shadow:0 2px 8px rgba(217,58,43,.35);transition:transform .12s ease,filter .12s ease}
+#stop:hover{filter:brightness(1.08)}
+#stop:active{transform:scale(.96)}
+#stop:focus-visible{outline:2px solid var(--cu-a);outline-offset:2px}
+#stop:disabled{cursor:default;filter:saturate(.4) brightness(.95)}
+.computer-stop-icon{width:9px;height:9px;border-radius:2px;background:currentColor}
+.computer-bar[data-stopping="true"] .computer-pulse::after{animation:none}
+
+@keyframes cu-spin{to{--cu-angle:360deg}}
+@keyframes cu-ripple{0%{transform:scale(.2);opacity:1}100%{transform:scale(1.6);opacity:0}}
+@keyframes cu-mark-life{0%,70%{opacity:1}100%{opacity:0}}
+@keyframes cu-pulse{0%{transform:scale(1);opacity:.6}100%{transform:scale(2.6);opacity:0}}
+@keyframes cu-bar-in{from{transform:translateY(-10px);opacity:0}to{transform:none;opacity:1}}
+@media(prefers-reduced-motion:reduce){
+ .computer-edge::before,.computer-pulse::after,.computer-bar{animation:none}
+ .computer-mark-ring{animation:none;opacity:.8}
+}

@@ -6,6 +6,7 @@ import { WakeWordRuntime } from '../src/main/wake-word/runtime.mjs'
 import { WakeAudioRouter } from '../src/renderer/wake-audio.mjs'
 import { normalizeSettings, applySettingsUpdate, orbSettings } from '../src/main/settings-store.mjs'
 import { shouldOpenSettings } from '../src/main/launch-command.mjs'
+import { trayClickAction } from '../src/main/tray-unread.mjs'
 
 class Worker extends EventEmitter {
   messages = []
@@ -410,7 +411,7 @@ test('tray and shortcut request workbench on explicit return', () => {
   const handlers=[],requests=[];let menu,visible=true,hidden=0
   class Tray{setToolTip(){}setContextMenu(value){menu=value}on(event,callback){if(event==='click')handlers.push(callback)}}
   const window={isVisible:()=>visible}
-  new Function('Tray','trayImage','Menu','app','mainWindow','requestPresentation','hideOrb','t','toggleVisor',trayBody)(Tray,()=>null,{buildFromTemplate:value=>value},{},window,mode=>requests.push(mode),()=>hidden++,value=>value,()=>{})
+  new Function('Tray','trayImage','Menu','app','mainWindow','requestPresentation','hideOrb','t','backendStatus','trayUnread','trayClickAction',trayBody)(Tray,()=>null,{buildFromTemplate:value=>value},{},window,mode=>requests.push(mode),()=>hidden++,value=>value,{state:'connected'},0,trayClickAction)
   for(const item of menu.filter(item=>item.label&&item.label!=='退出'))item.click()
   assert.deepEqual(requests,['workbench','orb','background']);requests.length=0
   const shortcut=source.match(/globalShortcut\.register\('CommandOrControl\+Shift\+Space', \(\) => \{([\s\S]*?)\n  \}\)/)[1]

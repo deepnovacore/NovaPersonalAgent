@@ -8,6 +8,7 @@ import {currentLanguage,t} from './locale.mjs'
 import {mountExecutionCard} from './execution-card.mjs'
 import {mountCodingTargetMenu} from './coding-target-menu.mjs'
 import {mountWorkbenchAgent} from './workbench-agent.mjs'
+import {mountComposerMode} from './composer-mode.mjs'
 import {createBuildCallLog} from './build-call-log.mjs'
 import {createOrbVisualSafe} from './orb-visual.mjs'
 import {ORB_STATE_NAMES} from './state.mjs'
@@ -81,8 +82,12 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api})
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3
  draft.addEventListener('input',()=>{c.draft=draft.value;if(!draft.value.trim())c.state().source_todo=null;renderSource();syncActions()})
- draft.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(()=>c.submit())}})
- const inputActions=el('div',undefined,'composer-actions');const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
+ draft.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(()=>c.submit())}
+  // Shift+Tab cycles the mode only from the draft; elsewhere it keeps reverse focus navigation.
+  else if(e.key==='Tab'&&e.shiftKey&&!e.isComposing&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&composerMode.cycle())e.preventDefault()
+ })
+ const inputActions=el('div',undefined,'composer-actions');const composerMode=mountComposerMode(inputActions,{c,el,run});const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
  const dictate=el('button',undefined,'composer-dictate');dictate.type='button';dictate.append(glyph(GLYPH.mic));inputActions.append(dictate)
  const recordingHere=()=>Boolean(c.dictationId)&&c.dictationConversationId===c.selectedId
  dictate.addEventListener('click',()=>run(()=>recordingHere()?c.finish():c.dictate()))
@@ -235,7 +240,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  }
  function update(){
   buildLog.update()
-  workbenchAgent.update()
+  workbenchAgent.update();composerMode.update()
   assistantWelcome?.sync()
   syncCompanion()
   renderSource()

@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     showPresentationError: message => ipcRenderer.invoke('nova:personal:presentation-error', message),
     setPresentation: (mode,activate=true) => ipcRenderer.invoke('nova:personal:presentation', mode,activate),
     onPresentationRequest: callback => {
-      const listener = (_event, mode) => { if (['background','workbench','orb'].includes(mode)) callback(mode) }
+      const listener = (_event, mode, attention) => { if (['background','workbench','orb'].includes(mode)) callback(mode, {attention: attention === true}) }
       ipcRenderer.on('nova:personal:presentation-request', listener)
       return () => ipcRenderer.removeListener('nova:personal:presentation-request', listener)
     },
@@ -39,6 +39,15 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
       const listener = (_event, value) => { if (typeof value === 'boolean') callback(value) }
       ipcRenderer.on('nova:personal:collapsed', listener)
       return () => ipcRenderer.removeListener('nova:personal:collapsed', listener)
+    },
+  }),
+  computerUse: Object.freeze({
+    overlay: frame => ipcRenderer.send('nova:computer-overlay:frame', frame),
+    clear: () => ipcRenderer.send('nova:computer-overlay:clear'),
+    onStop: callback => {
+      const listener = (_event, id) => { if (typeof id === 'string') callback(id) }
+      ipcRenderer.on('nova:computer-overlay:stop-request', listener)
+      return () => ipcRenderer.removeListener('nova:computer-overlay:stop-request', listener)
     },
   }),
   language: process.argv.includes('--nova-language=en') ? 'en' : 'zh-CN',

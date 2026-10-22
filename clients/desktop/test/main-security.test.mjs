@@ -37,6 +37,9 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:capabilities:probe',
     'nova:chatgpt:action',
     'nova:codex:rescan',
+    'nova:computer-overlay:clear',
+    'nova:computer-overlay:frame',
+    'nova:computer-overlay:stop-request',
     'nova:confirmation-mode',
     'nova:confirmation-placement',
     'nova:executor-result:open',
@@ -910,6 +913,7 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   let prevented = 0, quits = 0, backendStops = 0, hubCancels = 0
   const event = {preventDefault() { prevented++ }}
   const context = vm.createContext({
+    computerOverlay: null,
     desktopHubConnection: {action: async action => { assert.equal(action, 'cancel'); hubCancels++ }},
     sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}}, cancelPhonePairing: async () => {}, managedPhone: {stop: async () => {}},
     app: {
