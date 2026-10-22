@@ -72,19 +72,22 @@ void main() {
       'created-one',
     );
   });
-  test('stop reaches native task and never reports completion', () async {
-    final native = NativeFixture()..finish = false;
-    final runner = NativeChatTaskRunner(
-      agent: native,
-      pollInterval: const Duration(milliseconds: 1),
-    );
-    final running = runner.run(request, 'cancel-id');
-    await Future<void>.delayed(const Duration(milliseconds: 5));
-    await runner.cancel();
-    final result = await running;
-    expect(native.stops, greaterThanOrEqualTo(1));
-    expect(result['status'], 'cancelled');
-  });
+  test(
+    'stop reaches native task and preserves uncertain dispatched effects',
+    () async {
+      final native = NativeFixture()..finish = false;
+      final runner = NativeChatTaskRunner(
+        agent: native,
+        pollInterval: const Duration(milliseconds: 1),
+      );
+      final running = runner.run(request, 'cancel-id');
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await runner.cancel();
+      final result = await running;
+      expect(native.stops, greaterThanOrEqualTo(1));
+      expect(result['status'], 'outcome_unknown');
+    },
+  );
   test('interrupted task remains unknown and is never restarted', () async {
     final native = NativeFixture()..phase = 'interrupted';
     final runner = NativeChatTaskRunner(

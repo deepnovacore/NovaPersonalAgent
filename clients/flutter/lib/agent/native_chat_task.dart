@@ -30,23 +30,26 @@ class NativeChatTaskRunner {
     Map<String, dynamic> request,
     String id,
   ) async {
-    if (request.containsKey('target_package')) {
-      try {
-        final apps =
-            await agent.call('apps').timeout(const Duration(seconds: 10))
-                as List;
-        if (!apps.any((app) => app['package'] == request['target_package'])) {
-          return {'status': 'failed', 'error': 'target_app_not_installed'};
-        }
-      } catch (_) {
-        return {'status': 'failed', 'error': 'installed_apps_unavailable'};
-      }
-    }
     if (_active != null) return {'status': 'failed', 'reason': 'task_busy'};
     _active = id;
     _cancelled = false;
     final deadline = DateTime.now().add(timeout);
     try {
+      if (request.containsKey('target_package')) {
+        try {
+          final apps =
+              await agent.call('apps').timeout(const Duration(seconds: 10))
+                  as List;
+          if (_cancelled) return {'status': 'cancelled', 'task_id': id};
+          if (!apps.any((app) => app['package'] == request['target_package'])) {
+            return {'status': 'failed', 'error': 'target_app_not_installed'};
+          }
+        } catch (_) {
+          if (_cancelled) return {'status': 'cancelled', 'task_id': id};
+          return {'status': 'failed', 'error': 'installed_apps_unavailable'};
+        }
+      }
+      if (_cancelled) return {'status': 'cancelled', 'task_id': id};
       var task = Map<String, dynamic>.from(
         await agent
                 .call('run', {
@@ -61,10 +64,6 @@ class NativeChatTaskRunner {
             as Map,
       );
       while (true) {
-        if (_cancelled) {
-          await cancel();
-          return {'status': 'cancelled', 'task_id': id};
-        }
         switch (task['phase']) {
           case 'completed':
             return {
@@ -74,7 +73,11 @@ class NativeChatTaskRunner {
               'operations': task['operations'] ?? [],
             };
           case 'cancelled':
-            return {'status': 'cancelled', 'task_id': id};
+            return {
+              'status': 'outcome_unknown',
+              'task_id': id,
+              'reason': 'cancelled_after_dispatch',
+            };
           case 'verifying':
             if (request.containsKey('target_package') &&
                 task['evidence'] is String &&
@@ -93,15 +96,20 @@ class NativeChatTaskRunner {
           case 'interrupted':
             debugPrint('[NovaAgent] native interrupted: ${task['reason']}');
             return {
-              'status':
-                  request.containsKey('target_package') &&
-                      isNativeReadFailure(task)
-                  ? 'failed'
-                  : 'outcome_unknown',
+              'status': 'outcome_unknown',
               if (task['reason'] is String) 'reason': task['reason'],
               'task_id': id,
               'summary': task['summary'] ?? '',
             };
+        }
+        if (_cancelled) {
+          await cancel();
+          // Stopping a dispatched task cannot undo earlier device actions.
+          return {
+            'status': 'outcome_unknown',
+            'task_id': id,
+            'reason': 'cancelled_after_dispatch',
+          };
         }
         if (!DateTime.now().isBefore(deadline)) {
           await cancel();

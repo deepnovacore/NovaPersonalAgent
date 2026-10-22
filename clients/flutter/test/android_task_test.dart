@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 import 'package:nova_mobile/agent/native_chat_task.dart';
@@ -9,6 +10,8 @@ class Device implements LocalAgent {
   final calls = <String>[];
   Map<String, dynamic>? dispatched;
   bool appsFail = false;
+  Completer<void>? appsGate;
+  Completer<Map<String, dynamic>>? runGate;
   Map<String, dynamic> terminal = {
     'phase': 'verifying',
     'summary': '小红书已在前台',
@@ -20,7 +23,9 @@ class Device implements LocalAgent {
     Map<String, dynamic> input = const {},
   ]) async {
     calls.add(method);
+    if (method == 'stop') return {};
     if (method == 'apps') {
+      await appsGate?.future;
       if (appsFail) throw StateError('channel unavailable');
       return [
         {'package': 'com.xingin.xhs', 'label': '小红书'},
@@ -28,7 +33,9 @@ class Device implements LocalAgent {
     }
     if (method == 'run') {
       dispatched = input;
-      return {'id': input['id'], 'phase': 'running'};
+      return runGate == null
+          ? {'id': input['id'], 'phase': 'running'}
+          : await runGate!.future;
     }
     if (method == 'tasks') {
       return [
@@ -66,10 +73,6 @@ void main() {
     test(
       'native terminal classification and legacy reconciliation: $reason',
       () async {
-        final failed =
-            reason.startsWith('model_') ||
-            reason.startsWith('observation_') ||
-            reason == 'tool_screen_changed_during_capture';
         final device = Device()
           ..terminal = {'phase': 'interrupted', 'reason': reason};
         final args = {
@@ -81,7 +84,7 @@ void main() {
           agent: device,
           pollInterval: Duration.zero,
         ).run(args, 'id');
-        expect(result['status'], failed ? 'failed' : 'outcome_unknown');
+        expect(result['status'], 'outcome_unknown');
         expect(result['reason'], reason);
         final journal = ToolJournal(MemoryPersistence());
         await journal.open();
@@ -95,18 +98,105 @@ void main() {
           await journal.reconcileNativeTasks([
             {'id': 'id', ...args, ...device.terminal},
           ]),
-          failed ? 1 : 0,
+          0,
         );
-        expect(
-          journal.get('legacy')!['status'],
-          failed ? 'failed' : 'outcome_unknown',
-        );
-        if (failed) {
-          expect(journal.get('legacy')!['result']['data']['status'], 'failed');
-        }
+        expect(journal.get('legacy')!['status'], 'outcome_unknown');
       },
     );
   }
+
+  for (final phase in ['running', 'cancelled', 'completed']) {
+    test(
+      'cancellation after dispatch preserves native terminal evidence: $phase',
+      () async {
+        final device = Device()..runGate = Completer<Map<String, dynamic>>();
+        final native = NativeChatTaskRunner(
+          agent: device,
+          pollInterval: Duration.zero,
+        );
+        final running = native.run({
+          'scope': 'calendar',
+          'goal': 'create',
+          'acceptance': 'visible',
+        }, 'dispatched');
+        expect(device.calls, ['run']);
+        await native.cancel();
+        device.runGate!.complete({'id': 'dispatched', 'phase': phase});
+        final result = await running;
+        expect(
+          result['status'],
+          phase == 'completed' ? 'completed' : 'outcome_unknown',
+        );
+        expect(device.calls.where((call) => call == 'run').length, 1);
+      },
+    );
+  }
+
+  test(
+    'cancel during installed-app lookup never dispatches and releases ownership',
+    () async {
+      final device = Device()..appsGate = Completer<void>();
+      final native = NativeChatTaskRunner(
+        agent: device,
+        pollInterval: Duration.zero,
+      );
+      final args = {
+        'target_package': 'com.xingin.xhs',
+        'goal': 'open',
+        'acceptance': 'visible',
+      };
+      final running = native.run(args, 'cancel-before-dispatch');
+      expect((await native.run(args, 'competing'))['reason'], 'task_busy');
+      await native.cancel();
+      device.appsGate!.complete();
+      expect((await running)['status'], 'cancelled');
+      expect(device.calls.where((call) => call == 'run'), isEmpty);
+      expect(
+        (await native.run(args, 'new-explicit-request'))['status'],
+        'completed',
+      );
+      expect(device.calls.where((call) => call == 'run').length, 1);
+    },
+  );
+
+  test(
+    'model failure after native dispatch blocks cross-turn replay',
+    () async {
+      final device = Device()
+        ..terminal = {'phase': 'interrupted', 'reason': 'model_timeout'};
+      final native = NativeChatTaskRunner(
+        agent: device,
+        pollInterval: Duration.zero,
+      );
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      final runner = ToolRunner(
+        journal: journal,
+        registry: ToolRegistry(
+          snapshot: emptyLife,
+          mutate: (_, {required operationId}) async => {},
+          hasConflict: () => false,
+          fetch: (_) async => {},
+          requestDeviceTask: native.run,
+        ),
+      );
+      Future<Map<String, dynamic>> run(String turn) => runner.run(
+        turnId: turn,
+        callId: 'call',
+        name: 'device_run_task',
+        arguments: {
+          'goal': 'open',
+          'target_package': 'com.xingin.xhs',
+          'acceptance': 'visible',
+        },
+        approve: (_) async => false,
+      );
+      expect((await run('first'))['data']['status'], 'outcome_unknown');
+      final second = await run('second');
+      expect(second.toString(), contains('blocked_by_unresolved_prior_action'));
+      expect(device.calls.where((call) => call == 'run').length, 1);
+    },
+  );
 
   test(
     'apps preflight failure never dispatches or becomes an unknown action',

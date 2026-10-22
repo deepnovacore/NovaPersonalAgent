@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show debugPrint;
-import '../agent/local_agent.dart' show isNativeReadFailure;
 import 'dart:io';
 import 'agent_workspace.dart';
 import 'workspace_shell.dart';
@@ -567,16 +566,14 @@ class ToolJournal {
           task['phase'] == 'verifying' &&
           task['evidence'] is String &&
           (task['evidence'] as String).isNotEmpty;
-      final failed = isNativeReadFailure(task);
-      if (!verified && !awaiting && !failed) continue;
-      // Read-stage failure is terminal, not an uncertain action; absence still proves nothing.
-      record['status'] = failed ? 'failed' : 'completed';
+      if (!verified && !awaiting) continue;
+      // The final read failure cannot rule out effects from an earlier native step.
+      record['status'] = 'completed';
       record['result'] = {
         'untrusted': true,
-        'status': failed ? 'failed' : 'completed',
+        'status': 'completed',
         'data': {
-          'status': failed ? 'failed' : 'completed',
-          if (failed) 'reason': task['reason'],
+          'status': 'completed',
           'task_id': task['id'],
           'summary': task['summary'] ?? '',
         },

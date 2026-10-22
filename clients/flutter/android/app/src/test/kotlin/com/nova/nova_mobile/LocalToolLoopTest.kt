@@ -251,6 +251,13 @@ class LocalToolLoopTest {
             catch (_: IllegalArgumentException) { }
         }
     }
+    @Test fun modelFailureAfterDispatchDoesNotProveTheRunWasReadOnly() {
+        val host = Host()
+        LocalToolLoop(host, { _, turn -> if(turn == 0) action() else throw java.net.SocketTimeoutException("after effect") }).run()
+        assertEquals(1, host.writes)
+        assertEquals("model_timeout", host.interruption)
+        assertFalse(host.verified)
+    }
     @Test fun networkFailureReportsSafeCategoryWithoutProviderDetails() {
         val host = Host()
         LocalToolLoop(host, { _, _ -> throw java.net.UnknownHostException("private endpoint and secret") }).run()
