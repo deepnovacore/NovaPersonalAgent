@@ -9,6 +9,35 @@ class AssistantText extends StatelessWidget {
 
   /// Opens a workspace URL/path or a legacy artifact ID inside Nova.
   final Future<void> Function(String pathOrId)? onArtifactLink;
+
+  Iterable<Uri> get _previewLinks sync* {
+    final seen = <String>{};
+    for (final match in RegExp(
+      r'''nova-file:///workspace/[^\s`<>"\[\]，。；：！？、（）]+''',
+    ).allMatches(text)) {
+      final url = match[0]!.replaceFirst(RegExp(r'[).,;:!]+$'), '');
+      if (!seen.add(url) ||
+          text.contains(']($url)') ||
+          text.contains('](<$url>)') ||
+          text.contains('<$url>')) {
+        continue;
+      }
+      try {
+        final uri = Uri.parse(url);
+        if (uri.host.isEmpty &&
+            !uri.hasQuery &&
+            !uri.hasFragment &&
+            uri.path.startsWith('/workspace/') &&
+            !uri.pathSegments.contains('..') &&
+            RegExp(r'\.html?$', caseSensitive: false).hasMatch(uri.path)) {
+          yield uri;
+        }
+      } on FormatException {
+        // Malformed model output stays visible as text.
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -40,6 +69,13 @@ class AssistantText extends StatelessWidget {
             }
           },
         ),
+      if (onArtifactLink != null)
+        for (final uri in _previewLinks)
+          TextButton.icon(
+            onPressed: () => onArtifactLink!(uri.toString()),
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: Text(uri.pathSegments.last),
+          ),
     ],
   );
 }
