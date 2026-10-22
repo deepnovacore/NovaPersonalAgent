@@ -79,9 +79,16 @@ const click=async label=>{
  return evaluate(`(()=>{const button=[...document.querySelectorAll('button')].find(node=>!node.hidden&&!node.disabled&&node.textContent.trim()===${JSON.stringify(label)});if(!button)throw Error('Missing enabled button: '+${JSON.stringify(label)});const menu=button.closest('details');if(menu)menu.open=true;button.click()})()`)
 }
 const choose=async value=>{
- await until(()=>evaluate(`(()=>{const node=document.querySelector('[role="radiogroup"][aria-label="对话模式"] [data-mode=${JSON.stringify(value)}]');return Boolean(node&&!node.disabled)})()`),Boolean,'mode '+value)
- return evaluate(`document.querySelector('[role="radiogroup"][aria-label="对话模式"] [data-mode=${JSON.stringify(value)}]').click()`)
+ for(let i=0;i<4;i++){
+  const current=await evaluate(`document.querySelector('.composer-mode').dataset.mode`)
+  if(current===value)return
+  await until(()=>evaluate(`!document.querySelector('.composer-mode-active').disabled`),Boolean,'mode ready')
+  await evaluate(`document.querySelector('.composer-mode-active').click()`)
+  await until(()=>evaluate(`document.querySelector('.composer-mode').dataset.mode`),mode=>mode!==current,'mode changed')
+ }
+ assert.equal(await evaluate(`document.querySelector('.composer-mode').dataset.mode`),value)
 }
+
 const approval=async name=>{
  await until(state,value=>{const pending=value?.items.find(item=>item.id===value.selected)?.build?.approval;return pending?.name===name&&pending.id!==previousApproval},'approval '+name)
  await until(()=>evaluate(`(()=>{const node=[...document.querySelectorAll('button')].find(node=>node.textContent==='允许本次');return node&&!node.disabled})()`),Boolean,'complete approval preview')

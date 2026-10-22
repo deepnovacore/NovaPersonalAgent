@@ -1,13 +1,17 @@
+import {z} from 'zod'
+import {resolve} from 'node:path'
+import {fileURLToPath} from 'node:url'
+import {MacNativeReader} from '../../connectors/macos/reader.js'
 import {randomUUID} from 'node:crypto'
 import {mkdir} from 'node:fs/promises'
 import {constrainBase64ImageToMaxSize,imageInfoOfBase64} from '@midscene/shared/img'
 import {setTimeout as delay} from 'node:timers/promises'
 import {loadComputerConfig,type ComputerConfig} from '../../executors/computer-config.js'
 import {startComputerBackend} from '../../executors/computer-backend.js'
-import {computerForeground,guardComputerDevice,guiApproval,type ComputerTarget} from '../../executors/computer-device.js'
+import {computerForeground,connectComputerDevice} from '../../executors/computer-device.js'
 import {acquireDeviceLock,recordDeviceProcess,releaseDeviceLock,quarantineDeviceLock,type DeviceLock} from '../../executors/device-lock.js'
 import {acquireTaskResources,quarantineTaskResources} from '../../executors/task-resources.js'
-import {COMPUTER_IMAGE_LONG_EDGE,COMPUTER_RESOURCE,computerToolArguments,type ComputerToolName,type ToolImage} from './contract.js'
+import {computerApplicationSchema,COMPUTER_IMAGE_LONG_EDGE,COMPUTER_RESOURCE,computerToolArguments,type ComputerToolName,type ToolImage} from './contract.js'
 
 export interface ComputerSessionOptions {
  signal:AbortSignal
@@ -20,11 +24,12 @@ export interface ComputerSessionOptions {
 export class ComputerSession {
  readonly config:ComputerConfig
  private backend:Awaited<ReturnType<typeof startComputerBackend>>|undefined
- private guarded:Awaited<ReturnType<typeof guardComputerDevice>>|undefined
+ private guarded:Awaited<ReturnType<typeof connectComputerDevice>>|undefined
  private lock:DeviceLock|undefined
  private release:(()=>void)|undefined
  private image:ToolImage|undefined
  private observed=false
+ private selectedTarget:string|undefined
  private pendingAction:{name:ComputerToolName;point?:{x:number;y:number}}|undefined
  private unknown=false
  private closing:Promise<void>|undefined
@@ -43,28 +48,25 @@ export class ComputerSession {
    this.backend=await (options.backend??startComputerBackend)(config.displayId,options.signal,config.budgetMs,undefined,config.resourcesPath,config.clickHoldMs,config.macWindow)
    if(!this.backend.pid)throw Error('invalid_configuration')
    await recordDeviceProcess(this.lock,this.backend.pid)
-   const target=async():Promise<ComputerTarget>=>{
-    options.signal.throwIfAborted()
-    if(config.macWindow)return {displayId:config.displayId,...await this.backend!.windowTarget()}
-    const displays=await this.backend!.listDisplays()
-    if(displays.length!==1||displays[0]?.id!==config.displayId)throw Error('screen_changed')
-    return {displayId:config.displayId,...await (options.foreground??computerForeground)(options.signal)}
-   }
-   const baseline=await target()
-   if(!await guiApproval(options.approve('Connect',config.macWindow?{window:config.macWindow,app:'Safari',mode:'background',healthCheck:'window identity only',pointerInput:'brief AppKit keyboard-focus lease per Tap, restored before receipt'}:{displayId:config.displayId,healthCheck:'moves and restores pointer'}),options.signal))throw Error('declined')
-   if(JSON.stringify(await target())!==JSON.stringify(baseline))throw Error('screen_changed')
-   options.signal.throwIfAborted()
-   await this.backend.connect()
-   const size=await this.backend.device.size()
-   if(size.width!==baseline.width||size.height!==baseline.height)throw Error('screen_changed')
-   this.guarded=await guardComputerDevice(this.backend.device,target,{displayId:config.displayId,signal:options.signal,maxSteps:config.maxSteps,budgetMs:config.budgetMs,approve:options.approve,beforeWrite:()=>{const action=this.pendingAction;if(action)options.acting(action.name,action.point)},progress:()=>{ /* Build emits tool-scoped activity. */ }})
+   if(this.selectedTarget&&(await this.backend.windowTarget()).target!==this.selectedTarget)throw Error('screen_changed')
+   this.guarded=await connectComputerDevice(this.backend,config,{signal:options.signal,approve:options.approve,
+    ...(options.foreground?{foreground:options.foreground}:{}),beforeWrite:()=>{const action=this.pendingAction;if(action)options.acting(action.name,action.point)},
+    progress:()=>{ /* Build emits tool-scoped activity. */ }})
   }catch(error){
    if(error instanceof Error&&error.message==='cleanup_unknown')this.unknown=true
    await this.close()
    throw error
   }
  }
- async screenshot():Promise<ToolImage>{
+ async screenshot(application?:string):Promise<ToolImage>{
+  if(application!==undefined){
+   computerToolArguments.computer_screenshot.parse({application})
+   this.options.signal.throwIfAborted()
+   const resources=this.config.resourcesPath??(process as NodeJS.Process & {resourcesPath?:string}).resourcesPath??resolve(fileURLToPath(new URL('../../../../../clients/desktop/build/',import.meta.url)))
+   const result=z.object({pid:z.number().int().positive(),windowId:z.number().int().positive(),target:z.string().min(1),application:computerApplicationSchema}).parse(await new MacNativeReader(resources,'macos_gui').request({op:'applicationTarget',application},this.options.signal))
+   if(this.guarded&&this.selectedTarget!==result.target)throw Error('screen_changed')
+   this.config.macApplication=result.application;this.config.macWindow={pid:result.pid,windowId:result.windowId};this.selectedTarget=result.target
+  }
   await this.connect()
   if((this.config.settleMs??0)>0)await delay(this.config.settleMs,undefined,{signal:this.options.signal})
   const raw=await this.guarded!.device.screenshotBase64()
@@ -72,6 +74,12 @@ export class ComputerSession {
   const info=await imageInfoOfBase64(image)
   this.options.signal.throwIfAborted()
   this.image={media_type:image.startsWith('data:image/jpeg;')?'image/jpeg':'image/png',data_base64:image.slice(image.indexOf(',')+1),width:info.width,height:info.height,captured_at:new Date().toISOString()}
+  if(this.config.macWindow&&this.selectedTarget){
+   const resources=this.config.resourcesPath??(process as NodeJS.Process & {resourcesPath?:string}).resourcesPath??resolve(fileURLToPath(new URL('../../../../../clients/desktop/build/',import.meta.url)))
+   const editor=await new MacNativeReader(resources,'macos_gui').request({...this.config.macWindow,op:'editor',target:this.selectedTarget},this.options.signal)
+   if(editor.native_ui)this.image={...this.image,native_ui:z.object({source:z.literal('accessibility'),content:z.array(z.object({role:z.string().max(100),text:z.string().max(600),url:z.string().max(1000)})).max(80),truncated:z.boolean()}).parse(editor.native_ui)}
+   if(editor.available===true)this.image={...this.image,native_editor:z.object({role:z.string().max(100),value:z.string().max(400),source:z.literal('accessibility')}).parse(editor)}
+  }
   this.guarded!.planning();this.observed=true
   return this.image
  }
@@ -90,7 +98,7 @@ export class ComputerSession {
   if(!action?.paramSchema)throw Error('invalid_params')
   const params=name==='computer_click'?{locate}:name==='computer_type'&&'text' in input?{value:input.text}
    :name==='computer_key'&&'keys' in input?{keyName:input.keys}
-   :name==='computer_scroll'&&'amount' in input?{locate,direction:input.direction,scrollType:'singleAction',distance:Math.max(1,Math.min(size.width,size.height)*input.amount/10)}:{}
+   :name==='computer_scroll'?(()=>{const scroll=computerToolArguments.computer_scroll.parse(args);return {locate,direction:scroll.direction,scrollType:'singleAction',distance:Math.max(1,Math.min(size.width,size.height)*scroll.amount/10)}})():{}
   action.paramSchema.parse(params)
   this.pendingAction={name,...(point?{point}:{})}
   try{await action.call(params);this.guarded.planning()}catch(error){this.observed=false;if(error instanceof Error&&error.message==='cleanup_unknown')this.unknown=true;throw error}

@@ -5,7 +5,7 @@ import {z} from 'zod'
 import {resizeBase64ImageToJpeg,convertImgBufferToJpeg} from '@midscene/shared/img'
 import {jsonValueSchema,type JsonValue} from '../core/events.js'
 import {validateToolImage,type CascadedLlmInput} from '../realtime/cascaded/llm.js'
-import type {ToolImage} from './computer-use/contract.js'
+import {computerApplicationSchema,type ToolImage} from './computer-use/contract.js'
 import type {LocalShellProcess} from './local-shell.js'
 
 export const planSchema=z.object({id:z.string(),version:z.number().int().positive(),title:z.string().min(1).max(120),content:z.string().min(1).max(131072),conversation_id:z.string(),generation:z.number().int().nonnegative(),created_at:z.string(),publication_key:z.string().optional()}).strict()
@@ -29,6 +29,15 @@ export function emptyWorkbenchCheckpoint(conversation_id:string,generation:numbe
 const storeOperations=new Map<string,Promise<void>>()
 export class WorkbenchStore {
  constructor(readonly root:string){}
+ async computerApplicationAllowed(application:unknown):Promise<boolean>{
+  const app=computerApplicationSchema.parse(application),key=JSON.stringify([app.bundleId,app.path]);
+  const saved=await this.#read(this.#file('computer-app-consent',key),8192);
+  return saved!==null&&JSON.stringify(saved)===JSON.stringify({bundleId:app.bundleId,path:app.path,allowed:true})
+ }
+ async allowComputerApplication(application:unknown):Promise<void>{
+  const app=computerApplicationSchema.parse(application),key=JSON.stringify([app.bundleId,app.path]);
+  await this.#write(this.#file('computer-app-consent',key),{bundleId:app.bundleId,path:app.path,allowed:true})
+ }
  #file(kind:string,id:string):string{return join(this.root,kind+'-'+createHash('sha256').update(id).digest('hex')+'.json')}
  async #io<T>(path:string,operation:()=>Promise<T>):Promise<T>{
   const key=process.platform==='win32'?resolve(path).toLowerCase():resolve(path)
@@ -57,7 +66,7 @@ export class WorkbenchStore {
   const bytes=Buffer.from(image.data_base64,'base64'),ref=createHash('sha256').update(bytes).update(JSON.stringify({...image,data_base64:''})).digest('hex')+'.'+(image.media_type==='image/png'?'png':'jpeg')
   const path=this.#imagePath(id,generation,ref)
   await this.#writeBytes(path,bytes)
-  await this.#write(path+'.json',{...image,data_base64:undefined})
+  await this.#write(path+'.json',{media_type:image.media_type,width:image.width,height:image.height,captured_at:image.captured_at})
   return ref
  }
  async loadImage(id:string,generation:number,ref:string):Promise<ToolImage>{

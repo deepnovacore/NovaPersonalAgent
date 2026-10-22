@@ -22,7 +22,7 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
   const nativeRoot = macWindow ? resources ?? resolve(fileURLToPath(new URL('../../../../clients/desktop/build/', import.meta.url))) : undefined
   const focusReader = nativeRoot ? new MacNativeReader(nativeRoot, 'macos_gui') : undefined
   const focusSchema = z.object({focus: z.object({pid: z.number().int().positive().max(2147483647), windowId: z.number().int().positive().max(4294967295), started: z.number().finite().positive()}), targetStarted: z.number().finite().positive()})
-  let focusLease: (z.infer<typeof focusSchema> & {clickGroup: number}) | undefined
+  let focusLease: (z.infer<typeof focusSchema> & {clickGroup: number; releasePointer: boolean; releaseKey?: string}) | undefined
   let pointerReleaseNeeded = false, keyboardReleaseNeeded: string | undefined
   const temporary = mkdtempSync(join(tmpdir(), 'nova-gui-input-'))
   const environment: Record<string, string> = {TMPDIR: temporary, TEMP: temporary, TMP: temporary, ELECTRON_RUN_AS_NODE: '1'}
@@ -51,13 +51,13 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
   let buffer = ''
   const receive = (message: unknown) => {
     if (!message || typeof message !== 'object') return
-    const result = message as {id?: unknown; ok?: unknown; value?: unknown}
+    const result = message as {id?: unknown; ok?: unknown; value?: unknown; detail?:unknown}
     if (typeof result.id !== 'number') return
     const entry = pending.get(result.id)
     if (!entry) return
     pending.delete(result.id); clearTimeout(entry.timer); signal.removeEventListener('abort', entry.abort)
     if (result.ok === true) entry.resolve(result.value)
-    else {entry.reject(new Error(entry.write ? 'cleanup_unknown' : 'action_failed')); stop()}
+    else {entry.reject(new Error(entry.write ? 'cleanup_unknown' : 'action_failed',{cause:typeof result.detail==='string'&&/^native_gui:[a-z_]{1,80}$/u.test(result.detail)?new Error(result.detail):undefined})); stop()}
   }
   child.stdout.on('data', (chunk: Buffer) => {
     buffer += chunk.toString('utf8')
@@ -86,7 +86,7 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
     if (!await child.waitTreeGone(2000)) return false
     if (focusLease && focusReader && macWindow) {
       try {
-        const restored = await focusReader.request({...macWindow, op: 'focusRestore', releasePointer: true, ...focusLease}, AbortSignal.timeout(2000))
+        const restored = await focusReader.request({...macWindow, op: 'focusRestore', ...focusLease}, AbortSignal.timeout(2000))
         if (restored.restored !== true) return false
         focusLease = undefined
       } catch {return false}
@@ -121,12 +121,12 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
       return value
     }, actionSpace: () => Object.entries(schemas).map(([name, paramSchema]) => ({name, description: descriptions[name] ?? name, paramSchema,
       call: async (params: unknown) => {
-        if (name === 'Tap' && focusReader && macWindow) {
-          const lease = {...focusSchema.parse(await focusReader.request({...macWindow, op: 'focusSnapshot'}, signal)), clickGroup: randomInt(1, 2147483647)}
+        if (['Tap', 'Input', 'KeyboardPress'].includes(name) && focusReader && macWindow) {
+          const lease = {...focusSchema.parse(await focusReader.request({...macWindow, op: 'focusSnapshot'}, signal)), clickGroup: randomInt(1, 2147483647), releasePointer: name === 'Tap', ...(name === 'KeyboardPress' ? {releaseKey: actionKeyboardPressParamSchema.parse(params).keyName} : name === 'Input' ? {releaseKey: 'unicode'} : {})}
           if (closed || signal.aborted) throw Error('cancelled')
-          focusLease = lease // Host survives worker teardown and restores before releasing ownership.
+          focusLease = lease // Host survives worker teardown and releases targeted input before ownership.
           const receipt = await request(name, {...params as object, focusLease: lease}, true) as {restored?: unknown}
-          if (receipt?.restored !== true) {stop(); throw Error('cleanup_unknown')}
+          if (name === 'Tap' && receipt?.restored !== true) {stop(); throw Error('cleanup_unknown')}
           focusLease = undefined
         } else {
           if (!macWindow && name === 'Tap') pointerReleaseNeeded = true

@@ -16,18 +16,18 @@ async function fixture(approve:(name:string)=>Promise<boolean>=()=>Promise.resol
  const root=await mkdtemp(join(tmpdir(),'computer-session-'))
  const image='data:image/png;base64,'+(await sharp({create:{width:2560,height:1440,channels:3,background:'white'}}).png().toBuffer()).toString('base64')
  let target='window-one',closed=0,connected=0,cleanup=true
- let closeGate=Promise.resolve(),writeFailure=false
+ let closeGate=Promise.resolve(),writeFailure=false,afterWrite=()=>{}
  const acting:string[]=[],events:string[]=[],points:({x:number;y:number}|undefined)[]=[]
  const writes:{name:string;params:unknown}[]=[],approvals:string[]=[]
  const backend:Awaited<ReturnType<typeof startComputerBackend>>={
   pid:process.pid,device:{interfaceType:'computer',size:()=>Promise.resolve({width:1024,height:576}),screenshotBase64:()=>Promise.resolve(image),
-   actionSpace:()=>['Tap','Input','Scroll','KeyboardPress'].map(name=>({name,paramSchema:name==='Tap'?actionTapParamSchema:name==='Input'?z.object({value:z.string()}):name==='Scroll'?actionScrollParamSchema:actionKeyboardPressParamSchema,call:(params:unknown)=>{events.push('input');writes.push({name,params});return writeFailure?Promise.reject(Error('cleanup_unknown')):Promise.resolve()}}))},
+   actionSpace:()=>['Tap','Input','Scroll','KeyboardPress'].map(name=>({name,paramSchema:name==='Tap'?actionTapParamSchema:name==='Input'?z.object({value:z.string()}):name==='Scroll'?actionScrollParamSchema:actionKeyboardPressParamSchema,call:(params:unknown)=>{events.push('input');writes.push({name,params});afterWrite();return writeFailure?Promise.reject(Error('cleanup_unknown')):Promise.resolve()}}))},
   connect:()=>{connected++;return Promise.resolve()},listDisplays:()=>Promise.resolve([{id:'1'}]),close:async()=>{closed++;await closeGate;return cleanup},
   windowTarget:()=>Promise.resolve({target,width:1024,height:576}),releaseInput:()=>Promise.resolve(),
  }
  const session=new ComputerSession({signal:new AbortController().signal,config:{displayId:'1',lockRoot:root,baseUrl:'https://example.test',apiKey:'test',model:'test',modelFamily:'qwen3-vl',maxSteps:10,budgetMs:1000,settleMs:0},
   backend:()=>Promise.resolve(backend),foreground:()=>Promise.resolve({target,width:1024,height:576}),approve:name=>{approvals.push(name);return approve(name)},acting:(name,point)=>{events.push('acting');acting.push(name);points.push(point)}})
- return {session,writes,approvals,acting,events,points,failWrite:()=>{writeFailure=true},setTarget:(value:string)=>{target=value},setCleanup:(value:boolean)=>{cleanup=value},delayClose:(gate:Promise<void>)=>{closeGate=gate},connected:()=>connected,closed:()=>closed,
+ return {session,writes,approvals,acting,events,points,afterWrite:(effect:()=>void)=>{afterWrite=effect},failWrite:()=>{writeFailure=true},setTarget:(value:string)=>{target=value},setCleanup:(value:boolean)=>{cleanup=value},delayClose:(gate:Promise<void>)=>{closeGate=gate},connected:()=>connected,closed:()=>closed,
   dispose:async()=>{await session.close().catch(()=>{ /* test asserts cleanup errors separately */ });releaseQuarantinedTaskResources([COMPUTER_RESOURCE]);await rm(root,{recursive:true,force:true})}}
 }
 test('computer tools restrict non-vision models to delegation',{timeout:5000},()=>{
@@ -84,5 +84,22 @@ test('ambiguous input remains quarantined even when backend cleanup succeeds',{t
   await assert.rejects(f.session.action('computer_click',{x:10,y:10}),/cleanup_unknown/)
   await assert.rejects(f.session.close(),/cleanup_unknown/)
   assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),true)
+ }finally{await f.dispose()}
+})
+
+test('whole-screen Connect approval may change foreground before the first observation',{timeout:5000},async()=>{
+ const f=await fixture(name=>{if(name==='Connect')f.setTarget('approval-window');return Promise.resolve(true)})
+ try{await f.session.screenshot();assert.equal(f.connected(),1);await f.session.action('computer_click',{x:10,y:10});assert.equal(f.writes.length,1)}
+ finally{await f.dispose()}
+})
+
+test('an intentional app switch accepts a fresh screenshot and targets the new app',{timeout:5000},async()=>{
+ const f=await fixture()
+ try{
+  await f.session.screenshot();f.afterWrite(()=>f.setTarget('launched-app'))
+  await f.session.action('computer_key',{keys:'cmd+tab'})
+  await f.session.screenshot()
+  await f.session.action('computer_click',{x:10,y:10})
+  assert.deepEqual(f.writes.map(write=>write.name),['KeyboardPress','Tap'])
  }finally{await f.dispose()}
 })

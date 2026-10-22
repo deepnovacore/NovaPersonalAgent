@@ -8,6 +8,10 @@ import type {CameraCaptureRequest} from '../src/desktop.js'
 
 test('only verified model and adapter pairs enable conversation images', () => {
   assert.equal(supportsVision('qwen', 'qwen3-vl-plus'), true)
+  assert.equal(supportsVision('deepseek', 'deepseek-flash'), true)
+  assert.equal(supportsVision('openai-compatible', 'gpt-6-sol'), true)
+  assert.equal(supportsVision('openai-compatible', 'unknown-vl'), false)
+  assert.equal(supportsVision('deepseek', 'deepseek-v4-pro'), false)
   assert.equal(supportsVision('ark', 'doubao-seed-2-0-pro-260215'), true)
   for (const model of ['qwen-audio-3.0-realtime', 'qwen-flash', 'unknown-vl']) assert.equal(supportsVision('qwen', model), false)
   assert.equal(supportsVision('other', 'qwen3-vl-plus'), false)

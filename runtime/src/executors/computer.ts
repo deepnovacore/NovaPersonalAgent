@@ -6,7 +6,7 @@ import type {AgentController, AgentRuntimeDispatchPort} from './agent-controller
 import {startComputerBackend} from './computer-backend.js'
 import {GuiExecutionLifecycle} from './gui-execution.js'
 import {runGui, validGuiConfig, type GuiProgress} from './gui-runner.js'
-import {guardComputerDevice, guiApproval, computerForeground, validComputerDisplayId} from './computer-device.js'
+import {connectComputerDevice, computerForeground, validComputerDisplayId} from './computer-device.js'
 
 interface ComputerOptions {beforeWrite?: () => void; capture?: (image: string, steps: number) => void; diagnostic?: (message: string) => void; signal: AbortSignal; recordProcess?: (pid: number) => Promise<void>; approve: (name: string, params: unknown) => Promise<boolean>; progress: (event?: GuiProgress) => void}
 export const COMPUTER_DESCRIPTOR = Object.freeze({name: 'computer', summary:
@@ -21,34 +21,17 @@ export async function runComputer(config: ComputerConfig, instruction: string, o
   }
   const signal = AbortSignal.any([options.signal, AbortSignal.timeout(config.budgetMs)])
   let backend: Awaited<ReturnType<typeof startComputerBackend>> | undefined
-  let guarded: Awaited<ReturnType<typeof guardComputerDevice>> | undefined
+  let guarded: Awaited<ReturnType<typeof connectComputerDevice>> | undefined
   let unknown = false
   const result = {code: 'invalid_configuration', steps: 0}
   try {
     backend = await startComputerBackend(config.displayId, signal, config.budgetMs, undefined, config.resourcesPath, config.clickHoldMs, config.macWindow)
     if (!backend.pid) throw new Error('invalid_configuration')
     await options.recordProcess?.(backend.pid)
-    const target = async () => {
-      signal.throwIfAborted()
-      if (config.macWindow) return {displayId: config.displayId, ...await backend!.windowTarget()}
-      const displays = await backend!.listDisplays()
-      if (displays.length !== 1 || displays[0]?.id !== config.displayId) throw new Error('screen_changed')
-      return {displayId: config.displayId, ...await computerForeground(signal)}
-    }
-    const baseline = await target()
-    if (!await guiApproval(options.approve('Connect', config.macWindow ? {window: config.macWindow, app: 'Safari', mode: 'background', healthCheck: 'window identity only', pointerInput: 'brief AppKit keyboard-focus lease per Tap, restored before receipt'} : {displayId: config.displayId, healthCheck: 'moves and restores pointer'}), signal)) {
-      return Object.assign(result, {code: 'declined', steps: 0})
-    }
-    if (JSON.stringify(await target()) !== JSON.stringify(baseline)) return Object.assign(result, {code: 'screen_changed', steps: 0})
-    signal.throwIfAborted()
-    options.beforeWrite?.()
-    await backend.connect()
-    const size = await backend.device.size()
-    if (size.width !== baseline.width || size.height !== baseline.height) throw new Error('screen_changed')
-    guarded = await guardComputerDevice(backend.device, target, {...options, signal, displayId: config.displayId,
-      maxSteps: config.maxSteps, budgetMs: config.budgetMs, screenshotScrollDistance: config.modelFamily.startsWith('auto-glm'), progress: options.progress})
+    guarded = await connectComputerDevice(backend, config, {...options, signal, foreground: computerForeground,
+      ...(options.beforeWrite ? {beforeConnect: options.beforeWrite} : {}), screenshotScrollDistance: config.modelFamily.startsWith('auto-glm')})
     const code = await runGui(instruction, guarded.device, {...config, signal, steps: guarded.steps, planning: guarded.planning,
-      progress: options.progress, ...(options.capture ? {capture: options.capture} : {}), ...(options.diagnostic ? {diagnostic: options.diagnostic} : {}), context: `Current OS is ${process.platform === 'darwin' ? 'macOS; use Command for select-all and paste shortcuts' : 'Windows; use Control for shortcuts'}. ${config.macWindow ? 'This is a background Safari window. Never raise or switch windows. Approved Tap briefly leases AppKit keyboard focus and restores the current front window; do not use other focus operations. KeyboardPress supports only Command+A, Meta+A, Return, Enter, Tab, Escape and Backspace.' : ''} Use only Tap, Input, one Scroll and KeyboardPress. Tap a field before Input. Input appends to the focused field and must omit locate; KeyboardPress must omit locate. Scroll must use singleAction and distance no larger than the screen. All coordinates are in the provided screen. Do not run shell commands.`})
+      progress: options.progress, ...(options.capture ? {capture: options.capture} : {}), ...(options.diagnostic ? {diagnostic: options.diagnostic} : {}), context: `Current OS is ${process.platform === 'darwin' ? 'macOS; use Command for select-all and paste shortcuts' : 'Windows; use Control for shortcuts'}. ${config.macWindow ? 'This is a bound background application window. Never raise or switch windows. Use supported AX operations or window-targeted events without changing the user\'s foreground app. KeyboardPress supports only Command+A, Meta+A, Return, Enter, Tab, Escape and Backspace.' : ''} Use only Tap, Input, one Scroll and KeyboardPress. Tap a field before Input. Input appends to the focused field and must omit locate; KeyboardPress must omit locate. Scroll must use singleAction and distance no larger than the screen. All coordinates are in the provided screen. Do not run shell commands.`})
     const returned = guarded.failure() ?? code
     unknown = returned === 'cleanup_unknown'
     return Object.assign(result, {code: unknown ? returned : signal.aborted ? options.signal.aborted ? 'cancelled' : 'timeout' : returned, steps: guarded.steps()})
@@ -59,7 +42,10 @@ export async function runComputer(config: ComputerConfig, instruction: string, o
       : ['declined', 'screen_changed', 'needs_user_action', 'action_failed'].includes(reason) ? reason : 'invalid_configuration', steps: guarded?.steps() ?? 0})
   } finally {
     // Kill the SDK process group on every exit; unknown writes still retain device quarantine.
-    if (backend && !await backend.close()) result.code = 'cleanup_unknown'
+    if (backend) {
+      try {if (!await backend.close()) result.code = 'cleanup_unknown'}
+      catch {result.code = 'cleanup_unknown'}
+    }
   }
 }
 

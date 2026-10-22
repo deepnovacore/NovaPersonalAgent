@@ -498,6 +498,7 @@ test('Build Connect approval is required even when per-input approval is never',
   const id=await f.build()
   const pending=await until(()=>buildView(f.host,id).approval,value=>!!value)
   assert.equal(pending!.name,'computer_connect');assert.equal(connected,false)
+  assert.ok(f.frames.some(frame=>frame.type==='computer_use'&&frame.state==='active'))
   await f.command('build.approve',{id,approval_id:pending!.id,approved:true})
   await f.host.waitConversation(id);assert.equal(connected,true);assert.equal(actions,1)
   const frames=f.frames.filter(frame=>frame.type==='computer_use');assert.ok(frames.every(frame=>frame.conversation_id===id));assert.deepEqual(frames.map(frame=>frame.state),['active','acting','active','idle']);assert.deepEqual(frames[1]?.point,{x:0,y:0})
@@ -548,7 +549,7 @@ test('Stop interrupts a computer input and Resume observes before writing withou
  },'never',undefined,options=>({
   screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
   action:async()=>{
-   actions++
+   options.acting('computer_click',{x:0,y:0});actions++
    if(actions===1){started=true;await new Promise<void>(resolve=>options.signal.addEventListener('abort',()=>resolve(),{once:true}));options.signal.throwIfAborted()}
   },close:()=>{closed++;return Promise.resolve()},
  }))
@@ -676,5 +677,72 @@ test('successful click allows typing and Enter but requires observation for anot
  try{
   const id=await f.build();await f.host.waitConversation(id)
   assert.deepEqual(actions,['computer_click','computer_type','computer_key'])
+ }finally{await f.close()}
+})
+
+
+test('Build rejects async dispatch and refreshes computer tools after an in-turn switch change',{skip:!supported,timeout:10000},async t=>{
+ let enabled=false
+ const f=await fixture((request,step)=>{
+  assert.equal(request.tools.some(tool=>tool.name==='dispatch'),false)
+  if(step===0){assert.equal(request.tools.some(tool=>tool.name==='computer_screenshot'),false);return {call:{name:'monitor',arguments:{}}}}
+  assert.equal(request.tools.some(tool=>tool.name==='computer_screenshot'),true)
+  if(step===1)return {call:{name:'dispatch',arguments:{executor:'computer',instruction:'must not run'}}}
+  assert.equal((request.inputs.find(input=>input.kind==='tool_result')?.output as {code?:string})?.code,'tool_not_authorized')
+  return {text:'ready for synchronous computer use'}
+ },'never')
+ t.mock.method(f.host,'computerUseState',()=>({enabled,direct:enabled}))
+ f.bridge.invoke=()=>{enabled=true;return Promise.resolve({status:'observed'})}
+ try{const id=await f.build();await f.host.waitConversation(id);assert.equal(f.script.requests.length,3);assert.equal(f.host.tasks.list().length,0)}finally{await f.close()}
+})
+
+for(const operation of ['computer_screenshot','computer_click'] as const){
+ test(`Stop before ${operation} input is a clean pause`,{skip:!supported,timeout:10000},async()=>{
+  let pending=false,writes=0
+  const f=await fixture((_request,step)=>({call:{name:step===0?'computer_screenshot':'computer_click',arguments:step===0?{}:{x:0,y:0}}}),
+  'ask',undefined,options=>({
+   screenshot:async()=>{
+    if(operation==='computer_screenshot'){pending=true;await options.approve('Connect',{});options.signal.throwIfAborted()}
+    return {media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}
+   },
+   action:async()=>{pending=true;await options.approve('Tap',{});options.signal.throwIfAborted();options.acting('computer_click',{x:0,y:0});writes++},
+   close:()=>Promise.resolve(),
+  }))
+  f.host.computerUseState=()=>({enabled:true,direct:true})
+  try{
+   const id=await f.build();await until(()=>pending,value=>value);await f.command('build.stop',{id})
+   assert.equal(writes,0);assert.equal(buildView(f.host,id).status,'paused')
+   const checkpoint=await f.host.workbench.checkpoint(id,0)
+   assert.equal((checkpoint.calls.at(-1)?.result as {status:string}).status,'cancelled_before_execution')
+  }finally{await f.close()}
+ })
+}
+
+for(const decision of ['allow','always','deny','remembered'] as const)test(`native application consent ${decision} is scoped to binding and app identity`,{skip:!supported,timeout:15000},async()=>{
+ const app={name:'Fixture Editor',bundleId:'test.fixture.editor',path:'/Applications/Fixture Editor.app'}
+ let actions=0,observations=0
+ const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{application:app.name}}}:step===1?{call:{name:'computer_type',arguments:{text:'test'}}}:{text:'done'},'ask',undefined,options=>({
+  screenshot:async application=>{
+   assert.equal(application,app.name);observations++
+   if(!await options.approve('Connect',{mode:'background',application:app,window:{pid:123,windowId:456}}))throw Error('declined')
+   return {media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString(),native_editor:{role:'AXTextField',value:'今日美食',source:'accessibility'},native_ui:{source:'accessibility',content:Array.from({length:80},()=>({role:'AXStaticText',text:'x'.repeat(300),url:'https://example.test/results'})),truncated:true}}
+  },action:async()=>{assert.equal(await options.approve('Input',{value:'test'}),true);actions++},close:()=>Promise.resolve(),
+ }))
+ f.host.computerUseState=()=>({enabled:true,direct:true})
+ try{
+  if(decision==='remembered')await f.host.workbench.allowComputerApplication(app)
+  const id=await f.build()
+  if(decision!=='remembered'){
+   const pending=await until(()=>buildView(f.host,id).approval,value=>!!value)
+   assert.equal(pending!.name,'computer_connect');assert.equal(actions,0)
+   await f.command('build.approve',{id,approval_id:pending!.id,approved:decision!=='deny',...(decision==='always'?{always:true}:{})})
+  }
+  await f.host.waitConversation(id)
+  assert.equal(observations,1);assert.equal(actions,decision==='deny'?0:1)
+  if(decision!=='deny'){const checkpoint=await f.host.workbench.checkpoint(id,0);assert.deepEqual((checkpoint.calls[0]?.result as {native_editor:unknown}).native_editor,{role:'AXTextField',value:'今日美食',source:'accessibility'});assert.equal((checkpoint.calls[0]?.result as {native_ui:{content:{url:string}[]}}).native_ui.content[0]?.url,'https://example.test/results')}
+  const persisted=new WorkbenchStore(f.host.workbench.root)
+  assert.equal(await persisted.computerApplicationAllowed(app),decision==='always'||decision==='remembered')
+  assert.equal(await persisted.computerApplicationAllowed({...app,path:'/Other/Fixture Editor.app'}),false)
+  assert.equal(await persisted.computerApplicationAllowed({...app,bundleId:'test.other'}),false)
  }finally{await f.close()}
 })
