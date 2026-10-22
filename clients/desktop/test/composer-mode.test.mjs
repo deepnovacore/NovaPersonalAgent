@@ -18,9 +18,9 @@ function fixture(item){
   state:id=>{if(!drafts.has(id))drafts.set(id,{});return drafts.get(id)},
   command:async(method,params)=>{commands.push([method,params]);if(method==='conversations.mode')item.mode=params.mode}}
  const parent=el('div'),control=mountComposerMode(parent,{c,el,run:callback=>callback()})
- const root=parent.children[0],buttons=Object.fromEntries(root.children[0].children.slice(1).map(button=>[button.attributes['data-mode'],button]))
+ const root=parent.children[0],button=root.children[0]
  control.update()
- return {c,commands,control,root,buttons}
+ return {c,commands,control,root,button}
 }
 
 test('modes cycle Chat, Plan, Build, Delegate in both directions',()=>{
@@ -43,30 +43,30 @@ test('Shift+Tab steps through every mode with one host command per conversation-
 })
 
 test('Build and Delegate set the plan execution choice without starting anything',async()=>{
- const item={id:'chat:main',kind:'chat'},{c,commands,buttons,root}=fixture(item)
- buttons.delegate.listeners.click();await flush()
+ const item={id:'chat:main',kind:'chat'},{c,commands,control,button,root}=fixture(item)
+ await control.select('delegate');await flush()
  assert.equal(item.mode,'plan');assert.equal(c.state('chat:main').execution,'delegate');assert.equal(root.attributes['data-mode'],'delegate')
- buttons.build.listeners.click();await flush()
+ await control.select('build');await flush()
  assert.equal(c.state('chat:main').execution,'build');assert.equal(commands.length,1,'already in Plan')
  assert.ok(commands.every(([method])=>method==='conversations.mode'))
- assert.equal(buttons.build.attributes['aria-checked'],'true');assert.equal(buttons.plan.attributes['aria-checked'],'false')
- assert.equal(buttons.build.tabIndex,0);assert.equal(buttons.plan.tabIndex,-1)
+ assert.equal(button.textContent,'Build');assert.equal(root.children.length,1)
+ button.listeners.click();await flush();assert.equal(button.textContent,'Delegate')
 })
 
-test('arrow keys move within the group and Shift+Tab is left alone when switching is unavailable',async()=>{
- const item={id:'chat:main',kind:'chat'},{c,control,buttons,root}=fixture(item)
+test('arrow keys cycle the active mode and Shift+Tab is left alone when switching is unavailable',async()=>{
+ const item={id:'chat:main',kind:'chat'},{c,control,button,root}=fixture(item)
  let prevented=false
- buttons.chat.listeners.keydown({key:'ArrowLeft',preventDefault(){prevented=true}});await flush()
+ button.listeners.keydown({key:'ArrowLeft',preventDefault(){prevented=true}});await flush()
  assert.equal(prevented,true);assert.equal(root.attributes['data-mode'],'delegate')
  c.isVoiceConversation=true;control.update()
- assert.equal(control.cycle(),false);assert.equal(buttons.plan.disabled,true);assert.equal(root.attributes['aria-disabled'],'true')
+ assert.equal(control.cycle(),false);assert.equal(button.disabled,true);assert.equal(root.attributes['aria-disabled'],'true')
  c.isVoiceConversation=false;c.connected=false;control.update();assert.equal(control.cycle(),false)
 })
 
 test('a Build session shows Build locked and other kinds hide the control',()=>{
  const build=fixture({id:'b',kind:'build',build:{status:'running'}})
  assert.equal(build.root.hidden,false);assert.equal(build.root.attributes['data-mode'],'build')
- assert.equal(build.buttons.build.disabled,false);assert.equal(build.buttons.chat.disabled,true);assert.equal(build.control.cycle(),false)
- assert.equal(build.root.children[2].textContent,'Build 会话进行中')
+ assert.equal(build.button.disabled,true);assert.equal(build.button.textContent,'Build');assert.equal(build.control.cycle(),false)
+ assert.equal(build.button.title,'Build 会话进行中');assert.equal(build.root.children.length,1)
  for(const kind of ['proactive','schedule'])assert.equal(fixture({id:kind,kind}).root.hidden,true)
 })
