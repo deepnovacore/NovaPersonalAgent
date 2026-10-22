@@ -1001,6 +1001,8 @@ function receiveFrames(socket: WebSocket, count: number, label: string): Promise
       const bytes = Buffer.isBuffer(data)
         ? new Uint8Array(data)
         : new Uint8Array(Buffer.concat(Array.isArray(data) ? data : [Buffer.from(data)]))
+      // Background personal snapshots share the socket but are not voice/debug responses.
+      if (!binary && (JSON.parse(Buffer.from(bytes).toString('utf8')) as {type?: unknown}).type === 'personal.state') return
       frames.push({binary, bytes})
       if (frames.length === count) { cleanup(); resolve(frames) }
     }

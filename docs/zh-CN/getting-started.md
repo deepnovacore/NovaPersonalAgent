@@ -54,6 +54,8 @@ npm run start:client
 
 源码启动时，项目 `.env` 中的值优先于同名 shell 环境变量。修改 `.env` 后需重新启动桌面应用。
 
+桌面源码启动命令目前不提供热重载或文件监听。`start:client` 和 `start:workbench` 会先构建再启动；已有构建可用时，`npm run start:built --workspace @nova-personal-agent/desktop` 可以跳过构建快速启动。修改主进程、preload 或 runtime 后需要退出并重启；runtime 源码修改还需要重新构建。开发构建和缓存应放在已挂载的外置盘隔离目录。
+
 ## 3. 交办第一个任务
 
 [![Nova 在执行任务前澄清需求](../../assets/features/conversation-polished.png)](../../assets/features/conversation-polished.png)

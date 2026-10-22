@@ -24,3 +24,26 @@ test('title generation uses an ephemeral read-only thread and never returns its 
   assert.equal(calls.at(-1)?.method, 'thread/unsubscribe')
   assert.equal(calls.some(call => call.method === 'thread/name/set'), false)
 })
+
+test('local provider titles reuse its resolved model or inherit its configured default', async () => {
+  for (const model of ['custom-provider-model', null]) {
+    let listener: (method: string, params: Record<string, unknown>) => void = () => undefined
+    const calls: {method: string; params: Record<string, unknown>}[] = []
+    const title = await generateSessionTitle('Read-only review', {
+      model,
+      subscribe: callback => {listener = callback; return () => undefined},
+      request: (method, params) => {
+        calls.push({method, params})
+        if (method === 'thread/start') return Promise.resolve({thread: {id: 'provider-title'}})
+        if (method === 'turn/start') {
+          listener('item/completed', {threadId: 'provider-title', item: {type: 'agentMessage', text: '{"title":"Project review"}'}})
+          listener('turn/completed', {threadId: 'provider-title', turn: {status: 'completed'}})
+        }
+        return Promise.resolve({})
+      },
+    })
+    assert.equal(title, 'Project review')
+    assert.equal(calls[0]?.params.model, model ?? undefined)
+    assert.equal(Object.hasOwn(calls[0]!.params, 'model'), model !== null)
+  }
+})

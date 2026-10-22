@@ -62,8 +62,9 @@ test('guardian frames enforce exact UTF-8 byte limit, order, shape, and EOF', ()
 test('the force command is fixed and Windows fails closed without a packaged helper', async () => {
   assert.equal(new TextDecoder().decode(windowsGuardianForceFrame()), '{"type":"force","version":1}\n')
   const workspace = process.cwd()
+  const nodeBinary = await realpath(process.execPath)
   const spec = createCodexSpawnSpec({
-    binary: hostBinaryForTest(process.execPath),
+    binary: hostBinaryForTest(nodeBinary),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
     environment: {
@@ -181,6 +182,7 @@ test('packaged Windows guardian owns the fixed app-server command and rejects a 
   const output = new PassThrough()
   const error = new PassThrough()
   const control = new PassThrough()
+  const nodeBinary = await realpath(process.execPath)
   const child = Object.assign(new EventEmitter(), {
     stdin: input,
     stdout: output,
@@ -206,7 +208,7 @@ test('packaged Windows guardian owns the fixed app-server command and rejects a 
     assert.notEqual(factory, null)
     const workspace = await realpath(process.cwd())
     const spec = createCodexSpawnSpec({
-      binary: hostBinaryForTest(process.execPath),
+      binary: hostBinaryForTest(nodeBinary),
       workspace: hostWorkspaceForTest(workspace),
       codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
       environment: {
@@ -221,7 +223,7 @@ test('packaged Windows guardian owns the fixed app-server command and rejects a 
     assert.equal(owner.pid, 4242)
     assert.equal(launches[0]?.binary, await realpath(helper))
     assert.deepEqual(launches[0]?.argv.slice(0, 6), [
-      '--target', process.execPath, '--cwd', workspace, '--', process.execPath,
+      '--target', nodeBinary, '--cwd', workspace, '--', nodeBinary,
     ])
     control.write('{"type":"exit","version":1,"leaderExitCode":0,"treeEmpty":true}\n')
     child.emit('exit', 0)

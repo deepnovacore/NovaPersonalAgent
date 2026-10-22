@@ -1,6 +1,6 @@
 import {taskGrantService} from '../../personal-agent/tasks.js'
 import type {TaskDispatchContext} from '../../core/task-tools.js'
-import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources,taskResourcesUncertain} from '../task-resources.js'
+import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources,releaseQuarantinedTaskResources,taskResourcesUncertain,projectResourceKey} from '../task-resources.js'
 import {managedMcpResources,type ManagedCodexMcp} from './managed-mcp.js'
 import type {CodingTarget, CodingTargetPort, CodingTargetSelection} from '../../personal-agent/coding-targets.js'
 import {basename} from 'node:path'
@@ -112,6 +112,8 @@ interface RunSlot {
   live: CodexLiveAdapter | null
   task: Promise<ExecutorHandoff> | null
   cancelled: boolean
+  processStopped: boolean
+  resourcesQuarantined: boolean
 }
 
 interface ProjectRunInput {
@@ -174,7 +176,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   readonly #liveState: CodexAdapterSharedState = createCodexAdapterSharedState()
   readonly #status = new CodexLiveAdapter(NULL_TRANSPORT, undefined, {sharedState: this.#liveState})
   readonly #confirmedBindings = new WeakMap<object, ConfirmedDelegateBinding>()
-  readonly #retainedTransportCleanups = new Set<CodexAppServerTransport>()
+  readonly #retainedTransportCleanups = new Map<CodexAppServerTransport, {slot: RunSlot; keys: readonly string[]; codex: boolean}>()
   readonly #resourceKeys:readonly string[]|null
   readonly #slotWaiters=new Set<()=>void>()
   taskResource():string|null{return this.#resourceKeys?.length===1?this.#resourceKeys[0]!:null}
@@ -668,12 +670,16 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   ): Promise<ExecutorHandoff> {
     if (this.#closed) return failureHandoff('closed', 'run')
     if(this.#resourceKeys===null)return failureHandoff('computer_resource_unavailable','run')
+    // A failed close may own the resource quarantine. Retry it before waiting on that same lock.
+    try { await this.#drainRetainedTransportCleanups() }
+    catch { return failureHandoff('transport_failure', 'run') }
+    const resourceKeys=[...this.#resourceKeys,projectResourceKey(workspace.canonical_path)]
     const busy=()=>this.#slots.has(workspace.workspace_id)?'busy_project':this.#slots.size>=MAX_CONCURRENT_WORK?'capacity':null
     if(!context.resourceWaiting&&busy()){const existing=this.#slots.get(workspace.workspace_id);return existing?refusedRunHandoff('busy_project',{project:workspace.display_name,work_id:existing.work.work_id,title:existing.work.title}):refusedRunHandoff('capacity',{running:this.running().map(work=>({...work}))})}
     let release:(()=>void)|undefined
-    if(this.#resourceKeys.length){
-      if(taskResourcesBusy(this.#resourceKeys))await context.resourceWaiting?.(taskResourcesUncertain(this.#resourceKeys)?'computer_resource_uncertain':'computer_resource_busy')
-      release=await acquireTaskResources(this.#resourceKeys,context.signal)
+    if(resourceKeys.length){
+      if(taskResourcesBusy(resourceKeys))await context.resourceWaiting?.(taskResourcesUncertain(resourceKeys)?'project_resource_uncertain':'project_resource_busy')
+      release=await acquireTaskResources(resourceKeys,context.signal)
     }
     try{
       while(busy()){
@@ -697,6 +703,8 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       live: null,
       task: null,
       cancelled: false,
+      processStopped: true,
+      resourcesQuarantined: false,
     }
     this.#slots.set(workspace.workspace_id, slot)
     if (this.#taskWorkspaces.size >= 64) {
@@ -708,11 +716,11 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     slot.task = task
     try {
       const result=await task
-      if(result.outcome==='unknown'||this.#retainedTransportCleanups.size){quarantineTaskResources(this.#resourceKeys);release=undefined}
+      if((result.outcome==='unknown'&&!slot.processStopped)||this.#retainedTransportCleanups.size){quarantineTaskResources(resourceKeys);slot.resourcesQuarantined=true;release=undefined}
       return result
     } catch (error) {
       if (error instanceof ProjectStateError) return projectProblemHandoff(error.code)
-      quarantineTaskResources(this.#resourceKeys);release=undefined
+      if(!slot.processStopped||this.#retainedTransportCleanups.size){quarantineTaskResources(resourceKeys);slot.resourcesQuarantined=true;release=undefined}
       throw error
     } finally {
       context.signal.removeEventListener('abort', onAbort)
@@ -1080,6 +1088,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       // prior display title during the process-construction window.
       if (backend.backend_id !== 'codex') slot.work = {...slot.work, backend_id: backend.backend_id}
       await this.#refreshProjectContextBarrier()
+      slot.processStopped = false
       inner = this.#transportFactory.create(Object.freeze({
         workspace: approvedWorkspace,
         codexHome,
@@ -1154,10 +1163,13 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       slot.live = null
       try {
         await active.close()
+        // An unknown task result still needs reconciliation, but a verified stopped Codex tree
+        // no longer owns the physical project/computer resources.
+        if (codex) slot.processStopped = true
       } catch {
         // Completion evidence is already terminal. Retain cleanup ownership and fence the next
         // process until the transport's retryable close path succeeds.
-        this.#retainedTransportCleanups.add(transport)
+        this.#retainedTransportCleanups.set(transport, {slot, codex, keys: [...(this.#resourceKeys ?? []), projectResourceKey(workspace.canonical_path)]})
       }
       if (resumed === null) {
         if (reportedThreadId !== null && !bindingMismatch) {
@@ -1260,9 +1272,16 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
 
   async #drainRetainedTransportCleanups(): Promise<void> {
     let firstFailure: Error | null = null
-    for (const transport of [...this.#retainedTransportCleanups]) {
+    for (const [transport, cleanup] of [...this.#retainedTransportCleanups]) {
       try {
         await transport.close('shutdown')
+        if (cleanup.codex) {
+          cleanup.slot.processStopped = true
+          if (cleanup.slot.resourcesQuarantined) {
+            cleanup.slot.resourcesQuarantined = false
+            releaseQuarantinedTaskResources(cleanup.keys)
+          }
+        }
         this.#retainedTransportCleanups.delete(transport)
       } catch (error) {
         firstFailure ??= projectCloseError(error)

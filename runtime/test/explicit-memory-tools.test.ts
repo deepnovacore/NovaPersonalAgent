@@ -19,7 +19,7 @@ import {hostContextItemSchema,type HostContextItem,type RealtimeProvider} from '
 import {setTimeout as delay} from 'node:timers/promises'
 
 test('model tool saves through the real ledger and a fresh conversation reads it; stale authority and invented quotes cannot write',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-memory-tools-'))
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-memory-tools-'))
  const resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'ledger.sqlite')),userId:'test',model:'fixture',gateway:{async *stream(){await Promise.reject(Error('no model'))},complete(){throw Error('no model')}},inputConsent:true,conversationProviders:['chat']})
  const tools=compileToolSchema([],{includeMemoryRecall:true,includeExplicitMemory:true})
  let serial=0

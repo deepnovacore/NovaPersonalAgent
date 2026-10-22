@@ -240,18 +240,26 @@ test('pending duplicate aborts immediately, timeout aborts, and expired allocati
 })
 
 test('ping/pong keeps live peers and closes silent network peers', {timeout: 5000}, async t => {
+  t.mock.timers.enable({apis: ['setInterval']})
   const server = new AoqChatServer({token, port: 0, heartbeatMs: 30, issueCredential: () => Promise.resolve(allocation)})
   t.after(() => server.close())
   const {port} = await server.start()
   const silent = await peer(port, false)
   hello(silent.socket)
   await silent.next()
+  const silentPing = once(silent.socket, 'ping')
+  t.mock.timers.tick(30);await silentPing
+  t.mock.timers.tick(30)
   assert.equal((await silent.closed)[0], 1006)
   const live = await peer(port)
   hello(live.socket)
   await live.next()
-  await once(live.socket, 'ping')
-  await once(live.socket, 'ping')
+  for (let i = 0; i < 2; i++) {
+    const ping = once(live.socket, 'ping')
+    t.mock.timers.tick(30);await ping
+    // A round-trip ping proves the server consumed the preceding automatic pong.
+    const pong = once(live.socket, 'pong');live.socket.ping();await pong
+  }
   assert.equal(live.socket.readyState, WebSocket.OPEN)
 })
 

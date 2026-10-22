@@ -8,9 +8,40 @@ function harness({start,autoVoice=true}={}){
  c.connect();c.receive({type:'desktop.capabilities',input_instance_id:'host-A',capabilities:['text_input','dictation']});snapshot()
  return {c,sent,snapshot,get starts(){return starts},get stops(){return stops}}
 }
+test('model failures show safe actionable details in the owning conversation',()=>{
+ const {c}=harness()
+ c.receive({type:'conversation.error',conversation_id:'b',error:'response_failed',reason:'model_protocol_tool_arguments_json'})
+ assert.match(c.state('b').error,/JSON/);assert.equal(c.state('a').error,'')
+ c.receive({type:'conversation.error',conversation_id:'b',error:'response_failed',reason:'model_protocol_choice_delta'})
+ assert.equal(c.state('b').error,'模型回复格式异常，请重试。')
+ c.receive({type:'conversation.error',conversation_id:'b',error:'response_failed',reason:'private provider error with a token'})
+ assert.equal(c.state('b').error,'回复失败，请重试。')
+ c.receive({type:'conversation.error',conversation_id:'b',error:'response_failed'})
+ assert.equal(c.state('b').error,'回复失败，请重试。')
+})
+
 test('opening and changing text conversations never starts capture; drafts stay scoped',()=>{
  const h=harness();h.c.draft='A draft';h.snapshot('b');assert.equal(h.c.draft,'');h.c.draft='B draft';h.snapshot('a');assert.equal(h.c.draft,'A draft');assert.equal(h.starts,0)
  const revision=h.c.snapshot.revision;h.c.receive({type:'personal.state',revision:revision-1,conversations:{selected_id:'stale'}});assert.equal(h.c.selectedId,'a')
+})
+test('only owned valid conversation receipts update the snapshot, while task progress waits for state',async()=>{
+ const {c,sent}=harness();c.draft='keep current draft'
+ const original=c.snapshot
+ for(const data of [{selected_id:'b',items:[null]},{selected_id:'missing',items:[{id:'a'}]},{selected_id:'b',items:[{id:'b'},{id:'b'}]}]){
+  const pending=c.command('conversations.mode',{id:'a',mode:'plan'})
+  c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:true,data});await pending
+  assert.equal(c.snapshot,original)
+ }
+ const data={...original.conversations,selected_id:'b'}
+ c.receive({type:'personal.result',request_id:'unowned',ok:true,data});assert.equal(c.snapshot,original)
+ const opening=c.command('conversations.open_work',{work_id:'work'})
+ c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:true,data});assert.deepEqual(await opening,data)
+ assert.equal(c.selectedId,'a');assert.equal(c.draft,'keep current draft')
+ const updating=c.command('build.stop',{id:'a'})
+ const updated={...original.conversations,items:[{id:'a',kind:'build',build:{status:'paused'}}]}
+ c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:true,data:updated});await updating
+ assert.equal(c.selectedConversation.build.status,'paused','valid Build receipts still update controls without waiting for a broadcast')
+ c.disconnect()
 })
 test('two text conversations send concurrently and receipts affect only their own drafts',async()=>{
  const {c,sent,snapshot}=harness();c.draft='A request';await c.submit();const a=sent.at(-1);assert.equal(a.conversation_id,'a')
@@ -24,6 +55,18 @@ test('text sent for a named conversation goes there; text that cannot be sent is
  const h=harness();h.snapshot('b');h.c.draft='B draft'
  assert.equal(h.c.submitText('switch place','a'),true);assert.equal(h.sent.at(-1).conversation_id,'a');assert.equal(h.c.state('b').draft,'B draft')
  assert.equal(h.c.submitText('second','a'),false,'a pending submission blocks the next');assert.equal(h.c.state('a').draft,'second')
+})
+test('Build accepts steering messages while active and locks its composer only after finish_build',async()=>{
+ const sent=[],c=new PersonalController({send:frame=>{sent.push(frame);return true},start:async()=>{},stop:async()=>{}})
+ c.connect();c.receive({type:'desktop.capabilities',input_instance_id:'desktop',capabilities:['text_input']})
+ const state=(status,revision)=>c.receive({type:'personal.state',revision,conversations:{selected_id:'build',voice_id:null,items:[{id:'build',kind:'build',build:{status}}],messages:[]}})
+ state('awaiting_approval',1);c.draft='先检查审批中的消息'
+ assert.equal(await c.submit(),false);assert.equal(sent.length,0)
+ state('running',2);c.draft='请继续检查测试'
+ assert.equal(await c.submit(),true);assert.equal(sent.at(-1).conversation_id,'build');assert.equal(sent.at(-1).text,'请继续检查测试')
+ state('finished',3);c.draft='不应再发出'
+ assert.equal(await c.submit(),false);assert.equal(c.submitText('也不能再发','build'),false);assert.equal(c.draft,'不应再发出')
+ assert.equal(sent.filter(frame=>frame.type==='input.text').length,1)
 })
 test('voice owner blocks own text and all dictation, other text does not stop or steal capture',async()=>{
  const h=harness();await h.c.voice();assert.equal(h.starts,1);assert.equal(h.c.voiceId,'a');h.c.draft='blocked';assert.equal(await h.c.submit(),false)
@@ -219,4 +262,11 @@ test('a failed independent card request never replaces an existing draft referen
  const h=harness();h.snapshot('chat:main');const a={kind:'todo',id:'a',version:1},b={kind:'todo',id:'b',version:2};h.c.draft='Draft about A';h.c.state().references=[a]
  assert.equal(h.c.submitText('Plan B','chat:main',[b]),true);const request=h.sent.at(-1);h.c.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'stale_reference'});await new Promise(resolve=>setImmediate(resolve))
  assert.equal(h.c.draft,'Draft about A');assert.deepEqual(h.c.state().references,[a]);assert.equal(h.c.state().failed_card.text,'Plan B');assert.deepEqual(h.c.state().failed_card.references,[b]);h.c.disconnect()
+})
+
+test('every finished Build is locked, not just the first one in the list',()=>{
+ const {c}=harness()
+ const item=(id,status)=>({id,kind:'build',build:{status}})
+ c.receive({type:'personal.state',revision:1000,feed:[],memory:{entries:[]},conversations:{selected_id:'b2',voice_id:null,items:[item('b1','finished'),item('b2','finished'),item('b3','running'),{id:'chat',kind:'chat'}]}})
+ assert.deepEqual(['b1','b2','b3','chat'].map(id=>c.isBuildFinished(id)),[true,true,false,false])
 })

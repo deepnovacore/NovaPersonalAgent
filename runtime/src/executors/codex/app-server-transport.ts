@@ -1,4 +1,5 @@
 import type {ExecutorDiagnostic} from '../../core/executor-diagnostic.js'
+import type {WorkbenchPlan} from '../../personal-agent/workbench-store.js'
 import { Readable,Writable } from 'node:stream'
 import { managedMcpEnvironment,recordManagedMcpVisibility,type ManagedCodexMcp } from './managed-mcp.js'
 import { generateSessionTitle } from './session-title.js'
@@ -136,7 +137,13 @@ export interface SafePreflightReport extends Readonly<Record<string, unknown>> {
 /** Either the Codex sandbox certification or an ACP handshake, which certifies no sandbox. */
 export type CodingPreflightReport = SafePreflightReport | AcpPreflightReport
 
-export interface RunInput { readonly workOrder: string; readonly threadName?: string }
+export interface RunInput { readonly workOrder: string; readonly threadName?: string;readonly approvedPlan?:WorkbenchPlan }
+export function approvedPlanWorkOrder(input:RunInput):string{
+ if(!input.approvedPlan)return input.workOrder
+ const plan=input.approvedPlan
+ if(typeof plan.content!=='string'||!plan.content||plan.content.length>131072||!Number.isSafeInteger(plan.version)||plan.version<1)throw Error('invalid_approved_plan')
+ return input.workOrder+'\n\nUser-confirmed complete plan ('+plan.id+', version '+plan.version+'):\n'+plan.content
+}
 export interface SteerInput { readonly instruction: string }
 
 export interface TransportObserver {
@@ -304,6 +311,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
   #config: ValidatedCodexAppServerLaunchConfig
   readonly #processFactory: CodexProcessOwnerFactory
   #responsesProxy: string | undefined
+  #usesLocalProvider = false
   readonly #credentials: CredentialProvider
   readonly #preflightRunner: CodexHostPreflightRunner
   readonly #schemaProbe: CodexLiveSchemaProbe
@@ -438,6 +446,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     try {
       validateDeadline(deadline)
       workOrder = validateBoundedText(input.workOrder, CODEX_WORK_ORDER_LIMIT, 'transport_lost')
+      if(input.approvedPlan)workOrder=approvedPlanWorkOrder({...input,workOrder})
     } catch (error) {
       return outcome('refused', safeTransportError(error, 'transport_lost').code, false, null)
     }
@@ -547,7 +556,9 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       if (this.#config.generateTitles && input.threadName !== undefined) {
         const target = session
         const titleDeadline = {...deadline, expiresAtMs: Math.min(deadline.expiresAtMs, Date.now() + 12_000)}
+        const selectedModel = snapshotJsonRecord(target.threadResponse).model
         titleWork = generateSessionTitle(workOrder, {
+          ...(this.#usesLocalProvider ? {model: typeof selectedModel === 'string' ? selectedModel : null} : {}),
           mcpServers: Object.keys(this.#config.managedMcp?.servers ?? {}),
           signal: titleAbort.signal,
           request: async (method, params) => {
@@ -827,6 +838,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const identity = nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])
     if (certification !== undefined && certification.identity !== identity) throw new CodexTransportError('unsupported_protocol')
     const report = certification?.report ?? await this.#performPreflight(deadline)
+    this.#usesLocalProvider = snapshotJsonRecord(report.credential).policy === 'provider_config'
     if (identity !== nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])) throw new CodexTransportError('unsupported_protocol')
     if (this.#closed) throw new CodexTransportError('transport_lost')
     if (this.#credentialRemovalRequired) {
@@ -891,6 +903,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         codexHome: this.#config.codexHome,
         environment,
         preserveHome: this.#config.preserveHome,
+        // User provider configs may contain legacy fields accepted by the ordinary CLI.
+        // The effective permission/feature/MCP configuration is still validated below.
+        allowLegacyProviderConfig: this.#config.preserveHome === true && this.#config.apiKey === null
+          && snapshotJsonRecord(report.credential).policy === 'provider_config',
         sharedHomeOverrides: this.#sharedHomeOverrides ?? [],
         ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
         launchProfile: this.#config.launchProfile,
@@ -1181,7 +1197,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         || byteLength < 0
         || stdoutBytes + byteLength > MAX_STDOUT
       ) {
-        finishStdout(new CodexTransportError('transport_lost'))
+        finishStdout(new CodexTransportError('transport_lost', {
+          method: 'app-server/stdout', server_code: null,
+          message: `stdout_byte_limit_or_invalid_chunk; received_bytes=${stdoutBytes}; incoming_bytes=${typeof byteLength === 'number' ? byteLength : 'invalid'}; limit_bytes=${MAX_STDOUT}`,
+        }))
         return
       }
       let copy: Uint8Array
@@ -1195,9 +1214,9 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       }, error => { finishStdout(mapProtocolFailure(error)) })
     }
     const onStdoutEnd = (): void => { finishStdout(null) }
-    const onStdoutError = (): void => { finishStdout(new CodexTransportError('transport_lost')) }
+    const onStdoutError = (): void => { finishStdout(new CodexTransportError('transport_lost', {method: 'app-server/stdout', server_code: null, message: 'stdout_stream_error'})) }
     const onStdoutClose = (): void => {
-      if (!stdoutTerminal) finishStdout(new CodexTransportError('transport_lost'))
+      if (!stdoutTerminal) finishStdout(new CodexTransportError('transport_lost', {method: 'app-server/stdout', server_code: null, message: 'stdout_closed_before_end'}))
     }
     const onStderrData = (chunk: Buffer): void => {
       stderrBytes += chunk.byteLength
@@ -1961,7 +1980,7 @@ function mapProtocolFailure(error: unknown): CodexTransportError {
   if (error instanceof AppServerRequestRejected) return new CodexTransportError('server_rejected', error.diagnostic)
   if (!(error instanceof CodexProtocolError)) return new CodexTransportError('transport_lost')
   if (error.code === 'stdout_too_large' || error.code === 'stdout_line_too_large') {
-    return new CodexTransportError('transport_lost')
+    return new CodexTransportError('transport_lost', {method: 'app-server/stdout', server_code: null, message: error.code})
   }
   if (error.code === 'config_not_isolated') return new CodexTransportError('config_not_isolated')
   if (error.code === 'stream_failure' || error.code === 'transport_lost') {

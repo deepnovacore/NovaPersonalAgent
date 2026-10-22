@@ -1,4 +1,5 @@
 import {taskGrantService} from '../personal-agent/tasks.js'
+import type {WorkbenchPlan} from '../personal-agent/workbench-store.js'
 import type {TaskDispatchContext} from './task-tools.js'
 import type {CodingProgressNarrationState} from '../realtime/coding-progress-narration.js'
 import {createHash} from 'node:crypto'
@@ -68,6 +69,8 @@ export interface UserTurnAuthority {
 }
 
 export interface ExecutorDispatchContext {
+  /** Host-bound complete plan; never accepted from model tool arguments. */
+  readonly approvedPlan?:WorkbenchPlan
   readonly resourceWaiting?: (reason:string|null)=>Promise<void>
   readonly instructionAccepted?: ()=>void
   readonly beforeWrite?: () => void
@@ -589,6 +592,7 @@ export class CausalRuntime {
         const activityTasks=grant?taskGrantService(grant):undefined
         let activitySession:string|undefined
         const context: ExecutorDispatchContext = {
+        ...(grant&&activityTasks?.get(grant.fence.task_id).approved_plan?{approvedPlan:activityTasks.get(grant.fence.task_id).approved_plan!}:{}),
         ...(activityTasks?{resourceWaiting:(reason:string|null)=>activityTasks.resourceState(grant!.fence.task_id,reason)}:{}),
         ...(activityTasks?{activity:(item:ExecutorActivity)=>{void Promise.resolve().then(()=>activityTasks.appendEvent({task_id:grant!.fence.task_id,work_id:delegate.delegate_id,thread_id:item.thread_id,turn_id:item.turn_id,item_id:item.item_id,stage:item.stage,...(activitySession?{session_id:activitySession}:{}),kind:item.kind,...(item.sender?{sender:item.sender}:{}),text:item.text,refs:item.refs,...(item.text_truncated?{text_truncated:true}:{})},JSON.stringify([delegate.delegate_id,item.thread_id,item.turn_id,item.item_id,item.stage]))).catch(()=>{this.core.diagnostics.push({code:'task_event_persistence_failed',details:{task_id:grant!.fence.task_id,work_id:delegate.delegate_id}});activityTasks.markReplayIncomplete(grant!.fence.task_id)})}}:{}),
         instructionAccepted:()=>{this.#instructionReceipts.get(delegate.delegate_id)?.('accepted');this.#instructionReceipts.delete(delegate.delegate_id)},

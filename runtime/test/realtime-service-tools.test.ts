@@ -452,6 +452,26 @@ test('no-intake dispatch stays controller-owned while preserving the delegated a
   await service.close()
 })
 
+test('enter_plan_mode is a user-origin-bound inline host action and is unavailable outside Chat registrations',async()=>{
+ const calls:{call_id:string;origin_ref:string;still_wanted:boolean}[]=[]
+ const fixture=realtimeServiceHarness('pipeline',{includeEnterPlanMode:true,requestPlanMode:(callId,originRef,stillWanted)=>{
+  calls.push({call_id:callId,origin_ref:originRef,still_wanted:stillWanted()});return Promise.resolve({scheduled:true})
+ }})
+ await fixture.service.connect()
+ const acceptance=await dispatchTurn(fixture.service,'enter_plan_mode',{})
+ assert.equal(acceptance.accepted,true);assert.equal(acceptance.inline_fulfilled,true);assert.equal(acceptance.delegate_id,null)
+ assert.deepEqual(calls,[{call_id:'call-origin',origin_ref:'conversation:1',still_wanted:true}])
+ assert.deepEqual(JSON.parse(acceptance.host_item.content),{accepted:true,mode:'plan',scheduled:true})
+ assert.equal(fixture.runtimeDispatches(),0)
+ await fixture.service.close()
+
+ const ordinary=realtimeServiceHarness('pipeline')
+ await ordinary.service.connect()
+ const refused=await dispatchTurn(ordinary.service,'enter_plan_mode',{})
+ assert.equal(refused.accepted,false);assert.equal(refused.code,'unsupported_tool')
+ await ordinary.service.close()
+})
+
 test('a local supersession before no-intake controller dispatch starts no runtime delegate', async () => {
   const serviceRef: {current: RealtimeService | undefined} = {current: undefined}
   const fixture = realtimeServiceHarness('pipeline', {

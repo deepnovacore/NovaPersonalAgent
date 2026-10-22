@@ -624,3 +624,44 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
  .chat-companion{width:64px;height:64px;flex-basis:64px;border-radius:20px}
  .chat-companion img{width:64px;height:64px}
 }
+/* Local Agent controls share the workbench's existing surface and type scale. */
+.workbench-agent{padding:8px 12px;border-top:1px solid var(--line,#333);font-size:12px;flex-shrink:0;max-height:48vh;overflow:auto}
+.workbench-mode-bar,.workbench-plan-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.workbench-mode-bar select,.workbench-agent button,.workbench-agent select{font:inherit;min-height:28px;max-width:100%}
+.workbench-mode-bar>select{width:auto;flex:0 0 auto}
+.workbench-build-status{overflow-wrap:anywhere;flex:1;min-width:100px}
+.workbench-plan,.workbench-local-approval{margin-top:10px;padding:10px;border:1px solid var(--line,#555);border-radius:8px}
+.workbench-plan h3,.workbench-local-approval h3{font-size:13px;margin:0 0 8px}
+.workbench-plan-body{max-height:24vh;overflow:auto;user-select:text}
+.workbench-plan textarea{box-sizing:border-box;width:100%;min-height:180px;resize:vertical;font:12px/1.6 monospace}
+.workbench-plan select{margin:6px 4px 6px 0}.workbench-plan-actions{margin-top:8px}
+.workbench-local-approval pre,.workbench-tool-log{max-height:24vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 monospace;user-select:text}
+.build-switch-dialog{max-width:420px;padding:24px;border:1px solid var(--line,#555);border-radius:12px;background:var(--panel,#202024);color:inherit}
+.build-switch-dialog::backdrop{background:#0008}.build-switch-dialog h2{font-size:18px}.build-switch-dialog button{margin:12px 8px 0 0;padding:8px 12px}
+/* Native details retain expansion and keyboard focus as tool receipts stream in. */
+.workbench .tool-message{align-self:stretch;max-width:100%;padding:0;background:transparent;border:0;min-width:0}
+.workbench .tool-message-group{align-self:stretch;max-width:100%;padding:0;background:transparent;border:0;min-width:0;color:var(--ink-dim)}
+.build-tool-group>summary{list-style:none;cursor:pointer;padding:4px 0;color:var(--ink-faint);font-size:12px}
+.build-tool-group>summary::-webkit-details-marker{display:none}
+.build-tool-group>summary::before{content:'⌄';display:inline-block;width:18px;color:var(--ink-faint)}
+.build-tool-group:not([open])>summary::before{content:'›'}
+.build-tool-rows{padding-left:10px;border-left:1px solid var(--line)}
+.build-tool-call{border:0;border-radius:0;background:transparent;overflow:hidden}
+.build-tool-call>summary{display:flex;align-items:center;gap:7px;padding:4px 2px;min-width:0;color:var(--ink-dim);cursor:pointer}
+.build-tool-call>summary::before{flex-shrink:0}
+.build-tool-call summary code{font:11px/1.5 var(--mono);color:var(--ink);flex-shrink:0}
+.build-tool-mark{color:var(--accent);font-weight:600;flex-shrink:0}
+.build-tool-target{flex:1;min-width:24px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px/1.5 var(--mono)}
+.build-tool-state,.build-tool-time{flex-shrink:0;font:11px/1.5 var(--mono)}
+.build-tool-time{color:var(--ink-faint)}
+.tool-message[data-tool-status="completed"] .build-tool-mark{color:var(--ok)}
+.tool-message:is([data-tool-status="failed"],[data-tool-status="timed_out"],[data-tool-status="outcome_unknown"]) :is(.build-tool-mark,.build-tool-state){color:var(--warn)}
+.tool-message[data-tool-status="running"] .build-tool-state{color:var(--accent)}
+.build-tool-content{padding:4px 12px 12px 20px;border-left:1px solid var(--line)}
+.workbench .build-tool-content h4{font-size:11px;font-weight:500;color:var(--ink-faint);margin:10px 0 4px}
+.workbench .build-tool-content pre{margin:0;padding:8px;border-radius:var(--radius-sm);background:var(--surface-inset);white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 var(--mono);max-height:180px;overflow:auto}
+.build-log-notice{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--warn)}
+@media(max-width:600px){.workbench .build-tool-call>summary{flex-wrap:wrap}.build-tool-target{flex-basis:35%}.build-tool-time{display:none}}
+.build-full-reply{margin-top:8px;color:var(--ink-dim)}
+.build-full-reply>summary{cursor:pointer;font-size:12px;color:var(--ink-faint)}
+.build-full-reply-content{max-height:70vh;overflow:auto;user-select:text}

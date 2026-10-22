@@ -1523,6 +1523,11 @@ async function startSelectedCamera(camera, smokeChannel) {
     const result = await dialog.showOpenDialog(event.sender === settingsWindow?.webContents ? settingsWindow : mainWindow, {title:'选择允许 Nova 读取的目录', properties:['openDirectory']})
     return result.canceled ? null : result.filePaths[0] ?? null
   })
+  ipcMain.handle('nova:personal:build-directory',async event=>{
+    if(event.sender!==mainWindow.webContents)throw new Error('directory request rejected')
+    const result=await dialog.showOpenDialog(mainWindow,{title:t('选择本地 Build 项目目录'),properties:['openDirectory']})
+    return result.canceled?null:result.filePaths[0]??null
+  })
   const bindPresentationClose = mainWindow => {
     mainWindow.on('close', event => {
       if (app.isQuitting) return

@@ -144,12 +144,14 @@ export interface FrontendModuleSelection {
   readonly coding?: boolean
   readonly knowledge?: boolean
   readonly gui?: boolean
+  readonly enterPlanMode?:boolean
 }
 export function frontendInstructions(modules: FrontendModuleSelection = {}, executorApproval = false, language: PromptLanguage = 'zh-CN'): string {
   return [
     NOVA_VOICE_IDENTITY,
     ...FRONTEND_INSTRUCTIONS_BEFORE_CODEX_APPROVAL,
     ...(modules.coding === false ? [] : CODING_INSTRUCTIONS_BEFORE),
+    ...(modules.enterPlanMode===true?['用户明确要求进入 Plan、先制定计划或先澄清需求时，只调用 enter_plan_mode，不与其他工具调用混在同一 response；普通问题、讨论或已明确的执行请求继续按现有规则处理。工具结果确认模式切换后，简短引导用户继续补充需求。']:[]),
     ...(modules.gui === true ? GUI_AGENT_INSTRUCTIONS : []),
     ...(modules.coding === false && modules.camera === false && modules.gui !== true ? [] : HOST_CONFIRM_INSTRUCTIONS),
     ...(executorApproval && (modules.coding !== false || modules.gui === true) ? CODEX_APPROVAL_INSTRUCTIONS : []),

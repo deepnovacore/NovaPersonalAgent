@@ -402,7 +402,7 @@ export function progressEvent(input: {
 /** Spec 08 host tools on the pipeline fixture: `dispatch` / `cancel` / `confirm` are the only coding tools the model sees. */
 export async function dispatchTurn(
   service: RealtimeService,
-  name: 'schedule' | 'task' | 'dispatch' | 'cancel' | 'confirm' | `codex__${string}`,
+  name: 'schedule' | 'task' | 'dispatch' | 'cancel' | 'confirm' | 'enter_plan_mode' | `codex__${string}`,
   arguments_: Readonly<Record<string, JsonValue>>,
   responseId = 'origin',
 ): Promise<ToolAcceptance> {
@@ -820,6 +820,8 @@ interface PipelineOptions {
   readonly clearConversation?: () => Promise<void>
   /** Fold the ops into the spec 08 host tools; a raw `codex__*` from the provider is then refused. */
   readonly taskHost?: TaskToolHost
+  readonly requestPlanMode?:RealtimeServiceOptions['requestPlanMode']
+  readonly includeEnterPlanMode?:boolean
   readonly scheduleHost?: RealtimeServiceOptions['scheduleHost']
   readonly scopedTool?: RealtimeServiceOptions['scopedTool']
   readonly validateScopedContext?: ()=>Promise<boolean>
@@ -1062,6 +1064,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
       }
       const service = new TestService({
         ...(options.taskHost?{taskHost:options.taskHost}:{}),
+        ...(options.requestPlanMode?{requestPlanMode:options.requestPlanMode}:{}),
         ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
         ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
         ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
@@ -1082,7 +1085,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
           }),
           clearConversation: options.clearConversation ?? (() => Promise.resolve()),
         },
-        tools: compileToolSchema([manifest], {includeSchedules:!!options.scheduleHost,includeAppContext:!!options.scopedTool,includeTasks:!!options.taskHost,includeMemoryRecall: options.includeRecall ?? false, agentDescriptors}),
+        tools: compileToolSchema([manifest], {includeSchedules:!!options.scheduleHost,includeAppContext:!!options.scopedTool,includeTasks:!!options.taskHost,includeMemoryRecall: options.includeRecall ?? false,includeEnterPlanMode:options.includeEnterPlanMode===true, agentDescriptors}),
         session,
         bridge: new RealtimeRuntimeBridge({
           runtime: {
@@ -1106,7 +1109,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
               delegate_id: scripted.delegateId,
             }),
           },
-          tools: compileToolSchema([manifest], {includeSchedules:!!options.scheduleHost,includeAppContext:!!options.scopedTool,includeTasks:!!options.taskHost,includeMemoryRecall: options.includeRecall ?? false, agentDescriptors}),
+          tools: compileToolSchema([manifest], {includeSchedules:!!options.scheduleHost,includeAppContext:!!options.scopedTool,includeTasks:!!options.taskHost,includeMemoryRecall: options.includeRecall ?? false,includeEnterPlanMode:options.includeEnterPlanMode===true, agentDescriptors}),
           idFactory: nextId,
           ...(options.personalMemory === undefined ? {} : {personalMemory: options.personalMemory}),
         }),

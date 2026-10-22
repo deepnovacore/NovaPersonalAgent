@@ -20,6 +20,7 @@ import type {ProfileInput,ProfileDraft,ProfileObservation} from './profile-warmu
 
 const batchResult=z.object({batch:z.custom<ProcessingBatch>(),valid:z.boolean(),observed:z.boolean().optional(),published:z.boolean().optional()})
 const originalSchema=z.object({items:z.array(processingRefSchema.and(z.object({source_key:z.string(),text:z.string(),version:z.string(),source_kind:z.string(),observed_at:z.string(),locator:z.string(),source_metadata:z.record(z.string(),z.unknown()).nullable()})))})
+function accountId(value:unknown){return value&&typeof value==='object'&&'account_id' in value?value.account_id:undefined}
 
 /** Uses the existing ScheduleRun/Task ledgers and scheduler wake; owns no timer. */
 export class SourceProcessingAgent{

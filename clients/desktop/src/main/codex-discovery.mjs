@@ -1,8 +1,12 @@
 const SOURCES = new Set(['path', 'npm-user', 'common', 'manual', 'npm-launcher'])
 
-function appendNative(target, seen, command, source) {
+function normalizeCandidatePath(value, platform) {
+  return platform === 'win32' ? value.toLowerCase() : value
+}
+
+function appendNative(target, seen, command, source, platform) {
   if (typeof command !== 'string' || command === '') return
-  const key = `native\0${command}`
+  const key = `native\0${normalizeCandidatePath(command, platform)}`
   if (seen.has(key)) return
   seen.add(key)
   target.push(Object.freeze({
@@ -10,8 +14,8 @@ function appendNative(target, seen, command, source) {
   }))
 }
 
-function appendNpmLauncher(target, seen, candidate) {
-  const key = `npm-launcher\0${candidate.command}\0${candidate.prefixArgs.join('\0')}`
+function appendNpmLauncher(target, seen, candidate, platform) {
+  const key = `npm-launcher\0${normalizeCandidatePath(candidate.command, platform)}\0${candidate.prefixArgs.map(value => normalizeCandidatePath(value, platform)).join('\0')}\0${normalizeCandidatePath(candidate.launcherPath, platform)}`
   if (seen.has(key)) return
   seen.add(key)
   target.push(Object.freeze({
@@ -36,45 +40,72 @@ function windowsNpmCandidates({ root, arch, pathApi }) {
   ])
 }
 
-export function codexCandidates({ platform, arch, env = {}, home, pathApi }) {
+function windowsNpmPrefixes({ pathEntries, env, home, pathApi, manualBinaryPath }) {
+  const appData = typeof env.APPDATA === 'string' && env.APPDATA !== ''
+    ? env.APPDATA
+    : pathApi.join(home, 'AppData', 'Roaming')
+  const manualRoot = typeof manualBinaryPath === 'string'
+    && pathApi.basename(manualBinaryPath).toLowerCase() === 'codex.cmd'
+    ? pathApi.dirname(manualBinaryPath)
+    : null
+  const roots = [
+    ...pathEntries,
+    env.NPM_CONFIG_PREFIX,
+    env.npm_config_prefix,
+    pathApi.join(appData, 'npm'),
+    manualRoot,
+  ].filter(value => typeof value === 'string' && value !== '')
+  const result = []
+  const seen = new Set()
+  for (const root of roots) {
+    const key = normalizeCandidatePath(root, 'win32')
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(root)
+  }
+  return result
+}
+
+export function codexCandidates({ platform, arch, env = {}, home, pathApi, manualBinaryPath }) {
   const candidates = []
   const seen = new Set()
   const delimiter = platform === 'win32' ? ';' : ':'
   const pathEntries = String(env.PATH ?? '').split(delimiter).filter(Boolean)
   for (const entry of pathEntries) {
     if (platform === 'win32') {
-      appendNative(candidates, seen, pathApi.join(entry, 'codex.exe'), 'path')
-      appendNative(candidates, seen, pathApi.join(entry, 'codex'), 'path')
+      appendNative(candidates, seen, pathApi.join(entry, 'codex.exe'), 'path', platform)
+      appendNative(candidates, seen, pathApi.join(entry, 'codex'), 'path', platform)
     } else {
-      appendNative(candidates, seen, pathApi.join(entry, 'codex'), 'path')
+      appendNative(candidates, seen, pathApi.join(entry, 'codex'), 'path', platform)
     }
   }
   if (platform === 'win32') {
-    const appData = typeof env.APPDATA === 'string' && env.APPDATA !== ''
-      ? env.APPDATA
-      : pathApi.join(home, 'AppData', 'Roaming')
-    const npmRoot = pathApi.join(appData, 'npm')
-    for (const command of windowsNpmCandidates({ root: npmRoot, arch, pathApi })) {
-      appendNative(candidates, seen, command, 'npm-user')
-    }
-    const packageRoot = pathApi.join(npmRoot, 'node_modules', '@openai', 'codex')
-    for (const entry of pathEntries) {
-      appendNpmLauncher(candidates, seen, {
-        command: pathApi.join(entry, 'node.exe'),
-        prefixArgs: [pathApi.join(packageRoot, 'bin', 'codex.js')],
-        packageRoot,
-        manifestPath: pathApi.join(packageRoot, 'package.json'),
-        launcherPath: pathApi.join(npmRoot, 'codex.cmd'),
-      })
+    const nodeCommands = [...new Set(pathEntries.map(entry => pathApi.join(entry, 'node.exe')))]
+    for (const root of windowsNpmPrefixes({pathEntries, env, home, pathApi, manualBinaryPath})) {
+      for (const command of windowsNpmCandidates({root, arch, pathApi})) {
+        appendNative(candidates, seen, command, 'npm-user', platform)
+      }
+      const packageRoot = pathApi.join(root, 'node_modules', '@openai', 'codex')
+      const launcherPath = pathApi.join(root, 'codex.cmd')
+      const nodeCandidates = [pathApi.join(root, 'node.exe'), ...nodeCommands]
+      for (const command of new Set(nodeCandidates)) {
+        appendNpmLauncher(candidates, seen, {
+          command,
+          prefixArgs: [pathApi.join(packageRoot, 'bin', 'codex.js')],
+          packageRoot,
+          manifestPath: pathApi.join(packageRoot, 'package.json'),
+          launcherPath,
+        }, platform)
+      }
     }
   } else {
-    appendNative(candidates, seen, pathApi.join(home, '.local', 'bin', 'codex'), 'common')
+    appendNative(candidates, seen, pathApi.join(home, '.local', 'bin', 'codex'), 'common', platform)
     if (platform === 'darwin') {
-      appendNative(candidates, seen, pathApi.join(home, '.npm-global', 'bin', 'codex'), 'npm-user')
-      appendNative(candidates, seen, pathApi.join(home, '.volta', 'bin', 'codex'), 'npm-user')
-      appendNative(candidates, seen, '/opt/homebrew/bin/codex', 'common')
+      appendNative(candidates, seen, pathApi.join(home, '.npm-global', 'bin', 'codex'), 'npm-user', platform)
+      appendNative(candidates, seen, pathApi.join(home, '.volta', 'bin', 'codex'), 'npm-user', platform)
+      appendNative(candidates, seen, '/opt/homebrew/bin/codex', 'common', platform)
     }
-    appendNative(candidates, seen, '/usr/local/bin/codex', 'common')
+    appendNative(candidates, seen, '/usr/local/bin/codex', 'common', platform)
   }
   return Object.freeze(candidates)
 }
@@ -137,8 +168,14 @@ export async function resolveDesktopCodex({
   const manual = config?.codexBinaryMode === 'manual'
     && typeof config.codexBinaryPath === 'string'
     && config.codexBinaryPath !== ''
+  const manualLaunchers = manual
+    ? automaticCandidates.filter(candidate => candidate?.kind === 'npm-launcher'
+      && typeof candidate.launcherPath === 'string'
+      && normalizeCandidatePath(candidate.launcherPath, 'win32')
+        === normalizeCandidatePath(config.codexBinaryPath, 'win32'))
+    : []
   const candidates = manual
-    ? [Object.freeze({
+    ? manualLaunchers.length > 0 ? manualLaunchers : [Object.freeze({
         kind: 'native', command: config.codexBinaryPath,
         prefixArgs: Object.freeze([]), source: 'manual',
       })]

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {ConversationRuntimePool,createConversation,type ConversationRuntime} from '../src/personal-agent/conversations.js'
+import {ConversationRuntimePool,createConversation,type ConversationRuntime,type ConversationTurnContext} from '../src/personal-agent/conversations.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import {PersonalStore,initialState} from '../src/personal-agent/store.js'
@@ -356,14 +356,16 @@ test('a failing playback listener cannot prevent another runtime from parking it
 
 test('Todo source is canonical per submission, survives exact retry, and never leaks into a later turn',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-source-todo-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
- const contexts:unknown[]=[]
+ const contexts:(ConversationTurnContext|undefined)[]=[]
  try{await host.open();await host.command({type:'personal.command',request_id:'todo',method:'life.mutate',params:{op:'create',kind:'todo',title:'Linked todo',note:''}});const todo=host.life.snapshot().todos[0]!,source={id:todo.id,version:todo.version}
  host.setConversationRuntime(()=>Promise.resolve({runTurn:(_text,_signal,context)=>{contexts.push(context);return Promise.resolve({assistant:'ack'})},close:()=>Promise.resolve()}),()=>{/* no renderer transport */})
  await host.submitConversationText('chat:main','Handle this','source',source);await host.waitConversation('chat:main');await host.submitConversationText('chat:main','Handle this','source',source)
- assert.deepEqual(host.conversationSnapshot().messages[0]!.source_todo,source);assert.deepEqual(contexts,[{source_todo:source}])
+ assert.deepEqual(host.conversationSnapshot().messages[0]!.source_todo,source);assert.equal(contexts.length,1);assert.deepEqual(contexts[0]?.source_todo,source)
+ assert.equal(contexts[0]?.user_message_id,host.conversationSnapshot().messages[0]!.id)
  await assert.rejects(host.submitConversationText('chat:main','Handle this','source'),/request_id_conflict/)
  await assert.rejects(host.submitConversationText('chat:main','Handle this','different',{...source,version:source.version+1}),/source_todo_conflict/)
- await host.submitConversationText('chat:main','Unrelated','later');await host.waitConversation('chat:main');assert.deepEqual(contexts[1],{})
+ await host.submitConversationText('chat:main','Unrelated','later');await host.waitConversation('chat:main');assert.equal(contexts[1]?.source_todo,undefined)
+ assert.equal(contexts[1]?.user_message_id,host.conversationSnapshot().messages.find(message=>message.role==='user'&&message.text==='Unrelated')!.id)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 

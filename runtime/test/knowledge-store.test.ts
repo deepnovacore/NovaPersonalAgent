@@ -490,8 +490,9 @@ test('forced close during a native SQLite lock keeps reopening fail-closed until
     const termination = terminate.mock.calls[0]?.result
     assert.ok(termination)
     await assert.rejects(reopened.open(), (error: unknown) => error instanceof KnowledgeStoreClientError && error.code === 'STORE_WRITE_FAILED')
+    // Keep the write blocked until native SQLite returns and worker termination settles.
+    await settlesWithin('locked worker termination', termination, 3000)
     await lock.release()
-    await termination
     await reopened.open()
     assert.deepEqual((await reopened.listJobs()).map(job => job.id), ['saved'])
     await reopened.recordJob({id: 'recovered', source_id: 'source-a', state: 'complete', error_code: null, updated_at: 3})

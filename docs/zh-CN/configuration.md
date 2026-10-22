@@ -4,6 +4,12 @@
 
 通常在桌面设置中选择模型和填写密钥即可。源码运行也可以在项目 `.env` 中配置；修改后重启桌面应用。
 
+Windows 桌面端会在 PATH、自定义 npm 前缀和 `%APPDATA%\npm` 中查找 Codex，支持 nvm-windows 管理的 npm 安装。也可以在设置中手动填写 npm 安装的 `codex.cmd` 完整路径，即使它不在 PATH 中。自动检测优先使用安装包内的原生程序；需要使用 npm 启动器时，会校验官方包，再将 `codex.js` 作为独立参数传给 `node.exe`，Node 需位于启动器同目录或 PATH 中。检测和启动均不通过 shell 执行 `.cmd`。直接启动 runtime 时，`CODEX_BIN` 仍需指向原生程序；脚本解析由桌面宿主负责。
+
+Codex 认证继续支持已有登录和 Nova 中配置的 API Key。共享本机 Codex 配置的会话在登录检查失败后，还会检查 `~/.codex/config.toml` 中选中的 `model_providers.<model_provider>`：要求 `base_url` 非空，并且配置了 `experimental_bearer_token`，或同一 Codex 配置目录下的 `auth.json` 中有非空的 `OPENAI_API_KEY`。因此，即使 `codex login status` 显示 `Not logged in`，这类 provider 也可使用。凭据保留在现有文件中，不会复制到任务记录、日志或命令参数。
+
+这条 provider 配置通路沿用普通 CLI 对旧配置字段的兼容解析；执行前仍会校验生效后的权限、禁用功能和 MCP 配置。已有登录和显式 API Key 通路继续使用严格配置解析。
+
 ## 最小配置
 
 默认的 Qwen 实时语音只需要一把密钥：
@@ -25,6 +31,7 @@ DASHSCOPE_API_KEY=你的百炼密钥
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | 变量 | 默认 | 用途 |
 |---|---|---|
+| `NOVA_LOCAL_TOOL_APPROVAL` | ask | 本地 Build 写入、编辑和命令审批：ask 或 never；独立于执行器审批。 |
 | `PIPELINE_MODE` | integrated | 产品管线形态：集成或级联。 |
 | `PROMPT_LANGUAGE` | zh-CN | AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。 |
 | `INTEGRATED_PROVIDER` | qwen | 集成实时提供方。 |

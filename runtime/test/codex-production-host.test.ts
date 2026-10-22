@@ -20,6 +20,7 @@ import {hostBinaryForTest, hostCodexHomeForTest, hostWorkspaceForTest} from '../
 import {validateCodexSchemaBundle} from '../src/executors/codex/app-server-schema.js'
 import {supportedSchemaBundle} from './fixtures/codex/supported-schema-bundle.js'
 import {loadSettings} from '../src/config/config.js'
+import {sanitizeCodexPreflightReport} from '../src/executors/codex/contract.js'
 
 function fakeMachExecutable(): Buffer {
   const body = Buffer.alloc(64)
@@ -340,6 +341,90 @@ test('production preflight reports a safe login-status diagnostic without comman
   } finally {
     await rm(root, {recursive: true, force: true})
   }
+})
+
+test('production preflight adds shared provider tokens as an alternative to saved login', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-codex-provider-credential-')))
+  const workspace = join(root, 'workspace')
+  const binary = join(root, 'codex')
+  const home = join(root, 'home')
+  const probe = join(root, 'probe')
+  await mkdir(workspace)
+  await mkdir(home)
+  await writeFile(binary, 'binary', {mode: 0o755})
+  await writeFile(probe, 'probe', {mode: 0o755})
+  const token = 'provider-token-sentinel-must-not-leak'
+  const savedToken = `model_provider = "proxy"\n[model_providers.proxy]\nbase_url = "https://provider.example/v1"\nexperimental_bearer_token = "${token}"\n`
+  const cases = [
+    {name: 'saved provider token without auth.json', config: savedToken, accepted: true},
+    {name: 'OpenAI login still takes precedence', config: savedToken, savedLogin: true, accepted: true},
+    {name: 'empty token', config: savedToken.replace(token, '')},
+    {name: 'unselected provider', config: savedToken.replace('model_provider = "proxy"', 'model_provider = "openai"')},
+    {name: 'provider URL is required', config: savedToken.replace('base_url = "https://provider.example/v1"\n', '')},
+    {name: 'provider URL cannot be empty', config: savedToken.replace('https://provider.example/v1', '')},
+    {name: 'environment-only credentials do not satisfy the saved credential alternative', config: `${savedToken.replace(token, '')}env_key = "OTHER_PROVIDER_API_KEY"\n`},
+    {name: 'auth.json API key without bearer token', config: savedToken.replace(`experimental_bearer_token = "${token}"\n`, ''), auth: JSON.stringify({OPENAI_API_KEY: token}), accepted: true},
+    {name: 'empty bearer token falls back to auth.json API key', config: savedToken.replace(token, ''), auth: JSON.stringify({OPENAI_API_KEY: token}), accepted: true},
+    {name: 'API key supports a provider requiring OpenAI authentication', config: `${savedToken.replace(token, '')}requires_openai_auth = true\n`, auth: JSON.stringify({OPENAI_API_KEY: token}), accepted: true},
+    {name: 'empty auth.json API key is rejected', config: savedToken.replace(token, ''), auth: '{"OPENAI_API_KEY":" "}'},
+    {name: 'non-string auth.json API key is rejected', config: savedToken.replace(token, ''), auth: '{"OPENAI_API_KEY":123}'},
+    {name: 'ChatGPT tokens alone do not satisfy the provider API key alternative', config: savedToken.replace(token, ''), auth: '{"tokens":{"access_token":"expired-sentinel"}}'},
+    {name: 'malformed auth.json is rejected', config: savedToken.replace(token, ''), auth: '{"OPENAI_API_KEY":'},
+    {name: 'a saved bearer token does not depend on auth.json', config: savedToken, auth: '{invalid', accepted: true},
+    {name: 'malformed configuration', config: 'model_provider = "proxy"\n[invalid'},
+    {name: 'missing provider token', config: 'model_provider = "proxy"\n[model_providers.proxy]\nbase_url = "https://provider.example/v1"\n'},
+    {name: 'unshared home cannot use a provider token', config: savedToken, preserveHome: false},
+  ]
+  try {
+    for (const scenario of cases) await t.test(scenario.name, async () => {
+      await writeFile(join(home, 'config.toml'), scenario.config, {mode: 0o600})
+      if (scenario.auth !== undefined) await writeFile(join(home, 'auth.json'), scenario.auth, {mode: 0o600})
+      else await rm(join(home, 'auth.json'), {force: true})
+      const diagnostics: string[] = []
+      const calls: BoundedCodexCommand[] = []
+      const runner = new NativeCodexHostPreflightRunner({
+        probePath: probe, environment: {PATH: '/safe', HOME: home}, hasApiKey: false,
+        onDiagnostic: code => diagnostics.push(code),
+        commandRunner: async command => {
+          await Promise.resolve()
+          calls.push(command)
+          if (command.argv[0] === '--version') return {status: 0, stdout: Buffer.from('codex-cli 0.163.0')}
+          if (command.argv[0] === 'login') return scenario.savedLogin
+            ? {status: 0, stdout: Buffer.alloc(0), stderr: Buffer.from('Logged in using ChatGPT\n')}
+            : {status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('Not logged in\n')}
+          return {status: 0, stdout: Buffer.from(JSON.stringify({
+            cwd_matches: true, inside_write: true, inside_remove: true,
+            outside_write_denied: true, child_outside_write_denied: true, network_denied: true,
+            limits: {cpu: 'finite', as: 'unbounded', nofile: 'finite'},
+          }))}
+        },
+      })
+      const operation = runner.run({
+        binary: hostBinaryForTest(await realpath(binary)),
+        workspace: hostWorkspaceForTest(await realpath(workspace)),
+        codexHome: hostCodexHomeForTest(await realpath(home), {ephemeral: false}),
+        apiKey: null, developerInstructions: null, resumeThreadId: null,
+        persistent: true, preserveHome: scenario.preserveHome ?? true, workingInterval: 30,
+      }, 5_000)
+      if (scenario.accepted) {
+        const result = await operation
+        assert.deepEqual(sanitizeCodexPreflightReport(result)?.credential, {
+          present: true, identity: scenario.savedLogin ? 'chatgpt' : 'api_key',
+          policy: scenario.savedLogin ? 'saved_login' : 'provider_config',
+        })
+        assert.equal(calls.length, 3, 'provider credentials still require the sandbox probe')
+        assert.deepEqual(diagnostics, [], 'a usable alternative must not emit a login failure')
+        assert.equal(JSON.stringify(result).includes(token), false)
+      } else {
+        await assert.rejects(operation, {code: 'credential_missing'})
+        assert.equal(calls.length, 2)
+        assert.deepEqual(diagnostics, ['codex_login_status_nonzero'])
+      }
+      assert.equal(await readFile(join(home, 'config.toml'), 'utf8'), scenario.config)
+      if (scenario.auth !== undefined) assert.equal(await readFile(join(home, 'auth.json'), 'utf8'), scenario.auth)
+      assert.equal(JSON.stringify(calls).includes(token), false)
+    })
+  } finally { await rm(root, {recursive: true, force: true}) }
 })
 
 test('unsandboxed or malformed native probe output fails closed with a stable code', async () => {

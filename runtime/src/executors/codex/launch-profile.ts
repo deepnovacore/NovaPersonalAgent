@@ -36,7 +36,7 @@ export function resolveCodexLaunchProfile(input: {
   return input.project && input.foregroundBroker ? ASK : ASK_HEADLESS
 }
 
-export function codexAppServerArgv(profile: CodexLaunchProfile, managedMcp = false): readonly string[] {
+export function codexAppServerArgv(profile: CodexLaunchProfile, managedMcp = false, strictConfig = true): readonly string[] {
   const sandbox = 'permissions' in profile.thread
     ? ['-c', 'default_permissions="nova_personal_agent"', '-c', 'permissions.nova_personal_agent={ filesystem = { ":root" = "read", ":workspace_roots" = { "." = "write", ".git" = "read", ".agents" = "read", ".codex" = "read" } }, network = { enabled = false } }']
     : ['-c', 'sandbox_mode="danger-full-access"']
@@ -49,6 +49,7 @@ export function codexAppServerArgv(profile: CodexLaunchProfile, managedMcp = fal
     '-c', 'web_search="disabled"', ...sandbox,
     '-c', 'shell_environment_policy.inherit="core"',
     '-c', 'shell_environment_policy.include_only=["PATH","LANG","LC_ALL","TERM"]',
-    ...(managedMcp ? [] : ['-c', 'mcp_servers={}']), 'app-server', '--strict-config', '--stdio',
+    ...(managedMcp ? [] : ['-c', 'mcp_servers={}']), 'app-server',
+    ...(strictConfig ? ['--strict-config'] : []), '--stdio',
   ])
 }

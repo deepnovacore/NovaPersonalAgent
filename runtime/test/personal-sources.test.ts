@@ -1020,7 +1020,7 @@ test('nested documents retain project context and unavailable observations retry
     assert.equal(f.sources.list()[0]!.health,'degraded')
     assert.equal(f.sources.list()[0]!.failures[0]!.stage,'observe')
     f.setMemoryAvailable(true)
-    now+=100 // Expire the persisted retry delay without depending on restart speed.
+    now+=110 // Expire the persisted retry delay without depending on restart speed.
     await f.reopen()
     const entries=f.memory!.list().entries
     assert.equal(entries.length,2)

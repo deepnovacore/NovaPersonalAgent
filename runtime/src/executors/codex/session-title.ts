@@ -4,6 +4,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /** A separate ephemeral turn; its id must never replace the user's persistent thread binding. */
 export async function generateSessionTitle(objective: string, rpc: {
+  /** null inherits the configured provider model; undefined preserves the official title model. */
+  readonly model?: string | null
   readonly mcpServers?: readonly string[]
   /** Abandon the title as soon as the real turn no longer benefits from waiting for it. */
   readonly signal?: AbortSignal
@@ -27,7 +29,7 @@ export async function generateSessionTitle(objective: string, rpc: {
   if (rpc.signal?.aborted) abandon()
   try {
     const response = await rpc.request('thread/start', {
-      model: 'gpt-5.6-luna', ephemeral: true, permissions: ':read-only', approvalPolicy: 'never',
+      ...(rpc.model === null ? {} : {model: rpc.model ?? 'gpt-5.6-luna'}), ephemeral: true, permissions: ':read-only', approvalPolicy: 'never',
       config: {model_reasoning_effort: 'low', web_search: 'disabled',
         mcp_servers: Object.fromEntries((rpc.mcpServers ?? []).map(name => [name, {enabled: false}])),
         'features.apps': false, 'features.plugins': false, 'features.multi_agent': false, 'features.hooks': false},

@@ -48,8 +48,9 @@ test('shutdown fences an uncooperative preparation and restart does not repeat i
 })
 
 test('task completion preserves its originating topic card and updates one topic result',async()=>{
- const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-task-topic-'))
- const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',pool:new SuggestionPool(),memory:()=>undefined,evidence:ref=>({subject_key:'project:1',source:{type:'file',ref}}),evidenceRefs:()=>['file:1']})
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-task-topic-')),path=join(dir,'state.json')
+ const state=initialState();state.settings.timezone='UTC';await new PersonalStore(path).write(state)
+ const host=new PersonalAgentHost({path,userScope:'local',pool:new SuggestionPool(),memory:()=>undefined,evidence:ref=>({subject_key:'project:1',source:{type:'file',ref}}),evidenceRefs:()=>['file:1'],now:()=>new Date('2026-10-12T12:00:00Z')})
  try{await host.open();await host.admit({kind:'notify',summary:'Original matter',why_now:'Needs attention',evidence_refs:['file:1'],memory_refs:[]},await host.discoverySnapshot())
  const original=host.snapshot().feed[0]!
  await host.command({type:'personal.command',request_id:'topic',method:'conversations.open_feed',params:{feed_id:original.id}})

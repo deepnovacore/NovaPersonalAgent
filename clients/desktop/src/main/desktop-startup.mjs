@@ -163,6 +163,7 @@ export async function prepareDesktopStartup({
       env: environment,
       home,
       pathApi,
+      manualBinaryPath: config.codexBinaryMode === 'manual' ? config.codexBinaryPath : undefined,
     }),
     canonicalize: canonicalizeInvocation ?? (candidate => {
       const command = canonicalizeExecutable(candidate.command)

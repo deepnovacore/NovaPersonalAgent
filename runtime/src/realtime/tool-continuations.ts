@@ -4,6 +4,8 @@ import type {TaskToolHost} from '../core/task-tools.js'
 import {dispatchSources, projectRecoveryTurns, recentDispatchSources} from './history.js'
 import {taskToolArguments} from '../core/task-tools.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
+import type {UserTurnAuthority} from '../core/causal-runtime.js'
+export interface StandaloneToolTurn {readonly user:{text:string;epoch:number;origin_ref:string};readonly authority:UserTurnAuthority;readonly signal:AbortSignal;readonly task?:TaskDispatchContext}
 import type {IntakeOptions} from '../executors/coding/intake.js'
 import {
   parseAgentActionResult,
@@ -51,6 +53,7 @@ const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirma
 interface ToolContinuationPorts {
   readonly taskHost?: TaskToolHost
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
+  readonly requestPlanMode?:(callId:string,originRef:string,stillWanted:()=>boolean)=>Promise<unknown>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
   readonly validateScopedContext?:()=>Promise<boolean>
   readonly session: RealtimeSession
@@ -90,6 +93,16 @@ interface ToolContinuationPorts {
 }
 
 export class ToolContinuations {
+  /** Text loops share admission/execution with voice without manufacturing provider events. */
+  async invokeStandalone(event:ToolCallReady,turn:StandaloneToolTurn):Promise<ToolAcceptance>{
+    if(!this.#ports.tools.bindings.has(event.name)||this.#ports.tools.hidden.has(event.name))return this.#refusalAcceptance(event,'unknown_tool','{"code":"unknown_tool"}')
+    turn.signal.throwIfAborted()
+    const intercepted=await this.#interceptHost(event,turn.user.origin_ref,turn)
+    if(intercepted)return intercepted
+    const binding=this.#ports.tools.bindings.get(event.name)
+    if(binding?.kind==='query')return this.#ports.bridge.acceptPersonalMemoryRecall(event,{originRef:turn.user.origin_ref,signal:turn.signal})
+    return this.#ports.bridge.acceptToolCall(event,{originRef:turn.user.origin_ref,userTurn:turn.authority})
+  }
   recordIntakeDispatch(
     intake: Parameters<IntakeOptions['dispatch']>[0],
     result: Awaited<ReturnType<IntakeOptions['dispatch']>>,
@@ -1198,13 +1211,25 @@ export class ToolContinuations {
    * The host tools. A controller receives the fenced public request and returns structured facts;
    * RealtimeService alone maps those facts to provider-facing result language.
    */
-  async #interceptHost(event: ToolCallReady, originRef: string | null): Promise<ToolAcceptance | null> {
+  async #interceptHost(event: ToolCallReady, originRef: string | null,standalone?:StandaloneToolTurn): Promise<ToolAcceptance | null> {
+    if(event.name==='enter_plan_mode'){
+      const user=standalone?.user??this.#ports.intakeUser(),authority=standalone?.authority??this.#ports.currentUserTurn(event,originRef)
+      if(Object.keys(event.arguments).length)return this.#refusalAcceptance(event,'invalid_params','{"code":"invalid_params"}')
+      if(!this.#ports.requestPlanMode)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')
+      if(!user||!authority||!originRef||user.epoch!==event.session_epoch||user.origin_ref!==originRef||event.session_epoch<=this.#ports.discardedInputEpoch()||!authority.stillWanted())return this.#refusalAcceptance(event,'missing_origin_ref','{"code":"missing_origin_ref"}')
+      try{
+        await this.#ports.requestPlanMode(event.call_id,originRef,authority.stillWanted)
+        if(!authority.stillWanted())return this.#refusalAcceptance(event,'superseded','{"code":"superseded"}')
+        const acceptance=this.#refusalAcceptance(event,'accepted','{"accepted":true,"mode":"plan","scheduled":true}')
+        return {...acceptance,accepted:true,inline_fulfilled:true}
+      }catch(error){const code=error instanceof Error?error.message:'mode_change_failed';return this.#refusalAcceptance(event,code,canonicalJson({code,state:'refused'}))}
+    }
     if (event.name === CONFIRM_TOOL) {
       return this.#refusalAcceptance(event, 'unknown_confirmation', UNKNOWN_CONFIRMATION_TOOL_RESULT)
     }
     if(this.#ports.taskHost?.isCurrent?.()===false)return this.#refusalAcceptance(event,'superseded','{"code":"superseded"}')
     if(event.name==='schedule'){
-      const user=this.#ports.intakeUser(),authority=this.#ports.currentUserTurn(event,originRef),host=this.#ports.scheduleHost
+      const user=standalone?.user??this.#ports.intakeUser(),authority=standalone?.authority??this.#ports.currentUserTurn(event,originRef),host=this.#ports.scheduleHost
       if(!host)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')
       if(!authority||!user||event.session_epoch<=this.#ports.discardedInputEpoch()||user.epoch!==event.session_epoch||originRef!==user.origin_ref)return this.#refusalAcceptance(event,'missing_origin_ref','{"code":"missing_origin_ref"}')
       const args={...event.arguments};delete args.origin_ref
@@ -1253,8 +1278,8 @@ export class ToolContinuations {
     }
     // Both act on the user's behalf, so both need the current user turn as origin: a spontaneous
     // `cancel` would stop work nobody asked to stop.
-    const user = this.#ports.intakeUser()
-    if (event.session_epoch <= this.#ports.discardedInputEpoch() || originRef === null || user?.epoch !== event.session_epoch || originRef !== user.origin_ref) {
+    const user = standalone?.user??this.#ports.intakeUser()
+    if ((!standalone&&event.session_epoch <= this.#ports.discardedInputEpoch()) || originRef === null || user?.epoch !== event.session_epoch || originRef !== user.origin_ref) {
       return this.#refusalAcceptance(event, 'missing_origin_ref', '{"code":"missing_origin_ref"}')
     }
     const conversationItems = this.#ports.runtime.memory?.channels.get('conversation')?.items ?? []
@@ -1274,7 +1299,7 @@ export class ToolContinuations {
     if (controller === undefined) return this.#refusalAcceptance(event, 'unsupported_tool', '{"code":"unsupported_tool"}')
     // A user turn that supersedes an async controller operation makes its result informational only;
     // the controller must re-check this fence before it changes executor state.
-    const authority = this.#ports.currentUserTurn(event, originRef)
+    const authority = standalone?.authority??this.#ports.currentUserTurn(event, originRef)
     if (authority === null) return this.#refusalAcceptance(event, 'superseded', '{"code":"superseded"}')
     const revision = authority.acceptedUserInputRevision
     if (event.name === CANCEL_TOOL && this.#ports.taskHost) {
@@ -1294,7 +1319,7 @@ export class ToolContinuations {
       if (event.arguments.task_id !== undefined || candidates.length > 1) return this.#refusalAcceptance(event, 'ambiguous_task', canonicalJson({code: 'ambiguous_task', task_ids: candidates.map(task => task.id)}))
       return this.#refusalAcceptance(event, 'not_running', '{"code":"not_running"}')
     }
-    let taskContext:TaskDispatchContext|undefined
+    let taskContext:TaskDispatchContext|undefined=standalone?.task
     if(event.name===DISPATCH_TOOL&&event.arguments.task_id!==undefined){
       try{
         const host=this.#ports.taskHost

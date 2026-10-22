@@ -37,6 +37,9 @@ jobs:
       - run: npm install --global npm@11.6.0
       - run: npm ci
       - run: npm run check
+        env:
+          # tsc + eslint over runtime can exceed the default ~2 GB heap on the macOS runner.
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run test:runtime
         if: runner.os != 'Windows'
       # Full runtime regression runs on macOS/Linux; Windows keeps platform
@@ -59,6 +62,24 @@ jobs:
       - run: npm run smoke:capability-status --workspace @nova-personal-agent/desktop
         if: runner.os == 'macOS'
       - run: npm run build
+      - name: Accept native workbench Agent Loop in Electron
+        if: runner.os == 'macOS' || runner.os == 'Windows'
+        shell: pwsh
+        env:
+          NOVA_TEST_DIST: ${{ github.workspace }}/runtime/dist
+          NOVA_ACCEPTANCE_ROOT: ${{ runner.temp }}/workbench-agent-${{ github.run_id }}-${{ github.run_attempt }}
+          CODEX_RESOURCES_PATH: ${{ github.workspace }}/clients/desktop/build
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:NOVA_ACCEPTANCE_ROOT | Out-Null
+          Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+          npm run test:workbench-agent --workspace @nova-personal-agent/desktop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always() && (runner.os == 'macOS' || runner.os == 'Windows')
+        with:
+          name: workbench-agent-${{ runner.os }}
+          path: ${{ runner.temp }}/workbench-agent-${{ github.run_id }}-${{ github.run_attempt }}/*
+          if-no-files-found: warn
       - name: Verify installed headless npm package
         if: runner.os == 'Linux'
         run: |

@@ -7,6 +7,8 @@ import {renderFeedCard,sendPresented} from './feed-card.mjs'
 import {currentLanguage,t} from './locale.mjs'
 import {mountExecutionCard} from './execution-card.mjs'
 import {mountCodingTargetMenu} from './coding-target-menu.mjs'
+import {mountWorkbenchAgent} from './workbench-agent.mjs'
+import {createBuildCallLog} from './build-call-log.mjs'
 import {createOrbVisualSafe} from './orb-visual.mjs'
 import {ORB_STATE_NAMES} from './state.mjs'
 
@@ -76,6 +78,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const stageLabel=el('p','','voice-stage-label');stageLabel.setAttribute('role','status');stage.append(stageCanvas,stageLabel);pane.append(stage)
  const taskCards=el('section',undefined,'conversation-task-cards');taskCards.setAttribute('aria-label',t('此对话的任务'));pane.append(taskCards);const cardNodes=new Map()
  const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
+ const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api})
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3
  draft.addEventListener('input',()=>{c.draft=draft.value;if(!draft.value.trim())c.state().source_todo=null;renderSource();syncActions()})
  draft.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(()=>c.submit())}})
@@ -139,6 +142,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
 
  const feedNodes=new Map()
  let renderedNavigation='',renderedMessages='',renderedConversation=null
+ const buildLog=createBuildCallLog({c,el,changed:()=>renderHistory()})
  function renderConversations(){
   const items=c.snapshot?.conversations?.items??[]
   const waiting=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
@@ -181,7 +185,12 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
   if(feed){const {delivery,...content}=feed,memory=c.snapshot?.memory?.entries?.filter(entry=>feed.memory_refs?.some(ref=>ref.entry_id===entry.id)),key=JSON.stringify([message,content,memory,c.connected,Boolean(feed.expires_at&&Date.parse(feed.expires_at)<=Date.now()),Boolean(feed.snooze_until&&Date.parse(feed.snooze_until)>Date.now())]),cached=feedNodes.get(message.id);if(cached?.key===key)return cached.node;const holder=el('article',undefined,'message assistant message-feed');holder.dataset.messageId=message.id;holder.append(el('small',identityView?.profile.assistantName??'Nova','message-role'));renderFeedCard(holder,feed,{el,button,chips,command:(m,p)=>c.command(m,p),openFeed:(id,label)=>run(async()=>{const feed=c.snapshot?.feed?.find(item=>item.id===id);if(feed?.task_ref){const work=feed.task_ref.work_id,task=c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work)||work.startsWith('verified:'+task.id+':'));if(!task)throw Error(t('任务记录暂不可用，请在任务页核对。'));await openTask?.(task.id);return}await onHome();await focusReference([{kind:'feed',id,updated_at:feed.updated_at}])}),visible:false,presented,memory:c.snapshot?.memory?.entries,connected:c.connected,currentItem:()=>c.snapshot?.feed?.find(item=>item.id===feed.id),body:text=>renderMarkdown(text,{openLink})});feedNodes.set(message.id,{key,node:holder});return holder}
   const node=el('article',undefined,`message ${message.role==='user'?'user':'assistant'}`);node.dataset.messageId=message.id;node.append(el('small',message.role==='user'?'你':identityView?.profile.assistantName??'Nova','message-role'))
-  if(message.role==='user')node.append(el('p',message.text));else node.append(renderMarkdown(message.text,{openLink}))
+  if(message.role==='user')node.append(el('p',message.text));else {node.append(renderMarkdown(message.text,{openLink}));if(message.full_text_ref&&c.selectedConversation?.kind==='build'){
+   const full=el('details',undefined,'build-full-reply'),summary=el('summary',t('展开完整回复')),content=el('div',undefined,'build-full-reply-content');full.append(summary,content)
+   let loaded=false,loading=false
+   full.addEventListener('toggle',()=>{if(!full.open||loaded||loading)return;loading=true;content.replaceChildren(el('p',t('正在加载完整回复…'),'hint'));void (async()=>{try{const id=c.selectedId;let offset=0,text='';do{const page=await c.command('build.details',{id,view:'reply',message_id:message.turn_id,offset});if(id!==c.selectedId)return;text+=page.text;offset=page.next_offset}while(offset!==null);if(id!==c.selectedId)return;content.replaceChildren(renderMarkdown(text,{openLink}));loaded=true}catch(error){content.replaceChildren(el('p',t('完整回复加载失败：{0}',error.message),'hint'))}finally{loading=false}})()})
+   node.append(full)
+  }}
   if(message.schedule_ref&&openSchedule){const ref=message.schedule_ref,card=el('div',undefined,'message-schedule');card.dataset.scheduleId=ref.schedule_id;const schedule=c.snapshot?.schedules?.items?.find(item=>item.id===ref.schedule_id);card.append(el('span','◷','schedule-emblem'));button(schedule?.title??t('查看定时任务'),()=>openSchedule(ref.schedule_id),card);if(ref.task_id)button(t('查看任务'),()=>openTask(ref.task_id),card);node.append(card)}
   if(message.references?.length)node.append(el('small',t('引用 {0} 个事项',message.references.length),'message-reference'));
   const generationLabel={pending:'正在回复…',failed:'回复失败，请重新发送',interrupted:'回复已中断，请重新发送'}[message.generation_status];if(generationLabel)node.append(el('small',generationLabel,'hint'))
@@ -190,8 +199,9 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  function renderHistory(force=false){
   const persisted=c.selectedId==='chat:main'?homeTranscript(c.snapshot?.conversations):(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===c.selectedId)
   const turns=new Set(persisted.map(message=>message.turn_id).filter(Boolean))
-  const live=[...liveCaptions.values()].filter(frame=>frame.conversation_id===c.selectedId&&(frame.role!=='user'||frame.conversation_id===c.voiceId)&&!turns.has(frame.turn_id))
-  const key=JSON.stringify([c.selectedId,persisted,live,c.snapshot?.feed,c.snapshot?.memory,c.connected,c.snapshot?.settings?.timezone])
+  const isBuild=c.selectedConversation?.kind==='build'
+  const live=[...liveCaptions.values()].filter(frame=>frame.conversation_id===c.selectedId&&(frame.role!=='user'||frame.conversation_id===c.voiceId)&&!turns.has(frame.turn_id)&&(!isBuild||['running','awaiting_approval'].includes(c.selectedConversation?.build?.status)))
+  const key=JSON.stringify([c.selectedId,persisted,live,isBuild?buildLog.key:null,c.snapshot?.feed,c.snapshot?.memory,c.connected,c.snapshot?.settings?.timezone])
   if(key===renderedMessages&&!force)return
   const changedConversation=renderedConversation!==c.selectedId,previousTop=history.scrollTop;const nearBottom=history.scrollHeight-history.scrollTop-history.clientHeight<80
   if(changedConversation&&renderedConversation)positions.set(renderedConversation,{top:previousTop,bottom:nearBottom})
@@ -203,7 +213,9 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   for(const message of [...persisted,...live]){
    if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
    history.append(renderMessage(message))
+   if(isBuild&&message.role==='user')history.append(...buildLog.forMessage(message.id))
   }
+  if(isBuild)history.append(...buildLog.remaining(new Set(persisted.map(message=>message.id))))
   for(const node of previousNodes)if(!history.contains(node))disposeSources(node)
   for(const [id,{node}]of feedNodes)if(!history.contains(node))feedNodes.delete(id)
   if(focused&&history.contains(focused))focused.focus()
@@ -222,6 +234,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   }
  }
  function update(){
+  buildLog.update()
+  workbenchAgent.update()
   assistantWelcome?.sync()
   syncCompanion()
   renderSource()
@@ -230,13 +244,13 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}const criteria=task.acceptance??[];node.title=[task.goal,...(criteria.length?[t('验收条件'),...criteria.map(item=>'• '+item)]:[])].join('\n');node.textContent=`${task.goal.length>60?task.goal.slice(0,59)+'…':task.goal} · ${t(TASK_PHASE_LABEL[task.phase]??task.phase)} · ${taskNextStep(task)}${criteria.length?' · '+t('验收 {0} 条',criteria.length):''}`}
   if(draft.value!==c.draft)draft.value=c.draft
   const localDictation=c.dictationConversationId===c.selectedId&&Boolean(c.dictationId)
-  draft.disabled=!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')
+  draft.disabled=!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isBuildFinished(c.selectedId)||(c.buildWaitingApproval&&c.selectedConversation?.id===c.selectedId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')
   submit.disabled=draft.disabled
   dictate.disabled=!c.presentationReady||!c.connected||!c.selectedId||Boolean(c.voiceId)||(c.mode!=='text'&&c.dictationConversationId!==c.selectedId)||c.mode==='transcribing'||!c.capabilities.includes('dictation')
   voice.disabled=!c.presentationReady||!c.connected||!c.selectedId||(Boolean(c.voiceId)&&!c.isVoiceConversation)||(c.mode!=='text'&&!c.isVoiceConversation)
   syncActions();syncStage()
   hint.textContent=t(!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 再点一下麦克风结束'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行')
-  targetMenu.update();if(c.selectedId==='chat:main')targetMenu.element.hidden=true;executionCard.update((c.snapshot?.pending_confirmations??[]).find(item=>item.proposal_id&&item.workspace&&item.conversation_id===c.selectedId)??null,c.selectedId);renderConversations();renderHistory();deliverPresented();read()
+  targetMenu.update();if(c.selectedId==='chat:main'||c.selectedConversation?.kind==='build')targetMenu.element.hidden=true;if(c.selectedConversation?.kind==='build'||c.selectedConversation?.mode==='plan')dictate.disabled=true;executionCard.update((c.snapshot?.pending_confirmations??[]).find(item=>item.proposal_id&&item.workspace&&item.conversation_id===c.selectedId)??null,c.selectedId);renderConversations();renderHistory();deliverPresented();read()
  }
  async function focusDraft(text,source=null){
   if(source&&c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main'))return focusReference([{kind:'todo',...source}],text)
@@ -261,7 +275,11 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
    if(frame.text)liveCaptions.set(key,frame)
    while(liveCaptions.size>128)liveCaptions.delete(liveCaptions.keys().next().value)
   }
-  if(frame.type==='personal.state')for(const message of frame.conversations?.messages??[])if(message.turn_id)liveCaptions.delete(`${message.conversation_id}:${message.turn_id}`)
+  if(frame.type==='personal.state'){
+   for(const message of frame.conversations?.messages??[])if(message.turn_id)liveCaptions.delete(`${message.conversation_id}:${message.turn_id}`)
+   const idleBuilds=new Set((frame.conversations?.items??[]).filter(item=>item.kind==='build'&&!['running','awaiting_approval'].includes(item.build?.status)).map(item=>item.id))
+   for(const [key,value] of liveCaptions)if(idleBuilds.has(value.conversation_id))liveCaptions.delete(key)
+  }
  }
  return {identity,element:pane,update,receive,focusDraft,focusReference,reveal,setOpen,setOrb,setOrbLevel,get open(){return open},history}
 }

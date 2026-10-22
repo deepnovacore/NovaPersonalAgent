@@ -54,6 +54,8 @@ npm run start:client
 
 When running from source, the project `.env` takes precedence over matching shell variables. Restart the desktop after editing it.
 
+Desktop source launch commands currently provide no hot reload or file watching. `start:client` and `start:workbench` build before launching. With an existing build, `npm run start:built --workspace @nova-personal-agent/desktop` skips building for a faster launch. Changes to main, preload or runtime require quitting and restarting; runtime source changes also require rebuilding. Keep development builds and caches in an isolated directory on the selected mounted external disk.
+
 ## 3. Give Nova a task
 
 [![Nova clarifies a request before starting a task](../../assets/features/conversation-polished.en.png)](../../assets/features/conversation-polished.en.png)

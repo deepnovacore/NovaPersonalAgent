@@ -201,6 +201,16 @@ test('the compiled tool schema advertises always-on adapters before configured e
   assert.ok(names.includes('memory__recall'))
 })
 
+test('enter_plan_mode is registered only when the workbench Chat runtime requests the optional host tool',()=>{
+ const ordinary=buildAssembly({settings:settings({executors:[]}),gateway:new ScriptedGateway([])})
+ assert.equal(ordinary.tools.bindings.has('enter_plan_mode'),false)
+ const workbench=buildAssembly({settings:settings({executors:[]}),gateway:new ScriptedGateway([]),includeEnterPlanMode:true})
+ const schema=workbench.tools.schemas.find(item=>record(record(item).function).name==='enter_plan_mode')
+ assert.ok(schema)
+ assert.equal(workbench.tools.bindings.get('enter_plan_mode')?.logical_name,'host.enter_plan_mode')
+ assert.deepEqual(record(record(record(schema).function).parameters),{type:'object',properties:{},additionalProperties:false,required:[]})
+})
+
 test('camera module off removes MCP camera, watch, and guard without affecting search, memory, or configured executors', () => {
   const assembly = buildAssembly({
     settings: settings({executors: ['fast_sim']}),
