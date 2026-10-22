@@ -931,7 +931,7 @@ export class PersonalAgentHost {
             this.#state.user_scope = this.options.userScope;
             this.#loaded = true;
             await this.notifications.open();
-            let recovered=false;for(const conversation of this.#state.conversations.items){if(conversation.build){conversation.build.status='paused';conversation.build.reason='restart_requires_resume';conversation.build.approval=null;recovered=true;}for(const message of conversation.messages)if(message.generation_status==='pending'){message.generation_status='interrupted';recovered=true;}}
+            let recovered=false;for(const conversation of this.#state.conversations.items){if(conversation.build&&conversation.build.status!=='finished'){conversation.build.status='paused';conversation.build.reason='restart_requires_resume';conversation.build.approval=null;recovered=true;}for(const message of conversation.messages)if(message.generation_status==='pending'){message.generation_status='interrupted';recovered=true;}}
             if(recovered){this.#state.revision++;await this.#store.write(this.#state);}
 
             this.#abort = new AbortController();
