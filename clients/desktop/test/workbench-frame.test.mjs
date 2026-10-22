@@ -85,3 +85,13 @@ test('forget drops the restore rectangle', () => {
  frame.toggleMaximize();frame.forget()
  assert.equal(frame.maximized,false)
 })
+
+test('onChange reports each toggle result so the preference and renderer follow user maximize and restore', () => {
+ const seen=[]
+ let bounds={x:100,y:80,width:800,height:600}
+ const frame=createWorkbenchFrame({getBounds:()=>({...bounds}),setBounds:b=>{bounds={...b}},getWorkArea:()=>({x:0,y:25,width:1440,height:875}),onChange:v=>seen.push(v)})
+ frame.toggleMaximize();frame.toggleMaximize()
+ assert.deepEqual(seen,[true,false])
+ frame.toggleMaximize();frame.forget()
+ assert.deepEqual(seen,[true,false,true],'forget (collapse to the orb) is not a user restore')
+})

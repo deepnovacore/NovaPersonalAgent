@@ -59,6 +59,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   language: 'zh-CN',
   startupView: 'workbench',
   lastPresentation: 'workbench',
+  // Written by main when the user maximizes or restores the workbench; true means expanding fills the work area.
+  workbenchMaximized: true,
   palette: 'ember',
   skinId: 'nova',
   importedSkins: Object.freeze([]),
@@ -265,6 +267,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     language: pick(source.language, fallback.language, DEFAULT_SETTINGS.language, value => ['zh-CN', 'en'].includes(value) ? value : null),
     startupView: pick(source.startupView, fallback.startupView, DEFAULT_SETTINGS.startupView, value => ['orb', 'workbench', 'last'].includes(value) ? value : null),
     lastPresentation: pick(source.lastPresentation, fallback.lastPresentation, DEFAULT_SETTINGS.lastPresentation, value => ['orb', 'workbench'].includes(value) ? value : null),
+    workbenchMaximized: pick(source.workbenchMaximized, fallback.workbenchMaximized, DEFAULT_SETTINGS.workbenchMaximized, value => typeof value === 'boolean' ? value : null),
     palette: pick(source.palette, fallback.palette, DEFAULT_SETTINGS.palette, validPalette),
     codingProgressNarration: pick(source.codingProgressNarration, fallback.codingProgressNarration, DEFAULT_SETTINGS.codingProgressNarration, value => value === 'smart' || value === 'continuous' ? value : null),
     codingBackend: pick(source.codingBackend, fallback.codingBackend, DEFAULT_SETTINGS.codingBackend, value => CODING_BACKENDS.includes(value) ? value : null),
@@ -350,7 +353,7 @@ export function startupPresentation(settings, argv = []) {
 }
 
 export function backendSettings(settings) {
-  const {skinId, importedSkins, startupView, lastPresentation, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
+  const {skinId, importedSkins, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
   return backend
 }
 

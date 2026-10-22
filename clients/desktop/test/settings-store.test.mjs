@@ -85,6 +85,7 @@ test('the default settings are the documented schema', () => {
     skinId: 'nova', importedSkins: [],
     startupView: 'workbench',
     lastPresentation: 'workbench',
+    workbenchMaximized: true,
     language: 'zh-CN',
     palette: 'ember',
     proactivity: 'balanced',
@@ -277,6 +278,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     skinId: 'nova', importedSkins: [],
     startupView: 'workbench',
     lastPresentation: 'workbench',
+    workbenchMaximized: true,
     language: 'zh-CN',
     palette: 'graphite',
     proactivity: 'balanced',
@@ -422,6 +424,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'voiceprintEnabled', 'voiceprintId', 'voiceprintName', 'voiceprintUploadUrl',
     'wakeWordEnabled',
     'watchModel',
+    'workbenchMaximized',
   ])
 })
 
@@ -1395,4 +1398,13 @@ test('reading other people\'s messages for the profile is off by default and onl
   }
   assert.equal(applySettingsUpdate(on, {profileParticipantMessages: false}).profileParticipantMessages, false)
   assert.equal(applySettingsUpdate(on, {language: 'en'}).profileParticipantMessages, true, 'an unrelated update keeps the choice')
+})
+
+test('the workbench fill preference defaults on, is backend-invisible and only accepts booleans', () => {
+  assert.equal(normalizeSettings({}).workbenchMaximized, true)
+  assert.equal(normalizeSettings({workbenchMaximized: false}).workbenchMaximized, false)
+  assert.equal(normalizeSettings({workbenchMaximized: 'no'}, {workbenchMaximized: false}).workbenchMaximized, false)
+  assert.equal(normalizeSettings({workbenchMaximized: 0}).workbenchMaximized, true)
+  assert.equal('workbenchMaximized' in backendSettings({workbenchMaximized: false}), false)
+  assert.equal('workbenchMaximized' in publicSettings({workbenchMaximized: false}), false)
 })

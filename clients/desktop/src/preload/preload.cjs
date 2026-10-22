@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
       ipcRenderer.on('nova:personal:presentation-request', listener)
       return () => ipcRenderer.removeListener('nova:personal:presentation-request', listener)
     },
+    onMaximized: callback => {
+      const listener = (_event, value) => { if (typeof value === 'boolean') callback(value) }
+      ipcRenderer.on('nova:personal:maximized', listener)
+      return () => ipcRenderer.removeListener('nova:personal:maximized', listener)
+    },
     onCollapsed: callback => {
       const listener = (_event, value) => { if (typeof value === 'boolean') callback(value) }
       ipcRenderer.on('nova:personal:collapsed', listener)

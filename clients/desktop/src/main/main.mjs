@@ -1461,7 +1461,24 @@ async function startSelectedCamera(camera, smokeChannel) {
     getBounds: () => mainWindow.getBounds(),
     setBounds: bounds => mainWindow.setBounds(bounds),
     getWorkArea: bounds => screen.getDisplayMatching(bounds).workArea,
+    onChange: value => {
+      publishMaximized()
+      // Only a user toggle can differ from the stored preference: the automatic fill on expand requires it to be true.
+      if (settingsReady && currentSettings.workbenchMaximized !== value) {
+        settingsWriter({workbenchMaximized: value}, undefined, {preserveSecrets: true}).catch(error => {
+          console.error(`[desktop-diagnostic] workbench_maximized_save_failure type=${error.name}`)
+        })
+      }
+    },
   })
+  let lastMaximized = null
+  const publishMaximized = () => {
+    const value = workbenchFrame.maximized
+    if (value === lastMaximized) return
+    lastMaximized = value
+    sendToOrb('nova:personal:maximized', value)
+  }
+  mainWindow.on?.('resize', publishMaximized)
   const setPersonalCollapsed = value => {
     if (value === personalCollapsed && personalBounds !== null) return
     const wasVisible = windowsPresentation && mainWindow.isVisible()
@@ -1494,7 +1511,9 @@ async function startSelectedCamera(camera, smokeChannel) {
       // DIP readback on every mode switch would gradually grow it at 175% DPI.
       if (!windowsPresentation || personalBounds === null) mainWindow.setBounds(personalBounds ?? {x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2),width,height})
       personalBounds = mainWindow.getBounds()
+      if (currentSettings?.workbenchMaximized !== false && !workbenchFrame.maximized) workbenchFrame.toggleMaximize()
     }
+    publishMaximized()
     sendToOrb('nova:personal:collapsed', value)
     if (windowsPresentation && wasVisible) mainWindow.showInactive()
   }
