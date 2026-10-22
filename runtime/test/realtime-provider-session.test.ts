@@ -628,6 +628,15 @@ test('memory that cannot be withdrawn after a failed read still closes the sessi
  await assert.rejects(session.ensureResponse());assert.equal(provider.ensured,0);assert.equal(session.state,'closed')
 })
 
+test('a failed replacement with an empty context still closes before input reaches stale memory',async()=>{
+ let sent=0,content:string|null='private memory',revision=1
+ const provider=Object.assign(new FakeProvider(),{submitText:()=>{sent++;return Promise.resolve()}})
+ const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,responseAdaptation:()=>({revision,content})})
+ await session.connect();assert.equal(provider.responseAdaptations.at(-1)?.content,'private memory')
+ content=null;revision=2;provider.adaptationFailure=Error('deletion_failed')
+ await assert.rejects(session.submitText('hello'));assert.equal(sent,0);assert.equal(session.state,'closed')
+})
+
 test('requested-response audio does not read memory per frame but response admission revalidates it',async()=>{
  const provider=Object.assign(new FakeProvider(),{userResponseMode:'requested' as const})
  let reads=0,fail=false

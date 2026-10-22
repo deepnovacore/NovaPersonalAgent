@@ -484,14 +484,15 @@ export class RealtimeProviderSession {
     const operation = this.#responseAdaptationTail.then(async () => {
       if (!this.#isCurrentConnection(owner)) return
       const required=this.#responseAdaptationRequired?.()===true
-      // Unverified memory must never stay with the model, but the conversation itself may continue
-      // without memory. A fresh connection holds none; context sent earlier on this connection is
-      // replaced with an empty one at the same revision, which every provider accepts. Only a
-      // withdrawal that cannot be confirmed closes the session.
-      const failClosed=async()=>{
+      const failClosed=async()=>{if(required&&this.#isCurrentConnection(owner)){await this.close();throw new InternalProtocolError('memory authorization refresh failed; session closed')}}
+      // A read that cannot be verified must not leave memory with the model, but the conversation may
+      // continue without it. A fresh connection holds none; anything else on this connection, including
+      // an attempt whose delivery was never confirmed, is replaced with an empty context at the same
+      // revision. Only a confirmed withdrawal is skipped; one that cannot be confirmed closes the session.
+      const withdrawUnverified=async()=>{
         if(!required||!this.#isCurrentConnection(owner))return
         const previous=this.#responseAdaptationAttempt
-        if(previous===null||previous.epoch!==owner.identity.epoch||previous.signature===WITHDRAWN_SIGNATURE)return
+        if(previous===null||previous.epoch!==owner.identity.epoch||(previous.confirmed&&previous.signature===WITHDRAWN_SIGNATURE))return
         try{
           await this.#provider.replaceResponseAdaptation!({revision:previous.revision,content:null},combinedSignal(owner.controller.signal,signal))
           this.#assertCurrentConnection(owner)
@@ -515,18 +516,18 @@ export class RealtimeProviderSession {
           this.#responseAdaptationReadFailureDiagnosedEpoch = owner.identity.epoch
           this.#reportAdaptationDiagnostic('read_failed', owner.identity.epoch, null)
         }
-        await failClosed()
+        await withdrawUnverified()
         return
       }finally{
         if(aborted)readSignal.removeEventListener('abort',aborted)
       }
       if(!this.#isCurrentConnection(owner))return
       signal?.throwIfAborted()
-      if (raw === undefined) {await failClosed();return}
+      if (raw === undefined) {await withdrawUnverified();return}
       const parsed = responseAdaptationContextSchema.safeParse(raw)
       if (!parsed.success) {
         this.#reportAdaptationDiagnostic('invalid', owner.identity.epoch, null)
-        await failClosed()
+        await withdrawUnverified()
         return
       }
       const context = includeUserSources && this.#provider.responseAdaptationMode !== 'session_setup' ? parsed.data : {revision: parsed.data.revision, content: parsed.data.content,
