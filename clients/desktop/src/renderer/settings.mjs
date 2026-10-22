@@ -16,7 +16,7 @@ localizeDocument(document)
 import {createHubPanel} from './hub-panel.mjs'
 import {createPhonePanel} from './phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
-import {createCapabilitiesEditor} from './capabilities-editor.mjs'
+import {createCapabilitiesEditor, moduleStatusNote} from './capabilities-editor.mjs'
 import {createKnowledgePanel} from './knowledge-panel.mjs'
 // Settings are edited as one local transaction. Public drafts live in the
 // controller; secret plaintext remains only in password inputs until Save.
@@ -306,7 +306,7 @@ function keyUsage(view) {
     dashscopeApiKey: (view.pipelineMode === 'integrated' && view.integratedProvider === 'qwen')
       || (view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'qwen') ? t("必需")
       : view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun'
-        ? t("仅本地记忆嵌入需要") : t("当前未使用"),
+        ? t("仅本地记忆嵌入需要") : t("可选；不配则联网搜索回退与本地记忆嵌入关闭"),
     stepfunApiKey: view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun' ? t("必需") : t("当前未使用"),
     openaiApiKey: (view.pipelineMode === 'integrated' ? view.integratedProvider : view.cascadedLlmProvider) === 'openai' ? t('必需') : t('当前未使用'),
     geminiApiKey: (view.pipelineMode === 'integrated' ? view.integratedProvider === 'gemini' : [view.cascadedAsrProvider,view.cascadedLlmProvider,view.cascadedTtsProvider].includes('gemini')) ? t('必需') : t('当前未使用'),
@@ -315,15 +315,40 @@ function keyUsage(view) {
       && view.cascadedLlmProvider === 'ark' ? t("必需") : t("当前未使用"),
     doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' && [view.cascadedAsrProvider,view.cascadedTtsProvider].includes('volcengine') ? t("必需") : t("当前未使用"),
     composioApiKey: t('应用连接；修改后需重启'),
-    tavilyApiKey: t("可选"),
-    openrouterApiKey: 'Jev',
+    tavilyApiKey: searchKeyUsage(view.capabilities?.runtime?.modules?.search),
+    openrouterApiKey: t("增强个性化（可选）；不配则新闻只按时间线"),
+  }
+}
+
+// Search without a Tavily key reuses the DashScope key through the Bailian preset, or turns off (capability-registry.ts).
+function searchKeyUsage(search) {
+  const note = moduleStatusNote(search)
+  return note || t("可选；不配则回退百炼联网搜索（需 DashScope 密钥），两者都没有则搜索关闭")
+}
+
+// Required keys stay in view; the rest fold into 高级 so a first-time user sees one key to fill in.
+const MODEL_SECRET_KEYS = ['dashscopeApiKey', 'stepfunApiKey', 'openrouterApiKey', 'geminiApiKey', 'openaiApiKey', 'deepseekApiKey', 'arkApiKey', 'doubaoBigmodelApiKey']
+function arrangeSecrets(usage) {
+  const primary = document.querySelector('#secrets-primary')
+  const advanced = document.querySelector('#secrets-advanced-list')
+  let required = 0
+  for (const key of MODEL_SECRET_KEYS) {
+    const row = document.querySelector(`.secret[data-key="${key}"]`)
+    const isRequired = usage[key] === t("必需")
+    if (isRequired) required += 1
+    ;(isRequired ? primary : advanced).append(row)
+  }
+  document.querySelector('#secrets-advanced').open ||= required === 0
+  for (const key of SECRET_KEYS) {
+    const endpoint = document.querySelector(`details[data-endpoint="${key}"]`)
+    if (endpoint && usage[key] === t("必需")) endpoint.open = true
   }
 }
 
 function renderKeyUsage(view) {
-  for (const [key, usage] of Object.entries(keyUsage(view))) {
-    document.querySelector(`#usage-${key}`).textContent = usage
-  }
+  const usage = keyUsage(view)
+  for (const [key, text] of Object.entries(usage)) document.querySelector(`#usage-${key}`).textContent = text
+  arrangeSecrets(usage)
 }
 
 function renderPreset(select, customInput, value, presets) {

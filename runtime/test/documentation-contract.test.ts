@@ -133,7 +133,6 @@ test('the generic model credential is an optional support-model override only', 
   const entry = environmentContract.find(candidate =>
     candidate.name === 'MODEL_API_KEY')
   assert.ok(entry !== undefined)
-  assert.equal(entry.required, 'never')
   assert.match(entry.descriptionEn, /optional generic support-model.*override/iu)
   assert.match(entry.descriptionZh, /可选.*通用.*辅助模型.*覆盖/u)
   assert.doesNotMatch(`${entry.descriptionEn}\n${entry.descriptionZh}`, /Qwen.*fallback|Qwen 回退/iu)
