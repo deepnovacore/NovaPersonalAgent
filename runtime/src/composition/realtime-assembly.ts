@@ -1,4 +1,5 @@
 import type {UsageContext} from '../usage/context.js'
+import {acceptanceReadExistingOnly} from '../desktop/workbench-acceptance.js'
 import {resolveModelApiKey} from '../config/config.js'
 import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
@@ -592,12 +593,12 @@ export class RealtimeAssembly {
     if (this.#state === 'starting') {
       this.#state = 'started'
       // Optional work shares the memory worker; start it only after the connection is ready.
-      if (!this.#sharedPersonal) {
+      if (!this.#sharedPersonal && !acceptanceReadExistingOnly()) {
         if(this.#bindKnowledge){this.#knowledgeBinding=this.#bindKnowledge().catch(()=>{this.#diagnose('knowledge_memory_ledger_unavailable')});this.#bindKnowledge=undefined}
         this.personalAgent.startBackgroundWork()
         this.#personalMemory?.startBackgroundWork?.()
       }
-      if (!this.#sharedPersonal && this.#codexResource !== undefined) {
+      if (!this.#sharedPersonal && this.#codexResource !== undefined && !acceptanceReadExistingOnly()) {
         try {
           void this.#codexResource.start().catch(() => undefined)
         } catch {

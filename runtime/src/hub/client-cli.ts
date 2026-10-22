@@ -33,8 +33,8 @@ export async function runHubClient(args:string[]):Promise<number>{
  if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||!(url.protocol==='https:'||(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw Error('Hub URL must be an HTTPS origin (HTTP only for loopback)')
  const token=options.get('token')??process.env.NOVA_HUB_TOKEN
  if(!token)throw Error('--token or NOVA_HUB_TOKEN required')
- const request=async(path:string,body?:unknown,timeout=15000):Promise<unknown>=>{
-  const response=await fetch(new URL(`/hub/v1/${path}`,url),{method:body===undefined?'GET':'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error',signal:AbortSignal.timeout(Math.max(1,Math.ceil(timeout)))})
+ const request=async(path:string,body?:unknown,signal=AbortSignal.timeout(15000)):Promise<unknown>=>{
+  const response=await fetch(new URL(`/hub/v1/${path}`,url),{method:body===undefined?'GET':'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error',signal})
   const value:unknown=await response.json()
   if(!response.ok){const error=value as {error?:string};throw Error(`HTTP ${response.status}: ${error.error??'hub_request_failed'}`)}
   return value
@@ -66,7 +66,16 @@ export async function runHubClient(args:string[]):Promise<number>{
   const task=required('task'),deadline=Date.now()+positive('timeout-seconds',300)*1000
   let previous=''
   while(Date.now()<deadline){
-   const tasks=await request('tasks',undefined,Math.min(15000,deadline-Date.now())) as Task[],current=tasks.find(value=>value.task_id===task)
+   const remaining=deadline-Date.now(),signal=AbortSignal.timeout(Math.max(1,Math.ceil(Math.min(15000,remaining))))
+   let tasks:Task[]
+   try{tasks=await request('tasks',undefined,signal) as Task[]}
+   catch(error){
+    // A watch deadline can expire while reading either headers or the JSON body.
+    // Keep HTTP/network failures and the independent 15-second request cap intact.
+    if(remaining<=15000&&signal.aborted&&error instanceof Error&&['TimeoutError','AbortError'].includes(error.name))throw Error('watch_timeout')
+    throw error
+   }
+   const current=tasks.find(value=>value.task_id===task)
    if(current){
     const encoded=JSON.stringify(current)
     if(encoded!==previous){print(current);previous=encoded}

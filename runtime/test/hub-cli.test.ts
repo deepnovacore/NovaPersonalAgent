@@ -4,9 +4,11 @@ import {execFile} from 'node:child_process'
 import {mkdtemp,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import {createServer} from 'node:http'
 import type {AddressInfo} from 'node:net'
 import {HubStore} from '../src/hub/store.js'
 import {createHubServer} from '../src/hub/server.js'
+import {runHubClient} from '../src/hub/client-cli.js'
 
 async function fixture(){
  const dir=await mkdtemp(join(tmpdir(),'hub-cli-')),store=new HubStore(join(dir,'hub.db')),server=createHubServer(store)
@@ -73,6 +75,26 @@ test('CLI watch reports completion, cancellation, interruption, expiry and timeo
   const timeout=await f.cli(['watch','--task','missing','--timeout-seconds','0.1']);assert.notEqual(timeout.code,0);assert.match(timeout.err,/watch_timeout/)
  }finally{await f.close()}
 })
+
+for(const stalledAt of ['headers','body'] as const){
+ test(`CLI watch reports its deadline when the HTTP response stalls at ${stalledAt}`,{timeout:5000},async()=>{
+  const server=createServer((_request,response)=>{
+   if(stalledAt==='body'){
+    response.writeHead(200,{'content-type':'application/json'})
+    response.flushHeaders()
+   }
+  })
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve))
+  try{
+   const url=`http://127.0.0.1:${(server.address() as AddressInfo).port}`
+   await assert.rejects(runHubClient(['watch','--task','missing','--timeout-seconds','0.1',
+    '--url',url,'--token','test-token']),{message:'watch_timeout'})
+  }finally{
+   server.closeAllConnections()
+   await new Promise<void>(resolve=>server.close(()=>resolve()))
+  }
+ })
+}
 
 test('CLI options override environment and preserve schema and transport boundaries',async()=>{
  const f=await fixture()

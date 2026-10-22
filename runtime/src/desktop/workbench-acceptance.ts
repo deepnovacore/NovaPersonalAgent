@@ -13,7 +13,7 @@ import type {CapabilityRegistry} from '../config/capability-registry.js'
 import {Dispatcher,getGlobalDispatcher,setGlobalDispatcher} from 'undici'
 import {FEED_HEADERS,NEWS_SOURCES} from '../news/feeds.js'
 
-const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false),news:z.boolean().default(false)}).strict()
+const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false),news:z.boolean().default(false),readExistingOnly:z.boolean().default(false)}).strict()
 export type AcceptanceManifest=z.infer<typeof manifestSchema>
 let active:AcceptanceManifest|undefined
 let calls=0,blocked=0,probeVerified=false
@@ -27,6 +27,7 @@ export function assertOriginalProfilePaths(actual:{userData?:string;blackboardPa
  if(canonical(actual.blackboardPath)!==canonical(expected.blackboardPath))throw Error('acceptance_wrong_blackboard')
 }
 export function acceptanceEnabled():boolean{return !!process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT}
+export function acceptanceReadExistingOnly():boolean{return active?.readExistingOnly===true}
 export function acceptanceProfileGenerationEnabled():boolean{return active?.profileGeneration===true}
 /** Public RSS reads are allowed only when the manifest turns news on, and only as plain GETs to the built-in feed origins. */
 export function acceptanceNewsEnabled():boolean{return active?.news===true}
@@ -117,6 +118,7 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
   assertAcceptanceUrl(url,true)
   const provider=manifest.providers.find(item=>item.origin===new URL(url).origin)
   if(provider){
+   if(acceptanceReadExistingOnly())rejectEgress('acceptance_generation_paused')
    // Refuse opaque bodies, redirects, and an unknown model before transmitting.
    const body=init?.body
    if(typeof body!=='string')rejectEgress('acceptance_model_body_required')

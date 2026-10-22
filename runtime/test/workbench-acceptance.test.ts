@@ -31,6 +31,19 @@ test('report output cannot be inside original profile or repository',()=>{
  assert.throws(()=>loadAcceptanceManifest(f.env),/output_inside/)
  }finally{f.close()}
 })
+test('existing-results acceptance blocks even an authorized model before transport',()=>{
+ const f=fixture();try{
+ writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,readExistingOnly:true}))
+ const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href
+ const code=`import assert from 'node:assert/strict';import {installAcceptanceGate,acceptanceReadExistingOnly,acceptanceCounts} from ${JSON.stringify(moduleUrl)};
+ let sent=0;globalThis.fetch=async()=>{sent++;return new Response('{}')};
+ assert.equal(acceptanceReadExistingOnly(),false);installAcceptanceGate();assert.equal(acceptanceReadExistingOnly(),true);
+ await assert.rejects(fetch('https://provider.invalid',{method:'POST',body:JSON.stringify({model:'model'})}),/acceptance_generation_paused/);
+ assert.equal(sent,0);assert.equal(acceptanceCounts().model_calls,0);`
+ const child=spawnSync(process.execPath,['--input-type=module','-e',code],{env:f.env,encoding:'utf8'})
+ assert.equal(child.status,0,child.stderr)
+ }finally{f.close()}
+})
 test('real fetch/socket/http transports fail closed before network; persisted grants cannot be widened',()=>{
  const f=fixture();try{
  const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href
