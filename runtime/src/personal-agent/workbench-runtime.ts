@@ -30,6 +30,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  let closed=false,controller:AbortController|undefined,active:Promise<{assistant:string;turn_id?:string}>|undefined,version=state.run_version
  let computer:Pick<ComputerSession,'screenshot'|'action'|'close'>|undefined
  let currentComputerCall:WorkbenchCall|undefined
+ let computerInputStarted=false
  let observeRequired=true
  let coordinateObservationRequired=true
  let verificationRequired=false
@@ -85,8 +86,9 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
     else if(!state.inputs.length&&!state.pending_calls.length)state.inputs.push({kind:'user_text',text:RESUME_CHECK})
     if(context?.resume&&state.reason==='approval_denied')return {assistant:'上次操作已拒绝，请补充新的要求后继续。'}
     state.status='running';state.reason=null;state.assistant='';delete state.model_failure;await save()
-    const toolBridge=await bridge(),enabled=computerState(),tools=build?[...toolBridge.tools,...LOCAL_TOOLS,...(enabled.enabled?computerTools(enabled.direct):[]),finishTool]:[...toolBridge.tools.filter(tool=>toolBridge.readonlyNames.includes(tool.name)),publishTool]
-    const allowed=new Set(tools.map(tool=>tool.name));if(allowed.size!==tools.length||tools.length>128)throw Error('workbench_tool_configuration')
+    const toolBridge=await bridge(),baseTools=build?[...toolBridge.tools.filter(tool=>tool.name!=='dispatch'),...LOCAL_TOOLS,finishTool]:[...toolBridge.tools.filter(tool=>toolBridge.readonlyNames.includes(tool.name)),publishTool]
+    const authorizedTools=[...baseTools,...(build?computerTools(true):[])]
+    const allowed=new Set(authorizedTools.map(tool=>tool.name));if(allowed.size!==authorizedTools.length||authorizedTools.length>128)throw Error('workbench_tool_configuration')
     let toolRounds=0,finishedReply:string|undefined
     while(true){
      signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale')
@@ -106,7 +108,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
         else{
          if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
          call.state='running';call.started_at=new Date().toISOString();state.status='running';await save()
-         currentComputerCall=call
+         currentComputerCall=call;computerInputStarted=false
          const getComputer=async()=>{
           if(computer)return computer
           const Session=options.computerSession?undefined:(await import('./computer-use/session.js')).ComputerSession
@@ -119,14 +121,15 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
             if(!approved&&!signal.aborted)state.reason='approval_denied'
             state.status='running';current.state='running';await save()
             return approved&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
-           },acting:(action,point)=>{signal.throwIfAborted();if(!computerState().enabled||!host.localBuildAuthorized(conversation.id))throw Error('computer_use_disabled');computerFrame('acting',action,point)},
+           },acting:(action,point)=>{signal.throwIfAborted();if(!computerState().enabled||!host.localBuildAuthorized(conversation.id))throw Error('computer_use_disabled');computerInputStarted=true;computerFrame('acting',action,point)},
           })
           return computer
          }
          const capture=async():Promise<string>=>{
+          computerFrame('active',name)
           const image=await (await getComputer()).screenshot()
           const ref=await store.saveImage(conversation.id,conversation.generation,image)
-          observeRequired=false;coordinateObservationRequired=false;computerFrame('active',name)
+          observeRequired=false;coordinateObservationRequired=false
           return ref
          }
          try{
@@ -136,6 +139,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
           else if(name==='computer_run'){
            verificationRequired=true;await closeComputer();computerFrame('delegated',name)
            if(!toolBridge.computerRun)throw Error('computer_executor_unavailable')
+           computerInputStarted=true
            const result=await toolBridge.computerRun(state.last_user,call,signal)
            signal.throwIfAborted()
            call.result={result,image_ref:await capture()}
@@ -148,7 +152,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
          }catch(error){
           let code=error instanceof Error?error.message:'action_failed'
           try{await closeComputer()}catch{code='cleanup_unknown'}
-          call.result={code,status:signal.aborted||code==='cleanup_unknown'?'outcome_unknown':'failed'}
+          call.result={code,status:code==='cleanup_unknown'||(signal.aborted&&computerInputStarted)?'outcome_unknown':signal.aborted?'cancelled_before_execution':'failed'}
           observeRequired=true
          }
          call.state='completed';call.finished_at=new Date().toISOString();await save()
@@ -245,6 +249,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
       state.pending_calls=[];await save()
      }
      if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
+     const enabled=computerState(),tools=[...baseTools,...(enabled.enabled?computerTools(enabled.direct):[])]
      const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[],turn=randomUUID();let assistant='',completed=false
      try{
       for await(const event of llm.stream({language:options.language,inputs,tools,workspaceContext:enabled.enabled?[workspaceContext,computerUseSkill(enabled.direct)].filter(Boolean).join('\n'):workspaceContext,signal})){

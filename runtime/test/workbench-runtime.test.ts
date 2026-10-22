@@ -498,6 +498,7 @@ test('Build Connect approval is required even when per-input approval is never',
   const id=await f.build()
   const pending=await until(()=>buildView(f.host,id).approval,value=>!!value)
   assert.equal(pending!.name,'computer_connect');assert.equal(connected,false)
+  assert.ok(f.frames.some(frame=>frame.type==='computer_use'&&frame.state==='active'))
   await f.command('build.approve',{id,approval_id:pending!.id,approved:true})
   await f.host.waitConversation(id);assert.equal(connected,true);assert.equal(actions,1)
   const frames=f.frames.filter(frame=>frame.type==='computer_use');assert.ok(frames.every(frame=>frame.conversation_id===id));assert.deepEqual(frames.map(frame=>frame.state),['active','acting','active','idle']);assert.deepEqual(frames[1]?.point,{x:0,y:0})
@@ -548,7 +549,7 @@ test('Stop interrupts a computer input and Resume observes before writing withou
  },'never',undefined,options=>({
   screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
   action:async()=>{
-   actions++
+   options.acting('computer_click',{x:0,y:0});actions++
    if(actions===1){started=true;await new Promise<void>(resolve=>options.signal.addEventListener('abort',()=>resolve(),{once:true}));options.signal.throwIfAborted()}
   },close:()=>{closed++;return Promise.resolve()},
  }))
@@ -678,3 +679,41 @@ test('successful click allows typing and Enter but requires observation for anot
   assert.deepEqual(actions,['computer_click','computer_type','computer_key'])
  }finally{await f.close()}
 })
+
+
+test('Build rejects async dispatch and refreshes computer tools after an in-turn switch change',{skip:!supported,timeout:10000},async t=>{
+ let enabled=false
+ const f=await fixture((request,step)=>{
+  assert.equal(request.tools.some(tool=>tool.name==='dispatch'),false)
+  if(step===0){assert.equal(request.tools.some(tool=>tool.name==='computer_screenshot'),false);return {call:{name:'monitor',arguments:{}}}}
+  assert.equal(request.tools.some(tool=>tool.name==='computer_screenshot'),true)
+  if(step===1)return {call:{name:'dispatch',arguments:{executor:'computer',instruction:'must not run'}}}
+  assert.equal((request.inputs.find(input=>input.kind==='tool_result')?.output as {code?:string})?.code,'tool_not_authorized')
+  return {text:'ready for synchronous computer use'}
+ },'never')
+ t.mock.method(f.host,'computerUseState',()=>({enabled,direct:enabled}))
+ f.bridge.invoke=()=>{enabled=true;return Promise.resolve({status:'observed'})}
+ try{const id=await f.build();await f.host.waitConversation(id);assert.equal(f.script.requests.length,3);assert.equal(f.host.tasks.list().length,0)}finally{await f.close()}
+})
+
+for(const operation of ['computer_screenshot','computer_click'] as const){
+ test(`Stop before ${operation} input is a clean pause`,{skip:!supported,timeout:10000},async()=>{
+  let pending=false,writes=0
+  const f=await fixture((_request,step)=>({call:{name:step===0?'computer_screenshot':'computer_click',arguments:step===0?{}:{x:0,y:0}}}),
+  'ask',undefined,options=>({
+   screenshot:async()=>{
+    if(operation==='computer_screenshot'){pending=true;await options.approve('Connect',{});options.signal.throwIfAborted()}
+    return {media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}
+   },
+   action:async()=>{pending=true;await options.approve('Tap',{});options.signal.throwIfAborted();options.acting('computer_click',{x:0,y:0});writes++},
+   close:()=>Promise.resolve(),
+  }))
+  f.host.computerUseState=()=>({enabled:true,direct:true})
+  try{
+   const id=await f.build();await until(()=>pending,value=>value);await f.command('build.stop',{id})
+   assert.equal(writes,0);assert.equal(buildView(f.host,id).status,'paused')
+   const checkpoint=await f.host.workbench.checkpoint(id,0)
+   assert.equal((checkpoint.calls.at(-1)?.result as {status:string}).status,'cancelled_before_execution')
+  }finally{await f.close()}
+ })
+}
