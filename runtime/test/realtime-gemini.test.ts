@@ -292,3 +292,16 @@ test('Gemini local staging remains available while a replacement socket is conne
  assert.match(JSON.stringify(h.sockets[1]!.sent.at(-1)),/ready/)
  await h.adapter.close()
 })
+
+test('Gemini resends an adaptation whose refresh was cancelled instead of treating it as delivered',async()=>{
+ const h=harness();await h.adapter.connect({tools:[],signal:h.signal})
+ await h.adapter.replaceResponseAdaptation({revision:1,content:'private memory'},h.signal)
+ assert.match(JSON.stringify(h.sockets[1]!.sent[0]),/private memory/)
+ const cancelled=new AbortController();cancelled.abort()
+ await assert.rejects(h.adapter.replaceResponseAdaptation({revision:1,content:null},cancelled.signal))
+ // The cancelled withdrawal left the memory-bearing socket current; the same request must open a new setup.
+ await h.adapter.replaceResponseAdaptation({revision:1,content:null},h.signal)
+ assert.equal(h.sockets.length,3)
+ assert.doesNotMatch(JSON.stringify(h.sockets[2]!.sent[0]),/private memory/)
+ await h.adapter.close()
+})
