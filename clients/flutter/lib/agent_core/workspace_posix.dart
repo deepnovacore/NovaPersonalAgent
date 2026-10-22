@@ -34,6 +34,39 @@ final class WorkspaceDirectory {
         Int32 Function(Int32, Pointer<Utf8>, Int32, Pointer<Utf8>, Int32),
         int Function(int, Pointer<Utf8>, int, Pointer<Utf8>, int)
       >('linkat');
+  // Android app SELinux domains prohibit hard links. renameat2 is available
+  // in the kernel on supported devices, but its libc wrapper requires API 30.
+  static final _syscall = _lib
+      .lookupFunction<
+        IntPtr Function(
+          IntPtr,
+          VarArgs<(Int32, Pointer<Utf8>, Int32, Pointer<Utf8>, Uint32)>,
+        ),
+        int Function(int, int, Pointer<Utf8>, int, Pointer<Utf8>, int)
+      >('syscall');
+  static int _installMissing(
+    int directory,
+    Pointer<Utf8> from,
+    Pointer<Utf8> to,
+  ) {
+    if (!Platform.isAndroid) return _linkat(directory, from, directory, to, 0);
+    final renameat2 = switch (Abi.current()) {
+      Abi.androidArm64 => 276,
+      Abi.androidArm => 382,
+      Abi.androidX64 => 316,
+      Abi.androidIA32 => 353,
+      _ => throw UnsupportedError('Unsupported Android filesystem ABI'),
+    };
+    return _syscall(
+      renameat2,
+      directory,
+      from,
+      directory,
+      to,
+      1,
+    ); // RENAME_NOREPLACE
+  }
+
   static final _unlinkat = _lib
       .lookupFunction<
         Int32 Function(Int32, Pointer<Utf8>, Int32),
@@ -271,7 +304,7 @@ final class WorkspaceDirectory {
       handle = -1;
       if (onlyIfMissing) {
         // Atomic no-overwrite install; a concurrently created/edited target wins.
-        if (_linkat(fd, temp, fd, target, 0) < 0 && _errno().value != 17) {
+        if (_installMissing(fd, temp, target) < 0 && _errno().value != 17) {
           _fail();
         }
       } else if (_renameat(fd, temp, fd, target) < 0) {

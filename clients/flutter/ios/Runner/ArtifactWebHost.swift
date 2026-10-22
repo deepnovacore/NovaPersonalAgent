@@ -126,9 +126,17 @@ import WebKit
     // Allow initialization promises and the first render to settle before checking.
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
       guard let self, self.completion != nil else { return }
+      // Encode the body so syntax errors are caught inside the inspector.
+      guard let encoded = try? JSONSerialization.data(withJSONObject: [script]),
+        let arguments = String(data: encoded, encoding: .utf8) else {
+        self.finish(["loaded": true, "errors": ["invalid_test_script"]]); return
+      }
       let wrapped = """
-      (()=>{try {return JSON.stringify({loaded:true,title:document.title,errors:window.__novaPreviewErrors||[],result:(()=>{\(script)})()});}
-      catch(e){return JSON.stringify({loaded:true,errors:[String(e)]});}})()
+      (()=>{try{const result=(new Function(...\(arguments)))();
+      if(result&&typeof result.then==='function')throw new Error('async_test_script_unsupported: use a synchronous function body');
+      if(result===undefined||typeof result==='function'||typeof result==='symbol')throw new Error('invalid_test_result: return JSON-safe checks from a synchronous function body');
+      return JSON.stringify({loaded:true,title:document.title,errors:window.__novaPreviewErrors||[],result});}
+      catch(e){return JSON.stringify({loaded:true,errors:[...(window.__novaPreviewErrors||[]).slice(0,19),String(e).slice(0,500)]});}})()
       """
       self.web.evaluateJavaScript(wrapped) { [weak self] value, error in
         guard let self else { return }

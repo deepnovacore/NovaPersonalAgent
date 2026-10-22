@@ -34,6 +34,7 @@ void main() {
       root,
       inspect: (html, script) async => {
         'loaded': true,
+        'errors': <String>[],
         'result': html + script,
       },
     );
@@ -142,6 +143,7 @@ void main() {
         );
         expect(result.$1, 200);
         expect(jsonDecode(result.$2)['result'], '<html>saved</html>return 42;');
+        expect(jsonDecode(result.$2)['execution_ok'], true);
         expect(
           (await post(
             bridge.environment['NOVA_BROWSER_TOKEN']!,
@@ -152,6 +154,98 @@ void main() {
       } finally {
         http.close(force: true);
         await bridge.close();
+      }
+    },
+  );
+  test('browser errors preserve native evidence and explain repair', () async {
+    await workspace.write('index.html', '<p>game</p>');
+    await workspace.write(
+      'check.js',
+      'function() { return Promise.resolve({}); }',
+    );
+    final native = {
+      'loaded': true,
+      'errors': ['invalid_test_result'],
+      'execution_ok': true,
+      'result': {'observed': false},
+    };
+    final bridge = await WorkspaceBrowser.start(
+      AgentWorkspace(root, inspect: (_, _) async => native),
+    );
+    final http = HttpClient();
+    try {
+      final request = await http.postUrl(
+        Uri.parse(bridge.environment['NOVA_BROWSER_URL']!),
+      );
+      request.headers.set(
+        'X-Nova-Token',
+        bridge.environment['NOVA_BROWSER_TOKEN']!,
+      );
+      request.write('/workspace/index.html\n/workspace/check.js');
+      final response = await request.close();
+      expect(response.statusCode, 200); // wget keeps the diagnostic body.
+      final value = jsonDecode(await utf8.decoder.bind(response).join());
+      expect(value['execution_ok'], false);
+      for (final entry in native.entries.where(
+        (entry) => entry.key != 'execution_ok',
+      )) {
+        expect(value[entry.key], entry.value);
+      }
+      expect(value['hint'], contains('synchronous JavaScript function BODY'));
+      expect(value['hint'], contains('no Promise'));
+    } finally {
+      http.close(force: true);
+      await bridge.close();
+    }
+  });
+  test(
+    'browser CLI keeps JSON and fails on inspection or transport errors',
+    () async {
+      final wget = File('${root.path}/fake-wget');
+      await wget.writeAsString(r'''#!/bin/sh
+printf '%s' "$FIXTURE_RESPONSE"
+exit "$FIXTURE_STATUS"
+''');
+      await Process.run('chmod', ['+x', wget.path]);
+      final command = File('${root.path}/nova-browser');
+      await command.writeAsString(
+        browserCommand.replaceFirst('/bin/busybox', wget.path),
+      );
+      for (final fixture in [
+        (
+          '{"execution_ok":true,"loaded":true,"errors":[],"result":{"ok":true}}',
+          0,
+          0,
+        ),
+        (
+          '{"execution_ok":false,"loaded":true,"errors":["invalid_test_result"]}',
+          0,
+          1,
+        ),
+        ('{"loaded":true,"errors":[]}', 0, 1),
+        ('{"execution_ok":true,"loaded":true,"errors":[]}', 7, 7),
+        ('', 4, 4),
+      ]) {
+        final result = await Process.run(
+          '/bin/sh',
+          [
+            command.path,
+            'inspect',
+            '--path',
+            '/workspace/index.html',
+            '--script',
+            '/workspace/check.js',
+          ],
+          environment: {
+            'NOVA_BROWSER_URL': 'http://127.0.0.1/unused',
+            'NOVA_BROWSER_TOKEN': 'fixture',
+            'FIXTURE_RESPONSE': fixture.$1,
+            'FIXTURE_STATUS': '${fixture.$2}',
+          },
+        );
+        expect(result.exitCode, fixture.$3);
+        expect(result.stdout, '${fixture.$1}\n');
+        expect(result.stderr, fixture.$3 == 0 ? isEmpty : contains('failed'));
       }
     },
   );

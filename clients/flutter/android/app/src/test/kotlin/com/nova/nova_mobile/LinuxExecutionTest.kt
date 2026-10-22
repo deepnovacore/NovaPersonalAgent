@@ -9,13 +9,15 @@ import java.util.concurrent.TimeUnit
 
 class LinuxExecutionTest {
     private fun runner(limit: Int = 64 * 1024): LinuxExecution = LinuxExecution(
-        Files.createTempDirectory("nova-linux-test").toFile(), limit,
+        // macOS exposes the JVM temp directory through /var -> /private/var.
+        // The log writer requires a canonical workspace to reject symlink paths.
+        Files.createTempDirectory("nova-linux-test").toFile().canonicalFile, limit,
         { request -> ProcessBuilder("/bin/sh", "-c", request.command).start() },
         { process -> process.destroyForcibly(); Unit },
     )
     @Test fun capturesExitCodeAndSeparateStreams() {
         val result = runner().execute(ShellRequest("capture", "printf hello; printf problem >&2; exit 7"))
-        assertEquals("completed", result.status)
+        assertEquals(result.toString(), "completed", result.status)
         assertEquals("hello", result.stdout)
         assertEquals("problem", result.stderr)
         assertEquals(7, result.exitCode)
@@ -24,14 +26,14 @@ class LinuxExecutionTest {
     @Test fun truncationKeepsFullOutputLog() {
         val execution = runner(8)
         val result = execution.execute(ShellRequest("long", "printf 12345678901234567890"))
-        assertTrue(result.truncated)
+        assertTrue(result.toString(), result.truncated)
         assertEquals("12345678", result.stdout)
         assertNotNull(result.logPath)
         assertTrue(File(execution.workspace, ".nova/logs/long/stdout.log").readText().contains("12345678901234567890"))
     }
     @Test fun timeoutTerminatesCommand() {
         val result = runner().execute(ShellRequest("deadline", "exec sleep 10", timeoutMs = 50))
-        assertEquals("timed_out", result.status)
+        assertEquals(result.toString(), "timed_out", result.status)
     }
     @Test fun cancellationOnlyTargetsRequestedExecution() {
         val execution = runner()
@@ -40,7 +42,8 @@ class LinuxExecutionTest {
             val slow = worker.submit<ShellResult> { execution.execute(ShellRequest("slow", "exec sleep 10")) }
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
             while (!execution.cancel("slow") && System.nanoTime() < deadline) Thread.yield()
-            assertEquals("cancelled", slow.get(3, TimeUnit.SECONDS).status)
+            val cancelled = slow.get(3, TimeUnit.SECONDS)
+            assertEquals(cancelled.toString(), "cancelled", cancelled.status)
             assertEquals("completed", execution.execute(ShellRequest("fast", "printf fine")).status)
             assertFalse(execution.cancel("missing"))
         } finally { worker.shutdownNow() }

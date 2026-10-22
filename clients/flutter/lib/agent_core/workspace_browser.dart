@@ -5,6 +5,9 @@ import 'dart:math';
 import 'agent_workspace.dart';
 import 'model_client.dart';
 
+const browserScriptInstructions =
+    'check.js must contain a synchronous JavaScript function BODY, with no enclosing function or arrow wrapper, no Promise, await or timer-based checks. Example: const button = document.querySelector("button"); if (!button) throw new Error("missing button"); button.click(); return {title: document.title, clicked: true}; Return JSON-safe data and throw on failed assertions. execution_ok only means the inspection ran without reported errors; inspect the returned checks before claiming behavior passed.';
+
 /// A short-lived capability for a single guest execution. No public listener,
 /// host file paths, model credentials, or native commands cross this bridge.
 class WorkspaceBrowser {
@@ -62,7 +65,22 @@ class WorkspaceBrowser {
         if (_closed) throw const AgentFailure('browser_closed');
         final result = await workspace.inspectFiles(paths[0], paths[1]);
         request.response.headers.contentType = ContentType.json;
-        request.response.write(jsonEncode(result));
+        final ok =
+            result['loaded'] == true &&
+            result['errors'] is List &&
+            (result['errors'] as List).isEmpty;
+        // Keep HTTP 200 for completed inspections so BusyBox wget retains errors.
+        request.response.write(
+          jsonEncode(
+            {
+              'execution_ok': ok,
+              ...result,
+              if (!ok)
+                'hint':
+                    'Inspection failed; read errors, fix the page or check script, and rerun. $browserScriptInstructions',
+            }..['execution_ok'] = ok,
+          ),
+        );
       }
     } catch (error) {
       request.response.statusCode = 400;
@@ -110,7 +128,17 @@ done
 [ -n "${NOVA_BROWSER_URL:-}" ] && [ -n "${NOVA_BROWSER_TOKEN:-}" ] || {
   echo 'nova-browser must run inside an active Nova shell task' >&2; exit 1;
 }
-exec /bin/busybox wget -q -O - --timeout=25 \
+status=0
+response=$(/bin/busybox wget -q -O - --timeout=25 \
   --header "X-Nova-Token: $NOVA_BROWSER_TOKEN" \
-  --post-data "$(printf '%s\n%s' "$page" "$script")" "$NOVA_BROWSER_URL"
+  --post-data "$(printf '%s\n%s' "$page" "$script")" "$NOVA_BROWSER_URL") || status=$?
+printf '%s\n' "$response"
+if [ "$status" -ne 0 ]; then
+  echo 'Browser request failed; inspection did not complete.' >&2
+  exit "$status"
+fi
+case "$response" in
+  '{"execution_ok":true,'*) exit 0 ;;
+  *) echo 'Browser inspection failed; read the JSON errors and hint, fix and rerun.' >&2; exit 1 ;;
+esac
 ''';

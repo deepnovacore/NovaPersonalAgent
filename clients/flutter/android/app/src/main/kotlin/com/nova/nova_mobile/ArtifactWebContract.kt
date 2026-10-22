@@ -37,8 +37,11 @@ internal object ArtifactWebContract {
     """.trimIndent() + html
 
     fun inspectionScript(script: String): String = """
-        (()=>{try{return JSON.stringify({loaded:true,title:document.title,errors:window.__novaPreviewErrors||[],result:(()=>{$script})()});}
-        catch(e){return JSON.stringify({loaded:true,errors:[String(e).slice(0,500)]});}})()
+        (()=>{try{const result=(new Function(${JSONObject.quote(script)}))();
+        if(result&&typeof result.then==='function')throw new Error('async_test_script_unsupported: use a synchronous function body');
+        if(result===undefined||typeof result==='function'||typeof result==='symbol')throw new Error('invalid_test_result: return JSON-safe checks from a synchronous function body');
+        return JSON.stringify({loaded:true,title:document.title,errors:window.__novaPreviewErrors||[],result});}
+        catch(e){return JSON.stringify({loaded:true,errors:[...(window.__novaPreviewErrors||[]).slice(0,19),String(e).slice(0,500)]});}})()
     """.trimIndent()
 
     fun failure(code: String, loaded: Boolean = false): Map<String, Any?> =

@@ -112,6 +112,25 @@ void main() {
           'nova-browser inspect --path /workspace/index.html --script /workspace/check.js',
         ),
       );
+      final shellDescription = const ToolDefinition(
+        'shell.execute',
+        'local',
+        false,
+        {},
+      ).wire['function']['description'];
+      for (final description in [model.instructions, shellDescription]) {
+        expect(description, contains('synchronous JavaScript function BODY'));
+        expect(
+          description,
+          contains('no Promise, await or timer-based checks'),
+        );
+        expect(
+          description,
+          contains('return {title: document.title, clicked: true}'),
+        );
+        expect(description, contains('throw on failed assertions'));
+        expect(description, contains('execution_ok only means'));
+      }
       expect(model.instructions, isNot(contains('artifact_write')));
       expect(model.instructions, isNot(contains('not Python')));
     },

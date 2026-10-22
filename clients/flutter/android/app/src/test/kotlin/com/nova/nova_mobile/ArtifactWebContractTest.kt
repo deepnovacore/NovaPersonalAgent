@@ -55,7 +55,8 @@ class ArtifactWebContractTest {
 
     @Test fun scriptIsAFunctionBodyAndErrorsStayBounded() {
         val script = ArtifactWebContract.inspectionScript("return {found: !!document.querySelector('#game')};")
-        assertTrue(script.contains("result:(()=>{return {found:"))
+        assertTrue(script.contains("new Function(" + JSONObject.quote("return {found: !!document.querySelector('#game')};")))
+        assertTrue(script.contains("async_test_script_unsupported"))
         assertTrue(script.contains("JSON.stringify"))
         assertTrue(script.contains("slice(0,500)"))
     }
