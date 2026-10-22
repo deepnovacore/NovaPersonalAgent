@@ -291,6 +291,16 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           requestMicrophone: requestMicrophone,
           store: host.store,
         )..addListener(_phoneVoiceChanged);
+        phoneVoice!.onRestorePresentation = () async {
+          final call = phoneVoice;
+          if (!mounted || call?.active != true) return false;
+          _expandPhoneVoice();
+          await WidgetsBinding.instance.endOfFrame;
+          return mounted &&
+              identical(phoneVoice, call) &&
+              call!.active &&
+              _phoneVoiceExpanded;
+        };
       });
       unawaited(_openLocalSchedules(host));
       unawaited(_openProfileGeneration().catchError((Object _) {}));

@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart' show ValueListenable, TargetPlatform;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -36,6 +36,8 @@ class PanelSession extends PhoneVoiceSession {
   int interruptions = 0, endings = 0, taskCancellations = 0;
   Completer<void>? finishStop;
   bool disposing = false;
+  @override
+  Future<bool> minimizeToFloating() async => false;
   @override
   String get status => phase;
   @override
@@ -129,6 +131,21 @@ Widget panelHost(
 );
 
 void main() {
+  testWidgets(
+    'iOS PiP failure keeps the call and shows a non-permission error',
+    (tester) async {
+      final session = PanelSession()..floatingSupported = true;
+      addTearDown(session.dispose);
+      await tester.pumpWidget(panelHost(session, reduced: true));
+      await tester.tap(find.byTooltip('悬浮通话'));
+      await tester.pump();
+      expect(find.textContaining('画中画暂不可用'), findsOneWidget);
+      expect(find.textContaining('显示在其他应用上层'), findsNothing);
+      expect(session.active, isTrue);
+      expect(session.endings, 0);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
   for (final layout in [
     (size: const Size(320, 700), scale: 1.0),
     (size: const Size(390, 844), scale: 1.0),
@@ -240,6 +257,45 @@ void main() {
       expect(expansions, 1);
       expect(session.endings, 0);
     },
+  );
+
+  testWidgets(
+    'compact controls mute, return and end without cross-triggering',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final session = PanelSession();
+      addTearDown(session.dispose);
+      var expansions = 0;
+      await tester.pumpWidget(
+        panelHost(
+          session,
+          compact: true,
+          scale: 2,
+          onExpand: () => expansions++,
+        ),
+      );
+      await tester.tap(find.byTooltip('静音'));
+      await tester.pump();
+      expect(session.muted, isTrue);
+      expect(expansions, 0);
+      expect(session.endings, 0);
+      await tester.tap(find.byTooltip('取消静音'));
+      await tester.pump();
+      expect(session.muted, isFalse);
+      await tester.tap(find.byTooltip('返回通话'));
+      expect(expansions, 1);
+      expect(session.active, isTrue);
+      await tester.tap(find.byTooltip('结束通话'));
+      await tester.pump();
+      expect(session.endings, 1);
+      expect(session.active, isFalse);
+      expect(expansions, 1);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 
   testWidgets(

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../ui/theme.dart';
 import 'phone_voice_session.dart';
 import 'voice_call_visual.dart';
+import 'voice_companion.dart';
 
 class PhoneVoicePanel extends StatefulWidget {
   const PhoneVoicePanel({
@@ -50,9 +51,9 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
     _ => t('准备好聊聊', 'Ready to talk'),
   };
   Future<void> _action(Future<void> Function() action) async {
+    if (mounted && _actionError != null) setState(() => _actionError = null);
     try {
       await action();
-      if (mounted && _actionError != null) setState(() => _actionError = null);
     } catch (_) {
       if (mounted) {
         setState(
@@ -64,6 +65,17 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
       }
     }
   }
+
+  bool get _nativePip =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.iOS &&
+      session.active &&
+      session.companion is NativeVoiceCompanion;
+  Widget _pipSource(double width, double height) => SizedBox(
+    width: width,
+    height: height,
+    child: const UiKitView(viewType: 'nova/voice_pip_source'),
+  );
 
   Future<void> _end() async {
     if (_ending) return;
@@ -94,8 +106,11 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
 
   Widget _compact() => Material(
     key: const ValueKey('voice-compact-bar'),
-    color: const Color(0xffedf5f0),
-    borderRadius: BorderRadius.circular(18),
+    color: Colors.white,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(18),
+      side: const BorderSide(color: Color(0xffe2e9e5)),
+    ),
     child: InkWell(
       borderRadius: BorderRadius.circular(18),
       onTap: widget.onExpand,
@@ -103,13 +118,16 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
         padding: const EdgeInsets.only(left: 16, right: 4),
         child: Row(
           children: [
-            const Icon(CupertinoIcons.phone, color: Nova.mint, size: 20),
+            if (_nativePip)
+              _pipSource(72, 48)
+            else
+              const Icon(CupertinoIcons.phone, color: Nova.mint, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text(
-                  'Nova · $_status',
+                  _actionError ?? 'Nova · $_status',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Nova.text, fontSize: 13),
@@ -117,9 +135,31 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
               ),
             ),
             IconButton(
+              tooltip: t('返回通话', 'Return to call'),
+              onPressed: widget.onExpand,
+              color: const Color(0xff1d2d27),
+              icon: const Icon(CupertinoIcons.arrow_up_left_arrow_down_right),
+            ),
+            IconButton(
+              tooltip: session.muted ? t('取消静音', 'Unmute') : t('静音', 'Mute'),
+              onPressed: session.active && !_ending
+                  ? () => unawaited(_action(session.toggleMute))
+                  : null,
+              color: session.muted
+                  ? const Color(0xffc85450)
+                  : const Color(0xff1d2d27),
+              icon: Icon(
+                session.muted ? CupertinoIcons.mic_slash : CupertinoIcons.mic,
+              ),
+            ),
+            IconButton.filled(
               tooltip: t('结束通话', 'End call'),
               onPressed: _ending ? null : () => unawaited(_end()),
-              icon: const Icon(CupertinoIcons.phone_down_fill, color: Nova.red),
+              style: IconButton.styleFrom(
+                backgroundColor: const Color(0xffc85450),
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(CupertinoIcons.phone_down_fill),
             ),
           ],
         ),
@@ -154,7 +194,8 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                     color: Nova.secondary,
                   ),
                 ),
-                if (defaultTargetPlatform == TargetPlatform.android &&
+                if ((defaultTargetPlatform == TargetPlatform.android ||
+                        session.floatingSupported) &&
                     session.active)
                   IconButton(
                     tooltip: t('悬浮通话', 'Float call'),
@@ -164,23 +205,29 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                       if (!shown && mounted) {
                         setState(
                           () => _actionError = t(
-                            '请允许 Nova 显示在其他应用上层，然后返回点击悬浮通话。',
-                            'Allow Nova to display over other apps, then return and tap Float call.',
+                            defaultTargetPlatform == TargetPlatform.iOS
+                                ? '画中画暂不可用，通话仍在继续。请稍后重试。'
+                                : '请允许 Nova 显示在其他应用上层，然后返回点击悬浮通话。',
+                            defaultTargetPlatform == TargetPlatform.iOS
+                                ? 'Picture in Picture is unavailable. Your call continues; try again shortly.'
+                                : 'Allow Nova to display over other apps, then return and tap Float call.',
                           ),
                         );
                       }
                     }),
                   ),
-                const Expanded(
-                  child: Text(
-                    'Nova',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Nova.text,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
+                Expanded(
+                  child: _nativePip
+                      ? Center(child: _pipSource(110, 58))
+                      : const Text(
+                          'Nova',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Nova.text,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
                 ),
                 IconButton(
                   tooltip: t('语音设置', 'Voice settings'),
