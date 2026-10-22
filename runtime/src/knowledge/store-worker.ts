@@ -14,6 +14,7 @@ import type {
   KnowledgeIndexChunk,
   ReplaceKnowledgeSourceInput,
 } from './types.js'
+import {isRecord} from '../core/guards.js'
 
 const MAX_SOURCE_BYTES = 10 * 1024 * 1024
 const MAX_CHUNKS = 20_000
@@ -793,10 +794,6 @@ function safeOutputUrl(value: string): boolean {
 
 function redactPathSpans(value: string): string {
   return value.replace(/(?:\\\\[^\s<>"'`()\[\]{},;!?]+|[A-Za-z]:[\\/][^\s<>"'`()\[\]{},;!?]+|\/(?!\/)[^\s<>"'`()\[\]{},;!?]+)/gu, '[path]')
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function invalid(): never { throw new StoreError('STORE_INVALID_INPUT') }

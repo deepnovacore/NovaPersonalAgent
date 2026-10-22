@@ -5,6 +5,7 @@ import {
   ConfigurationError, OPENAI_BASE_URL, GEMINI_BASE_URL, cascadedCredentialField,
   DASHSCOPE_COMPATIBLE_BASE_URL,
   requireCascadedCredentials,
+  requiredSetting,
   resolveCascadedSelection,
   type CascadedSelection,
   type Settings,
@@ -218,12 +219,6 @@ function resolveTtsConfig(settings: Settings, apiKey: string): VolcengineTtsConf
     apiKey,
     outputSampleRate: 24_000,
   })
-}
-
-function requiredSetting(value: string, name: string): string {
-  const normalized = stripLikePython(value)
-  if (normalized === '') throw new ConfigurationError(`${name} 不能为空`)
-  return normalized
 }
 
 function secureEndpoint(value: string, scheme: 'https' | 'wss', name: string): string {

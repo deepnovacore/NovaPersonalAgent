@@ -6,6 +6,7 @@ import {randomUUID} from 'node:crypto'
 import {basename, dirname, join} from 'node:path'
 import {hostCodexHomeValue, refreshEphemeralCodexHomeIdentity, type HostCodexHome} from './process-owner.js'
 import {CodexCredentialError, createCodexEnvironment, snapshotEnvironmentInput} from './spawn-env.js'
+import {isErrno, isPlainRecord} from '../../core/guards.js'
 export {CodexCredentialError, environmentValue} from './spawn-env.js'
 
 export type CodexCredentialDiagnosticCode =
@@ -220,14 +221,4 @@ function requireString(value: unknown): string {
 
 function ownerMatches(uid: number): boolean {
   return typeof process.getuid !== 'function' || uid === process.getuid()
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value) as object | null
-  return prototype === Object.prototype || prototype === null
-}
-
-function isErrno(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && Reflect.get(error, 'code') === code
 }

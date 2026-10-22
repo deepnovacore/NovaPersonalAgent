@@ -3,6 +3,7 @@ import {resolve} from 'node:path'
 import {CodexProtocolError} from './protocol.js'
 import {snapshotJsonRecord} from './safe-json.js'
 import type {CodexLaunchProfile} from './launch-profile.js'
+import {exactKeys, isPlainRecord} from '../../core/guards.js'
 
 export interface MethodSchemaSpec {
   readonly file: string
@@ -196,11 +197,11 @@ export function validateCodexSchemaBundle(
     if (!Array.isArray(variants)) throw new TypeError('variants')
     const requests = new Map<string, Record<string, unknown>>()
     for (const candidate of variants) {
-      if (!isPlainObject(candidate)) continue
+      if (!isPlainRecord(candidate)) continue
       const properties = candidate.properties
-      if (!isPlainObject(properties)) continue
+      if (!isPlainRecord(properties)) continue
       const methodSchema = properties.method
-      if (!isPlainObject(methodSchema) || !Array.isArray(methodSchema.enum)) continue
+      if (!isPlainRecord(methodSchema) || !Array.isArray(methodSchema.enum)) continue
       if (methodSchema.enum.length !== 1 || typeof methodSchema.enum[0] !== 'string') continue
       requests.set(methodSchema.enum[0], candidate)
     }
@@ -390,7 +391,7 @@ function validateFileChangeItem(root: Record<string, unknown>): void {
   const choices = threadItem.oneOf
   if (!Array.isArray(choices)) throw new TypeError('thread item choices')
   const matches = choices.filter(candidate => {
-    if (!isPlainObject(candidate) || !isPlainObject(candidate.properties)) return false
+    if (!isPlainRecord(candidate) || !isPlainRecord(candidate.properties)) return false
     return enumValue(candidate.properties.type) === 'fileChange'
   })
   if (matches.length !== 1) throw new TypeError('file change item')
@@ -431,7 +432,7 @@ function validatePatchChangeKind(
   if (!Array.isArray(choices) || choices.length !== 3) throw new TypeError('patch choices')
   for (const kind of ['add', 'delete', 'update'] as const) {
     const matches = choices.filter(candidate => {
-      if (!isPlainObject(candidate) || !isPlainObject(candidate.properties)) return false
+      if (!isPlainRecord(candidate) || !isPlainRecord(candidate.properties)) return false
       return enumValue(candidate.properties.type) === kind
     })
     if (matches.length !== 1) throw new TypeError('patch kind')
@@ -492,12 +493,12 @@ function validateDecisionResponse(
 }
 
 function approvalMethod(candidate: unknown): string | null {
-  if (!isPlainObject(candidate) || !isPlainObject(candidate.properties)) return null
+  if (!isPlainRecord(candidate) || !isPlainRecord(candidate.properties)) return null
   return enumValue(candidate.properties.method)
 }
 
 function enumValue(candidate: unknown): string | null {
-  if (!isPlainObject(candidate) || candidate.type !== 'string') return null
+  if (!isPlainRecord(candidate) || candidate.type !== 'string') return null
   return Array.isArray(candidate.enum)
     && candidate.enum.length === 1
     && typeof candidate.enum[0] === 'string'
@@ -538,8 +539,8 @@ function requireReference(node: Record<string, unknown>, expected: string): void
 function requireNullableReference(candidate: unknown, reference: string): void {
   const choices = requireObject(candidate).anyOf
   if (!Array.isArray(choices) || choices.length !== 2) throw new TypeError('nullable reference')
-  const references = choices.filter(choice => isPlainObject(choice) && choice.$ref === reference)
-  const nulls = choices.filter(choice => isPlainObject(choice) && choice.type === 'null')
+  const references = choices.filter(choice => isPlainRecord(choice) && choice.$ref === reference)
+  const nulls = choices.filter(choice => isPlainRecord(choice) && choice.type === 'null')
   if (references.length !== 1 || nulls.length !== 1) throw new TypeError('nullable reference')
 }
 
@@ -804,7 +805,7 @@ export function validateEffectiveCodexConfig(
 function truthy(value: unknown): boolean {
   if (value === null || value === undefined || value === false || value === 0 || value === '') return false
   if (Array.isArray(value)) return value.length > 0
-  if (isPlainObject(value)) return Object.keys(value).length > 0
+  if (isPlainRecord(value)) return Object.keys(value).length > 0
   return true
 }
 
@@ -824,11 +825,6 @@ function exactStringRecord(
     && expectedKeys.every(key => Object.hasOwn(value, key) && value[key] === expected[key])
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && expected.every(key => Object.hasOwn(value, key))
-}
-
 function requiredKeysWithNullExtras(
   value: Record<string, unknown>,
   required: readonly string[],
@@ -839,14 +835,8 @@ function requiredKeysWithNullExtras(
 }
 
 function requireObject(value: unknown): Record<string, unknown> {
-  if (!isPlainObject(value)) throw new TypeError('object')
+  if (!isPlainRecord(value)) throw new TypeError('object')
   return value
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value) as object | null
-  return prototype === Object.prototype || prototype === null
 }
 
 function deepFreeze<T>(value: T): T {

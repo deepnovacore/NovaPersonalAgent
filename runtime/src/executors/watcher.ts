@@ -25,6 +25,7 @@ import { handoffPolicySchema } from '../core/memory.js'
 import type { MediaRef, MediaStore } from '../core/media-store.js'
 import type { ModelGateway } from '../model/model-gateway.js'
 import { executorManifestSchema, opSpecSchema, type ExecutorManifest } from '../core/ports.js'
+import {isRecord} from '../core/guards.js'
 
 export const WATCH_PROGRESS_SUMMARY_TEMPLATE = '仍在监控：{condition}'
 /** Past this many consecutive failures the window gives up rather than burning the whole duration. */
@@ -162,7 +163,7 @@ export function parseWatchVerdict(text: string): WatchVerdict {
   } catch {
     throw new TypeError('invalid verdict')
   }
-  if (!isPlainObject(value)) throw new TypeError('invalid verdict')
+  if (!isRecord(value)) throw new TypeError('invalid verdict')
   const keys = Object.keys(value)
   if (keys.length !== 2 || !keys.includes('hit') || !keys.includes('observation')) {
     throw new TypeError('invalid verdict')
@@ -792,10 +793,6 @@ function failure(error: string, op: string): ExecutorHandoff {
 
 function unknown(error: string): ExecutorHandoff {
   return {outcome: 'unknown', trust: 'untrusted_external', content: {error}}
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**

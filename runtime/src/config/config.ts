@@ -1006,7 +1006,7 @@ function rawEnvironmentValue(value: string | undefined): string | undefined {
   return value
 }
 
-function requiredSetting(value: string, name: string): string {
+export function requiredSetting(value: string, name: string): string {
   const normalized = stripLikePython(value)
   if (normalized === '') throw new ConfigurationError(`${name} 不能为空`)
   return normalized
