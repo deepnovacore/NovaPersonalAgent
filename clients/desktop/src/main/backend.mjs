@@ -214,7 +214,6 @@ export function backendLaunchSpec({
   }
   for (const [name, value] of [
     ['WATCH_MODEL', settings?.watchModel ?? ''],
-    ['PLANNER_MODEL', settings?.plannerModel ?? SETTINGS_DEFAULTS.plannerModel],
     ['EMBEDDING_MODEL', settings?.embeddingModel
       ?? SETTINGS_DEFAULTS.embeddingModel],
     ['CAPABILITIES_CONFIG', settings?.capabilitiesConfigPath

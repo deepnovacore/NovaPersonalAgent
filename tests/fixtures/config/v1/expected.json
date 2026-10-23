@@ -11,7 +11,7 @@
         "codex_project_state_root": "/fixture/state",
         "codex_working_interval": 5.0,
         "codex_workspace": "/fixture/workspace",
-        "compressor_model": "compressor",
+        "compressor_model": "qwen-flash",
         "dashscope_api_key_present": true,
         "doubao_asr_api_key_present": true,
         "doubao_asr_chunk_ms": 320,

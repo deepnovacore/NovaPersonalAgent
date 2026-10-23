@@ -85,10 +85,10 @@ import type {CodingAgentControllerFactory} from '../executors/coding-executor.js
 export function defaultIntake(
   core: Assembly,
   gateway: ModelGateway,
-  settings: IntakeSettings & {readonly support_model: string; readonly planner_model: string; readonly fast_model: string},
+  settings: IntakeSettings & {readonly support_model: string},
 ): RealtimeAssemblyOptions['intake'] {
   if (executorWithRole([...core.runtime.executors.values()].map(adapter => adapter.manifest), 'coding') === null) return undefined
-  return {models: intakeModels(gateway, settings.support_model, settings.planner_model || settings.fast_model), settings}
+  return {models: intakeModels(gateway, settings.support_model, settings.support_model), settings}
 }
 
 export const REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS = 1_000

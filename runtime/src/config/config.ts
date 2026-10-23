@@ -142,7 +142,6 @@ export const settingsSchema = z.object({
   clarification_depth: clarificationDepthSchema.default('balanced'),
   plan_readback: planReadbackSchema.default('summary'),
   generate_plan: z.boolean().default(true),
-  planner_model: z.string().default(''),
   progress_bubbles: progressBubblesSchema.default('milestones'),
   search_provider: searchProviderSchema.default('tavily'),
   search_mcp_url: z.string().default(''),
@@ -298,7 +297,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
   const executors = parseExecutors(environment.EXECUTORS, configuredExecutor ?? '')
   // StepFun support chat defaults to its own model. fast_model keeps its DashScope default
   // because local memory extraction reaches it through the DashScope embedding connection;
-  // an empty watch or planner model would fall back to it, so empty counts as unset there.
+  // an empty watch model would fall back to it, so empty counts as unset there.
   const stepfunSupport = !textConversations && integratedProvider === 'stepfun'
     && (optionalSecret(environment.MODEL_API_KEY) ?? '').trim() === ''
   const supportDefault = (value: string | undefined): string | undefined =>
@@ -350,7 +349,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     conversation_vision_enabled: optionalBoolean(environment.CONVERSATION_VISION_ENABLED),
     monitor_camera_device_id: optionalString(environment.MONITOR_CAMERA_DEVICE_ID),
     support_model: supportDefault(rawEnvironmentValue(environment.SUPPORT_MODEL)),
-    compressor_model: supportDefault(rawEnvironmentValue(environment.COMPRESSOR_MODEL)),
+    compressor_model: supportDefault(undefined),
     language: parsePromptLanguageSetting(environment.PROMPT_LANGUAGE),
     news_language: parseSelector(promptLanguageSchema, environment.NEWS_LANGUAGE, 'en', 'NEWS_LANGUAGE'),
     pipeline_mode: pipelineMode,
@@ -451,7 +450,6 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ),
     plan_readback: parsePlanReadback(environment.PLAN_READBACK),
     generate_plan: optionalBoolean(environment.GENERATE_PLAN),
-    planner_model: supportDefault(emptyAsUnset(optionalString(environment.PLANNER_MODEL))),
     progress_bubbles: parseProgressBubbles(environment.PROGRESS_BUBBLES),
     search_provider: parseSearchProvider(environment.SEARCH_PROVIDER),
     search_mcp_url: optionalString(environment.SEARCH_MCP_URL),

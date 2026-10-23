@@ -124,7 +124,6 @@ test('the default settings are the documented schema', () => {
     planReadback: 'summary',
     generatePlan: true,
     profileParticipantMessages: false,
-    plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
@@ -158,7 +157,6 @@ test('version 3 migrates to v4 defaults while preserving existing desktop fields
   assert.equal(migrated.codexApprovalMode, 'ask')
   assert.equal(migrated.clarificationDepth, 'balanced')
   assert.equal(migrated.planReadback, 'summary')
-  assert.equal(migrated.plannerModel, '')
   assert.equal(migrated.progressBubbles, 'milestones')
   assert.equal(migrated.embeddingProvider, 'dashscope')
   assert.equal(migrated.embeddingModel, 'text-embedding-v4')
@@ -173,7 +171,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: 'yolo',
     clarificationDepth: 'thorough',
     planReadback: 'confirm',
-    plannerModel: 'planner-model',
     progressBubbles: 'all',
     embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
@@ -185,7 +182,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: normalized.codexApprovalMode,
     clarificationDepth: normalized.clarificationDepth,
     planReadback: normalized.planReadback,
-    plannerModel: normalized.plannerModel,
     progressBubbles: normalized.progressBubbles,
     embeddingProvider: normalized.embeddingProvider,
     embeddingModel: normalized.embeddingModel,
@@ -195,7 +191,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: 'yolo',
     clarificationDepth: 'thorough',
     planReadback: 'confirm',
-    plannerModel: 'planner-model',
     progressBubbles: 'all',
     embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
@@ -317,7 +312,6 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     planReadback: 'summary',
     generatePlan: true,
     profileParticipantMessages: false,
-    plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
@@ -411,7 +405,6 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
-    'plannerModel',
     'proactivity',
     'profileParticipantMessages',
     'progressBubbles',
@@ -626,7 +619,6 @@ test('publicSettings never carries the secrets object', () => {
     'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
-    'plannerModel',
     'proactivity',
     'profileParticipantMessages',
     'progressBubbles',

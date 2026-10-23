@@ -259,7 +259,6 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
     token: TOKEN,
     readyEndpoint: '127.0.0.1:49152',
     parentEnv: {
-      PLANNER_MODEL: 'parent-planner',
       EMBEDDING_MODEL: 'parent-embedding',
       KNOWLEDGE_PATH: '/parent/knowledge.sqlite',
     },
@@ -267,7 +266,6 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
       codexApprovalMode: 'yolo',
       clarificationDepth: 'thorough',
       planReadback: 'confirm',
-      plannerModel: 'settings-planner',
       progressBubbles: 'all',
       embeddingProvider: 'local',
       embeddingModel: 'custom-embedding',
@@ -280,14 +278,13 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
     approval: spec.env.CODEX_APPROVAL_MODE,
     depth: spec.env.CLARIFICATION_DEPTH,
     readback: spec.env.PLAN_READBACK,
-    planner: spec.env.PLANNER_MODEL,
     bubbles: spec.env.PROGRESS_BUBBLES,
     embeddingProvider: spec.env.EMBEDDING_PROVIDER,
     embeddingModel: spec.env.EMBEDDING_MODEL,
     capabilities: spec.env.CAPABILITIES_CONFIG,
     knowledge: spec.env.KNOWLEDGE_PATH,
   }, {
-    approval: 'yolo', depth: 'thorough', readback: 'confirm', planner: 'settings-planner',
+    approval: 'yolo', depth: 'thorough', readback: 'confirm',
     bubbles: 'all', embeddingProvider: 'local', embeddingModel: 'custom-embedding',
     capabilities: resolve('/settings/capabilities.json'), knowledge: '/settings/knowledge.sqlite',
   })
@@ -297,14 +294,12 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
     token: TOKEN,
     readyEndpoint: '127.0.0.1:49152',
     parentEnv: {
-      PLANNER_MODEL: 'parent-planner',
       EMBEDDING_MODEL: 'parent-embedding',
     },
     settings: {
-      plannerModel: '', embeddingModel: '', capabilitiesConfigPath: '', knowledgePath: '',
+      embeddingModel: '', capabilitiesConfigPath: '', knowledgePath: '',
     },
   })
-  assert.equal(empty.env.PLANNER_MODEL, 'parent-planner')
   assert.equal(empty.env.EMBEDDING_MODEL, 'parent-embedding')
   assert.equal('CAPABILITIES_CONFIG' in empty.env, false)
   assert.equal('KNOWLEDGE_PATH' in empty.env, false)

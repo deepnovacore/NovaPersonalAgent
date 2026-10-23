@@ -62,7 +62,6 @@ test('pipeline defaults are product-shaped and cascaded defaults use DeepSeek Fl
     codexApprovalMode: settings.codex_approval_mode,
     clarificationDepth: settings.clarification_depth,
     planReadback: settings.plan_readback,
-    plannerModel: settings.planner_model,
     progressBubbles: settings.progress_bubbles,
     embeddingProvider: settings.embedding_provider,
     embeddingModel: settings.embedding_model,
@@ -74,7 +73,6 @@ test('pipeline defaults are product-shaped and cascaded defaults use DeepSeek Fl
     codexApprovalMode: 'ask',
     clarificationDepth: 'balanced',
     planReadback: 'summary',
-    plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
@@ -152,7 +150,6 @@ test('v4 settings env selectors and paths load with the documented names', () =>
     CODEX_APPROVAL_MODE: 'yolo',
     CLARIFICATION_DEPTH: 'thorough',
     PLAN_READBACK: 'confirm',
-    PLANNER_MODEL: 'planner-model',
     PROGRESS_BUBBLES: 'all',
     CAPABILITIES_CONFIG: '/state/capabilities.json',
     KNOWLEDGE_PATH: '/state/knowledge.sqlite',
@@ -162,7 +159,6 @@ test('v4 settings env selectors and paths load with the documented names', () =>
   assert.equal(settings.codex_approval_mode, 'yolo')
   assert.equal(settings.clarification_depth, 'thorough')
   assert.equal(settings.plan_readback, 'confirm')
-  assert.equal(settings.planner_model, 'planner-model')
   assert.equal(settings.progress_bubbles, 'all')
   assert.equal(settings.knowledge_path, '/state/knowledge.sqlite')
   assert.equal(settings.embedding_provider, 'dashscope')
@@ -273,18 +269,17 @@ test('StepFun support models default to Step 3.7 Flash while memory extraction s
   const base = {INTEGRATED_PROVIDER: 'stepfun', STEPFUN_API_KEY: 'step-secret',
     DASHSCOPE_API_KEY: 'support-secret', MEMORY_CONNECTION: 'local'}
   const step = loadSettings(base)
-  assert.deepEqual([step.support_model, step.compressor_model, step.watch_model, step.planner_model],
-    ['step-3.7-flash', 'step-3.7-flash', 'step-3.7-flash', 'step-3.7-flash'])
+  assert.deepEqual([step.support_model, step.compressor_model, step.watch_model],
+    ['step-3.7-flash', 'step-3.7-flash', 'step-3.7-flash'])
   // Extraction is sent through the DashScope embedding connection, so its model must stay there.
   assert.equal(step.fast_model, 'qwen3-vl-plus')
   const memory = requirePersonalMemory(step)
   assert.equal(memory?.connection === 'local' && memory.extractionModel, 'qwen3-vl-plus')
   assert.equal(memory?.connection === 'local' && memory.embedding.baseUrl, 'https://dashscope.aliyuncs.com/compatible-mode/v1')
   const explicit = loadSettings({...base, SUPPORT_MODEL: 'qwen-plus',
-    WATCH_MODEL: '', PLANNER_MODEL: ''})
+    WATCH_MODEL: ''})
   assert.equal(explicit.support_model, 'qwen-plus', 'an explicit model is never rewritten')
   assert.equal(explicit.watch_model, 'step-3.7-flash', 'empty watch would fall back to a DashScope model')
-  assert.equal(explicit.planner_model, 'step-3.7-flash')
   const gateway = loadSettings({...base, MODEL_API_KEY: 'gateway-secret'})
   assert.equal(gateway.support_model, 'qwen-plus', 'a custom gateway keeps the generic defaults')
   assert.equal(loadSettings({DASHSCOPE_API_KEY: 'qwen-secret'}).support_model, 'qwen-plus')

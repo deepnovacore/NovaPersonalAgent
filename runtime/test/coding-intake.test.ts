@@ -1221,20 +1221,17 @@ test('a cached successful assessment does not repeat its clarification after an 
   assert.equal(h.planned(), 0)
 })
 
-test('intake timing falls back for empty or absent planner models and keeps explicit models', async () => {
-  for (const planner_model of [undefined, '', 'planner']) {
-    const timings: unknown[] = []
-    const h = harness({
-      settings: {clarification_depth: 'balanced', plan_readback: 'summary',
-        ...(planner_model === undefined ? {} : {planner_model}), fast_model: 'fast'},
-      record: (_current, kind, detail) => {
-        if (kind === 'intake.timing' && detail.stage === 'plan') timings.push(detail.model)
-      },
-    })
-    h.intake.open(request, 'Fix empty password', 'conversation:1', 'epoch1')
-    await h.intake.settled()
-    assert.deepEqual(timings, [planner_model === 'planner' ? 'planner' : 'fast'])
-  }
+test('intake plan timing records the support model', async () => {
+  const timings: unknown[] = []
+  const h = harness({
+    settings: {clarification_depth: 'balanced', plan_readback: 'summary', support_model: 'support'},
+    record: (_current, kind, detail) => {
+      if (kind === 'intake.timing' && detail.stage === 'plan') timings.push(detail.model)
+    },
+  })
+  h.intake.open(request, 'Fix empty password', 'conversation:1', 'epoch1')
+  await h.intake.settled()
+  assert.deepEqual(timings, ['support'])
 })
 
 test('project confirmation repairs the logged null-evidence failure without asking again', async () => {
