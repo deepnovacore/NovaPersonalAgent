@@ -102,6 +102,8 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #preparedRevision=0
   #preparedSignatures=new Map<string,{signature:string;revision:number}>()
   #consolidating:Promise<void>|null=null
+  /** In-memory retry budget: a failing derivation must not become one model call per maintenance tick. */
+  #consolidationFailures:{day:string;count:number;at:number}|null=null
   #adaptation:PersonalMemoryResponseAdaptation={revision:0,replyPreferences:[]}
   constructor(readonly options:{sourceProcessingLlm?:{baseUrl:string;apiKey:string};sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];conversationRecipients?:Record<string,string>;personalMemoryEnabled?:boolean;profileParticipantMessages?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
     this.prefix='personal:'+digest(options.userId)+':'
@@ -295,7 +297,11 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(!plan)return
     const contexts=plan.basis.map(ref=>authorized.contexts.get(ref.id)!)
     for(const entry of plan.entries)if(await this.options.client.memory('processing_stamp',{ids:entry.evidence_refs,purpose:'extraction',provider:this.#extractionFingerprint()})!==authorized.contexts.get(entry.entry_id)!.stamp)return
-    const content=await generateConsolidation(plan,{gateway:this.options.gateway,model:this.options.model,signal:this.#abort.signal})
+    const failures=this.#consolidationFailures
+    if(failures?.day===plan.day&&(failures.count>=3||Date.now()-failures.at<300000))return
+    let content:Awaited<ReturnType<typeof generateConsolidation>>
+    try{content=await generateConsolidation(plan,{gateway:this.options.gateway,model:this.options.model,signal:this.#abort.signal})}
+    catch(error){if(!this.#abort.signal.aborted)this.#consolidationFailures={day:plan.day,count:(failures?.day===plan.day?failures.count:0)+1,at:Date.now()};throw error}
     if(!this.#opened||this.#abort.signal.aborted||workEpoch!==this.#memoryWorkEpoch)return
     const fresh=await this.#authorizedRows(await this.#rows(false,false,true))
     const refreshed=prepareConsolidation(fresh.entries,previous,{now:new Date(),...this.options.consolidation})

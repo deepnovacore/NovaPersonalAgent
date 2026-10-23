@@ -1,4 +1,4 @@
-import test from 'node:test'
+import test,{mock} from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
@@ -40,4 +40,26 @@ for(const change of ['revoke','correct','close'] as const)test(`daily summary ca
   release();if(closing)await closing;else await resource.flush()
   assert.equal((await client.memory('list',{}) as EntryRevision[]).filter(row=>row.kind==='memory_summary').length,0)
  }finally{release?.();await resource.close();await client.close();await rm(root,{recursive:true,force:true})}
+})
+
+test('a summary that keeps failing fact checks is retried at most 3 times per local day, 5 minutes apart',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-daily-budget-'));let summaries=0
+ const budget={entries:[{key:'budget',text:'预算每月100元',topic:'预算',kind:'fact',due:null,direction:null,status:null,valid_until:null}]}
+ const gateway:ModelGateway={async *stream(){ /* complete only */ },complete(request){const p=JSON.parse(request.prompt) as {day?:string;entries:{id:string;revision:number}[]};if(!p.day)return Promise.resolve({text:JSON.stringify(budget)});summaries++;return Promise.resolve({text:JSON.stringify({profile_derived:[],one_page:[{text:'预算每月99999元',refs:[{id:p.entries[0]!.id,revision:p.entries[0]!.revision}]}]})})}}
+ const start=Date.parse('2026-10-23T08:00:00Z')
+ mock.timers.enable({apis:['setInterval','Date'],now:start})
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'budget',gateway,model:'fixture',inputConsent:true,closeClient:false,consolidation:{enabled:true}})
+ const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms))
+ const settle=async(expected:number)=>{for(let i=0;i<500&&summaries<expected;i++)await pause(10);await pause(300)}
+ const advance=async(at:number,expected:number)=>{mock.timers.setTime(at);mock.timers.tick(60000);await settle(expected)}
+ try{
+  await resource.open();await resource.remember({sourceId:'one',sessionId:'test',sequence:1,text:'预算每月100元',occurredAt:now(),confirmed:true});await resource.flush();await settle(1)
+  assert.equal(summaries,1,'the first attempt ran')
+  await advance(start+60000,1);assert.equal(summaries,1,'no retry within 5 minutes')
+  await advance(start+6*60000,2);assert.equal(summaries,2)
+  await advance(start+12*60000,3);assert.equal(summaries,3)
+  await advance(start+18*60000,3);await advance(start+24*60000,3);await advance(start+3600000,3);assert.equal(summaries,3,'budget exhausted for the day')
+  assert.equal((await client.memory('list',{}) as EntryRevision[]).filter(row=>row.kind==='memory_summary').length,0,'no partial summary is left behind')
+  await advance(start+24*3600000,4);assert.equal(summaries,4,'the next local date may try again')
+ }finally{mock.timers.reset();await resource.close();await client.close();await rm(root,{recursive:true,force:true})}
 })
