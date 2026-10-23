@@ -45,7 +45,7 @@ for(const enabled of [undefined,false,true])test('production device gateway opt-
    ownership:{own:cleanup=>{cleanups.add(cleanup);return()=>{cleanups.delete(cleanup)}}},
    onDiagnostic:()=>undefined,environment:{DASHSCOPE_API_KEY:'synthetic-text-key',PIPELINE_MODE:'integrated',
     CAPABILITIES_CONFIG:capabilities,REALTIME_TELEMETRY:join(dir,'telemetry.jsonl'),
-    BLACKBOARD_PATH:join(dir,'blackboard.sqlite'),MEMORY_PATH:join(dir,'memory.sqlite'),WORKSPACE_GRAPH_PATH:join(dir,'workspace.sqlite')}})
+    BLACKBOARD_PATH:join(dir,'blackboard.sqlite'),MEMORY_PATH:join(dir,'memory.sqlite'),MEMORY_LEDGER_PATH:join(dir,'workspace.sqlite')}})
   await composition.realtime.start()
   const host=composition.realtime.personalAgent
   assert.equal('stopRevoker' in host.options,enabled===true)

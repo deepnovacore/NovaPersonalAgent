@@ -32,7 +32,7 @@ test('actual desktop production composition starts with text credentials only an
   await writeFile(capabilities,JSON.stringify({version:1,modules:{search:{enabled:false},camera:{enabled:false},coding:{enabled:false},knowledge:{enabled:false}}}))
   composition=await buildProductionComposition({token:'00000000000000000000000000000000',stop,ownership:{own:cleanup=>{cleanups.add(cleanup);return()=>{cleanups.delete(cleanup)}}},onDiagnostic:()=>{/* no external logging */},environment:{
    DASHSCOPE_API_KEY:'synthetic-text-key',PIPELINE_MODE:'integrated',CAPABILITIES_CONFIG:capabilities,
-   REALTIME_TELEMETRY:path.join(dir,'telemetry.jsonl'),BLACKBOARD_PATH:path.join(dir,'blackboard.sqlite'),MEMORY_PATH:path.join(dir,'memory.sqlite'),WORKSPACE_GRAPH_PATH:path.join(dir,'workspace.sqlite'),
+   REALTIME_TELEMETRY:path.join(dir,'telemetry.jsonl'),BLACKBOARD_PATH:path.join(dir,'blackboard.sqlite'),MEMORY_PATH:path.join(dir,'memory.sqlite'),MEMORY_LEDGER_PATH:path.join(dir,'workspace.sqlite'),
   }})
   await composition.realtime.start()
   assert.equal(composition.realtime.provider.constructor.name,'CascadedRealtimeAdapter')

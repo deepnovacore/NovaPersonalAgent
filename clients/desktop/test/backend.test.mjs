@@ -138,7 +138,6 @@ test('passes token only through environment and dials back over loopback', () =>
   assert.deepEqual(spec.argv, [])
   assert.equal(spec.env.DESKTOP_TOKEN, TOKEN)
   assert.equal(spec.env.DESKTOP_READY_ENDPOINT, '127.0.0.1:49152')
-  assert.equal('DESKTOP_READY_FD' in spec.env, false)
   assert.equal(spec.env.CODEX_WORKSPACE, '/workspace')
   assert.deepEqual(spec.stdio, ['ignore', 'pipe', 'pipe'])
   assert.equal(spec.stdio.length, 3)
@@ -392,17 +391,6 @@ test('runtime entry resolves inside the workspace for dev and the asar for packa
     appPath: packagedApp,
     packageRoot: '/unused/desktop',
   }), resolve(packagedApp, 'node_modules/@nova-personal-agent/runtime/dist/src/desktop-entry.js'))
-})
-
-test('launch spec strips a stale inherited readiness pipe', () => {
-  const spec = nodeLaunchSpec({
-    workspace: '/workspace',
-    token: TOKEN,
-    readyEndpoint: '127.0.0.1:49152',
-    parentEnv: { DESKTOP_READY_FD: '3' },
-  })
-
-  assert.equal('DESKTOP_READY_FD' in spec.env, false)
 })
 
 test('a local runtime entry override is absolute and ignored by packaged clients', () => {
@@ -1342,7 +1330,6 @@ test('a spawned backend reaches readiness through the launch spec environment', 
   const script = `
     const net = require('node:net')
     const [host, port] = process.env.DESKTOP_READY_ENDPOINT.split(':')
-    if (process.env.DESKTOP_READY_FD) throw new Error('fd 3 must be gone')
     const payload = JSON.stringify({
       token: process.env.DESKTOP_TOKEN,
       host: '127.0.0.1',

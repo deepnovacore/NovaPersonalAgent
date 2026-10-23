@@ -775,12 +775,6 @@ test('memory connection separates local provider selection from remote engine ow
   assert.throws(() => requirePersonalMemory(loadSettings({...remote,MEMORY_TOKEN:''})), ConfigurationError)
 })
 
-test('removed memory backend configuration fails explicitly instead of silently disabling memory', () => {
-  for (const backend of ['voicemem', 'http', 'disabled']) {
-    assert.throws(() => loadSettings({MEMORY_BACKEND:backend}), /MEMORY_CONNECTION/u)
-  }
-})
-
 test('default memory config resolves the v0.3 ledger without opt-in and allows explicit disable', () => {
   const config = requirePersonalMemory(loadSettings({MODEL_API_KEY: 'test'}))
   assert.ok(config?.connection === 'local')

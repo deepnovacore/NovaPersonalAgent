@@ -308,9 +308,6 @@ export function backendLaunchSpec({
         settings?.integratedVoice ?? providerDefaults?.[1] ?? SETTINGS_DEFAULTS.integratedVoice,
     })
   }
-  // The inherited fd-3 readiness pipe is gone: stdio stops at stderr and the
-  // backend dials back instead, so a stale parent value must never imply one.
-  delete env.DESKTOP_READY_FD
   // Overrides only: an absent, empty, or whitespace-only decrypted value
   // leaves the key out of `env` entirely, so whatever the launcher's own
   // `.env`/parent env supplied keeps winning. Never a replacement with an

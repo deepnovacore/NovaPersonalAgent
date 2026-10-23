@@ -52,7 +52,6 @@ const rows: readonly Row[] = [
   ['COMPOSIO_API_KEY', 'core', true, true, null, 'Composio application connection credential.', 'Composio application connection credential.'],
 
   ['MEMORY_LEDGER_PATH', 'core', false, true, '~/.nova-audio-agent/workspace-graph.sqlite', 'Canonical memory ledger SQLite path; retains the v0.3 storage location.', '统一记忆账本 SQLite 路径，兼容 v0.3 已有存储位置。'],
-  ['WORKSPACE_GRAPH_PATH', 'host_private', false, false, null, 'Legacy alias for the memory ledger path.', '记忆账本路径的历史兼容别名。'],
   ['AOQ_API_HOST', 'host_private', false, false, null, 'AOQ API host used by the remote server.', '远程服务使用的北京 AOQ API 主机。'],
   ['SERVER_MEDIA_MODE', 'host_private', false, false, null, 'Remote media mode: relay, aoq_chat or aoq_runtime.', '远程媒体模式：relay、aoq_chat 或 aoq_runtime。'],
   ['BACKEND', 'host_private', false, false, 'node', 'Node-only desktop backend guard.', '仅 Node 的桌面后端守卫。'],
@@ -98,7 +97,6 @@ const rows: readonly Row[] = [
   ['KNOWLEDGE_PATH', 'core', false, true, '~/.nova-audio-agent/knowledge.sqlite', 'Knowledge SQLite database path.', '知识库 SQLite 数据库路径。'],
   ['EMBEDDING_PROVIDER', 'core', false, true, 'dashscope', 'Knowledge embedding provider.', '知识库 embedding 提供方。'],
   ['EMBEDDING_MODEL', 'core', false, true, 'text-embedding-v4', 'Knowledge embedding model.', '知识库 embedding 模型。'],
-  ['MEMORY_BACKEND', 'core', false, false, null, 'Removed; rejected in favor of MEMORY_CONNECTION.', '已移除；使用时会报错，请改用 MEMORY_CONNECTION。'],
   ['MEMORY_CONNECTION', 'core', false, true, 'local', 'Memory connection: disabled, local, or remote.', '记忆连接：disabled、local 或 remote。'],
   ['MEMORY_PROVIDER', 'core', false, true, null, 'Local engine: voicemem (default; unified ledger) or explicit mem0. Remote engines are service-owned.', '本地引擎：voicemem（默认，统一账本）或显式选择 mem0。远程引擎由服务端选择。'],
   ['BLACKBOARD_PATH', 'core', false, true, '~/.nova-audio-agent/blackboard.sqlite', 'Conversation recovery database path.', '会话恢复数据库路径。'],
@@ -171,7 +169,6 @@ const rows: readonly Row[] = [
   ['NOVA_HUB_URL', 'host_private', false, false, null, 'HTTPS origin of the sync Hub used by the hub command-line client.', 'Hub 命令行客户端使用的同步 Hub HTTPS 地址。'],
   ['NOVA_HUB_TOKEN', 'host_private', true, false, null, 'Device token for the sync Hub command-line client.', 'Hub 命令行客户端使用的设备令牌。'],
   ['DESKTOP_READY_ENDPOINT', 'host_private', false, false, null, 'Desktop readiness endpoint.', '桌面就绪端点。'],
-  ['DESKTOP_READY_FD', 'host_private', false, false, null, 'Legacy desktop readiness descriptor.', '旧桌面就绪描述符。'],
   ['DEV_BACKEND_ENTRY', 'host_private', false, false, null, 'Unpackaged desktop backend entry override.', '未打包桌面的开发后端入口覆盖。'],
   ['DEV_START_MUTED', 'host_private', false, false, null, 'Start the unpackaged desktop with microphone muted.', '未打包桌面以闭麦状态启动。'],
   ['RELEASE_CAMERA_SMOKE', 'host_private', false, false, null, 'Packaged release camera capability sentinel.', '安装包发布相机能力哨兵。'],

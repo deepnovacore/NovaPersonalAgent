@@ -475,7 +475,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     memory_token: optionalSecret(environment.MEMORY_TOKEN),
     memory_path: optionalString(environment.MEMORY_PATH),
     memory_user_id: optionalString(environment.MEMORY_USER_ID),
-    workspace_graph_path: optionalString(environment.MEMORY_LEDGER_PATH) ?? optionalString(environment.WORKSPACE_GRAPH_PATH),
+    workspace_graph_path: optionalString(environment.MEMORY_LEDGER_PATH),
   }
   const withoutUndefined = Object.fromEntries(
     Object.entries(candidate).filter(([, value]) => value !== undefined),
@@ -486,9 +486,6 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
       .sort(compareStrings)
       .map(configurationFieldName)
     throw new ConfigurationError(`invalid configuration: ${fields.join(', ')}`)
-  }
-  if (environment.MEMORY_BACKEND !== undefined) {
-    throw new ConfigurationError('MEMORY_BACKEND was removed; use MEMORY_CONNECTION')
   }
   resolveMemoryConnection(result.data)
   return result.data
