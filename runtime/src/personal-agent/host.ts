@@ -635,7 +635,21 @@ export class PersonalAgentHost {
     #planModeTransitions=new Map<string,{call_id:string;promise:Promise<void>}>();
     waitConversation(id:string):Promise<void>{return this.#conversationRuns.get(id)??Promise.resolve()}
     #announcementTail:Promise<void>=Promise.resolve();
-    #announcementsPending=0;
+    // Typed chat:main input and voice switches supersede queued announcements by bumping the
+    // generation instead of waiting on delivery checks that may never settle.
+    #announcementGeneration=0;
+    #announcementStart:Promise<void>|undefined;
+    #inboxTextTransition=false;
+    announcementStartGrace(signal:AbortSignal):Promise<void>{return new Promise(resolve=>{const timer=setTimeout(resolve,3000);signal.addEventListener('abort',()=>{clearTimeout(timer);resolve()},{once:true})})}
+    #supersedeAnnouncements():Promise<void>|undefined{
+        this.#announcementGeneration++;
+        const start=this.#announcementStart;
+        // Later announcements must not race a voice runtime that is still being created.
+        this.#announcementTail=start?start.catch(()=>{ /* the superseded announcement already gave up */ }):Promise.resolve();
+        if(!start)return undefined;
+        const done=new AbortController();
+        return Promise.race([start.catch(()=>{ /* a failed start leaves nothing to stop */ }),this.announcementStartGrace(done.signal)]).finally(()=>done.abort());
+    }
     #conversationPool: ConversationRuntimePool | undefined;
     setConversationRuntime(factory:ConversationRuntimeFactory,emit:(frame:Record<string,unknown>)=>void):void {
         this.#recoveryFactory=factory;
@@ -701,8 +715,8 @@ export class PersonalAgentHost {
         }
         if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');
         if(this.#clearingConversations.has(id))throw Error('conversation_clearing');
-        if(this.#state.conversations.voice_id===id||this.#voiceTransition)throw Error('voice_active');
-        if(id==='chat:main'&&(this.#announcementsPending>0||this.#conversationPool.hasVoice(id))){this.#voiceTransition=true;try{await this.#announcementTail;if(this.#conversationPool.hasVoice(id))await this.#conversationPool.stopVoice(id)}finally{this.#voiceTransition=false}}
+        if(this.#state.conversations.voice_id===id||this.#voiceTransition||id==='chat:main'&&this.#inboxTextTransition)throw Error('voice_active');
+        if(id==='chat:main'){const starting=this.#supersedeAnnouncements();if(starting||this.#conversationPool.hasVoice(id)){this.#inboxTextTransition=true;try{await starting;if(this.#conversationPool.hasVoice(id))await this.#conversationPool.stopVoice(id)}finally{this.#inboxTextTransition=false}}}
         if(!this.#conversationPool.acceptsText(id))throw Error('conversation_busy');
         if(requestId){const prior=conversation.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null)||canonicalJson(prior.references??null)!==canonicalJson(context.references??null))throw Error('request_id_conflict');return}}
         if(sourceTodo){const todo=this.life.snapshot().todos.find(todo=>todo.id===sourceTodo.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict')}
@@ -784,7 +798,7 @@ export class PersonalAgentHost {
         if(method==='conversations.target'){
             const q=z.object({id:z.string().min(1).max(128),target:z.object({workspace_id:z.string().min(1).max(128),session_id:z.string().min(1).max(128).nullable()}).strict().nullable()}).strict().parse(p);
             if(!this.#state.conversations.items.some(item=>item.id===q.id))throw Error('conversation_not_found');
-            if(this.#state.conversations.voice_id===q.id||this.#voiceTransition||this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
+            if(this.#state.conversations.voice_id===q.id||this.#voiceTransition||q.id==='chat:main'&&this.#inboxTextTransition||this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
             if(q.target&&!this.#codingTargets)throw Error('coding_unavailable');
             const target=q.target?await this.#codingTargets!.validate(q.target):null;
             // Admission can race target validation; never clear a runtime that acquired work meanwhile.
@@ -801,7 +815,7 @@ export class PersonalAgentHost {
                 if(this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
                 await this.#conversationPool?.clear(q.id);await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.items.find(item=>item.id===q.id)!.mode='chat';await this.#commit(next)});item={...item,mode:'chat'};
             }
-            const c=this.#state.conversations;if(q.enabled){if(c.voice_id&&c.voice_id!==q.id)throw Error('voice_active');if(c.voice_id===q.id)return this.conversationSnapshot();if(!this.#conversationPool)throw Error('voice_unavailable');this.#voiceTransition=true;try{await this.#announcementTail;if(this.#conversationPool.hasVoice('chat:main'))await this.#conversationPool.stopVoice('chat:main');await this.#conversationPool.startVoice(item)}finally{this.#voiceTransition=false}}else{if(c.voice_id!==q.id)throw Error('voice_not_owned');await this.#conversationPool?.stopVoice(q.id)}await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.voice_id=q.enabled?q.id:null;await this.#commit(next)});return this.conversationSnapshot()}
+            const c=this.#state.conversations;if(q.enabled){if(c.voice_id&&c.voice_id!==q.id)throw Error('voice_active');if(c.voice_id===q.id)return this.conversationSnapshot();if(!this.#conversationPool)throw Error('voice_unavailable');this.#voiceTransition=true;try{await this.#supersedeAnnouncements();if(this.#conversationPool.hasVoice('chat:main'))await this.#conversationPool.stopVoice('chat:main');await this.#conversationPool.startVoice(item)}finally{this.#voiceTransition=false}}else{if(c.voice_id!==q.id)throw Error('voice_not_owned');await this.#conversationPool?.stopVoice(q.id)}await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.voice_id=q.enabled?q.id:null;await this.#commit(next)});return this.conversationSnapshot()}
         if(method==='conversations.clear'){const q=z.object({id:z.string(),expected_generation:z.number().int().optional()}).strict().parse(p);const item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');if(q.expected_generation!==undefined&&item.generation!==q.expected_generation)throw Error('generation_conflict');if(this.#state.conversations.voice_id===q.id)throw Error('voice_active');this.#localBuildAuthority.delete(q.id);this.#clearingConversations.add(q.id);try{await this.#conversationPool?.clear(q.id);await this.#serial(async()=>{const next=structuredClone(this.#state);const target=next.conversations.items.find(item=>item.id===q.id)!;target.messages=[];target.read_through_id=null;target.generation++;target.prepared=null;delete target.scheduled_result_focus;delete target.plan;if(target.kind==='build'){target.kind='chat';target.mode='chat';delete target.build}await this.#commit(next)});}finally{this.#clearingConversations.delete(q.id)}return this.conversationSnapshot()}
         if(method==='conversations.open_feed'){const feed=this.#state.feed.find(f=>f.id===p.feed_id);const item=feed?this.#state.conversations.items.find(c=>c.feed_ids.includes(feed.id)||c.kind==='topic'&&c.subject_key===feed.subject_key):undefined;if(item&&JSON.stringify(item.prepared)!==JSON.stringify(feed?.prepared)){if(this.#state.conversations.voice_id===item.id)throw Error('voice_active');await this.#conversationPool?.clear(item.id)}}
         return this.#serial(async()=>{const next=structuredClone(this.#state),c=next.conversations;
@@ -1495,17 +1509,27 @@ export class PersonalAgentHost {
         if(!this.localNotifications)return true;
         if(this.#presentationMode){
             if(this.#presentationMode!=='orb'||!this.#conversationPool)return true;
-            const speakable=()=>this.localNotifications&&this.#presentationMode==='orb'&&this.#opened&&!this.#voiceTransition;
-            this.#announcementsPending++;
+            const generation=this.#announcementGeneration,current=()=>generation===this.#announcementGeneration,pool=this.#conversationPool;
+            const speakable=()=>current()&&this.localNotifications&&this.#presentationMode==='orb'&&this.#opened&&!this.#voiceTransition;
             this.#announcementTail=this.#announcementTail.then(async()=>{
                 if(!speakable())return;
                 const feedId=suggestion.content.personal_feed_id;
                 if(typeof feedId==='string'&&(this.#state.feed.find(item=>item.id===feedId)?.delivery.spoken_at||!await this.canDeliver(feedId)))return;
                 if(!speakable())return;
                 let id=this.#state.conversations.voice_id;
-                if(!id){const inbox=this.#state.conversations.items.find(item=>item.id==='chat:main')!;if(!this.#conversationPool!.hasVoice(inbox.id))await this.#conversationPool!.startVoice(inbox);id=this.#state.conversations.voice_id??inbox.id}
-                if(this.#presentationMode==='orb'&&!this.#voiceTransition)this.#conversationPool!.deliverSuggestion(id,suggestion,reason);
-            }).catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:'chat:main',error:'announcement_unavailable'})}).finally(()=>{this.#announcementsPending--});
+                if(!id){
+                    const inbox=this.#state.conversations.items.find(item=>item.id==='chat:main')!;
+                    if(!pool.hasVoice(inbox.id)){
+                        // A runtime that finishes starting after the announcement was superseded is released immediately.
+                        const start=pool.startVoice(inbox).then(async()=>{if(!current())await pool.stopVoice(inbox.id)});
+                        this.#announcementStart=start;
+                        try{await start}finally{if(this.#announcementStart===start)this.#announcementStart=undefined}
+                        if(!speakable())return;
+                    }
+                    id=this.#state.conversations.voice_id??inbox.id;
+                }
+                if(speakable())pool.deliverSuggestion(id,suggestion,reason);
+            }).catch(()=>{if(current())this.#conversationEmit?.({type:'conversation.error',conversation_id:'chat:main',error:'announcement_unavailable'})});
             return true;
         }
         if(!this.#conversationPool)return false;if(this.#state.conversations.voice_id==='chat:main')this.#conversationPool.deliverSuggestion('chat:main',suggestion,reason);return true;
