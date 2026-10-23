@@ -21,7 +21,7 @@ function conversationSnapshot(value){
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{}}) {
     this.confirmBuildSwitch=confirmBuildSwitch
-    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
+    Object.assign(this,{startRequests:new Map(),send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get selectedConversation(){return this.snapshot?.conversations?.items?.find(item=>item.id===this.selectedId)??null}
@@ -66,7 +66,7 @@ export class PersonalController {
     const wasConnected=this.everConnected
     for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){this.restoreSubmission(state,state.submission)}
     this.connected=false;this.capabilities=[];this.generation++;this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
-    for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
+    for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(Object.assign(new Error('连接已断开，操作状态请刷新确认'),{outcome_unknown:true}))}
     // Only a real exit after a connection ever succeeded is alarming; a cold-start
     // "never connected" disconnect() call must stay quiet.
     this.pending.clear();void this.stop();if(wasConnected)this.error='连接已断开，草稿已保留';this.changed()
@@ -161,12 +161,12 @@ export class PersonalController {
   async command(method,params={},options={}){
     const notSent=message=>Object.assign(new Error(message),method==='tasks.input'?{input_status:'failed'}:{})
     if(!this.connected)throw notSent('尚未连接')
-    if(['conversations.clear','conversations.open_work','conversations.discuss'].includes(method)&&this.activeBuild&&!await this.guardBuildSwitch())throw notSent('切换已取消')
+    if(['conversations.clear','conversations.open_work','conversations.discuss','conversations.start'].includes(method)&&this.activeBuild&&!await this.guardBuildSwitch())throw notSent('切换已取消')
     if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state','tasks.get','tasks.list','conversations.approve'].includes(method))throw notSent('正在恢复显示模式，请稍候')
     if(this.pending.size>=32)throw notSent('请等待当前操作完成')
     const request_id=options.request_id??crypto.randomUUID()
     return new Promise((resolve,reject)=>{
-      const timer=setTimeout(()=>{this.pending.delete(request_id);reject(new Error('操作超时，请刷新状态后重试'))},30000)
+      const timer=setTimeout(()=>{this.pending.delete(request_id);reject(Object.assign(new Error('操作超时，请刷新状态后重试'),{outcome_unknown:true}))},30000)
       this.pending.set(request_id,{resolve,reject,timer,method})
       if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(notSent('发送失败'))}
     })
@@ -174,6 +174,13 @@ export class PersonalController {
   async select(id){if(id!==this.selectedId&&this.activeBuild&&!await this.guardBuildSwitch())return;const result=await this.command('conversations.select',{id});if(this.snapshot&&result?.selected_id===id&&conversationSnapshot(result)){this.snapshot={...this.snapshot,conversations:result};this.changed()}return result}
   async home(){if(this.selectedId!=='chat:main')await this.select('chat:main');if(this.selectedId!=='chat:main')throw Error('主对话尚未就绪，请稍后重试')}
   async create(){if(this.activeBuild&&!await this.guardBuildSwitch())return;return this.command('conversations.create',{})}
+  /** One click opens a new conversation carrying the card reference; an in-progress Build is stopped only after the user confirms. A retry of the same request reuses its request id so the host never creates a second conversation. */
+  async startConversationWithReference({title,text,references}){
+    const key=JSON.stringify([title,text,references]),request_id=this.startRequests.get(key)??crypto.randomUUID()
+    this.startRequests.set(key,request_id)
+    try{const result=await this.command('conversations.start',{title,text,references},{request_id});this.startRequests.delete(key);return result}
+    catch(error){if(!error.outcome_unknown)this.startRequests.delete(key);throw error} // A host-reported failure is final; only an unknown outcome is retried under the same id.
+  }
   async openFeed(id,label){if(this.activeBuild&&!await this.guardBuildSwitch())return;return this.command('conversations.open_feed',{feed_id:id,label})}
   async text(){
     if(this.mode==='voice')return

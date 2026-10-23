@@ -89,6 +89,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  chat.setOpen(true)
  async function showHome(){if(c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main'))await c.home();chat.reveal()}
  async function discuss(references,text){await showHome();if(text){if(!c.submitText(text,'chat:main',references))throw Error(t('主对话暂时无法发送，原有草稿已保留，请稍后重试。'));chat.reveal()}else await chat.focusReference(references)}
+ async function startConversation(request){await c.startConversationWithReference(request);chat.reveal()}
  function syncLayout(){tabs.select(selected);panel.setAttribute('aria-labelledby',`workspace-tab-${selected}`);pageTitle.hidden=!inspector}
 
  // The orb carries no mode buttons: double-click expands, the context menu switches modes, and sleep is the only voice switch.
@@ -138,11 +139,11 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   for(const item of s?.understanding?.items??[]){if(item.kind!==candidateKind)continue;const a=el('article',undefined,'card pending');a.append(el('h3','可能想记下'),el('p',item.text),el('p',`依据：${item.quote}`,'hint'));if(item.kind==='profile')a.append(el('p','确认后将追加到个人介绍，不会替换已有内容。','hint'));const edit=el('textarea');edit.value=lifeLocal['candidate:'+item.id]??item.text;edit.maxLength=1000;edit.setAttribute('aria-label','候选内容');edit.setAttribute('data-editor-key',`candidate:${item.id}:content`);edit.addEventListener('input',()=>{lifeLocal['candidate:'+item.id]=edit.value});a.append(edit);button('记下来',()=>c.command('understanding.action',{id:item.id,action:'accept',text:edit.value,...(item.kind==='profile'?{expected_profile_version:s.life.profile.version}:{})}),a,`understanding:${item.id}`);button('略过',()=>c.command('understanding.action',{id:item.id,action:'dismiss'}),a,`understanding:${item.id}`);pending.append(a)}
   if(['ideas','goals'].includes(selected)){
    const suggestions=()=>renderSourceSuggestions(panel,{openArticle:url=>api.personal.openArticle(url),clampable,tab:selected,context:s?.workbench_context,sources:s?.sources??[],button,command:(m,p)=>c.command(m,p),continueChat,delegate:text=>chat.focusDraft(text),openSettings,connected:c.connected,everConnected:c.everConnected,startupFailed:startupNotice.dataset.stage==='failed'})
-   renderLife(panel,{kind:({ideas:'idea',goals:'goal'})[selected],state:s?.life,clampable,suggested:(s?.workbench_context?.cards??[]).filter(card=>card.tab===selected).length,openArticle:url=>api.personal.openArticle(url),command:(m,p)=>c.command(m,p),button,run,bindPending,local:lifeLocal,rerender:renderPanel})
+   renderLife(panel,{kind:({ideas:'idea',goals:'goal'})[selected],state:s?.life,startConversation,clampable,suggested:(s?.workbench_context?.cards??[]).filter(card=>card.tab===selected).length,openArticle:url=>api.personal.openArticle(url),command:(m,p)=>c.command(m,p),button,run,bindPending,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
    suggestions()
   }else if(selected==='timeline'){
-   renderTimeline(panel,{snapshot:s,el,button,discuss,openSettings,openArticle:url=>api.personal.openArticle(url),command:(...args)=>c.command(...args),expanded:timelineExpanded,connected:c.connected})
+   renderTimeline(panel,{snapshot:s,el,button,discuss,startConversation,openSettings,openArticle:url=>api.personal.openArticle(url),command:(...args)=>c.command(...args),expanded:timelineExpanded,connected:c.connected})
   }else if(selected==='feeds'){
    renderNews(panel,{news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings,connected:c.connected})
   }else if(selected==='tasks'){

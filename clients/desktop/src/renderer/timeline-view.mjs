@@ -2,6 +2,7 @@ import {attachSources,attachSourceTags,disposeSources} from './source-popover.mj
 import {renderSourceStatus} from './source-status.mjs'
 import {t,currentLanguage} from './locale.mjs'
 import {renderCardTags} from './card-tags.mjs'
+import {markOpensConversation} from './new-conversation-mark.mjs'
 const LABEL={overdue:'已过截止',current:'今天到期',soon:'接下来 7 天',later:'之后',waiting:'等待中 · 未设期限',unscheduled:'尚未安排',completed:'已完成'}
 const STATUS={open:'待开始',doing:'进行中',waiting:'等待回复'}
 export function timelineDate(snapshot,now=new Date()){return now.toLocaleDateString('en-CA',{timeZone:snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone})}
@@ -17,7 +18,7 @@ export function timelineGroups(snapshot,now=new Date()){
  }
  return [...grouped].filter(([,items])=>items.length).map(([id,items])=>({id,label:LABEL[id],items:items.sort((a,b)=>(a.date??'').localeCompare(b.date??'')||a.title.localeCompare(b.title))}))
 }
-export function renderTimeline(parent,{snapshot,el,button,discuss,openArticle,openSettings,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
+export function renderTimeline(parent,{snapshot,el,button,discuss,startConversation,openArticle,openSettings,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
  const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}${snapshot?.timeline?' timeline-briefing':''}`);parent.append(root)
  renderSourceStatus(root,{sources:snapshot?.sources??[],status:snapshot?.profile_preparation?.status,processing:snapshot?.profile_preparation?.processing,el,button,openSettings})
  const allGroups=timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),groups=snapshot?.timeline?[]:allGroups
@@ -90,7 +91,13 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openArticle,op
    if(item.sources_available===false&&!item.sources_checking)card.append(el('p',t('原始来源已不可用'),'hint timeline-source-unavailable'))
    else if(item.sources_available!==false)attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
    const actions=el('div',undefined,'timeline-actions');card.append(actions)
-   for(const action of item.sources_available===false||item.historical===true?[]:item.actions??[])button(action.label,()=>discuss([{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],action.kind==='draft'?t('请直接在当前对话中根据引用事项写出草稿，并标明事实缺口。只展示文字，不创建待办或任务，不发送消息或执行操作。'):t('请在当前对话中分析引用事项，说明已知事实、判断和下一步。只讨论，不创建待办或任务，不执行操作。')),actions).className=action===item.actions[0]?'timeline-primary':'soft'
+   for(const action of item.sources_available===false||item.historical===true?[]:item.actions??[]){
+    const reference=[{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],draft=action.kind==='draft'
+    const text=draft?t('请直接在当前对话中根据引用事项写出草稿，并标明事实缺口。只展示文字，不创建待办或任务，不发送消息或执行操作。'):t('请在当前对话中分析引用事项，说明已知事实、判断和下一步。只讨论，不创建待办或任务，不执行操作。')
+    // A draft is work on its own, so it gets its own conversation; discussion stays in the main one.
+    const node=draft&&startConversation?markOpensConversation(button(action.label,()=>startConversation({title:item.title.slice(0,40),text,references:reference}),actions)):button(action.label,()=>discuss(reference,text),actions)
+    node.className=action===item.actions[0]?'timeline-primary':'soft'
+   }
    if(command)button(t('隐藏'),()=>command('timeline.dismiss',{id:item.id}),actions).className='quiet timeline-dismiss'
   }
   if(!attention.cards?.length)section.append(el('p',t(attention.status==='working'?'正在结合近期信息整理…':attention.status==='queued'?'即将整理近期信息…':attention.status==='failed'?(attention.error==='timeline_generation_timeout'?'整理用时较长，尚未完成，可点击刷新重试。':'这次整理未完成，可稍后刷新。'):attention.input_count?'暂时没有足够明确的关注事项。':'已授权来源中暂时没有可整理的近期内容。'),'hint'))
@@ -154,7 +161,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openArticle,op
    }
    const action=item.source_changed?'核对来源':item.status==='waiting'?'起草跟进':item.status==='doing'?'整理下一步':'拆成行动步骤'
    const prompt=item.source_changed?'请针对「{0}」核对已记录的来源内容，说明哪些已知、哪些需要进一步确认，再整理下一步行动。':item.status==='waiting'?'请针对「{0}」起草一条跟进消息，先给我草稿。':item.status==='doing'?'请针对「{0}」结合当前记录和真实截止日期，整理下一步行动和需要确认的问题。':'请针对「{0}」拆成可执行的行动步骤，结合真实截止日期，说明建议顺序。'
-   const primary=item.status==='done'?null:button(t(action),()=>discuss([item.reference],t(prompt,item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
+   const primary=item.status==='done'?null:startConversation?markOpensConversation(button(t(action),()=>startConversation({title:item.title.slice(0,40),text:t(prompt,item.title),references:[item.reference]}),actions,`timeline-plan:${item.id}`)):button(t(action),()=>discuss([item.reference],t(prompt,item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
    if(!compact&&command&&item.status!=='done'){
     const label=t(item.importance==='high'?'取消重要标记':'标为重要'),star=button(label,()=>command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,importance:item.importance==='high'?'normal':'high'}),card,`life:${item.id}`)
     star.className='timeline-importance';star.textContent=item.importance==='high'?'★':'☆';star.title=label;star.setAttribute('aria-label',label);star.setAttribute('aria-pressed',String(item.importance==='high'))
@@ -182,7 +189,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openArticle,op
  if(!compact&&(attention?.cards?.length??0)>visibleCount){
   const more=button(t('继续查看进展（还有 {0} 条）',attention.cards.length-visibleCount),()=>{
    expanded.add(pageKey+pages);disposeSources(root)
-   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,openArticle,openSettings,command,expanded,compact,connected,now})
+   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,startConversation,openArticle,openSettings,command,expanded,compact,connected,now})
    const replacement=holder.children[0];root.replaceWith(replacement)
    replacement.querySelectorAll('.timeline-attention-card')[visibleCount]?.focus?.({preventScroll:true})
   },root,'timeline:more');more.className='soft timeline-load-more'

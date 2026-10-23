@@ -264,3 +264,17 @@ test('goal card cadence menu sends a life.mutate update',async t=>{
  menu.value='daily';await menu.listeners.change()
  assert.deepEqual(commands,[['life.mutate',{op:'update',kind:'goal',id:'g',expected_version:3,cadence:'daily'}]])
 })
+
+test('goal card offers Plan next steps that opens a new conversation referencing the exact goal, in both languages',t=>{
+ const goal={id:'g',kind:'goal',title:'跑完半马',note:'',status:'active',version:3,success_criteria:'3 小时内',progress:{done:0,total:0}},starts=[]
+ const h=harness(t);renderLife(h.panel,{...h,startConversation:request=>starts.push(request),kind:'goal',state:{todos:[],ideas:[],goals:[goal,{...goal,id:'done',status:'completed'},{...goal,id:'old',status:'archived'}]},local:{'goal:all':true}})
+ const plans=all(h.panel).filter(n=>n.textContent==='规划下一步');assert.equal(plans.length,1,'only a live goal can be planned')
+ assert.equal(plans[0].dataset.opensConversation,'true');assert.equal(plans[0].title,'会新开一个对话');assert.equal(plans[0].pendingKey,undefined)
+ plans[0].action()
+ assert.deepEqual(starts.map(r=>[r.title,r.references]),[['跑完半马',[{kind:'goal',id:'g',version:3}]]]);assert.match(starts[0].text,/跑完半马/u)
+ const none=harness(t);renderLife(none.panel,{...none,kind:'goal',state:{todos:[],ideas:[],goals:[goal]}});assert.equal(all(none.panel).some(n=>n.textContent==='规划下一步'),false)
+ const idea=harness(t);renderLife(idea.panel,{...idea,startConversation:()=>{},kind:'idea',state:{todos:[],goals:[],ideas:[{id:'i',kind:'idea',title:'A',note:'',status:'active',version:1}]}});assert.equal(all(idea.panel).some(n=>n.textContent==='规划下一步'),false)
+ setLanguage('en');t.after(()=>setLanguage('zh-CN'))
+ const en=harness(t);renderLife(en.panel,{...en,startConversation:request=>starts.push(request),kind:'goal',state:{todos:[],ideas:[],goals:[goal]}})
+ const button=all(en.panel).find(n=>n.textContent==='Plan next steps');assert.ok(button);assert.equal(button.title,'Opens a new conversation');button.action();assert.match(starts.at(-1).text,/Help me plan the next steps/u)
+})

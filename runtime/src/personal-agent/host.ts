@@ -4,6 +4,7 @@ import {supportsVision} from '../model/vision-capability.js'
 import {ReadingCopies} from './reading-copies.js'
 import {createPreferredNameSync} from './preferred-name-sync.js'
 import {WorkbenchStore,type WorkbenchPlan} from './workbench-store.js'
+import {realpath} from 'node:fs/promises'
 import {canonicalProject,projectResourceKey} from './local-tools.js'
 import {taskResourcesBusy,quarantineTaskResources,releaseQuarantinedTaskResources} from '../executors/task-resources.js'
 import {localShellProcessGone,type LocalShellProcess} from './local-shell.js'
@@ -51,7 +52,7 @@ import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
-import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, goalProgressSchema, type GoalProgress, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
+import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, goalProgressSchema, type GoalProgress, type DiscussionReference, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
@@ -786,6 +787,37 @@ export class PersonalAgentHost {
         this.#planModeTransitions.set(id,{call_id:callId,promise:transition});
         void transition.catch(()=>{ /* The user sees the mode-change error event. */ });
         return Promise.resolve({scheduled:true});
+    }
+    /** One new conversation whose first message carries the card reference. A retry of the same request never creates a second one, and a failed start leaves no empty conversation. */
+    async #startConversation(q:{title:string;text:string;references:DiscussionReference[];mode?:'chat'|'plan'|undefined},requestId:string,local:boolean):Promise<{accepted:true;conversation_id:string}>{
+        const prior=this.#state.conversations.items.find(item=>item.messages.some(message=>message.request_id===requestId));
+        if(prior){await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.selected_id=prior.id;await this.#commit(next)});return {accepted:true,conversation_id:prior.id}}
+        if(!this.#opened||!this.#conversationPool)throw Error('conversation_runtime_unavailable');
+        const context=await this.discussionContext(q.references),item=createConversation('chat',q.title);
+        // Without an explicit mode, a card about a registered coding project opens as Plan; Build and the project directory stay the user's choice.
+        const project=q.mode===undefined&&local?await this.#cardProject(q.references):undefined,text=project?`${q.text}\n\n[project: ${project}]`:q.text;
+        if(q.mode==='plan'||project)item.mode='plan';
+        await this.#serial(async()=>{const next=structuredClone(this.#state);if(next.conversations.items.filter(value=>value.kind!=='schedule').length>=128)throw Error('conversation_limit');next.conversations.items.push(item);await this.#commit(next)});
+        try{await this.submitConversationText(item.id,text,requestId,context.source_todo,context)}
+        catch(error){
+            await this.#serial(async()=>{const next=structuredClone(this.#state),created=next.conversations.items.find(value=>value.id===item.id);if(!created||created.messages.length||this.#conversationRuns.has(item.id))return;next.conversations.items=next.conversations.items.filter(value=>value.id!==item.id);await this.#commit(next)});
+            throw error;
+        }
+        await this.#serial(async()=>{const next=structuredClone(this.#state);if(!next.conversations.items.some(value=>value.id===item.id))return;next.conversations.selected_id=item.id;await this.#commit(next)});
+        return {accepted:true,conversation_id:item.id};
+    }
+    /** The one registered coding project whose directory is a source root of the referenced timeline card; ambiguity or any unavailable data means none. */
+    async #cardProject(references:readonly DiscussionReference[]):Promise<string|undefined>{
+        const ref=references.find(item=>item.kind==='timeline');if(!ref||!this.#codingTargets||!this.#sources?.contextEntries)return undefined;
+        try{
+            const cited=new Set(this.timeline.discussion(ref.id,ref.version).card.refs),canonical=async(path:string)=>realpath(path).catch(()=>null);
+            const roots=new Set((await Promise.all(this.#sources.contextEntries().flatMap(entry=>'kind' in entry&&entry.kind==='file'&&cited.has(entry.id)?[canonical(entry.root)]:[]))).filter((path):path is string=>path!==null));
+            if(!roots.size)return undefined;
+            const matched=new Map<string,string>();
+            for(const target of await this.#codingTargets.list()){const directory=target.directory?await canonical(target.directory):null;if(directory&&roots.has(directory)&&!matched.has(directory))matched.set(directory,target.project)}
+            const name=matched.size===1?[...matched.values()][0]!.replace(/[\p{Cc}\p{Cf}]/gu,' ').trim().slice(0,80):'';
+            return name||undefined;
+        }catch{return undefined}
     }
     async discussionContext(references:NonNullable<ConversationTurnContext['references']>):Promise<ConversationTurnContext>{
         const material:string[]=[],evidenceRefs:string[]=[];let sourceTodo:{id:string;version:number}|undefined;
@@ -1805,10 +1837,10 @@ export class PersonalAgentHost {
         if(context?.client_id!=='desktop:local'&&typeof command.params.id==='string'&&this.#state.conversations.items.some(item=>item.id===command.params.id&&item.kind==='build'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
         const localCommand=command.method.startsWith('build.')||command.method.startsWith('plans.')||command.method==='conversations.mode';
         if(localCommand&&(context?.client_id!=='desktop:local'||this.#presentationMode!=='workbench'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
-        if(this.activeLocalBuild()&&(['conversations.create','conversations.select','conversations.open_work','conversations.open_feed','conversations.discuss','conversations.clear','conversations.voice','build.start'].includes(command.method))&&!(command.method==='conversations.select'&&command.params.id===this.activeLocalBuild()!.id))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
+        if(this.activeLocalBuild()&&(['conversations.create','conversations.select','conversations.open_work','conversations.open_feed','conversations.discuss','conversations.start','conversations.clear','conversations.voice','build.start'].includes(command.method))&&!(command.method==='conversations.select'&&command.params.id===this.activeLocalBuild()!.id))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
         // Recovery owns task execution only: presentation, state and non-task commands keep working, and a handback made now is woken when recovery ends.
         if(this.#recovering&&(command.method.startsWith('tasks.')||command.method==='conversations.approve')&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
-        const scheduleCommand=command.method.startsWith('schedules.'),taskCommand=command.method.startsWith('tasks.'),scoped=localCommand||scheduleCommand||taskCommand||command.method==='presentation.set'||command.method==='conversations.approve'||command.method==='conversations.confirm';
+        const scheduleCommand=command.method.startsWith('schedules.'),taskCommand=command.method.startsWith('tasks.'),scoped=localCommand||scheduleCommand||taskCommand||command.method==='presentation.set'||command.method==='conversations.approve'||command.method==='conversations.confirm'||command.method==='conversations.start';
         const client=context?.client_id;
         if((scheduleCommand||taskCommand||command.method==='conversations.approve')&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
         const receiptId=scoped?hash({client:client??null,request:command.request_id}):command.request_id;
@@ -1910,6 +1942,13 @@ export class PersonalAgentHost {
             const context=await this.discussionContext(q.references);
             await this.submitConversationText('chat:main',q.text,receiptId,context.source_todo,context);
             data={accepted:true,conversation_id:'chat:main'};
+        }
+        else if(command.method==='conversations.start'){
+            const q=z.object({title:z.string().trim().min(1).max(120),text:z.string().trim().min(1).max(4000),references:z.array(discussionReferenceSchema).min(1).max(2),mode:z.enum(['chat','plan']).optional()}).strict().parse(p);
+            if(new Set(q.references.map(ref=>`${ref.kind}:${ref.id}`)).size!==q.references.length)throw Error('duplicate_reference');
+            const local=context?.client_id==='desktop:local'&&this.#presentationMode==='workbench';
+            if(q.mode==='plan'&&!local)throw Error('local_workbench_required');
+            data=await this.#startConversation(q,receiptId,local);
         }
         else if(command.method.startsWith('conversations.')) {data=await this.#conversationCommand(command.method,p);if(command.method==='conversations.open_feed'&&this.#conversationPool){const id=this.#state.conversations.selected_id;const label=typeof p.label==='string'?p.label:'聊聊这条建议';await this.submitConversationText(id,label,'feed:'+String(p.feed_id))}}
         else if (command.method === 'state') {

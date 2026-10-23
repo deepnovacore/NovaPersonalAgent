@@ -2,6 +2,7 @@ import test,{beforeEach,afterEach} from 'node:test'
 import assert from 'node:assert/strict'
 import {timelineGroups,renderTimeline} from '../src/renderer/timeline-view.mjs'
 import {disposeSources} from '../src/renderer/source-popover.mjs'
+import {setLanguage} from '../src/renderer/locale.mjs'
 const snapshot={settings:{timezone:'Asia/Shanghai'},life:{goals:[{id:'g',title:'Ship Nova'}],todos:[
  {id:'date',title:'Draft',status:'open',due:'2026-10-12',version:1,goal_id:'g'},
  {id:'wait',title:'Reply',status:'waiting',due:null,version:3,updated_at:'2026-09-01T00:00:00Z'},
@@ -37,10 +38,10 @@ const previousDocument=globalThis.document
 beforeEach(()=>{globalThis.document={activeElement:null,listeners:new Map(),createElement:tag=>new Element(tag),addEventListener(event,handler){if(!this.listeners.has(event))this.listeners.set(event,new Set());this.listeners.get(event).add(handler)},removeEventListener(event,handler){this.listeners.get(event)?.delete(handler)}}})
 afterEach(()=>{disposeSources();globalThis.document=previousDocument})
 function render(state,options={}){
- const parent=new Element('main'),calls=[],el=(...args)=>new Element(...args)
+ const parent=new Element('main'),calls=[],starts=[],el=(...args)=>new Element(...args)
  const button=(text,click,host)=>{const node=el('button',text);node.addEventListener('click',click);host.append(node);return node}
- renderTimeline(parent,{snapshot:{settings:snapshot.settings,...state},el,button,discuss:(...args)=>calls.push(args),now:new Date('2026-10-11T18:00:00Z'),...options})
- return {parent,calls}
+ renderTimeline(parent,{snapshot:{settings:snapshot.settings,...state},el,button,discuss:(...args)=>calls.push(args),startConversation:(...args)=>starts.push(args),now:new Date('2026-10-11T18:00:00Z'),...options})
+ return {parent,calls,starts}
 }
 test('dated cards share chronological date nodes while undated and completed cards stay off the axis',()=>{
  const state=structuredClone(snapshot)
@@ -131,10 +132,10 @@ test('changed sources get an explicit caution and source excerpts keep their pro
 })
 test('importance stays an explicit versioned mutation and is separate from the main assistance action',()=>{
  const commands=[],state=structuredClone(snapshot);state.life.todos[0].importance='high'
- const {parent,calls}=render(state,{command:(...args)=>commands.push(args)}),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date'),star=card.querySelectorAll('.timeline-importance')[0]
+ const {parent,starts}=render(state,{command:(...args)=>commands.push(args)}),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date'),star=card.querySelectorAll('.timeline-importance')[0]
  assert.ok(star);assert.equal(star['aria-label'],'取消重要标记');assert.equal(star['aria-pressed'],'true')
  star.listeners.click();assert.deepEqual(commands,[['life.mutate',{op:'update',kind:'todo',id:'date',expected_version:1,importance:'normal'}]])
- const action=card.querySelectorAll('.timeline-actions')[0].querySelectorAll('button')[0];assert.equal(action.textContent,'拆成行动步骤');action.listeners.click();assert.deepEqual(calls[0][0],[{kind:'todo',id:'date',version:1}]);assert.match(calls[0][1],/Draft/)
+ const action=card.querySelectorAll('.timeline-actions')[0].querySelectorAll('button')[0];assert.equal(action.textContent,'拆成行动步骤');action.listeners.click();assert.deepEqual(starts[0][0].references,[{kind:'todo',id:'date',version:1}]);assert.match(starts[0][0].text,/Draft/);assert.equal(starts[0][0].title,'Draft')
 })
 
 test('briefing retains Today and the date axis while loading without pending suggestions',()=>{
@@ -202,7 +203,7 @@ test('existing todo entries are discussed in place: no card offers a jump to a t
 
 test('timeline renders synthesized attention cards even with zero todos and no direct mentions',()=>{
  const state={life:{todos:[],goals:[]},timeline:{status:'ready',cards:[{id:'signal',version:'v1',kind:'attention',status_label:'状态待核查',category:'需要关注',title:'监控仍未恢复',why_now:'告警重复出现，当前状态需核对',facts:[{label:'重复告警',tone:'warning',text:'节点告警出现两次'}],next_steps:[{title:'确认恢复时间',detail:'拿到当前状态和恢复安排'}],uncertainty:'尚未取得恢复确认',actions:[{label:'起草询问',kind:'draft'}],sources:[]}]}}
- const {parent,calls}=render(state)
+ const {parent,starts}=render(state)
  assert.equal(parent.querySelectorAll('.timeline-attention-card').length,1)
  assert.equal(parent.querySelectorAll('.timeline-attention-card')[0].dataset.kind,'attention')
  assert.equal(parent.querySelectorAll('.timeline-status-tag')[0].textContent,'状态待核查')
@@ -213,9 +214,9 @@ test('timeline renders synthesized attention cards even with zero todos and no d
  assert.equal(parent.querySelectorAll('.timeline-unplaced')[0].querySelectorAll('.timeline-attention-card').length,1)
  assert.equal(parent.querySelectorAll('.timeline-current').length,1)
  const button=parent.querySelectorAll('button').find(n=>n.textContent==='起草询问');assert.ok(button);button.listeners.click()
- assert.equal(calls[0][0][0].kind,'timeline')
- assert.equal(calls[0][0][0].interaction,'draft')
- assert.match(calls[0][1],/草稿/)
+ assert.deepEqual(starts[0][0].references,[{kind:'timeline',id:'signal',version:'v1',interaction:'draft'}])
+ assert.equal(starts[0][0].title,'监控仍未恢复')
+ assert.match(starts[0][0].text,/草稿/)
  assert.equal(state.life.todos.length,0)
 })
 
@@ -361,4 +362,43 @@ test('deleted-source history keeps its content and date while disabling source a
  assert.ok(!node.querySelectorAll('button').some(button=>button.textContent==='讨论'))
  assert.ok(node.querySelectorAll('button').some(button=>button.textContent==='隐藏'))
  assert.deepEqual(parent.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),['2026-10-11'])
+})
+
+const briefCard=(overrides={})=>({id:'brief',version:'v1',kind:'attention',category:'发布',title:'长'.repeat(60),why_now:'演示临近',facts:[],actions:[{label:'起草状态说明',kind:'draft'},{label:'一起分析',kind:'discuss'}],sources:[],...overrides})
+test('a draft briefing action opens a new conversation and a discuss action keeps the main conversation',()=>{
+ const {parent,calls,starts}=render({life:{todos:[],goals:[]},timeline:{cards:[briefCard()]}})
+ const draft=parent.querySelectorAll('button').find(n=>n.textContent==='起草状态说明'),discuss=parent.querySelectorAll('button').find(n=>n.textContent==='一起分析')
+ assert.ok(draft&&discuss)
+ draft.listeners.click();assert.equal(calls.length,0);assert.equal(starts.length,1)
+ assert.deepEqual(starts[0][0].references,[{kind:'timeline',id:'brief',version:'v1',interaction:'draft'}]);assert.equal(starts[0][0].title.length,40)
+ assert.match(starts[0][0].text,/草稿/)
+ discuss.listeners.click();assert.equal(starts.length,1);assert.deepEqual(calls[0][0],[{kind:'timeline',id:'brief',version:'v1',interaction:'discuss'}]);assert.match(calls[0][1],/只讨论/)
+})
+test('only buttons that open a conversation carry the marker, and the generated label is untouched',()=>{
+ const {parent}=render({life:{todos:[],goals:[]},timeline:{cards:[briefCard()]}})
+ const draft=parent.querySelectorAll('button').find(n=>n.textContent==='起草状态说明'),discuss=parent.querySelectorAll('button').find(n=>n.textContent==='一起分析')
+ assert.equal(draft.dataset.opensConversation,'true');assert.equal(draft.title,'会新开一个对话');assert.equal(draft['aria-label'],'起草状态说明 · 会新开一个对话')
+ assert.equal(discuss.dataset.opensConversation,undefined);assert.notEqual(discuss.title,'会新开一个对话');assert.equal(discuss['aria-label'],undefined)
+ setLanguage('en')
+ try{
+  const en=render({life:{todos:[],goals:[]},timeline:{cards:[briefCard()]}}).parent.querySelectorAll('button').find(n=>n.textContent==='起草状态说明')
+  assert.equal(en.title,'Opens a new conversation');assert.equal(en['aria-label'],'起草状态说明 · Opens a new conversation')
+ }finally{setLanguage('zh-CN')}
+})
+test('historical or sourceless briefing cards offer no conversation actions',()=>{
+ for(const overrides of [{historical:true},{sources_available:false}]){
+  const {parent}=render({life:{todos:[],goals:[]},timeline:{cards:[briefCard(overrides)]}})
+  assert.equal(parent.querySelectorAll('button').some(n=>n.textContent==='起草状态说明'),false)
+ }
+})
+test('every todo status primary action opens a conversation about that exact todo while the title still discusses',()=>{
+ const todos=[{id:'a',title:'Open one',status:'open',version:1,due:null},{id:'b',title:'Doing one',status:'doing',version:2},{id:'c',title:'Waiting one',status:'waiting',version:3},{id:'d',title:'Changed',status:'open',version:4,source_changed:true}]
+ const {parent,calls,starts}=render({life:{todos,goals:[]}})
+ for(const todo of todos){
+  const card=parent.querySelectorAll('article').find(node=>node.dataset.objectId===todo.id),primary=card.querySelectorAll('button').find(node=>node.pendingKey===undefined&&node.className==='soft'&&/拆成|整理|起草|核对/u.test(node.textContent))
+  assert.ok(primary,todo.id);assert.equal(primary.dataset.opensConversation,'true');primary.listeners.click()
+  assert.deepEqual(starts.at(-1)[0].references,[{kind:'todo',id:todo.id,version:todo.version}]);assert.equal(starts.at(-1)[0].title,todo.title)
+ }
+ assert.equal(starts.length,4);assert.equal(calls.length,0)
+ parent.querySelectorAll('.timeline-title')[0].listeners.click();assert.equal(calls.length,1);assert.equal(starts.length,4)
 })

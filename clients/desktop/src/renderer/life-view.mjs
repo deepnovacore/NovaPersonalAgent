@@ -3,10 +3,11 @@ import {renderSoulCard} from './soul-card.mjs'
 import {renderCardTags} from './card-tags.mjs'
 import {renderInterests,renderWarmup} from './profile-preferences.mjs'
 import {attachSources,attachSourceTags} from './source-popover.mjs'
+import {markOpensConversation} from './new-conversation-mark.mjs'
 const el=(tag,text,className)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n}
 const labels={todo:'待办',idea:'想法',goal:'目标'}
 const statuses={idea:{active:'保留',archived:'已归档'},goal:{active:'推进中',paused:'已暂停',completed:'已达成',archived:'已归档'}}
-export function renderLife(panel,{kind,state,command,button,local,rerender,openArticle,suggested=0,clampable,bindPending,run=action=>action(),confirm=message=>globalThis.confirm(message)}){
+export function renderLife(panel,{kind,state,command,startConversation,button,local,rerender,openArticle,suggested=0,clampable,bindPending,run=action=>action(),confirm=message=>globalThis.confirm(message)}){
  const rows=state?.[kind==='idea'?'ideas':'goals']??[]
  panel.append(el('h2',t(labels[kind])))
  const toolbar=el('div',undefined,'page-toolbar'),toolbarActions=el('div',undefined,'page-toolbar-actions');panel.append(toolbar)
@@ -42,6 +43,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,openA
   const select=el('select');select.setAttribute('aria-label',`${row.title}状态`);for(const [value,label]of Object.entries(statuses[kind])){const opt=el('option',label);opt.value=value;select.append(opt)}select.value=row.status;const saving=el('span','正在保存…','action-progress');saving.setAttribute('role','status');saving.hidden=true;const change=async()=>{const value=select.value;try{await command('life.mutate',{op:'update',kind,id:row.id,expected_version:row.version,status:value})}finally{select.value=row.status}};if(bindPending)bindPending(select,`life:${row.id}`,change,'change',saving);else select.addEventListener('change',()=>run(change));footer.append(select,saving,actions)
   if(kind==='goal'){const cadence=el('select');cadence.setAttribute('aria-label',t('{0}的提醒节奏',row.title));for(const [value,label]of [['daily','每天'],['progress','有进展时'],['off','不主动提醒']]){const opt=el('option',t(label));opt.value=value;cadence.append(opt)}const current=row.cadence??'off';cadence.value=current;const changeCadence=async()=>{const value=cadence.value;try{await command('life.mutate',{op:'update',kind:'goal',id:row.id,expected_version:row.version,cadence:value})}finally{cadence.value=current}};if(bindPending)bindPending(cadence,`life:${row.id}`,changeCadence,'change');else cadence.addEventListener('change',()=>run(changeCadence));footer.append(cadence)}
   if(kind==='idea'){const converted=[...(state?.todos??[]),...(state?.goals??[])].filter(r=>r.idea_id===row.id);for(const target of ['todo','goal']){const existing=converted.find(r=>r.kind===target);if(existing)card.append(el('p',`已转为${labels[target]}：${existing.title}`));else if(row.status!=='archived')button(`转为${labels[target]}`,()=>command('life.mutate',{op:'convert',id:row.id,target,expected_version:row.version}),actions,`life:${row.id}`).className='ghost'}}
+  if(kind==='goal'&&startConversation&&['active','paused'].includes(row.status))markOpensConversation(button(t('规划下一步'),()=>startConversation({title:row.title.slice(0,40),text:t('请围绕目标「{0}」帮我规划下一步：结合达成标准和已有进展，给出最多三个具体行动和需要先确认的问题。只讨论，不创建待办或任务，不执行操作。',row.title),references:[{kind:'goal',id:row.id,version:row.version}]}),actions,`goal-plan:${row.id}`)).className='soft'
   button('编辑',()=>{local[formKey]={...row};rerender()},actions,`life:${row.id}`).className='ghost'
   if(kind==='goal')button(t('删除'),async()=>{if(confirm(t('删除目标“{0}”？关联的待办和想法会保留，但不再属于这个目标。',row.title)))await command('life.mutate',{op:'delete',kind:'goal',id:row.id,expected_version:row.version})},actions,`life:${row.id}`).className='quiet'
   card.append(footer)

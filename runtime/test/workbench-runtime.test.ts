@@ -214,6 +214,9 @@ test('Build requires approval before side effects, stops on denial and does not 
   assert.equal((await f.raw('build.approve',{id,approval_id:view.approval!.id,approved:true},false)).ok,false)
   assert.equal((await f.raw('build.approve',{id,approval_id:'stale',approved:true})).ok,false)
   assert.equal((await f.raw('conversations.create',{})).error,'build_stop_required')
+  const before=f.host.conversationSnapshot().items.length
+  assert.equal((await f.raw('conversations.start',{title:'x',text:'x',references:[{kind:'todo',id:'any-todo',version:1}]})).error,'build_stop_required')
+  assert.equal(f.host.conversationSnapshot().items.length,before);assert.equal(f.host.conversationSnapshot().selected_id,id)
   await assert.rejects(f.host.submitConversationText(id,'double',undefined,undefined,{local_desktop:true}),/conversation_busy/)
   await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).reason,'approval_denied');await f.command('build.resume',{id});await f.host.waitConversation(id)
