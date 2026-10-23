@@ -181,7 +181,7 @@ export function publicRuntimeCapabilityStatus(value) {
     state: value.state === 'startup_failed' ? 'startup_failed' : 'compiled'}
   if (value.modules) {
     result.modules = {}
-    for (const name of ['search', 'camera', 'coding', 'knowledge']) {
+    for (const name of ['search', 'camera', 'coding', 'knowledge', 'memory']) {
       const module = value.modules[name]
       if (typeof module?.enabled !== 'boolean') continue
       result.modules[name] = {enabled: module.enabled}

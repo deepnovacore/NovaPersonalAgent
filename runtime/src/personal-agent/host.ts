@@ -525,7 +525,10 @@ export class PersonalAgentHost {
         if(message.source.type==='task_waiting'&&!this.tasks.list().some(t=>t.id===message.source.id&&t.phase==='waiting'&&(!t.trigger||!this.schedules.findRun(t.trigger.run_id)?.processing)))return 'invalid';
         if(message.source.type==='approval'&&!this.#pendingDecisions().pending_approvals.some(a=>a.approval_id===message.source.id))return 'invalid';
         if(message.source.type==='confirmation'&&!this.#pendingDecisions().pending_confirmations.some(a=>a.proposal_id===message.source.id))return 'invalid';
-        return isQuietTime(this.#state.settings,this.#now())&&message.priority<100?'defer':'valid';
+        if(message.priority>=100)return 'valid';
+        if(isQuietTime(this.#state.settings,this.#now()))return 'defer';
+        const proactive=['brief','suggestion'] as const;
+        return proactive.some(kind=>kind===message.kind)&&this.notifications.deliveredToday(proactive,dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=(this.#state.settings.proactive_daily_cap??3)?'defer':'valid';
     }
     async #presentNotification(message:NotificationInput):Promise<void>{
         await this.#serial(async()=>{if(!this.localNotifications)throw Error('notification_route_changed');const next=structuredClone(this.#state);const feed=message.source.type==='feed'?next.feed.find(f=>f.id===message.source.id):undefined;
@@ -1806,7 +1809,7 @@ export class PersonalAgentHost {
             await this.refreshMemory();
         }
         else if (command.method === 'discovery.configure') {
-            const q = personalSettingsSchema.omit({assistant_name:true,user_name:true}).partial().extend({ enabled: z.boolean().optional(), interval_minutes: z.number().int().min(5).max(1440).optional() }).strict().parse(p);
+            const q = personalSettingsSchema.omit({assistant_name:true,user_name:true}).partial().extend({ enabled: z.boolean().optional(), interval_minutes: z.number().int().min(5).max(1440).optional(), proactive_daily_cap: z.number().int().min(1).max(10).optional() }).strict().parse(p);
             await this.#serial(async () => { const next = structuredClone(this.#state);const settings={...q};delete settings.enabled;delete settings.interval_minutes;Object.assign(next.settings,settings); if (q.enabled !== undefined)
                 next.settings.discovery_enabled = q.enabled; if (q.interval_minutes !== undefined)
                 next.settings.discovery_interval_minutes = q.interval_minutes; await this.#commit(next); });

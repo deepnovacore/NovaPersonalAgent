@@ -434,7 +434,7 @@ test('failed orb transition can retry backlog admission without changing mode ag
 for(const timing of ['before','during'] as const)test(`startup source notification ${timing} host loading preserves the owned store and drains after initialization`,async t=>{
  const {PersonalStore,initialState}=await import('../src/personal-agent/store.js'),{readFile}=await import('node:fs/promises')
  const dir=await mkdtemp(join(await realpath(tmpdir()),'host-startup-source-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState()
- state.user_scope='local';state.revision=77;state.settings={discovery_enabled:false,discovery_interval_minutes:17};state.receipts.saved={payload:'unchanged',result:{ok:true}};state.dedupe=['retained']
+ state.user_scope='local';state.revision=77;state.settings={discovery_enabled:false,discovery_interval_minutes:17,proactive_daily_cap:5};state.receipts.saved={payload:'unchanged',result:{ok:true}};state.dedupe=['retained']
  state.conversations.items.find(item=>item.id==='chat:main')!.messages.push({id:'original',conversation_id:'chat:main',role:'assistant',text:'Original retained transcript',created_at:now.toISOString()});await store.write(state)
  const original=await readFile(path,'utf8'),host=new PersonalAgentHost({path,userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  let release=()=>undefined as void,opening:Promise<void>|undefined

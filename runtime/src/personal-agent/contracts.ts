@@ -62,6 +62,8 @@ export interface PersonalSettings {
     briefing_weekdays?:number[]|undefined;
     quiet_start?:string|undefined;
     quiet_end?:string|undefined;
+    /** Daily limit for proactive `brief`/`suggestion` notifications; the schema fills the default of 3. */
+    proactive_daily_cap?:number|undefined;
 }
 export const feedItemSchema: z.ZodType<FeedItem> = z.object({
     schedule_ref:scheduleReferenceSchema.optional(),prepared:preparedContentSchema.optional(),action_label:z.string().trim().min(1).max(80).optional(),
@@ -76,4 +78,5 @@ export const personalSettingsSchema = z.object({ assistant_name:identityNameSche
     briefing_outlook_time:wallClockSchema.optional(),briefing_review_time:wallClockSchema.optional(),
     briefing_weekdays:z.array(z.number().int().min(1).max(7)).max(7).refine(days=>new Set(days).size===days.length).optional(),
     quiet_start:wallClockSchema.optional(),quiet_end:wallClockSchema.optional(),
+    proactive_daily_cap:z.number().int().min(1).max(10).default(3),
 }).strict();

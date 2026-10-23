@@ -274,6 +274,15 @@ test('private status projects only safe public fields and bounded exact counts',
   assert.equal(publicRuntimeCapabilityStatus({toolCount: -1, toolBudget: 24}), null)
 })
 
+test('memory module status reaches the public capability view', async () => {
+  const {publicRuntimeCapabilityStatus} = await import('../src/main/backend-supervisor.mjs')
+  const missing = publicRuntimeCapabilityStatus({state: 'running', toolCount: 1, toolBudget: 24,
+    modules: {memory: {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY', fallback: null}}})
+  assert.deepEqual(missing.modules.memory, {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})
+  const ready = publicRuntimeCapabilityStatus({state: 'running', toolCount: 1, toolBudget: 24, modules: {memory: {enabled: true, reason: null, fallback: null}}})
+  assert.deepEqual(ready.modules.memory, {enabled: true})
+})
+
 test('first-run status keeps only known pipeline, blocking key names and missing-environment reasons', async () => {
   const {publicRuntimeCapabilityStatus} = await import('../src/main/backend-supervisor.mjs')
   const failed = publicRuntimeCapabilityStatus({state: 'startup_failed', toolCount: null, toolBudget: 24,

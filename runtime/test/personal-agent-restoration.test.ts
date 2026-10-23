@@ -25,7 +25,7 @@ test('personal store replacement retries only transient Windows sharing failures
 async function fixture(){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-restore-')),path=join(dir,'personal.json');
  const state=initialState();state.user_scope='fixture';state.revision=12;
- state.settings={discovery_enabled:false,discovery_interval_minutes:90,timezone:'Asia/Shanghai'};
+ state.settings={discovery_enabled:false,discovery_interval_minutes:90,timezone:'Asia/Shanghai',proactive_daily_cap:4};
  state.conversations.items.push(createConversation('chat','Project discussion',null,'project-chat'));
  state.conversations.selected_id='project-chat';
  for(const item of state.conversations.items)item.messages.push({id:item.id+'-message',conversation_id:item.id,role:'user',text:'Preserved '+item.id,created_at:'2026-09-20T00:00:00Z'});
