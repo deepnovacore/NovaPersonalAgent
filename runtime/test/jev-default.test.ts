@@ -6,16 +6,25 @@ import type {ModelGateway,CompleteRequest} from '../src/model/model-gateway.js'
 import {settingsSchema} from '../src/config/config.js'
 import {decide} from '../src/model/jev-client.js'
 import {createJevNewsRanker} from '../src/news/jev-ranking.js'
-test('default news uses Jev and never silently substitutes the chat provider',async()=>{
+test('without an OpenRouter key news falls back to the support model visibly and the fallback can be turned off',async()=>{
  assert.equal(settingsSchema.parse({executors:[]}).openrouter_api_key,null)
  const calls:CompleteRequest[]=[]
- const gateway={complete:(request:CompleteRequest)=>{calls.push(request);return Promise.resolve({text:JSON.stringify({candidates:[{quote:'记下想法',occurrence:0,kind:'idea',text:'记下想法'}]})})}} as unknown as ModelGateway
- const core=buildAssembly({settings:settingsSchema.parse({executors:[],support_model:'support-test'}),gateway,cameraModuleEnabled:false,blackboard:{path:':memory:',ownerId:'test'}})
- const models=core.personalAgentConfig!.models
- await assert.rejects(models.rankNews([],[],new AbortController().signal),/jev_not_configured/)
- assert.equal(calls.length,0,'news never calls the chat model')
- await assert.rejects(models.understand({id:'source',version:1,text:'记下想法',origin:'user'},new AbortController().signal),/jev_not_configured/)
- assert.equal(calls[0]!.model,'support-test','understanding extracts with the shared LLM before Jev judgment')
+ const article={id:'a',source_id:'bbc',title:'New voice model',summary:'A voice model can run offline.',url:'https://www.bbc.com/a',published_at:null,first_seen:new Date().toISOString(),content_hash:'h'}
+ const gateway={complete:(request:CompleteRequest)=>{calls.push(request);return Promise.resolve({text:JSON.stringify(request.jsonSchema&&JSON.stringify(request.jsonSchema).includes('scores')?{scores:[{id:'a',matches:[{interest_id:'voice',score:0.9,quote:'New voice model'}],reason:'相关'}]}:{candidates:[{quote:'记下想法',occurrence:0,kind:'idea',text:'记下想法'}]})})}} as unknown as ModelGateway
+ const build=(extra:Record<string,unknown>={})=>buildAssembly({settings:settingsSchema.parse({executors:[],support_model:'support-test',...extra}),gateway,cameraModuleEnabled:false,blackboard:{path:':memory:',ownerId:'test'}}).personalAgentConfig!.models
+ const keyless=build()
+ assert.ok(keyless.rankNewsFallback,'keyless assembly offers the support-model ranker')
+ const rows=await keyless.rankNewsFallback!([{id:'voice',text:'语音模型',weight:1}],[article],new AbortController().signal)
+ assert.ok(calls.length>0);assert.equal(calls[0]!.model,'support-test');assert.equal(rows[0]!.matches[0]!.interest_id,'voice')
+ assert.deepEqual(Object.keys(JSON.parse(calls[0]!.prompt) as object).sort(),['articles','interests','output_schema'])
+ // The plain ranker stays Jev: with fallback switched off the host calls it and it still refuses.
+ const before=calls.length
+ await assert.rejects(keyless.rankNews([],[],new AbortController().signal),/jev_not_configured/)
+ assert.equal(calls.length,before,'Jev path never calls the chat model')
+ const keyed=build({openrouter_api_key:'sk-test'})
+ assert.equal(keyed.rankNewsFallback,undefined,'a configured key leaves Jev as the only news ranker')
+ await assert.rejects(keyless.understand({id:'source',version:1,text:'记下想法',origin:'user'},new AbortController().signal),/jev_not_configured/)
+ assert.equal(calls.at(-1)!.model,'support-test','understanding extracts with the shared LLM before Jev judgment')
 })
 test('typed transport rejects incomplete probability distributions',async()=>{
  const q={one:{type:'choice' as const,instructions:'test',criteria:{yes:'yes',no:'no'}}}

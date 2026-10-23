@@ -7,6 +7,7 @@ import {GatewayPersonalWriter} from '../model/personal-writer.js'
 import {createUnderstandingPipeline} from '../understanding/pipeline.js'
 import {createJevJudge} from '../understanding/jev.js'
 import {createJevNewsRanker} from '../news/jev-ranking.js'
+import {createNewsRanker} from '../news/ranking.js'
 import type {HostOptions} from '../personal-agent/host.js'
 import {CodingProgressNarrationState} from '../realtime/coding-progress-narration.js'
 import type {BlackboardSessionOptions} from '../memory/blackboard-session.js'
@@ -117,7 +118,7 @@ export interface Assembly {
     profileParticipantMessages?: boolean
     models: Required<Pick<HostOptions,
       'generateProfile' | 'generateDigests' | 'generateContext' | 'generateWorkbench' | 'generateTimeline' | 'rankNews' | 'understand'
-      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover'>>
+      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover'>> & Pick<HostOptions, 'rankNewsFallback'>
     taskVerifier: Pick<GatewayTaskVerifier, 'evaluateTask'>
   }
 
@@ -410,6 +411,8 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       generateWorkbench: observeOperation('context',createWorkbenchGenerator(gateway,settings.support_model)),
       generateTimeline:observeOperation('timeline',writer.generateTimeline),
       rankNews: observeOperation('news',createJevNewsRanker(jev)),
+      // Only without an OpenRouter key; the host decides per ranking whether the user still allows it.
+      ...(jev.apiKey.trim()?{}:{rankNewsFallback: observeOperation('news',createNewsRanker(gateway,settings.support_model))}),
       understand: observeOperation('understanding',createUnderstandingPipeline({gateway,model:settings.support_model,judge:createJevJudge(jev)})),
       prepareBrief: observeOperation('digest',writer.prepareBrief.bind(writer)),
       prepareProposal: observeOperation('proactivity',writer.prepareProposal.bind(writer)),
