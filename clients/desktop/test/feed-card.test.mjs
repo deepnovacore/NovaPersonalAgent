@@ -84,3 +84,20 @@ test('a goal proposal offers "set as goal" with its revision and "no thanks", an
  await find('不用了').action();assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'decline_goal'}])
  assert.deepEqual(buttons(renderFeedCard(h.parent,item({kind:'question',lifecycle:'resolved',goal_proposal:goal}),h)),[],'an adopted proposal has no actions left')
 })
+
+test('a goal check-in shows one line per goal with "reply with progress" and "stop reminding"',async()=>{
+ const h=harness(),references=[]
+ const checkin={local_date:'2026-10-12',items:[{goal_id:'a',goal_version:1,text:'今天练口语了吗？',recalled:'练了三次跟读'},{goal_id:'b',goal_version:1,text:'网站进展如何？',recalled:null},{goal_id:'gone',goal_version:1,text:'已删除的目标',recalled:null}]}
+ const goals=[{id:'a',version:3,cadence:'daily'},{id:'b',version:1,cadence:'off'}]
+ const card=renderFeedCard(h.parent,item({kind:'question',title:'运行时标题',goal_checkin:checkin}),{...h,goals,reference:refs=>{references.push(refs)}})
+ const rows=card.children.filter(n=>n.className==='feed-checkin'),texts=node=>[node.textContent,...node.children.flatMap(texts)].filter(Boolean)
+ assert.equal(card.children[0].textContent,'问问你的目标','a localized title instead of the runtime string')
+ assert.deepEqual(rows.map(row=>row.dataset.goalId),['a','b','gone'])
+ assert.ok(texts(rows[0]).includes('上次：练了三次跟读'))
+ assert.deepEqual(buttons(rows[0]),['回复进展','不再提醒']);assert.deepEqual(buttons(rows[1]),['回复进展'],'a muted goal offers no second mute');assert.ok(texts(rows[1]).includes('已不再提醒'))
+ assert.deepEqual(buttons(rows[2]),[],'a deleted goal has no actions');assert.ok(texts(rows[2]).includes('这个目标已删除。'))
+ const find=(row,label)=>row.children.flatMap(function walk(n){return n.tag==='button'&&n.textContent===label?[n]:n.children.flatMap(walk)})[0]
+ await find(rows[0],'回复进展').action();assert.deepEqual(references,[[{kind:'goal',id:'a',version:3}]],'the reference carries the goal\'s current version')
+ await find(rows[0],'不再提醒').action();assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'goal_checkin_mute',goal_id:'a'}])
+ assert.deepEqual(buttons(renderFeedCard(h.parent,item({goal_checkin:checkin}),{...h,goals,reference:()=>{},connected:false})),[],'offline shows no actions')
+})

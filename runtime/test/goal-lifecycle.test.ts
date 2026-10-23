@@ -59,30 +59,36 @@ test('memory backend: goal deletion tombstones the goal entry and rewrites linke
  }finally{db.close()}
 })
 
-test('goalCheckinEligible accepts only an existing active goal',()=>{
- const goals=(['active','paused','completed','archived'] as const).map(status=>({id:status,status}))
+test('goalCheckinEligible accepts only an existing active goal with a cadence',()=>{
+ const goals=[...(['active','paused','completed','archived'] as const).map(status=>({id:status,status,cadence:'daily'})),{id:'muted',status:'active',cadence:'off'},{id:'project',status:'active',cadence:'progress'}]
  assert.deepEqual(goalCheckinEligible({goals},'active'),{eligible:true,reason:'eligible'})
  for(const status of ['paused','completed','archived'])assert.deepEqual(goalCheckinEligible({goals},status),{eligible:false,reason:'goal_not_active'})
  assert.deepEqual(goalCheckinEligible({goals},'missing'),{eligible:false,reason:'goal_not_found'})
  assert.deepEqual(goalCheckinEligible({goals:goals.filter(g=>g.id!=='active')},'active'),{eligible:false,reason:'goal_not_found'},'a deleted goal is no longer eligible')
+ assert.deepEqual(goalCheckinEligible({goals},'muted'),{eligible:false,reason:'goal_cadence_off'},'a goal without a cadence never checks in')
+ assert.deepEqual(goalCheckinEligible({goals},'project'),{eligible:true,reason:'eligible'})
 })
 
 const host=(dir:string)=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'u',pool:new SuggestionPool(),memory:()=>undefined,evidence:ref=>({subject_key:ref,source:{type:'conversation',ref}}),now:()=>now})
 const command=async(h:PersonalAgentHost,request_id:string,params:Record<string,unknown>)=>{const r=await h.command({type:'personal.command',request_id,method:'life.mutate',params}) as {ok:boolean;data?:{id:string;version:number};error?:string};assert.equal(r.ok,true,r.error);return r.data!}
-const checkin=(goalId:string,key:string):NotificationInput=>({event_key:'goal-checkin:'+key,revision:'1',occurrence:'initial',kind:'suggestion',title:'今天的目标',body:'今天推进了吗？',source:{type:goalCheckinSource,id:goalId},created_at:now.getTime(),expires_at:null,not_before:0,priority:40,coalesce_key:null,feedback:[]})
+// One summary per local date: the source names the date and the guard lists every goal it asks about.
+const checkin=(goalIds:string[],key:string):NotificationInput=>({event_key:'goal-checkin:'+key,revision:'1',occurrence:'initial',kind:'suggestion',title:'今天的目标',body:'今天推进了吗？'+key,guard:{goal_ids:goalIds},source:{type:goalCheckinSource,id:'2026-10-12'},created_at:now.getTime(),expires_at:null,not_before:0,priority:40,coalesce_key:null,feedback:[]})
 
-test('a queued goal check-in is dropped once its goal is paused or deleted',()=>withDir('nova-goal-checkin-',async dir=>{
+test('a queued goal check-in is dropped once any of its goals is paused, muted or deleted',()=>withDir('nova-goal-checkin-',async dir=>{
  const h=host(dir)
- try{await h.open()
-  const kept=await command(h,'keep',{op:'create',kind:'goal',title:'保持运动'}),paused=await command(h,'pause-goal',{op:'create',kind:'goal',title:'学吉他'}),deleted=await command(h,'delete-goal',{op:'create',kind:'goal',title:'写小说'})
-  for(const g of [kept,paused,deleted])assert.equal(await h.notificationValidity(checkin(g.id,g.id)),'valid')
-  for(const g of [kept,paused,deleted])await h.notifications.publish(checkin(g.id,g.id))
+ try{await h.open();assert.equal((await h.command({type:'personal.command',request_id:'online',method:'presentation.set',params:{mode:'workbench'}}) as {ok:boolean}).ok,true)
+  const goal=(request:string,title:string)=>command(h,request,{op:'create',kind:'goal',title,cadence:'daily'})
+  const kept=await goal('keep','保持运动'),paused=await goal('pause-goal','学吉他'),deleted=await goal('delete-goal','写小说'),muted=await goal('mute-goal','学日语')
+  for(const g of [kept,paused,deleted,muted])assert.equal(await h.notificationValidity(checkin([g.id],g.id)),'valid')
+  assert.equal(await h.notificationValidity(checkin([],'none')),'invalid','a summary naming no goal is never sent')
+  for(const [key,ids] of [['keep',[kept.id]],['pause',[kept.id,paused.id]],['delete',[deleted.id]],['mute',[muted.id]]] as const)await h.notifications.publish(checkin([...ids],key))
   await command(h,'pause',{op:'update',kind:'goal',id:paused.id,expected_version:1,status:'paused'})
   await command(h,'delete',{op:'delete',kind:'goal',id:deleted.id,expected_version:1})
-  assert.equal(await h.notificationValidity(checkin(paused.id,'p')),'invalid');assert.equal(await h.notificationValidity(checkin(deleted.id,'d')),'invalid')
+  await command(h,'mute',{op:'update',kind:'goal',id:muted.id,expected_version:1,cadence:'off'})
+  assert.equal(await h.notificationValidity(checkin([kept.id,paused.id],'p')),'invalid','one paused goal voids the whole summary');assert.equal(await h.notificationValidity(checkin([deleted.id],'d')),'invalid');assert.equal(await h.notificationValidity(checkin([muted.id],'m')),'invalid')
   await h.flushNotifications();await h.flushNotifications()
   const sent=h.conversationSnapshot().messages.filter(m=>m.origin==='proactive')
-  assert.equal(sent.length,1,'only the active goal check-in is delivered');assert.match(sent[0]!.text,/今天推进了吗/u)
+  assert.deepEqual(sent.map(m=>m.text.split('\n')[1]),['今天推进了吗？keep'],'only the summary whose goals are all still eligible is delivered')
  }finally{await h.close()}
 }))
 

@@ -49,7 +49,7 @@ export function createProactivityPanel({document, api, moduleStatusNote = () => 
  function render() {
   root.replaceChildren()
   const connected = state !== null && !busy, caps = state?.capabilities ?? {}, settings = state?.settings ?? {}
-  const discovery = card(t('主动发现'), t('有依据才提出建议。关闭后仍可主动交办任务。'))
+  const discovery = card(t('主动发现'), t('有依据才提出建议；也包括提议目标和按节奏问候目标进展。关闭后这些都会停止，仍可主动交办任务。'))
   const select = el('select'); select.setAttribute('aria-label', t('主动发现间隔'))
   for (const [value, label] of [['0', t('关闭')], ['15', t('每 15 分钟')], ['30', t('每 30 分钟')], ['60', t('每小时')], ['120', t('每两小时')]]) {const option = el('option', label); option.value = value; select.append(option)}
   select.value = settings.discovery_enabled ? String(settings.discovery_interval_minutes) : '0'

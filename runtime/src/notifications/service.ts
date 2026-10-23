@@ -51,6 +51,7 @@ export class NotificationService {
     snapshot() { const counts = Object.fromEntries(['pending', 'sending', 'accepted', 'retry_wait', 'blocked', 'unknown', 'cancelled', 'expired', 'superseded'].map(s => [s, 0])) as Record<DeliveryStatus, number>; for (const d of this.#state.deliveries)
         counts[d.status]++; return { primary_binding_id: this.#state.primary_binding_id, route_revision: this.#state.route_revision, local: this.local, configured: this.#state.configured, bindings: this.#state.bindings.map(b => ({id:b.id,provider:b.provider,user_scope:b.user_scope,generation:b.generation,status:b.status})), counts, deliveries: this.#state.deliveries.slice(-100).map(d => ({ id: d.id, title: d.notification.title, source: d.notification.source, status: d.status, error: d.error, binding_id: d.binding.id, updated_at: d.updated_at })) }; }
     /** Accepted is the only delivered terminal status; its `updated_at` is set when the final part's receipt is stored. */
+    accepted(eventKey: string): boolean { return this.#state.deliveries.some(d => d.status === 'accepted' && d.notification.event_key === eventKey); }
     deliveredToday(kinds: readonly NotificationInput['kind'][], timezone: string, now: number): number { const format = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }); const today = format.format(now); return this.#state.deliveries.filter(d => d.status === 'accepted' && kinds.includes(d.notification.kind) && format.format(d.updated_at) === today).length; }
     /** True once this exact message reached delivery: sending (the local adapter presents it while sending) or accepted. */
     isAdmitted(key: { event_key: string; revision: string; occurrence: string }): boolean { return this.#state.deliveries.some(d => (d.status === 'accepted' || d.status === 'sending') && d.notification.event_key === key.event_key && d.notification.revision === key.revision && d.notification.occurrence === key.occurrence); }
@@ -108,9 +109,10 @@ export class NotificationService {
             delete s.dedupe[key]; s.cutoff = Math.max(s.cutoff, now - 90 * 86400000); }
     async #invalidateDelivery(id: string) { await this.#mutate(s => { const d=s.deliveries.find(row=>row.id===id);if(d)this.#erase(d); }); }
     #erase(d: Delivery) {d.invalidated=true;d.notification.body='';d.notification.title='';for(const p of d.parts){p.part.body='';p.part.title='';delete p.part.payload;}if(d.status!=='sending'&&d.status!=='unknown'&&!terminal.has(d.status))d.status='cancelled';}
-    async invalidate(type: string, id: string, notify = true) { if (!this.#state.deliveries.some(d => d.notification.source.type === type && d.notification.source.id === id && !d.invalidated))
+    /** `version`, when given, narrows the match to one source version (several goal check-ins can share a local date). */
+    async invalidate(type: string, id: string, notify = true, version?: string) { const matches = (d: Delivery) => d.notification.source.type === type && d.notification.source.id === id && (version === undefined || d.notification.source.version === version); if (!this.#state.deliveries.some(d => matches(d) && !d.invalidated))
         return; await this.#mutate(s => { for (const d of s.deliveries)
-        if (d.notification.source.type === type && d.notification.source.id === id) {
+        if (matches(d)) {
             d.invalidated = true;
             d.notification.body = '';
             d.notification.title = '';

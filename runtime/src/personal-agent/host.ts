@@ -18,7 +18,7 @@ import {SourceProcessingAgent} from './source-processing-agent.js';
 import {notificationResultText} from '../notifications/content.js';
 import {NotificationService} from '../notifications/service.js';
 import {novaNotificationAdapter} from '../notifications/adapters/nova.js';
-import {feedNotification,feedNotificationKey} from '../notifications/feed.js';
+import {feedNotification,feedNotificationKey,feedSourceId} from '../notifications/feed.js';
 import {goalCheckinSource,type NotificationChannelAdapter,type NotificationInput} from '../notifications/contracts.js';
 import {TaskLoop,TaskExecutionRejected,type TaskDecision} from './task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
@@ -60,6 +60,8 @@ import {ScheduledRunAuthority,type ScheduledRunGrant} from './scheduled-run-auth
 import {SCHEDULE_CATCHUP_MS} from './scheduled-time.js';
 import {ScheduledAppContext,type AppContextSection} from './app-context.js';
 import {canonicalJson} from '../text/canonical-json.js';
+import {goalProgressUpdateSchema,groundGoalCheckins,type GoalCheckinInput,type GoalCheckinWriter,type GoalProgressWriter} from '../model/goal-checkin-writer.js';
+import {dueGoalCheckins,goalCheckinJitterMs,localDateEnd,localDateOf} from './goal-checkin.js';
 import {goalTopicKey,groundGoalCandidates,type GoalProposer,type GoalProposerInput,type GoalProposerMemory,type GoalProposerMessage} from '../model/goal-writer.js';
 /** Supplied only by an authenticated transport, never command params. */
 export interface PersonalCommandContext {client_id:string;can_takeover?:boolean;presentation_mode?:'background'|'workbench'|'orb'}
@@ -131,6 +133,10 @@ export interface HostOptions {
     prepareBrief?: (snapshot:DiscoverySnapshot,slot:DailyBriefSlot,signal:AbortSignal)=>Promise<PreparedMaterial|null>;
     prepareProposal?: (snapshot:DiscoverySnapshot,proposal:Proposal,signal:AbortSignal)=>Promise<PreparedMaterial|null>;
     proposeGoals?: GoalProposer;
+    /** Writes today's goal check-in lines; the host grounds them again before admission. */
+    prepareGoalCheckin?: GoalCheckinWriter;
+    /** Turns a reply that references a goal into its derived progress record. */
+    updateGoalProgress?: GoalProgressWriter;
     summarizeMemory?: (entries: readonly MemoryEntry[], signal: AbortSignal) => Promise<MemoryOverview | null>;
     evidenceRefs?: () => string[];
     onTick?: (snapshot: DiscoverySnapshot) => void;
@@ -146,6 +152,7 @@ export function countSourceGroundedContextCards(cards:readonly {tab:'ideas'|'goa
     return {cards:grounded.length,ideas:grounded.filter(card=>card.tab==='ideas').length,goals:grounded.filter(card=>card.tab==='goals').length};
 }
 export type PresentationMode = 'background' | 'workbench' | 'orb'
+export type GoalCheckinOutcome='skipped'|'waiting'|'pending'|'done'|'capped'|'none'|'empty'|'admitted'|'discarded'|'invalidated'|'failed'
 export interface PresentedDecision {approval_id?:string|undefined;conversation_id?:string|undefined;proposal_id?:string|undefined}
 export interface TaskRuntimePort {
  recover?(task:TaskRecord):Promise<string|null>
@@ -529,12 +536,14 @@ export class PersonalAgentHost {
         const guard=message.guard;if(guard?.requires_runtime&&!this.#runtimeNotificationGuards.get(message.event_key)?.())return 'invalid';
         if(guard?.task_id){const task=this.tasks.list().find(t=>t.id===guard.task_id);if(!task||task.goal_revision!==guard.goal_revision||task.phase==='cancelled'||(message.kind==='task_progress'&&['completed','failed'].includes(task.phase))||(guard.work_id&&!task.work_ids.includes(guard.work_id)))return 'invalid';}
         if(guard?.evidence_refs&&!await this.#valid({evidence_refs:guard.evidence_refs,memory_refs:[]}))return 'invalid';
-        if(message.source.type==='feed'){const item=this.#state.feed.find(f=>f.id===message.source.id);if(!item||item.lifecycle==='invalidated'||item.user_state==='dismissed'||feedNotificationKey(this.#feedNotification(item))!==feedNotificationKey(message))return 'invalid';if(!await this.#valid(item)||!this.#goalProposalEvidenceIntact(item))return 'invalid';if(item.snooze_until&&Date.parse(item.snooze_until)>this.#now().getTime())return 'defer';}
+        const feedId=feedSourceId(message);
+        if(feedId!==undefined){const item=this.#state.feed.find(f=>f.id===feedId);if(!item||item.lifecycle==='invalidated'||item.user_state==='dismissed'||feedNotificationKey(this.#feedNotification(item))!==feedNotificationKey(message))return 'invalid';if(!await this.#valid(item)||!this.#goalProposalEvidenceIntact(item))return 'invalid';if(item.snooze_until&&Date.parse(item.snooze_until)>this.#now().getTime())return 'defer';}
         if(message.source.type==='conversation_runtime'&&!this.#state.conversations.items.some(c=>c.id===message.source.id&&String(c.generation)===message.source.version))return 'invalid';
         if(message.source.type==='task_waiting'&&!this.tasks.list().some(t=>t.id===message.source.id&&t.phase==='waiting'&&(!t.trigger||!this.schedules.findRun(t.trigger.run_id)?.processing)))return 'invalid';
         if(message.source.type==='approval'&&!this.#pendingDecisions().pending_approvals.some(a=>a.approval_id===message.source.id))return 'invalid';
         if(message.source.type==='confirmation'&&!this.#pendingDecisions().pending_confirmations.some(a=>a.proposal_id===message.source.id))return 'invalid';
-        if(message.source.type===goalCheckinSource&&!goalCheckinEligible(this.life.snapshot(),message.source.id).eligible)return 'invalid';
+        // Any goal in the summary that is gone, not active or muted voids the whole summary; the next tick rewrites it for the rest.
+        if(message.source.type===goalCheckinSource){if(!this.#checkinEligible(guard?.goal_ids??[]))return 'invalid';if(!this.#online())return 'defer';}
         if(message.priority>=100)return 'valid';
         if(isQuietTime(this.#state.settings,this.#now()))return 'defer';
         const proactive=['brief','suggestion'] as const;
@@ -545,7 +554,7 @@ export class PersonalAgentHost {
     recordGoalProgress(input:GoalProgress):Promise<void>{const row=goalProgressSchema.parse(input);return this.#serial(async()=>{const goals=this.life.snapshot().goals,goal=goals.find(g=>g.id===row.goal_id);if(!goal)throw Error('goal_not_found');if(goal.version!==row.goal_version)throw Error('version_conflict');const next=structuredClone(this.#state);next.goal_progress=[...next.goal_progress.filter(r=>r.goal_id!==row.goal_id&&goals.some(g=>g.id===r.goal_id)),row];await this.#commit(next)})}
     #pruneGoalProgress():Promise<void>{return this.#serial(async()=>{const goals=this.life.snapshot().goals;if(this.#state.goal_progress.every(r=>goals.some(g=>g.id===r.goal_id)))return;const next=structuredClone(this.#state);next.goal_progress=next.goal_progress.filter(r=>goals.some(g=>g.id===r.goal_id));await this.#commit(next)})}
     async #presentNotification(message:NotificationInput):Promise<void>{
-        await this.#serial(async()=>{if(!this.localNotifications)throw Error('notification_route_changed');const next=structuredClone(this.#state);const feed=message.source.type==='feed'?next.feed.find(f=>f.id===message.source.id):undefined;
+        await this.#serial(async()=>{if(!this.localNotifications)throw Error('notification_route_changed');const next=structuredClone(this.#state);const feedId=feedSourceId(message),feed=feedId!==undefined?next.feed.find(f=>f.id===feedId):undefined;
         const owner=feed?.task_ref?next.conversations.items.find(c=>c.id===next.conversations.work_owners[feed.task_ref!.work_id]):undefined;
         const durableTask=feed?.task_ref?this.tasks.list().find(t=>t.work_ids.includes(feed.task_ref!.work_id)||feed.task_ref!.work_id==='verified:'+t.id+':'+t.goal_revision):undefined;if(owner&&durableTask&&(durableTask.conversation_generation??0)!==owner.generation)return;
         const conversation=owner??next.conversations.items.find(c=>c.id==='chat:main')!;const taskTurn=feed?.kind==='task_result'&&feed.task_ref?'task:'+feed.task_ref.work_id:undefined;const id=feed?(taskTurn??'feed:'+feed.id)+(message.occurrence==='initial'?'':':'+hash(message.occurrence)):'notification:'+hash([message.event_key,message.revision,message.occurrence]);
@@ -626,7 +635,7 @@ export class PersonalAgentHost {
         if(!seen&&mode!=='workbench')await this.stopLocalBuilds();
         if(seen&&this.#presentationMode==='background')throw Error('presentation_hidden');
         const changed=this.#presentationMode!==mode||this.#presentationNeedsRetry;
-        if(!seen)this.#presentationMode=mode;
+        if(!seen){this.#presentationMode=mode;this.#noteActive()}
         let failed=false;
         for(const listener of this.#presentationListeners){try{await listener(mode,seen)}catch{failed=true}}
         if(!seen)this.#presentationNeedsRetry=failed;
@@ -746,6 +755,8 @@ export class PersonalAgentHost {
         const operation=this.#conversationPool.run(conversation,text,{...context,user_message_id:userMessageId,...(sourceTodo?{source_todo:sourceTodo}:{}),...(context.references?{refresh:()=>this.discussionContext(context.references!)}:{})}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';const assistant={id:randomUUID(),conversation_id:id,role:'assistant' as const,reply_to:userMessageId,text:result.assistant.slice(0,16000),...(conversation.kind==='build'&&result.assistant.length>16000?{full_text_ref:true}:{}),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})},userIndex=item.messages.findIndex(message=>message.id===userMessageId);item.messages.splice(userIndex<0?item.messages.length:userIndex+1,0,assistant);item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed',...((conversation.mode==='plan'||conversation.kind==='build')&&error instanceof Error&&/^model_[a-z_]{1,96}$/u.test(error.message)?{reason:error.message}:{})})});
         this.#conversationRuns.set(id,operation);
         void operation.catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'status_persistence_failed'})});
+        const goalIds=id==='chat:main'?(context.references??[]).flatMap(ref=>ref.kind==='goal'?[ref.id]:[]):[];
+        if(goalIds.length)void operation.then(()=>this.#goalReplyProgress(userMessageId,goalIds)).catch(()=>{/* progress updates are best-effort */});
     }
     requestPlanModeFromTool(id:string,generation:number,callId:string,originRef:string,stillWanted:()=>boolean):Promise<{scheduled:true}>{
         if(!callId||!originRef||!stillWanted())throw Error('superseded');
@@ -1114,6 +1125,7 @@ export class PersonalAgentHost {
         if(!this.#opened)return;
         if(this.#now().getTime()>=this.#nextDiscovery){this.#nextDiscovery=this.#now().getTime()+this.#state.settings.discovery_interval_minutes*60000;void this.discover().catch(()=>{/* optional discovery */})}
         void this.runGoalProposer().catch(()=>{/* the next local date retries */});
+        void this.runGoalCheckins().catch(()=>{/* the next tick retries */});
         if(this.#briefing)return this.#briefing;
         const run=this.#runBriefs();this.#briefing=run;
         try{await run}finally{if(this.#briefing===run)this.#briefing=undefined}
@@ -1195,6 +1207,107 @@ export class PersonalAgentHost {
         if(revision!==proposal.revision||goalProposalRevision(item.id,proposal.title,proposal.success_criteria,proposal.cadence)!==proposal.revision)throw Error('stale_goal_proposal');
         await this.life.mutate({op:'create',kind:'goal',title:proposal.title,note:'',success_criteria:proposal.success_criteria,cadence:proposal.cadence},requestId);
         item.lifecycle='resolved';item.user_state='seen';if(item.suggestion_id)this.options.pool.withdraw(item.suggestion_id);
+    }
+    #firstActive:{date:string;at:number}|null=null;
+    #online():boolean{return this.#presentationMode!==null&&this.#presentationMode!=='background'}
+    /** First foreground moment of each local date; the day's goal check-in waits for it. */
+    #noteActive():void{if(!this.#online())return;const at=this.#now().getTime(),date=localDateOf(dailyBriefSettings(this.#state.settings).timezone,at);if(this.#firstActive?.date!==date)this.#firstActive={date,at}}
+    /** Proactive discovery on, and every goal still exists, is active and has a cadence. */
+    #checkinEligible(goalIds:readonly string[]):boolean{const life=this.life.snapshot();return this.#state.settings.discovery_enabled&&goalIds.length>0&&goalIds.every(id=>goalCheckinEligible(life,id).eligible)}
+    #dueCheckins(now:number,timezone:string):string[]{
+        const life=this.life.snapshot();
+        return dueGoalCheckins({discovery_enabled:this.#state.settings.discovery_enabled,timezone,now,goals:life.goals,todos:life.todos,last_checkin_at:this.#state.goal_checkins.last_at,last_progress_at:Object.fromEntries(this.#state.goal_progress.map(r=>[r.goal_id,r.last_progress_at]))});
+    }
+    #checkinInput(date:string,timezone:string,ids:readonly string[]):GoalCheckinInput{
+        const life=this.life.snapshot(),main=this.#state.conversations.items.find(c=>c.id==='chat:main');
+        return {local_date:date,timezone,goals:ids.flatMap(id=>{const goal=life.goals.find(g=>g.id===id);if(!goal||goal.cadence==='off')return [];const progress=this.goalProgress(id);
+            const messages=(main?.messages??[]).filter(m=>m.role==='user'&&m.generation_status==='completed'&&m.references?.some(r=>r.kind==='goal'&&r.id===id)).slice(-3).map(m=>({id:'message:chat:main:'+m.id,text:m.text.slice(0,1000),at:m.created_at}));
+            return [{goal_id:id,goal_version:goal.version,title:goal.title,success_criteria:goal.success_criteria,cadence:goal.cadence,progress:progress&&!progress.stale?{summary:progress.summary,next_step:progress.next_step,last_progress_at:progress.last_progress_at}:null,messages}]})};
+    }
+    #checkinRun:Promise<GoalCheckinOutcome>|undefined;
+    /** Today's goal check-in summary: one per local date, written only while the user is in the foreground. */
+    runGoalCheckins():Promise<GoalCheckinOutcome>{
+        if(this.#checkinRun)return this.#checkinRun;
+        const run=this.#runGoalCheckins();this.#checkinRun=run;
+        void run.finally(()=>{if(this.#checkinRun===run)this.#checkinRun=undefined}).catch(()=>{/* caller owns the result */});return run;
+    }
+    /** Settles an admitted summary: delivered closes the date; one that lost a goal before delivery is voided without using the date. */
+    #settleGoalCheckin(date:string):Promise<GoalCheckinOutcome|null>{return this.#serial(async()=>{
+        const run=this.#state.goal_checkins.runs[date];
+        if(run?.status==='delivered'||run?.status==='empty')return 'done';
+        if(run?.status!=='success'||!run.feed_id)return null;
+        const item=this.#state.feed.find(f=>f.id===run.feed_id),next=structuredClone(this.#state),settled=next.goal_checkins.runs[date]!,at=this.#now().toISOString();
+        if(item&&(this.notifications.accepted('feed:'+item.id)||item.user_state==='dismissed')){
+            settled.status='delivered';const goals=this.life.snapshot().goals;
+            for(const line of item.goal_checkin?.items??[])next.goal_checkins.last_at[line.goal_id]=at;
+            next.goal_checkins.last_at=Object.fromEntries(Object.entries(next.goal_checkins.last_at).filter(([id])=>goals.some(g=>g.id===id)));
+            await this.#commit(next);return 'done';
+        }
+        if(item?.lifecycle==='active'&&this.#checkinEligible(item.goal_checkin?.items.map(line=>line.goal_id)??[]))return 'pending';
+        const voided=next.feed.find(f=>f.id===run.feed_id);if(voided?.lifecycle==='active'){voided.lifecycle='invalidated';voided.updated_at=at}
+        Object.assign(settled,{status:'invalidated',attempts:0,feed_id:null});await this.#commit(next);return 'invalidated';
+    })}
+    async #runGoalCheckins():Promise<GoalCheckinOutcome>{
+        if(acceptanceEnabled()||!this.#opened||!this.#state.settings.discovery_enabled||!this.options.prepareGoalCheckin)return 'skipped';
+        this.#noteActive();
+        const now=this.#now(),timezone=dailyBriefSettings(this.#state.settings).timezone,date=localDateOf(timezone,now.getTime());
+        if(!this.#online()||this.#firstActive?.date!==date||now.getTime()<this.#firstActive.at+goalCheckinJitterMs(date)||isQuietTime(this.#state.settings,now))return 'waiting';
+        const settled=await this.#settleGoalCheckin(date);if(settled)return settled;
+        // A full daily allowance would only defer the summary, so the model is not called.
+        if(this.notifications.deliveredToday(['brief','suggestion'],timezone,now.getTime())>=(this.#state.settings.proactive_daily_cap??5))return 'capped';
+        // First check, before generation: only goals eligible now reach the model. The attempt is recorded before the call; the date is used only by an admitted summary.
+        const ids=await this.#serial(async()=>{
+            const run=this.#state.goal_checkins.runs[date],at=this.#now().getTime();
+            if(!this.#opened||run&&(run.status==='success'||run.status==='delivered'||run.status==='empty'||run.attempts>=3||run.status!=='invalidated'&&at-Date.parse(run.last_attempt_at)<5*60000))return null;
+            const due=this.#dueCheckins(at,timezone);if(!due.length)return null;
+            const next=structuredClone(this.#state);next.goal_checkins.runs[date]={status:'processing',attempts:(run?.attempts??0)+1,last_attempt_at:new Date(at).toISOString(),feed_id:null};
+            next.goal_checkins.runs=Object.fromEntries(Object.entries(next.goal_checkins.runs).sort(([a],[b])=>a.localeCompare(b)).slice(-14));
+            await this.#commit(next);return due;
+        });
+        if(!ids)return 'none';
+        const finish=(status:'failed'|'empty'|'invalidated')=>this.#serial(async()=>{const next=structuredClone(this.#state),run=next.goal_checkins.runs[date];if(run?.status!=='processing')return;run.status=status;if(status==='invalidated')run.attempts=0;await this.#commit(next)});
+        try{
+            const input=this.#checkinInput(date,timezone,ids),signal=AbortSignal.any([this.#abort.signal,AbortSignal.timeout(60000)]);
+            const raw=await this.options.prepareGoalCheckin(input,signal);
+            if(signal.aborted||!this.#opened)throw Error('goal_checkin_interrupted');
+            // Second check, before commit: a goal paused, muted, edited or deleted while the model ran discards the whole result.
+            const life=this.life.snapshot(),at=this.#now();
+            if(localDateOf(timezone,at.getTime())!==date||!this.#checkinEligible(ids)||input.goals.some(goal=>life.goals.find(g=>g.id===goal.goal_id)?.version!==goal.goal_version)){await finish('invalidated');return 'discarded'}
+            const items=groundGoalCheckins(raw,input);
+            if(!items.length){await finish('empty');return 'empty'}
+            const result=await this.#serial(async()=>{
+                const run=this.#state.goal_checkins.runs[date],latest=this.life.snapshot();
+                if(run?.status!=='processing'||!this.#checkinEligible(ids)||items.some(line=>latest.goals.find(g=>g.id===line.goal_id)?.version!==line.goal_version))return 'discarded' as const;
+                const id=randomUUID(),iso=this.#now().toISOString(),next=structuredClone(this.#state);
+                next.feed.push({id,kind:'question',title:'问问你的目标',why_now:'按你确认的目标节奏，今天问一句',evidence_refs:[],memory_refs:[],source:{type:'conversation',ref:'goal_checkin:'+date},suggestion_id:null,task_ref:null,subject_key:'goal_checkin:'+date,priority:40,created_at:iso,updated_at:iso,expires_at:new Date(localDateEnd(timezone,at.getTime())).toISOString(),user_state:'new',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null},goal_checkin:{local_date:date,items}});
+                next.goal_checkins.runs[date]={...run,status:'success',feed_id:id};await this.#commit(next);return 'admitted' as const;
+            });
+            if(result==='discarded'){await finish('invalidated');return result}
+            await this.flushNotifications();
+            return result;
+        }catch{await finish('failed').catch(()=>{/* the attempt count already bounds retries */});return 'failed'}
+    }
+    async #muteGoalCheckin(item:FeedItem,goalId:string|undefined):Promise<void>{
+        if(!item.goal_checkin?.items.some(line=>line.goal_id===goalId))throw Error('not_goal_checkin');
+        const goal=this.life.snapshot().goals.find(g=>g.id===goalId);if(!goal)throw Error('goal_not_found');
+        if(goal.cadence==='off')return;
+        await this.life.mutate({op:'update',kind:'goal',id:goal.id,expected_version:goal.version,cadence:'off'},'goal-checkin-mute:'+hash([goal.id,goal.version]).slice(0,32));
+    }
+    /** After a chat:main turn that referenced goals completes: refresh each goal's derived progress from that reply only. Failures stay silent. */
+    async #goalReplyProgress(messageId:string,goalIds:readonly string[]):Promise<void>{
+        const write=this.options.updateGoalProgress;if(!write)return;
+        for(const goalId of goalIds){
+            try{
+                const message=this.#state.conversations.items.find(c=>c.id==='chat:main')?.messages.find(m=>m.id===messageId),goal=this.life.snapshot().goals.find(g=>g.id===goalId);
+                if(!this.#opened||message?.role!=='user'||message.generation_status!=='completed'||!goal)continue;
+                const evidence='message:chat:main:'+message.id,previous=this.goalProgress(goalId);
+                const signal=AbortSignal.any([this.#abort.signal,AbortSignal.timeout(60000)]);
+                const update=goalProgressUpdateSchema.parse(await write({goal:{title:goal.title,success_criteria:goal.success_criteria,status:goal.status},previous:previous&&!previous.stale?{summary:previous.summary,next_step:previous.next_step,last_progress_at:previous.last_progress_at}:null,message:{id:evidence,text:message.text.slice(0,4000),at:message.created_at}},signal));
+                const current=this.life.snapshot().goals.find(g=>g.id===goalId);
+                if(signal.aborted||!this.#opened||!current)continue;
+                await this.recordGoalProgress({goal_id:goalId,goal_version:current.version,summary:update.summary,next_step:update.next_step,last_progress_at:update.made_progress?message.created_at:this.goalProgress(goalId)?.last_progress_at??null,evidence_refs:[evidence],basis_revision:evidence,updated_at:this.#now().toISOString()});
+            }catch{try{this.options.onDiagnostic?.('goal_progress_update_failed')}catch{/* diagnostics are optional */}}
+        }
     }
     async #claim(key:string):Promise<boolean>{return this.#serial(async()=>{
         if(!this.#opened||this.#state.dedupe.includes(key))return false;
@@ -1433,7 +1546,7 @@ export class PersonalAgentHost {
         const selected=next.conversations.items.find(c=>c.id===next.conversations.selected_id),latest=selected?.messages.findLast(m=>m.role==='user');
         const isNew=!!latest&&!this.#state.conversations.items.find(c=>c.id===selected?.id)?.messages.some(m=>m.id===latest.id);
         for(const item of next.feed){if(item.lifecycle==='invalidated'||item.user_state==='dismissed')continue;const message=this.#feedNotification(item),key=feedNotificationKey(message);if(next.notification_fingerprints[item.id]!==key){next.notification_fingerprints[item.id]=key;if(!item.task_ref||!next.notification_task_baseline.includes(item.task_ref.work_id))next.notification_intents[hash(key)]=message}}
-        for(const item of this.#state.feed){const current=next.feed.find(f=>f.id===item.id);if(!current||current.lifecycle==='invalidated'||current.user_state==='dismissed'){for(const [key,message]of Object.entries(next.notification_intents))if(message.source.type==='feed'&&message.source.id===item.id)delete next.notification_intents[key];await this.notifications.invalidate('feed',item.id,false)}}
+        for(const item of this.#state.feed){const current=next.feed.find(f=>f.id===item.id);if(!current||current.lifecycle==='invalidated'||current.user_state==='dismissed'){for(const [key,message]of Object.entries(next.notification_intents))if(feedSourceId(message)===item.id)delete next.notification_intents[key];const source=feedNotification(item).source;await this.notifications.invalidate(source.type,source.id,false,source.version)}}
         next.revision = this.#state.revision + 1; await this.#store.write(next); this.#state = next;
         if(this.#opened)this.understanding.observe(isNew);this.#notify();
     }
@@ -1632,9 +1745,10 @@ export class PersonalAgentHost {
     }
 
     async canDeliver(id: string): Promise<boolean> { if(!this.#opened||isQuietTime(this.#state.settings,this.#now()))return false; await this.revalidate(); const item = this.#state.feed.find(f => f.id === id); return !!item && (item.lifecycle === 'active'||item.kind==='task_result'&&item.lifecycle==='resolved') && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime()) && this.#proactiveAdmitted(item) && await this.#valid(item); }
-    async action(params: unknown): Promise<unknown> { const p = z.object({ id: z.string(), action: z.enum(['open', 'act', 'snooze', 'dismiss', 'expand_evidence', 'presented', 'notified', 'adopt_goal', 'decline_goal']), snooze_until: z.string().datetime().optional(),goal_revision:z.string().max(64).optional(),notification:z.object({revision:z.string(),occurrence:z.string()}).strict().optional() }).strict().parse(params); await this.revalidate(); return this.#serial(async () => { const next = structuredClone(this.#state), item = next.feed.find(f => f.id === p.id); if (!item)
+    async action(params: unknown): Promise<unknown> { const p = z.object({ id: z.string(), action: z.enum(['open', 'act', 'snooze', 'dismiss', 'expand_evidence', 'presented', 'notified', 'adopt_goal', 'decline_goal', 'goal_checkin_mute']), snooze_until: z.string().datetime().optional(),goal_revision:z.string().max(64).optional(),goal_id:z.string().min(1).max(512).optional(),notification:z.object({revision:z.string(),occurrence:z.string()}).strict().optional() }).strict().parse(params); await this.revalidate(); return this.#serial(async () => { const next = structuredClone(this.#state), item = next.feed.find(f => f.id === p.id); if (!item)
         throw Error('not_found'); if(p.notification){const current=this.#feedNotification(item);if(current.revision!==p.notification.revision||current.occurrence!==p.notification.occurrence||!current.feedback.some(action=>action===p.action)||item.lifecycle==='invalidated'||item.user_state==='dismissed')throw Error('stale_notification');} if (['act', 'presented', 'notified'].includes(p.action) && ((item.lifecycle !== 'active' && !(p.action === 'presented' && item.lifecycle === 'resolved')) || item.user_state === 'dismissed' || (item.snooze_until && Date.parse(item.snooze_until) > this.#now().getTime())))
         throw Error('stale'); if (p.action === 'adopt_goal' || p.action === 'decline_goal') await this.#goalProposalAction(item, next, p.action, p.goal_revision);
+    else if (p.action === 'goal_checkin_mute') await this.#muteGoalCheckin(item, p.goal_id);
     else if (p.action === 'act') {
         if (!this.options.act)
             throw Error('unsupported');
