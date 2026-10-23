@@ -54,7 +54,7 @@
 
 - 隔离整栈 TypeScript 构建、runtime 全量 ESLint 通过。Space 测试 **99/99**，另真实 HTTP Client→Host→gateway→provider boundary 联验通过。
 - 受影响的既有模型接入、provider session、MemoryLedger worker、mem0 回归 **57/57**。隔离构建脚本现保留各 workspace 本地安装的依赖解析。
-- Flutter `dart analyze lib test` 无问题；14 个相关测试文件 **54/54**。
+- Flutter `dart analyze lib test` 无问题；14 个相关测试文件 **54/54**。完整 test 目录 **942 通过、3 跳过、2 个 golden 测试失败**；同 Flutter 3.47.7 的迁移前基线复现两失败，6 张实际截图中 5 张与基线逐字节相同，另一张仅预期的 Data sync→Local data 文案不同。未更新 golden 或宣称全量全绿。
 - 完整 Android debug APK 已构建（含 MainActivity、FCM、JNI 与实际 Linux runtime），原生 **65/65**。最终 APK 与源码逐文件比对一致；SHA-256 `fbf9deba2079ed1e3239e397385ebc37c765a38231c9911392120ab1b86067f6`。
 - 小米官方公开历史 SDK 5.1.2-C 配置也实际编译、打包通过，原生 **65/65**，最终 APK SHA-256 `48372e832fd76dd34616108a090874a77fabb0682bc13dada369b362f17a03f5`；最新版 SDK 需发布者登录，真机到达尚未验证。
 - 使用环境配置 key 的真实 DashScope 模型联验通过：Host 持有模型调用，Client 收到预览后断线、重连补最终回复，重复意图只调用模型一次。详见 `2026-10-23-space-host-live-evidence.md`。
@@ -62,9 +62,9 @@
 - 早期完整 runtime 测试 4405 项中 19 项失败已归因：10 项修复/环境依赖校正后通过，2 项旧 Space 编译结果由当前整栈测试覆盖；另 7 项在备份基线复现（6 个 POSIX/ACP 进程回收、1 个 Qwen 1.5 秒时限），没有通过修改生产逻辑掩盖。
 - 公开增量审计无真实凭据、内部组织端点、私人数据、未审 IP 资产或生成二进制。起点 HEAD 与公开 origin/v1.1.0dev 相同；备份分支不推送。
 
-### 未取得的外部证据
+### iOS 构建与尚缺的外部证据
 
-这不是 M0–M7 所有退出证据完成声明。iOS 完整 Runner+NSE 的 unsigned Xcode 构建已准备 workflow，用户已授权推送验收分支，正在 GitHub macOS runner 实跑。真实手机杀 App 与 SDK 网络断开不是同一验收；iPhone/GMS Android/小米锁屏、隔夜、Doze、force-stop、NSE Keychain、点击补拉仍需真机及厂商账号。独立外部密码学评审亦没有以 agent code review 替代。上述项目不得标记为通过。
+这不是 M0–M7 所有退出证据完成声明。iOS 完整 Runner+NSE 的 unsigned Xcode 构建已在 GitHub macOS ARM64 runner 实跑通过：最终代码 `0fa8c70bbba8496eedf48f0e5848cf374f437823`，run `39984894779`，耗时 5 分 17 秒；真实 iSH/Alpine、Flutter 资源与两个 arm64 可执行文件均验证通过，详见 native-build-evidence 文档。真实手机杀 App 与 SDK 网络断开不是同一验收；iPhone/GMS Android/小米锁屏、隔夜、Doze、force-stop、NSE Keychain、点击补拉仍需真机及厂商账号。独立外部密码学评审亦没有以 agent code review 替代。上述项目不得标记为通过。
 
 - 真实 source.input→Host Source Agent→唯一 ledger→Client 加密展示联验已通过，11 次真实模型请求，包含未授权/仅上传/撤销处理/撤销上传边界；详见真实模型证据文档。
 - 真实资料处理验收推动最小产品改进：Client 显示安全的 Space 处理状态汇总，明确区别于逐条采集回执、提示离线缓存，并兼容旧 Host；独立复审无确定 P1/P2。不导出推断正文、来源授权或内部错误。
