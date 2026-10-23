@@ -30,6 +30,15 @@ test('dates must come from the sources',()=>{
  assert.equal(reason('deadline 2026-10-12',['deadline 2026-10-9']),'date_not_in_sources')
  assert.equal(reason('下周提交，昨天开会',['提交报告','开会']),'ok','relative dates are not checked')
 })
+test('dates tolerate spaces around 年/月/日 and compare equal to the compact form',()=>{
+ assert.equal(reason('准备 10 月 21 日的汇报',['正在准备 10 月 12 日的季度汇报']),'date_not_in_sources')
+ assert.equal(reason('截止 2026 年 10 月 21 日',['截止 2026 年 10 月 12 日']),'date_not_in_sources')
+ assert.equal(reason('10月 21日开会',['10月12日开会']),'date_not_in_sources')
+ assert.equal(reason('10 月 12 日的汇报',['10月12日的汇报']),'ok')
+ assert.equal(reason('10月12日的汇报',['10 月 12 日的汇报']),'ok')
+ assert.equal(reason('2026 年 10 月 12 日',['2026-10-12']),'ok')
+ assert.equal(reason('10 月份的 12 个任务',['任务清单']),'ok','not a date')
+})
 test('only numbers with a unit, currency or percent sign are checked; bare counts pass',()=>{
  assert.equal(reason('预算每月 99999 元',['预算每月 100 元']),'number_not_in_sources')
  assert.equal(reason('每周跑步 5 次',['每周跑 3 次']),'number_not_in_sources')
