@@ -521,11 +521,15 @@ export class PersonalAgentHost {
             const body=notificationResultText(value,message.body);message.body=body.length>130000?body.slice(0,130000)+'\n（结果过长，请在 Nova 任务详情查看其余内容）':body;message.revision=hash([message.revision,message.body]);}
         return message;
     }
+    /** Quota-bound proactive feeds (same scope as notificationValidity's cap) may be spoken only after the notification service admitted them. */
+    #proactiveAdmitted(item:FeedItem):boolean{const m=this.#feedNotification(item);return !['brief','suggestion'].includes(m.kind)||m.priority>=100||this.notifications.isAdmitted(m)}
+    /** Every conversation message a goal proposal cites must still exist in a live (not clearing) conversation. */
+    #goalProposalEvidenceIntact(item:FeedItem):boolean{const refs=item.goal_proposal?.evidence_refs;if(!refs)return true;const live=new Set(this.#state.conversations.items.filter(c=>!this.#clearingConversations.has(c.id)).flatMap(c=>c.messages.map(m=>'message:'+c.id+':'+m.id)));return refs.every(ref=>live.has(ref))}
     async notificationValidity(message:NotificationInput):Promise<'valid'|'defer'|'invalid'>{
         const guard=message.guard;if(guard?.requires_runtime&&!this.#runtimeNotificationGuards.get(message.event_key)?.())return 'invalid';
         if(guard?.task_id){const task=this.tasks.list().find(t=>t.id===guard.task_id);if(!task||task.goal_revision!==guard.goal_revision||task.phase==='cancelled'||(message.kind==='task_progress'&&['completed','failed'].includes(task.phase))||(guard.work_id&&!task.work_ids.includes(guard.work_id)))return 'invalid';}
         if(guard?.evidence_refs&&!await this.#valid({evidence_refs:guard.evidence_refs,memory_refs:[]}))return 'invalid';
-        if(message.source.type==='feed'){const item=this.#state.feed.find(f=>f.id===message.source.id);if(!item||item.lifecycle==='invalidated'||item.user_state==='dismissed'||feedNotificationKey(this.#feedNotification(item))!==feedNotificationKey(message))return 'invalid';if(!await this.#valid(item))return 'invalid';if(item.snooze_until&&Date.parse(item.snooze_until)>this.#now().getTime())return 'defer';}
+        if(message.source.type==='feed'){const item=this.#state.feed.find(f=>f.id===message.source.id);if(!item||item.lifecycle==='invalidated'||item.user_state==='dismissed'||feedNotificationKey(this.#feedNotification(item))!==feedNotificationKey(message))return 'invalid';if(!await this.#valid(item)||!this.#goalProposalEvidenceIntact(item))return 'invalid';if(item.snooze_until&&Date.parse(item.snooze_until)>this.#now().getTime())return 'defer';}
         if(message.source.type==='conversation_runtime'&&!this.#state.conversations.items.some(c=>c.id===message.source.id&&String(c.generation)===message.source.version))return 'invalid';
         if(message.source.type==='task_waiting'&&!this.tasks.list().some(t=>t.id===message.source.id&&t.phase==='waiting'&&(!t.trigger||!this.schedules.findRun(t.trigger.run_id)?.processing)))return 'invalid';
         if(message.source.type==='approval'&&!this.#pendingDecisions().pending_approvals.some(a=>a.approval_id===message.source.id))return 'invalid';
@@ -627,7 +631,7 @@ export class PersonalAgentHost {
         for(const listener of this.#presentationListeners){try{await listener(mode,seen)}catch{failed=true}}
         if(!seen)this.#presentationNeedsRetry=failed;
         if(failed){this.#notify();throw Error('presentation_sync_failed')}
-        if(!seen&&changed&&mode==='orb')for(const item of this.#state.feed){if((item.lifecycle==='active'||item.kind==='task_result')&&item.user_state!=='dismissed'&&!item.delivery.spoken_at){if(item.suggestion_id)this.options.pool.withdraw(item.suggestion_id);this.#pool(item)}}
+        if(!seen&&changed&&mode==='orb')for(const item of this.#state.feed){if((item.lifecycle==='active'||item.kind==='task_result')&&item.user_state!=='dismissed'&&!item.delivery.spoken_at&&this.#proactiveAdmitted(item)){if(item.suggestion_id)this.options.pool.withdraw(item.suggestion_id);this.#pool(item)}}
         this.#notify();
     }
     readonly workbenchContext:WorkbenchContext|DailyWorkbench;
@@ -992,7 +996,7 @@ export class PersonalAgentHost {
             else this.#sourcePending.legacy=true;
             await this.revalidate();
             for (const item of this.#state.feed) {
-                if (item.lifecycle === 'active' && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime())) this.#pool(item);
+                if (item.lifecycle === 'active' && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime()) && this.#proactiveAdmitted(item)) this.#pool(item);
             }
             this.#readingCopies?.start();
             if(!deferBackground)this.startBackgroundWork();
@@ -1182,6 +1186,7 @@ export class PersonalAgentHost {
         const requestId='goal-proposal:'+createHash('sha256').update(item.id).digest('hex').slice(0,32);
         if(action==='adopt_goal'&&item.lifecycle==='resolved'&&this.life.receipt(requestId))return; // Already created: a repeated click is a no-op.
         if(item.lifecycle!=='active'||item.user_state==='dismissed'||(item.expires_at&&Date.parse(item.expires_at)<=this.#now().getTime()))throw Error('stale');
+        if(action==='adopt_goal'&&!this.#goalProposalEvidenceIntact(item))throw Error('stale');
         if(action==='decline_goal'){
             const at=this.#now();
             next.goal_proposal_rejections=[...next.goal_proposal_rejections.filter(r=>r.topic_key!==proposal.topic_key&&Date.parse(r.until)>at.getTime()),{topic_key:proposal.topic_key,title:proposal.title,rejected_at:at.toISOString(),until:new Date(at.getTime()+30*86400000).toISOString()}].slice(-200);
@@ -1526,7 +1531,7 @@ export class PersonalAgentHost {
     async revalidate(): Promise<void> { await this.#serial(async () => { const next = structuredClone(this.#state); let changed = false; for (const item of next.feed) {
         if (item.lifecycle !== 'active')
             continue;
-        if ((item.expires_at && Date.parse(item.expires_at) <= this.#now().getTime()) || !await this.#valid(item)) {
+        if ((item.expires_at && Date.parse(item.expires_at) <= this.#now().getTime()) || !await this.#valid(item) || !this.#goalProposalEvidenceIntact(item)) {
             item.lifecycle = 'invalidated';
             item.updated_at = this.#now().toISOString();
             if (item.suggestion_id)
@@ -1626,7 +1631,7 @@ export class PersonalAgentHost {
         if(!this.#conversationPool)return false;if(this.#state.conversations.voice_id==='chat:main')this.#conversationPool.deliverSuggestion('chat:main',suggestion,reason);return true;
     }
 
-    async canDeliver(id: string): Promise<boolean> { if(!this.#opened||isQuietTime(this.#state.settings,this.#now()))return false; await this.revalidate(); const item = this.#state.feed.find(f => f.id === id); return !!item && (item.lifecycle === 'active'||item.kind==='task_result'&&item.lifecycle==='resolved') && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime()) && await this.#valid(item); }
+    async canDeliver(id: string): Promise<boolean> { if(!this.#opened||isQuietTime(this.#state.settings,this.#now()))return false; await this.revalidate(); const item = this.#state.feed.find(f => f.id === id); return !!item && (item.lifecycle === 'active'||item.kind==='task_result'&&item.lifecycle==='resolved') && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime()) && this.#proactiveAdmitted(item) && await this.#valid(item); }
     async action(params: unknown): Promise<unknown> { const p = z.object({ id: z.string(), action: z.enum(['open', 'act', 'snooze', 'dismiss', 'expand_evidence', 'presented', 'notified', 'adopt_goal', 'decline_goal']), snooze_until: z.string().datetime().optional(),goal_revision:z.string().max(64).optional(),notification:z.object({revision:z.string(),occurrence:z.string()}).strict().optional() }).strict().parse(params); await this.revalidate(); return this.#serial(async () => { const next = structuredClone(this.#state), item = next.feed.find(f => f.id === p.id); if (!item)
         throw Error('not_found'); if(p.notification){const current=this.#feedNotification(item);if(current.revision!==p.notification.revision||current.occurrence!==p.notification.occurrence||!current.feedback.some(action=>action===p.action)||item.lifecycle==='invalidated'||item.user_state==='dismissed')throw Error('stale_notification');} if (['act', 'presented', 'notified'].includes(p.action) && ((item.lifecycle !== 'active' && !(p.action === 'presented' && item.lifecycle === 'resolved')) || item.user_state === 'dismissed' || (item.snooze_until && Date.parse(item.snooze_until) > this.#now().getTime())))
         throw Error('stale'); if (p.action === 'adopt_goal' || p.action === 'decline_goal') await this.#goalProposalAction(item, next, p.action, p.goal_revision);
