@@ -9,7 +9,7 @@ Workbench is Nova's main window. It opens a wide, persistent Nova conversation o
 | Workspace tab | Holds |
 |---|---|
 | Nova | Persistent main conversation with proactive reminders and task receipts |
-| Timeline | Dated items and briefing cards, plus a separate group for undated items; entries that already exist as Todos stay here |
+| Timeline | Briefing cards, followed by your own Todo entries grouped by due date (overdue, today, soon, later, waiting, unscheduled, completed); you can mark them done, change their status or due date, and open a discussion from each |
 | Ideas | Loose thoughts you may later turn into a Todo or a Goal |
 | Goals | Outcomes you're tracking, with success criteria and progress from their linked Todos |
 | Feeds | An interest-ranked reading list |
@@ -70,7 +70,7 @@ A short free-text description of you, edited directly or filled in gradually as 
 
 Workbench opens Nova by default. The main conversation persists and displays proactive reminders and task receipts. Task details, dedicated conversations and voice ownership stay independent. Open the Timeline from the first tab.
 
-Timeline uses the due dates of existing Todo entries and separates undated waiting items. Blue labels indicate time, rose labels indicate importance explicitly marked by you, purple indicates waiting, green indicates progress and amber indicates conditions such as past due. Each color has a text label. Set importance with the star on a Timeline card; it updates the original item. Calendar coverage has not been confirmed, so this view does not represent your complete schedule.
+Below the briefing cards, a "My to-dos" list groups your existing Todo entries by their due dates and separates undated waiting items; each entry can be marked done, moved to another status or given a due date. Blue labels indicate time, rose labels indicate importance explicitly marked by you, purple indicates waiting, green indicates progress and amber indicates conditions such as past due. Each color has a text label. Set importance with the star on a Timeline card; it updates the original item. Calendar coverage has not been confirmed, so this view does not represent your complete schedule.
 
 Todo `due` is a nullable date (`YYYY-MM-DD`); creation and update timestamps are not deadlines. Feishu @mentions are input to the briefing, not Todos. This view organizes dates and does not calculate conflicts between time slots.
 

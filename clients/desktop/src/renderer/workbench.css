@@ -479,6 +479,8 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .timeline-content:not(.timeline-compact) .timeline-card>.source-info{opacity:1;color:var(--ink-dim);top:12px;right:12px;width:24px;height:24px;line-height:24px}
 .timeline-content:not(.timeline-compact) .timeline-meta{padding-right:54px}
 .workbench .timeline-importance{position:absolute;top:12px;right:42px;width:24px;height:24px;line-height:24px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--ink-dim);font-size:17px}
+.workbench .timeline-todos-title{margin:28px 0 4px;font-size:15px}
+.workbench .timeline-todo-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
 .workbench .timeline-importance[aria-pressed="true"]{color:var(--tag-importance-ink);background:var(--tag-importance-wash)}
 .workbench .timeline-importance:hover:not(:disabled){background:var(--surface-inset)}
 .workbench .timeline-title{font-size:18px;font-weight:600;line-height:1.45;text-align:left;border:0;padding:0;background:none;color:var(--ink)}
