@@ -7,7 +7,7 @@ export function readDesktopPermissions({platform,systemPreferences,environment={
   try{accessibility=systemPreferences.isTrustedAccessibilityClient(false)?'granted':'denied'}catch{accessibility='unknown'}
  }else if(platform==='win32'){microphone=media('microphone');screen=accessibility='not_required'}
  const selected=(environment.EXECUTORS??environment.EXECUTOR??'').split(',').map(s=>s.trim()).includes('computer')
- const computerConfigured=selected&&['COMPUTER_DISPLAY_ID','COMPUTER_BASE_URL','COMPUTER_MODEL','COMPUTER_MODEL_FAMILY','COMPUTER_API_KEY'].every(key=>Boolean(environment[key]))
+ const computerConfigured=selected&&['COMPUTER_DISPLAY_ID','EXECUTOR_BASE_URL','EXECUTOR_MODEL','EXECUTOR_MODEL_FAMILY','EXECUTOR_API_KEY'].every(key=>Boolean(environment[key]))
  return {platform,microphone,screen,accessibility,computerConfigured,computerReady:computerConfigured&&backendReady&&['granted','not_required'].includes(screen)&&['granted','not_required'].includes(accessibility)}
 }
 export async function requestDesktopPermission(kind,{platform,systemPreferences,shell,desktopCapturer}){

@@ -14,15 +14,15 @@ import {ComputerExecutor, loadComputerConfig} from '../src/executors/computer.js
 import type {runComputer as RunComputer} from '../src/executors/computer.js'
 import {deviceLockPath} from '../src/executors/device-lock.js'
 
-const env = {COMPUTER_DISPLAY_ID: '1', COMPUTER_BASE_URL: 'http://127.0.0.1:8000/v1', COMPUTER_MODEL: 'scripted',
-  COMPUTER_MODEL_FAMILY: 'auto-glm', COMPUTER_API_KEY: 'local'}
+const env = {COMPUTER_DISPLAY_ID: '1', EXECUTOR_BASE_URL: 'http://127.0.0.1:8000/v1', EXECUTOR_MODEL: 'scripted',
+  EXECUTOR_MODEL_FAMILY: 'auto-glm', EXECUTOR_API_KEY: 'local'}
 const user = {instruction: 'tap center', originalUserText: 'tap center', origin_ref: 'conversation:1',
   sessionEpoch: 1, acceptedUserInputRevision: 1, stillWanted: () => true}
 
 test('computer configuration requires an explicit display and a verified model family', () => {
   assert.equal(loadComputerConfig(env).displayId, '1')
-  for (const invalid of [{COMPUTER_DISPLAY_ID: ''}, {COMPUTER_MODEL_FAMILY: 'unverified'},
-    {COMPUTER_BASE_URL: 'http://remote.example'}, {COMPUTER_MAX_STEPS: 'NaN'}, {COMPUTER_CLICK_HOLD_MS: '0'}, {COMPUTER_CLICK_HOLD_MS: '1001'}]) assert.throws(() => loadComputerConfig({...env, ...invalid}))
+  for (const invalid of [{COMPUTER_DISPLAY_ID: ''}, {EXECUTOR_MODEL_FAMILY: 'unverified'},
+    {EXECUTOR_BASE_URL: 'http://remote.example'}, {EXECUTOR_MAX_STEPS: 'NaN'}, {COMPUTER_CLICK_HOLD_MS: '0'}, {COMPUTER_CLICK_HOLD_MS: '1001'}]) assert.throws(() => loadComputerConfig({...env, ...invalid}))
 })
 
 for (const code of ['model_finished', 'declined', 'screen_changed'] as const) test(`GUI handoff never claims completion or no start after effects: ${code}`, async t => {

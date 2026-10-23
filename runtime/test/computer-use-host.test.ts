@@ -18,7 +18,7 @@ test('legacy builds remain readable and computer state is strict',()=>{
 })
 test('computer switch requires local selected Build and fails closed without permissions/configuration',{timeout:10000},async t=>{
  const platform=Object.getOwnPropertyDescriptor(process,'platform')!;Object.defineProperty(process,'platform',{value:'darwin'});t.after(()=>Object.defineProperty(process,'platform',platform))
- const env=process.env;process.env={...env,COMPUTER_DISPLAY_ID:'1',COMPUTER_BASE_URL:'https://example.com/v1',COMPUTER_MODEL:'test',COMPUTER_MODEL_FAMILY:'qwen3-vl',COMPUTER_API_KEY:'test',COMPUTER_MAC_WINDOW_PID:'',COMPUTER_MAC_WINDOW_ID:''};t.after(()=>{process.env=env})
+ const env=process.env;process.env={...env,COMPUTER_DISPLAY_ID:'1',EXECUTOR_BASE_URL:'https://example.com/v1',EXECUTOR_MODEL:'test',EXECUTOR_MODEL_FAMILY:'qwen3-vl',EXECUTOR_API_KEY:'test',COMPUTER_MAC_WINDOW_PID:'',COMPUTER_MAC_WINDOW_ID:''};t.after(()=>{process.env=env})
  const root=await mkdtemp(join(tmpdir(),'computer-host-')),path=join(root,'state.json'),state=initialState()
  const item=createConversation('build','Build',null,'build:test');item.build=build;state.conversations.items.push(item);state.conversations.selected_id=item.id
  await writeFile(path,JSON.stringify(state),{mode:0o600})
@@ -61,7 +61,7 @@ test('computer switch requires local selected Build and fails closed without per
  conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],cascade_llm_provider:'self-hosted',cascade_llm_model:null})})
  assert.equal(host.computerUseState(item.id).direct,false)
 
- Object.defineProperty(process,'platform',{value:'linux'});process.env.COMPUTER_BASE_URL='invalid'
+ Object.defineProperty(process,'platform',{value:'linux'});process.env.EXECUTOR_BASE_URL='invalid'
  const unsupported=await command('build.computer_use',{conversation_id:item.id,enabled:true})
  assert.deepEqual(unsupported.data.missing,['platform','configuration','vision_model']);assert.equal(unsupported.data.ok,false)
 })

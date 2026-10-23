@@ -16,9 +16,9 @@ export const BROWSER_DESCRIPTOR = Object.freeze({name: 'browser', summary: 'Uses
 export function loadBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
   const engine = env.BROWSER_ENGINE ?? 'chromium'
   const config = {engine, url: env.BROWSER_URL ?? '', headless: env.BROWSER_HEADLESS !== 'false',
-    baseUrl: env.BROWSER_BASE_URL ?? '', model: env.BROWSER_MODEL ?? '', modelFamily: env.BROWSER_MODEL_FAMILY ?? '', apiKey: env.BROWSER_API_KEY ?? '',
-    maxSteps: Number(env.BROWSER_MAX_STEPS ?? 30), budgetMs: Number(env.BROWSER_TIMEOUT_SECONDS ?? 600) * 1000,
-    settleMs: Number(env.BROWSER_SETTLE_MS ?? 1000), lockRoot: join(homedir(), '.nova-audio-agent', 'gui-devices')}
+    baseUrl: env.EXECUTOR_BASE_URL ?? '', model: env.EXECUTOR_MODEL ?? '', modelFamily: env.EXECUTOR_MODEL_FAMILY ?? '', apiKey: env.EXECUTOR_API_KEY ?? '',
+    maxSteps: Number(env.EXECUTOR_MAX_STEPS ?? 30), budgetMs: Number(env.EXECUTOR_TIMEOUT_SECONDS ?? 600) * 1000,
+    settleMs: Number(env.EXECUTOR_SETTLE_MS ?? 1000), lockRoot: join(homedir(), '.nova-audio-agent', 'gui-devices')}
   if (!['chromium', 'firefox', 'webkit'].includes(engine) || !validBrowserUrl(config.url) || !validGuiConfig(config, 'validate')
     || (env.BROWSER_HEADLESS !== undefined && !['true', 'false'].includes(env.BROWSER_HEADLESS))) throw Error('invalid_browser_configuration')
   return config as BrowserConfig

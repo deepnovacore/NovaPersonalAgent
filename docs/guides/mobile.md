@@ -8,25 +8,25 @@ Nova owns task admission, approvals, cancellation, device ownership and result t
 
 Select `mobile` in `EXECUTORS` and supply:
 
-| Variable prefix `MOBILE_` | Value |
+| Variable | Value |
 | --- | --- |
-| `ENGINE` | `midscene` (default; other engines rejected) |
-| `DEVICE_TYPE` | `android` or `ios-simulator` |
-| `DEVICE_ID` | Exact authorized ADB serial or booted simulator UUID |
-| `WDA_URL` | Existing loopback WDA, e.g. `http://127.0.0.1:8710` |
-| `BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` |
-| `MODEL` | `autoglm-phone` |
-| `MODEL_FAMILY` | `auto-glm` |
-| `API_KEY` | Secret supplied locally, never committed |
-| `MAX_STEPS` | Default 30, maximum 100 |
-| `TIMEOUT_SECONDS` | Default 600, maximum 1800 |
-| `SETTLE_MS` | Default 4000, range 0–30000; wait for iOS animations before initial planning and after actions |
+| `MOBILE_ENGINE` | `midscene` (default; other engines rejected) |
+| `MOBILE_DEVICE_TYPE` | `android` or `ios-simulator` |
+| `MOBILE_DEVICE_ID` | Exact authorized ADB serial or booted simulator UUID |
+| `MOBILE_WDA_URL` | Existing loopback WDA, e.g. `http://127.0.0.1:8710` |
+| `EXECUTOR_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` |
+| `EXECUTOR_MODEL` | `autoglm-phone` |
+| `EXECUTOR_MODEL_FAMILY` | `auto-glm` |
+| `EXECUTOR_API_KEY` | Secret supplied locally, never committed |
+| `EXECUTOR_MAX_STEPS` | Default 30, maximum 100 |
+| `EXECUTOR_TIMEOUT_SECONDS` | Default 600, maximum 1800 |
+| `EXECUTOR_SETTLE_MS` | Default 4000, range 0–30000; wait for iOS animations before initial planning and after actions |
 
 Provision a WDA session before dispatch. The runner borrows it without starting WDA, creating a session or changing its settings. It verifies the simulator UUID and local WDA listener process identity; physical iOS currently fails closed. WDA and the runtime need local `simctl`, `lsof` and `ps` access.
 
 ## Android preparation
 
-Select `DEVICE_TYPE=android` and the serial shown as `device` by `adb devices -l`. Install and enable ADB Keyboard as described in [AutoGLM setup](autoglm.md#optional-android-setup). Input appends UTF-8 text to the focused field and restores the previous input method, including after cancellation. Keep USB debugging enabled; some OEM phones also require their separate USB debugging security permission for input injection. WDA is unused on Android.
+Select `MOBILE_DEVICE_TYPE=android` and the serial shown as `device` by `adb devices -l`. Install and enable ADB Keyboard as described in [AutoGLM setup](autoglm.md#optional-android-setup). Input appends UTF-8 text to the focused field and restores the previous input method, including after cancellation. Keep USB debugging enabled; some OEM phones also require their separate USB debugging security permission for input injection. WDA is unused on Android.
 
 Launch accepts only an exact installed package name; no application-name mapping or shell command is inferred. Every action passes through Nova's existing approval and device/window guard. Midscene plans from full device screenshots; coordinates use that same screen. Pixel changes alone do not invalidate an action. A changed foreground window or screen dimensions stops the run with `screen_changed`. An uncertain ADB write or keyboard restoration retains the device quarantine lock.
 
