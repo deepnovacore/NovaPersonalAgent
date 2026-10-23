@@ -8,6 +8,8 @@
     "node": ">=22.13.0"
   },
   "workspaces": [
+    "relay",
+    "push-gateway",
     "runtime",
     "clients/desktop",
     "cli"
@@ -31,7 +33,13 @@
     "test:runtime": "npm test --workspace @nova-personal-agent/runtime",
     "test:runtime:win": "npm run test:win --workspace @nova-personal-agent/runtime",
     "test:runtime:win:platform": "npm run test:win:platform --workspace @nova-personal-agent/runtime",
-    "test:server-cli": "node --test server-cli/test/*.test.mjs"
+    "test:server-cli": "node --test server-cli/test/*.test.mjs",
+    "test:relay": "node relay/scripts/test.mjs",
+    "check:relay": "npm run typecheck --workspace @nova-personal-agent/relay",
+    "test:push-gateway": "node push-gateway/scripts/test.mjs",
+    "check:push-gateway": "npm run typecheck --workspace @nova-personal-agent/push-gateway",
+    "build:space": "node scripts/build-space-stack.mjs",
+    "test:space": "node scripts/test-space-stack.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

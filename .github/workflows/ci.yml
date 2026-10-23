@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "v0.2.0dev", "v0.3.0dev", "v0.3.0post.dev", "v0.4.0dev", "v1.0.0dev"]
+    branches: ["main", "v0.2.0dev", "v0.3.0dev", "v0.3.0post.dev", "v0.4.0dev", "v1.0.0dev", "v1.1.0dev"]
     tags: ["v*"]
   pull_request:
 
@@ -19,6 +19,20 @@ jobs:
         with:
           node-version: "22"
       - run: node --test .github/scripts/pr-review.test.cjs
+
+  space-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build:space -- --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
+      - run: npm run test:space -- --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
+      - run: node push-gateway/test/native-crypto-checks.mjs --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
 
   electron:
     strategy:
