@@ -14,7 +14,7 @@ test('without an OpenRouter key news falls back to the support model visibly and
  const build=(extra:Record<string,unknown>={})=>buildAssembly({settings:settingsSchema.parse({executors:[],support_model:'support-test',...extra}),gateway,cameraModuleEnabled:false,blackboard:{path:':memory:',ownerId:'test'}}).personalAgentConfig!.models
  const keyless=build()
  assert.ok(keyless.rankNewsFallback,'keyless assembly offers the support-model ranker')
- const rows=await keyless.rankNewsFallback!([{id:'voice',text:'语音模型',weight:1}],[article],new AbortController().signal)
+ const rows=await keyless.rankNewsFallback([{id:'voice',text:'语音模型',weight:1}],[article],new AbortController().signal)
  assert.ok(calls.length>0);assert.equal(calls[0]!.model,'support-test');assert.equal(rows[0]!.matches[0]!.interest_id,'voice')
  assert.deepEqual(Object.keys(JSON.parse(calls[0]!.prompt) as object).sort(),['articles','interests','output_schema'])
  // The plain ranker stays Jev: with fallback switched off the host calls it and it still refuses.
