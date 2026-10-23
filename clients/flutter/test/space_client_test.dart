@@ -264,4 +264,37 @@ void main() {
       expect(state.clientSources[source]!['status'], 'revoking');
     },
   );
+  test(
+    'source processing projection caches only safe status and downgrades unknown values',
+    () async {
+      final disk = MemorySpacePersistence();
+      var state = SpaceClientState(disk);
+      await state.open();
+      await state.apply({
+        'v': 1,
+        'type': 'snapshot',
+        'snapshot': {
+          'schema_version': 1,
+          'revision': 1,
+          'source_processing': {
+            'status': 'future-state',
+            'needs_update': true,
+            'error': 'PRIVATE ERROR',
+            'draft': {'about': 'PRIVATE INFERENCE'},
+          },
+        },
+      });
+      expect(state.snapshot['source_processing'], {
+        'status': 'idle',
+        'needs_update': true,
+      });
+      state = SpaceClientState(disk);
+      await state.open();
+      expect(state.snapshot['source_processing'], {
+        'status': 'idle',
+        'needs_update': true,
+      });
+      expect(state.hostOnline, false);
+    },
+  );
 }

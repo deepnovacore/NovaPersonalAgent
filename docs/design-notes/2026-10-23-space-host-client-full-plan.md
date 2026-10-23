@@ -4,7 +4,7 @@
 
 ## 工程决策
 
-- 当前 `v1.1.0dev` 云检出原地继续，保留已完成投递内核。删除旧机制前使用 `backup/pre-space-host-client-5652030e` 保留基线；真实外部推送尚未执行；iOS 远端 CI 的验收分支推送等待用户确认。
+- 当前 `v1.1.0dev` 云检出原地继续，保留已完成投递内核。删除旧机制前使用 `backup/pre-space-host-client-5652030e` 保留基线；真实外部推送尚未执行；用户已允许 iOS 远端 CI，验收分支为 `codex/space-host-client-acceptance-20261023`。
 - E2E 使用成熟 JOSE 库的标准 JWE，不自造加密原语；所有线上网络入口必须认证、验签、限额。密码学外部评审仍独立于代码审查。
 - 业务协议 v1：Host 为唯一写入方。客户端意图持久化，op_id 幂等，冲突保留；聊天短时即时提交且不离线排队；stream 仅预览，最终回复持久化。
 - O11 选 Host 快照恢复；Host 离线只能显示旧缓存。O3 保留既有 Host 的 latest/catchup 行为并公开标注，手机不接管。O8 同仓独立 relay / gateway 包。O10 手机通知用通知适配器。O12 通用中英文文案，不含私人内容。
@@ -52,10 +52,11 @@
 
 ## 最终集成验收（2026-10-23）
 
-- 隔离整栈 TypeScript 构建、runtime 全量 ESLint 通过。Space 测试 **98/98**，另真实 HTTP Client→Host→gateway→provider boundary 联验通过。
+- 隔离整栈 TypeScript 构建、runtime 全量 ESLint 通过。Space 测试 **99/99**，另真实 HTTP Client→Host→gateway→provider boundary 联验通过。
 - 受影响的既有模型接入、provider session、MemoryLedger worker、mem0 回归 **57/57**。隔离构建脚本现保留各 workspace 本地安装的依赖解析。
-- Flutter `dart analyze lib test` 无问题；14 个相关测试文件 **52/52**。
-- 完整 Android debug APK 已构建（含 MainActivity、FCM、JNI 与实际 Linux runtime），原生 **65/65**。最终 APK 与源码逐文件比对一致；SHA-256 `0e608b81d6242dfb98da4ca51e7e026978de710e4eea131b999879eca0bcc1c2`。
+- Flutter `dart analyze lib test` 无问题；14 个相关测试文件 **54/54**。
+- 完整 Android debug APK 已构建（含 MainActivity、FCM、JNI 与实际 Linux runtime），原生 **65/65**。最终 APK 与源码逐文件比对一致；SHA-256 `fbf9deba2079ed1e3239e397385ebc37c765a38231c9911392120ab1b86067f6`。
+- 小米官方公开历史 SDK 5.1.2-C 配置也实际编译、打包通过，原生 **65/65**，最终 APK SHA-256 `48372e832fd76dd34616108a090874a77fabb0682bc13dada369b362f17a03f5`；最新版 SDK 需发布者登录，真机到达尚未验证。
 - 使用环境配置 key 的真实 DashScope 模型联验通过：Host 持有模型调用，Client 收到预览后断线、重连补最终回复，重复意图只调用模型一次。详见 `2026-10-23-space-host-live-evidence.md`。
 - 第四轮全新上下文推送复审确认共享写入、关闭 tombstone、持久 key inbox、锁顺序、body deadline、重启重试均收敛，无未解决的确定 P1/P2。
 - 早期完整 runtime 测试 4405 项中 19 项失败已归因：10 项修复/环境依赖校正后通过，2 项旧 Space 编译结果由当前整栈测试覆盖；另 7 项在备份基线复现（6 个 POSIX/ACP 进程回收、1 个 Qwen 1.5 秒时限），没有通过修改生产逻辑掩盖。
@@ -63,4 +64,7 @@
 
 ### 未取得的外部证据
 
-这不是 M0–M7 所有退出证据完成声明。iOS 完整 Runner+NSE 的 unsigned Xcode 构建已准备 workflow，尚需用户允许推送验收分支后在 GitHub macOS runner 实跑。真实手机杀 App 与 SDK 网络断开不是同一验收；iPhone/GMS Android/小米锁屏、隔夜、Doze、force-stop、NSE Keychain、点击补拉仍需真机及厂商账号。独立外部密码学评审亦没有以 agent code review 替代。上述项目不得标记为通过。
+这不是 M0–M7 所有退出证据完成声明。iOS 完整 Runner+NSE 的 unsigned Xcode 构建已准备 workflow，用户已授权推送验收分支，正在 GitHub macOS runner 实跑。真实手机杀 App 与 SDK 网络断开不是同一验收；iPhone/GMS Android/小米锁屏、隔夜、Doze、force-stop、NSE Keychain、点击补拉仍需真机及厂商账号。独立外部密码学评审亦没有以 agent code review 替代。上述项目不得标记为通过。
+
+- 真实 source.input→Host Source Agent→唯一 ledger→Client 加密展示联验已通过，11 次真实模型请求，包含未授权/仅上传/撤销处理/撤销上传边界；详见真实模型证据文档。
+- 真实资料处理验收推动最小产品改进：Client 显示安全的 Space 处理状态汇总，明确区别于逐条采集回执、提示离线缓存，并兼容旧 Host；独立复审无确定 P1/P2。不导出推断正文、来源授权或内部错误。

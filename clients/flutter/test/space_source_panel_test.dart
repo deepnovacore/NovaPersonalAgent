@@ -47,4 +47,100 @@ void main() {
       expect((state.pending.first['input'] as Map)['allow_processing'], false);
     },
   );
+  testWidgets(
+    'source receipts and Host processing status remain distinct with cached offline labels',
+    (tester) async {
+      final state = SpaceClientState(MemorySpacePersistence());
+      await state.open();
+      await state.collectSource(
+        name: 'Phone note',
+        text: 'A user supplied fact',
+        provider: 'https://model.example|v1',
+        allowProcessing: true,
+      );
+      final grant = state.pending.first['op_id'],
+          fact = state.pending.last['op_id'];
+      await state.apply({
+        'v': 1,
+        'type': 'receipt',
+        'op_id': grant,
+        'status': 'accepted',
+      });
+      await state.apply({
+        'v': 1,
+        'type': 'receipt',
+        'op_id': fact,
+        'status': 'accepted',
+      });
+      var revision = 0;
+      Future<void> showStatus(
+        String status, {
+        bool online = true,
+        bool needsUpdate = false,
+      }) async {
+        state.hostOnline = online;
+        await state.apply({
+          'v': 1,
+          'type': 'snapshot',
+          'snapshot': {
+            'schema_version': 1,
+            'revision': ++revision,
+            'source_processing': {
+              'status': status,
+              'needs_update': needsUpdate,
+            },
+          },
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: SpaceSourcePanel(state: state, onSync: () async {}),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await showStatus('idle');
+      expect(find.textContaining('Host 已收妥'), findsOneWidget);
+      expect(find.text('等待 Host 处理'), findsOneWidget);
+      await showStatus('working');
+      expect(find.text('Host 正在处理采集内容'), findsOneWidget);
+      expect(find.text('Host 已完成处理'), findsNothing);
+      await showStatus('ready');
+      expect(find.text('Host 已完成处理'), findsOneWidget);
+      expect(find.text('Host 处理汇总'), findsOneWidget);
+      await showStatus('ready', needsUpdate: true);
+      expect(find.text('Host 已完成上次处理'), findsOneWidget);
+      expect(find.text('Host 已完成处理'), findsNothing);
+      expect(find.text('有新内容等待更新'), findsOneWidget);
+      await showStatus('failed');
+      expect(find.text('Host 处理失败，请检查 Host'), findsOneWidget);
+      await showStatus('future-state', needsUpdate: true);
+      expect(find.text('等待 Host 处理'), findsOneWidget);
+      expect(find.textContaining('有新内容等待更新'), findsOneWidget);
+      await showStatus('ready', online: false);
+      expect(find.text('Host 已完成处理'), findsOneWidget);
+      expect(find.textContaining('Host 不在线，显示上次处理状态'), findsOneWidget);
+
+      await state.apply({
+        'v': 1,
+        'type': 'snapshot',
+        'snapshot': {'schema_version': 1, 'revision': ++revision},
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SpaceSourcePanel(state: state, onSync: () async {}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('等待 Host 提供处理状态'), findsOneWidget);
+      expect(find.text('Host 不在线，等待获取处理状态'), findsOneWidget);
+      expect(find.text('Host 已完成处理'), findsNothing);
+    },
+  );
 }

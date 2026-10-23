@@ -4,7 +4,7 @@ export const intentSchema=z.object({v:z.literal(1),type:z.literal('intent'),op_i
 export type SpaceIntent=z.infer<typeof intentSchema>;
 export type BusinessMessage=Record<string,unknown>;
 export interface DisplayCard {id:string;kind:string;title:string;body:string;version:string|number;created_at?:string;dismissed?:boolean}
-export interface DisplaySnapshot {schema_version:1;revision:number;processing_provider:{id:string;label:string}|null;goals:Record<string,unknown>[];todos:Record<string,unknown>[];ideas:Record<string,unknown>[];profile:{about:string;version:number};timeline:DisplayCard[];feed:DisplayCard[];notifications:DisplayCard[];chat:Record<string,unknown>[]}
+export interface DisplaySnapshot {schema_version:1;revision:number;processing_provider:{id:string;label:string}|null;source_processing:{status:'idle'|'working'|'ready'|'failed';needs_update:boolean};goals:Record<string,unknown>[];todos:Record<string,unknown>[];ideas:Record<string,unknown>[];profile:{about:string;version:number};timeline:DisplayCard[];feed:DisplayCard[];notifications:DisplayCard[];chat:Record<string,unknown>[]}
 export const mobileActionSchema=z.discriminatedUnion('tool',[
  z.object({tool:z.literal('calendar.read'),args:z.object({start:z.string().datetime(),end:z.string().datetime()}).strict()}),
  z.object({tool:z.literal('reminder.create'),args:z.object({title:z.string().min(1).max(200),due:z.string().datetime()}).strict()}),

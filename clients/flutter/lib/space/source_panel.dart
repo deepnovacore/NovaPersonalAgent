@@ -188,6 +188,7 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
       const SizedBox(height: 20),
       Text('手机采集与授权', style: Theme.of(context).textTheme.titleLarge),
       const Text('由你选择内容并授权 Host 处理。此设备不运行个人资料推断。'),
+      _processingSummary(),
       Wrap(
         spacing: 8,
         children: [
@@ -232,8 +233,40 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
         ),
     ],
   );
+
+  Widget _processingSummary() {
+    final processing = widget.state.snapshot['source_processing'];
+    final hasStatus = processing is Map;
+    final status = hasStatus ? processing['status'] : null;
+    final needsUpdate = hasStatus && processing['needs_update'] == true;
+    final title = !hasStatus
+        ? '等待 Host 提供处理状态'
+        : switch (status) {
+            'working' => 'Host 正在处理采集内容',
+            'ready' => needsUpdate ? 'Host 已完成上次处理' : 'Host 已完成处理',
+            'failed' => 'Host 处理失败，请检查 Host',
+            _ => '等待 Host 处理',
+          };
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Host 处理汇总'),
+            Text(title),
+            const Text('当前 Space 的汇总状态，不代表每份来源均已完成。'),
+            if (needsUpdate) const Text('有新内容等待更新'),
+            if (!widget.state.hostOnline)
+              Text(hasStatus ? 'Host 不在线，显示上次处理状态' : 'Host 不在线，等待获取处理状态'),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _status(String? value) => switch (value) {
-    'accepted' => 'Host 已接收',
+    'accepted' => 'Host 已收妥',
     'revoked' => '授权已撤销',
     'deleted' => 'Host 已删除',
     'conflict' => '授权存在冲突',

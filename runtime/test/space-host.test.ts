@@ -9,6 +9,15 @@ import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
+import {displaySnapshot} from '../src/space-host/projection.js';
+
+test('source processing display exports only bounded aggregate status and never profile inference details',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'space-source-status-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'one-space',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ try{await host.open({deferBackground:true});const read=host.snapshot.bind(host);host.snapshot=()=>({...read(),profile_preparation:{...read().profile_preparation,status:'working',needs_update:true,draft:{about:{text:'private inferred portrait',refs:[]},work:[],interests:[]},sources:[{id:'private-ref',version:'private-version',observed_at:new Date().toISOString(),label:'private source'}]}}) as ReturnType<typeof host.snapshot>;
+  const snapshot=displaySnapshot(host) as unknown as Record<string,unknown>;assert.deepEqual(snapshot.source_processing,{status:'working',needs_update:true});assert.equal(JSON.stringify(snapshot).includes('private'),false);assert.equal('profile_preparation' in snapshot,false);
+  host.snapshot=()=>({...read(),profile_preparation:{...read().profile_preparation,status:'future-private-status',needs_update:false}}) as unknown as ReturnType<typeof host.snapshot>;assert.deepEqual((displaySnapshot(host) as unknown as Record<string,unknown>).source_processing,{status:'idle',needs_update:false});
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+});
 
 test('Host retains Life idempotency, remaps dependencies, conflicts, and display allowlist after restart',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'space-host-'));const sent:Record<string,unknown>[]=[];

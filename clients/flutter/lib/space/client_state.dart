@@ -415,6 +415,7 @@ class SpaceClientState extends ChangeNotifier {
         (snapshot['revision'] as int? ?? 0)) {
       return;
     }
+    final processing = value['source_processing'];
     snapshot = {
       for (final key in [
         'schema_version',
@@ -430,6 +431,19 @@ class SpaceClientState extends ChangeNotifier {
         'processing_provider',
       ])
         if (value.containsKey(key)) key: value[key],
+      if (processing is Map)
+        'source_processing': {
+          'status':
+              const [
+                'idle',
+                'working',
+                'ready',
+                'failed',
+              ].contains(processing['status'])
+              ? processing['status']
+              : 'idle',
+          'needs_update': processing['needs_update'] == true,
+        },
     };
     for (final raw in (value['chat'] as List? ?? []).whereType<Map>()) {
       final item = _copy(raw);
