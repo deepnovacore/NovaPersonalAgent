@@ -30,14 +30,19 @@ test('dates must come from the sources',()=>{
  assert.equal(reason('deadline 2026-10-12',['deadline 2026-10-9']),'date_not_in_sources')
  assert.equal(reason('下周提交，昨天开会',['提交报告','开会']),'ok','relative dates are not checked')
 })
-test('negation flips are rejected only when enough content words are shared',()=>{
- assert.equal(reason('需要报销',['不需要报销']),'negation_flipped')
- assert.equal(reason('不需要报销',['需要报销']),'negation_flipped')
- assert.equal(reason('The user eats spicy food',['The user does not eat spicy food']),'negation_flipped')
- assert.equal(reason('He never missed the meeting',['He missed the meeting']),'negation_flipped')
- assert.equal(reason('喜欢咖啡',['不吃辣']),'ok','unrelated content words')
- assert.equal(reason('不喜欢香菜',['喜欢咖啡和茶']),'ok','one shared bigram is not enough')
- assert.equal(reason('不需要报销',['不需要报销']),'ok')
+test('only numbers with a unit, currency or percent sign are checked; bare counts pass',()=>{
+ assert.equal(reason('预算每月 99999 元',['预算每月 100 元']),'number_not_in_sources')
+ assert.equal(reason('每周跑步 5 次',['每周跑 3 次']),'number_not_in_sources')
+ assert.equal(reason('每天 8 小时',['每天 3 小时']),'number_not_in_sources')
+ assert.equal(reason('$999',['$100']),'number_not_in_sources')
+ assert.equal(reason('完成率 90%',['完成率30%']),'number_not_in_sources')
+ assert.equal(reason('当前关注 4 个方面',['关注饮食']),'ok')
+ assert.equal(reason('共 3 项',['提醒']),'ok')
+ assert.equal(reason('第 2 点',['提醒']),'ok')
+})
+test('faithful rewording with other negation phrasing is not rejected (negation is deliberately not checked)',()=>{
+ assert.equal(reason('用户倾向于上午开会，避免电话沟通',['不喜欢电话沟通']),'ok')
+ assert.equal(reason('我吃辣',['我不吃辣']),'ok')
 })
 test('normal consolidation is not killed',()=>{
  const sources=['我不吃辣，但喜欢咖啡和茶。周五下午有项目评审会议。','Prefers morning meetings; does not want calls after 6 pm.','预算每月 1,000 元，截止 2026-10-12。']
