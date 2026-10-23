@@ -14,8 +14,8 @@ import {deviceLockPath} from '../src/executors/device-lock.js'
 import type {runMobileIos} from '../src/executors/mobile-ios.js'
 
 const env = {MOBILE_DEVICE_ID: 'test-device', MOBILE_DEVICE_TYPE: 'ios-simulator',
-  MOBILE_BASE_URL: 'http://127.0.0.1:8000/v1', MOBILE_MODEL: 'test-model',
-  MOBILE_MODEL_FAMILY: 'test-family', MOBILE_API_KEY: 'test-secret'}
+  EXECUTOR_BASE_URL: 'http://127.0.0.1:8000/v1', EXECUTOR_MODEL: 'test-model',
+  EXECUTOR_MODEL_FAMILY: 'test-family', EXECUTOR_API_KEY: 'test-secret'}
 const user = () => ({instruction: 'Open settings', originalUserText: 'Open settings', origin_ref: 'conversation:1',
   sessionEpoch: 1, acceptedUserInputRevision: 1, stillWanted: () => true})
 async function setup(t: TestContext, runner: typeof runMobileIos) {
@@ -52,14 +52,14 @@ test('mobile config keeps engine, model family and iOS host identity explicit', 
   assert.equal(config.modelFamily, 'test-family')
   assert.equal(config.wdaUrl, 'http://127.0.0.1:8100')
   assert.equal(config.settleMs, 4000)
-  assert.equal(loadMobileConfig({...env, MOBILE_SETTLE_MS: '0'}).settleMs, 0)
-  assert.equal(loadMobileConfig({...env, MOBILE_SETTLE_MS: '30000'}).settleMs, 30000)
+  assert.equal(loadMobileConfig({...env, EXECUTOR_SETTLE_MS: '0'}).settleMs, 0)
+  assert.equal(loadMobileConfig({...env, EXECUTOR_SETTLE_MS: '30000'}).settleMs, 30000)
   assert.match(config.lockRoot, /autoglm-devices$/u)
   for (const [key, value] of [['ENGINE', 'other'], ['DEVICE_TYPE', 'unknown'], ['DEVICE_ID', 'two devices'],
     ['BASE_URL', 'http://remote.example/v1'], ['BASE_URL', 'https://user:secret@remote.example/v1'],
     ['WDA_URL', 'https://remote.example'], ['MODEL_FAMILY', ''], ['MAX_STEPS', '0'],
     ['SETTLE_MS', '-1'], ['SETTLE_MS', '30001'], ['SETTLE_MS', '1.5'], ['SETTLE_MS', 'NaN']]) {
-    assert.throws(() => loadMobileConfig({...env, [`MOBILE_${key}`]: value}))
+    assert.throws(() => loadMobileConfig({...env, [`${['ENGINE', 'DEVICE_TYPE', 'DEVICE_ID', 'WDA_URL'].includes(key!) ? 'MOBILE' : 'EXECUTOR'}_${key}`]: value}))
   }
 })
 

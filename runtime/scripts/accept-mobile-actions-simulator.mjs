@@ -66,9 +66,9 @@ server.on('connection', () => { evidence.connections++ })
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
 const base = `http://127.0.0.1:${server.address().port}`
 try {
-  const config = loadMobileConfig({...process.env, MOBILE_BASE_URL: `${base}/v1`,
-    MOBILE_MODEL: 'simulator-scripted-actions', MOBILE_MODEL_FAMILY: 'auto-glm',
-    MOBILE_API_KEY: 'local-fixture-only', MOBILE_MAX_STEPS: '4', MOBILE_TIMEOUT_SECONDS: '90'})
+  const config = loadMobileConfig({...process.env, EXECUTOR_BASE_URL: `${base}/v1`,
+    EXECUTOR_MODEL: 'simulator-scripted-actions', EXECUTOR_MODEL_FAMILY: 'auto-glm',
+    EXECUTOR_API_KEY: 'local-fixture-only', EXECUTOR_MAX_STEPS: '4', EXECUTOR_TIMEOUT_SECONDS: '90'})
   evidence.device_id = config.deviceId
   const clock = new RealClock(), approvals = new HostApprovalController({clock, idFactory: randomUUID})
   executor = new MobileExecutor(config, approvals)

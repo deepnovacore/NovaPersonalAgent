@@ -4,7 +4,7 @@ Computer Use 是 macOS 和 Windows 本地 Build 会话的可选能力，需要�
 
 ## 配置
 
-复用现有电脑执行器配置：`COMPUTER_DISPLAY_ID`、`COMPUTER_BASE_URL`、`COMPUTER_MODEL`、`COMPUTER_MODEL_FAMILY`、`COMPUTER_API_KEY`。步数、超时、画面稳定等待和点击时长分别由 `COMPUTER_MAX_STEPS`、`COMPUTER_TIMEOUT_SECONDS`、`COMPUTER_SETTLE_MS`、`COMPUTER_CLICK_HOLD_MS` 限制。取值和默认值以自动生成的环境变量参考为准；凭据只放在本地配置中，不写入项目。
+复用现有电脑执行器配置：`COMPUTER_DISPLAY_ID`、`EXECUTOR_BASE_URL`、`EXECUTOR_MODEL`、`EXECUTOR_MODEL_FAMILY`、`EXECUTOR_API_KEY`。步数、超时、画面稳定等待和点击时长分别由 `EXECUTOR_MAX_STEPS`、`EXECUTOR_TIMEOUT_SECONDS`、`EXECUTOR_SETTLE_MS`、`COMPUTER_CLICK_HOLD_MS` 限制。取值和默认值以自动生成的环境变量参考为准；凭据只放在本地配置中，不写入项目。
 
 macOS 需要授予桌面应用屏幕录制和辅助功能权限。Windows 需要打包的进程守护组件。全桌面控制要求仅有一个已配置显示器。可选的后台 Safari 窗口模式使用 `COMPUTER_MAC_WINDOW_PID` 和 `COMPUTER_MAC_WINDOW_ID`；Connect 审批必须说明目标窗口和临时键盘焦点行为。
 
@@ -20,7 +20,7 @@ macOS 需要授予桌面应用屏幕录制和辅助功能权限。Windows 需要
 - StepFun：`step-3.7-flash`。
 - Ark：`doubao-seed-2-0-pro-260215`。
 
-其他模型标识不会被默认视为支持图片：仅开放委派，并在预检中提示 `vision_model`。Build 模型与电脑执行器的 `COMPUTER_MODEL` 是两项独立配置。
+其他模型标识不会被默认视为支持图片：仅开放委派，并在预检中提示 `vision_model`。Build 模型与电脑执行器的 `EXECUTOR_MODEL` 是两项独立配置。
 
 ## 审批、Stop 与恢复
 
