@@ -98,13 +98,14 @@ relay 的直接用途：PC 端会产生 proactive 生成、定时任务等结果
 | D18 | iOS 锁屏通知一律经我们的 push gateway（APNs 凭证绑定 App 发布者）。接受并**公开说明**元数据边界：gateway 可见“设备令牌 + 时间 + 密文大小” |
 | D19 | Android 首期只做 FCM；国内无 FCM 的设备首期不保证锁屏到达 |
 | D20 | 小米：保留 E2E，通知使用**公信通用文案**，接受每设备每应用每天 5 条的配额，**不承诺“小米私信不限量”**；超配额靠 App 内补拉 |
+| D24 | relay 取代 Tailscale 作为产品的连接方式；relay 底层可以评估基于 Tailscale 实现，但尚未选定技术方案。不给用户保留两套连接流程作为默认要求 |
 | D21 | 预研阶段不写迁移/兼容层，旧状态直接重置 |
 
 ### 2.4 分支与流程
 
 | ID | 决策 |
 |---|---|
-| D22 | `v1.1.0dev` **等 `v1.0.0` 打标签后从标签分叉**，在独立 worktree 开发。截至 2026-10-23 仓库只有未推送的 `v1.0.0dev`，没有 `v1.0.0` 标签。在此之前不要创建 `v1.1.0dev` |
+| D22 | 2026-10-23 更新：产品负责人授权将当前文档分支（包含 `v1.0.0dev` 的 `ecb533f9` 基线）推送为 `fork/v1.1.0dev`；本地仍为 `docs/space-host-client-handoff`。此授权替代此前“等标签后才创建该远端分支”的限制，不表示已经开始产品实现 |
 | D23 | 关键设计用 codex 评审，只跑一轮，由负责人把握严重度，有争议的点向产品负责人提问 |
 
 ## 3. 范围
@@ -139,8 +140,8 @@ relay 的直接用途：PC 端会产生 proactive 生成、定时任务等结果
 
 | ID | 问题 | 倾向 / 建议 |
 |---|---|---|
-| O1 | relay 是否取代 Tailscale / 局域网成为**默认**连接方式（后两者保留为高级选项）？尚未向产品负责人确认 | 💡 建议默认走 relay：每设备一条出站连接，无需开端口；nanoMuse 也是这样 |
-| O2 | Client 模式下，手机还要不要作为**原生能力执行端**（现有 `ios_native` / `android_native` 目标与 `device_run_task` 路由）？D11 只说 Client 没有本地聊天，没说它不能执行 Host 派来的原生任务 | ❓ 倾向保留（日历、提醒事项、相机等只有手机有），但需明确它与“Client 没有 runtime”如何共存 |
+| O1 | relay 是否取代 Tailscale？ | ✅ 已确认，见 D24。底层是否复用 Tailscale 仍待技术评估；局域网直连是否需要另议，不自动保留旧连接流程 |
+| O2 | Client 是否提供手机系统工具，例如读取日历、创建系统提醒、用户参与的拍照或设备操作？须区分“执行 Host 指定的明确动作”与“手机自行调用模型、规划并完成多步目标” | ❓ 建议保留前者：Host 规划，Client 校验权限、执行动作并回执；不在 Client 保留独立 Agent 循环。尚未获产品确认，详见架构文档 §5.4；不能直接保留整个 `device_run_task` 并声称不需要 runtime |
 | O3 | Host 离线时错过的定时槽：跳过、只补最近一次、还是逐次补跑？ | ❓ 起点文档 §4-C 的原问题，尚未决定 |
 | O4 | 展示契约的字段清单与最低版本协商 | ❓ M3 的首要产出 |
 | O5 | 托管 relay 的滥用、配额、创建准入 | ❓ 空间 ID = 公钥只证明持钥，批量生成公钥可绕过按空间配额（codex 评审，推断）。见架构文档 §11 |
@@ -169,14 +170,14 @@ relay 的直接用途：PC 端会产生 proactive 生成、定时任务等结果
 1. 读完本组文档，跑一遍 V1–V5。
 2. **M0 风险 spike** 与 **M1 relay 骨架**可并行启动。M0 需要的账号与证书见里程碑文档 §M0 前置。
 3. M3 的契约设计可以与 M0 并行（纯文档与 schema，不依赖推送）。
-4. 在 `v1.0.0` 标签出现前，只做 spike 与文档，不要创建 `v1.1.0dev`，也不要在 `v1.0.0dev` 上提交产品代码。
+4. 当前只做 spike 与文档，不在 `v1.0.0dev` 上提交产品代码；远端文档分支按更新后的 D22 命名为 `fork/v1.1.0dev`。
 
 ## 7. 项目约束（`AGENTS.md`）
 
 - **公开 / 内部分支**：`v0.2.0dev` 与发布分支是公开的；公司试点只在 `internal`。relay 与 push gateway 属通用能力，走公开分支。**不得**嵌入组织域名、员工数据、租户标识、内部端点、部署文件；托管 relay 的地址只作部署配置。公开修复可以流入 `internal`，反向不行。
 - **角色 / IP 素材**：与本方案无关，但任何示例、截图、测试 fixture 不得带未审批角色或衍生媒体。
 - **构建隔离**：构建输出与编译器缓存放用户指定的外置盘（本机为 `/Volumes/sqxh-junjie`），先确认已挂载，不得悄悄回落到系统盘；输出目录按**规范化 worktree 路径 + chat ID** 命名；只清理当前 chat 的输出目录，不要清理共享的 `runtime/dist` 或桌面构建目录。
-- **推送**：先推 `fork`，确认后再推官方 `origin`。本组文档没有提交、没有推送。
+- **推送**：先推 `fork`，确认后再推官方 `origin`。文档已提交；远端目标为 `fork/v1.1.0dev`，推送完成情况以 Git 远端引用为准。
 - **预研阶段**：不写兼容层；旧状态直接重置。
 - **删除前**：删除可工作代码之前，先备份到专用分支（例如 `backup/pre-space-host-client-<sha>`），不要只依赖 git 历史。
 - **文档措辞**：沿用项目术语（proactivity 用 “push-and-pull”；抢占用 Floor / priority / preempt / defer；用 “executor” 不用 “lane”）。README 改动受 `runtime/test/documentation-contract.test.ts` 约束，环境变量文档由 `runtime/src/config/environment-contract.ts` 生成。
@@ -184,8 +185,8 @@ relay 的直接用途：PC 端会产生 proactive 生成、定时任务等结果
 ## 8. 本组文档的存放与状态
 
 - 位置：独立 worktree `/Volumes/sqxh-junjie/worktrees/nova-audio-agent/docs-space-host-client-handoff`，分支 `docs/space-host-client-handoff`，基于 `v1.0.0dev`（`ecb533f9`）。
-- 状态：**未提交、未推送**。主检出 `/Users/fishwowater/sqxh/nova-audio-agent` 的 `docs/design-notes/` 下另有两份同名未跟踪副本（起点文档与讨论纪要），以 worktree 内的版本为准。
-- 这个分支只放文档，**不是** `v1.1.0dev`。
+- 状态：首批文档已提交为 `cc142e8d`；后续讨论更新继续在此分支提交。主检出 `/Users/fishwowater/sqxh/nova-audio-agent` 的 `docs/design-notes/` 下另有两份同名未跟踪副本（起点文档与讨论纪要），以 worktree 内的版本为准。
+- 当前新增内容仅为文档；本地分支名不变，远端名称按 D22 为 `v1.1.0dev`。
 
 ## 9. 来源索引
 
