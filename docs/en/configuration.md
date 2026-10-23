@@ -49,7 +49,6 @@ Set only what you need to change. Keep credentials out of Git.
 | `STEPFUN_API_KEY` | None | StepFun realtime credential. |
 | `DEEPSEEK_API_KEY` | None | Official DeepSeek cascaded LLM credential. |
 | `ARK_API_KEY` | None | Ark cascaded LLM credential. |
-| `DOUBAO_ASR_API_KEY` | Doubao big-model key | Volcengine ASR credential override. |
 | `DOUBAO_BIGMODEL_API_KEY` | None | Volcengine TTS and ASR fallback credential. |
 | `CODEX_WORKSPACE` | None | Host-approved Codex workspace. |
 | `CODEX_BIN` | codex | Host-approved Codex app-server binary. |

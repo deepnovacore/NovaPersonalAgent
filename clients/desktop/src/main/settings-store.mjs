@@ -33,7 +33,6 @@ export const SECRET_KEYS = Object.freeze([
   'arkApiKey',
   'deepseekApiKey',
   'doubaoBigmodelApiKey',
-  'doubaoAsrApiKey',
 ])
 
 export const PALETTES = Object.freeze(['ember', 'graphite'])

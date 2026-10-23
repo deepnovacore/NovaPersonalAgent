@@ -33,7 +33,6 @@ export const SECRET_ENV_MAP = Object.freeze({
   arkApiKey: 'ARK_API_KEY',
   deepseekApiKey: 'DEEPSEEK_API_KEY',
   doubaoBigmodelApiKey: 'DOUBAO_BIGMODEL_API_KEY',
-  doubaoAsrApiKey: 'DOUBAO_ASR_API_KEY',
 })
 
 // Main-only values and a separate public projection share the same precedence.
@@ -637,10 +636,7 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
     activeSecretKeys.add(llmProvider === 'openai-compatible' ? 'openaiCompatibleApiKey' : llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
     if (pipelineMode === 'cascaded') {
       activeSecretKeys.add(settings?.cascadedTtsProvider === 'openai-compatible' ? 'compatibleTtsApiKey' : settings?.cascadedTtsProvider === 'self-hosted' ? 'selfHostedTtsApiKey' : (settings?.cascadedTtsProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
-      // Optional override only. When absent, the runtime falls back to the
-      // big-model key; Main does not synthesize a duplicate secret value.
-      activeSecretKeys.add(settings?.cascadedAsrProvider === 'openai-compatible' ? 'compatibleAsrApiKey' : settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoAsrApiKey')
-      if ((settings?.cascadedAsrProvider ?? 'volcengine') === 'volcengine') activeSecretKeys.add('doubaoBigmodelApiKey')
+      activeSecretKeys.add(settings?.cascadedAsrProvider === 'openai-compatible' ? 'compatibleAsrApiKey' : settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
     } else {
       const integrated = settings?.integratedProvider ?? 'qwen'
       activeSecretKeys.add(integrated === 'qwen' ? 'dashscopeApiKey' : `${integrated}ApiKey`)

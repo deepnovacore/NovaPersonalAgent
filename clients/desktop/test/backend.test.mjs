@@ -415,7 +415,6 @@ test('integrated launch injects all active public settings and only its platform
       dashscopeApiKey: 'dash-key',
       arkApiKey: 'ark-key',
       doubaoBigmodelApiKey: 'doubao-key',
-      doubaoAsrApiKey: 'asr-key',
     },
   })
 
@@ -434,7 +433,6 @@ test('integrated launch injects all active public settings and only its platform
     'CASCADE_TTS_PROVIDER',
     'DOUBAO_TTS_VOICE',
     'DOUBAO_BIGMODEL_API_KEY',
-    'DOUBAO_ASR_API_KEY',
   ]) {
     assert.equal(name in spec.env, false, `${name} is inactive for integrated mode`)
   }
@@ -474,7 +472,6 @@ test('cascaded Qwen launch injects active selectors, remembered model, and Douba
       dashscopeApiKey: 'dash-key',
       arkApiKey: 'ark-key',
       doubaoBigmodelApiKey: 'doubao-key',
-      doubaoAsrApiKey: 'asr-key',
     },
   })
 
@@ -487,7 +484,6 @@ test('cascaded Qwen launch injects active selectors, remembered model, and Douba
   assert.equal(spec.env.DOUBAO_TTS_VOICE, 'zh_female_custom')
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'dash-key')
   assert.equal(spec.env.DOUBAO_BIGMODEL_API_KEY, 'doubao-key')
-  assert.equal(spec.env.DOUBAO_ASR_API_KEY, 'asr-key')
   assert.equal('ARK_API_KEY' in spec.env, false)
   assert.equal('INTEGRATED_PROVIDER' in spec.env, false)
   assert.equal('QWEN_REALTIME_MODEL' in spec.env, false)
@@ -523,26 +519,10 @@ test('cascaded Ark launch selects the remembered Ark model without injecting Das
   assert.equal(spec.env.ARK_API_KEY, 'ark-key')
   assert.equal(spec.env.DOUBAO_BIGMODEL_API_KEY, 'doubao-key')
   assert.equal('DASHSCOPE_API_KEY' in spec.env, false)
-  assert.equal('DOUBAO_ASR_API_KEY' in spec.env, false)
   assert.deepEqual(settings.cascadedLlmModels, {
     qwen: 'qwen-remembered',
     ark: 'ark-selected',
   })
-})
-
-test('absent cascaded ASR override does not duplicate the big-model secret', () => {
-  const spec = nodeLaunchSpec({
-    workspace: '/workspace',
-    token: TOKEN,
-    readyEndpoint: '127.0.0.1:49152',
-    parentEnv: { DOUBAO_ASR_API_KEY: 'parent-asr-key' },
-    settings: { ...SETTINGS_V2, pipelineMode: 'cascaded' },
-    decryptedSecrets: { doubaoBigmodelApiKey: 'doubao-key' },
-  })
-
-  assert.equal(spec.env.DOUBAO_BIGMODEL_API_KEY, 'doubao-key')
-  assert.equal(spec.env.DOUBAO_ASR_API_KEY, 'parent-asr-key')
-  assert.notEqual(spec.env.DOUBAO_ASR_API_KEY, spec.env.DOUBAO_BIGMODEL_API_KEY)
 })
 
 test('launch spec falls back to the settings-store defaults when settings is missing', () => {
@@ -601,7 +581,6 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
       codexApiKey: 'codex-key',
       arkApiKey: 'ark-key',
       doubaoBigmodelApiKey: 'doubao-key',
-      doubaoAsrApiKey: 'asr-key',
     },
   })
 
@@ -611,7 +590,6 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
   assert.equal(spec.env.CODEX_API_KEY, 'codex-key')
   assert.equal('ARK_API_KEY' in spec.env, false)
   assert.equal('DOUBAO_BIGMODEL_API_KEY' in spec.env, false)
-  assert.equal('DOUBAO_ASR_API_KEY' in spec.env, false)
 })
 
 test('launch spec supplies the resolved desktop search proxy without overriding explicit env', () => {
@@ -661,7 +639,6 @@ test('launch spec omits a secret env var entirely when absent, empty, or undefin
   assert.equal('CODEX_API_KEY' in spec.env, false)
   assert.equal('ARK_API_KEY' in spec.env, false)
   assert.equal('DOUBAO_BIGMODEL_API_KEY' in spec.env, false)
-  assert.equal('DOUBAO_ASR_API_KEY' in spec.env, false)
 
   const noSecretsAtAll = nodeLaunchSpec({
     workspace: '/workspace',
@@ -743,7 +720,6 @@ test('cascaded Ark launch rejects raw boundary controls in every new secret over
   const parentEnv = {
     ARK_API_KEY: 'parent-ark',
     DOUBAO_BIGMODEL_API_KEY: 'parent-doubao',
-    DOUBAO_ASR_API_KEY: 'parent-asr',
   }
   const spec = nodeLaunchSpec({
     workspace: '/workspace',
@@ -758,13 +734,11 @@ test('cascaded Ark launch rejects raw boundary controls in every new secret over
     decryptedSecrets: {
       arkApiKey: '\nark-override',
       doubaoBigmodelApiKey: 'doubao-override\r',
-      doubaoAsrApiKey: '\tasr-override',
     },
   })
 
   assert.equal(spec.env.ARK_API_KEY, 'parent-ark')
   assert.equal(spec.env.DOUBAO_BIGMODEL_API_KEY, 'parent-doubao')
-  assert.equal(spec.env.DOUBAO_ASR_API_KEY, 'parent-asr')
 })
 
 test('launch spec injects a decrypted secret with its surrounding whitespace trimmed', () => {

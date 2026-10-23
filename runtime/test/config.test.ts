@@ -205,7 +205,7 @@ test('Ark receives its provider default only when no model override exists', () 
 })
 
 test('integrated loading never reads Ark or Doubao credential slots', () => {
-  const forbidden = new Set(['ARK_API_KEY', 'DOUBAO_ASR_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
+  const forbidden = new Set(['ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
   const environment = new Proxy<NodeJS.ProcessEnv>({
     PIPELINE_MODE: 'integrated',
     DASHSCOPE_API_KEY: 'dashscope-key',

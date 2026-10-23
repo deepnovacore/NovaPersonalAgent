@@ -92,7 +92,6 @@ export const settingsSchema = z.object({
   dashscope_api_key: z.string().nullable().default(null),
   ark_api_key: z.string().nullable().default(null),
   deepseek_api_key: z.string().nullable().default(null),
-  doubao_asr_api_key: z.string().nullable().default(null),
   doubao_bigmodel_api_key: z.string().nullable().default(null),
   volcengine_ark_base_url: z.string().default('https://ark.cn-beijing.volces.com/api/v3'),
   volcengine_ark_model: z.string().default('doubao-seed-2-0-pro-260215'),
@@ -396,7 +395,6 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
           environment.VOLCENGINE_ARK_BASE_URL,
         ),
       } : {}),
-      doubao_asr_api_key: optionalSecret(environment.DOUBAO_ASR_API_KEY),
       doubao_bigmodel_api_key: optionalSecret(environment.DOUBAO_BIGMODEL_API_KEY),
       doubao_asr_endpoint: rawEnvironmentValue(environment.DOUBAO_ASR_ENDPOINT),
       doubao_asr_resource_id: rawEnvironmentValue(
@@ -662,7 +660,7 @@ export function describeMissingBlockingCredentials(settings: Settings, textConve
   const llmField = cascadedCredentialField(settings.cascade_llm_provider)
   return {pipeline: 'cascaded', missing: [...new Set([
     ...(settings.cascade_llm_provider === 'self-hosted' || present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
-    ...(textConversations || settings.cascade_asr_provider === 'self-hosted' ? [] : settings.cascade_asr_provider === 'openai-compatible' ? (present(settings.compatible_asr_api_key) ? [] : ['COMPATIBLE_ASR_API_KEY']) : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_asr_api_key) || present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_ASR_API_KEY'])),
+    ...(textConversations || settings.cascade_asr_provider === 'self-hosted' ? [] : settings.cascade_asr_provider === 'openai-compatible' ? (present(settings.compatible_asr_api_key) ? [] : ['COMPATIBLE_ASR_API_KEY']) : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
     ...(textConversations || settings.cascade_tts_provider === 'self-hosted' ? [] : settings.cascade_tts_provider === 'openai-compatible' ? (present(settings.compatible_tts_api_key) ? [] : ['COMPATIBLE_TTS_API_KEY']) : settings.cascade_tts_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
   ])]}
 }
@@ -728,19 +726,16 @@ export function requireCascadedCredentials(
   const field = cascadedCredentialField(selection.llmProvider)
   const llmApiKey = selection.llmProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_llm_api_key ?? '') : requiredCredential(settings[field], field.toUpperCase())
   const ttsApiKey = selection.ttsProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_tts_api_key ?? '') : selection.ttsProvider === 'openai-compatible' ? requiredCredential(settings.compatible_tts_api_key, 'COMPATIBLE_TTS_API_KEY') : selection.ttsProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
-  const asrApiKey = selection.asrProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_asr_api_key ?? '') : selection.asrProvider === 'openai-compatible' ? requiredCredential(settings.compatible_asr_api_key, 'COMPATIBLE_ASR_API_KEY') : selection.asrProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(stripLikePython(settings.doubao_asr_api_key ?? '') || settings.doubao_bigmodel_api_key, 'DOUBAO_ASR_API_KEY')
+  const asrApiKey = selection.asrProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_asr_api_key ?? '') : selection.asrProvider === 'openai-compatible' ? requiredCredential(settings.compatible_asr_api_key, 'COMPATIBLE_ASR_API_KEY') : selection.asrProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
   return Object.freeze({llmApiKey, asrApiKey, ttsApiKey})
 }
 
 export function requireVolcengineRealtime(settings: Settings): VolcengineRealtimeConfig {
   const arkApiKey = stripLikePython(settings.ark_api_key ?? '')
   const ttsApiKey = stripLikePython(settings.doubao_bigmodel_api_key ?? '')
-  const asrApiKey = stripLikePython(settings.doubao_asr_api_key ?? '') || ttsApiKey
+  const asrApiKey = ttsApiKey
   if (arkApiKey === '') throw new ConfigurationError('缺少 ARK_API_KEY')
   if (ttsApiKey === '') throw new ConfigurationError('缺少 DOUBAO_BIGMODEL_API_KEY')
-  if (asrApiKey === '') {
-    throw new ConfigurationError('缺少 DOUBAO_ASR_API_KEY 或 DOUBAO_BIGMODEL_API_KEY')
-  }
   if (settings.doubao_asr_chunk_ms <= 0) {
     throw new ConfigurationError('DOUBAO_ASR_CHUNK_MS 必须为正整数')
   }
@@ -1044,7 +1039,6 @@ function configurationFieldName(field: string): string {
     ark_api_key: 'ARK_API_KEY',
     deepseek_api_key: 'DEEPSEEK_API_KEY',
     dashscope_api_key: 'DASHSCOPE_API_KEY',
-    doubao_asr_api_key: 'DOUBAO_ASR_API_KEY',
     doubao_bigmodel_api_key: 'DOUBAO_BIGMODEL_API_KEY',
     tavily_api_key: 'TAVILY_API_KEY',
     openrouter_api_key: 'OPENROUTER_API_KEY',

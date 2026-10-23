@@ -50,7 +50,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
   assert.match(english, /Volcengine ASR\s*->\s*DeepSeek `deepseek-flash`\s*->\s*Volcengine TTS/u)
   assert.match(english, /Ark.*explicit.*cascaded LLM/isu)
   assert.match(english, /one key per platform.*reused/isu)
-  assert.match(english, /ASR.*fallback.*DOUBAO_BIGMODEL_API_KEY/isu)
+  assert.match(english, /DOUBAO_BIGMODEL_API_KEY` for both ASR and TTS/u)
   assert.match(english, /conditional.*Settings Panel/isu)
   assert.match(english, /write-only.*presence/isu)
   assert.match(english, /next launch/iu)
@@ -61,7 +61,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
   assert.match(chinese, /火山 ASR\s*->\s*DeepSeek `deepseek-flash`\s*->\s*火山 TTS/u)
   assert.match(chinese, /Ark.*显式.*级联 LLM/su)
   assert.match(chinese, /每个平台.*一把密钥.*复用/su)
-  assert.match(chinese, /ASR.*回退.*DOUBAO_BIGMODEL_API_KEY/su)
+  assert.match(chinese, /ASR 与 TTS 共用 `DOUBAO_BIGMODEL_API_KEY`/u)
   assert.match(chinese, /条件.*设置面板/su)
   assert.match(chinese, /只写.*存在/u)
   assert.match(chinese, /下次启动/u)
@@ -69,7 +69,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
 
   for (const [file, text] of documents) {
     assert.doesNotMatch(text, /workspace-graph surfaces|工作区图谱|WORKSPACE_GRAPH/u, file)
-    assert.doesNotMatch(text, /(?:REALTIME_PROVIDER|VOLCENGINE_ARK_MODEL|VOLCENGINE_ARK_SUPPORT_MODEL)/u, file)
+    assert.doesNotMatch(text, /(?:REALTIME_PROVIDER|VOLCENGINE_ARK_MODEL|VOLCENGINE_ARK_SUPPORT_MODEL|DOUBAO_ASR_API_KEY)/u, file)
   }
 })
 

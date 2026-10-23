@@ -50,7 +50,7 @@
 
 自托管阶段连接你自己运行的端点（`SELF_HOSTED_ASR_URL`、`SELF_HOSTED_LLM_BASE_URL`、`SELF_HOSTED_TTS_URL`），只使用各自专用的可选凭据；仓库提供了流式 Whisper ASR、vLLM LLM 和 Breeze TTS 的参考启动器。云端与自托管阶段可在同一条管线中混用。详见[自托管语音与预设](deployment/self-hosted-voice.md)。
 
-使用火山语音时，ASR 优先使用 `DOUBAO_ASR_API_KEY`，未配置时使用 `DOUBAO_BIGMODEL_API_KEY`；TTS 使用后者。辅助模型与个人记忆可能仍需要百炼凭据，详见[核心配置](configuration.md)。
+使用火山语音时，ASR 与 TTS 共用 `DOUBAO_BIGMODEL_API_KEY`。辅助模型与个人记忆可能仍需要百炼凭据，详见[核心配置](configuration.md)。
 
 ## 声纹校验
 

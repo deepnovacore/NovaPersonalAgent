@@ -87,7 +87,7 @@ Keys are write-only: the panel shows presence, not their values. Edit `.env` to 
 
 Integrated mode can also use StepFun (`INTEGRATED_PROVIDER=stepfun`, preview) with `STEPFUN_API_KEY`.
 
-One key per platform is reused across selected services: DeepSeek uses `DEEPSEEK_API_KEY`; Qwen uses `DASHSCOPE_API_KEY`; Volcengine speech uses `DOUBAO_BIGMODEL_API_KEY`. An optional `DOUBAO_ASR_API_KEY` overrides recognition credentials; the ASR fallback is `DOUBAO_BIGMODEL_API_KEY`.
+One key per platform is reused across selected services: DeepSeek uses `DEEPSEEK_API_KEY`; Qwen uses `DASHSCOPE_API_KEY`; Volcengine speech uses `DOUBAO_BIGMODEL_API_KEY` for both ASR and TTS.
 
 Ark is an explicit cascaded LLM option using `ARK_API_KEY`. The conditional Settings Panel shows only the selected mode's controls. Service settings take effect on the backend's next launch. Nova does not automatically fail over to another provider.
 

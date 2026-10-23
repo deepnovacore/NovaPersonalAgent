@@ -127,7 +127,6 @@ const rows: readonly Row[] = [
   ['QWEN_GUARD_HISTORY_PAIRS', 'qwen', false, true, '4', 'Guard history pair count.', 'Guard 历史对话对数。'],
   ['DEEPSEEK_API_KEY', 'deepseek', true, true, null, 'Official DeepSeek cascaded LLM credential.', 'DeepSeek 官方级联 LLM 凭据。'],
   ['ARK_API_KEY', 'ark', true, true, null, 'Ark cascaded LLM credential.', '方舟级联 LLM 凭据。'],
-  ['DOUBAO_ASR_API_KEY', 'volcengine', true, true, 'Doubao big-model key', 'Volcengine ASR credential override.', '火山 ASR 凭据覆盖。'],
   ['DOUBAO_BIGMODEL_API_KEY', 'volcengine', true, true, null, 'Volcengine TTS and ASR fallback credential.', '火山 TTS 及 ASR 回退凭据。'],
   ['VOLCENGINE_ARK_BASE_URL', 'ark', false, true, 'Volcengine Ark endpoint', 'Ark secure endpoint.', '方舟安全地址。'],
   ['DOUBAO_ASR_ENDPOINT', 'volcengine', false, true, 'Doubao ASR endpoint', 'Doubao ASR secure endpoint.', '豆包 ASR 安全地址。'],

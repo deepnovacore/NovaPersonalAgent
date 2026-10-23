@@ -14,7 +14,7 @@ test('desktop text graph connects without speech credentials or initializing aud
  await assembly.provider.connect({tools:[],signal})
  assert(opens>0);assert.equal(audio,0);assert.equal(requests,0)
  assert.equal(typeof assembly.provider.transcribeDraft,'function')
- await assert.rejects(async()=>assembly.provider.transcribeDraft!(new Uint8Array(320),signal),/DOUBAO_ASR_API_KEY/)
+ await assert.rejects(async()=>assembly.provider.transcribeDraft!(new Uint8Array(320),signal),/DOUBAO_BIGMODEL_API_KEY/)
  assert.equal(audio,0)
  await assembly.stop()
 })

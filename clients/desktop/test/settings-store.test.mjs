@@ -36,7 +36,6 @@ const ALL_SECRET_KEYS = Object.freeze([
   'arkApiKey',
   'deepseekApiKey',
   'doubaoBigmodelApiKey',
-  'doubaoAsrApiKey',
 ])
 
 // The store never imports Electron: the keychain arrives as this three-method
@@ -541,7 +540,6 @@ test('normalizeSettings keeps only well-formed secret entries', () => {
       codexApiKey: { enc: 'none', data: 'not base64!' },
       arkApiKey: { enc: 'safeStorage', data: 'YXJr' },
       doubaoBigmodelApiKey: { enc: 'none', data: 'ZG91YmFv' },
-      doubaoAsrApiKey: { enc: 'safeStorage', data: 'YXNy' },
       strayKey: { enc: 'none', data: 'aGk=' },
     },
   })
@@ -551,7 +549,6 @@ test('normalizeSettings keeps only well-formed secret entries', () => {
     tavilyApiKey: { enc: 'none', data: 'aGk=' },
     arkApiKey: { enc: 'safeStorage', data: 'YXJr' },
     doubaoBigmodelApiKey: { enc: 'none', data: 'ZG91YmFv' },
-    doubaoAsrApiKey: { enc: 'safeStorage', data: 'YXNy' },
   })
 })
 
@@ -564,7 +561,6 @@ test('normalizeSettings rejects secret entries that are not objects or lack data
       codexApiKey: null,
       arkApiKey: [],
       doubaoBigmodelApiKey: { enc: 'none', data: 'not base64!' },
-      doubaoAsrApiKey: { enc: 'rot13', data: 'YXNy' },
     },
   })
 
@@ -666,7 +662,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     arkApiKey: false,
     deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
-    doubaoAsrApiKey: false,
   })
   assert.doesNotMatch(JSON.stringify(secretsPresent(settings)), /sk-dash|sk-codex|sealed/)
   assert.deepEqual(secretsPresent(undefined), {
@@ -684,7 +679,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     arkApiKey: false,
     deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
-    doubaoAsrApiKey: false,
   })
 })
 

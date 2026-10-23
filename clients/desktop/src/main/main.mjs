@@ -1832,7 +1832,7 @@ async function startSelectedCamera(camera, smokeChannel) {
         const settings = currentSettings
         return {secrets: decryptSecretsForSpawn(settings, secretCodec),uploadUrl: settings.voiceprintUploadUrl}
       })
-      if (!(secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey) || !uploadUrl) return {error:'voiceprint_configuration_required'}
+      if (!secrets.doubaoBigmodelApiKey || !uploadUrl) return {error:'voiceprint_configuration_required'}
       if (!await voiceprintHealth(uploadUrl, (url, init) => net.fetch(url, init))) return {error:'voiceprint_unhealthy'}
       if (voiceprintRecording || voiceprintBusy || settingsWindow?.webContents !== event.sender) return {error:'voiceprint_busy'}
       voiceprintRecording = true
@@ -1854,7 +1854,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     const fetcher = (url, init) => net.fetch(url, init)
     const speechKey = settings => {
       const secrets = decryptSecretsForSpawn(settings, secretCodec)
-      return secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey
+      return secrets.doubaoBigmodelApiKey
     }
     try {
       // Main owns the upload target: only the saved URL receives audio.

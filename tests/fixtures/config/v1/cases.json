@@ -10,7 +10,6 @@
       "environment": {
         "ARK_API_KEY": "fixture-ark-key",
         "DASHSCOPE_API_KEY": "fixture-dash-key",
-        "DOUBAO_ASR_API_KEY": "fixture-asr-key",
         "DOUBAO_BIGMODEL_API_KEY": "fixture-tts-key",
         "CODEX_API_KEY": "fixture-codex-key",
         "CODEX_BIN": "/fixture/bin/codex",
