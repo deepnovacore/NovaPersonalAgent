@@ -1456,6 +1456,7 @@ async function startSelectedCamera(camera, smokeChannel) {
 
   let personalCollapsed = false
   let personalBounds = null
+  let wantedMaximized = null, savesInFlight = 0, autoFilling = false
   let initialOrbBounds = mainWindow.getBounds()
   const workbenchFrame = createWorkbenchFrame({
     getBounds: () => mainWindow.getBounds(),
@@ -1463,12 +1464,15 @@ async function startSelectedCamera(camera, smokeChannel) {
     getWorkArea: bounds => screen.getDisplayMatching(bounds).workArea,
     onChange: value => {
       publishMaximized()
-      // Only a user toggle can differ from the stored preference: the automatic fill on expand requires it to be true.
-      if (settingsReady && currentSettings.workbenchMaximized !== value) {
-        settingsWriter({workbenchMaximized: value}, undefined, {preserveSecrets: true}).catch(error => {
-          console.error(`[desktop-diagnostic] workbench_maximized_save_failure type=${error.name}`)
-        })
-      }
+      // The automatic fill on expand is not a user choice and must not touch the stored preference.
+      if (autoFilling || !settingsReady) return
+      // currentSettings only advances when a write commits, so deduplicating against it would drop a choice made while an earlier save is still in flight.
+      wantedMaximized = value
+      if (savesInFlight === 0 && currentSettings.workbenchMaximized === value) return
+      savesInFlight++
+      settingsWriter({workbenchMaximized: value}, undefined, {preserveSecrets: true}).catch(error => {
+        console.error(`[desktop-diagnostic] workbench_maximized_save_failure type=${error.name}`)
+      }).finally(() => { if (--savesInFlight === 0) wantedMaximized = null })
     },
   })
   let lastMaximized = null
@@ -1484,8 +1488,9 @@ async function startSelectedCamera(camera, smokeChannel) {
     const wasVisible = windowsPresentation && mainWindow.isVisible()
     if (value) {
       personalBounds = workbenchFrame.naturalBounds()
-      if (windowsPresentation && workbenchFrame.maximized) mainWindow.setBounds(personalBounds)
-      workbenchFrame.forget()
+      // A maximized Windows shell stays maximized while hidden: its restore rectangle is kept as the stable
+      // baseline, because writing the rounded DIP readback back would grow it by a pixel on every cycle at fractional DPI.
+      if (!(windowsPresentation && workbenchFrame.maximized)) workbenchFrame.forget()
       if (windowsPresentation) mainWindow = windowsPresentation.select(true)
       personalCollapsed = true
       mainWindow.setResizable(false)
@@ -1511,7 +1516,11 @@ async function startSelectedCamera(camera, smokeChannel) {
       // DIP readback on every mode switch would gradually grow it at 175% DPI.
       if (!windowsPresentation || personalBounds === null) mainWindow.setBounds(personalBounds ?? {x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2),width,height})
       personalBounds = mainWindow.getBounds()
-      if (currentSettings?.workbenchMaximized !== false && !workbenchFrame.maximized) workbenchFrame.toggleMaximize()
+      const wantMaximized = (wantedMaximized ?? currentSettings?.workbenchMaximized) !== false
+      if (wantMaximized !== workbenchFrame.maximized) {
+        autoFilling = true
+        try { workbenchFrame.toggleMaximize() } finally { autoFilling = false }
+      }
     }
     publishMaximized()
     sendToOrb('nova:personal:collapsed', value)
