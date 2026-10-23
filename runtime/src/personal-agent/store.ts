@@ -25,7 +25,7 @@ export interface PersonalState {
         result: unknown;
     }>;
 }
-export const initialState = (): PersonalState => ({ notification_task_baseline:[],notification_intents:{},notification_fingerprints:{},notifications_initialized:false,conversations:initialConversations(), user_scope: null, revision: 0, feed: [], dedupe: [], brief_runs: {}, settings: { discovery_enabled: true, discovery_interval_minutes: 30, proactive_daily_cap: 5 }, receipts: {} });
+export const initialState = (): PersonalState => ({ notification_task_baseline:[],notification_intents:{},notification_fingerprints:{},notifications_initialized:false,conversations:initialConversations(), user_scope: null, revision: 0, feed: [], dedupe: [], brief_runs: {}, settings: { discovery_enabled: true, discovery_interval_minutes: 30, proactive_daily_cap: 5, news_rank_fallback: true }, receipts: {} });
 // ponytail: bounded JSON ledger; move to the existing Worker if 10000 retained matters are needed.
 const MAX_STORE_BYTES = 16 * 1024 * 1024;
 const WINDOWS_RENAME_RETRY_DELAYS_MS = [25, 50, 75, 100, 125, 150, 175, 200] as const;

@@ -17,7 +17,17 @@ export function memoryEmbeddingNote(module, moduleStatusNote) {
 }
 
 /** Discovery cadence, briefings, quiet hours and the daily proactive cap, all saved through `discovery.configure`. */
-export function createProactivityPanel({document, api, moduleStatusNote = () => ''}) {
+/**
+ * The row telling the user that, without an OpenRouter key, interests and article titles go to the chat model.
+ * `provider` is null when the settings do not name one; the wording stays generic instead of guessing.
+ */
+export function rankFallbackNote(provider) {
+ return provider
+  ? t('没有 OpenRouter 密钥时，会用你的对话模型（{0}）判断资讯相关度：你的兴趣和文章标题会发给它。', provider)
+  : t('没有 OpenRouter 密钥时，会用你的对话模型判断资讯相关度：你的兴趣和文章标题会发给它。')
+}
+
+export function createProactivityPanel({document, api, moduleStatusNote = () => '', rankFallback = () => null}) {
  const root = document.querySelector('#proactivity-panel'), error = document.querySelector('#proactivity-error')
  let state = null, busy = false, memory
  const onError = caught => { error.textContent = caught?.message || t('主动性设置暂时不可用') }
@@ -53,6 +63,13 @@ export function createProactivityPanel({document, api, moduleStatusNote = () => 
   input.addEventListener('change', () => apply(input.value))
   const step = (label, delta) => {const b = button(label, () => apply(Number(input.value) + delta), row); b.setAttribute('aria-label', delta < 0 ? t('减少上限') : t('增加上限')); b.disabled = !connected; return b}
   step('−', -1); row.append(input); step('+', 1); cap.append(row)
+  const fallback = rankFallback()
+  if (fallback?.keyMissing === true) {
+   const news = card(t('资讯相关度'), rankFallbackNote(fallback.provider ?? null)), enabled = settings.news_rank_fallback !== false
+   const label = el('label'), box = el('input'); box.type = 'checkbox'; box.checked = enabled; box.disabled = !connected; box.setAttribute('aria-label', t('用对话模型判断资讯相关度'))
+   box.addEventListener('change', () => {void command('discovery.configure', {news_rank_fallback: box.checked}).catch(onError)})
+   label.append(box, el('span', t('用对话模型判断资讯相关度'))); news.append(label)
+  }
   renderDailyBrief({settings, connected, card, el, button, command})
   const note = memoryEmbeddingNote(memory, moduleStatusNote)
   if (note) card(t('记忆'), note).dataset.memoryStatus = memory.enabled ? 'on' : 'off'

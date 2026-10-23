@@ -1,16 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
-import {createProactivityPanel, clampDailyCap, memoryEmbeddingNote} from '../src/renderer/proactivity-panel.mjs'
+import {createProactivityPanel, clampDailyCap, memoryEmbeddingNote, rankFallbackNote} from '../src/renderer/proactivity-panel.mjs'
 import {moduleStatusNote} from '../src/renderer/capabilities-editor.mjs'
 class Node{constructor(tag){this.tag=tag;this.children=[];this.listeners={};this.dataset={};this.className='';this.textContent=''}append(...c){this.children.push(...c)}replaceChildren(...c){this.children=c}setAttribute(k,v){this[k]=v}addEventListener(k,v){this.listeners[k]=v}}
 const all=n=>[n,...n.children.flatMap(all)]
-function harness(settings={},{failState=false}={}){
+function harness(settings={},{failState=false,rankFallback}={}){
  const root=new Node('div'),error=new Node('p'),calls=[]
  const document={querySelector:sel=>sel==='#proactivity-panel'?root:error,createElement:tag=>new Node(tag)}
  const state={capabilities:{discovery:true},settings:{discovery_enabled:true,discovery_interval_minutes:30,...settings}}
  const api={personalCommand:async(method,params)=>{calls.push([method,params]);if(method==='state')return failState?{error:'unavailable'}:state;return {ok:true}}}
- const panel=createProactivityPanel({document,api,moduleStatusNote})
+ const panel=createProactivityPanel({document,api,moduleStatusNote,...(rankFallback?{rankFallback}:{})})
  const tick=()=>new Promise(r=>setImmediate(r))
  return {root,error,calls,panel,tick,state,
   button:label=>all(root).find(n=>n.tag==='button'&&(n.textContent===label||n['aria-label']===label)),
@@ -67,4 +67,17 @@ test('the settings page mounts the panel and no longer carries the removed setti
  assert.ok(!/daily-brief-view|discovery\.configure/.test(connections))
  const notification=readFileSync(new URL('../src/renderer/notification-settings.mjs',import.meta.url),'utf8')
  assert.ok(!/legacy/.test(notification))
+})
+test('news fallback row shows only without an OpenRouter key and sends news_rank_fallback alone',async()=>{
+ const rows=h=>all(h.root).filter(n=>n.tag==='input'&&n['aria-label']==='用对话模型判断资讯相关度')
+ const keyed=harness({},{rankFallback:()=>({keyMissing:false,provider:'Qwen'})});await keyed.panel.load();assert.equal(rows(keyed).length,0)
+ assert.ok(!all(keyed.root).some(n=>String(n.textContent).includes('OpenRouter')))
+ const bare=harness({},{});await bare.panel.load();assert.equal(rows(bare).length,0,'no fallback info means no row')
+ const h=harness({},{rankFallback:()=>({keyMissing:true,provider:'Qwen'})});await h.panel.load()
+ assert.ok(all(h.root).some(n=>n.textContent==='没有 OpenRouter 密钥时，会用你的对话模型（Qwen）判断资讯相关度：你的兴趣和文章标题会发给它。'))
+ const [box]=rows(h);assert.equal(box.checked,true,'on by default');assert.equal(box.disabled,false)
+ box.checked=false;box.listeners.change();await h.tick()
+ assert.deepEqual(h.calls[1],['discovery.configure',{news_rank_fallback:false}])
+ const off=harness({news_rank_fallback:false},{rankFallback:()=>({keyMissing:true,provider:null})});await off.panel.load()
+ assert.equal(rows(off)[0].checked,false);assert.equal(rankFallbackNote(null),'没有 OpenRouter 密钥时，会用你的对话模型判断资讯相关度：你的兴趣和文章标题会发给它。','unnamed provider stays generic')
 })
