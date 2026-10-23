@@ -5,7 +5,6 @@ export function renderNotificationSettings({state,feishu,local,card,el,button,co
  if(!state)return
  const a=card(t('主动消息'),t('选择 Nova 主动提醒的接收位置。你发起的对话仍在 Nova 中回复。'))
  a.append(el('p',state.local?t('当前渠道：Nova'):t('当前渠道：飞书')))
- if(state.legacy_additional)a.append(el('p',t('已保留原来的飞书附加提醒。选择主渠道后将只向该渠道投递。')))
  if(!state.local)button(t('改为在 Nova 接收'),()=>command('notifications.configure',{binding_id:'nova'}),a)
  if(feishu?.available&&feishu?.configured){
   a.append(el('p',t('飞书应用需启用机器人、消息发送权限，并将你加入可用范围。首次使用前请在飞书打开机器人私聊。'),'personal-hint'))

@@ -50,9 +50,6 @@ test('multipart retry preserves receipts and does not resend accepted parts',asy
  const s=new NotificationService({path:join(dir,'state.json'),userScope:'u',adapters:[adapter],now:()=>now,random:()=>0.5});try{await s.open();await s.publish(message());await s.dispatch();assert.deepEqual(sent,['first','second']);fail=false;now=21000;await s.dispatch();assert.deepEqual(sent,['first','second','second']);assert.equal(s.snapshot().counts.accepted,1)}finally{await s.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('legacy additional delivery is retained until an explicit primary choice',async()=>{
- const f=await fixture();try{await f.service.migrate('im');await f.service.publish(message());await f.service.dispatch();assert.deepEqual(f.sent.map(x=>x.target),['nova','im']);await f.service.configure('im');await f.service.publish(message('new'));await f.service.dispatch();assert.deepEqual(f.sent.map(x=>x.target),['nova','im','im'])}finally{await f.close()}
-})
 test('definitely unsent racing request follows the new route after its rejection',async()=>{
  const f=await fixture();try{await f.service.publish(message());let release!:()=>void,entered!:()=>void;const reached=new Promise<void>(r=>{entered=r});f.barrier(()=>{entered();return new Promise<void>(r=>{release=r})});f.setOutcome({kind:'retryable',definitelyNotAccepted:true});const run=f.service.dispatch();await reached;await f.service.configure('im');release();await run;f.barrier(()=>Promise.resolve());f.setOutcome({kind:'accepted',receipt:{message_id:'done'}});await f.service.dispatch();assert.deepEqual(f.sent.map(x=>x.target),['nova','im']);assert.equal(f.service.snapshot().counts.accepted,1)}finally{await f.close()}
 })

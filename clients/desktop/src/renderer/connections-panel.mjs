@@ -1,9 +1,8 @@
 import {onButton} from './button-action.mjs'
 import {t} from './locale.mjs'
 import {renderConnectors} from './connectors-view.mjs'
-import {renderDailyBrief} from './daily-brief-view.mjs'
 
-/** Sources, app connectors, briefing schedule and discovery cadence, reached through the settings window's narrow IPC bridge. */
+/** Sources and app connectors, reached through the settings window's narrow IPC bridge. */
 export function createConnectionsPanel({document, api}) {
  const root=document.querySelector('#connections-panel'),error=document.querySelector('#connections-error')
  let state=null,busy=false,selected='files',actionPending=false
@@ -18,9 +17,9 @@ export function createConnectionsPanel({document, api}) {
   let target=root
   const panels={}
   if(state!==null){
-   const tabs=el('div',undefined,'connections-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('资料与提醒分类'));root.append(tabs)
-   const items=[['files',t('本机资料')],['apps',t('邮件与日历')],['reminders',t('主动提醒')]]
-   for(const [id,label]of items){const b=button(label,()=>{selected=id;render()},tabs);b.id='connections-tab-'+id;b.setAttribute('role','tab');b.setAttribute('aria-selected',String(selected===id));b.setAttribute('aria-controls','connections-page-'+id);b.tabIndex=selected===id?0:-1;b.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const index=items.findIndex(item=>item[0]===id);selected=items[event.key==='Home'?0:event.key==='End'?2:(index+(event.key==='ArrowRight'?1:2))%3][0];render();document.querySelector('#connections-tab-'+selected)?.focus()})}
+   const tabs=el('div',undefined,'connections-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('资料与应用分类'));root.append(tabs)
+   const items=[['files',t('本机资料')],['apps',t('邮件与日历')]]
+   for(const [id,label]of items){const b=button(label,()=>{selected=id;render()},tabs);b.id='connections-tab-'+id;b.setAttribute('role','tab');b.setAttribute('aria-selected',String(selected===id));b.setAttribute('aria-controls','connections-page-'+id);b.tabIndex=selected===id?0:-1;b.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const index=items.findIndex(item=>item[0]===id);selected=items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowRight'?1:items.length-1))%items.length][0];render();document.querySelector('#connections-tab-'+selected)?.focus()})}
    for(const [id]of items){const page=el('div',undefined,'connections-page');page.id='connections-page-'+id;page.setAttribute('role','tabpanel');page.setAttribute('aria-labelledby','connections-tab-'+id);page.hidden=selected!==id;panels[id]=page;root.append(page)}
    target=panels.files
   }
@@ -45,9 +44,6 @@ export function createConnectionsPanel({document, api}) {
   }
   target=panels.apps
   renderConnectors({state:s.connectors,local,card,el,button,command,api:{personal:{openConnectorAuthorization:url=>api.openConnectorAuthorization(url)}},refresh:render})
-  target=panels.reminders
-  renderDailyBrief({settings:s.settings,connected:true,card,el,button,command})
-  const discovery=card(t('主动发现'),t('有依据才提出建议。关闭后仍可主动交办任务。'));const select=el('select');select.setAttribute('aria-label',t('主动发现间隔'));for(const [value,label]of [['0',t('关闭')],['15',t('每 15 分钟')],['30',t('每 30 分钟')],['60',t('每小时')],['120',t('每两小时')]]){const option=el('option',label);option.value=value;select.append(option)}select.value=s.settings?.discovery_enabled?String(s.settings.discovery_interval_minutes):'0';select.disabled=!caps.discovery||busy;select.addEventListener('change',()=>{void command('discovery.configure',{enabled:select.value!=='0',...(select.value!=='0'?{interval_minutes:Number(select.value)}:{})}).catch(local.onError)});discovery.append(select)
   if(busy)for(const input of root.querySelectorAll('button,input,select'))input.disabled=true
  }
  async function command(method,params={}){

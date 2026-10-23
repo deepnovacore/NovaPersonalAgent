@@ -329,7 +329,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     snapshot:()=>feishu.snapshot(),
     restore:()=>feishu.restore(),
     command:async(method,params)=>{const result=await feishu.command(method,z.record(z.string(),z.unknown()).parse(params));await syncNotificationBinding();return result},
-    open:async()=>{await feishu.open();await syncNotificationBinding();await host.notifications.migrate(feishu.snapshot().bot_enabled?'feishu':null)},
+    open:async()=>{await feishu.open();await syncNotificationBinding();await host.notifications.migrate()},
     close:async()=>{await feishu.close()},
   })
   ownership.own(() => composition.desktop.server.close())

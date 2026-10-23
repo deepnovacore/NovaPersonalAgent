@@ -316,11 +316,16 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             <option value="continuous" title="持续转述新的编程进展，等待你说完后播报；会增加语音用量。">连续转述</option>
           </select>
         </div>
-        <div class="field interval-field">
-          <label for="heartbeat" title="后台编程进度播报的最小间隔，避免频繁打断对话。">编程执行器播报间隔</label>
-          <input type="range" id="heartbeat" min="15" max="120" step="1" value="30">
-          <output id="heartbeat-value" for="heartbeat">30 秒</output>
-        </div>
+        <div id="proactivity-panel"></div>
+        <p id="proactivity-error" role="status" aria-live="polite"></p>
+        <details id="proactivity-advanced">
+          <summary>高级</summary>
+          <div class="field interval-field">
+            <label for="heartbeat" title="后台编程进度播报的最小间隔，避免频繁打断对话。">编程执行器播报间隔</label>
+            <input type="range" id="heartbeat" min="15" max="120" step="1" value="30">
+            <output id="heartbeat-value" for="heartbeat">30 秒</output>
+          </div>
+        </details>
       </section>
       <section id="pipeline" class="setting-section">
         <h2>语音管线</h2>
