@@ -1467,8 +1467,8 @@ async function startSelectedCamera(camera, smokeChannel) {
       // The automatic fill on expand is not a user choice and must not touch the stored preference.
       if (autoFilling || !settingsReady) return
       // currentSettings only advances when a write commits, so deduplicating against it would drop a choice made while an earlier save is still in flight.
-      wantedMaximized = value
       if (savesInFlight === 0 && currentSettings.workbenchMaximized === value) return
+      wantedMaximized = value
       savesInFlight++
       settingsWriter({workbenchMaximized: value}, undefined, {preserveSecrets: true}).catch(error => {
         console.error(`[desktop-diagnostic] workbench_maximized_save_failure type=${error.name}`)

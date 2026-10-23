@@ -1368,6 +1368,28 @@ test('rapid restore then maximize while the first save is in flight persists the
  assert.deepEqual(writes.at(-1),{workbenchMaximized:true})
 })
 
+test('a maximize that needs no write leaves no stale choice shadowing a later committed preference',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf('  let personalCollapsed = false')
+ const body=source.slice(start,source.indexOf("  ipcMain.handle('nova:personal:presentation-error'",start))
+ const area={x:0,y:25,width:1440,height:875}
+ let bounds={x:1300,y:700,width:64,height:64}
+ const mainWindow={getBounds:()=>({...bounds}),setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds:b=>{bounds={...b}},setHasShadow(){}}
+ const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:area}),getDisplayMatching:()=>({workArea:area})}
+ const settings={workbenchMaximized:true},writes=[]
+ const fixture=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame','windowsPresentation','currentSettings','settingsReady','settingsWriter',`${body};return {set:setPersonalCollapsed,frame:workbenchFrame,setSettings:value=>{currentSettings=value}}`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame,null,settings,true,async patch=>{writes.push(patch);Object.assign(settings,patch)})
+ fixture.set(false)
+ assert.equal(fixture.frame.maximized,true)
+ bounds={x:100,y:100,width:900,height:600}
+ assert.equal(fixture.frame.maximized,false,'a manual resize leaves the filled state')
+ fixture.frame.toggleMaximize()
+ assert.equal(fixture.frame.maximized,true)
+ assert.deepEqual(writes,[],'the stored preference already says true')
+ fixture.setSettings({workbenchMaximized:false})
+ fixture.set(true);fixture.set(false)
+ assert.equal(fixture.frame.maximized,false,'the committed preference wins over an earlier no-op choice')
+})
+
 test('keyboard activation wakes a sleeping orb and expands an awake one', async () => {
   const source = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
   const start = source.indexOf("orb.addEventListener('keydown',")
