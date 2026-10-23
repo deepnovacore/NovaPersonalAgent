@@ -658,6 +658,7 @@ export class PersonalAgentHost {
     #clearingConversations=new Set<string>();
     #conversationEmit:((frame:Record<string,unknown>)=>void)|undefined;
     #conversationRuns=new Map<string,Promise<void>>();
+    #goalProgressTail=new Map<string,Promise<void>>();
     #planModeTransitions=new Map<string,{call_id:string;promise:Promise<void>}>();
     waitConversation(id:string):Promise<void>{return this.#conversationRuns.get(id)??Promise.resolve()}
     #announcementTail:Promise<void>=Promise.resolve();
@@ -755,8 +756,8 @@ export class PersonalAgentHost {
         const operation=this.#conversationPool.run(conversation,text,{...context,user_message_id:userMessageId,...(sourceTodo?{source_todo:sourceTodo}:{}),...(context.references?{refresh:()=>this.discussionContext(context.references!)}:{})}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';const assistant={id:randomUUID(),conversation_id:id,role:'assistant' as const,reply_to:userMessageId,text:result.assistant.slice(0,16000),...(conversation.kind==='build'&&result.assistant.length>16000?{full_text_ref:true}:{}),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})},userIndex=item.messages.findIndex(message=>message.id===userMessageId);item.messages.splice(userIndex<0?item.messages.length:userIndex+1,0,assistant);item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed',...((conversation.mode==='plan'||conversation.kind==='build')&&error instanceof Error&&/^model_[a-z_]{1,96}$/u.test(error.message)?{reason:error.message}:{})})});
         this.#conversationRuns.set(id,operation);
         void operation.catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'status_persistence_failed'})});
-        const goalIds=id==='chat:main'?(context.references??[]).flatMap(ref=>ref.kind==='goal'?[ref.id]:[]):[];
-        if(goalIds.length)void operation.then(()=>this.#goalReplyProgress(userMessageId,goalIds)).catch(()=>{/* progress updates are best-effort */});
+        const goalRefs=id==='chat:main'?(context.references??[]).flatMap(ref=>ref.kind==='goal'?[{id:ref.id,version:ref.version}]:[]):[];
+        if(goalRefs.length)void operation.then(()=>this.#goalReplyProgress(userMessageId,goalRefs)).catch(()=>{/* progress updates are best-effort */});
     }
     requestPlanModeFromTool(id:string,generation:number,callId:string,originRef:string,stillWanted:()=>boolean):Promise<{scheduled:true}>{
         if(!callId||!originRef||!stillWanted())throw Error('superseded');
@@ -1294,20 +1295,34 @@ export class PersonalAgentHost {
         await this.life.mutate({op:'update',kind:'goal',id:goal.id,expected_version:goal.version,cadence:'off'},'goal-checkin-mute:'+hash([goal.id,goal.version]).slice(0,32));
     }
     /** After a chat:main turn that referenced goals completes: refresh each goal's derived progress from that reply only. Failures stay silent. */
-    async #goalReplyProgress(messageId:string,goalIds:readonly string[]):Promise<void>{
+    async #goalReplyProgress(messageId:string,refs:readonly {id:string;version:number}[]):Promise<void>{
         const write=this.options.updateGoalProgress;if(!write)return;
-        for(const goalId of goalIds){
-            try{
-                const message=this.#state.conversations.items.find(c=>c.id==='chat:main')?.messages.find(m=>m.id===messageId),goal=this.life.snapshot().goals.find(g=>g.id===goalId);
-                if(!this.#opened||message?.role!=='user'||message.generation_status!=='completed'||!goal)continue;
-                const evidence='message:chat:main:'+message.id,previous=this.goalProgress(goalId);
-                const signal=AbortSignal.any([this.#abort.signal,AbortSignal.timeout(60000)]);
-                const update=goalProgressUpdateSchema.parse(await write({goal:{title:goal.title,success_criteria:goal.success_criteria,status:goal.status},previous:previous&&!previous.stale?{summary:previous.summary,next_step:previous.next_step,last_progress_at:previous.last_progress_at}:null,message:{id:evidence,text:message.text.slice(0,4000),at:message.created_at}},signal));
-                const current=this.life.snapshot().goals.find(g=>g.id===goalId);
-                if(signal.aborted||!this.#opened||!current)continue;
-                await this.recordGoalProgress({goal_id:goalId,goal_version:current.version,summary:update.summary,next_step:update.next_step,last_progress_at:update.made_progress?message.created_at:this.goalProgress(goalId)?.last_progress_at??null,evidence_refs:[evidence],basis_revision:evidence,updated_at:this.#now().toISOString()});
-            }catch{try{this.options.onDiagnostic?.('goal_progress_update_failed')}catch{/* diagnostics are optional */}}
+        for(const ref of refs){
+            // Updates for one goal run in the order the replies finished; `previous` is read when the update runs, not when it is queued.
+            const run=(this.#goalProgressTail.get(ref.id)??Promise.resolve()).then(()=>this.#updateGoalProgress(write,messageId,ref));
+            const tail=run.finally(()=>{if(this.#goalProgressTail.get(ref.id)===tail)this.#goalProgressTail.delete(ref.id)});
+            this.#goalProgressTail.set(ref.id,tail);await run;
         }
+    }
+    async #updateGoalProgress(write:GoalProgressWriter,messageId:string,ref:{id:string;version:number}):Promise<void>{
+        const goalId=ref.id;
+        try{
+            const messages=this.#state.conversations.items.find(c=>c.id==='chat:main')?.messages??[],message=messages.find(m=>m.id===messageId),goal=this.life.snapshot().goals.find(g=>g.id===goalId);
+            // The user referenced a version that is no longer current: it is not the goal this update would describe.
+            if(!this.#opened||message?.role!=='user'||message.generation_status!=='completed'||goal?.version!==ref.version)return;
+            const evidence='message:chat:main:'+message.id,previous=this.goalProgress(goalId);
+            const signal=AbortSignal.any([this.#abort.signal,AbortSignal.timeout(60000)]);
+            const update=goalProgressUpdateSchema.parse(await write({goal:{title:goal.title,success_criteria:goal.success_criteria,status:goal.status},previous:previous&&!previous.stale?{summary:previous.summary,next_step:previous.next_step,last_progress_at:previous.last_progress_at}:null,message:{id:evidence,text:message.text.slice(0,4000),at:message.created_at}},signal));
+            // Content generated from `goal` is only recorded while `goal` is still current.
+            const current=this.life.snapshot().goals.find(g=>g.id===goalId),latest=this.goalProgress(goalId);
+            if(signal.aborted||!this.#opened||current?.version!==goal.version)return;
+            // A record based on a later message is never overwritten by an earlier one.
+            const recorded=latest?.evidence_refs[0]?.startsWith('message:chat:main:')?messages.findIndex(m=>'message:chat:main:'+m.id===latest.evidence_refs[0]):-1;
+            if(recorded>messages.findIndex(m=>m.id===messageId))return;
+            // `last_progress_at` only moves forward.
+            const times=[update.made_progress?message.created_at:null,latest?.last_progress_at??null].filter((t):t is string=>!!t).sort((x,y)=>Date.parse(y)-Date.parse(x));
+            await this.recordGoalProgress({goal_id:goalId,goal_version:goal.version,summary:update.summary,next_step:update.next_step,last_progress_at:times[0]??null,evidence_refs:[evidence],basis_revision:evidence,updated_at:this.#now().toISOString()});
+        }catch{try{this.options.onDiagnostic?.('goal_progress_update_failed')}catch{/* diagnostics are optional */}}
     }
     async #claim(key:string):Promise<boolean>{return this.#serial(async()=>{
         if(!this.#opened||this.#state.dedupe.includes(key))return false;
