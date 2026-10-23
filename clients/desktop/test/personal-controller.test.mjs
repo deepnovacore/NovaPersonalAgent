@@ -270,3 +270,19 @@ test('every finished Build is locked, not just the first one in the list',()=>{
  c.receive({type:'personal.state',revision:1000,feed:[],memory:{entries:[]},conversations:{selected_id:'b2',voice_id:null,items:[item('b1','finished'),item('b2','finished'),item('b3','running'),{id:'chat',kind:'chat'}]}})
  assert.deepEqual(['b1','b2','b3','chat'].map(id=>c.isBuildFinished(id)),[true,true,false,false])
 })
+
+test('starting a conversation sends one command, keeps drafts and reuses the request id only after an unknown outcome',async()=>{
+ const {c,sent}=harness();c.draft='keep me'
+ const request={title:'卡片',text:'聊聊',references:[{kind:'todo',id:'t',version:2}]}
+ const answer=(frame,result)=>c.receive({type:'personal.result',request_id:frame.request_id,...result})
+ const first=c.startConversationWithReference(request);await new Promise(resolve=>setImmediate(resolve))
+ const frame=sent.at(-1);assert.equal(frame.method,'conversations.start');assert.deepEqual(frame.params,request)
+ answer(frame,{ok:false,error:'stale_reference'});await assert.rejects(first,/stale_reference/);assert.equal(c.draft,'keep me','a failed start keeps the unsent draft')
+ const second=c.startConversationWithReference(request);await new Promise(resolve=>setImmediate(resolve))
+ const retry=sent.at(-1);assert.notEqual(retry.request_id,frame.request_id,'a host-reported failure is final, so the next click is a new request')
+ c.disconnect();await assert.rejects(second,e=>e.outcome_unknown===true)
+ c.connect();c.receive({type:'desktop.capabilities',input_instance_id:'host-A',capabilities:['text_input']})
+ const third=c.startConversationWithReference(request);await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(sent.at(-1).request_id,retry.request_id,'after an unknown outcome the same request id is retried');answer(sent.at(-1),{ok:true,data:{accepted:true,conversation_id:'n'}});assert.deepEqual(await third,{accepted:true,conversation_id:'n'})
+ const fourth=c.startConversationWithReference(request);await new Promise(resolve=>setImmediate(resolve));assert.notEqual(sent.at(-1).request_id,retry.request_id,'a settled request is not reused');answer(sent.at(-1),{ok:true,data:{}});await fourth
+})

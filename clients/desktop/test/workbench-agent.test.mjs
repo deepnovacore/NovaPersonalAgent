@@ -28,6 +28,14 @@ test('running Build switch waits for user decision, applies stop receipt and lea
  await c.select('build');assert.equal(asked,2,'paused sessions switch without another prompt')
 })
 
+test('starting a conversation from a card never stops a running Build without confirmation',async()=>{
+ let approve=false,asked=0
+ const {c,sent}=fixture(async()=>{asked++;return approve}),request={title:'卡片',text:'聊聊',references:[{kind:'goal',id:'g',version:1}]}
+ await assert.rejects(c.startConversationWithReference(request),/切换已取消/);assert.equal(asked,1);assert.deepEqual(sent,[],'cancelling sends nothing at all')
+ approve=true;await c.startConversationWithReference(request)
+ assert.deepEqual(sent.map(frame=>frame.method),['build.stop','conversations.start']);assert.deepEqual(sent[1].params,request)
+})
+
 test('switching from running Build to voice stops first and routes microphone ownership to Chat',async()=>{
  const {c,sent}=fixture(async()=>true)
  // Stop just before capture: this test checks routing without claiming microphone hardware coverage.

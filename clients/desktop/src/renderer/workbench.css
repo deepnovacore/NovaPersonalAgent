@@ -487,6 +487,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .timeline-card[data-sources="true"] .timeline-title{padding-right:24px}
 .timeline-content:not(.timeline-compact) .timeline-title{padding-right:54px}
 .workbench .timeline-title:hover:not(:disabled){color:var(--accent)}
+[data-opens-conversation="true"]::after{content:"↗";margin-left:6px;font-size:.85em;opacity:.7}
 .timeline-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:3px}
 .workbench .timeline-actions .soft{border:0;border-radius:9px;padding:8px 13px;font-size:12px;font-weight:600;background:var(--card-wash);color:var(--card-ink)}
 .workbench .timeline-card[data-period="near"] .timeline-actions .soft{background:var(--card-ink);color:var(--surface-raised)}
