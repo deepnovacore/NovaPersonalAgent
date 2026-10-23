@@ -5,7 +5,7 @@ import {attachSources,attachSourceTags} from './source-popover.mjs'
 const el=(tag,text,className)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n}
 const labels={todo:'待办',idea:'想法',goal:'目标'}
 const statuses={idea:{active:'保留',archived:'已归档'},goal:{active:'推进中',paused:'已暂停',completed:'已达成',archived:'已归档'}}
-export function renderLife(panel,{kind,state,command,button,local,rerender,openArticle,suggested=0,clampable,bindPending,run=action=>action()}){
+export function renderLife(panel,{kind,state,command,button,local,rerender,openArticle,suggested=0,clampable,bindPending,run=action=>action(),confirm=message=>globalThis.confirm(message)}){
  const rows=state?.[kind==='idea'?'ideas':'goals']??[]
  panel.append(el('h2',t(labels[kind])))
  const toolbar=el('div',undefined,'page-toolbar'),toolbarActions=el('div',undefined,'page-toolbar-actions');panel.append(toolbar)
@@ -36,10 +36,12 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,openA
   const footer=el('div',undefined,'card-footer'),actions=el('div',undefined,'card-actions')
   if(row.auto_recorded&&row.workbench_source&&row.version===1&&kind==='goal')button('撤销自动记录',()=>command('context.undo',{id:row.id}),actions,`life:${row.id}`).className='quiet'
   if(row.news_source){card.append(el('p',`由你从公开资讯保存：${row.news_source.title}`),el('p',row.news_source.url));if(openArticle)button('查看资讯原文',()=>openArticle(row.news_source.url),actions).className='ghost'}
-  if(kind==='goal'){card.append(el('p',`达成标准：${row.success_criteria||'尚未填写'}`),el('p',row.progress.total?`行动进度：${row.progress.done}/${row.progress.total}（不含已取消待办；目标是否达成由你确认）`:'尚未关联待办；不代表目标已达成'))}
+  if(kind==='goal'){card.append(el('p',`达成标准：${row.success_criteria||'尚未填写'}`),el('p',row.progress.total?`行动进度：${row.progress.done}/${row.progress.total}（不含已取消待办；目标是否达成由你确认）`:'尚未关联待办；不代表目标已达成'))
+   const derived=row.derived_progress;if(derived){const box=el('section',undefined,'goal-derived-progress');box.append(el('p',t('最近进展：{0}',derived.summary)));if(derived.next_step)box.append(el('p',t('下一步：{0}',derived.next_step)));box.append(el('p',t(derived.stale?'由 Nova 整理，基于你修改前的目标；稍后会重新整理':'由 Nova 整理，你修改目标后会重新整理'),'hint'));card.append(box)}}
   const select=el('select');select.setAttribute('aria-label',`${row.title}状态`);for(const [value,label]of Object.entries(statuses[kind])){const opt=el('option',label);opt.value=value;select.append(opt)}select.value=row.status;const saving=el('span','正在保存…','action-progress');saving.setAttribute('role','status');saving.hidden=true;const change=async()=>{const value=select.value;try{await command('life.mutate',{op:'update',kind,id:row.id,expected_version:row.version,status:value})}finally{select.value=row.status}};if(bindPending)bindPending(select,`life:${row.id}`,change,'change',saving);else select.addEventListener('change',()=>run(change));footer.append(select,saving,actions)
   if(kind==='idea'){const converted=[...(state?.todos??[]),...(state?.goals??[])].filter(r=>r.idea_id===row.id);for(const target of ['todo','goal']){const existing=converted.find(r=>r.kind===target);if(existing)card.append(el('p',`已转为${labels[target]}：${existing.title}`));else if(row.status!=='archived')button(`转为${labels[target]}`,()=>command('life.mutate',{op:'convert',id:row.id,target,expected_version:row.version}),actions,`life:${row.id}`).className='ghost'}}
   button('编辑',()=>{local[formKey]={...row};rerender()},actions,`life:${row.id}`).className='ghost'
+  if(kind==='goal')button(t('删除'),async()=>{if(confirm(t('删除目标“{0}”？关联的待办和想法会保留，但不再属于这个目标。',row.title)))await command('life.mutate',{op:'delete',kind:'goal',id:row.id,expected_version:row.version})},actions,`life:${row.id}`).className='quiet'
   card.append(footer)
  }
 }

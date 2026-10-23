@@ -1813,4 +1813,9 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "agent 主动找你的消息每天最多几条；你自己发起的任务结果不计入。": "The most messages the agent may start with you per day; results of tasks you started do not count.",
   "减少上限": "Lower the cap",
   "增加上限": "Raise the cap",
+  "删除": "Delete",
+  "最近进展：{0}": "Recent progress: {0}",
+  "由 Nova 整理，你修改目标后会重新整理": "Compiled by Nova; it will be recompiled after you edit the goal",
+  "由 Nova 整理，基于你修改前的目标；稍后会重新整理": "Compiled by Nova from the goal before your edit; it will be recompiled",
+  "删除目标“{0}”？关联的待办和想法会保留，但不再属于这个目标。": "Delete the goal \u201c{0}\u201d? Linked to-dos and ideas stay, but no longer belong to it.",
 })

@@ -19,7 +19,7 @@ import {notificationResultText} from '../notifications/content.js';
 import {NotificationService} from '../notifications/service.js';
 import {novaNotificationAdapter} from '../notifications/adapters/nova.js';
 import {feedNotification,feedNotificationKey} from '../notifications/feed.js';
-import type {NotificationChannelAdapter,NotificationInput} from '../notifications/contracts.js';
+import {goalCheckinSource,type NotificationChannelAdapter,type NotificationInput} from '../notifications/contracts.js';
 import {TaskLoop,TaskExecutionRejected,type TaskDecision} from './task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
 import {acceptanceEnabled,acceptanceNewsEnabled,acceptanceProfileGenerationEnabled,appendAcceptanceCounts,assertPersistedAcceptanceGrant} from '../desktop/workbench-acceptance.js'
@@ -35,7 +35,7 @@ import type {ProjectConfirmationView} from '../projects/project-confirmation.js'
 import {memoryEligibleForDiscovery} from '../memory/entry.js';
 import {PersonalUnderstanding} from './understanding.js';
 import type {UnderstandingPipeline} from '../understanding/pipeline.js';
-import {LifeService} from './life.js';
+import {LifeService,goalCheckinEligible} from './life.js';
 import {NewsService} from '../news/service.js';
 import type {NewsRanker} from '../news/ranking.js';
 import type {SourceChange} from '../memory-substrate/source-state.js'
@@ -51,7 +51,7 @@ import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
-import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
+import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, goalProgressSchema, type GoalProgress, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
@@ -525,11 +525,16 @@ export class PersonalAgentHost {
         if(message.source.type==='task_waiting'&&!this.tasks.list().some(t=>t.id===message.source.id&&t.phase==='waiting'&&(!t.trigger||!this.schedules.findRun(t.trigger.run_id)?.processing)))return 'invalid';
         if(message.source.type==='approval'&&!this.#pendingDecisions().pending_approvals.some(a=>a.approval_id===message.source.id))return 'invalid';
         if(message.source.type==='confirmation'&&!this.#pendingDecisions().pending_confirmations.some(a=>a.proposal_id===message.source.id))return 'invalid';
+        if(message.source.type===goalCheckinSource&&!goalCheckinEligible(this.life.snapshot(),message.source.id).eligible)return 'invalid';
         if(message.priority>=100)return 'valid';
         if(isQuietTime(this.#state.settings,this.#now()))return 'defer';
         const proactive=['brief','suggestion'] as const;
         return proactive.some(kind=>kind===message.kind)&&this.notifications.deliveredToday(proactive,dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=(this.#state.settings.proactive_daily_cap??5)?'defer':'valid';
     }
+    /** Host-internal derived progress; `stale` means the user edited the goal after it was written. */
+    goalProgress(goalId:string):(GoalProgress&{stale:boolean})|null{const goal=this.life.snapshot().goals.find(g=>g.id===goalId),row=this.#state.goal_progress.find(r=>r.goal_id===goalId);return goal&&row?{...structuredClone(row),stale:row.goal_version!==goal.version}:null}
+    recordGoalProgress(input:GoalProgress):Promise<void>{const row=goalProgressSchema.parse(input);return this.#serial(async()=>{const goals=this.life.snapshot().goals,goal=goals.find(g=>g.id===row.goal_id);if(!goal)throw Error('goal_not_found');if(goal.version!==row.goal_version)throw Error('version_conflict');const next=structuredClone(this.#state);next.goal_progress=[...next.goal_progress.filter(r=>r.goal_id!==row.goal_id&&goals.some(g=>g.id===r.goal_id)),row];await this.#commit(next)})}
+    #pruneGoalProgress():Promise<void>{return this.#serial(async()=>{const goals=this.life.snapshot().goals;if(this.#state.goal_progress.every(r=>goals.some(g=>g.id===r.goal_id)))return;const next=structuredClone(this.#state);next.goal_progress=next.goal_progress.filter(r=>goals.some(g=>g.id===r.goal_id));await this.#commit(next)})}
     async #presentNotification(message:NotificationInput):Promise<void>{
         await this.#serial(async()=>{if(!this.localNotifications)throw Error('notification_route_changed');const next=structuredClone(this.#state);const feed=message.source.type==='feed'?next.feed.find(f=>f.id===message.source.id):undefined;
         const owner=feed?.task_ref?next.conversations.items.find(c=>c.id===next.conversations.work_owners[feed.task_ref!.work_id]):undefined;
@@ -1331,7 +1336,7 @@ export class PersonalAgentHost {
         const life=this.life.snapshot();
         if(this.workbenchContext instanceof DailyWorkbench)for(const item of [...life.todos,...life.ideas,...life.goals])if(item.workbench_source)item.source_changed=this.workbenchContext.sourceChanged(item.workbench_source.refs);
         for(const todo of life.todos)if(todo.context_source)todo.sources=this.workbenchContext.sourcesForRefs(todo.context_source.refs);
-        return life;
+        return {...life,goals:life.goals.map(goal=>{const row=this.goalProgress(goal.id);return row?{...goal,derived_progress:{summary:row.summary,next_step:row.next_step,last_progress_at:row.last_progress_at,stale:row.stale}}:goal})};
     }
     snapshot() { const account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id;this.sourceProcessingAgent.setPresentationAccount(account);this.timeline.setAccess({scope:account?'feishu:'+account:'local',allowed:true,legacy_refs:[]});const m = this.options.memory(); const snapshot={ type: 'personal.state' as const, notifications:{...this.notifications.snapshot(),admission_error:this.#notificationError,pending_intents:Object.keys(this.#state.notification_intents).length}, timeline:this.timeline.snapshot(), workbench_context:this.workbenchContext.snapshot(),derived_understanding:this.sourceProcessingAgent.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), schedules:{items:this.schedules.list().filter(item=>!item.processing).map(item=>{const view=scheduleView(item);return {id:view.id,title:view.title,revision:view.revision,enabled:view.enabled,rule:view.rule,next_slot:view.next_slot,missed_count:view.missed_count,dst_gap_count:view.dst_gap_count}}),active_runs:this.schedules.activeRuns().filter(run=>!run.processing).map(scheduleRunView)}, tasks:this.tasks.list().filter(task=>!task.trigger||!this.schedules.findRun(task.trigger.run_id)?.processing).map(({approved_plan,...task})=>({...task,...(approved_plan?{approved_plan_ref:{id:approved_plan.id,version:approved_plan.version,title:approved_plan.title}}:{})})), conversations:this.conversationSnapshot(0), news:this.news.snapshot(), profile_preparation:this.sourceProcessingAgent.enabled?this.sourceProcessingAgent.profileSnapshot():this.profileWarmup.snapshot(), life:this.#lifeSnapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { schedules:this.#conversationPool!==undefined, tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; snapshot.conversations=this.conversationSnapshot(Math.max(0,Math.min(256*1024,1024*1024-Buffer.byteLength(JSON.stringify(snapshot))-1024)));return snapshot; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];if(m?.references?.some(ref=>ref.kind==='timeline'&&ref.interaction))return null;return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).filter(m=>!m.schedule_ref?.run_id).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
@@ -1688,7 +1693,7 @@ export class PersonalAgentHost {
         else if(command.method==='timeline.refresh'){await this.refreshTimeline();void this.timeline.refresh();data={accepted:true}}
         else if(command.method==='timeline.dismiss'){const q=z.object({id:z.string().min(1).max(128)}).strict().parse(p);await this.timeline.dismiss(q.id);data={ok:true}}
         else if(command.method==='context.refresh'){z.object({}).strict().parse(p);void this.workbenchContext.refresh();data={accepted:true}}
-        else if(command.method==='context.undo'){const q=z.object({id:z.string().min(1).max(128)}).strict().parse(p);if(!(this.workbenchContext instanceof DailyWorkbench))throw Error('unavailable');await this.workbenchContext.undo(q.id);data={ok:true}}
+        else if(command.method==='context.undo'){const q=z.object({id:z.string().min(1).max(128)}).strict().parse(p);if(!(this.workbenchContext instanceof DailyWorkbench))throw Error('unavailable');await this.workbenchContext.undo(q.id);await this.#pruneGoalProgress();data={ok:true}}
         else if(command.method==='context.adopt'&&this.workbenchContext instanceof DailyWorkbench){const q=z.object({id:z.string().min(1).max(128)}).strict().parse(p);data=await this.workbenchContext.adopt(q.id)}
         else if(command.method==='projects.correct'){
             const q=z.object({id:z.string().min(1).max(128),value:z.enum(['participating','historical','reference','automatic'])}).strict().parse(p);
@@ -1710,7 +1715,7 @@ export class PersonalAgentHost {
         else if(command.method==='profile.refresh'){z.object({}).strict().parse(p);if(this.sourceProcessingAgent.enabled)await this.sourceProcessingAgent.refresh();else void this.profileWarmup.refresh(true);data={ok:true};}
         else if(command.method==='understanding.start'){this.understanding.start();data=this.understanding.snapshot();}
         else if(command.method==='understanding.action')data=await this.understanding.action(p);
-        else if (command.method==='life.mutate') {if(p.op==='from_news')throw Error('news_conversion_command_required');if(p.op==='from_workbench')throw Error('context_adoption_command_required');if(p.op==='from_suggestion')throw Error('conversion_command_required');data=await this.life.mutate(p,command.request_id);}
+        else if (command.method==='life.mutate') {if(p.op==='from_news')throw Error('news_conversion_command_required');if(p.op==='from_workbench')throw Error('context_adoption_command_required');if(p.op==='from_suggestion')throw Error('conversion_command_required');data=await this.life.mutate(p,command.request_id);if(p.op==='delete'||p.op==='undo_create')await this.#pruneGoalProgress();}
         else if(command.method==='news.convert'){const input=this.news.conversionInput(p);data=await this.life.mutate(input,command.request_id,()=>{this.news.conversionInput(p)});}
         else if (command.method.startsWith('news.')) {
             if(command.method==='news.configure')await this.news.configure(p);
