@@ -150,7 +150,8 @@ The front brain handles conversation; the back brain does the work. Task events 
     </td>
     <td width="50%" valign="top">
       <h3>Take Nova with you</h3>
-      <p>Connect your iPhone over Tailscale to your desktop or headless server. Talk to Nova and approve tasks wherever you are.</p>
+      <p>Create an independent Space, or pair a mobile Client to a desktop Host through an encrypted relay. The Host runs your agent; the Client shows results and sends actions. Host roles stay fixed for each Space.</p>
+      <p>Development branch: <a href="docs/zh-CN/space-host-client.md">Space setup and acceptance guide</a> (Chinese). Device push delivery still requires signed real-device acceptance.</p>
       <a href="assets/features/iphone.en.png"><img src="assets/features/iphone.en.png" alt="Nova iPhone client and connection settings" width="100%"></a>
     </td>
   </tr>
@@ -187,11 +188,9 @@ v0.4 introduces the Nova Personal Agent package names. Published v0.3.x versions
 
 Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-personal-agent@0.4.0`. Upgrades keep your settings and data; back up your Nova data before downgrading.
 
-Headless Ubuntu 22.04+ x64:
+The current development branch uses Space / Host / Client. Configure a desktop Host with the [Space setup guide](docs/zh-CN/space-host-client.md) and deploy or select an encrypted [relay](relay/README.md). Runtime and context stay on the Host; the relay forwards ciphertext. A Client needs its Host online for chat and never takes over background work. Independent Spaces run locally without relay.
 
-1. Install or upgrade with `npm install --global nova-personal-agent-server@latest`, then configure the service and initialize credentials using the [configuration guide](docs/en/deployment/remote-server.md).
-2. Start the service with `novapersonal-server start`.
-3. In a second terminal, run `novapersonal-server pair wss://your-host.ts.net` to display a one-use pairing QR code.
+The v0.4.0 downloads above predate this model. New Spaces require a build from this branch. Host loss means Space loss; changing modes creates a new Space without migrating old data.
 
 ### 3.2 Develop from source
 
@@ -219,11 +218,11 @@ The client includes microphone, camera, sound, settings and external MCP control
 
 ### 3.3 Support matrix
 
-| Platform | Desktop app | Headless server | Connect iPhone |
+| Platform | Desktop app | Historical v0.4 server | Mobile Client |
 |---|---|---|---|
-| macOS arm64 | ✅ Native echo cancellation | ✅ From source | ✅ Desktop pairing |
-| Windows x64 | ✅ | ❌ | ❌ |
-| Ubuntu 22.04+ x64 | ✅ | ✅ npm package | ✅ Headless pairing |
+| macOS arm64 | ✅ Native echo cancellation | ✅ From source | Space pairing via relay |
+| Windows x64 | ✅ | ❌ | Space pairing via relay |
+| Ubuntu 22.04+ x64 | ✅ | ✅ npm package | Space pairing via relay |
 
 | Layer | Providers |
 |---|---|

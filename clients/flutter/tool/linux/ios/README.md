@@ -26,3 +26,32 @@ The process owns one immutable runtime/workspace mapping. Each Flutter engine ow
 The only writable application-content mount is the selected workspace. DNS mounts one dedicated runtime file, never an application database or credential directory. The host environment is not inherited: native execution supplies fixed Linux defaults plus the validated browser bridge URL/token. Host-side logs use descriptor-relative operations with `O_NOFOLLOW`, and cancellation and successful completion clean up tasks by their inherited execution token, including reparented or detached descendants. Exit notifications carry that token so a recycled PID cannot retire another command.
 
 Development verification on 2026-10-19: full unsigned iOS Debug app build succeeded with actual libraries/resources; host guest lifecycle checks passed. The host check also installed Python with APK and executed the JSON read/write check using the signed Tsinghua Alpine v3.21 mirror after the default repository connection timed out; package signature verification remained enabled. The isolated signed iPhone fixture passed all six checks: shared workspace file/shell access, browser DOM commands, exit/stderr reporting, timeout, cancellation, and signed APK installation of Python followed by script execution. The Python check used the test-only Tsinghua Alpine mirror override. Initial device DNS sends failed with `Host is unreachable`; a test-only URLSession/NWPath probe recorded the app network permission restriction and a subsequent HTTP 200, and all six checks passed after network access was allowed. Native probes are compiled only with `NOVA_WORKSPACE_ACCEPTANCE`; raw device diagnostics remain outside the repository. No simulator or diagnostic asset-exclusion build is a substitute for that evidence.
+
+## GitHub Actions compile verification
+
+`.github/workflows/flutter-ios.yml` builds the Flutter `Runner` scheme and embedded
+`NovaNotificationService` on a disposable macOS 15 ARM64 runner with Flutter
+3.47.7, the project's SwiftPM integration (CocoaPods fallback when needed) and
+the real pinned iSH/Alpine runtime. It checks the resulting
+main executable, NSE executable, Flutter assets and fakefs payload. This is an
+unsigned device build, not an APNs delivery or physical-device acceptance test.
+
+CI explicitly passes `--ci-runner-temp` to the runtime builder and
+`NOVA_CI_RUNNER_TEMP=1` to its packaging phase. Both enforce `GITHUB_ACTIONS=true`
+and a canonical path strictly below `RUNNER_TEMP`; local builds still require a
+mounted external volume. Build sources, outputs and caches are namespaced by
+Actions run ID and attempt. Flutter uses a relative `.build` symlink into that
+namespace because its build-dir setting rejects absolute paths. No shared build
+cache is restored. The workflow
+uploads the Xcode log, result bundle and dependency manifest even on failure.
+
+After the workflow is available on an authorized remote branch, run:
+
+```sh
+gh workflow run flutter-ios.yml --ref <branch>
+gh run list --workflow flutter-ios.yml --branch <branch>
+gh run watch <run-id> --exit-status
+```
+
+Only a successful run for the exact revision provides compile evidence. Merely
+adding or statically validating this workflow does not prove an iOS build passed.

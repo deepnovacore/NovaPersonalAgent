@@ -150,7 +150,8 @@ https://github.com/user-attachments/assets/6f050c21-aede-4b2a-8f79-e7794d5137d4
     </td>
     <td width="50%" valign="top">
       <h3>把 Nova 带在身边</h3>
-      <p>通过 Tailscale 将 iPhone 连到桌面端或无头服务。随时对话，也能在手机上确认任务权限。</p>
+      <p>创建独立运行的 Space，或通过加密 relay 将手机 Client 绑定桌面 Host。Host 运行 Agent，Client 展示结果并回传操作；每个 Space 的 Host 角色固定。</p>
+      <p>开发分支：<a href="docs/zh-CN/space-host-client.md">Space 配置与验收指南</a>。系统推送到达仍需签名真机验收。</p>
       <a href="assets/features/iphone.png"><img src="assets/features/iphone.png" alt="Nova iPhone 客户端与连接设置" width="100%"></a>
     </td>
   </tr>
@@ -188,11 +189,9 @@ v0.4 开始使用 Nova Personal Agent 新包名。已发布的 v0.3.x 仍使用�
 
 升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-personal-agent@0.4.0`。升级保留设置与数据；降级前请备份 Nova 数据。
 
-Ubuntu 22.04+ x64 无头服务：
+当前开发分支使用 Space / Host / Client。按 [Space 设置指南](docs/zh-CN/space-host-client.md)配置桌面 Host，部署或选择加密 [relay](relay/README.md)。Runtime 与 context 留在 Host，relay 只转发密文。Client 聊天需要 Host 在线，不会接管后台任务；独立 Space 在本机运行，无需 relay。
 
-1. 运行 `npm install --global nova-personal-agent-server@latest` 安装或升级，按[远程服务指南](docs/zh-CN/deployment/remote-server.md)完成配置与凭据初始化。
-2. 运行 `novapersonal-server start` 启动服务。
-3. 另开终端运行 `novapersonal-server pair wss://your-host.ts.net`，显示一次性配对二维码。
+上方 v0.4.0 下载早于这个模型，新 Space 需要构建本分支。Host 损坏即 Space 丢失；切换模式需要新建 Space，旧数据不迁移。
 
 ### 3.2 从源码开发
 
@@ -222,11 +221,11 @@ node runtime/dist/src/cli.js demo all
 
 ### 3.3 支持矩阵
 
-| 平台 | 桌面应用 | 无头服务 | 连接 iPhone |
+| 平台 | 桌面应用 | 历史 v0.4 服务 | 手机 Client |
 |---|---|---|---|
-| macOS arm64 | ✅ 原生回声消除 | ✅ 源码运行 | ✅ 桌面端配对 |
-| Windows x64 | ✅ | ❌ | ❌ |
-| Ubuntu 22.04+ x64 | ✅ | ✅ npm 包 | ✅ 无头服务配对 |
+| macOS arm64 | ✅ 原生回声消除 | ✅ 源码运行 | 通过 relay 配对 Space |
+| Windows x64 | ✅ | ❌ | 通过 relay 配对 Space |
+| Ubuntu 22.04+ x64 | ✅ | ✅ npm 包 | 通过 relay 配对 Space |
 
 | 层 | 可选服务 |
 |---|---|

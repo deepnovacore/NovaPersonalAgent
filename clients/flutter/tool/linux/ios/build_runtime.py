@@ -21,9 +21,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-root', type=pathlib.Path, required=True)
     parser.add_argument('--sdk', choices=['iphoneos','iphonesimulator','macosx'], default='iphoneos')
+    parser.add_argument('--ci-runner-temp', action='store_true', help='Allow an isolated GitHub Actions RUNNER_TEMP output root')
     args = parser.parse_args()
     out = args.output_root.resolve()
-    if len(out.parts) < 4 or out.parts[1] != 'Volumes' or not os.path.ismount(pathlib.Path('/Volumes') / out.parts[2]):
+    if args.ci_runner_temp:
+        runner_temp = os.environ.get('RUNNER_TEMP')
+        if os.environ.get('GITHUB_ACTIONS') != 'true' or not runner_temp or not out.is_relative_to(pathlib.Path(runner_temp).resolve()) or out == pathlib.Path(runner_temp).resolve():
+            raise SystemExit('--ci-runner-temp requires an isolated output under GitHub Actions RUNNER_TEMP')
+    elif len(out.parts) < 4 or out.parts[1] != 'Volumes' or not os.path.ismount(pathlib.Path('/Volumes') / out.parts[2]):
         raise SystemExit('--output-root must be on a mounted external volume; no internal fallback')
     out.mkdir(parents=True, exist_ok=True)
     downloads = out / 'downloads'; downloads.mkdir(exist_ok=True)
