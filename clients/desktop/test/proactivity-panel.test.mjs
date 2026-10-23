@@ -20,7 +20,7 @@ test('panel holds discovery, briefing, quiet hours and the daily cap',async()=>{
  const h=harness();await h.panel.load()
  const labels=all(h.root).map(n=>n['aria-label']).filter(Boolean)
  for(const label of ['主动发现间隔','早间简报','晚间简报','免打扰开始','免打扰结束','时区','周一','周日','每日主动消息上限'])assert.ok(labels.includes(label),label)
- assert.ok(h.button('保存简报设置'));assert.equal(h.cap().value,'3');assert.equal(h.cap().min,'1');assert.equal(h.cap().max,'10')
+ assert.ok(h.button('保存简报设置'));assert.equal(h.cap().value,'5');assert.equal(h.cap().min,'1');assert.equal(h.cap().max,'10')
  assert.ok(all(h.root).some(n=>n.textContent==='agent 主动找你的消息每天最多几条；你自己发起的任务结果不计入。'))
 })
 test('changing the cap sends discovery.configure with proactive_daily_cap and only that field',async()=>{
@@ -31,7 +31,7 @@ test('changing the cap sends discovery.configure with proactive_daily_cap and on
  assert.deepEqual(h.calls.filter(c=>c[0]==='discovery.configure').at(-1),['discovery.configure',{proactive_daily_cap:6}])
 })
 test('out of range cap values are clamped and the bounds never send a command',async()=>{
- assert.equal(clampDailyCap(0),1);assert.equal(clampDailyCap(99),10);assert.equal(clampDailyCap(-4),1);assert.equal(clampDailyCap(4.6),5);assert.equal(clampDailyCap('abc'),3)
+ assert.equal(clampDailyCap(0),1);assert.equal(clampDailyCap(99),10);assert.equal(clampDailyCap(-4),1);assert.equal(clampDailyCap(4.6),5);assert.equal(clampDailyCap('abc'),5)
  const h=harness({proactive_daily_cap:10});await h.panel.load();const before=h.calls.length
  await h.button('增加上限').listeners.click();await h.tick();assert.equal(h.calls.length,before)
  h.cap().value='500';h.cap().listeners.change();await h.tick();assert.equal(h.calls.length,before);assert.equal(h.cap().value,'10')

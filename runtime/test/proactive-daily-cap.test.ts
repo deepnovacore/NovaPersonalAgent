@@ -24,15 +24,15 @@ async function fixture(){
 
 test('proactive messages beyond the daily cap are deferred until the next local date; responses and preemptive alerts are not capped',async()=>{
  const f=await fixture();try{
-  for(const key of ['s1','s2','s3'])await f.publish(key)
-  assert.deepEqual(['s1','s2','s3'].map(f.status),['accepted','accepted','accepted'],'the default cap of 3 delivers within quota')
-  await f.publish('s4');await f.publish('b5',{kind:'brief'})
-  assert.equal(f.status('s4'),'pending','the fourth suggestion is deferred, not dropped');assert.equal(f.status('b5'),'pending','briefs share the same quota')
+  for(const key of ['s1','s2','s3','s4','s5'])await f.publish(key)
+  assert.deepEqual(['s1','s2','s3','s4','s5'].map(f.status),['accepted','accepted','accepted','accepted','accepted'],'the default cap of 5 delivers within quota')
+  await f.publish('s6');await f.publish('b7',{kind:'brief'})
+  assert.equal(f.status('s6'),'pending','the sixth suggestion is deferred, not dropped');assert.equal(f.status('b7'),'pending','briefs share the same quota')
   await f.publish('result',{kind:'task_result'});await f.publish('urgent',{priority:100})
   assert.equal(f.status('result'),'accepted','task results answer the user and are never capped');assert.equal(f.status('urgent'),'accepted','priority 100 is exempt like quiet hours')
-  await f.host.flushNotifications();assert.equal(f.status('s4'),'pending','a later flush on the same local date still defers')
+  await f.host.flushNotifications();assert.equal(f.status('s6'),'pending','a later flush on the same local date still defers')
   f.setClock(nextLocalDay);await f.host.flushNotifications()
-  assert.equal(f.status('s4'),'accepted','the next local date in the user timezone delivers the deferred message');assert.equal(f.status('b5'),'accepted')
+  assert.equal(f.status('s6'),'accepted','the next local date in the user timezone delivers the deferred message');assert.equal(f.status('b7'),'accepted')
  }finally{await f.close()}
 })
 
@@ -42,14 +42,14 @@ test('superseded and expired proactive deliveries do not consume the daily cap',
   assert.equal(f.status('old'),'superseded')
   await f.publish('stale',{expires_at:start+1000,not_before:start+500});f.setClock(start+2000);await f.host.flushNotifications()
   assert.equal(f.status('stale'),'expired')
-  for(const key of ['fresh1','fresh2','fresh3']){await f.publish(key);assert.equal(f.status(key),'accepted','neither superseded nor expired deliveries count')}
+  for(const key of ['fresh1','fresh2','fresh3','fresh4','fresh5']){await f.publish(key);assert.equal(f.status(key),'accepted','neither superseded nor expired deliveries count')}
   await f.publish('over');assert.equal(f.status('over'),'pending','accepted deliveries do count')
  }finally{await f.close()}
 })
 
 test('discovery.configure stores the daily cap, keeps it when omitted and rejects values outside 1-10',async()=>{
  const f=await fixture();try{
-  assert.equal(f.host.snapshot().settings.proactive_daily_cap,3,'default cap')
+  assert.equal(f.host.snapshot().settings.proactive_daily_cap,5,'default cap')
   assert.equal((await f.configure({proactive_daily_cap:7})).ok,true);assert.equal(f.host.snapshot().settings.proactive_daily_cap,7)
   assert.equal((await f.configure({enabled:false})).ok,true);assert.equal(f.host.snapshot().settings.proactive_daily_cap,7,'omitted field keeps the stored value')
   for(const value of [0,11,2.5,'3'])assert.equal((await f.configure({proactive_daily_cap:value})).ok,false,String(value))

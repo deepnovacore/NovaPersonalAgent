@@ -4,7 +4,7 @@ import {renderDailyBrief} from './daily-brief-view.mjs'
 
 export const DAILY_CAP_MIN = 1
 export const DAILY_CAP_MAX = 10
-export const DAILY_CAP_DEFAULT = 3
+export const DAILY_CAP_DEFAULT = 5
 /** Out-of-range or non-integer input never reaches the runtime; it is pulled into 1-10. */
 export function clampDailyCap(value) {
  const number = Math.round(Number(value))

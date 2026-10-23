@@ -528,7 +528,7 @@ export class PersonalAgentHost {
         if(message.priority>=100)return 'valid';
         if(isQuietTime(this.#state.settings,this.#now()))return 'defer';
         const proactive=['brief','suggestion'] as const;
-        return proactive.some(kind=>kind===message.kind)&&this.notifications.deliveredToday(proactive,dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=(this.#state.settings.proactive_daily_cap??3)?'defer':'valid';
+        return proactive.some(kind=>kind===message.kind)&&this.notifications.deliveredToday(proactive,dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=(this.#state.settings.proactive_daily_cap??5)?'defer':'valid';
     }
     async #presentNotification(message:NotificationInput):Promise<void>{
         await this.#serial(async()=>{if(!this.localNotifications)throw Error('notification_route_changed');const next=structuredClone(this.#state);const feed=message.source.type==='feed'?next.feed.find(f=>f.id===message.source.id):undefined;
