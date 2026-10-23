@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,readFile,realpath,rm,stat} from 'node:fs/promises'
+import {mkdtemp,readFile,realpath,rm,stat,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
@@ -48,6 +48,20 @@ test('hidden schedule ownership has a separate quota, rejects foreground use and
   const backup=path+'.before-schedules.json';assert.equal(await readFile(backup,'utf8'),original);assert.equal((await stat(backup)).mode&0o777,0o600)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+test('an empty pre-schedules backup is recreated like a missing one, a corrupt one still fails',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-schedule-backup-')),path=join(dir,'personal.json'),backup=path+'.before-schedules.json'
+ try{
+  const original=JSON.stringify(initialState());await writeFile(path,original,{mode:0o600})
+  // A reset that truncates the store and its backup must not leave the app unable to start.
+  await writeFile(backup,'',{mode:0o600})
+  await new PersonalStore(path).ensureScheduleBackup()
+  assert.equal(await readFile(backup,'utf8'),original);assert.equal((await stat(backup)).mode&0o777,0o600)
+  await writeFile(backup,'{not json',{mode:0o600})
+  await assert.rejects(new PersonalStore(path).ensureScheduleBackup())
+  assert.equal(await readFile(backup,'utf8'),'{not json')
+ }finally{await rm(dir,{recursive:true,force:true})}
+})
+
 test('an unknown dispatched effect survives recovery without a second attempt',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-run-unknown-')),path=join(dir,'personal.json')
  const make=()=>new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
