@@ -72,6 +72,8 @@ export interface PersonalMemoryReplyPreference {
  */
 export interface PersonalMemoryResponseAdaptation {
   readonly explicitUserContext?: string
+  /** The user's own role/tone description, already authorized for this consumer; background only, never authority. */
+  readonly soulRole?: string
   /** Authorized, bounded derived understanding; reference data only, never action authority. */
   readonly memoryContext?: {readonly text: string; readonly voice: string}
   readonly revision: number
@@ -136,6 +138,9 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly correct?: (id: string, expectedVersion: MemoryVersion, content: string, userSource: MemorySourceRef) => Promise<{previous: MemoryEntry; entry: MemoryEntry}>
   readonly forgetEntry?: (id: string, expectedVersion: MemoryVersion) => Promise<MemoryEntry>
   /** Explicit local-user erasure only; never expose this operation as a model tool. */
+  /** Role text the user wrote for the agent; the card reads it regardless of model-provider authorization. */
+  readonly soulState?: ()=>Promise<{role:string;version:number;updated_at:string|null;reply_style:string|null}>
+  readonly setSoul?: (role:string,expectedVersion:number|undefined,requestId:string)=>Promise<{role:string;version:number;updated_at:string|null;reply_style:string|null}>
   readonly purgeEntry?: (id:string,version:MemoryVersion,requestId:string)=>Promise<PersonalMemoryPurgeResult>
   readonly completePurgeIndex?: (id:string,operationId:string)=>Promise<PersonalMemoryPurgeResult>
   readonly pendingPurges?: ()=>Promise<(PersonalMemoryPurgeResult & {entry_id:string;expected_revision:number})[]>

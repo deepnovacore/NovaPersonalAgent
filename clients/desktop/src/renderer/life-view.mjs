@@ -1,4 +1,5 @@
 import {t} from './locale.mjs'
+import {renderSoulCard} from './soul-card.mjs'
 import {renderCardTags} from './card-tags.mjs'
 import {renderInterests,renderWarmup} from './profile-preferences.mjs'
 import {attachSources,attachSourceTags} from './source-popover.mjs'
@@ -46,8 +47,15 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,openA
   card.append(footer)
  }
 }
-export function renderProfile(panel,{products,state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate}){
+export function renderProfile(panel,options){
+ const {soul}=options
+ if(!soul){renderProfileBody(panel,options);return}
  panel.append(el('h2',t('个人资料')))
+ const split=el('div',undefined,'profile-split'),main=el('div',undefined,'profile-main'),side=el('div',undefined,'profile-soul');split.append(main,side);panel.append(split)
+ renderProfileBody(main,{...options,heading:false});renderSoulCard(side,{soul:soul.view,command:options.command,button:options.button,local:options.local,rerender:options.rerender,openSettings:soul.openSettings})
+}
+function renderProfileBody(panel,{products,state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate,heading=true}){
+ if(heading)panel.append(el('h2',t('个人资料')))
  const displayDraft=warmup?.draft
  renderWarmup(panel,{warmup,command,button})
  if(warmup)panel.append(el('p',warmup.automatic_available===false?'今日自动更新次数已用完，如需再次更新可手动触发。':'每天最多自动更新一次，额外更新可手动触发。'))

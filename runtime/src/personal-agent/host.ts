@@ -866,6 +866,7 @@ export class PersonalAgentHost {
     readonly #store: PersonalStore;
     #state: PersonalState = initialState();
     #includeExpired=false;
+    #soul: {role:string;version:number;updated_at:string|null;reply_style:string|null}|null=null;
     #memory: {
         include_expired?: boolean;
         entries: MemoryEntry[];
@@ -1437,6 +1438,7 @@ export class PersonalAgentHost {
         const refresh = this.#memoryRefresh, memory = this.options.memory();
         const page = memory?.list ? await memory.list({ ...(cursor ? { cursor } : {}), limit,...(includeExpired?{include_expired:true}:{}) }) : {entries: [], cursor: null};
         const pending_purges=await memory?.pendingPurges?.()??[];
+        const soul=await memory?.soulState?.().catch(()=>null)??null;
         if (refresh !== this.#memoryRefresh || !this.#opened) return;
         const initialPage=cursor&&memory?.list?await memory.list({limit:100}):page;
         if(refresh!==this.#memoryRefresh||!this.#opened)return;
@@ -1474,6 +1476,7 @@ export class PersonalAgentHost {
         this.#overviewAbort.abort();
         this.#overviewKey = key;
         this.#memory = {...page, pending_purges, include_expired:includeExpired, overview: this.#overviewCache?.key === key ? this.#overviewCache.value : null};
+        this.#soul=soul;
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
@@ -1523,6 +1526,8 @@ export class PersonalAgentHost {
         }else await this.#serial(async()=>{const next=structuredClone(this.#state);Object.assign(next.settings,q);await this.#commit(next)});
     }
     identity(){return {assistant_name:this.#state.settings.assistant_name??'nova',user_name:this.#state.settings.user_name??''}}
+    /** A read-only join of existing sources: the name, reply_style slot and contact settings are never copied into a second store. */
+    #soulView(){const s=this.#state.settings,b=dailyBriefSettings(s);return {available:this.options.memory()?.setSoul!==undefined&&this.#soul!==null,role:this.#soul?.role??'',version:this.#soul?.version??0,updated_at:this.#soul?.updated_at??null,assistant_name:this.identity().assistant_name,reply_style:this.#soul?.reply_style??null,contact:{daily_cap:s.proactive_daily_cap,quiet_start:b.quiet_start,quiet_end:b.quiet_end,briefs_on:b.briefing_outlook_enabled||b.briefing_review_enabled,discovery_on:s.discovery_enabled}}}
     async #timelineInputs(retainHistory=false):Promise<TimelineInput[]>{
         const history=retainHistory?this.timeline.retainedEvidenceIds():[],stated=this.#stated.map(entry=>entry.id);
         const messages=await this.options.memory()?.timelineEvidence?.(history)??[];
@@ -1554,7 +1559,7 @@ export class PersonalAgentHost {
         for(const todo of life.todos)if(todo.context_source)todo.sources=this.workbenchContext.sourcesForRefs(todo.context_source.refs);
         return {...life,goals:life.goals.map(goal=>{const row=this.goalProgress(goal.id);return row?{...goal,derived_progress:{summary:row.summary,next_step:row.next_step,last_progress_at:row.last_progress_at,stale:row.stale}}:goal})};
     }
-    snapshot() { const account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id;this.sourceProcessingAgent.setPresentationAccount(account);this.timeline.setAccess({scope:account?'feishu:'+account:'local',allowed:true,legacy_refs:[]});const m = this.options.memory(); const snapshot={ type: 'personal.state' as const, notifications:{...this.notifications.snapshot(),admission_error:this.#notificationError,pending_intents:Object.keys(this.#state.notification_intents).length}, timeline:this.timeline.snapshot(), workbench_context:this.workbenchContext.snapshot(),derived_understanding:this.sourceProcessingAgent.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), schedules:{items:this.schedules.list().filter(item=>!item.processing).map(item=>{const view=scheduleView(item);return {id:view.id,title:view.title,revision:view.revision,enabled:view.enabled,rule:view.rule,next_slot:view.next_slot,missed_count:view.missed_count,dst_gap_count:view.dst_gap_count}}),active_runs:this.schedules.activeRuns().filter(run=>!run.processing).map(scheduleRunView)}, tasks:this.tasks.list().filter(task=>!task.trigger||!this.schedules.findRun(task.trigger.run_id)?.processing).map(({approved_plan,...task})=>({...task,...(approved_plan?{approved_plan_ref:{id:approved_plan.id,version:approved_plan.version,title:approved_plan.title}}:{})})), conversations:this.conversationSnapshot(0), news:this.news.snapshot(), profile_preparation:this.sourceProcessingAgent.enabled?this.sourceProcessingAgent.profileSnapshot():this.profileWarmup.snapshot(), life:this.#lifeSnapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { schedules:this.#conversationPool!==undefined, tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; snapshot.conversations=this.conversationSnapshot(Math.max(0,Math.min(256*1024,1024*1024-Buffer.byteLength(JSON.stringify(snapshot))-1024)));return snapshot; }
+    snapshot() { const account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id;this.sourceProcessingAgent.setPresentationAccount(account);this.timeline.setAccess({scope:account?'feishu:'+account:'local',allowed:true,legacy_refs:[]});const m = this.options.memory(); const snapshot={ type: 'personal.state' as const, notifications:{...this.notifications.snapshot(),admission_error:this.#notificationError,pending_intents:Object.keys(this.#state.notification_intents).length}, timeline:this.timeline.snapshot(), workbench_context:this.workbenchContext.snapshot(),derived_understanding:this.sourceProcessingAgent.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), schedules:{items:this.schedules.list().filter(item=>!item.processing).map(item=>{const view=scheduleView(item);return {id:view.id,title:view.title,revision:view.revision,enabled:view.enabled,rule:view.rule,next_slot:view.next_slot,missed_count:view.missed_count,dst_gap_count:view.dst_gap_count}}),active_runs:this.schedules.activeRuns().filter(run=>!run.processing).map(scheduleRunView)}, tasks:this.tasks.list().filter(task=>!task.trigger||!this.schedules.findRun(task.trigger.run_id)?.processing).map(({approved_plan,...task})=>({...task,...(approved_plan?{approved_plan_ref:{id:approved_plan.id,version:approved_plan.version,title:approved_plan.title}}:{})})), conversations:this.conversationSnapshot(0), news:this.news.snapshot(), profile_preparation:this.sourceProcessingAgent.enabled?this.sourceProcessingAgent.profileSnapshot():this.profileWarmup.snapshot(), life:this.#lifeSnapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), soul:this.#soulView(), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { schedules:this.#conversationPool!==undefined, tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; snapshot.conversations=this.conversationSnapshot(Math.max(0,Math.min(256*1024,1024*1024-Buffer.byteLength(JSON.stringify(snapshot))-1024)));return snapshot; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];if(m?.references?.some(ref=>ref.kind==='timeline'&&ref.interaction))return null;return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).filter(m=>!m.schedule_ref?.run_id).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         if (!this.#release || !this.#loaded) throw Error('personal_store_not_ready');
@@ -1830,6 +1835,11 @@ export class PersonalAgentHost {
         else if(command.method==='identity.configure'){
             const q=z.object({assistant_name:identityNameSchema.min(1),user_name:userNameSchema}).strict().parse(p);
             await this.#configureIdentity(command.request_id,payload,q);this.#notify();data=this.identity();
+        }
+        else if(command.method==='soul.set'){
+            const q=z.object({role:z.string().max(1000),expected_version:z.number().int().nonnegative().optional()}).strict().parse(p);
+            if(!m?.setSoul)throw Error('memory_unavailable');
+            const soul=await m.setSoul(q.role,q.expected_version,command.request_id);this.#soul=soul;data=soul;this.#notify();
         }
         else if(command.method.startsWith('notifications.')){/* Handled above; never forward notification commands to source connectors. */}
         else if(taskCommand){

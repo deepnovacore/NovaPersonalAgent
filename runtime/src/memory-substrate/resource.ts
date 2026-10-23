@@ -24,6 +24,7 @@ import {MemoryObservationSchema, MemoryListOptionsSchema, MemorySourceRefSchema,
 import type {PersonalMemoryResource, PersonalMemoryRememberTurn, PersonalMemoryResponseAdaptation, PersonalMemoryPurgeResult} from '../memory/personal-memory.js'
 import {CandidateSchema, EntryRevisionSchema, EvidenceRecordSchema, contentHash, type Candidate,type EntryRevision, type EvidenceRecord} from './store.js'
 import {prepareAutomaticCandidate} from './candidates.js'
+import {SOUL_BODY_MAX} from './memory-documents.js'
 import {prepareConsolidation,generateConsolidation,memoryReadContext} from './consolidation.js'
 import {resolutionSchema,validateResolution,type ResolutionContext,type ResolutionDecision,type LifeResolution,type ResolvedLifeCandidate} from './resolution.js'
 
@@ -215,6 +216,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     signal?.throwIfAborted();this.#ready()
     if(workEpoch!==this.#memoryWorkEpoch)return {revision:++this.#preparedRevision,replyPreferences:[],memoryContext:{text:'',voice:''}}
     const summary=rows.find(row=>row.entry_id===this.prefix+'summary:daily')??null,now=new Date()
+    const soulRole=this.#soulRole(rows)
     const projection={replyPreferences:rows.filter(row=>row.kind==='preference'&&row.origin==='stated').slice(0,16).map(row=>({id:row.entry_id,text:displayText(row.content.text),evidenceIds:row.evidence_refs})),memoryContext:{text:memoryReadContext(rows,summary,{now,mode:'text'}),voice:memoryReadContext(rows,summary,{now,mode:'voice'})}}
     let explicitUserContext:string|undefined
     const recipient=this.options.conversationRecipients?.[consumer]
@@ -223,7 +225,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
       // Hub hides shared context, but does not disable unrelated local chat.
       try{await this.#sharedContext.prepare();explicitUserContext=this.#sharedContext.correctionContext(recipient)}catch{signal?.throwIfAborted()}
     }
-    const enriched={...projection,...(explicitUserContext?{explicitUserContext}:{})}
+    const enriched={...projection,...(explicitUserContext?{explicitUserContext}:{}),...(soulRole?{soulRole}:{})}
     const signature=JSON.stringify(enriched),old=this.#preparedSignatures.get(consumer)
     const revision=old?.signature===signature?old.revision:Math.max(++this.#preparedRevision,this.#adaptation.revision+1)
     this.#preparedRevision=Math.max(this.#preparedRevision,revision)
@@ -279,7 +281,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(signature===this.#snapshotSignature)return
     this.#snapshotSignature=signature
     const summary=rows.find(row=>row.entry_id===this.prefix+'summary:daily')??null,now=new Date()
-    this.#adaptation={revision:this.#adaptation.revision+1,replyPreferences:authorized.entries.filter(r=>r.kind==='preference'&&r.origin==='stated').slice(0,16).map(r=>({id:r.entry_id,text:displayText(r.content.text),evidenceIds:r.evidence_refs})),memoryContext:{text:memoryReadContext(authorized.entries,summary,{now,mode:'text'}),voice:memoryReadContext(authorized.entries,summary,{now,mode:'voice'})}}
+    this.#adaptation={revision:this.#adaptation.revision+1,replyPreferences:authorized.entries.filter(r=>r.kind==='preference'&&r.origin==='stated').slice(0,16).map(r=>({id:r.entry_id,text:displayText(r.content.text),evidenceIds:r.evidence_refs})),memoryContext:{text:memoryReadContext(authorized.entries,summary,{now,mode:'text'}),voice:memoryReadContext(authorized.entries,summary,{now,mode:'voice'})},...(this.#soulRole(authorized.entries)?{soulRole:this.#soulRole(authorized.entries)!}:{})}
     this.#queueConsolidation()
     if(notify){this.#queueIndex();this.options.onChange?.();this.#onChange?.()}
   }
@@ -312,12 +314,12 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     await this.options.client.memory('commit_consolidation',{entry_prefix:this.prefix,provider:this.#extractionFingerprint(),candidate,contexts})
     if(this.#opened)await this.#refresh()
   }
-  async list(options:Parameters<NonNullable<PersonalMemoryResource['list']>>[0]={}){const q=MemoryListOptionsSchema.parse(options);const offset=q.cursor?Number(q.cursor):0;if(!Number.isSafeInteger(offset)||offset<0)throw Error('invalid_cursor');const rows=(await this.#rows(q.include_expired??false,true,true)).filter(row=>row.op!=='tombstone'&&row.kind!=='memory_summary'&&!(row.kind==='entity'&&row.content.entity_kind==='person')&&!(row.entry_id.startsWith('workspace:')&&['inactive','suppressed','stale'].includes(displayText(row.content.status))));const limit=q.limit??100;return {entries:await this.#entries(rows.slice(offset,offset+limit)),cursor:offset+limit<rows.length?String(offset+limit):null}}
-  async get(id:string):Promise<MemoryEntry|null>{const row=(await this.#rows(true,true,true)).find(r=>r.entry_id===id);return row?this.#entry(row):null}
+  async list(options:Parameters<NonNullable<PersonalMemoryResource['list']>>[0]={}){const q=MemoryListOptionsSchema.parse(options);const offset=q.cursor?Number(q.cursor):0;if(!Number.isSafeInteger(offset)||offset<0)throw Error('invalid_cursor');const rows=(await this.#rows(q.include_expired??false,true,true)).filter(row=>row.op!=='tombstone'&&row.kind!=='memory_summary'&&row.kind!=='soul'&&!(row.kind==='entity'&&row.content.entity_kind==='person')&&!(row.entry_id.startsWith('workspace:')&&['inactive','suppressed','stale'].includes(displayText(row.content.status))));const limit=q.limit??100;return {entries:await this.#entries(rows.slice(offset,offset+limit)),cursor:offset+limit<rows.length?String(offset+limit):null}}
+  async get(id:string):Promise<MemoryEntry|null>{const row=(await this.#rows(true,true,true)).find(r=>r.entry_id===id&&r.kind!=='soul');return row?this.#entry(row):null}
   async getMany(ids:readonly string[]):Promise<(MemoryEntry|null)[]>{
     if(!ids.length)return []
     const wanted=new Set(ids),rows=new Map<string,EntryRevision>()
-    for(const row of await this.#rows(true,true,true))if(wanted.has(row.entry_id)&&!rows.has(row.entry_id))rows.set(row.entry_id,row)
+    for(const row of await this.#rows(true,true,true))if(wanted.has(row.entry_id)&&row.kind!=='soul'&&!rows.has(row.entry_id))rows.set(row.entry_id,row)
     const entries=new Map<string,MemoryEntry>()
     for(const entry of await this.#entries([...rows.values()]))entries.set(entry.id,entry)
     return ids.map(id=>entries.get(id)??null)
@@ -674,7 +676,47 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const row=(await this.#rows(true)).find(entry=>entry.entry_id===id);if(!row||row.op==='tombstone')throw Error('STORE_NOT_FOUND')
     for(const ref of row.evidence_refs.slice(-16)){const raw=await this.options.client.memory('evidence',{id:ref});if(raw!==null){const source=EvidenceRecordSchema.parse(raw);if(source.source_kind!=='user_correction')await this.#extract(source,undefined,true)}}
   }
-  async #current(id:string,version:MemoryVersion):Promise<EntryRevision>{const row=(await this.#rows(true)).find(r=>r.entry_id===id);if(!row)throw Error('STORE_NOT_FOUND');if(row.op==='tombstone'||row.revision!==version)throw Error('STORE_CONFLICT');return row}
+  async #current(id:string,version:MemoryVersion):Promise<EntryRevision>{const row=(await this.#rows(true)).find(r=>r.entry_id===id&&r.kind!=='soul');if(!row)throw Error('STORE_NOT_FOUND');if(row.op==='tombstone'||row.revision!==version)throw Error('STORE_CONFLICT');return row}
+  /** Authorized, nonempty role text for the model; the card reads soulState() instead. */
+  #soulRole(rows:readonly EntryRevision[]):string|undefined{const row=this.#soulRow(rows),text=row&&typeof row.content.text==='string'?row.content.text.slice(0,SOUL_BODY_MAX).trim():'';return text||undefined}
+  #soulBase():string{return this.prefix+'soul:main'}
+  /** The single live role record. A purge fences an entry ID forever, so a later role gets a fresh generation ID. */
+  #soulRow(rows:readonly EntryRevision[]):EntryRevision|null{
+    const base=this.#soulBase()
+    return rows.find(row=>row.kind==='soul'&&row.op!=='tombstone'&&(row.entry_id===base||row.entry_id.startsWith(base+':')))??null
+  }
+  /** The user's own role text for the card, independent of model-provider authorization. */
+  async soulState():Promise<{role:string;version:number;updated_at:string|null;reply_style:string|null}>{
+    this.#ready()
+    const rows=await this.#rows(true),row=this.#soulRow(rows),text=row&&typeof row.content.text==='string'?row.content.text:''
+    // Read-only: the reply_style slot is written only through memory__remember and stays the single source of truth.
+    const style=rows.filter(item=>item.kind==='preference'&&item.origin==='stated'&&item.op!=='tombstone'&&item.content.memory_slot==='reply_style'&&typeof item.content.text==='string'&&item.content.text.trim()!=='').sort((a,b)=>b.recorded_at.localeCompare(a.recorded_at))[0]
+    return {role:text.slice(0,SOUL_BODY_MAX),version:row?.revision??0,updated_at:row?.recorded_at??null,reply_style:typeof style?.content.text==='string'?style.content.text.trim().slice(0,500):null}
+  }
+  async setSoul(role:string,expectedVersion:number|undefined,requestId:string):Promise<{role:string;version:number;updated_at:string|null;reply_style:string|null}>{
+    this.#ready()
+    if(this.options.personalMemoryEnabled===false||this.options.inputConsent!==true)throw Error('memory_unavailable')
+    const checked=z.string().max(SOUL_BODY_MAX).refine(value=>!value.includes('<!--')).safeParse(role)
+    if(!checked.success)throw Error('invalid_role')
+    const text=checked.data.trim()
+    const rows=await this.#rows(true),current=this.#soulRow(rows),version=current?.revision??0
+    if(expectedVersion!==undefined&&expectedVersion!==version)throw Error('stale')
+    if(current?.content.text===text)return this.soulState()
+    const now=new Date().toISOString()
+    const source=MemorySourceRefSchema.parse({type:'conversation',ref:'soul-set:'+requestId,observed_at:now})
+    const evidence=await this.#admit(source,text||'(cleared the role description)','user_correction',source.ref,undefined,true,undefined,false)
+    const write=(id:string,expected:number)=>this.options.client.memory('merge',CandidateSchema.parse({entry_id:id,expected_revision:expected,kind:'soul',origin:'stated',written_by:'user_correction',evidence_refs:[evidence.id],entity_refs:[],content:{text},valid_until:null,recorded_at:now}))
+    const code=(error:unknown)=>(error as {code?:string}|undefined)?.code??(error instanceof Error?error.message:'')
+    try{
+      try{await write(current?.entry_id??this.#soulBase(),version)}
+      catch(error){
+        if(!current&&code(error)==='STORE_PURGED_ID')await write(this.#soulBase()+':'+digest(requestId).slice(0,16),0)
+        else throw error
+      }
+    }catch(error){if(code(error)==='STORE_STALE_REVISION')throw Error('stale');throw error}
+    await this.#refresh()
+    return this.soulState()
+  }
   async correct(id:string,version:MemoryVersion,content:string,source:MemorySourceRef){const old=await this.#current(id,version);if(!content.trim()||content.length>500||source.type!=='conversation')throw Error('STORE_INVALID_INPUT');const evidence=await this.#admit(MemorySourceRefSchema.parse(source),content,'user_correction',source.ref,undefined,true,undefined,await this.#inheritsConsent(old));const candidate=CandidateSchema.parse({entry_id:id,expected_revision:version,kind:old.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidence.id],entity_refs:old.entity_refs,content:{...old.content,text:content,...(old.kind==='commitment'?{due:null}: {})},valid_until:null,recorded_at:new Date().toISOString()});const row=EntryRevisionSchema.parse(await this.options.client.memory('merge',candidate));await this.#refresh();return {previous:await this.#entry(old),entry:await this.#entry(row)}}
   async forgetEntry(id:string,version:MemoryVersion){const old=await this.#current(id,version);const now=new Date().toISOString();const evidence=await this.#admit({type:'conversation',ref:'forget:'+randomUUID(),observed_at:now},'用户删除这条记忆','user_correction');const candidate=CandidateSchema.parse({entry_id:id,expected_revision:version,kind:old.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidence.id],content:{text:''},op:'tombstone',recorded_at:now});const row=EntryRevisionSchema.parse(await this.options.client.memory('forget',{entry_id:id,candidate}));await this.#refresh();return this.#entry(row)}
   async purgeEntry(id:string,version:MemoryVersion,requestId:string):Promise<PersonalMemoryPurgeResult>{

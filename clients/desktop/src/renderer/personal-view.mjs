@@ -157,7 +157,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
     target.draft=draft;chat.reveal()
    }})
   }else if(selected==='profile'){
-   renderProfile(panel,{products:s?.derived_understanding,state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
+   renderProfile(panel,{soul:{view:s?.soul,openSettings},products:s?.derived_understanding,state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
    renderMemorySection(panel,{snapshot:s,caps,el,button,chips,command:(m,p)=>c.command(m,p),continueChat,bindPending,connected:c.connected,local:lifeLocal})
   }

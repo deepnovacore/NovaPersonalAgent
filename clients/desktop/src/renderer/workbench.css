@@ -749,3 +749,11 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-approval-head>h3{margin:0}
 .build-log-notice>.ui-icon{color:var(--warn)}
 .workbench-build-actions button.has-icon .ui-icon{width:12px;height:12px}
+.workbench .profile-split{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;align-items:start}
+.workbench .profile-main,.workbench .profile-soul{display:flex;flex-direction:column;gap:16px;min-width:0}
+.workbench .soul-intro{font-size:14px;line-height:1.9;overflow-wrap:anywhere}
+.workbench .soul-row{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.workbench .soul-row textarea{width:100%}
+.workbench .soul-placeholder{color:var(--ink-dim)}
+.workbench .soul-role{white-space:pre-wrap;overflow-wrap:anywhere}
+.workbench .soul-error{color:var(--danger,#c0392b);font-size:13px}
