@@ -10,10 +10,10 @@
 export type FactFidelityResult={ok:true}|{ok:false;reason:'number_not_in_sources'|'date_not_in_sources';detail:string}
 
 const pad=(value:string):string=>value.padStart(2,'0')
-const FULL_DATE=/(?<![\d.])(\d{4})(?:[-/](\d{1,2})[-/](\d{1,2})|年(\d{1,2})月(\d{1,2})[日号]?)(?!\d)/gu
-const SHORT_DATE=/(?<![\d年])(\d{1,2})月(\d{1,2})[日号]/gu
+const FULL_DATE=/(?<![\d.])(\d{4})(?:[-/](\d{1,2})[-/](\d{1,2})|\s{0,2}年\s{0,2}(\d{1,2})\s{0,2}月\s{0,2}(\d{1,2})(?:\s{0,2}[日号])?)(?!\d)/gu
+const SHORT_DATE=/(?<![\d年])(\d{1,2})\s{0,2}月\s{0,2}(\d{1,2})\s{0,2}[日号]/gu
 const NUMBER_TEXT=String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?`
-const UNITS=String.raw`%|元|块|万|千|小时|分钟|天|周|月|年|公里|次|yuan|usd|rmb|dollars?|kg|km`
+const UNITS=String.raw`%|元|块|万|千|小时|分钟|天|周|月(?!份)|年|公里|次|yuan|usd|rmb|dollars?|kg|km`
 const MEASURED=new RegExp(String.raw`(?<![A-Za-z0-9_.,])(?:([¥$])\s?(${NUMBER_TEXT})|(${NUMBER_TEXT})\s?(?:${UNITS})(?![a-z]))`,'giu')
 const NUMBER=/(?<![A-Za-z0-9_.,])(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/gu
 
