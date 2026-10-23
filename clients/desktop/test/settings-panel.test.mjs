@@ -14,6 +14,7 @@ import * as settingsController from '../src/renderer/settings-controller.mjs'
 import {createSecretRevisions} from '../src/renderer/secret-revisions.mjs'
 import * as voiceChoice from '../src/renderer/voice-choice.mjs'
 import {moduleStatusNote} from '../src/renderer/capabilities-editor.mjs'
+import {memoryEmbeddingNote} from '../src/renderer/proactivity-panel.mjs'
 const { createSettingsController, mergePatch, settingsButtonState } = settingsController
 
 const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
@@ -81,6 +82,8 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
+    createProactivityPanel: () => ({load: () => Promise.resolve(), setMemory() {}}),
+    memoryEmbeddingNote,
     createKnowledgePanel: () => ({render() {}}),
     createVoiceprintPanel: () => ({render() {}}),
     createChatGptPanel: () => {},
@@ -1070,7 +1073,7 @@ test('every settings block belongs to exactly one sidebar category', () => {
   // table would be hidden permanently by applyCategory.
   const blocks = [...html.matchAll(/<(?:section|details) (?:class="[^"]*" )?id="([^"]+)"/g)]
     .map(match => match[1])
-    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced', 'secrets-advanced'].includes(id))
+    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced', 'secrets-advanced', 'proactivity-advanced'].includes(id))
   for (const id of blocks) assert.ok(sections.includes(id), `${id} is missing from a category`)
 })
 
