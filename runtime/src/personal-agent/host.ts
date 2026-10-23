@@ -60,6 +60,7 @@ import {ScheduledRunAuthority,type ScheduledRunGrant} from './scheduled-run-auth
 import {SCHEDULE_CATCHUP_MS} from './scheduled-time.js';
 import {ScheduledAppContext,type AppContextSection} from './app-context.js';
 import {canonicalJson} from '../text/canonical-json.js';
+import {goalTopicKey,groundGoalCandidates,type GoalProposer,type GoalProposerInput,type GoalProposerMemory,type GoalProposerMessage} from '../model/goal-writer.js';
 /** Supplied only by an authenticated transport, never command params. */
 export interface PersonalCommandContext {client_id:string;can_takeover?:boolean;presentation_mode?:'background'|'workbench'|'orb'}
 export interface Evidence {
@@ -129,6 +130,7 @@ export interface HostOptions {
     discover?: (snapshot: DiscoverySnapshot, signal: AbortSignal) => Promise<Proposal | null>;
     prepareBrief?: (snapshot:DiscoverySnapshot,slot:DailyBriefSlot,signal:AbortSignal)=>Promise<PreparedMaterial|null>;
     prepareProposal?: (snapshot:DiscoverySnapshot,proposal:Proposal,signal:AbortSignal)=>Promise<PreparedMaterial|null>;
+    proposeGoals?: GoalProposer;
     summarizeMemory?: (entries: readonly MemoryEntry[], signal: AbortSignal) => Promise<MemoryOverview | null>;
     evidenceRefs?: () => string[];
     onTick?: (snapshot: DiscoverySnapshot) => void;
@@ -136,6 +138,7 @@ export interface HostOptions {
     now?: () => Date;
 }
 const hash = (s: unknown): string => createHash('sha256').update(JSON.stringify(s)).digest('hex');
+const goalProposalRevision=(id:string,title:string,criteria:string,cadence:string)=>hash(['goal-proposal',id,title,criteria,cadence]).slice(0,32);
 /** Count cards that cite at least one source entry at its current version. */
 export function countSourceGroundedContextCards(cards:readonly {tab:'ideas'|'goals';refs:readonly {entry_id:string;version:string|number}[]}[],entries:readonly ContextEntry[]):{cards:number;ideas:number;goals:number}{
     const current=new Set(entries.map(entry=>JSON.stringify([entry.id,entry.version])));
@@ -1106,9 +1109,87 @@ export class PersonalAgentHost {
     async scheduledTick():Promise<void>{
         if(!this.#opened)return;
         if(this.#now().getTime()>=this.#nextDiscovery){this.#nextDiscovery=this.#now().getTime()+this.#state.settings.discovery_interval_minutes*60000;void this.discover().catch(()=>{/* optional discovery */})}
+        void this.runGoalProposer().catch(()=>{/* the next local date retries */});
         if(this.#briefing)return this.#briefing;
         const run=this.#runBriefs();this.#briefing=run;
         try{await run}finally{if(this.#briefing===run)this.#briefing=undefined}
+    }
+    #goalRun:Promise<'skipped'|'empty'|'admitted'|'failed'>|undefined;
+    /** At most one goal-proposal run per local date, only after new user messages; it never shares the brief slots. */
+    runGoalProposer():Promise<'skipped'|'empty'|'admitted'|'failed'>{
+        if(this.#goalRun)return this.#goalRun;
+        const run=this.#runGoalProposer();this.#goalRun=run;
+        void run.finally(()=>{if(this.#goalRun===run)this.#goalRun=undefined}).catch(()=>{/* caller owns the result */});return run;
+    }
+    #goalMessages(now:Date):GoalProposerMessage[]{
+        const since=now.getTime()-14*86400000;
+        return this.#state.conversations.items.filter(c=>c.kind==='chat'||c.kind==='topic').flatMap(c=>c.messages.filter(m=>m.role==='user'&&!m.schedule_ref&&!m.references?.some(ref=>ref.kind==='timeline'&&ref.interaction)&&m.text.trim()&&Date.parse(m.created_at)>=since).map(m=>({id:'message:'+c.id+':'+m.id,text:m.text.slice(0,1000),at:m.created_at}))).sort((a,b)=>a.at.localeCompare(b.at)).slice(-40);
+    }
+    /** Recent user-confirmed memories, re-read and re-authorized now; none when the resource is absent or withholds consent. */
+    async #goalMemories():Promise<GoalProposerMemory[]>{
+        const ids=this.#stated.slice(-8).map(entry=>entry.id);if(!ids.length)return [];
+        const current=(await this.#generationMemories(ids)).filter((entry):entry is MemoryEntry=>memoryEligibleForDiscovery(entry)&&entry.origin==='stated'&&entry.version!==null);
+        return (await this.authorizedGenerationEntries(current)).map(entry=>({entry_id:entry.id,version:entry.version!,text:entry.content}));
+    }
+    #goalBlocked(state:PersonalState,now:Date):{keys:string[];goals:string[];declined:string[]}{
+        const goals=this.life.snapshot().goals.filter(goal=>goal.status==='active'||goal.status==='paused').map(goal=>goal.title);
+        const declined=state.goal_proposal_rejections.filter(r=>Date.parse(r.until)>now.getTime());
+        // A topic asked about in the last 7 days is not asked again, even if the card was ignored or expired.
+        const pending=state.feed.filter(f=>f.goal_proposal&&Date.parse(f.created_at)>now.getTime()-7*86400000).map(f=>f.goal_proposal!.topic_key);
+        return {keys:[...goals.map(goalTopicKey),...declined.map(r=>r.topic_key),...pending],goals,declined:declined.map(r=>r.title)};
+    }
+    async #runGoalProposer():Promise<'skipped'|'empty'|'admitted'|'failed'>{
+        if(acceptanceEnabled()||!this.#opened||!this.#state.settings.discovery_enabled||!this.options.proposeGoals)return 'skipped';
+        const now=this.#now(),timezone=dailyBriefSettings(this.#state.settings).timezone,local_date=now.toLocaleDateString('en-CA',{timeZone:timezone});
+        const latest=()=>this.#goalMessages(now).at(-1)?.at;
+        // The attempt is recorded before the model call so a failure is not retried on the same date; only success advances `consumed_through`.
+        const begun=await this.#serial(async()=>{
+            const run=this.#state.goal_proposer,last=latest();
+            if(!this.#opened||run.last_run_date===local_date||!last||run.consumed_through&&last<=run.consumed_through)return false;
+            const next=structuredClone(this.#state);next.goal_proposer={...run,last_run_date:local_date,last_outcome:'processing'};next.goal_proposal_rejections=next.goal_proposal_rejections.filter(r=>Date.parse(r.until)>now.getTime());await this.#commit(next);return true;
+        });
+        if(!begun)return 'skipped';
+        try{
+            const blocked=this.#goalBlocked(this.#state,now),messages=this.#goalMessages(now),through=messages.at(-1)!.at;
+            const input:GoalProposerInput={local_date,timezone,messages,memories:await this.#goalMemories(),existing_goals:blocked.goals,declined_topics:blocked.declined,blocked_topic_keys:blocked.keys};
+            const controller=this.#abort,signal=AbortSignal.any([controller.signal,AbortSignal.timeout(60000)]);
+            const raw=await this.options.proposeGoals(input,signal);
+            if(signal.aborted||!this.#opened)throw Error('goal_proposal_interrupted');
+            const result=await this.#serial(async()=>{
+                if(!this.#state.settings.discovery_enabled)throw Error('discovery_disabled');
+                // Ground again against the state as it is now: a cleared message, a new rejection or a revoked memory drops the candidate.
+                const at=this.#now(),current=this.#goalBlocked(this.#state,at);
+                const candidates=groundGoalCandidates(raw,{messages:this.#goalMessages(at),memories:input.memories,blocked_topic_keys:current.keys});
+                const next=structuredClone(this.#state);
+                for(const c of candidates){
+                    if(!await this.#valid({evidence_refs:[],memory_refs:c.memory_refs}))continue;
+                    const id=randomUUID(),topic_key=goalTopicKey(c.title),success_criteria=c.success_criteria;
+                    next.feed.push({id,kind:'question',title:c.ask_text,why_now:c.cadence==='daily'?'建议节奏：每天陪你练一点':'建议节奏：有新进展时再问问你',evidence_refs:[],memory_refs:c.memory_refs,source:{type:'conversation',ref:c.evidence_refs[0]!.message_id},suggestion_id:null,task_ref:null,subject_key:'goal:'+topic_key,priority:40,created_at:at.toISOString(),updated_at:at.toISOString(),expires_at:new Date(at.getTime()+86400000).toISOString(),user_state:'new',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null},
+                        goal_proposal:{title:c.title,success_criteria,cadence:c.cadence,topic_key,revision:goalProposalRevision(id,c.title,success_criteria,c.cadence),evidence_refs:c.evidence_refs.map(ref=>ref.message_id)}});
+                }
+                const admitted=next.feed.length>this.#state.feed.length;
+                next.goal_proposer={last_run_date:local_date,consumed_through:through,last_outcome:admitted?'success':'empty'};await this.#commit(next);return admitted?'admitted' as const:'empty' as const;
+            });
+            if(result==='admitted')await this.flushNotifications();
+            return result;
+        }catch{
+            await this.#serial(async()=>{if(!this.#loaded||!this.#release)return;const next=structuredClone(this.#state);next.goal_proposer={...next.goal_proposer,last_outcome:'failed'};await this.#commit(next)}).catch(()=>{/* the attempt date already limits retries */});
+            return 'failed';
+        }
+    }
+    async #goalProposalAction(item:FeedItem,next:PersonalState,action:'adopt_goal'|'decline_goal',revision:string|undefined):Promise<void>{
+        const proposal=item.goal_proposal;if(!proposal)throw Error('not_goal_proposal');
+        const requestId='goal-proposal:'+createHash('sha256').update(item.id).digest('hex').slice(0,32);
+        if(action==='adopt_goal'&&item.lifecycle==='resolved'&&this.life.receipt(requestId))return; // Already created: a repeated click is a no-op.
+        if(item.lifecycle!=='active'||item.user_state==='dismissed'||(item.expires_at&&Date.parse(item.expires_at)<=this.#now().getTime()))throw Error('stale');
+        if(action==='decline_goal'){
+            const at=this.#now();
+            next.goal_proposal_rejections=[...next.goal_proposal_rejections.filter(r=>r.topic_key!==proposal.topic_key&&Date.parse(r.until)>at.getTime()),{topic_key:proposal.topic_key,title:proposal.title,rejected_at:at.toISOString(),until:new Date(at.getTime()+30*86400000).toISOString()}].slice(-200);
+            item.user_state='dismissed';if(item.suggestion_id)this.options.pool.withdraw(item.suggestion_id);return;
+        }
+        if(revision!==proposal.revision||goalProposalRevision(item.id,proposal.title,proposal.success_criteria,proposal.cadence)!==proposal.revision)throw Error('stale_goal_proposal');
+        await this.life.mutate({op:'create',kind:'goal',title:proposal.title,note:'',success_criteria:proposal.success_criteria,cadence:proposal.cadence},requestId);
+        item.lifecycle='resolved';item.user_state='seen';if(item.suggestion_id)this.options.pool.withdraw(item.suggestion_id);
     }
     async #claim(key:string):Promise<boolean>{return this.#serial(async()=>{
         if(!this.#opened||this.#state.dedupe.includes(key))return false;
@@ -1546,9 +1627,10 @@ export class PersonalAgentHost {
     }
 
     async canDeliver(id: string): Promise<boolean> { if(!this.#opened||isQuietTime(this.#state.settings,this.#now()))return false; await this.revalidate(); const item = this.#state.feed.find(f => f.id === id); return !!item && (item.lifecycle === 'active'||item.kind==='task_result'&&item.lifecycle==='resolved') && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime()) && await this.#valid(item); }
-    async action(params: unknown): Promise<unknown> { const p = z.object({ id: z.string(), action: z.enum(['open', 'act', 'snooze', 'dismiss', 'expand_evidence', 'presented', 'notified']), snooze_until: z.string().datetime().optional(),notification:z.object({revision:z.string(),occurrence:z.string()}).strict().optional() }).strict().parse(params); await this.revalidate(); return this.#serial(async () => { const next = structuredClone(this.#state), item = next.feed.find(f => f.id === p.id); if (!item)
+    async action(params: unknown): Promise<unknown> { const p = z.object({ id: z.string(), action: z.enum(['open', 'act', 'snooze', 'dismiss', 'expand_evidence', 'presented', 'notified', 'adopt_goal', 'decline_goal']), snooze_until: z.string().datetime().optional(),goal_revision:z.string().max(64).optional(),notification:z.object({revision:z.string(),occurrence:z.string()}).strict().optional() }).strict().parse(params); await this.revalidate(); return this.#serial(async () => { const next = structuredClone(this.#state), item = next.feed.find(f => f.id === p.id); if (!item)
         throw Error('not_found'); if(p.notification){const current=this.#feedNotification(item);if(current.revision!==p.notification.revision||current.occurrence!==p.notification.occurrence||!current.feedback.some(action=>action===p.action)||item.lifecycle==='invalidated'||item.user_state==='dismissed')throw Error('stale_notification');} if (['act', 'presented', 'notified'].includes(p.action) && ((item.lifecycle !== 'active' && !(p.action === 'presented' && item.lifecycle === 'resolved')) || item.user_state === 'dismissed' || (item.snooze_until && Date.parse(item.snooze_until) > this.#now().getTime())))
-        throw Error('stale'); if (p.action === 'act') {
+        throw Error('stale'); if (p.action === 'adopt_goal' || p.action === 'decline_goal') await this.#goalProposalAction(item, next, p.action, p.goal_revision);
+    else if (p.action === 'act') {
         if (!this.options.act)
             throw Error('unsupported');
         if (!await this.#valid(item))

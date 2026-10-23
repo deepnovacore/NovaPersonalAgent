@@ -7,6 +7,7 @@ import {t} from './locale.mjs'
 export const FEED_KIND_LABEL={question:'待回应'}
 export const FEED_LIFECYCLE_LABEL={active:'',resolved:'已有结果',invalidated:'已失效'}
 export function feedActionLabel(item){return item.kind==='task_result'?'查看任务结果':item.task_ref?'查看任务进展':item.kind==='question'?'回复这个问题':item.kind==='change'?'查看变化':'讨论这个建议'}
+export const GOAL_CADENCE_LABEL={daily:'每天陪你练一点',progress:'有新进展时再问问你',off:'不主动提醒'}
 export const isDismissed=item=>item.user_state==='dismissed'||item.user_state==='dismiss'
 /** Sends the presented receipt once per item; a failure clears the marker so the next visibility check retries. */
 export function sendPresented(item,{presented,command}){
@@ -24,7 +25,10 @@ export function renderFeedCard(parent,item,{el,button,chips,command,openFeed,vis
  const dismissed=isDismissed(item);if(dismissed)card.dataset.dismissed='true'
  card.append(el('h3',item.title))
  // Briefings carry their substance in prepared.text (mirrored into the message); why_now alone would drop it.
- const why=typeof item.why_now==='string'?item.why_now.trim():''
+ const goal=item.goal_proposal
+ // A goal proposal shows the goal and its cadence in the viewer's language instead of the runtime's why_now line.
+ if(goal){card.append(el('p',t('目标：{0}',goal.title),'feed-why'));if(goal.success_criteria)card.append(el('p',t('怎样算达成：{0}',goal.success_criteria),'feed-body'));card.append(el('p',t('建议节奏：{0}',t(GOAL_CADENCE_LABEL[goal.cadence]??goal.cadence)),'feed-body'))}
+ const why=!goal&&typeof item.why_now==='string'?item.why_now.trim():''
  const prepared=typeof item.prepared?.text==='string'&&item.prepared.text.trim()&&item.prepared.text.trim()!==why?item.prepared.text:null
  if(why)card.append(el('p',why,'feed-why'))
  if(prepared&&body)card.append(body(prepared))
@@ -34,6 +38,12 @@ export function renderFeedCard(parent,item,{el,button,chips,command,openFeed,vis
  if(visible&&connected)sendPresented(item,{presented,command})
  if(!dismissed){
   const expired=Boolean(item.expires_at&&Date.parse(item.expires_at)<=Date.now())
+  if(goal){
+   const note=!connected?'连接后可继续讨论。':item.lifecycle==='resolved'?'已设为目标。':item.lifecycle!=='active'||expired?'这条建议已过期，请核对当前情况。':null
+   if(note)card.append(el('p',t(note),'feed-unavailable'))
+   else{const actions=el('div',undefined,'feed-actions');card.append(actions);button(t('设为目标'),()=>command('feed.action',{id:item.id,action:'adopt_goal',goal_revision:goal.revision}),actions).className='soft';button(t('不用了'),()=>command('feed.action',{id:item.id,action:'decline_goal'}),actions)}
+   parent.append(card);return card
+  }
   const unavailable=!connected?'连接后可继续讨论。':!item.task_ref&&(item.lifecycle!=='active'||expired)?item.lifecycle==='invalidated'?'依据已变化，这条建议已失效。':expired?'这条建议已过期，请核对当前情况。':'这条建议已有结果。':null
   if(unavailable)card.append(el('p',t(unavailable),'feed-unavailable'))
   const actions=el('div',undefined,'feed-actions');card.append(actions)

@@ -1,5 +1,6 @@
 import {createWorkbenchGenerator} from '../model/workbench-writer.js'
 import {observeOperation} from '../usage/context.js'
+import {proposeGoals,type GoalProposerInput} from '../model/goal-writer.js'
 import type {UsageReporter} from '../realtime/usage.js'
 import {GatewayProactivity} from '../model/proactivity.js'
 import {GatewayTaskVerifier} from '../model/task-verifier.js'
@@ -118,7 +119,7 @@ export interface Assembly {
     profileParticipantMessages?: boolean
     models: Required<Pick<HostOptions,
       'generateProfile' | 'generateDigests' | 'generateContext' | 'generateWorkbench' | 'generateTimeline' | 'rankNews' | 'understand'
-      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover'>> & Pick<HostOptions, 'rankNewsFallback'>
+      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover' | 'proposeGoals'>> & Pick<HostOptions, 'rankNewsFallback'>
     taskVerifier: Pick<GatewayTaskVerifier, 'evaluateTask'>
   }
 
@@ -418,6 +419,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       prepareProposal: observeOperation('proactivity',writer.prepareProposal.bind(writer)),
       summarizeMemory: observeOperation('memory',writer.summarizeMemory.bind(writer)),
       discover: observeOperation('proactivity',proactive.discover.bind(proactive)),
+      proposeGoals: observeOperation('proactivity',(input:GoalProposerInput,signal:AbortSignal)=>proposeGoals(gateway,settings.support_model,input,signal)),
     }}}),
     capabilities,
     capabilityStatus: capabilityStatus(capabilities, tools.schemas.length),
