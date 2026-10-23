@@ -10,6 +10,7 @@ import {createVoiceprintPanel} from './voiceprint-panel.mjs'
 import {createStartupNotice, startupMessage} from './startup-notice.mjs'
 import {createImPanel} from './im-panel.mjs'
 import {createConnectionsPanel} from './connections-panel.mjs'
+import {createProactivityPanel, memoryEmbeddingNote} from './proactivity-panel.mjs'
 import {t, currentLanguage} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
@@ -62,6 +63,7 @@ if(welcomeApi){
 }
 const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
+const proactivityPanel = createProactivityPanel({document, api, moduleStatusNote})
 const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
   'openaiCompatibleApiKey',
@@ -202,6 +204,7 @@ function applyCategory(id) {
   if (id === 'skills') renderSettingsSkills()
   if (id === 'im') void imPanel.load()
   if (id === 'connections') void connectionsPanel.load()
+  if (id === 'general') void proactivityPanel.load()
   hubPanel.setActive(id === 'hub')
   phonePanel.setActive(id === 'phone')
   document.querySelector('footer').hidden = id === 'phone' || id === 'hub'
@@ -306,7 +309,8 @@ function keyUsage(view) {
     dashscopeApiKey: (view.pipelineMode === 'integrated' && view.integratedProvider === 'qwen')
       || (view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'qwen') ? t("必需")
       : view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun'
-        ? t("仅本地记忆嵌入需要") : t("可选；不配则联网搜索回退与本地记忆嵌入关闭"),
+        ? memoryEmbeddingNote(view.capabilities?.runtime?.modules?.memory, moduleStatusNote) ?? t("仅本地记忆嵌入需要")
+        : memoryEmbeddingNote(view.capabilities?.runtime?.modules?.memory, moduleStatusNote) ?? t("可选；不配则联网搜索回退与本地记忆嵌入关闭"),
     stepfunApiKey: view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun' ? t("必需") : t("当前未使用"),
     openaiApiKey: (view.pipelineMode === 'integrated' ? view.integratedProvider : view.cascadedLlmProvider) === 'openai' ? t('必需') : t('当前未使用'),
     geminiApiKey: (view.pipelineMode === 'integrated' ? view.integratedProvider === 'gemini' : [view.cascadedAsrProvider,view.cascadedLlmProvider,view.cascadedTtsProvider].includes('gemini')) ? t('必需') : t('当前未使用'),
@@ -531,6 +535,7 @@ function render(view, drafts, state) {
 
   codingProgressNarrationInput.value = view.codingProgressNarration
   for (const input of proactivityInputs) input.checked = input.value === view.proactivity
+  proactivityPanel.setMemory(view.capabilities?.runtime?.modules?.memory)
   for (const input of pipelineModeInputs) input.checked = input.value === view.pipelineMode
   for (const input of codexApprovalModeInputs) {
     input.checked = input.value === view.codexApprovalMode

@@ -1213,3 +1213,14 @@ select option{color:var(--ink);background:var(--surface)}
 .advanced-keys { margin: 10px 0 0; }
 .advanced-keys > summary { cursor: pointer; color: var(--ink-dim); font-size: 12px; padding: 6px 2px; }
 .custom-endpoint { margin: 4px 0 0; }
+
+/* Proactivity panel: the same card language as the connections page, inside the general category. */
+#proactivity-section .im-card { padding: 20px; margin: 16px 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+#proactivity-section .im-card p { line-height: 1.7; color: var(--ink-dim); }
+#proactivity-section .im-card button { margin: 6px 8px 6px 0; }
+#proactivity-section .im-field, #proactivity-section .personal-consent { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+#proactivity-section .im-field:has(input[role="switch"]) { justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); }
+#proactivity-section fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 18px 0; display: flex; flex-wrap: wrap; gap: 8px 16px; }
+#proactivity-section .cap-stepper { display: flex; align-items: center; gap: 8px; }
+#proactivity-section .cap-stepper input { width: 4.5em; text-align: center; }
+#proactivity-advanced { margin-top: 12px; }

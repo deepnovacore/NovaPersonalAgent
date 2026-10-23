@@ -24,7 +24,7 @@ export class NotificationService {
     #opened = false;
     constructor(readonly options: NotificationOptions) { this.#store = notificationStore(options.path); this.#adapters = new Map(options.adapters.map(a => [a.providerId, a])); this.#state = this.#initial(); }
     #now() { return this.options.now?.() ?? Date.now(); }
-    #initial(): NotificationState { return { schema_version: 1, user_scope: this.options.userScope, route_revision: 0, primary_binding_id: 'nova', configured: false, legacy_binding_id: null, bindings: [{ id: 'nova', provider: 'nova', identity: 'local', generation: 0, user_scope: this.options.userScope, status: 'ready' }], deliveries: [], dedupe: {}, migrated: false, cutoff: 0 }; }
+    #initial(): NotificationState { return { schema_version: 1, user_scope: this.options.userScope, route_revision: 0, primary_binding_id: 'nova', configured: false, bindings: [{ id: 'nova', provider: 'nova', identity: 'local', generation: 0, user_scope: this.options.userScope, status: 'ready' }], deliveries: [], dedupe: {}, migrated: false, cutoff: 0 }; }
     register(adapter: NotificationChannelAdapter) { if (this.#opened)
         throw Error('notification_adapter_already_started'); this.#adapters.set(adapter.providerId, adapter); }
     get local() { return this.#state.primary_binding_id === 'nova'; }
@@ -49,7 +49,7 @@ export class NotificationService {
         } }); this.#opened = true; }
     async close() { this.#opened = false; this.#stop.abort(); await this.#run; await this.#tail; }
     snapshot() { const counts = Object.fromEntries(['pending', 'sending', 'accepted', 'retry_wait', 'blocked', 'unknown', 'cancelled', 'expired', 'superseded'].map(s => [s, 0])) as Record<DeliveryStatus, number>; for (const d of this.#state.deliveries)
-        counts[d.status]++; return { primary_binding_id: this.#state.primary_binding_id, route_revision: this.#state.route_revision, local: this.local, configured: this.#state.configured, legacy_additional: this.#state.legacy_binding_id !== null, bindings: this.#state.bindings.map(b => ({id:b.id,provider:b.provider,user_scope:b.user_scope,generation:b.generation,status:b.status})), counts, deliveries: this.#state.deliveries.slice(-100).map(d => ({ id: d.id, title: d.notification.title, source: d.notification.source, status: d.status, error: d.error, binding_id: d.binding.id, updated_at: d.updated_at })) }; }
+        counts[d.status]++; return { primary_binding_id: this.#state.primary_binding_id, route_revision: this.#state.route_revision, local: this.local, configured: this.#state.configured, bindings: this.#state.bindings.map(b => ({id:b.id,provider:b.provider,user_scope:b.user_scope,generation:b.generation,status:b.status})), counts, deliveries: this.#state.deliveries.slice(-100).map(d => ({ id: d.id, title: d.notification.title, source: d.notification.source, status: d.status, error: d.error, binding_id: d.binding.id, updated_at: d.updated_at })) }; }
     /** Accepted is the only delivered terminal status; its `updated_at` is set when the final part's receipt is stored. */
     deliveredToday(kinds: readonly NotificationInput['kind'][], timezone: string, now: number): number { const format = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }); const today = format.format(now); return this.#state.deliveries.filter(d => d.status === 'accepted' && kinds.includes(d.notification.kind) && format.format(d.updated_at) === today).length; }
     async bind(value: ChannelBinding) { const binding = bindingSchema.parse(value); if (binding.user_scope !== this.options.userScope)
@@ -57,7 +57,7 @@ export class NotificationService {
         throw Error('notification_binding_generation'); s.bindings = s.bindings.filter(b => b.id !== binding.id); s.bindings.push(binding); }); }
     async configure(id: string) { const binding = this.binding(id); const adapter = binding && this.#adapters.get(binding.provider); if (binding?.status !== 'ready' || !adapter || !await adapter.inspect(binding, this.#stop.signal))
         throw Error('notification_channel_unavailable'); await this.#mutate(s => { const current = s.bindings.find(b => b.id === id); if (current?.identity !== binding.identity || current.generation !== binding.generation || current.status !== 'ready')
-        throw Error('notification_binding_changed'); s.configured = true; s.legacy_binding_id = null; s.primary_binding_id = id; s.route_revision++; for (const d of [...s.deliveries]) {
+        throw Error('notification_binding_changed'); s.configured = true; s.primary_binding_id = id; s.route_revision++; for (const d of [...s.deliveries]) {
         if (terminal.has(d.status) || uncertain(d))
             continue;
         const original = s.bindings.find(b => b.id === d.binding.id);
@@ -67,10 +67,9 @@ export class NotificationService {
         if (!d.invalidated)
             this.#enqueue(s, d.notification, binding);
     } }); }
-    async migrate(legacyBindingId: string | null, delivered: NotificationInput[] = []) { if (this.#state.migrated)
+    async migrate(delivered: NotificationInput[] = []) { if (this.#state.migrated)
         return; await this.#mutate(s => { if (s.migrated)
-        return; s.migrated = true; s.cutoff = this.#now() - 90 * 86400000; if (!s.configured)
-        s.legacy_binding_id = legacyBindingId; for (const n of delivered)
+        return; s.migrated = true; s.cutoff = this.#now() - 90 * 86400000; for (const n of delivered)
         s.dedupe[this.#messageKey(n)] = this.#now(); }); }
     #messageKey(n: NotificationInput) { return digest([this.options.userScope, n.event_key, n.revision, n.occurrence]); }
     #enqueue(s: NotificationState, n: NotificationInput, binding: ChannelBinding) { const id = digest([this.#messageKey(n), binding.id, binding.generation, s.route_revision]); if (s.deliveries.some(d => d.id === id))
@@ -99,11 +98,6 @@ export class NotificationService {
             if (!target)
                 throw Error('notification_binding_missing');
             this.#enqueue(s, n, target);
-            if (s.legacy_binding_id && n.source.type === 'feed') {
-                const extra = s.bindings.find(b => b.id === s.legacy_binding_id);
-                if (extra)
-                    this.#enqueue(s, n, extra);
-            }
             s.dedupe[key] = this.#now();
         });
     }
