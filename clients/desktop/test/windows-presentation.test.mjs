@@ -54,7 +54,7 @@ function setup({opaque = false, roundBounds = false} = {}) {
     setHasShadow() {}
   }
   const options = browserWindowOptions('/preload.cjs', 'shell-test', {opaque})
-  const shells = createWindowsPresentationWindows({BaseWindow, WebContentsView, options, workbenchBackground: '#f4f5f7'})
+  const shells = createWindowsPresentationWindows({BaseWindow, WebContentsView, options, workbenchBackground: '#f4f5f7', platform: 'win32'})
   return {shells, views, loads, options, get closes() { return closes }}
 }
 
@@ -112,7 +112,7 @@ test('renderer is closed after both native shells close', {skip:process.platform
   assert.equal(state.closes, 1)
 })
 
-test('Windows mode switches preserve workbench bounds at fractional DPI and hidden windows stay hidden', {skip:process.platform!=='win32'}, async () => {
+test('Windows mode switches preserve workbench bounds at fractional DPI and hidden windows stay hidden', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const start = source.indexOf('  let personalCollapsed = false')
   const body = source.slice(start, source.indexOf("  ipcMain.handle('nova:personal:presentation-error'", start))
@@ -120,7 +120,7 @@ test('Windows mode switches preserve workbench bounds at fractional DPI and hidd
   const area = {x: 0, y: 0, width: 1920, height: 1080}
   const screen = {getCursorScreenPoint: () => ({x: 0, y: 0}), getDisplayNearestPoint: () => ({workArea: area}), getDisplayMatching: () => ({workArea: area})}
   let syncs = 0
-  const fixture = new Function('mainWindow', 'windowsPresentation', 'screen', 'orbWindow', 'sendToOrb', 'createWorkbenchFrame', 'currentSettings', 'settingsReady', 'settingsWriter', `${body};return {set:setPersonalCollapsed,frame:workbenchFrame,window:()=>mainWindow}`)(shells.orb, shells, screen, {sync: () => syncs++}, () => {}, createWorkbenchFrame, {workbenchMaximized: false}, false, async () => {})
+  const fixture = new Function('mainWindow', 'windowsPresentation', 'screen', 'orbWindow', 'sendToOrb', 'createWorkbenchFrame', 'currentSettings', 'settingsReady', 'settingsWriter', `${body};return {set:setPersonalCollapsed,frame:workbenchFrame,window:()=>mainWindow}`)(shells.orb, shells, screen, {sync: () => syncs++}, () => {}, o => createWorkbenchFrame({...o, platform: 'win32'}), {workbenchMaximized: false}, false, async () => {})
   fixture.set(false)
   const natural = shells.workbench.getBounds()
   assert.equal(shells.workbench.isVisible(), false)
@@ -146,6 +146,31 @@ test('Windows mode switches preserve workbench bounds at fractional DPI and hidd
   shells.workbench.hide()
   fixture.set(true)
   assert.equal(shells.windows.some(window => window.isVisible()), false)
+})
+
+test('default maximize preference: 20 collapse/expand cycles keep a stable restore rectangle at fractional DPI', () => {
+  return (async () => {
+    const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+    const start = source.indexOf('  let personalCollapsed = false')
+    const body = source.slice(start, source.indexOf("  ipcMain.handle('nova:personal:presentation-error'", start))
+    const {shells} = setup({roundBounds: true})
+    const area = {x: 0, y: 0, width: 1920, height: 1080}
+    const screen = {getCursorScreenPoint: () => ({x: 0, y: 0}), getDisplayNearestPoint: () => ({workArea: area}), getDisplayMatching: () => ({workArea: area})}
+    const writes = []
+    const fixture = new Function('mainWindow', 'windowsPresentation', 'screen', 'orbWindow', 'sendToOrb', 'createWorkbenchFrame', 'currentSettings', 'settingsReady', 'settingsWriter', `${body};return {set:setPersonalCollapsed,frame:workbenchFrame}`)(shells.orb, shells, screen, {sync: () => {}}, () => {}, o => createWorkbenchFrame({...o, platform: 'win32'}), {workbenchMaximized: true}, true, async patch => { writes.push(patch) })
+    fixture.set(false)
+    shells.workbench.showInactive()
+    const first = fixture.frame.naturalBounds()
+    for (let i = 0; i < 20; i++) {
+      fixture.set(true)
+      fixture.set(false)
+      assert.equal(fixture.frame.maximized, true)
+      assert.deepEqual(fixture.frame.naturalBounds(), first, `cycle ${i}: restore rectangle must not grow`)
+    }
+    assert.deepEqual(writes, [], 'automatic fill and collapse must not write the preference')
+    fixture.frame.toggleMaximize()
+    assert.deepEqual(shells.workbench.getBounds().width, first.width + 1, 'one user restore applies the stored rectangle once')
+  })()
 })
 
 test('two-shell construction and system-corner styling are limited to Windows', async () => {

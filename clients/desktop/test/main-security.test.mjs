@@ -1345,6 +1345,29 @@ test('expanding fills the work area while the preference is on, restore persists
  assert.equal(sent.filter(([c])=>c==='nova:personal:maximized').at(-1)[1],false)
 })
 
+test('rapid restore then maximize while the first save is in flight persists the last choice',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf('  let personalCollapsed = false')
+ const body=source.slice(start,source.indexOf("  ipcMain.handle('nova:personal:presentation-error'",start))
+ const area={x:0,y:25,width:1440,height:875}
+ let bounds={x:1300,y:700,width:64,height:64}
+ const mainWindow={getBounds:()=>({...bounds}),setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds:b=>{bounds={...b}},setHasShadow(){}}
+ const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:area}),getDisplayMatching:()=>({workArea:area})}
+ const settings={workbenchMaximized:true},writes=[],releases=[]
+ // Each write stays in flight until released; commits apply in call order, as the real writer's queue does.
+ const writer=async patch=>{writes.push(patch);await new Promise(resolve=>releases.push(resolve));Object.assign(settings,patch)}
+ const fixture=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame','windowsPresentation','currentSettings','settingsReady','settingsWriter',`${body};return {set:setPersonalCollapsed,frame:workbenchFrame}`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame,null,settings,true,writer)
+ fixture.set(false)
+ assert.equal(fixture.frame.maximized,true)
+ fixture.frame.toggleMaximize()
+ fixture.frame.toggleMaximize()
+ assert.equal(fixture.frame.maximized,true)
+ releases.splice(0).forEach(release=>release())
+ await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(settings.workbenchMaximized,true,'the last user choice is what ends up stored')
+ assert.deepEqual(writes.at(-1),{workbenchMaximized:true})
+})
+
 test('keyboard activation wakes a sleeping orb and expands an awake one', async () => {
   const source = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
   const start = source.indexOf("orb.addEventListener('keydown',")
