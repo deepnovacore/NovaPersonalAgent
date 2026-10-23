@@ -76,3 +76,15 @@ test('news-derived Life objects retain public source marker without promoting th
  assert.equal((JSON.parse(prompt) as {entries:{source_type:string}[]}).entries[0]?.source_type,'user_saved_public_news');assert.ok(!prompt.includes('PUBLIC CLAIM'))
  for(const mode of ['voice','text'] as const){const context=memoryReadContext([idea],null,{now,mode});assert.ok(context.includes('public-news reference, not a personal fact'));assert.ok(!context.includes('PUBLIC CLAIM'))}
 })
+
+test('a rewritten amount or date is rejected against the full cited text, not the clipped prompt',async()=>{
+ const budget=(text:string)=>({...fact('budget',1,text),kind:'fact' as const})
+ const plan=prepareConsolidation([budget('Budget is 100 yuan monthly')],null,{now})!
+ const output=(text:string)=>({profile_derived:[],one_page:[{text,refs:[{id:'budget',revision:1}]}]})
+ await assert.rejects(generateConsolidation(plan,{gateway:gateway(output('Budget is 99999 yuan monthly')),model:'fixture'}),/STORE_SUMMARY_FACT_MISMATCH/)
+ assert.equal((await generateConsolidation(plan,{gateway:gateway(output('Monthly budget: 100 yuan')),model:'fixture'})).one_page,'Monthly budget: 100 yuan [budget@1]')
+ const tail=budget('x'.repeat(600)+' 预算 8888 元'),longPlan=prepareConsolidation([tail],null,{now})!
+ assert.equal((await generateConsolidation(longPlan,{gateway:gateway(output('预算 8888 元')),model:'fixture'})).one_page,'预算 8888 元 [budget@1]','a figure beyond the 500-char prompt clip is still a legitimate source')
+ const dated=prepareConsolidation([budget('报销截止 2026-10-12')],null,{now})!
+ await assert.rejects(generateConsolidation(dated,{gateway:gateway({profile_derived:[{text:'报销截止 2026-10-21',refs:[{id:'budget',revision:1}]}],one_page:output('x').one_page}),model:'fixture'}),/STORE_SUMMARY_FACT_MISMATCH/)
+})

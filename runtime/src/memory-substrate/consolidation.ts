@@ -3,6 +3,7 @@ import {z} from 'zod'
 import type {EntryRevision} from './store.js'
 import type {ModelGateway} from '../model/model-gateway.js'
 import type {JsonValue} from '../core/events.js'
+import {checkFactFidelity} from './fact-fidelity.js'
 
 const basisRefSchema=z.object({id:z.string().min(1).max(512),revision:z.number().int().positive()}).strict()
 export type BasisRef=z.infer<typeof basisRefSchema>
@@ -80,6 +81,13 @@ export async function generateConsolidation(plan:ConsolidationPlan,options:{gate
  signal.throwIfAborted()
  const output=outputSchema.parse(JSON.parse(response.text)),allowed=new Map(snapshot.basis.map(ref=>[ref.id,ref.revision]))
  for(const paragraph of [...output.profile_derived,...output.one_page])for(const ref of paragraph.refs)if(allowed.get(ref.id)!==ref.revision)throw Error('STORE_INVALID_SUMMARY_REFERENCE')
+ // Full, untruncated text of exactly the cited revisions (the prompt only carries a clipped copy).
+ const full=new Map(snapshot.entries.map(entry=>[`${entry.entry_id}@${entry.revision}`,[textOf(entry),details(entry).due,entry.valid_until,snapshot.day].filter(Boolean).join('\n')]))
+ for(const paragraphs of [output.profile_derived,output.one_page]){
+  const refs=new Set(paragraphs.flatMap(paragraph=>paragraph.refs.map(ref=>`${ref.id}@${ref.revision}`)))
+  const result=checkFactFidelity(paragraphs.map(paragraph=>paragraph.text).join('\n'),[...refs].map(ref=>full.get(ref)??''))
+  if(!result.ok)throw Error(`STORE_SUMMARY_FACT_MISMATCH: ${result.reason}`)
+ }
  const render=(paragraphs:z.infer<typeof paragraphSchema>[],budget:number):string=>{
   let result=''
   for(const paragraph of paragraphs){const line=`${paragraph.text} [${paragraph.refs.map(ref=>`${ref.id}@${ref.revision}`).join(', ')}]`;if(result.length+line.length+1<=budget)result+=(result?'\n':'')+line}
