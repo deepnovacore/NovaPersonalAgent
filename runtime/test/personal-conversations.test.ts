@@ -346,6 +346,66 @@ test('orb announcements use one output runtime without claiming microphone or ch
 })
 
 
+function announcementHarness(name:string){
+ const pool=new SuggestionPool(),dirPromise=mkdtemp(join(tmpdir(),name))
+ const created:string[]=[],delivered:string[]=[],turns:string[]=[]
+ let releaseCheck:(value:boolean)=>void=()=>{ /* replaced below */ }
+ const check=new Promise<boolean>(resolve=>{releaseCheck=resolve})
+ const tick=()=>new Promise(resolve=>setImmediate(resolve))
+ return {pool,created,delivered,turns,releaseCheck:(value:boolean)=>releaseCheck(value),tick,async setup(){
+  const dir=await dirPromise,host=new PersonalAgentHost({path:join(await realpath(dir),'state.json'),userScope:'test',memory:()=>undefined,pool,evidence:()=>null})
+  await host.open()
+  host.setConversationRuntime((c,_emit,mode)=>{created.push(c.id+':'+mode);return Promise.resolve({runTurn:text=>{turns.push(text);return Promise.resolve({assistant:'ok'})},deliverSuggestion:s=>{delivered.push(s.id)},close:()=>Promise.resolve()})},()=>{ /* no renderer */ })
+  host.canDeliver=()=>check
+  const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready',personal_feed_id:'feed-gated'},salience:40,expires_at:1e15})
+  const reason={kind:'suggestion_selected',priority:40,routing_class:'ambient' as const,origin:null,selected_suggestion:suggestion.id}
+  await host.command({type:'personal.command',request_id:'mode-o',method:'presentation.set',params:{mode:'orb'}})
+  return {dir,host,suggestion,reason}
+ }}
+}
+
+test('typing into chat:main while an orb announcement is still validating abandons the announcement instead of failing the message',async()=>{
+ const h=announcementHarness('nova-announce-race-'),{dir,host,suggestion,reason}=await h.setup()
+ try{
+  host.routePersonalSuggestion(suggestion,reason);await h.tick()
+  await host.command({type:'personal.command',request_id:'mode-w',method:'presentation.set',params:{mode:'workbench'}})
+  const submitted=host.submitConversationText('chat:main','Typed while announcing')
+  h.releaseCheck(true)
+  await submitted;await host.waitConversation('chat:main');await h.tick()
+  const message=host.conversationSnapshot().messages.find(m=>m.role==='user')!
+  assert.equal(message.generation_status,'completed')
+  assert.deepEqual(h.turns,['Typed while announcing'])
+  assert.deepEqual(h.created,['chat:main:text'],'the abandoned announcement never starts a voice runtime')
+  assert.deepEqual(h.delivered,[])
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('an orb announcement whose delivery check resolves late is still spoken',async()=>{
+ const h=announcementHarness('nova-announce-late-'),{dir,host,suggestion,reason}=await h.setup()
+ try{
+  host.routePersonalSuggestion(suggestion,reason);await h.tick();assert.deepEqual(h.delivered,[])
+  h.releaseCheck(true);await h.tick();await h.tick()
+  assert.deepEqual(h.created,['chat:main:voice']);assert.deepEqual(h.delivered,[suggestion.id])
+  assert.equal(host.conversationSnapshot().voice_id,null)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('text submitted during an in-flight orb announcement proceeds as soon as the announcement check settles',{timeout:5000},async()=>{
+ const h=announcementHarness('nova-announce-wait-'),{dir,host,suggestion,reason}=await h.setup()
+ try{
+  host.routePersonalSuggestion(suggestion,reason);await h.tick()
+  let settled=false
+  const submitted=host.submitConversationText('chat:main','Typed in orb').then(()=>{settled=true})
+  await h.tick();assert.equal(settled,false,'admission waits for the in-flight announcement')
+  h.releaseCheck(true)
+  await submitted;assert.equal(settled,true)
+  await host.waitConversation('chat:main')
+  assert.equal(host.conversationSnapshot().messages.find(m=>m.role==='user')!.generation_status,'completed')
+  assert.deepEqual(h.delivered,[]);assert.deepEqual(h.created,['chat:main:text'])
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
 test('a failing playback listener cannot prevent another runtime from parking its approvals',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-mode-listeners-'))
  const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
