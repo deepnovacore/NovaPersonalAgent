@@ -23,8 +23,8 @@ export function memoryEmbeddingNote(module, moduleStatusNote) {
  */
 export function rankFallbackNote(provider) {
  return provider
-  ? t('没有 OpenRouter 密钥时，会用你的对话模型（{0}）判断资讯相关度：你的兴趣和文章标题会发给它。', provider)
-  : t('没有 OpenRouter 密钥时，会用你的对话模型判断资讯相关度：你的兴趣和文章标题会发给它。')
+  ? t('没有 OpenRouter 密钥时，会用你的对话模型（{0}）判断资讯相关度：你的兴趣、文章标题和摘要会发给它。', provider)
+  : t('没有 OpenRouter 密钥时，会用你的对话模型判断资讯相关度：你的兴趣、文章标题和摘要会发给它。')
 }
 
 export function createProactivityPanel({document, api, moduleStatusNote = () => '', rankFallback = () => null}) {

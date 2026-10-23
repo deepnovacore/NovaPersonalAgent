@@ -632,7 +632,7 @@ test('only the selected pipeline key stays in view; the rest fold into 高级 wi
   assert.match(html, /<details id="secrets-advanced" class="advanced-keys"><summary>高级：其他供应商与增强项<\/summary>/)
   assert.doesNotMatch(html, /id="(doubaoAsr|model)ApiKey"/)
   assert.match(script, /arrangeSecrets\(usage\)/)
-  assert.match(script, /不配则新闻只按时间线/)
+  assert.match(script, /不配则改用对话模型判断资讯相关度/)
   assert.match(script, /不配则回退百炼联网搜索/)
 })
 

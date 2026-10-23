@@ -326,7 +326,7 @@ function keyUsage(view) {
     doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' && [view.cascadedAsrProvider,view.cascadedTtsProvider].includes('volcengine') ? t("必需") : t("当前未使用"),
     composioApiKey: t('应用连接；修改后需重启'),
     tavilyApiKey: searchKeyUsage(view.capabilities?.runtime?.modules?.search),
-    openrouterApiKey: t("增强个性化（可选）；不配则新闻只按时间线"),
+    openrouterApiKey: t("增强个性化（可选）；不配则改用对话模型判断资讯相关度，可在“主动性”里关闭"),
   }
 }
 
