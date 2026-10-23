@@ -1273,6 +1273,7 @@ async function launchBackend(smokeChannel, onExit) {
     token,
     // Restoring local memory and the knowledge index can exceed the empty-state deadline.
     timeoutMs: 60_000,
+    deferTimeout: true,
     onTimeout: () => {
       if (spawnedBackend) void shutdownBackendBestEffort(spawnedBackend)
     },
@@ -1334,6 +1335,8 @@ async function launchBackend(smokeChannel, onExit) {
     }
     await feishuSetupOwner.release()
     if(acceptance&&(spec.env.NOVA_WORKBENCH_ACCEPTANCE_MANIFEST!==process.env.NOVA_WORKBENCH_ACCEPTANCE_MANIFEST||spec.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT!==process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT))throw Error('acceptance_child_environment_missing')
+    // OS authorization and configuration work must not consume the child startup budget.
+    listener.startTimeout()
     spawnedBackend = utilityProcess.fork(spec.entry, acceptance?[...spec.argv,'--nova-workbench-acceptance-required']:spec.argv, {
       cwd: workspace,
       env: spec.env,
@@ -1614,16 +1617,17 @@ async function startSelectedCamera(camera, smokeChannel) {
   for (const window of windowsPresentation?.windows ?? [mainWindow]) bindPresentationShow(window)
   setPersonalCollapsed(false)
 
-  const windowShown = sourceStartupSmoke
-    ? new Promise((resolveShown, rejectShown) => {
-        if (mainWindow.isVisible()) {
-          resolveShown()
-          return
-        }
-        mainWindow.once('show', resolveShown)
-        mainWindow.once('closed', () => rejectShown(new Error('source_startup_window_closed')))
-      })
-    : null
+  const windowShown = new Promise((resolveShown, rejectShown) => {
+    if (mainWindow.isVisible()) {
+      resolveShown()
+      return
+    }
+    for (const window of windowsPresentation?.windows ?? [mainWindow]) {
+      window.once('show', () => { if (window === mainWindow) resolveShown() })
+      window.once('closed', () => { if (window === mainWindow) rejectShown(new Error('startup_window_closed')) })
+    }
+  })
+  windowShown.catch(() => {})
 
   configureWorkbenchNativeDrag({
     window: mainWindow,
@@ -2294,7 +2298,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   // Secondary windows share this session's protocol. Do not expose their
   // launch id or open them until the asynchronous asset graph is registered.
-  await rendererLoaded
+  await Promise.all([rendererLoaded, windowShown])
   activeLaunchId = launchId
   initializeVisor(launchId)
   initializeComputerOverlay(launchId)
@@ -2363,7 +2367,7 @@ async function startSelectedCamera(camera, smokeChannel) {
       if (runtimeCapabilities?.state === 'running' && status.state !== 'connected') runtimeCapabilities = {...runtimeCapabilities, state: 'stopped'}
       sendToSettings('nova:settings:changed', settingsView())
       if (status.state === 'connected') { backendEverConnected = true; publishStartup('ready') }
-      else if (status.state === 'reconnecting') publishStartup(backendEverConnected ? 'reconnecting' : 'backend')
+      else if (status.state === 'reconnecting') publishStartup(backendEverConnected ? 'reconnecting' : 'backend', status.diagnostic)
       else if (!['starting', 'stopped'].includes(status.state)) publishStartup('failed', status.diagnostic)
       sendToOrb('nova:backend-status', {...status, startup})
       if (smokeChannel === null && status.state === 'connected' && status.connection) {

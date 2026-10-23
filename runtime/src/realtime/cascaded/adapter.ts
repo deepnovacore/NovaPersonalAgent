@@ -1202,9 +1202,12 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           recoverable: true,
         })
         active.id ??= this.#freshId()
-        await this.#emitTerminal(
-          owner, active, 'failed', ttsFailure ? 'tts_failure' : 'provider_failure',
-        )
+        // Causes the user can act on (account, key, rate limit, connectivity) survive to the conversation.
+        const detail = error instanceof Error && 'detail' in error ? error.detail : null
+        const reason = ttsFailure ? 'tts_failure'
+          : code === 'http' && (detail === 'auth' || detail === 'quota' || detail === 'rate_limited') ? `provider_http_${detail}`
+            : code === 'network' || code === 'timeout' ? `provider_${code}` : 'provider_failure'
+        await this.#emitTerminal(owner, active, 'failed', reason)
       }
     } finally {
       if (owner.response === active) owner.response = null

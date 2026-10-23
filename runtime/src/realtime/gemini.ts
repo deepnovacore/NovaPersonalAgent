@@ -33,6 +33,8 @@ export class GeminiLiveAdapter implements RealtimeProvider {
   #history:readonly CommittedConversationPair[]=[]
   #workspace:HostContextItem|undefined
   #adaptation:ResponseAdaptationContext|undefined
+  /** The guidance the current socket was set up with; only an acknowledged setup counts as delivered. */
+  #deliveredAdaptation:ResponseAdaptationContext|undefined
   #pending=new Map<string,{id:string;item:HostContextItem}>()
   #calls=new Map<string,{name:string;socket:RealtimeSocket}>()
   #response:{id:string;text:string;user:string;origin?:ResponseOrigin}|undefined
@@ -57,7 +59,7 @@ export class GeminiLiveAdapter implements RealtimeProvider {
     if(this.#socket)throw failure()
     this.#epoch++;this.#controller=new AbortController();this.#queue=[];this.#tools=structuredClone(options.tools)
     this.#visibleResponses.clear();this.#nextOrigin=undefined;this.#audioUsed=false;this.#allowToolContinuation=false;this.#yieldedId=undefined;this.#toolUser=''
-    this.#pending.clear();this.#calls.clear();this.#completed.clear();this.#response=undefined;this.#user=undefined;this.#workspace=undefined;this.#adaptation=undefined;this.#used=false
+    this.#pending.clear();this.#calls.clear();this.#completed.clear();this.#response=undefined;this.#user=undefined;this.#workspace=undefined;this.#adaptation=undefined;this.#deliveredAdaptation=undefined;this.#used=false
     await this.#serial(()=>this.#open(options.signal))
     return {epoch:this.#epoch,provider_session_id:`gemini-${this.#epoch}-${this.#id()}`}
   }
@@ -118,10 +120,11 @@ export class GeminiLiveAdapter implements RealtimeProvider {
     const context=responseAdaptationContextSchema.parse(input)
     await this.#serial(async()=>{
       if(this.#adaptation && context.revision<this.#adaptation.revision)throw failure()
-      const prior=this.#adaptation;this.#adaptation=context
-      if(JSON.stringify([prior?.content,prior?.user_sources])===JSON.stringify([context.content,context.user_sources]))return
+      // Compare with what the live socket carries: a cancelled or failed refresh leaves the old setup in place.
+      const prior=this.#deliveredAdaptation;this.#adaptation=context
+      if(this.#socket&&JSON.stringify([prior?.content,prior?.user_sources])===JSON.stringify([context.content,context.user_sources])){this.#deliveredAdaptation=context;return}
       // Empty initial guidance has no server-visible effect.
-      if(!prior && !context.content && !context.user_sources?.length)return
+      if(!prior && !context.content && !context.user_sources?.length){this.#deliveredAdaptation=context;return}
       await this.#refresh(signal)
     })
   }
@@ -215,6 +218,7 @@ export class GeminiLiveAdapter implements RealtimeProvider {
       const ack:unknown=JSON.parse(await abortable(socket.receive(),ownedSignal))
       if(!object(ack)||!object(ack.setupComplete))throw failure()
       ownedSignal.throwIfAborted();if(this.#socket!==socket)throw failure()
+      this.#deliveredAdaptation=this.#adaptation
       void this.#read(socket,this.#epoch)
     } catch {
       if(this.#socket===socket)this.#socket=undefined

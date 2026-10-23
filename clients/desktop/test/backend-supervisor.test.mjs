@@ -54,6 +54,26 @@ test('readiness cleanup preserves explicit permanent failures and refuses unconf
   {kind: 'unavailable', code: 'backend_stop_failed'})
 })
 
+test('a readiness timeout keeps its diagnosis when stopping the child reports a generic exit', async () => {
+  const codes = []
+  const supervisor = createBackendSupervisor({
+    start: async onExit => {
+      const diagnostic = createBackendDiagnosticCollector()
+      // The timeout path stops the child itself; the exit that follows carries no new information.
+      await waitForBackendReadiness({}, Promise.reject(new Error('readiness timeout')), diagnostic,
+        async () => { onExit(diagnostic.failure()) })
+    },
+    stopBackend: async () => {},
+    onStatus: status => { if (status.diagnostic) codes.push(status.diagnostic) },
+    schedule: callback => callback,
+    cancel: () => {},
+  })
+  await supervisor.start()
+  assert.equal(supervisor.status().state, 'reconnecting')
+  assert.deepEqual(codes, ['backend_start_timeout'])
+  await supervisor.stop()
+})
+
 test('structured startup failures stay permanent when utility exit precedes stderr', async () => {
   for (const status of [
     {state: 'startup_failed', toolCount: 2, toolBudget: 1},

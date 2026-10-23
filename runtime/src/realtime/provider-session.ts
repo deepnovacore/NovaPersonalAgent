@@ -50,7 +50,7 @@ interface ConnectionOwner {
 export interface RealtimeProviderSessionOptions {
   /** A provider-specific asynchronous authorization refresh, or a legacy synchronous cache. */
   readonly responseAdaptation?: (signal?:AbortSignal) => ResponseAdaptationContext | undefined | Promise<ResponseAdaptationContext | undefined>
-  /** New memory contexts must fail closed; legacy reply-style advice remains advisory. */
+  /** New memory contexts are revalidated before input and withdrawn when unverifiable; legacy reply-style advice remains advisory. */
   readonly responseAdaptationRequired?:()=>boolean
   readonly onResponseAdaptationApplied?: (context: ResponseAdaptationContext, epoch: number) => void
   readonly onDiagnostic?: (diagnostic: {
@@ -62,6 +62,7 @@ export interface RealtimeProviderSessionOptions {
 }
 
 class InternalProtocolError extends RealtimeProtocolError {}
+const WITHDRAWN_SIGNATURE = JSON.stringify({content: null})
 
 export class RealtimeProviderSession {
   async setLanguage(language?: PromptLanguage): Promise<void> { await this.#provider.setLanguage?.(language) }
@@ -484,6 +485,23 @@ export class RealtimeProviderSession {
       if (!this.#isCurrentConnection(owner)) return
       const required=this.#responseAdaptationRequired?.()===true
       const failClosed=async()=>{if(required&&this.#isCurrentConnection(owner)){await this.close();throw new InternalProtocolError('memory authorization refresh failed; session closed')}}
+      // A read that cannot be verified must not leave memory with the model, but the conversation may
+      // continue without it. A fresh connection holds none; anything else on this connection, including
+      // an attempt whose delivery was never confirmed, is replaced with an empty context at the same
+      // revision. Only a confirmed withdrawal is skipped; one that cannot be confirmed closes the session.
+      const withdrawUnverified=async()=>{
+        if(!required||!this.#isCurrentConnection(owner))return
+        const previous=this.#responseAdaptationAttempt
+        if(previous===null||previous.epoch!==owner.identity.epoch||(previous.confirmed&&previous.signature===WITHDRAWN_SIGNATURE))return
+        try{
+          await this.#provider.replaceResponseAdaptation!({revision:previous.revision,content:null},combinedSignal(owner.controller.signal,signal))
+          this.#assertCurrentConnection(owner)
+          this.#responseAdaptationAttempt={epoch:owner.identity.epoch,revision:previous.revision,signature:WITHDRAWN_SIGNATURE,confirmed:true}
+        }catch{
+          if(!this.#isCurrentConnection(owner))return
+          await this.close();throw new InternalProtocolError('memory authorization withdrawal failed; session closed')
+        }
+      }
       let raw: unknown
       const readSignal=AbortSignal.any([owner.controller.signal,...(signal?[signal]:[]),AbortSignal.timeout(10000)])
       let aborted:(()=>void)|undefined
@@ -498,18 +516,18 @@ export class RealtimeProviderSession {
           this.#responseAdaptationReadFailureDiagnosedEpoch = owner.identity.epoch
           this.#reportAdaptationDiagnostic('read_failed', owner.identity.epoch, null)
         }
-        await failClosed()
+        await withdrawUnverified()
         return
       }finally{
         if(aborted)readSignal.removeEventListener('abort',aborted)
       }
       if(!this.#isCurrentConnection(owner))return
       signal?.throwIfAborted()
-      if (raw === undefined) {await failClosed();return}
+      if (raw === undefined) {await withdrawUnverified();return}
       const parsed = responseAdaptationContextSchema.safeParse(raw)
       if (!parsed.success) {
         this.#reportAdaptationDiagnostic('invalid', owner.identity.epoch, null)
-        await failClosed()
+        await withdrawUnverified()
         return
       }
       const context = includeUserSources && this.#provider.responseAdaptationMode !== 'session_setup' ? parsed.data : {revision: parsed.data.revision, content: parsed.data.content,
@@ -525,7 +543,10 @@ export class RealtimeProviderSession {
         this.#onResponseAdaptationApplied?.(context, owner.identity.epoch)
         return
       }
-      if (previous !== null && previous.epoch === owner.identity.epoch
+      // Advisory guidance does not retry a failed attempt on every frame. Required memory never takes an
+      // unconfirmed attempt (one cancelled mid-delivery) as delivered: it is sent again, and a failure
+      // then closes the session, before any input can reach the provider.
+      if (!required && previous !== null && previous.epoch === owner.identity.epoch
         && previous.revision === context.revision && previous.signature === signature) return
       this.#responseAdaptationAttempt = {
         epoch: owner.identity.epoch, revision: context.revision, signature, confirmed: false,

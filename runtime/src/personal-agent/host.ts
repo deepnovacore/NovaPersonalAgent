@@ -40,6 +40,17 @@ import {LifeService,goalCheckinEligible} from './life.js';
 import {NewsService} from '../news/service.js';
 import type {NewsRanker} from '../news/ranking.js';
 import type {SourceChange} from '../memory-substrate/source-state.js'
+import {runInMemoryBackground} from '../memory-ledger/store-client.js'
+
+// Account, key, rate-limit and connectivity failures are shown in every mode; workbench modes also show model detail.
+const ACTIONABLE_FAILURE=/^model_(?:http_(?:auth|quota|rate_limited)|network|timeout)$/u
+function conversationFailureReason(error:unknown,workbench:boolean):{reason?:string}{
+    if(!(error instanceof Error))return {}
+    const provider='reason' in error&&typeof error.reason==='string'&&/^provider_[a-z_]{1,64}$/u.test(error.reason)?'model_'+error.reason.slice('provider_'.length):undefined
+    if(provider&&ACTIONABLE_FAILURE.test(provider))return {reason:provider}
+    if(/^model_[a-z_]{1,96}$/u.test(error.message)&&(workbench||ACTIONABLE_FAILURE.test(error.message)))return {reason:error.message}
+    return {}
+}
 import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
 import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool,nextConversationTitle,sourceTodoSchema, type ConversationRuntimeFactory,type ConversationRuntime,type ConversationTurnContext} from './conversations.js';
@@ -754,7 +765,7 @@ export class PersonalAgentHost {
         if(conversation.kind==='build'&&!this.localBuildAuthorized(id)){await this.updateLocalBuild(id,conversation.generation,{status:'paused',reason:'stopped',approval:null});return}
         if(!conversation.messages.some(message=>message.id===userMessageId))return;
         const generation=conversation.generation;
-        const operation=this.#conversationPool.run(conversation,text,{...context,user_message_id:userMessageId,...(sourceTodo?{source_todo:sourceTodo}:{}),...(context.references?{refresh:()=>this.discussionContext(context.references!)}:{})}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';const assistant={id:randomUUID(),conversation_id:id,role:'assistant' as const,reply_to:userMessageId,text:result.assistant.slice(0,16000),...(conversation.kind==='build'&&result.assistant.length>16000?{full_text_ref:true}:{}),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})},userIndex=item.messages.findIndex(message=>message.id===userMessageId);item.messages.splice(userIndex<0?item.messages.length:userIndex+1,0,assistant);item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed',...((conversation.mode==='plan'||conversation.kind==='build')&&error instanceof Error&&/^model_[a-z_]{1,96}$/u.test(error.message)?{reason:error.message}:{})})});
+        const operation=this.#conversationPool.run(conversation,text,{...context,user_message_id:userMessageId,...(sourceTodo?{source_todo:sourceTodo}:{}),...(context.references?{refresh:()=>this.discussionContext(context.references!)}:{})}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';const assistant={id:randomUUID(),conversation_id:id,role:'assistant' as const,reply_to:userMessageId,text:result.assistant.slice(0,16000),...(conversation.kind==='build'&&result.assistant.length>16000?{full_text_ref:true}:{}),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})},userIndex=item.messages.findIndex(message=>message.id===userMessageId);item.messages.splice(userIndex<0?item.messages.length:userIndex+1,0,assistant);item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed',...conversationFailureReason(error,conversation.mode==='plan'||conversation.kind==='build')})});
         this.#conversationRuns.set(id,operation);
         void operation.catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'status_persistence_failed'})});
         const goalRefs=id==='chat:main'?(context.references??[]).flatMap(ref=>ref.kind==='goal'?[{id:ref.id,version:ref.version}]:[]):[];
@@ -1035,7 +1046,8 @@ export class PersonalAgentHost {
             // The pending mark is on disk, so a failed cleanup (a full disk, say) is tried again on the next start instead of being forgotten.
             if(this.profileWarmup.newsCleanupPending())try{await this.news.clearSeededInterests();await this.profileWarmup.confirmNewsCleanup()}catch{/* still pending; the next start retries */}
             this.#seedNews();
-            await this.#sources?.open?.();
+            // Source sync and its timers index in the background; conversation and UI reads go first.
+            await runInMemoryBackground(()=>this.#sources?.open?.());
             if(acceptanceEnabled()){this.#acceptanceSample();this.#acceptanceTimer=setInterval(()=>this.#acceptanceSample(),1000);this.#acceptanceTimer.unref()}
             if(!deferBackground){await (this.#connectorsOpening=this.#openConnectors());await this.refreshMemory();}
             else this.#sourcePending.legacy=true;
@@ -1054,7 +1066,8 @@ export class PersonalAgentHost {
         if(acceptanceEnabled())return;
         await Promise.allSettled([this.#feishu?.open(),this.#connectors?.open()]);
     }
-    startBackgroundWork():void {
+    startBackgroundWork():void {runInMemoryBackground(()=>this.#startBackgroundWork())}
+    #startBackgroundWork():void {
         if(!this.#opened||!this.#loaded||this.#sourceReady)return;
         this.#sourceReady = true;
         this.#connectorsOpening??=this.#openConnectors().finally(()=>this.#notify());

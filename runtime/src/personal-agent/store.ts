@@ -62,7 +62,10 @@ export class PersonalStore {
     constructor(readonly path: string) { }
     async ensureScheduleBackup():Promise<void>{
         const path=this.path+'.before-schedules.json'
-        try{const saved=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await saved.stat();if(info.size>MAX_STORE_BYTES||(process.platform!=='win32'&&(info.mode&0o777)!==0o600))throw Error('invalid_schedule_backup');stateSchema.parse(JSON.parse(await saved.readFile('utf8')));return}finally{await saved.close()}}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
+        // An empty backup (a truncating reset) is treated as missing and recreated below; any other invalid backup still fails.
+        let empty=false
+        try{const saved=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await saved.stat();if(info.size>MAX_STORE_BYTES||(process.platform!=='win32'&&(info.mode&0o777)!==0o600))throw Error('invalid_schedule_backup');if(info.size===0&&info.isFile())empty=true;else{stateSchema.parse(JSON.parse(await saved.readFile('utf8')));return}}finally{await saved.close()}}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
+        if(empty)await unlink(path)
         const original=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW)
         let text:string
         try{if((await original.stat()).size>MAX_STORE_BYTES)throw Error('personal_store_capacity');text=await original.readFile('utf8')}finally{await original.close()}
