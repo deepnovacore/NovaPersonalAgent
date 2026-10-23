@@ -635,6 +635,7 @@ export class PersonalAgentHost {
     #planModeTransitions=new Map<string,{call_id:string;promise:Promise<void>}>();
     waitConversation(id:string):Promise<void>{return this.#conversationRuns.get(id)??Promise.resolve()}
     #announcementTail:Promise<void>=Promise.resolve();
+    #announcementsPending=0;
     #conversationPool: ConversationRuntimePool | undefined;
     setConversationRuntime(factory:ConversationRuntimeFactory,emit:(frame:Record<string,unknown>)=>void):void {
         this.#recoveryFactory=factory;
@@ -701,7 +702,7 @@ export class PersonalAgentHost {
         if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');
         if(this.#clearingConversations.has(id))throw Error('conversation_clearing');
         if(this.#state.conversations.voice_id===id||this.#voiceTransition)throw Error('voice_active');
-        if(id==='chat:main'&&this.#conversationPool.hasVoice(id)){this.#voiceTransition=true;try{await this.#announcementTail;await this.#conversationPool.stopVoice(id)}finally{this.#voiceTransition=false}}
+        if(id==='chat:main'&&(this.#announcementsPending>0||this.#conversationPool.hasVoice(id))){this.#voiceTransition=true;try{await this.#announcementTail;if(this.#conversationPool.hasVoice(id))await this.#conversationPool.stopVoice(id)}finally{this.#voiceTransition=false}}
         if(!this.#conversationPool.acceptsText(id))throw Error('conversation_busy');
         if(requestId){const prior=conversation.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null)||canonicalJson(prior.references??null)!==canonicalJson(context.references??null))throw Error('request_id_conflict');return}}
         if(sourceTodo){const todo=this.life.snapshot().todos.find(todo=>todo.id===sourceTodo.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict')}
@@ -1494,14 +1495,17 @@ export class PersonalAgentHost {
         if(!this.localNotifications)return true;
         if(this.#presentationMode){
             if(this.#presentationMode!=='orb'||!this.#conversationPool)return true;
+            const speakable=()=>this.localNotifications&&this.#presentationMode==='orb'&&this.#opened&&!this.#voiceTransition;
+            this.#announcementsPending++;
             this.#announcementTail=this.#announcementTail.then(async()=>{
-                if(!this.localNotifications||this.#presentationMode!=='orb'||!this.#opened||this.#voiceTransition)return;
+                if(!speakable())return;
                 const feedId=suggestion.content.personal_feed_id;
                 if(typeof feedId==='string'&&(this.#state.feed.find(item=>item.id===feedId)?.delivery.spoken_at||!await this.canDeliver(feedId)))return;
+                if(!speakable())return;
                 let id=this.#state.conversations.voice_id;
                 if(!id){const inbox=this.#state.conversations.items.find(item=>item.id==='chat:main')!;if(!this.#conversationPool!.hasVoice(inbox.id))await this.#conversationPool!.startVoice(inbox);id=this.#state.conversations.voice_id??inbox.id}
                 if(this.#presentationMode==='orb'&&!this.#voiceTransition)this.#conversationPool!.deliverSuggestion(id,suggestion,reason);
-            }).catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:'chat:main',error:'announcement_unavailable'})});
+            }).catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:'chat:main',error:'announcement_unavailable'})}).finally(()=>{this.#announcementsPending--});
             return true;
         }
         if(!this.#conversationPool)return false;if(this.#state.conversations.voice_id==='chat:main')this.#conversationPool.deliverSuggestion('chat:main',suggestion,reason);return true;
