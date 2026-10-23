@@ -346,16 +346,16 @@ test('orb announcements use one output runtime without claiming microphone or ch
 })
 
 
-function announcementHarness(name:string){
+function announcementHarness(name:string,voiceReady:Promise<void>=Promise.resolve()){
  const pool=new SuggestionPool(),dirPromise=mkdtemp(join(tmpdir(),name))
- const created:string[]=[],delivered:string[]=[],turns:string[]=[]
+ const created:string[]=[],delivered:string[]=[],turns:string[]=[],released:string[]=[],errors:unknown[]=[]
  let releaseCheck:(value:boolean)=>void=()=>{ /* replaced below */ }
  const check=new Promise<boolean>(resolve=>{releaseCheck=resolve})
  const tick=()=>new Promise(resolve=>setImmediate(resolve))
- return {pool,created,delivered,turns,releaseCheck:(value:boolean)=>releaseCheck(value),tick,async setup(){
+ return {pool,created,delivered,turns,released,errors,releaseCheck:(value:boolean)=>releaseCheck(value),tick,async setup(){
   const dir=await dirPromise,host=new PersonalAgentHost({path:join(await realpath(dir),'state.json'),userScope:'test',memory:()=>undefined,pool,evidence:()=>null})
   await host.open()
-  host.setConversationRuntime((c,_emit,mode)=>{created.push(c.id+':'+mode);return Promise.resolve({runTurn:text=>{turns.push(text);return Promise.resolve({assistant:'ok'})},deliverSuggestion:s=>{delivered.push(s.id)},close:()=>Promise.resolve()})},()=>{ /* no renderer */ })
+  host.setConversationRuntime(async(c,_emit,mode)=>{const label=c.id+':'+mode;created.push(label);if(mode==='voice')await voiceReady;return {runTurn:text=>{turns.push(text);return Promise.resolve({assistant:'ok'})},deliverSuggestion:s=>{delivered.push(s.id)},parkVoice:()=>{released.push('park:'+label);return Promise.resolve()},close:()=>{released.push('close:'+label);return Promise.resolve()}}},frame=>{if(frame.type==='conversation.error')errors.push(frame.error)})
   host.canDeliver=()=>check
   const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready',personal_feed_id:'feed-gated'},salience:40,expires_at:1e15})
   const reason={kind:'suggestion_selected',priority:40,routing_class:'ambient' as const,origin:null,selected_suggestion:suggestion.id}
@@ -402,6 +402,69 @@ test('text submitted during an in-flight orb announcement proceeds as soon as th
   await host.waitConversation('chat:main')
   assert.equal(host.conversationSnapshot().messages.find(m=>m.role==='user')!.generation_status,'completed')
   assert.deepEqual(h.delivered,[]);assert.deepEqual(h.created,['chat:main:text'])
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('a delivery check that never settles cannot stall typed chat:main admission or block other conversations',{timeout:5000},async()=>{
+ const h=announcementHarness('nova-announce-hung-'),{dir,host,suggestion,reason}=await h.setup()
+ try{
+  host.announcementStartGrace=()=>new Promise<void>(()=>{ /* no voice start is in flight, so no grace is needed */ })
+  const other=(await host.command({type:'personal.command',request_id:'other',method:'conversations.create',params:{title:'Other'}}) as {data:{selected_id:string}}).data.selected_id
+  host.routePersonalSuggestion(suggestion,reason);await h.tick()
+  let settled=false
+  const submitted=host.submitConversationText('chat:main','Typed while hung').then(()=>{settled=true})
+  await host.submitConversationText(other,'Elsewhere')
+  for(let i=0;i<5&&!settled;i++)await h.tick()
+  assert.equal(settled,true,'admission does not wait for a delivery check that never returns')
+  await submitted;await host.waitConversation('chat:main');await host.waitConversation(other)
+  assert.equal(host.conversationSnapshot().home_messages.find(m=>m.text==='Typed while hung')?.generation_status,'completed')
+  host.routePersonalSuggestion(suggestion,reason);await h.tick()
+  await host.submitConversationText('chat:main','Second typed');await host.waitConversation('chat:main')
+  assert.deepEqual(h.turns.sort(),['Elsewhere','Second typed','Typed while hung'])
+  assert.deepEqual(h.created.filter(c=>c.endsWith(':voice')),[])
+  assert.deepEqual(h.delivered,[])
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a voice runtime that finishes starting after text was typed is released at once and never speaks',{timeout:5000},async()=>{
+ let voiceReady:()=>void=()=>{ /* replaced below */ }
+ const h=announcementHarness('nova-announce-late-voice-',new Promise<void>(resolve=>{voiceReady=resolve})),{dir,host,suggestion,reason}=await h.setup()
+ try{
+  let expire:()=>void=()=>{ /* replaced below */ }
+  host.announcementStartGrace=()=>new Promise<void>(resolve=>{expire=resolve})
+  host.routePersonalSuggestion(suggestion,reason);h.releaseCheck(true)
+  for(let i=0;i<5&&!h.created.includes('chat:main:voice');i++)await h.tick()
+  assert.deepEqual(h.created,['chat:main:voice'],'the announcement is waiting on voice runtime creation')
+  let settled=false
+  const submitted=host.submitConversationText('chat:main','Typed during voice start').then(()=>{settled=true})
+  await h.tick();await h.tick();assert.equal(settled,false,'admission gives a starting voice runtime a bounded chance to settle')
+  expire()
+  await submitted;await host.waitConversation('chat:main')
+  assert.equal(host.conversationSnapshot().messages.find(m=>m.role==='user')!.generation_status,'completed')
+  voiceReady();for(let i=0;i<5;i++)await h.tick()
+  assert.ok(h.released.some(r=>r.endsWith(':chat:main:voice')),'the late voice runtime is released')
+  assert.equal(host.conversationSnapshot().voice_id,null)
+  assert.deepEqual(h.delivered,[])
+  assert.deepEqual(h.errors,[],'a superseded announcement is not reported as a failure')
+  await host.submitConversationText('chat:main','Next typed');await host.waitConversation('chat:main')
+  assert.deepEqual(h.turns,['Typed during voice start','Next typed'],'the late voice runtime does not occupy chat:main')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a voice runtime that finishes starting within the grace period is stopped before the typed turn runs',{timeout:5000},async()=>{
+ let voiceReady:()=>void=()=>{ /* replaced below */ }
+ const h=announcementHarness('nova-announce-grace-voice-',new Promise<void>(resolve=>{voiceReady=resolve})),{dir,host,suggestion,reason}=await h.setup()
+ try{
+  host.announcementStartGrace=()=>new Promise<void>(()=>{ /* the start settles first */ })
+  host.routePersonalSuggestion(suggestion,reason);h.releaseCheck(true)
+  for(let i=0;i<5&&!h.created.includes('chat:main:voice');i++)await h.tick()
+  const submitted=host.submitConversationText('chat:main','Typed during voice start')
+  await h.tick();voiceReady()
+  await submitted;await host.waitConversation('chat:main')
+  assert.equal(host.conversationSnapshot().messages.find(m=>m.role==='user')!.generation_status,'completed')
+  assert.deepEqual(h.released.filter(r=>r.endsWith(':chat:main:voice')),['park:chat:main:voice','close:chat:main:voice'])
+  assert.deepEqual(h.delivered,[]);assert.deepEqual(h.errors,[])
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 

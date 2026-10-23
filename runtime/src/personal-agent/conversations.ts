@@ -75,7 +75,7 @@ export class ConversationRuntimePool {
   const id=conversation.id,controller=this.#controllers.get(id)??new AbortController();this.#controllers.set(id,controller)
   const operation=(this.#tails.get(id)??Promise.resolve()).then(async()=>{
    if(controller.signal.aborted)throw Error('conversation_cleared')
-   if(this.#modes.get(id)==='parked'){this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);const previous=this.#ready.get(id);this.#ready.delete(id);this.#runtimes.delete(id);this.#modes.delete(id);await previous?.close()}
+   if(this.#modes.get(id)==='parked'){this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);const previous=this.#ready.get(id),starting=this.#runtimes.get(id);this.#ready.delete(id);this.#runtimes.delete(id);this.#modes.delete(id);if(previous)await previous.close();else void starting?.then(late=>late.close(),()=>{ /* a failed start has nothing to close */ })}
    let runtime=this.#runtimes.get(id)
    if(!runtime){this.#modes.set(id,'text');const lifetime=new AbortController();this.#lifetimes.set(id,lifetime);runtime=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal);this.#runtimes.set(id,runtime);void runtime.catch(()=>{lifetime.abort();if(this.#runtimes.get(id)===runtime){this.#runtimes.delete(id);this.#lifetimes.delete(id);this.#modes.delete(id)}})}
    const ready=await runtime;this.#ready.set(id,ready);const current=context?.refresh?await context.refresh():context;controller.signal.throwIfAborted();return ready.runTurn(text,controller.signal,current)
