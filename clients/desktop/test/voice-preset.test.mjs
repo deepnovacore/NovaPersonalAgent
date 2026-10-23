@@ -94,7 +94,7 @@ test('hybrid preset selects Volcengine ASR and DeepSeek Flash while retaining se
     assert.throws(() => parseVoicePreset(JSON.stringify({...hybrid, llm: {...hybrid.llm, ...extra}})), /invalid_voice_preset/)
     assert.throws(() => parseVoicePreset(JSON.stringify({...hybrid, asr: {...hybrid.asr, ...extra}})), /invalid_voice_preset/)
   }
-  const env = backendLaunchSpec({nodeEntry: '/repo/runtime/dist/src/desktop-entry.js', nodeResourcesPath: '/repo/clients/desktop/build', workspace: '/workspace', token: 'a'.repeat(32), readyEndpoint: '127.0.0.1:49152', parentEnv: {}, settings, decryptedSecrets: {doubaoAsrApiKey: 'asr-test', deepseekApiKey: 'llm-test', selfHostedTtsApiKey: ''}}).env
+  const env = backendLaunchSpec({nodeEntry: '/repo/runtime/dist/src/desktop-entry.js', nodeResourcesPath: '/repo/clients/desktop/build', workspace: '/workspace', token: 'a'.repeat(32), readyEndpoint: '127.0.0.1:49152', parentEnv: {}, settings, decryptedSecrets: {doubaoBigmodelApiKey: 'asr-test', deepseekApiKey: 'llm-test', selfHostedTtsApiKey: ''}}).env
   assert.equal(env.CASCADE_ASR_PROVIDER, 'volcengine')
   assert.equal(env.CASCADE_LLM_PROVIDER, 'deepseek')
   assert.equal(env.CASCADE_LLM_MODEL, 'deepseek-flash')

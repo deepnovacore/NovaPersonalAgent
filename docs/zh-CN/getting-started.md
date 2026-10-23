@@ -87,7 +87,7 @@ npm run start:client
 
 集成模式也可选择 StepFun（`INTEGRATED_PROVIDER=stepfun`，预览特性），需配置 `STEPFUN_API_KEY`。
 
-每个平台使用一把密钥，在选中的服务间复用：DeepSeek 使用 `DEEPSEEK_API_KEY`，Qwen 使用 `DASHSCOPE_API_KEY`，火山语音使用 `DOUBAO_BIGMODEL_API_KEY`。可通过 `DOUBAO_ASR_API_KEY` 单独指定识别密钥；未填写时，ASR 回退到 `DOUBAO_BIGMODEL_API_KEY`。
+每个平台使用一把密钥，在选中的服务间复用：DeepSeek 使用 `DEEPSEEK_API_KEY`，Qwen 使用 `DASHSCOPE_API_KEY`，火山语音的 ASR 与 TTS 共用 `DOUBAO_BIGMODEL_API_KEY`。
 
 Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板只显示当前模式需要的配置；密钥只写并返回存在状态。服务配置在后台下次启动时生效，不会自动切换到其他供应商。
 

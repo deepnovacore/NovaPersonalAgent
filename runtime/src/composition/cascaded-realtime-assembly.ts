@@ -434,7 +434,6 @@ function supportComposition(
   Object.assign(settings, {
     watch_model: watchModel,
     support_model: model,
-    planner_model: stripLikePython(options.settings.planner_model) || model,
     compressor_model: provider !== 'qwen' && options.settings.compressor_model === 'qwen-flash'
       ? model : options.settings.compressor_model,
   })

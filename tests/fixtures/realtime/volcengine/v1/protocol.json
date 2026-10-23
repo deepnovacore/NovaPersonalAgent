@@ -10,10 +10,9 @@
       "action": "resolve"
     },
     {
-      "id": "dedicated-key-and-overrides",
+      "id": "shared-key-and-overrides",
       "settings": {
         "ark_api_key": "\u001cark\u0085",
-        "doubao_asr_api_key": "\u001casr_dedicated\u0085",
         "doubao_bigmodel_api_key": "\u001ctts_fallback\u0085",
         "volcengine_ark_base_url": "\u001chttps://ark.example/v3/?region=cn///\u0085",
         "volcengine_ark_model": "\u001cmodel-a\u0085",

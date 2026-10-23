@@ -34,7 +34,7 @@ test('system permission inspection is read-only; granted permissions do not impl
  const status=readDesktopPermissions({platform:'darwin',systemPreferences,environment:{},backendReady:true})
  assert.equal(status.screen,'granted');assert.equal(status.accessibility,'granted');assert.equal(status.computerConfigured,false);assert.equal(status.computerReady,false)
  assert.deepEqual(calls,['microphone','screen'])
- const configured=readDesktopPermissions({platform:'darwin',systemPreferences,backendReady:true,environment:{EXECUTORS:'computer',COMPUTER_DISPLAY_ID:'0',COMPUTER_MODEL:'model',COMPUTER_MODEL_FAMILY:'qwen3-vl',COMPUTER_BASE_URL:'https://example.com/v1',COMPUTER_API_KEY:'key'}})
+ const configured=readDesktopPermissions({platform:'darwin',systemPreferences,backendReady:true,environment:{EXECUTORS:'computer',COMPUTER_DISPLAY_ID:'0',EXECUTOR_MODEL:'model',EXECUTOR_MODEL_FAMILY:'qwen3-vl',EXECUTOR_BASE_URL:'https://example.com/v1',EXECUTOR_API_KEY:'key'}})
  assert.equal(configured.computerReady,true)
 })
 test('permission requests only open a fixed system pane after explicit action; unsupported OS is not granted',async()=>{

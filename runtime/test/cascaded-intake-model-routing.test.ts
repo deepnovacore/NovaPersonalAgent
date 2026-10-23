@@ -67,9 +67,7 @@ test('host and desktop text/voice children keep resolved support models paired a
     {provider: 'ark', model: 'ark-selected', endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'},
     {provider: 'qwen', model: 'qwen-turbo', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'},
     {provider: 'deepseek', model: 'deepseek-flash', endpoint: 'https://generic.example/v1/chat/completions', generic: true},
-    {provider: 'deepseek', model: 'deepseek-flash', endpoint: 'https://api.deepseek.com/chat/completions', planner: 'deepseek-v4-pro'},
     {provider: 'qwen', model: 'qwen-turbo', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', integrated: true},
-    {provider: 'qwen', model: 'qwen-turbo', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', integrated: true, planner: 'qwen-plus'},
     {provider: 'qwen', model: 'qwen-turbo', endpoint: 'https://generic.example/v1/chat/completions', integrated: true, generic: true},
   ]) {
     contexts.length = 0
@@ -100,7 +98,6 @@ test('host and desktop text/voice children keep resolved support models paired a
       DEEPSEEK_API_KEY: 'fixture', ARK_API_KEY: 'fixture', DASHSCOPE_API_KEY: 'fixture',
       DOUBAO_BIGMODEL_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture',
       ...(scenario.generic ? {MODEL_API_KEY: 'fixture', MODEL_BASE_URL: 'https://generic.example/v1'} : {}),
-      ...(scenario.planner ? {PLANNER_MODEL: scenario.planner} : {}),
     }, !!scenario.integrated)
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-support-routing-'))
     let realtime: ReturnType<typeof buildCascadedRealtimeAssembly> | undefined
@@ -125,7 +122,7 @@ test('host and desktop text/voice children keep resolved support models paired a
           assert.deepEqual(records, [
             {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
             {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen3-vl-plus' : scenario.planner ?? scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
             {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
           ], scenario.provider)
         }

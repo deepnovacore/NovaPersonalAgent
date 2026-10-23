@@ -67,6 +67,6 @@ test('Gemini speech stages need only the Gemini key and validate mixed-stage cre
   assert.equal(selected.asr.apiKey, 'selected')
   assert.equal(selected.tts.apiKey, 'selected')
   assert.deepEqual(describeMissingBlockingCredentials(loadSettings({...environment,GEMINI_API_KEY:''})).missing, ['GEMINI_API_KEY'])
-  assert.deepEqual(describeMissingBlockingCredentials(loadSettings({...environment,CASCADE_ASR_PROVIDER:'volcengine'})).missing, ['DOUBAO_ASR_API_KEY'])
+  assert.deepEqual(describeMissingBlockingCredentials(loadSettings({...environment,CASCADE_ASR_PROVIDER:'volcengine'})).missing, ['DOUBAO_BIGMODEL_API_KEY'])
   assert.deepEqual(describeMissingBlockingCredentials(loadSettings({...environment,CASCADE_TTS_PROVIDER:'volcengine'})).missing, ['DOUBAO_BIGMODEL_API_KEY'])
 })

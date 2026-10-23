@@ -157,7 +157,6 @@ function projectSettings(settings: Settings): Readonly<Record<string, unknown>> 
     codex_workspace: settings.codex_workspace,
     compressor_model: settings.compressor_model,
     dashscope_api_key_present: secretPresent(settings.dashscope_api_key),
-    doubao_asr_api_key_present: secretPresent(settings.doubao_asr_api_key),
     doubao_asr_chunk_ms: settings.doubao_asr_chunk_ms,
     doubao_asr_endpoint: settings.doubao_asr_endpoint,
     doubao_asr_resource_id: settings.doubao_asr_resource_id,

@@ -141,7 +141,7 @@ test('queued voiceprint registration reads upload target, key and previous ID fr
   const context = {
     settingsWindow:{webContents:sender},currentSettings:{voiceprintUploadUrl:'https://old.example',voiceprintId:'old',key:'old-key'},voiceprintBusy:false,secretCodec:{},net:{fetch(){}},
     accessCredentials:async operation=>{if(!calls.length)await waiting;calls.push('read');return operation()},
-    decryptSecretsForSpawn:settings=>({doubaoAsrApiKey:settings.key}),voiceprintHealth:async url=>{calls.push(url);return true},
+    decryptSecretsForSpawn:settings=>({doubaoBigmodelApiKey:settings.key}),voiceprintHealth:async url=>{calls.push(url);return true},
     registerVoiceprint:async input=>{calls.push([input.uploadUrl,input.apiKey]);return {id:'new',name:'new-name'}},
     deleteVoiceprint:async input=>{calls.push(input.id)},applyDesktopSettings:async()=>{context.currentSettings.voiceprintId='new';return {saved:true}},
     endVoiceprintRecording(){},ipcMain:{handle(_channel,fn){handler=fn}},
@@ -195,7 +195,7 @@ test('registration cleanup respects failed recovery and pending backend configur
     const context = {
       settingsWindow:{webContents:sender},currentSettings:{...original},voiceprintBusy:false,
       settingsRecoveryAvailable:false,settingsRestartPending:scenario === 'pending_restart',secretCodec:{},net:{fetch(){}},
-      decryptSecretsForSpawn:()=>({doubaoAsrApiKey:'key'}),voiceprintHealth:async()=>true,
+      decryptSecretsForSpawn:()=>({doubaoBigmodelApiKey:'key'}),voiceprintHealth:async()=>true,
       accessCredentials:async operation=>{credentialReads++;await Promise.resolve();if(scenario.startsWith('credential_')&&credentialReads===2)throw Error('credential unavailable');return operation()},
       registerVoiceprint:async()=>({id:'new',name:'new-name'}),
       deleteVoiceprint:async({id})=>{deleted.push(id);events.push(`delete:${id}`);if(scenario==='credential_discard_failed')throw Error('delete unavailable')},

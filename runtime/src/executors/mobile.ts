@@ -15,14 +15,14 @@ export function loadMobileConfig(env: NodeJS.ProcessEnv): MobileIosConfig {
     ENGINE: env.MOBILE_ENGINE,
     DEVICE_TYPE: env.MOBILE_DEVICE_TYPE,
     DEVICE_ID: env.MOBILE_DEVICE_ID,
-    BASE_URL: env.MOBILE_BASE_URL,
+    BASE_URL: env.EXECUTOR_BASE_URL,
     WDA_URL: env.MOBILE_WDA_URL,
-    MODEL: env.MOBILE_MODEL,
-    MODEL_FAMILY: env.MOBILE_MODEL_FAMILY,
-    API_KEY: env.MOBILE_API_KEY,
-    MAX_STEPS: env.MOBILE_MAX_STEPS,
-    TIMEOUT_SECONDS: env.MOBILE_TIMEOUT_SECONDS,
-    SETTLE_MS: env.MOBILE_SETTLE_MS,
+    MODEL: env.EXECUTOR_MODEL,
+    MODEL_FAMILY: env.EXECUTOR_MODEL_FAMILY,
+    API_KEY: env.EXECUTOR_API_KEY,
+    MAX_STEPS: env.EXECUTOR_MAX_STEPS,
+    TIMEOUT_SECONDS: env.EXECUTOR_TIMEOUT_SECONDS,
+    SETTLE_MS: env.EXECUTOR_SETTLE_MS,
   }
   const required = (name: keyof typeof values, fallback?: string, max = 4096): string => {
     const value = (values[name] ?? fallback)?.trim()
