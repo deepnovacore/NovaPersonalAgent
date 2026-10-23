@@ -138,7 +138,6 @@ test('passes token only through environment and dials back over loopback', () =>
   assert.deepEqual(spec.argv, [])
   assert.equal(spec.env.DESKTOP_TOKEN, TOKEN)
   assert.equal(spec.env.DESKTOP_READY_ENDPOINT, '127.0.0.1:49152')
-  assert.equal('DESKTOP_READY_FD' in spec.env, false)
   assert.equal(spec.env.CODEX_WORKSPACE, '/workspace')
   assert.deepEqual(spec.stdio, ['ignore', 'pipe', 'pipe'])
   assert.equal(spec.stdio.length, 3)
@@ -260,7 +259,6 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
     token: TOKEN,
     readyEndpoint: '127.0.0.1:49152',
     parentEnv: {
-      PLANNER_MODEL: 'parent-planner',
       EMBEDDING_MODEL: 'parent-embedding',
       KNOWLEDGE_PATH: '/parent/knowledge.sqlite',
     },
@@ -268,7 +266,6 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
       codexApprovalMode: 'yolo',
       clarificationDepth: 'thorough',
       planReadback: 'confirm',
-      plannerModel: 'settings-planner',
       progressBubbles: 'all',
       embeddingProvider: 'local',
       embeddingModel: 'custom-embedding',
@@ -281,14 +278,13 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
     approval: spec.env.CODEX_APPROVAL_MODE,
     depth: spec.env.CLARIFICATION_DEPTH,
     readback: spec.env.PLAN_READBACK,
-    planner: spec.env.PLANNER_MODEL,
     bubbles: spec.env.PROGRESS_BUBBLES,
     embeddingProvider: spec.env.EMBEDDING_PROVIDER,
     embeddingModel: spec.env.EMBEDDING_MODEL,
     capabilities: spec.env.CAPABILITIES_CONFIG,
     knowledge: spec.env.KNOWLEDGE_PATH,
   }, {
-    approval: 'yolo', depth: 'thorough', readback: 'confirm', planner: 'settings-planner',
+    approval: 'yolo', depth: 'thorough', readback: 'confirm',
     bubbles: 'all', embeddingProvider: 'local', embeddingModel: 'custom-embedding',
     capabilities: resolve('/settings/capabilities.json'), knowledge: '/settings/knowledge.sqlite',
   })
@@ -298,14 +294,12 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
     token: TOKEN,
     readyEndpoint: '127.0.0.1:49152',
     parentEnv: {
-      PLANNER_MODEL: 'parent-planner',
       EMBEDDING_MODEL: 'parent-embedding',
     },
     settings: {
-      plannerModel: '', embeddingModel: '', capabilitiesConfigPath: '', knowledgePath: '',
+      embeddingModel: '', capabilitiesConfigPath: '', knowledgePath: '',
     },
   })
-  assert.equal(empty.env.PLANNER_MODEL, 'parent-planner')
   assert.equal(empty.env.EMBEDDING_MODEL, 'parent-embedding')
   assert.equal('CAPABILITIES_CONFIG' in empty.env, false)
   assert.equal('KNOWLEDGE_PATH' in empty.env, false)
@@ -394,17 +388,6 @@ test('runtime entry resolves inside the workspace for dev and the asar for packa
   }), resolve(packagedApp, 'node_modules/@nova-personal-agent/runtime/dist/src/desktop-entry.js'))
 })
 
-test('launch spec strips a stale inherited readiness pipe', () => {
-  const spec = nodeLaunchSpec({
-    workspace: '/workspace',
-    token: TOKEN,
-    readyEndpoint: '127.0.0.1:49152',
-    parentEnv: { DESKTOP_READY_FD: '3' },
-  })
-
-  assert.equal('DESKTOP_READY_FD' in spec.env, false)
-})
-
 test('a local runtime entry override is absolute and ignored by packaged clients', () => {
   const options = {appPath: '/repo/clients/desktop', packageRoot: '/repo/clients/desktop',
     environment: {DEV_BACKEND_ENTRY: '/private/tmp/local-entry.mjs'}}
@@ -432,7 +415,6 @@ test('integrated launch injects all active public settings and only its platform
       dashscopeApiKey: 'dash-key',
       arkApiKey: 'ark-key',
       doubaoBigmodelApiKey: 'doubao-key',
-      doubaoAsrApiKey: 'asr-key',
     },
   })
 
@@ -451,7 +433,6 @@ test('integrated launch injects all active public settings and only its platform
     'CASCADE_TTS_PROVIDER',
     'DOUBAO_TTS_VOICE',
     'DOUBAO_BIGMODEL_API_KEY',
-    'DOUBAO_ASR_API_KEY',
   ]) {
     assert.equal(name in spec.env, false, `${name} is inactive for integrated mode`)
   }
@@ -491,7 +472,6 @@ test('cascaded Qwen launch injects active selectors, remembered model, and Douba
       dashscopeApiKey: 'dash-key',
       arkApiKey: 'ark-key',
       doubaoBigmodelApiKey: 'doubao-key',
-      doubaoAsrApiKey: 'asr-key',
     },
   })
 
@@ -504,7 +484,6 @@ test('cascaded Qwen launch injects active selectors, remembered model, and Douba
   assert.equal(spec.env.DOUBAO_TTS_VOICE, 'zh_female_custom')
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'dash-key')
   assert.equal(spec.env.DOUBAO_BIGMODEL_API_KEY, 'doubao-key')
-  assert.equal(spec.env.DOUBAO_ASR_API_KEY, 'asr-key')
   assert.equal('ARK_API_KEY' in spec.env, false)
   assert.equal('INTEGRATED_PROVIDER' in spec.env, false)
   assert.equal('QWEN_REALTIME_MODEL' in spec.env, false)
@@ -540,26 +519,10 @@ test('cascaded Ark launch selects the remembered Ark model without injecting Das
   assert.equal(spec.env.ARK_API_KEY, 'ark-key')
   assert.equal(spec.env.DOUBAO_BIGMODEL_API_KEY, 'doubao-key')
   assert.equal('DASHSCOPE_API_KEY' in spec.env, false)
-  assert.equal('DOUBAO_ASR_API_KEY' in spec.env, false)
   assert.deepEqual(settings.cascadedLlmModels, {
     qwen: 'qwen-remembered',
     ark: 'ark-selected',
   })
-})
-
-test('absent cascaded ASR override does not duplicate the big-model secret', () => {
-  const spec = nodeLaunchSpec({
-    workspace: '/workspace',
-    token: TOKEN,
-    readyEndpoint: '127.0.0.1:49152',
-    parentEnv: { DOUBAO_ASR_API_KEY: 'parent-asr-key' },
-    settings: { ...SETTINGS_V2, pipelineMode: 'cascaded' },
-    decryptedSecrets: { doubaoBigmodelApiKey: 'doubao-key' },
-  })
-
-  assert.equal(spec.env.DOUBAO_BIGMODEL_API_KEY, 'doubao-key')
-  assert.equal(spec.env.DOUBAO_ASR_API_KEY, 'parent-asr-key')
-  assert.notEqual(spec.env.DOUBAO_ASR_API_KEY, spec.env.DOUBAO_BIGMODEL_API_KEY)
 })
 
 test('launch spec falls back to the settings-store defaults when settings is missing', () => {
@@ -618,7 +581,6 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
       codexApiKey: 'codex-key',
       arkApiKey: 'ark-key',
       doubaoBigmodelApiKey: 'doubao-key',
-      doubaoAsrApiKey: 'asr-key',
     },
   })
 
@@ -628,7 +590,6 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
   assert.equal(spec.env.CODEX_API_KEY, 'codex-key')
   assert.equal('ARK_API_KEY' in spec.env, false)
   assert.equal('DOUBAO_BIGMODEL_API_KEY' in spec.env, false)
-  assert.equal('DOUBAO_ASR_API_KEY' in spec.env, false)
 })
 
 test('launch spec supplies the resolved desktop search proxy without overriding explicit env', () => {
@@ -678,7 +639,6 @@ test('launch spec omits a secret env var entirely when absent, empty, or undefin
   assert.equal('CODEX_API_KEY' in spec.env, false)
   assert.equal('ARK_API_KEY' in spec.env, false)
   assert.equal('DOUBAO_BIGMODEL_API_KEY' in spec.env, false)
-  assert.equal('DOUBAO_ASR_API_KEY' in spec.env, false)
 
   const noSecretsAtAll = nodeLaunchSpec({
     workspace: '/workspace',
@@ -760,7 +720,6 @@ test('cascaded Ark launch rejects raw boundary controls in every new secret over
   const parentEnv = {
     ARK_API_KEY: 'parent-ark',
     DOUBAO_BIGMODEL_API_KEY: 'parent-doubao',
-    DOUBAO_ASR_API_KEY: 'parent-asr',
   }
   const spec = nodeLaunchSpec({
     workspace: '/workspace',
@@ -775,13 +734,11 @@ test('cascaded Ark launch rejects raw boundary controls in every new secret over
     decryptedSecrets: {
       arkApiKey: '\nark-override',
       doubaoBigmodelApiKey: 'doubao-override\r',
-      doubaoAsrApiKey: '\tasr-override',
     },
   })
 
   assert.equal(spec.env.ARK_API_KEY, 'parent-ark')
   assert.equal(spec.env.DOUBAO_BIGMODEL_API_KEY, 'parent-doubao')
-  assert.equal(spec.env.DOUBAO_ASR_API_KEY, 'parent-asr')
 })
 
 test('launch spec injects a decrypted secret with its surrounding whitespace trimmed', () => {
@@ -1342,7 +1299,6 @@ test('a spawned backend reaches readiness through the launch spec environment', 
   const script = `
     const net = require('node:net')
     const [host, port] = process.env.DESKTOP_READY_ENDPOINT.split(':')
-    if (process.env.DESKTOP_READY_FD) throw new Error('fd 3 must be gone')
     const payload = JSON.stringify({
       token: process.env.DESKTOP_TOKEN,
       host: '127.0.0.1',

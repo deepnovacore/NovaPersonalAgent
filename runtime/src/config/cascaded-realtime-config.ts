@@ -162,8 +162,8 @@ export function requireSelectedCascadedAsrConfig(settings:Settings):VolcengineAs
   if(settings.cascade_asr_provider === 'openai-compatible')return resolveCompatibleSpeechConfig(settings, 'asr', stripLikePython(settings.compatible_asr_api_key ?? ''))
   if(settings.cascade_asr_provider === 'self-hosted')return resolveAsrConfig(settings, stripLikePython(settings.self_hosted_asr_api_key ?? ''))
   if(settings.cascade_asr_provider === 'gemini')return resolveGeminiSpeechConfig(settings, 'asr', stripLikePython(settings.gemini_api_key??''))
-  const key=stripLikePython(settings.doubao_asr_api_key??'')||stripLikePython(settings.doubao_bigmodel_api_key??'')
-  if(!key)throw new ConfigurationError('缺少 DOUBAO_ASR_API_KEY')
+  const key=stripLikePython(settings.doubao_bigmodel_api_key??'')
+  if(!key)throw new ConfigurationError('缺少 DOUBAO_BIGMODEL_API_KEY')
   return resolveAsrConfig(settings,key)
 }
 

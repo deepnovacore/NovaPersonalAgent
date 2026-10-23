@@ -49,7 +49,6 @@ DASHSCOPE_API_KEY=你的百炼密钥
 | `STEPFUN_API_KEY` | 无 | StepFun 实时凭据。 |
 | `DEEPSEEK_API_KEY` | 无 | DeepSeek 官方级联 LLM 凭据。 |
 | `ARK_API_KEY` | 无 | 方舟级联 LLM 凭据。 |
-| `DOUBAO_ASR_API_KEY` | Doubao big-model key | 火山 ASR 凭据覆盖。 |
 | `DOUBAO_BIGMODEL_API_KEY` | 无 | 火山 TTS 及 ASR 回退凭据。 |
 | `CODEX_WORKSPACE` | 无 | 主机批准的 Codex 工作区。 |
 | `CODEX_BIN` | codex | 主机批准的 Codex app-server 可执行文件。 |

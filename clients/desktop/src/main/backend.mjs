@@ -33,7 +33,6 @@ export const SECRET_ENV_MAP = Object.freeze({
   arkApiKey: 'ARK_API_KEY',
   deepseekApiKey: 'DEEPSEEK_API_KEY',
   doubaoBigmodelApiKey: 'DOUBAO_BIGMODEL_API_KEY',
-  doubaoAsrApiKey: 'DOUBAO_ASR_API_KEY',
 })
 
 // Main-only values and a separate public projection share the same precedence.
@@ -214,7 +213,6 @@ export function backendLaunchSpec({
   }
   for (const [name, value] of [
     ['WATCH_MODEL', settings?.watchModel ?? ''],
-    ['PLANNER_MODEL', settings?.plannerModel ?? SETTINGS_DEFAULTS.plannerModel],
     ['EMBEDDING_MODEL', settings?.embeddingModel
       ?? SETTINGS_DEFAULTS.embeddingModel],
     ['CAPABILITIES_CONFIG', settings?.capabilitiesConfigPath
@@ -308,9 +306,6 @@ export function backendLaunchSpec({
         settings?.integratedVoice ?? providerDefaults?.[1] ?? SETTINGS_DEFAULTS.integratedVoice,
     })
   }
-  // The inherited fd-3 readiness pipe is gone: stdio stops at stderr and the
-  // backend dials back instead, so a stale parent value must never imply one.
-  delete env.DESKTOP_READY_FD
   // Overrides only: an absent, empty, or whitespace-only decrypted value
   // leaves the key out of `env` entirely, so whatever the launcher's own
   // `.env`/parent env supplied keeps winning. Never a replacement with an
@@ -641,10 +636,7 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
     activeSecretKeys.add(llmProvider === 'openai-compatible' ? 'openaiCompatibleApiKey' : llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
     if (pipelineMode === 'cascaded') {
       activeSecretKeys.add(settings?.cascadedTtsProvider === 'openai-compatible' ? 'compatibleTtsApiKey' : settings?.cascadedTtsProvider === 'self-hosted' ? 'selfHostedTtsApiKey' : (settings?.cascadedTtsProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
-      // Optional override only. When absent, the runtime falls back to the
-      // big-model key; Main does not synthesize a duplicate secret value.
-      activeSecretKeys.add(settings?.cascadedAsrProvider === 'openai-compatible' ? 'compatibleAsrApiKey' : settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoAsrApiKey')
-      if ((settings?.cascadedAsrProvider ?? 'volcengine') === 'volcengine') activeSecretKeys.add('doubaoBigmodelApiKey')
+      activeSecretKeys.add(settings?.cascadedAsrProvider === 'openai-compatible' ? 'compatibleAsrApiKey' : settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
     } else {
       const integrated = settings?.integratedProvider ?? 'qwen'
       activeSecretKeys.add(integrated === 'qwen' ? 'dashscopeApiKey' : `${integrated}ApiKey`)

@@ -33,7 +33,6 @@ export const SECRET_KEYS = Object.freeze([
   'arkApiKey',
   'deepseekApiKey',
   'doubaoBigmodelApiKey',
-  'doubaoAsrApiKey',
 ])
 
 export const PALETTES = Object.freeze(['ember', 'graphite'])
@@ -328,7 +327,6 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     generatePlan: pick(source.generatePlan, fallback.generatePlan, DEFAULT_SETTINGS.generatePlan, validBoolean),
     profileParticipantMessages: pick(source.profileParticipantMessages, fallback.profileParticipantMessages, DEFAULT_SETTINGS.profileParticipantMessages, validBoolean),
     planReadback: pick(acceptsV4Fields ? source.planReadback : undefined, acceptsV4Fields ? fallback.planReadback : undefined, DEFAULT_SETTINGS.planReadback, validPlanReadback),
-    plannerModel: pick(acceptsV4Fields ? source.plannerModel : undefined, acceptsV4Fields ? fallback.plannerModel : undefined, DEFAULT_SETTINGS.plannerModel, validDesktopString),
     progressBubbles: pick(acceptsV4Fields ? source.progressBubbles : undefined, acceptsV4Fields ? fallback.progressBubbles : undefined, DEFAULT_SETTINGS.progressBubbles, validProgressBubbles),
     conversationVisionEnabled: pick(source.conversationVisionEnabled, fallback.conversationVisionEnabled, DEFAULT_SETTINGS.conversationVisionEnabled, validBoolean),
     monitorCameraDeviceId: pick(source.monitorCameraDeviceId, fallback.monitorCameraDeviceId, DEFAULT_SETTINGS.monitorCameraDeviceId, value => typeof value === 'string' && value.length <= 256 && !/[\x00-\x1f]/u.test(value) ? value : null),
@@ -408,7 +406,6 @@ export function publicSettings(settings) {
     planReadback: normalized.planReadback,
     generatePlan: normalized.generatePlan,
     profileParticipantMessages: normalized.profileParticipantMessages,
-    plannerModel: normalized.plannerModel,
     progressBubbles: normalized.progressBubbles,
     conversationVisionEnabled: normalized.conversationVisionEnabled,
     monitorCameraDeviceId: normalized.monitorCameraDeviceId,

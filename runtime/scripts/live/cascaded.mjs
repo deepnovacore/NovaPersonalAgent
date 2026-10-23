@@ -1,6 +1,6 @@
 /** Digital audio live acceptance. Uses production factories; never records the microphone.
  * node runtime/scripts/live-smoke.mjs --target=cascaded --env-file /path/to/.env --output /tmp/report.json
- * Requires ARK_API_KEY and DOUBAO_BIGMODEL_API_KEY (optional DOUBAO_ASR_API_KEY).
+ * Requires ARK_API_KEY and DOUBAO_BIGMODEL_API_KEY.
  */
 import assert from 'node:assert/strict'
 import {readFile, writeFile} from 'node:fs/promises'
