@@ -13,13 +13,6 @@ jobs:
     timeout-minutes: 60
     env:
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
-      NOVA_CI_ROOT: ${{ runner.temp }}/nova-flutter-ios-${{ github.run_id }}-${{ github.run_attempt }}
-      NOVA_LINUX_ROOT: ${{ runner.temp }}/nova-flutter-ios-${{ github.run_id }}-${{ github.run_attempt }}/linux
-      XDG_CONFIG_HOME: ${{ runner.temp }}/nova-flutter-ios-${{ github.run_id }}-${{ github.run_attempt }}/flutter-config
-      PUB_CACHE: ${{ runner.temp }}/nova-flutter-ios-${{ github.run_id }}-${{ github.run_attempt }}/pub-cache
-      CP_HOME_DIR: ${{ runner.temp }}/nova-flutter-ios-${{ github.run_id }}-${{ github.run_attempt }}/cocoapods
-      CLANG_MODULE_CACHE_PATH: ${{ runner.temp }}/nova-flutter-ios-${{ github.run_id }}-${{ github.run_attempt }}/clang-cache
-      HOMEBREW_CACHE: ${{ runner.temp }}/nova-flutter-ios-${{ github.run_id }}-${{ github.run_attempt }}/brew-cache
       HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +21,18 @@ jobs:
           test "$(uname -m)" = arm64
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
-          mkdir -p "$NOVA_CI_ROOT/tmp"
-          echo "TMPDIR=$NOVA_CI_ROOT/tmp/" >> "$GITHUB_ENV"
+          build_root="$RUNNER_TEMP/nova-flutter-ios-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$build_root/tmp"
+          {
+            echo "NOVA_CI_ROOT=$build_root"
+            echo "NOVA_LINUX_ROOT=$build_root/linux"
+            echo "XDG_CONFIG_HOME=$build_root/flutter-config"
+            echo "PUB_CACHE=$build_root/pub-cache"
+            echo "CP_HOME_DIR=$build_root/cocoapods"
+            echo "CLANG_MODULE_CACHE_PATH=$build_root/clang-cache"
+            echo "HOMEBREW_CACHE=$build_root/brew-cache"
+            echo "TMPDIR=$build_root/tmp/"
+          } >> "$GITHUB_ENV"
       - name: Install native runtime toolchain
         run: |
           brew install llvm lld libarchive pkgconf
