@@ -17,7 +17,7 @@ import {NullTelemetry} from '../dist/src/realtime/telemetry.js';
 const [envFile,modelFile,serial,instruction,output]=process.argv.slice(2);
 if(!envFile||!modelFile||!serial||!instruction||!output) throw Error('usage: node accept-mobile-android.mjs env-file model-json serial instruction output-json');
 const secret=JSON.parse(await readFile(modelFile,'utf8'));
-const env={...process.env,...parseEnv(await readFile(envFile,'utf8')),PIPELINE_MODE:'cascaded',EXECUTORS:'mobile',MOBILE_DEVICE_TYPE:'android',MOBILE_DEVICE_ID:serial,MOBILE_BASE_URL:secret.baseUrl,MOBILE_MODEL:secret.model,MOBILE_MODEL_FAMILY:secret.modelFamily,MOBILE_API_KEY:secret.apiKey,MOBILE_MAX_STEPS:'15',MOBILE_TIMEOUT_SECONDS:'900'};
+const env={...process.env,...parseEnv(await readFile(envFile,'utf8')),PIPELINE_MODE:'cascaded',EXECUTORS:'mobile',MOBILE_DEVICE_TYPE:'android',MOBILE_DEVICE_ID:serial,EXECUTOR_BASE_URL:secret.baseUrl,EXECUTOR_MODEL:secret.model,EXECUTOR_MODEL_FAMILY:secret.modelFamily,EXECUTOR_API_KEY:secret.apiKey,EXECUTOR_MAX_STEPS:'15',EXECUTOR_TIMEOUT_SECONDS:'900'};
 const config=loadMobileConfig(env),settings=loadSettings(env),clock=new RealClock(),telemetry=new NullTelemetry({clock});
 const approvals=new HostApprovalController({clock,idFactory:randomUUID}),executor=new MobileExecutor(config,approvals);
 const evidence={started:new Date().toISOString(),kind:'Nova-production-text-input-real-frontend-Midscene-ADB',instruction,scope:'Text task, real models and physical phone; digital audio acknowledgements, no microphone/speaker or desktop UI acceptance',device:config.deviceId,frontend:settings.cascade_llm_provider,model:config.model,approvals:[],events:[],spoken:[]};

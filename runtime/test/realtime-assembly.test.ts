@@ -5225,12 +5225,11 @@ test('core gateway preserves compressor choices and falls back for provider defa
         },
         endpoint: 'https://generic.example/v9/chat/completions',
         authorization: 'Bearer generic-safe-key',
-        models: {watch: 'watch-original', surrogate: 'surrogate-original', compressor: 'compressor-original'},
+        models: {watch: 'watch-original', surrogate: 'surrogate-original', compressor: 'qwen-flash'},
       },
       {
         name: 'Python-whitespace Ark fallback',
         environment: {
-          COMPRESSOR_MODEL: 'qwen-flash',
           MODEL_API_KEY: '\u001c\u0085',
           MODEL_BASE_URL: 'https://generic.example/v9',
         },
@@ -5239,18 +5238,10 @@ test('core gateway preserves compressor choices and falls back for provider defa
         models: {watch: 'watch-original', surrogate: 'ark-selected', compressor: 'ark-selected'},
       },
       {
-        name: 'Ark explicit compressor',
-        environment: {MODEL_API_KEY: ''},
-        endpoint: 'https://ark-support.example/api/v3/chat/completions',
-        authorization: 'Bearer ark-test-key',
-        models: {watch: 'watch-original', surrogate: 'ark-selected', compressor: 'compressor-original'},
-      },
-      {
         name: 'Qwen fallback',
         environment: {
           CASCADE_LLM_PROVIDER: 'qwen',
           CASCADE_LLM_MODEL: 'qwen3-max',
-          COMPRESSOR_MODEL: 'qwen-flash',
           DASHSCOPE_API_KEY: 'dash-support-key',
           MODEL_API_KEY: '\u001c\u0085',
         },
@@ -5268,7 +5259,6 @@ test('core gateway preserves compressor choices and falls back for provider defa
         FAST_MODEL: 'fast-original',
         WATCH_MODEL: 'watch-original',
         SUPPORT_MODEL: 'surrogate-original',
-        COMPRESSOR_MODEL: 'compressor-original',
         VOLCENGINE_ARK_BASE_URL: 'https://ark-support.example/api/v3',
         CASCADE_LLM_MODEL: 'ark-selected',
         ...scenario.environment,

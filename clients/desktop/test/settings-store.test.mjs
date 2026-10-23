@@ -36,7 +36,6 @@ const ALL_SECRET_KEYS = Object.freeze([
   'arkApiKey',
   'deepseekApiKey',
   'doubaoBigmodelApiKey',
-  'doubaoAsrApiKey',
 ])
 
 // The store never imports Electron: the keychain arrives as this three-method
@@ -124,7 +123,6 @@ test('the default settings are the documented schema', () => {
     planReadback: 'summary',
     generatePlan: true,
     profileParticipantMessages: false,
-    plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
@@ -158,7 +156,6 @@ test('version 3 migrates to v4 defaults while preserving existing desktop fields
   assert.equal(migrated.codexApprovalMode, 'ask')
   assert.equal(migrated.clarificationDepth, 'balanced')
   assert.equal(migrated.planReadback, 'summary')
-  assert.equal(migrated.plannerModel, '')
   assert.equal(migrated.progressBubbles, 'milestones')
   assert.equal(migrated.embeddingProvider, 'dashscope')
   assert.equal(migrated.embeddingModel, 'text-embedding-v4')
@@ -173,7 +170,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: 'yolo',
     clarificationDepth: 'thorough',
     planReadback: 'confirm',
-    plannerModel: 'planner-model',
     progressBubbles: 'all',
     embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
@@ -185,7 +181,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: normalized.codexApprovalMode,
     clarificationDepth: normalized.clarificationDepth,
     planReadback: normalized.planReadback,
-    plannerModel: normalized.plannerModel,
     progressBubbles: normalized.progressBubbles,
     embeddingProvider: normalized.embeddingProvider,
     embeddingModel: normalized.embeddingModel,
@@ -195,7 +190,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: 'yolo',
     clarificationDepth: 'thorough',
     planReadback: 'confirm',
-    plannerModel: 'planner-model',
     progressBubbles: 'all',
     embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
@@ -317,7 +311,6 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     planReadback: 'summary',
     generatePlan: true,
     profileParticipantMessages: false,
-    plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
@@ -411,7 +404,6 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
-    'plannerModel',
     'proactivity',
     'profileParticipantMessages',
     'progressBubbles',
@@ -548,7 +540,6 @@ test('normalizeSettings keeps only well-formed secret entries', () => {
       codexApiKey: { enc: 'none', data: 'not base64!' },
       arkApiKey: { enc: 'safeStorage', data: 'YXJr' },
       doubaoBigmodelApiKey: { enc: 'none', data: 'ZG91YmFv' },
-      doubaoAsrApiKey: { enc: 'safeStorage', data: 'YXNy' },
       strayKey: { enc: 'none', data: 'aGk=' },
     },
   })
@@ -558,7 +549,6 @@ test('normalizeSettings keeps only well-formed secret entries', () => {
     tavilyApiKey: { enc: 'none', data: 'aGk=' },
     arkApiKey: { enc: 'safeStorage', data: 'YXJr' },
     doubaoBigmodelApiKey: { enc: 'none', data: 'ZG91YmFv' },
-    doubaoAsrApiKey: { enc: 'safeStorage', data: 'YXNy' },
   })
 })
 
@@ -571,7 +561,6 @@ test('normalizeSettings rejects secret entries that are not objects or lack data
       codexApiKey: null,
       arkApiKey: [],
       doubaoBigmodelApiKey: { enc: 'none', data: 'not base64!' },
-      doubaoAsrApiKey: { enc: 'rot13', data: 'YXNy' },
     },
   })
 
@@ -626,7 +615,6 @@ test('publicSettings never carries the secrets object', () => {
     'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
-    'plannerModel',
     'proactivity',
     'profileParticipantMessages',
     'progressBubbles',
@@ -674,7 +662,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     arkApiKey: false,
     deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
-    doubaoAsrApiKey: false,
   })
   assert.doesNotMatch(JSON.stringify(secretsPresent(settings)), /sk-dash|sk-codex|sealed/)
   assert.deepEqual(secretsPresent(undefined), {
@@ -692,7 +679,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     arkApiKey: false,
     deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
-    doubaoAsrApiKey: false,
   })
 })
 

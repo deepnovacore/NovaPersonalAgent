@@ -4,7 +4,7 @@ Computer Use is an opt-in, per-conversation capability for local Build on macOS 
 
 ## Setup
 
-Configure the existing computer executor with `COMPUTER_DISPLAY_ID`, `COMPUTER_BASE_URL`, `COMPUTER_MODEL`, `COMPUTER_MODEL_FAMILY` and `COMPUTER_API_KEY`. Its step, timeout, settling and click-duration limits use `COMPUTER_MAX_STEPS`, `COMPUTER_TIMEOUT_SECONDS`, `COMPUTER_SETTLE_MS` and `COMPUTER_CLICK_HOLD_MS`. Consult the generated environment reference for supported values and defaults; credentials belong in local configuration, not the project.
+Configure the existing computer executor with `COMPUTER_DISPLAY_ID`, `EXECUTOR_BASE_URL`, `EXECUTOR_MODEL`, `EXECUTOR_MODEL_FAMILY` and `EXECUTOR_API_KEY`. Its step, timeout, settling and click-duration limits use `EXECUTOR_MAX_STEPS`, `EXECUTOR_TIMEOUT_SECONDS`, `EXECUTOR_SETTLE_MS` and `COMPUTER_CLICK_HOLD_MS`. Consult the generated environment reference for supported values and defaults; credentials belong in local configuration, not the project.
 
 On macOS, grant Screen Recording and Accessibility permissions to the desktop application. On Windows, the packaged process guardian is required. Full-desktop control requires one configured display. Optional background Safari targeting uses `COMPUTER_MAC_WINDOW_PID` and `COMPUTER_MAC_WINDOW_ID`; its Connect prompt must identify the window and temporary keyboard-focus behavior.
 
@@ -20,7 +20,7 @@ The current Build vision allowlist is:
 - StepFun: `step-3.7-flash`.
 - Ark: `doubao-seed-2-0-pro-260215`.
 
-Other model IDs are not assumed to support images. They receive delegation only, with a `vision_model` preflight notice. The Build model and the computer executor's `COMPUTER_MODEL` are separate settings.
+Other model IDs are not assumed to support images. They receive delegation only, with a `vision_model` preflight notice. The Build model and the computer executor's `EXECUTOR_MODEL` are separate settings.
 
 ## Approval, Stop and recovery
 

@@ -6,9 +6,9 @@ import {validComputerDisplayId} from './computer-device.js'
 export interface ComputerConfig extends GuiModelConfig {displayId: string; lockRoot: string; resourcesPath?: string; clickHoldMs?: number; macWindow?: {pid: number; windowId: number}; macApplication?: {name:string;bundleId:string;path:string}}
 
 export function loadComputerConfig(env: NodeJS.ProcessEnv): ComputerConfig {
-  const config = {...(env.CODEX_RESOURCES_PATH ? {resourcesPath: env.CODEX_RESOURCES_PATH} : {}), displayId: env.COMPUTER_DISPLAY_ID ?? '', baseUrl: env.COMPUTER_BASE_URL ?? '', model: env.COMPUTER_MODEL ?? '',
-    modelFamily: env.COMPUTER_MODEL_FAMILY ?? '', apiKey: env.COMPUTER_API_KEY ?? '', maxSteps: Number(env.COMPUTER_MAX_STEPS ?? 30),
-    budgetMs: Number(env.COMPUTER_TIMEOUT_SECONDS ?? 600) * 1000, settleMs: Number(env.COMPUTER_SETTLE_MS ?? 4000), clickHoldMs: Number(env.COMPUTER_CLICK_HOLD_MS ?? 100),
+  const config = {...(env.CODEX_RESOURCES_PATH ? {resourcesPath: env.CODEX_RESOURCES_PATH} : {}), displayId: env.COMPUTER_DISPLAY_ID ?? '', baseUrl: env.EXECUTOR_BASE_URL ?? '', model: env.EXECUTOR_MODEL ?? '',
+    modelFamily: env.EXECUTOR_MODEL_FAMILY ?? '', apiKey: env.EXECUTOR_API_KEY ?? '', maxSteps: Number(env.EXECUTOR_MAX_STEPS ?? 30),
+    budgetMs: Number(env.EXECUTOR_TIMEOUT_SECONDS ?? 600) * 1000, settleMs: Number(env.EXECUTOR_SETTLE_MS ?? 4000), clickHoldMs: Number(env.COMPUTER_CLICK_HOLD_MS ?? 100),
     lockRoot: join(homedir(), '.nova-audio-agent', 'gui-devices')}
   const windowPid = env.COMPUTER_MAC_WINDOW_PID === '' ? undefined : env.COMPUTER_MAC_WINDOW_PID, windowId = env.COMPUTER_MAC_WINDOW_ID === '' ? undefined : env.COMPUTER_MAC_WINDOW_ID
   let macWindow: ComputerConfig['macWindow']

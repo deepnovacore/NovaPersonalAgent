@@ -39,10 +39,10 @@
       <section class="setting-section" id="assistant-identity-section"><h2>你的助手</h2><div id="assistant-identity-panel"></div></section>
       <section class="setting-section" id="desktop-permissions-section"><h2>电脑操作与系统权限</h2><div id="desktop-permissions-panel"></div><details class="computer-configuration"><summary>高级配置</summary><p>当前需要在启动环境中选择 computer 执行器，并配置 GUI 模型和目标显示器。整屏模式仅支持一个显示器。</p><pre>EXECUTORS=computer,codex
 COMPUTER_DISPLAY_ID=0
-COMPUTER_BASE_URL=你的 GUI 模型地址
-COMPUTER_MODEL=模型名称
-COMPUTER_MODEL_FAMILY=qwen3-vl
-COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 名称；系统没有 macOS 的辅助功能授权开关。修改启动配置后重启 Nova。</p></details></section>
+EXECUTOR_BASE_URL=你的 GUI 模型地址
+EXECUTOR_MODEL=模型名称
+EXECUTOR_MODEL_FAMILY=qwen3-vl
+EXECUTOR_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 名称；系统没有 macOS 的辅助功能授权开关。修改启动配置后重启 Nova。</p></details></section>
       <section class="setting-section" id="visor-section">
         <h2>Nova Visor · 桌面驾驶舱</h2>
         <p class="hint">在桌面上叠加一层半透明的 Nova 状态面板。</p>

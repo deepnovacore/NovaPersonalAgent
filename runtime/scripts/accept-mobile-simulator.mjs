@@ -72,9 +72,9 @@ try {
   } else model = {baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: 'simulator-scripted-home',
     modelFamily: 'auto-glm', apiKey: 'simulator-local-only'}
   const config = loadMobileConfig({...process.env,
-    MOBILE_BASE_URL: model.baseUrl, MOBILE_MODEL: model.model,
-    MOBILE_MODEL_FAMILY: model.modelFamily, MOBILE_API_KEY: model.apiKey,
-    MOBILE_MAX_STEPS: '3', MOBILE_TIMEOUT_SECONDS: '90'})
+    EXECUTOR_BASE_URL: model.baseUrl, EXECUTOR_MODEL: model.model,
+    EXECUTOR_MODEL_FAMILY: model.modelFamily, EXECUTOR_API_KEY: model.apiKey,
+    EXECUTOR_MAX_STEPS: '3', EXECUTOR_TIMEOUT_SECONDS: '90'})
   evidence.device_id = config.deviceId
   evidence.wda_url = config.wdaUrl
   evidence.engine = 'midscene'

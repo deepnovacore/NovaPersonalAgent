@@ -62,7 +62,6 @@ const SECRET_KEY_NAMES = [
   'openaiApiKey',
   'geminiApiKey',
   'doubaoBigmodelApiKey',
-  'doubaoAsrApiKey',
 ]
 const SECRET_KEYS = new Set(SECRET_KEY_NAMES)
 const MAIN_LIVE_VIEW_FIELDS = [

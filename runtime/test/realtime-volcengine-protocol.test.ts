@@ -53,7 +53,6 @@ interface Expected {
 
 const settingEnvironment: Readonly<Record<string, string>> = {
   ark_api_key: 'ARK_API_KEY',
-  doubao_asr_api_key: 'DOUBAO_ASR_API_KEY',
   doubao_bigmodel_api_key: 'DOUBAO_BIGMODEL_API_KEY',
   volcengine_ark_base_url: 'VOLCENGINE_ARK_BASE_URL',
   doubao_asr_endpoint: 'DOUBAO_ASR_ENDPOINT',
@@ -71,10 +70,10 @@ const settingEnvironment: Readonly<Record<string, string>> = {
   volcengine_vad_max_utterance_ms: 'VOLCENGINE_VAD_MAX_UTTERANCE_MS',
 }
 const keyValues: Readonly<Record<string, string>> = {
-  ark: 'fixture-ark-key', asr_dedicated: 'fixture-asr-key', tts_fallback: 'fixture-tts-key',
+  ark: 'fixture-ark-key', tts_fallback: 'fixture-tts-key',
 }
 const keyLabels = new Map(Object.entries(keyValues).map(([label, value]) => [value, label]))
-const secretFields = new Set(['ark_api_key', 'doubao_asr_api_key', 'doubao_bigmodel_api_key'])
+const secretFields = new Set(['ark_api_key', 'doubao_bigmodel_api_key'])
 
 function environmentFor(raw: Record<string, unknown>): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {

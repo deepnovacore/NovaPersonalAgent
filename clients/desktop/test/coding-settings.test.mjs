@@ -48,7 +48,7 @@ test('actual main applies a default-only change live without restarting, and rol
     vm.runInContext(`${live}\n${apply}\nglobalThis.applyDesktopSettings = applyDesktopSettings`, context)
     if (pendingRestart) {
       const deferred = await context.applyDesktopSettings({settingsPatch: {
-        plannerModel: 'new-planner', codingBackendPaths: {pi: {binaryPath: '/new/pi-acp'}},
+        embeddingModel: 'new-embedding', codingBackendPaths: {pi: {binaryPath: '/new/pi-acp'}},
       }, capabilitiesDocument: {version: 1, modules: {coding: {enabled: !runtimeEnabled}}}})
       assert.equal(deferred.operationStatus, 'pending_restart')
       assert.deepEqual(calls, [])
@@ -61,7 +61,7 @@ test('actual main applies a default-only change live without restarting, and rol
     assert.equal(runtimeBackend, runtimeEnabled ? saved.codingBackend : 'codex')
     assert.deepEqual(calls, runtimeEnabled ? failDelivery ? ['pi', 'codex'] : ['pi'] : [])
     if (pendingRestart) {
-      assert.equal(saved.plannerModel, 'new-planner')
+      assert.equal(saved.embeddingModel, 'new-embedding')
       assert.equal(saved.codingBackendPaths.pi.binaryPath, '/new/pi-acp')
       if (!failDelivery) assert.equal(result.operationStatus, 'pending_restart')
     }

@@ -57,7 +57,7 @@ export function applyChatGptEnvironment(env,view,broker){
   const model=view.model||'chatgpt-model-selection-required'
   if(view.useModels){
     Object.assign(env,{CASCADE_LLM_PROVIDER:'openai-compatible',OPENAI_COMPATIBLE_BASE_URL:broker.baseUrl,OPENAI_COMPATIBLE_API_KEY:broker.secret,OPENAI_COMPATIBLE_PROTOCOL:'responses',CASCADE_LLM_MODEL:model,
-      MODEL_API_KEY:'',WATCH_MODEL:model,SUPPORT_MODEL:model,PLANNER_MODEL:model,COMPRESSOR_MODEL:model})
+      MODEL_API_KEY:'',WATCH_MODEL:model,SUPPORT_MODEL:model})
   }
   if(view.useCodex)Object.assign(env,{CODEX_API_KEY:broker.secret,NOVA_CODEX_RESPONSES_PROXY:broker.baseUrl})
   return env

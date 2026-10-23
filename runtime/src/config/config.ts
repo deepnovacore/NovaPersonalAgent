@@ -92,7 +92,6 @@ export const settingsSchema = z.object({
   dashscope_api_key: z.string().nullable().default(null),
   ark_api_key: z.string().nullable().default(null),
   deepseek_api_key: z.string().nullable().default(null),
-  doubao_asr_api_key: z.string().nullable().default(null),
   doubao_bigmodel_api_key: z.string().nullable().default(null),
   volcengine_ark_base_url: z.string().default('https://ark.cn-beijing.volces.com/api/v3'),
   volcengine_ark_model: z.string().default('doubao-seed-2-0-pro-260215'),
@@ -142,7 +141,6 @@ export const settingsSchema = z.object({
   clarification_depth: clarificationDepthSchema.default('balanced'),
   plan_readback: planReadbackSchema.default('summary'),
   generate_plan: z.boolean().default(true),
-  planner_model: z.string().default(''),
   progress_bubbles: progressBubblesSchema.default('milestones'),
   search_provider: searchProviderSchema.default('tavily'),
   search_mcp_url: z.string().default(''),
@@ -298,7 +296,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
   const executors = parseExecutors(environment.EXECUTORS, configuredExecutor ?? '')
   // StepFun support chat defaults to its own model. fast_model keeps its DashScope default
   // because local memory extraction reaches it through the DashScope embedding connection;
-  // an empty watch or planner model would fall back to it, so empty counts as unset there.
+  // an empty watch model would fall back to it, so empty counts as unset there.
   const stepfunSupport = !textConversations && integratedProvider === 'stepfun'
     && (optionalSecret(environment.MODEL_API_KEY) ?? '').trim() === ''
   const supportDefault = (value: string | undefined): string | undefined =>
@@ -350,7 +348,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     conversation_vision_enabled: optionalBoolean(environment.CONVERSATION_VISION_ENABLED),
     monitor_camera_device_id: optionalString(environment.MONITOR_CAMERA_DEVICE_ID),
     support_model: supportDefault(rawEnvironmentValue(environment.SUPPORT_MODEL)),
-    compressor_model: supportDefault(rawEnvironmentValue(environment.COMPRESSOR_MODEL)),
+    compressor_model: supportDefault(undefined),
     language: parsePromptLanguageSetting(environment.PROMPT_LANGUAGE),
     news_language: parseSelector(promptLanguageSchema, environment.NEWS_LANGUAGE, 'en', 'NEWS_LANGUAGE'),
     pipeline_mode: pipelineMode,
@@ -397,7 +395,6 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
           environment.VOLCENGINE_ARK_BASE_URL,
         ),
       } : {}),
-      doubao_asr_api_key: optionalSecret(environment.DOUBAO_ASR_API_KEY),
       doubao_bigmodel_api_key: optionalSecret(environment.DOUBAO_BIGMODEL_API_KEY),
       doubao_asr_endpoint: rawEnvironmentValue(environment.DOUBAO_ASR_ENDPOINT),
       doubao_asr_resource_id: rawEnvironmentValue(
@@ -451,7 +448,6 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ),
     plan_readback: parsePlanReadback(environment.PLAN_READBACK),
     generate_plan: optionalBoolean(environment.GENERATE_PLAN),
-    planner_model: supportDefault(emptyAsUnset(optionalString(environment.PLANNER_MODEL))),
     progress_bubbles: parseProgressBubbles(environment.PROGRESS_BUBBLES),
     search_provider: parseSearchProvider(environment.SEARCH_PROVIDER),
     search_mcp_url: optionalString(environment.SEARCH_MCP_URL),
@@ -475,7 +471,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     memory_token: optionalSecret(environment.MEMORY_TOKEN),
     memory_path: optionalString(environment.MEMORY_PATH),
     memory_user_id: optionalString(environment.MEMORY_USER_ID),
-    workspace_graph_path: optionalString(environment.MEMORY_LEDGER_PATH) ?? optionalString(environment.WORKSPACE_GRAPH_PATH),
+    workspace_graph_path: optionalString(environment.MEMORY_LEDGER_PATH),
   }
   const withoutUndefined = Object.fromEntries(
     Object.entries(candidate).filter(([, value]) => value !== undefined),
@@ -486,9 +482,6 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
       .sort(compareStrings)
       .map(configurationFieldName)
     throw new ConfigurationError(`invalid configuration: ${fields.join(', ')}`)
-  }
-  if (environment.MEMORY_BACKEND !== undefined) {
-    throw new ConfigurationError('MEMORY_BACKEND was removed; use MEMORY_CONNECTION')
   }
   resolveMemoryConnection(result.data)
   return result.data
@@ -667,7 +660,7 @@ export function describeMissingBlockingCredentials(settings: Settings, textConve
   const llmField = cascadedCredentialField(settings.cascade_llm_provider)
   return {pipeline: 'cascaded', missing: [...new Set([
     ...(settings.cascade_llm_provider === 'self-hosted' || present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
-    ...(textConversations || settings.cascade_asr_provider === 'self-hosted' ? [] : settings.cascade_asr_provider === 'openai-compatible' ? (present(settings.compatible_asr_api_key) ? [] : ['COMPATIBLE_ASR_API_KEY']) : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_asr_api_key) || present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_ASR_API_KEY'])),
+    ...(textConversations || settings.cascade_asr_provider === 'self-hosted' ? [] : settings.cascade_asr_provider === 'openai-compatible' ? (present(settings.compatible_asr_api_key) ? [] : ['COMPATIBLE_ASR_API_KEY']) : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
     ...(textConversations || settings.cascade_tts_provider === 'self-hosted' ? [] : settings.cascade_tts_provider === 'openai-compatible' ? (present(settings.compatible_tts_api_key) ? [] : ['COMPATIBLE_TTS_API_KEY']) : settings.cascade_tts_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
   ])]}
 }
@@ -733,19 +726,16 @@ export function requireCascadedCredentials(
   const field = cascadedCredentialField(selection.llmProvider)
   const llmApiKey = selection.llmProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_llm_api_key ?? '') : requiredCredential(settings[field], field.toUpperCase())
   const ttsApiKey = selection.ttsProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_tts_api_key ?? '') : selection.ttsProvider === 'openai-compatible' ? requiredCredential(settings.compatible_tts_api_key, 'COMPATIBLE_TTS_API_KEY') : selection.ttsProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
-  const asrApiKey = selection.asrProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_asr_api_key ?? '') : selection.asrProvider === 'openai-compatible' ? requiredCredential(settings.compatible_asr_api_key, 'COMPATIBLE_ASR_API_KEY') : selection.asrProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(stripLikePython(settings.doubao_asr_api_key ?? '') || settings.doubao_bigmodel_api_key, 'DOUBAO_ASR_API_KEY')
+  const asrApiKey = selection.asrProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_asr_api_key ?? '') : selection.asrProvider === 'openai-compatible' ? requiredCredential(settings.compatible_asr_api_key, 'COMPATIBLE_ASR_API_KEY') : selection.asrProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
   return Object.freeze({llmApiKey, asrApiKey, ttsApiKey})
 }
 
 export function requireVolcengineRealtime(settings: Settings): VolcengineRealtimeConfig {
   const arkApiKey = stripLikePython(settings.ark_api_key ?? '')
   const ttsApiKey = stripLikePython(settings.doubao_bigmodel_api_key ?? '')
-  const asrApiKey = stripLikePython(settings.doubao_asr_api_key ?? '') || ttsApiKey
+  const asrApiKey = ttsApiKey
   if (arkApiKey === '') throw new ConfigurationError('缺少 ARK_API_KEY')
   if (ttsApiKey === '') throw new ConfigurationError('缺少 DOUBAO_BIGMODEL_API_KEY')
-  if (asrApiKey === '') {
-    throw new ConfigurationError('缺少 DOUBAO_ASR_API_KEY 或 DOUBAO_BIGMODEL_API_KEY')
-  }
   if (settings.doubao_asr_chunk_ms <= 0) {
     throw new ConfigurationError('DOUBAO_ASR_CHUNK_MS 必须为正整数')
   }
@@ -1049,7 +1039,6 @@ function configurationFieldName(field: string): string {
     ark_api_key: 'ARK_API_KEY',
     deepseek_api_key: 'DEEPSEEK_API_KEY',
     dashscope_api_key: 'DASHSCOPE_API_KEY',
-    doubao_asr_api_key: 'DOUBAO_ASR_API_KEY',
     doubao_bigmodel_api_key: 'DOUBAO_BIGMODEL_API_KEY',
     tavily_api_key: 'TAVILY_API_KEY',
     openrouter_api_key: 'OPENROUTER_API_KEY',

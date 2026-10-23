@@ -49,12 +49,11 @@ test('integrated voice keeps the explicitly selected text LLM and ledger path', 
  const {requireSelectedCascadedLlmConfig}=await import('../src/config/cascaded-realtime-config.js')
  const settings=loadSettings({PIPELINE_MODE:'integrated',DASHSCOPE_API_KEY:'voice-key',
   CASCADE_LLM_PROVIDER:'deepseek',DEEPSEEK_API_KEY:'text-key',
-  MEMORY_LEDGER_PATH:'/tmp/new-ledger.sqlite',WORKSPACE_GRAPH_PATH:'/tmp/legacy-ledger.sqlite'},true)
+  MEMORY_LEDGER_PATH:'/tmp/new-ledger.sqlite'},true)
  assert.equal(settings.pipeline_mode,'integrated')
  assert.equal(settings.workspace_graph_path,'/tmp/new-ledger.sqlite')
  const selected=requireSelectedCascadedLlmConfig(settings)
  assert.equal(selected.provider,'deepseek');assert.equal(selected.config.apiKey,'text-key')
- assert.equal(loadSettings({WORKSPACE_GRAPH_PATH:'/tmp/legacy-ledger.sqlite'}).workspace_graph_path,'/tmp/legacy-ledger.sqlite')
 })
 
 for(const language of ['en','zh-CN'] as const)test(`scheduled text factory uses a read-only serial worker instruction (${language})`,async()=>{

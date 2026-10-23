@@ -50,7 +50,7 @@ Conversation vision uses the selected cascaded language model. Loop Camera uses 
 
 Self-hosted stages talk to endpoints you run (`SELF_HOSTED_ASR_URL`, `SELF_HOSTED_LLM_BASE_URL`, `SELF_HOSTED_TTS_URL`) and use only their own optional credentials; the repository ships a reference launcher for a streaming Whisper ASR, a vLLM LLM and a Breeze TTS. Cloud and self-hosted stages can be mixed in one pipeline. See [self-hosted voice and presets](deployment/self-hosted-voice.md).
 
-For Volcengine, ASR uses `DOUBAO_ASR_API_KEY` when present, otherwise `DOUBAO_BIGMODEL_API_KEY`. TTS uses the latter. Supporting models and personal memory may still require DashScope credentials; see [configuration](configuration.md).
+For Volcengine, ASR and TTS both use `DOUBAO_BIGMODEL_API_KEY`. Supporting models and personal memory may still require DashScope credentials; see [configuration](configuration.md).
 
 ## Voiceprint verification
 

@@ -10,7 +10,6 @@
       "environment": {
         "ARK_API_KEY": "fixture-ark-key",
         "DASHSCOPE_API_KEY": "fixture-dash-key",
-        "DOUBAO_ASR_API_KEY": "fixture-asr-key",
         "DOUBAO_BIGMODEL_API_KEY": "fixture-tts-key",
         "CODEX_API_KEY": "fixture-codex-key",
         "CODEX_BIN": "/fixture/bin/codex",
@@ -19,7 +18,6 @@
         "CODEX_PROJECT_STATE_ROOT": "/fixture/state",
         "CODEX_WORKING_INTERVAL": "5",
         "CODEX_WORKSPACE": "/fixture/workspace",
-        "COMPRESSOR_MODEL": "compressor",
         "DOUBAO_ASR_CHUNK_MS": "320",
         "DOUBAO_ASR_ENDPOINT": "wss://asr.example/ws/",
         "DOUBAO_ASR_RESOURCE_ID": "asr-resource",
