@@ -30,8 +30,10 @@ struct NativeModelConfiguration: Codable {
 }
 
 final class NativeModelSettings {
+  private let spaceId: String
+  init(spaceId: String) { self.spaceId = spaceId }
   private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword,
-    kSecAttrService as String: "nova.local-model.v1", kSecAttrAccount as String: "configuration"] }
+    kSecAttrService as String: "nova.local-model.v1", kSecAttrAccount as String: "configuration.space.\(spaceId)"] }
   func read() throws -> NativeModelConfiguration? {
     var request = query; request[kSecReturnData as String] = true
     var result: CFTypeRef?

@@ -31,8 +31,6 @@
       <button type="button" class="nav-item" id="category-privacy" data-category="privacy" aria-current="false" tabindex="-1">隐私与数据</button>
       <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
       <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
-      <button type="button" class="nav-item" id="category-hub" data-category="hub" aria-current="false" tabindex="-1">手机同步 Hub</button>
-      <button type="button" class="nav-item" id="category-phone" data-category="phone" aria-current="false" tabindex="-1">连接 iPhone</button>
       <button type="button" class="nav-item" id="category-codex" data-category="codex" aria-current="false" tabindex="-1">编程</button>
     </nav>
     <main>
@@ -83,48 +81,6 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
         <select id="startup-view"><option value="orb">Orb（悬浮球）</option><option value="workbench">Workbench（工作台）</option><option value="last">上次使用</option></select>
         <p class="hint">下次启动时生效；上次使用会记住最后打开的悬浮球或工作台。</p>
       </section>
-      <section class="setting-section" id="hub-connection-section">
-        <div class="phone-heading"><div><h2>手机同步 Hub</h2><p>在 Mac 后台运行 Hub，供 Android 手机同步资料与设备任务。</p></div></div>
-        <div class="phone-card">
-          <img id="hub-qr" alt="使用 Android Nova 扫描连接同步 Hub" width="280" height="280" hidden>
-          <p id="hub-description" role="status"></p><p id="hub-host"></p><p id="hub-expiry" aria-live="off"></p>
-          <div class="phone-actions"><button type="button" id="hub-primary" class="phone-primary">启用后台同步</button><button type="button" id="hub-recheck">重新检测</button><button type="button" id="hub-cancel" hidden>取消二维码</button></div>
-        </div>
-        <div class="phone-guide"><p>需要两端登录同一 Tailscale 网络。Android 通常只能同时使用一个 VPN，请自行确认其他 VPN 是否会影响连接。</p></div>
-        <p>退出 Nova 后仍可同步；Mac 休眠、注销或断网时暂不可连接。</p>
-        <div id="hub-devices" aria-label="已配对设备"></div>
-        <div class="phone-bottom"><button type="button" id="hub-stop" hidden>停止后台同步</button><button type="button" id="hub-remove" hidden>移除后台服务</button></div>
-      </section>
-      <section class="setting-section" id="phone-connection-section">
-        <div class="phone-heading"><div><h2>连接 iPhone</h2><p>将 iPhone 安全连接到这台 Nova。</p></div><span class="phone-badge" id="phone-state">私人设备连接</span></div>
-        <ol class="phone-steps" aria-label="连接步骤">
-          <li id="phone-step-network"><span>1</span>准备网络</li><li id="phone-step-scan"><span>2</span>扫码配对</li><li id="phone-step-done"><span>3</span>开始对话</li>
-        </ol>
-        <div class="phone-card">
-          <div class="phone-visual">
-            <div id="phone-illustration" aria-hidden="true">
-              <svg viewBox="0 0 80 80" fill="none"><rect x="24" y="10" width="32" height="60" rx="8" stroke="currentColor" stroke-width="2"/><path d="M35 16h10M36 63h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m32 39 6 6 11-12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <img id="phone-qr" alt="使用 iPhone Nova 扫描此二维码连接" width="224" height="224" hidden>
-          </div>
-          <div class="phone-copy">
-            <h3 id="phone-title">建立设备连接</h3>
-            <p id="phone-description">在 iPhone 上继续与这台电脑的 Nova 对话。首次连接只需扫码。</p>
-            <p id="phone-host"></p>
-            <div class="phone-actions"><button type="button" id="phone-primary" class="phone-primary">启用手机连接</button><button type="button" id="phone-recheck" class="phone-text-button">重新检测</button></div>
-          </div>
-        </div>
-        <div class="phone-guide"><span class="phone-guide-icon" aria-hidden="true">↗</span><div><strong>一次配对，随时连接</strong><p>网络就绪后，这里会显示二维码。在 iPhone 的 Nova 中选择「连接主机」扫码即可。</p></div></div>
-        <p class="phone-privacy">仅授权设备可连接 · 配对码仅可使用一次</p>
-        <div id="phone-devices" aria-label="已配对设备" hidden></div>
-        <div class="phone-bottom"><details id="phone-advanced"><summary>高级设置</summary>
-          <p class="note">通常无需修改，留空即由 Nova 自动管理。</p>
-          <div class="field"><label for="phone-server-url">自定义地址</label><input id="phone-server-url" type="text" placeholder="自动检测" autocomplete="off" spellcheck="false"></div>
-          <div class="field"><label for="phone-server-port">已有服务端口</label><input id="phone-server-port" type="number" min="1" max="65535" placeholder="自动管理"></div>
-          <div class="field"><label for="phone-server-token-file">认证文件</label><input id="phone-server-token-file" type="text" placeholder="认证文件路径" autocomplete="off" spellcheck="false"></div>
-          <button type="button" id="phone-pairing-open">保存并连接</button>
-        </details><button type="button" id="phone-disable" class="phone-text-button" hidden>停用手机连接</button></div>
-      </section>
       <section class="setting-section" id="frontend-usage-section">
         <h2>用量与费用</h2>
         <div class="usage-overview" aria-label="用量统计范围">
@@ -164,7 +120,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
         </div>
       </section>
       <section class="setting-section" id="im-section" hidden><h2>IM 渠道</h2><p class="hint">连接你使用的聊天工具，选择同步范围与提醒方式。</p><div id="im-connection"></div><p id="im-error" role="status" aria-live="polite"></p></section>
-      <section class="setting-section" id="connections-section" hidden><h2>连接与权限</h2><p class="hint">只读取你授权的内容，不会代你修改或发送；内容会交给你选择的模型服务处理。</p><div id="connections-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
+      <section class="setting-section" id="connections-section" hidden><h2>连接与权限</h2><p class="hint">只读取你授权的内容，不会代你修改或发送；内容会交给你选择的模型服务处理。</p><div id="connections-panel"></div><div id="space-host-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
       <section class="setting-section" id="privacy-section">
         <h2>隐私与数据</h2>
         <p class="hint">决定哪些内容会交给模型服务处理。默认只读取你发的消息，以及 @ 你的消息。</p>

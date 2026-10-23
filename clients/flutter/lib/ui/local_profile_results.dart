@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import 'theme.dart';
 import 'profile_generation_status.dart';
 import '../context/profile_generation_coordinator.dart';
@@ -8,14 +10,14 @@ import '../context/profile_corrections.dart';
 import '../context/profile_repository.dart';
 import '../context/secure_persistence.dart';
 import '../context/source_store.dart' show sourceAccessExpiry;
-import '../device/space_authority.dart';
+import '../context/local_publication.dart';
 
 /// Local projection; only individually confirmed candidates enter the Life path.
 class LocalProfileResults extends StatelessWidget {
   const LocalProfileResults({
     super.key,
     required this.host,
-    required this.authority,
+    required this.publication,
     required this.kind,
     this.repository,
     this.generation,
@@ -27,7 +29,7 @@ class LocalProfileResults extends StatelessWidget {
   });
   final ProfileGenerationCoordinator? generation;
   final FeishuHost host;
-  final SpaceAuthorityRepository authority;
+  final LocalPublicationContext publication;
   final ProfileRepository? repository;
   final String kind;
   final int revision;
@@ -51,7 +53,7 @@ class LocalProfileResults extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _ProfileScope(
     host: host,
-    authority: authority,
+    publication: publication,
     repository: repository,
     revision: revision,
     changes: generation,
@@ -292,9 +294,9 @@ class LocalProfileResults extends StatelessWidget {
     Map<String, dynamic> value,
   ) {
     entries.sort(
-      (a, b) => DateTime.parse(
-        b['observed_at'] as String,
-      ).compareTo(DateTime.parse(a['observed_at'] as String)),
+      (a, b) =>
+          DateTime.parse(b['observed_at'] as String)
+              .compareTo(DateTime.parse(a['observed_at'] as String)),
     );
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
@@ -612,7 +614,7 @@ class LocalProfileResults extends StatelessWidget {
     context: context,
     builder: (_) => _ProfileScope(
       host: host,
-      authority: authority,
+      publication: publication,
       repository: profile,
       revision: revision,
       builder: (dialogContext, _, current, loading, failed, retry) {
@@ -684,14 +686,14 @@ class LocalProfileResults extends StatelessWidget {
 class _ProfileScope extends StatefulWidget {
   const _ProfileScope({
     required this.host,
-    required this.authority,
+    required this.publication,
     required this.builder,
     this.repository,
     required this.revision,
     this.changes,
   });
   final FeishuHost host;
-  final SpaceAuthorityRepository authority;
+  final LocalPublicationContext publication;
   final ProfileRepository? repository;
   final int revision;
   final Listenable? changes;
@@ -713,8 +715,8 @@ class _ProfileScopeState extends State<_ProfileScope> {
   ProfileRepository _repository() =>
       widget.repository ??
       ProfileRepository(
-        const SecureContextPersistence('nova.profile.local.v1'),
-        widget.authority,
+        SecureContextPersistence('nova.profile.local.v1'),
+        widget.publication,
         widget.host.sources,
         corrections: ProfileCorrections(),
       );
@@ -726,7 +728,7 @@ class _ProfileScopeState extends State<_ProfileScope> {
   void initState() {
     super.initState();
     widget.host.addListener(_changed);
-    widget.authority.addListener(_changed);
+    widget.publication.addListener(_changed);
     widget.changes?.addListener(_changed);
     unawaited(_open());
   }
@@ -791,9 +793,8 @@ class _ProfileScopeState extends State<_ProfileScope> {
               .toList()
             ..sort();
       if (dates.isNotEmpty) {
-        final end = DateTime.fromMillisecondsSinceEpoch(
-          dates.first,
-        ).add(const Duration(milliseconds: 1));
+        final end = DateTime.fromMillisecondsSinceEpoch(dates.first)
+            .add(const Duration(milliseconds: 1));
         expiry = Timer(end.difference(now), _changed);
       }
     }
@@ -811,7 +812,7 @@ class _ProfileScopeState extends State<_ProfileScope> {
   void dispose() {
     expiry?.cancel();
     widget.host.removeListener(_changed);
-    widget.authority.removeListener(_changed);
+    widget.publication.removeListener(_changed);
     widget.changes?.removeListener(_changed);
     super.dispose();
   }

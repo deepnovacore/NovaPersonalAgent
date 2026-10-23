@@ -1,3 +1,4 @@
+import {readHostSpaceConfig,loadSpaceHostController} from '../space-host/config.js'
 import type {UsageContext} from '../usage/context.js'
 import {acceptanceReadExistingOnly} from '../desktop/workbench-acceptance.js'
 import {resolveModelApiKey} from '../config/config.js'
@@ -15,9 +16,6 @@ import {UnifiedRetrieval} from '../memory/retrieval.js'
 import {DashScopeEmbeddingProvider} from '../knowledge/embeddings.js'
 import {createHash as embeddingHash} from 'node:crypto'
 import {SubstrateMemoryResource} from '../memory-substrate/resource.js'
-import {HubContextBridge} from '../hub/context-bridge.js'
-import {HubScheduleCoordinator} from '../hub/schedule-coordinator.js'
-import {loadHubCredentials,LifeSyncTransport} from '../hub/life-sync-transport.js'
 import {MemoryLedgerClient} from '../memory-ledger/store-client.js'
 import {homedir as memoryHome} from 'node:os'
 import {resolve as memoryPath} from 'node:path'
@@ -213,6 +211,7 @@ async function responseAdaptationFor(
 }
 
 export interface RealtimeAssemblyOptions {
+  readonly spaceHostConfigPath?:string
   readonly usageContext?: UsageContext
   readonly conversationContext?:()=>Promise<string|null>
   readonly suppressMemoryAdaptation?:boolean
@@ -302,6 +301,8 @@ export class RealtimeAssembly {
   readonly tools: CompiledTools
 
   readonly #sharedPersonal: boolean
+  #spaceHostPrepared=false
+  readonly #spaceHostConfigPath:string|undefined
   readonly #unsubscribePersonalEvents: () => void
   readonly #onDiagnostic: (line: string) => void
   readonly #projectAdapter: ProjectExecutorAdapter | undefined
@@ -361,6 +362,7 @@ export class RealtimeAssembly {
   readonly taskConversationId?: string
   readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
     readonly personalMemory?: PersonalMemoryResource
+    readonly spaceHostConfigPath?:string
     readonly createPersonalMemory?: () => PersonalMemoryResource
     readonly memoryConsumerFingerprint?:string
     readonly personalMemoryTurnTracker: PersonalMemoryTurnTracker
@@ -383,13 +385,15 @@ export class RealtimeAssembly {
     this.#idFactory = input.idFactory
     this.#unbindSuggestionSelected = input.unbindSuggestionSelected
     this.#sharedPersonal = input.sharedPersonal !== undefined
+    this.#spaceHostConfigPath=input.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
+    const spaceConfig=this.#spaceHostConfigPath?readHostSpaceConfig(memoryPath(this.#spaceHostConfigPath)):undefined
     this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
-      ...(input.core.personalAgentConfig?.path?{readingCopiesDirectory:dirname(memoryPath(input.core.personalAgentConfig.path))}:{}),
+      ...((spaceConfig?.personal_path??input.core.personalAgentConfig?.path)?{readingCopiesDirectory:dirname(memoryPath(spaceConfig?.personal_path??input.core.personalAgentConfig!.path))}:{}),
       onDiagnostic:code=>this.#diagnose(code),
       newsLanguage: input.core.personalAgentConfig?.newsLanguage ?? 'en',
       profileParticipantMessages: input.core.personalAgentConfig?.profileParticipantMessages === true,
-      path: input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),
-      userScope: input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
+      path: spaceConfig?.personal_path ?? input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),
+      userScope: spaceConfig?.space ?? input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
       explicitMemoryConsumer:()=>input.memoryConsumerFingerprint,
       pool: input.core.runtime.core.suggestions,
       evidence: ref => { try {const [channel,seq]=parseMemoryRef(ref);const item=input.core.runtime.memory.channels.get(channel)?.items.find(item=>item.seq===seq);if(!item)return null;const work=item.content.work_id??item.content.delegate_id;return {subject_key:typeof work==='string'?'task:'+work:ref,source:{type:typeof work==='string'?'task':'conversation',ref},...(typeof work==='string'?{task_ref:{work_id:work}}:{})}}catch{return null}},
@@ -400,14 +404,6 @@ export class RealtimeAssembly {
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
     if (!this.#sharedPersonal) this.personalAgent.setRetrieval(input.retrieval)
-    if(!this.#sharedPersonal&&process.env.NOVA_CONTEXT_HUB_CREDENTIALS){
-      const path=memoryPath(process.env.NOVA_CONTEXT_HUB_CREDENTIALS)
-      this.personalAgent.schedules.coordinator=new HubScheduleCoordinator(this.personalAgent.schedules,async(route,body)=>{
-        const credentials=await loadHubCredentials(path)
-        if(!credentials)throw Error('hub_credentials_required')
-        return new LifeSyncTransport(credentials).contextRequest(route,body)
-      })
-    }
     this.#unsubscribePersonalEvents=input.core.runtime.observe((event,current)=>{
       if(current===false)return
       if(event.kind==='handoff'&&input.core.runtime.claimedHandoff(event.seq)){
@@ -556,6 +552,7 @@ export class RealtimeAssembly {
         this.#acceptProjectContext(context)
       }
       await this.core.start()
+      if(!this.#sharedPersonal&&!this.#spaceHostPrepared&&this.#spaceHostConfigPath){this.personalAgent.setSpaceHost(await loadSpaceHostController(this.personalAgent,memoryPath(this.#spaceHostConfigPath)));this.#spaceHostPrepared=true}
       if (!this.#sharedPersonal) await this.personalAgent.open({deferBackground:true})
     } catch (error) {
       if (this.#state === 'starting') {
@@ -1062,6 +1059,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       )
       const resource = personalMemoryHolder.current
       if (resource?.remember === undefined) return
+      if(resource instanceof SubstrateMemoryResource&&(resource.options.personalMemoryEnabled===false||resource.options.inputConsent===false))return
       const [, sequence] = parseMemoryRef(turn.originRef)
       return resource.remember({
         sourceId: `${personalMemorySessionId}:${turn.originRef}`,
@@ -1146,6 +1144,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       },
     }}),
     idFactory,
+    spaceMobile:{invoke:(args,context)=>{const host=options.sharedPersonal?.host??assemblyHolder.current?.personalAgent;if(!host)throw Error('personal_store_not_ready');return host.invokeSpaceMobile(args,context)}},
     ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
     ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
     ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
@@ -1204,6 +1203,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const personalMemory = options.sharedPersonal?.memory ?? options.createPersonalMemory?.()
   personalMemoryHolder.current = personalMemory
   return assignAssembly(new RealtimeAssembly({
+    ...(options.spaceHostConfigPath?{spaceHostConfigPath:options.spaceHostConfigPath}:{}),
     toolCount: count,
     core,
     provider,
@@ -1445,14 +1445,16 @@ export function composeRealtime(
   options: Omit<RealtimeAssemblyOptions, 'core' | 'provider' | 'idFactory'> & {readonly settings: AssemblyOptions['settings']; readonly idFactory: () => string},
   providerTuning: Required<Pick<RealtimeAssemblyOptions, 'controlledPreemptiveAlertReconnect' | 'preemptiveAlertHistoryRecovery' | 'preemptiveAlertHistoryPairs'>>,
 ): RealtimeAssembly {
+  const spaceConfigPath=options.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
+  const spaceConfig=spaceConfigPath?readHostSpaceConfig(memoryPath(spaceConfigPath)):undefined
   const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
   let sharedClient: MemoryLedgerClient | undefined
-  const getClient = () => sharedClient ??= new MemoryLedgerClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
+  const getClient = () => sharedClient ??= new MemoryLedgerClient(spaceConfig?spaceConfig.personal_path+'.memory.sqlite':memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
   const memoryGateway=local?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,clock:new RealClock()}):core.gateway
-  const useLocalLedger=local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
+  const useLocalLedger=spaceConfig!==undefined||local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
   const createPersonalMemory = useLocalLedger ? () => {
-    const memory = new SubstrateMemoryResource({client:getClient(),userId:local?.userId??options.settings.memory_user_id,
+    const memory = new SubstrateMemoryResource({client:getClient(),userId:spaceConfig?.space??local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?options.settings.model_base_url:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       sourceProcessingLlm:{baseUrl:local?.embedding.baseUrl??options.settings.model_base_url,apiKey:local?.embedding.apiKey??resolveModelApiKey(options.settings)??''},
       extractionFingerprint:embeddingHash('sha256').update((local?.embedding.baseUrl??options.settings.model_base_url)+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
@@ -1461,19 +1463,9 @@ export function composeRealtime(
       conversationRecipients:Object.fromEntries((['text','voice'] as const).flatMap(mode=>{const recipient=configuredMemoryRecipient(options.settings,mode);return recipient?[[recipient.consumer,recipient.provider]]:[]})),
       consolidation:{enabled:options.settings.memory_consolidation_enabled,timezone:options.settings.memory_consolidation_timezone,hour:options.settings.memory_consolidation_hour},
       gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
-      ...(local?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
+      ...(local&&!spaceConfig?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
     })
-    if(local){
-      const credentialsPath=process.env.NOVA_CONTEXT_HUB_CREDENTIALS
-      if(credentialsPath){
-        // Explicit local opt-in; neither Feishu secrets nor model keys enter sync.
-        const transport=async(path:string,body?:unknown)=>{
-          const credentials=await loadHubCredentials(memoryPath(credentialsPath))
-          if(!credentials)throw Error('hub_credentials_required')
-          return new LifeSyncTransport(credentials).contextRequest(path,body)
-        }
-        memory.setSharedContext(new HubContextBridge(memory,memoryPath(local.path)+'.shared-context.json',transport))
-      }
+    if(local||spaceConfig){
       return memory
     }
     // Knowledge-only mode owns A originals, without enabling personal capture or B projections.
@@ -1494,6 +1486,7 @@ export function composeRealtime(
     ...(options.onExecutorSuggestion === undefined ? {} : {onExecutorSuggestion: options.onExecutorSuggestion}),
     idFactory: options.idFactory,
     ...providerTuning,
+    ...(spaceConfigPath?{spaceHostConfigPath:spaceConfigPath}:{}),
     ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     ...(options.providerToolView === undefined
       ? {}

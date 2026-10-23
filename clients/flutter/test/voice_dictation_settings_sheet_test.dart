@@ -17,7 +17,7 @@ Future<void> openDictationSettings(
           builder: (context) => TextButton(
             onPressed: () => showVoiceSettings(
               context,
-              const VoiceSettings(),
+              VoiceSettings(),
               dictationOnly: true,
               language: language,
             ),
@@ -54,7 +54,7 @@ void main() {
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
       expect(find.byType(VoiceSettingsSheet), findsNothing);
-      final saved = (await const VoiceSettings().readDraft())!;
+      final saved = (await VoiceSettings().readDraft())!;
       expect(saved.asr.key, 'asr-test-secret');
       expect(saved.integrated.key, isEmpty);
       expect(saved.fastLlm.key, isEmpty);
@@ -100,7 +100,7 @@ void main() {
       );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
-      final saved = (await const VoiceSettings().readDraft())!;
+      final saved = (await VoiceSettings().readDraft())!;
       expect(saved.asr.key, 'saved-asr-secret');
       expect(saved.asr.model, 'updated-asr-model');
       expect(saved.pipeline, initial.pipeline);
@@ -132,7 +132,7 @@ void main() {
       expect(find.byType(VoiceSettingsSheet), findsOneWidget);
       expect(find.textContaining('Check the service address'), findsOneWidget);
       expect(
-        (await const VoiceSettings().readDraft())!.asr.endpoint,
+        (await VoiceSettings().readDraft())!.asr.endpoint,
         initial.asr.endpoint,
       );
       await tester.enterText(key, 'replacement-secret');
@@ -140,7 +140,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(VoiceSettingsSheet), findsNothing);
       expect(
-        (await const VoiceSettings().readDraft())!.asr.key,
+        (await VoiceSettings().readDraft())!.asr.key,
         'replacement-secret',
       );
     },

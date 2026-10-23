@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/ui/local_profile_results.dart';
 import 'package:nova_mobile/ui/theme.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
@@ -11,7 +11,7 @@ import 'local_profile_results_test.dart' show ReadyHost;
 class _PublishedProfile extends ProfileRepository {
   _PublishedProfile(
     super.persistence,
-    super.authority,
+    super.publication,
     super.sources,
     this.saved,
   );
@@ -73,10 +73,10 @@ void main() {
   ) async {
     final sources = _ExpiredSourceView();
     final host = ReadyHost(sources);
-    final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+    final publication = LocalPublicationContext(MemoryLifePersistence());
     final profile = _PublishedProfile(
       MemoryLifePersistence(),
-      authority,
+      publication,
       sources,
       {
         'entries': [_entry(steps: false)],
@@ -90,7 +90,7 @@ void main() {
           body: SingleChildScrollView(
             child: LocalProfileResults(
               host: host,
-              authority: authority,
+              publication: publication,
               repository: profile,
               kind: 'timeline',
             ),
@@ -121,7 +121,7 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     host.dispose();
-    authority.dispose();
+    publication.dispose();
   });
   for (final width in [320.0, 360.0]) {
     testWidgets(
@@ -133,7 +133,7 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         final sources = SourceStore(MemoryLifePersistence());
         final host = ReadyHost(sources);
-        final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+        final publication = LocalPublicationContext(MemoryLifePersistence());
         final saved = <String, dynamic>{
           'entries': [
             _entry(),
@@ -156,7 +156,7 @@ void main() {
         };
         final profile = _PublishedProfile(
           MemoryLifePersistence(),
-          authority,
+          publication,
           sources,
           saved,
         );
@@ -169,7 +169,7 @@ void main() {
                 child: SingleChildScrollView(
                   child: LocalProfileResults(
                     host: host,
-                    authority: authority,
+                    publication: publication,
                     repository: profile,
                     kind: 'timeline',
                   ),
@@ -201,7 +201,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         host.dispose();
-        authority.dispose();
+        publication.dispose();
       },
     );
   }
@@ -211,10 +211,10 @@ void main() {
     (tester) async {
       final sources = SourceStore(MemoryLifePersistence());
       final host = ReadyHost(sources);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+      final publication = LocalPublicationContext(MemoryLifePersistence());
       final profile = _PublishedProfile(
         MemoryLifePersistence(),
-        authority,
+        publication,
         sources,
         {
           'entries': [_entry(steps: false)],
@@ -227,7 +227,7 @@ void main() {
             body: SingleChildScrollView(
               child: LocalProfileResults(
                 host: host,
-                authority: authority,
+                publication: publication,
                 repository: profile,
                 kind: 'timeline',
               ),
@@ -248,7 +248,7 @@ void main() {
       expect(find.text('项目验收还差环境复核'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       host.dispose();
-      authority.dispose();
+      publication.dispose();
     },
   );
 }

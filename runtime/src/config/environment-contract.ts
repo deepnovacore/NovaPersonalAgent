@@ -25,6 +25,7 @@ type Row = readonly [
 ]
 
 const rows: readonly Row[] = [
+  ['NOVA_SPACE_HOST_CONFIG', 'core', false, true, 'never', null, 'Absolute path to a private Host Space configuration; runtime data stays on this Host.', 'Host Space 私密配置的绝对路径；runtime 与数据保留在本机 Host。'],
   ['NOVA_LOCAL_TOOL_APPROVAL', 'core', false, true, 'never', 'ask', 'Local Build file writes, edits and shell approval: ask or never; independent of executor approval.', '本地 Build 写入、编辑和命令审批：ask 或 never；独立于执行器审批。'],
   ['COMPATIBLE_ASR_OMIT_RESPONSE_FORMAT', 'core', false, true, 'never', 'false', 'Omit response_format for ASR services returning JSON without this field.', '为不支持 response_format 参数的 ASR 服务省略该字段。'],
   ["OPENAI_COMPATIBLE_BASE_URL", "core", false, true, "never", "https://api.openai.com/v1", "OpenAI-compatible LLM API base URL.", "通用 OpenAI LLM API 基础地址。"],

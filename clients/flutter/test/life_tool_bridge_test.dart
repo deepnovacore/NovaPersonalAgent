@@ -5,7 +5,7 @@ import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
   test(
-    'native Life tools use the existing durable outbox and reject stale writes',
+    'native Life tools use the durable local writer and reject stale writes',
     () async {
       final storage = MemoryLifePersistence();
       final actual = LocalLife(storage);
@@ -13,7 +13,7 @@ void main() {
       final bridge = LifeToolBridge(actual);
       final input = {'op': 'create', 'kind': 'todo', 'title': 'Once'};
       await bridge.handle('validate', {'input': input});
-      expect(actual.pendingCount, 0);
+      expect(actual.life['todos'], isEmpty);
       final first = await bridge.handle('mutate', {
         'input': input,
         'operation_id': 'one',
@@ -26,7 +26,6 @@ void main() {
         first,
       );
       expect(restored.life['todos'].length, 1);
-      expect(restored.pendingCount, 1);
       await expectLater(
         resumed.handle('mutate', {
           'input': {

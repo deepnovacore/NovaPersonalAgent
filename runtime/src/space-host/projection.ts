@@ -1,0 +1,10 @@
+import type {PersonalAgentHost} from '../personal-agent/host.js';
+import type {DisplayCard,DisplaySnapshot} from './contracts.js';
+export function displayText(value:unknown,fallback=''):string{return typeof value==='string'?value:typeof value==='number'||typeof value==='boolean'?String(value):fallback}
+const fields=['id','kind','title','note','status','importance','version','created_at','updated_at','due','goal_id','idea_id','success_criteria','progress'];
+const pick=(row:Record<string,unknown>,keys:string[])=>Object.fromEntries(keys.filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
+function card(row:Record<string,unknown>):DisplayCard{return {id:displayText(row.id),kind:displayText(row.kind,'text'),title:displayText(row.title),body:displayText(row.body??row.why_now).slice(0,6000),version:typeof row.version==='number'||typeof row.version==='string'?row.version:displayText(row.updated_at),...(typeof row.created_at==='string'?{created_at:row.created_at}:{}),dismissed:row.user_state==='dismissed'}}
+export function displaySnapshot(host:PersonalAgentHost,turns=new Map<string,string>()):DisplaySnapshot {
+ const llm=host.options.memory()?.sourceProcessingLlm?.();const state=host.snapshot(),life=host.life.snapshot(),timeline=state.timeline as unknown as {cards?:Record<string,unknown>[]};
+ return {schema_version:1,processing_provider:llm?{id:llm.baseUrl+'|'+llm.model,label:llm.model}:null,revision:state.revision,goals:life.goals.map(row=>pick(row,fields)),todos:life.todos.map(row=>pick(row,fields)),ideas:life.ideas.map(row=>pick(row,fields)),profile:life.profile,timeline:(timeline.cards??[]).map(card),feed:state.feed.slice(-200).map(row=>card({...row,body:row.prepared?.text??row.why_now})),notifications:host.notifications.display().map(card),chat:host.spaceChatMessages().slice(-128).map(row=>{const user=row.request_id?row:host.spaceChatMessages().find(user=>user.id===row.reply_to),turn=user?.request_id?turns.get(user.request_id):undefined;return {...pick(row,['id','conversation_id','role','text','created_at','turn_id','status']),...(turn?{turn_id:turn,...(row.role==='user'?{id:'user_'+turn}:{})}:{})}})};
+}

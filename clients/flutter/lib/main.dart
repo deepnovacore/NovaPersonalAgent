@@ -1,3 +1,5 @@
+import 'space/space_storage.dart';
+import 'space/native_scope.dart';
 import 'package:flutter/material.dart';
 import 'ui/app.dart';
 import 'agent_core/scheduled_agent_runner.dart';
@@ -13,9 +15,14 @@ void main() {
 @pragma('vm:entry-point')
 Future<void> novaScheduleMain() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ScheduledAgentRunner.open(
-    LifeHost(backgroundReader: true),
-    ModelSettings(headless: true),
-    headless: true,
-  );
+  final space = await SpaceStorage.readActive();
+  if (space?.mode != SpaceMode.standalone) return;
+  await SpaceNativeScope.activate(space);
+  await SpaceStorage.runScoped(space, () async {
+    await ScheduledAgentRunner.open(
+      LifeHost(backgroundReader: true),
+      ModelSettings(headless: true),
+      headless: true,
+    );
+  });
 }

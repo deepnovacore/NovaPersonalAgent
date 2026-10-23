@@ -77,6 +77,7 @@ export interface AssemblyOptions {
   readonly taskHost?: boolean
   readonly includeEnterPlanMode?:boolean
   readonly includeSchedules?: boolean
+  readonly includeSpaceMobile?:boolean
   readonly sourceProcessingContext?: boolean
   readonly scheduledContext?: boolean
   /** Borrow deployment resources; this scoped core closes only its own state. */
@@ -315,7 +316,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       || !descriptor.ownedChannels.some(channel => (options.executors ?? []).some(adapter => adapter.manifest.name === channel && adapter.manifest.roles.includes('coding')))),
     ...(cameraModuleEnabled ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
-  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, includeExplicitMemory: options.scheduledContext!==true&&options.sourceProcessingContext!==true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true,includeEnterPlanMode:options.includeEnterPlanMode===true})
+  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeSpaceMobile:(options.includeSpaceMobile===true||!!process.env.NOVA_SPACE_HOST_CONFIG)&&options.scheduledContext!==true&&options.sourceProcessingContext!==true,includeMemoryRecall: true, includeExplicitMemory: options.scheduledContext!==true&&options.sourceProcessingContext!==true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true,includeEnterPlanMode:options.includeEnterPlanMode===true})
 
   const proactive = new GatewayProactivity({
     gateway,

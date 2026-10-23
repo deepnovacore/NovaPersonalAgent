@@ -34,3 +34,22 @@ test('staging reuses the nearest matching ancestor for cyclic peer dependencies'
   assert.equal(JSON.parse(await readFile(join(staged,'node_modules/pg/package.json'),'utf8')).version,'1')
  }finally{await rm(root,{recursive:true,force:true})}
 })
+
+test('staged Host can load relay client and excludes relay sources and deployment files', async () => {
+ const root=await mkdtemp(join(tmpdir(),'nova-stage-space-'))
+ try {
+  const relay=join(root,'node_modules/@nova-personal-agent/relay')
+  await mkdir(join(relay,'dist/src'),{recursive:true})
+  await mkdir(join(relay,'src'))
+  for(const dir of ['src','LICENSES'])await mkdir(join(root,dir))
+  await writeFile(join(root,'THIRD_PARTY_NOTICES.md'),'fixture')
+  await writeFile(join(root,'package.json'),JSON.stringify({name:'host-fixture',dependencies:{'@nova-personal-agent/relay':'1'}}))
+  await writeFile(join(relay,'package.json'),JSON.stringify({name:'@nova-personal-agent/relay',version:'1',exports:{'./client':'./dist/src/client.cjs'}}))
+  await writeFile(join(relay,'dist/src/client.cjs'),'exports.RelayClient = class RelayClient {}')
+  await writeFile(join(relay,'src/client.ts'),'development source')
+  await writeFile(join(relay,'.env'),'deployment fixture')
+  const staged=await stageReleaseApplication({packageRoot:root})
+  assert.equal(typeof createRequire(join(staged,'package.json'))('@nova-personal-agent/relay/client').RelayClient,'function')
+  for(const file of ['src/client.ts','.env'])await assert.rejects(access(join(staged,'node_modules/@nova-personal-agent/relay',file)))
+ } finally { await rm(root,{recursive:true,force:true}) }
+})

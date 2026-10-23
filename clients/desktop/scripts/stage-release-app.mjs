@@ -59,6 +59,7 @@ export async function stageReleaseApplication({packageRoot}) {
           if (/\.(map|ts|cts|mts|snap|png)$/u.test(local) || /\.test\.[cm]?js$/u.test(local)) return false
           if (meta.name === '@nova-personal-agent/runtime') return local === '' || local === 'package.json' || local === 'dist'
             || local === 'scripts' || local === 'scripts/autoglm-bridge.py' || /^dist\/(?:src|eval)(?:\/|$)/u.test(local)
+          if (meta.name === '@nova-personal-agent/relay') return local === '' || local === 'package.json' || local === 'dist' || /^dist\/src(?:\/|$)/u.test(local)
           if (meta.name === '@livekit/agents' && /^resources\/.*\.ogg$/u.test(local)) return false
           return true
         },

@@ -68,7 +68,7 @@ void main() {
     expect(find.text('Model provider'), findsOneWidget);
     await tester.tap(find.text('Devices'));
     await tester.pumpAndSettle();
-    expect(find.text('This phone'), findsOneWidget);
+    expect(find.text('This device'), findsOneWidget);
     expect(find.text('Computer & voice'), findsNothing);
     // Disconnected from the computer, so a fresh conversation is local.
     expect(store.conversations.single['backend'], 'local');

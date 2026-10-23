@@ -1,3 +1,4 @@
+import {readHostSpaceConfig,scopeHostSpaceSettings} from '../space-host/config.js'
 import {UsageLedger} from '../usage/ledger.js'
 import {reportUsage} from '../realtime/usage.js'
 import {homedir} from 'node:os'
@@ -60,7 +61,10 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   readonly integratedProviders?: IntegratedProviderRegistry
   readonly createServer?: (options: Parameters<NonNullable<DesktopRealtimeOptions['createServer']>>[0], media?: ClientMedia) => ReturnType<NonNullable<DesktopRealtimeOptions['createServer']>>
 }) {
-  const loadedSettings = loadSettings(environment, !remote)
+  const baseSettings = loadSettings(environment, !remote)
+  const spaceConfigPath=environment.NOVA_SPACE_HOST_CONFIG?resolve(environment.NOVA_SPACE_HOST_CONFIG):undefined
+  const spaceConfig=spaceConfigPath?readHostSpaceConfig(spaceConfigPath):undefined
+  const loadedSettings = spaceConfig?scopeHostSpaceSettings(baseSettings,spaceConfig):baseSettings
   const media = remote ? remoteClientMedia(loadedSettings) : undefined
   if (!remote) requireSelectedCascadedLlmConfig(loadedSettings)
   else if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
@@ -194,6 +198,8 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         clock,
       })
       const realtimeOptions: BuildProductionRealtimeAssemblyOptions = {
+        ...(spaceConfigPath?{spaceHostConfigPath:spaceConfigPath}:{}),
+        includeSpaceMobile:!!spaceConfig,
         textOnly:!remote,
         nextPlaybackGeneration,
         blackboard: blackboardOptionsFromSettings(settings),

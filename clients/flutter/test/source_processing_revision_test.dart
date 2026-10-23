@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/context/profile_observation_checkpoint.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
@@ -86,9 +86,9 @@ void main() {
         windowEnd: now,
       );
       await source.grantProcessing('provider', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
-      final repo = ProfileRepository(profileDisk, authority, source);
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
+      final repo = ProfileRepository(profileDisk, publication, source);
       await repo.publish(
         jsonEncode([
           {
@@ -99,7 +99,7 @@ void main() {
             'observed_at': now.toIso8601String(),
           },
         ]),
-        epoch: authority.epoch,
+
         sourceRevision: source.revision,
         consentRevision: source.processingRevision,
         provider: 'provider',

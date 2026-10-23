@@ -59,36 +59,6 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('dismissing focused Hub settings keeps the workspace usable', (
-    tester,
-  ) async {
-    FlutterSecureStorage.setMockInitialValues({});
-    final repo = LocalLife(MemoryLifePersistence());
-    await repo.open();
-    await mount(tester, repo);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
-    await openSettingsItem(tester, 'Data sync');
-    await tester.tap(find.byTooltip('同步设置'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('Advanced: manual connection'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(1), 'https://hub.example');
-    await tester.pageBack();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(tester.takeException(), isNull);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.byTooltip('同步设置'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('Connect sync Hub'), findsOneWidget);
-    await tester.pageBack();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
-  });
   testWidgets(
     'local workspace shows editable todos without connecting a host',
     (tester) async {
@@ -138,10 +108,7 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
       }
-      await openSettingsItem(tester, 'Data sync');
-      await tester.tap(find.byTooltip('同步设置'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
+      await openSettingsItem(tester, 'Local data');
       await tester.pageBack();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));

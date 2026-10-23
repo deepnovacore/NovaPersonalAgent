@@ -11,16 +11,18 @@ import android.os.Looper
 
 /** The native command boundary used by a local planner. State sync has no path
  * into this controller. The UI can always stop a run without a Hub or model. */
-class LocalAgentController(context: Context) {
-    private val journal=LocalAgentJournal(context.applicationContext)
-    private val settings = LocalModelSettings(context.applicationContext)
+class LocalAgentController(context: Context, spaceId: String) {
+    private val journal=LocalAgentJournal(context.applicationContext, spaceId)
+    private val settings = LocalModelSettings(context.applicationContext, spaceId)
     private val loopWorker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private data class Active(val id:String,val secret:String,val fence:RunFence,var observation:JSONObject?=null,
         var target:String?=null, var model:LocalGuiModel?=null, var approval:ActionApproval?=null)
     @Volatile private var active:Active?=null
+    @Volatile private var closed=false
     init { journal.recover() }
     @Synchronized fun start(request:JSONObject):JSONObject {
+        check(!closed) { "space_changed" }
         val id=request.getString("id");require(id.length in 1..100)
         val prior=journal.task(id)
         if(prior!=null){
@@ -43,6 +45,13 @@ class LocalAgentController(context: Context) {
         main.postDelayed({ if(active===run) interrupt(id,"time_limit") },300000)
         return record
     }
+    @Synchronized fun close() {
+        closed=true
+        active?.let { interrupt(it.id, "space_changed") }
+        loopWorker.shutdownNow()
+        // Let an interrupted worker finish writing its old scoped journal; never
+        // substitute the new Space's store under an existing task.
+    }
     fun modelSettings() = settings.status()
     @Synchronized fun clearChatGptSettings():JSONObject {
         active?.let { stop(it.id) }
@@ -50,11 +59,13 @@ class LocalAgentController(context: Context) {
         return settings.status()
     }
     @Synchronized fun saveModelSettings(value:JSONObject):JSONObject {
+        check(!closed) { "space_changed" }
         check(active==null){"stop_task_before_changing_model"}
         settings.save(value)
         return settings.status()
     }
     @Synchronized fun runModel(request:JSONObject):JSONObject {
+        check(!closed) { "space_changed" }
         journal.task(request.getString("id"))?.let { previous ->
             require(previous.optJSONObject("todo_ref")?.toString()==request.optJSONObject("todo_ref")?.toString()){"task_id_conflict"}
             require(previous.getString("goal")==request.getString("goal") && previous.getString("acceptance")==request.getString("acceptance") && previous.optString("target_package")==request.getString("target_package")){"task_id_conflict"}

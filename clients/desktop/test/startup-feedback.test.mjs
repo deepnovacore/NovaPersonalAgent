@@ -214,18 +214,15 @@ test('generic assembly failure still schedules automatic recovery', async () => 
 })
 
 
-test('configuration commits start phone independently and keep its failures out of backend status', async () => {
+test('configuration commits keep startup readiness independent of unrelated device services', async () => {
   const body=source.slice(source.indexOf('async function commitDesktopConfiguration('),source.indexOf('async function discardDesktopConfiguration('))
-  let starts=0
   const context=vm.createContext({managedWorkspaceMaintenance:null,refreshManagedWorkspaceCapabilities:async()=>{},configurationReady:false,settingsReady:true,
-    acceptance:null,currentSettings:{phoneConnectionEnabled:true},managedPhone:{start:async()=>{starts++;throw Error('private phone detail')}},
     startup:{stage:'ready'},backendStatus:{state:'connected'}})
   vm.runInContext(body,context)
   await context.commitDesktopConfiguration({maintenance:null,config:{},codexStatus:{}})
-  await new Promise(resolve=>setImmediate(resolve));assert.equal(starts,1);assert.equal(context.startup.stage,'ready')
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(context.startup.stage,'ready')
   context.backendStatus={state:'unavailable'}
   await context.commitDesktopConfiguration({maintenance:null,config:{},codexStatus:{}})
-  assert.equal(starts,2)
   const prepare=source.slice(source.indexOf('async function prepareDesktopConfiguration('),source.indexOf('async function commitDesktopConfiguration('))
   assert.doesNotMatch(prepare,/paintStartup|requestPresentation|showInactive/)
 })

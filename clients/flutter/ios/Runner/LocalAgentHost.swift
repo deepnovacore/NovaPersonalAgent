@@ -8,7 +8,9 @@ import UIKit
   private let channel: FlutterMethodChannel
   private let lifeChannel: FlutterMethodChannel
   private let journal: LocalTaskJournal
-  private let settings = NativeModelSettings()
+  private let settings: NativeModelSettings
+  private let spaceId: String
+  private var closed = false
   private let tools = LocalEventTools()
   private var active: String?
   private var worker: Task<Void, Never>?
@@ -18,8 +20,10 @@ import UIKit
   private var backgroundObserver: NSObjectProtocol?
   private var expiryObserver: NSObjectProtocol?
   private var cachedConfiguration: NativeModelConfiguration?
-  init(messenger: FlutterBinaryMessenger) throws {
-    let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+  init(messenger: FlutterBinaryMessenger, spaceId: String) throws {
+    self.spaceId = spaceId
+    settings = NativeModelSettings(spaceId: spaceId)
+    let root = try NovaSpaceScope.supportDirectory(spaceId)
     var folder = root.appendingPathComponent("NativeTasks", isDirectory: true)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     var attributes = URLResourceValues(); attributes.isExcludedFromBackup = true
@@ -57,7 +61,14 @@ import UIKit
     if let observer = backgroundObserver { NotificationCenter.default.removeObserver(observer) }
     if let observer = expiryObserver { NotificationCenter.default.removeObserver(observer) }
   }
+  func close() {
+    closed = true
+    if let id = active { try? stop(id, phase: "interrupted", summary: "Space changed; verify any dispatched action.") }
+    worker?.cancel(); model?.cancel(); cachedConfiguration = nil
+    channel.setMethodCallHandler(nil)
+  }
   private func command(_ method: String, _ input: [String: Any]) async throws -> Any {
+    guard !closed, (try? NovaSpaceScope.standaloneID()) == spaceId else { throw LocalAgentError("local_runtime_unavailable") }
     switch method {
     case "capabilities": return ["platform": "ios", "model_runtime": true, "model_configured": try settings.read() != nil,
       "native_tools": ["nova", "calendar", "reminders"], "foreground_only": false, "background_execution": "system_managed"]

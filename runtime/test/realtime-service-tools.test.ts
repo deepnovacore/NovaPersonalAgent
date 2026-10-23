@@ -1450,3 +1450,9 @@ test('revoked scheduled context is never injected or continued through the provi
  assert.equal(reads,1);assert.equal(injectedItems.some(item=>item.content.includes('revoked context')),false);assert.equal(actions.slice(before).some(action=>action.startsWith('response')),false)
  }finally{await service.close()}
 })
+
+test('Space mobile host tool is origin-bound and returns its exact action receipt',async()=>{
+ let calls=0;
+ const {service}=realtimeServiceHarness('pipeline',{spaceMobile:{invoke:(raw,context)=>{calls++;assert.deepEqual(raw,{operation:'action',device:'phone',action:{tool:'reminder.create',args:{title:'Test',due:'2026-10-24T00:00:00.000Z'}}});assert.ok(context.request_id.startsWith('conversation:1:'));assert.equal(context.stillWanted(),true);return Promise.resolve({action_id:'host-action',status:'pending'})}}});
+ await service.connect();try{const receipt=await dispatchTurn(service,'mobile__action',{operation:'action',device:'phone',action:{tool:'reminder.create',args:{title:'Test',due:'2026-10-24T00:00:00.000Z'}},origin_ref:'conversation:1'});assert.equal(receipt.accepted,true);assert.equal(calls,1);assert.match(receipt.host_item.content,/host-action/);await service.handleEvent({kind:'response_started',session_epoch:1,response_id:'unrelated-mobile',origin:{kind:'unknown'}});await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'unrelated-mobile',item_id:'wrong',call_id:'wrong',name:'mobile__action',arguments:{operation:'list',origin_ref:'conversation:1'}});assert.equal(calls,1)}finally{await service.close()}
+});

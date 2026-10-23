@@ -1,7 +1,3 @@
-import {createHubService} from './hub-service.mjs'
-import {createHubNetwork} from './hub-network.mjs'
-import {createHubConnection} from './hub-connection.mjs'
-import {installHubIpc} from './hub-integration.mjs'
 import {ChatGptAccounts} from './chatgpt-auth.mjs'
 import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
 import {isEndpointSecret} from '../renderer/compatible-providers.mjs'
@@ -23,7 +19,6 @@ import {FeishuConnector, VISION_MODELS} from '@nova-personal-agent/runtime/deskt
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
-import {phoneNetwork, requestPhonePairing, renderPhoneQr} from './phone-connection.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
 import {parseCapabilityRegistry} from '@nova-personal-agent/runtime/desktop'
@@ -529,7 +524,6 @@ const settingsWriter = createSettingsWriter({
 })
 
 function publishCommittedSettings() {
-  if (!currentSettings.phoneConnectionEnabled) void managedPhone.stop()
   capabilityEditorCache = null
   if(presentationMode!=='background')wakeWord?.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
   settingsGeneration += 1
@@ -670,7 +664,6 @@ function openSettingsWindow(launchId, { category } = {}) {
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
     void cancelPhonePairing()
-    void desktopHubConnection?.action('cancel')
     endVoiceprintRecording()
     settingsWindow = null
     pendingSettingsCategory = null
@@ -718,128 +711,6 @@ function activeMcpSubmenu(launchId) {
   return activeMcpMenuRows(runtimeCapabilities).map(row => (row.enabled
     ? { label: row.label, click: () => openSettingsWindow(launchId, { category: 'capabilities' }) }
     : { label: row.label, enabled: false }))
-}
-
-const phoneRoot = () => resolve(app.getPath('userData'), 'phone')
-let phoneConfig, phonePayload, phoneImage, phoneEpoch = 0
-let phoneIssuedDevices = new Set()
-let phoneQueue = Promise.resolve()
-let phoneBackend, phoneOperation = Promise.resolve()
-const managedPhone = {
-  get running() { return !!backend && !!phoneBackend && phoneBackend === backendControl },
-  start() {
-    const operation = phoneOperation.then(async () => {
-      if (this.running) return
-      if (!configurationReady || !backendControl) throw classifyBackendFailure('configuration_required')
-      const owner = backendControl
-      const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
-      const {initializeServerToken, loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
-      await mkdir(phoneRoot(), {recursive: true, mode: 0o700})
-      const tokenFile = resolve(phoneRoot(), 'host.token')
-      try { initializeServerToken(tokenFile) } catch (error) { if (error.code !== 'EEXIST') throw error }
-      const config = loadServerConfig({SERVER_PORT:'19876',SERVER_TOKEN_FILE:tokenFile})
-      if (app.isQuitting || !currentSettings.phoneConnectionEnabled) throw new Error('service_unavailable')
-      const result = await owner.request('phone.start', {port:config.port,tokenFile}, {timeoutMs:30000})
-      if (!result?.running || owner !== backendControl) throw new Error('service_unavailable')
-      phoneConfig = config
-      phoneBackend = owner
-    })
-    phoneOperation = operation.catch(() => {})
-    return operation
-  },
-  stop() {
-    const operation = phoneOperation.then(async () => {
-      const owner = phoneBackend
-      phoneBackend = undefined
-      if (owner) await owner.request('phone.stop', {}, {timeoutMs:10000}).catch(() => {})
-    })
-    phoneOperation = operation.catch(() => {})
-    return operation
-  },
-}
-
-let desktopHubService, desktopHubConnection
-function hubAvailable() { return process.platform === 'darwin' && !acceptance && !sourceStartupSmoke && releaseSmokeChannel === null }
-function getDesktopHub() {
-  if (!desktopHubConnection) {
-    const entry = app.isPackaged
-      ? resolve(app.getAppPath(), 'node_modules/@nova-personal-agent/runtime/dist/src/hub/managed-entry.js')
-      : resolve(packageRoot, '../../runtime/dist/src/hub/managed-entry.js')
-    desktopHubService = createHubService({homeDir:homedir(), executable:process.execPath, entry, appVersion:app.getVersion(), development:!app.isPackaged})
-    desktopHubConnection = createHubConnection({service:desktopHubService, network:createHubNetwork()})
-  }
-  return desktopHubConnection
-}
-
-async function cancelPhonePairing(invalidate = true) {
-  if (invalidate) phoneEpoch++
-  const config = phoneConfig, code = phonePayload?.code
-  phonePayload = undefined; phoneImage = undefined
-  if (config && code) await requestPhonePairing(config, {type: 'pair.cancel', code}).catch(() => {})
-}
-
-async function phoneAction(action, deviceId, epoch = phoneEpoch) {
-  if(acceptance)throw Error('acceptance_phone_disabled')
-  if (action === 'cancel') { await cancelPhonePairing(); return {state: 'idle'} }
-  if (app.isQuitting) return {state: 'idle'}
-  if (action === 'install') { await shell.openExternal('https://tailscale.com/download'); return {state: 'not_installed'} }
-  if (action === 'login') { await shell.openPath('/Applications/Tailscale.app'); return {state: 'needs_login', service: true} }
-  if (action === 'help') { await shell.openExternal('https://tailscale.com/docs/features/tailscale-serve'); return {state: 'needs_serve'} }
-  if (action === 'disable') {
-    await accessCredentials(() => settingsWriter({phoneConnectionEnabled: false}), {retry: true})
-    await cancelPhonePairing(); await managedPhone.stop()
-    return {state: 'idle'}
-  }
-  if (action === 'enable') await accessCredentials(() => settingsWriter({phoneConnectionEnabled: true}), {retry: true})
-  if (!currentSettings.phoneConnectionEnabled) return {state: 'idle'}
-  try {
-    if (process.platform !== 'darwin') return {state: 'unsupported'}
-    if (currentSettings.phoneServerPort && currentSettings.phoneServerTokenFile) {
-      await managedPhone.stop()
-      const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
-      const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
-      const external = loadServerConfig({SERVER_PORT: String(currentSettings.phoneServerPort),
-        SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
-      if (phoneConfig?.port !== external.port || phoneConfig?.token !== external.token) await cancelPhonePairing(false)
-      phoneConfig = external
-    } else {
-      if (!managedPhone.running && phonePayload) await cancelPhonePairing(false)
-      await managedPhone.start()
-    }
-    const config = phoneConfig
-    const network = currentSettings.phoneServerUrl ? {state: 'ready', url: currentSettings.phoneServerUrl}
-      : await phoneNetwork(config.port, action === 'network')
-    if (epoch !== phoneEpoch) return {state: 'idle'}
-    if (network.state !== 'ready') return {...network, service: true}
-    if (action === 'revoke') await requestPhonePairing(config, {type: 'pair.revoke', device_id: deviceId})
-    if (phonePayload && phonePayload.server !== new URL('/client/v1', network.url).href) await cancelPhonePairing(false)
-    if (epoch !== phoneEpoch) return {state: 'idle'}
-    const activeEpoch = epoch
-    if (action === 'refresh' || !phonePayload) {
-      const before = await requestPhonePairing(config, {type: 'pair.list'})
-      if (epoch !== phoneEpoch) return {state: 'idle'}
-      phoneIssuedDevices = new Set(before.devices.map(device => device.id))
-      const payload = await requestPhonePairing(config, {type: 'pair.create', server: network.url})
-      if (activeEpoch !== phoneEpoch) {
-        await requestPhonePairing(config, {type: 'pair.cancel', code: payload.code}).catch(() => {})
-        return {state: 'idle'}
-      }
-      phonePayload = payload; phoneImage = undefined
-      const script = app.isPackaged ? resolve(process.resourcesPath, 'pair-device.swift') : resolve(packageRoot, '../../runtime/scripts/pair-device.swift')
-      phoneImage = await renderPhoneQr(script, payload)
-      if (activeEpoch !== phoneEpoch) { phoneImage = undefined; return {state: 'idle'} }
-    }
-    const result = await requestPhonePairing(config, {type: 'pair.list', code: phonePayload.code})
-    return {state: result.pairing_active ? 'ready' : result.devices.some(device => !phoneIssuedDevices.has(device.id)) ? 'paired' : 'invalidated', image: result.pairing_active ? phoneImage : undefined,
-      host: new URL(network.url).hostname, devices: result.devices, service: true}
-  } catch (error) {
-    await cancelPhonePairing()
-    return {state: error.message === 'qr_unavailable' ? 'qr_unavailable' : 'service_unavailable'}
-  }
-}
-
-function openPairingWindow(launchId = activeLaunchId) {
-  openSettingsWindow(launchId, {category: 'phone'})
 }
 
 // Sleep is an orb state; the workbench has no bubble to rest in.
@@ -982,7 +853,6 @@ function showOrbMenu(launchId) {
       { label: t("悬浮球"), type: 'radio', checked: presentationMode === 'orb', click: () => requestPresentation('orb') },
       { label: t("隐藏"), type: 'radio', checked: presentationMode === 'background', click: () => requestPresentation('background') },
     ] },
-    { label: t("连接 iPhone…"), click: () => { void openPairingWindow() } },
     { label: t("记忆面板"), click: () => openMemoryBoard(launchId) },
     { label: t("设置…"), click: () => openSettingsWindow(launchId) },
     { label: t("MCP 服务"), submenu: activeMcpSubmenu(launchId) },
@@ -1162,7 +1032,6 @@ async function commitDesktopConfiguration(prepared) {
   await refreshManagedWorkspaceCapabilities()
   configurationReady = true
   settingsReady = true
-  if (!acceptance && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
   return Object.freeze({
     externalWorkspaceReset: reconciliation?.status === 'reconciled'
       && reconciliation.active_workspace_reset === true,
@@ -1384,7 +1253,6 @@ async function launchBackend(smokeChannel, onExit) {
     })
     ;[ready] = await Promise.all([waitForBackendReadiness(spawnedBackend, listener.readiness, diagnostic),acceptanceProof])
     if(acceptance)appendAcceptanceCounts('runtime_gate_verified',{verified:1})
-    if (!acceptance && process.platform === 'darwin' && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
   } finally {
     listener.close()
   }
@@ -1680,17 +1548,6 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   ipcMain.on('nova:orb-menu:show', event => {
     if (mainWindow && event.sender === mainWindow.webContents) showOrbMenu(launchId)
-  })
-  installHubIpc({ipcMain, getSender:()=>settingsWindow?.webContents, enabled:hubAvailable, action:(name,id)=>getDesktopHub().action(name,id)})
-  ipcMain.handle('nova:phone:action', (event, action, deviceId) => {
-    if (!settingsWindow || event.sender !== settingsWindow.webContents
-      || !['status', 'enable', 'disable', 'network', 'refresh', 'cancel', 'install', 'help', 'login', 'revoke'].includes(action)
-      || (action === 'revoke' ? typeof deviceId !== 'string' || !/^[a-f0-9-]{36}$/.test(deviceId) : deviceId !== undefined)) return {state: 'unavailable'}
-    if (action === 'cancel') return phoneAction(action)
-    const epoch = phoneEpoch
-    const result = phoneQueue.then(() => phoneAction(action, deviceId, epoch))
-    phoneQueue = result.catch(() => {})
-    return result
   })
   ipcMain.on('nova:setup:open', event => {
     if (mainWindow && event.sender === mainWindow.webContents) void openSetupWindow()
@@ -2036,7 +1893,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   ipcMain.handle('nova:settings:personal', async (event, payload) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('connections request rejected')
-    const allowed = ['state', 'identity.configure', 'sources.add', 'sources.authorize_computer', 'sources.priority.add', 'sources.priority.remove', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure']
+    const allowed = ['space.status', 'space.invitation', 'space.pairings', 'space.confirm_pairing', 'space.revoke', 'state', 'identity.configure', 'sources.add', 'sources.authorize_computer', 'sources.priority.add', 'sources.priority.remove', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure']
     if (!payload || Object.getPrototypeOf(payload) !== Object.prototype || Object.keys(payload).sort().join(',') !== 'method,params'
       || !allowed.includes(payload.method) || !payload.params || Object.getPrototypeOf(payload.params) !== Object.prototype
       || JSON.stringify(payload.params).length > 16384) throw new Error('connections request rejected')
@@ -2048,6 +1905,12 @@ async function startSelectedCamera(camera, smokeChannel) {
     if (!owner) throw new Error('connections unavailable')
     const result = await owner.request(payload.method, payload.params, {timeoutMs: 180000})
     if (owner !== backendControl || generation !== settingsGeneration) throw new Error('connections changed')
+    if (payload.method === 'space.invitation' && result && !result.error) {
+      const value = JSON.stringify(result)
+      if (value.length > 8192) throw new Error('pairing payload too large')
+      const {default: QRCode} = await import('qrcode')
+      return {...result, qr_image: await QRCode.toDataURL(value, {width: 360, margin: 2})}
+    }
     return result
   })
   ipcMain.handle('nova:knowledge:action', async (event, payload) => {
@@ -2487,7 +2350,6 @@ if (packagedSourceRollbackUnavailable) {
       platform: process.platform,
       iconFile: resolve(packageRoot, 'resources/icon-source/1024x1024.png'),
     })
-    if (hubAvailable()) { getDesktopHub(); void desktopHubService.restore().catch(() => {}) }
     const started=start()
     if(acceptance)void started.then(async()=>{
       await waitForNativeWorkbench(mainWindow)
@@ -2546,7 +2408,7 @@ app.on('before-quit', event => {
     await maintenance?.close()
     sourceSmokeStage('maintenance_closed')
   }), wait(3000).then(() => sourceSmokeStage('maintenance_deadline'))])
-  const drain = Promise.all([backendDrain, maintenanceDrain, desktopHubConnection?.action('cancel'), feishuSetupOwner.release(), cancelPhonePairing().then(() => managedPhone.stop())])
+  const drain = Promise.all([backendDrain, maintenanceDrain, feishuSetupOwner.release()])
   const resumeQuit = () => { quitDrained = true; sourceSmokeStage('quit_resumed'); app.quit() }
   quitDrain = drain.then(resumeQuit, resumeQuit)
 })

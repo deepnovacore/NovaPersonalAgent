@@ -1,39 +1,5 @@
-# Hub 电脑端控制台
+# Retired Hub console
 
-Hub 自带中文浏览器控制台。启动后打开服务根地址，例如 `http://127.0.0.1:8787/`。页面展示当前账户的设备、主设备与最近任务，支持连接、手动刷新和断开；不会发送设备心跳或执行任务。
+The standalone Hub console and its HTTP service have been removed after the Space network acceptance test passed. Current setup uses [Space / Host / Client](../zh-CN/space-host-client.md) and the encrypted relay. Device presence never changes the fixed Host role. There is no authority transfer, schedule handoff or old token connection UI.
 
-界面采用紧凑列表：设备名称、能力与最近上报并列显示，任务保留执行阶段和投递状态。连接帮助默认折叠；窄窗口会将设备能力移到第二行。
-
-## 启动
-
-需要 Node.js 22.13+（含 `node:sqlite`）及已构建的 runtime。在仓库规定的独立外置盘构建目录中运行：
-
-```sh
-node dist/src/hub/cli.js serve /path/to/private/hub.sqlite 127.0.0.1 8787
-```
-
-使用已有设备令牌连接。新建测试账户时，可对同一数据库登记一个控制台身份：
-
-```sh
-node dist/src/hub/cli.js enroll /path/to/private/hub.sqlite my-account console worker
-```
-
-将输出的 `token` 粘贴到页面的“访问令牌”。该令牌属于指定账户，沿用 Hub 现有设备权限，并非独立的管理员或只读凭据。不要把令牌放进网址、截图或共享日志。
-
-## 状态含义
-
-- “在线”沿用 Hub 的 90 秒心跳判断；控制台读取状态不会更新心跳。
-- “尚未上报”表示设备已登记，但尚未上报名称与能力。
-- 任务的“投递状态”与“执行阶段”分别显示；已送达不等于完成。
-- “未设置主设备”表示账户尚未初始化协作关系。
-- 请求失败时，对应区域标记失败；如果保留了上次结果，会明确提示结果可能已过时。
-
-连接使用同源 API。令牌只在当前网页内存中保留，断开、认证失效或刷新网页后需要重新输入。远程部署需要 HTTPS；只有本机回环地址支持 HTTP。服务默认监听本机，页面本身公开，账户数据仍由现有 Bearer 认证保护。
-
-## 验证记录（2026-10-18）
-
-- Hub 定向回归：45 项通过；最终布局改动后，页面/认证/设备路由定向复验 5 项通过。
-- 新增 UI 模块的独立严格类型检查、变更文件 ESLint 和 diff 空白检查通过。
-- 真实 Chromium 浏览器：32 项检查通过，覆盖真实 Hub 数据、未上报/离线设备、主设备、任务阶段、认证失效、部分失败恢复、断开时的迟到响应、文本注入、刷新后凭据清除，以及 320/390 像素布局。
-- 桌面和窄屏截图经人工视觉检查。验证数据属于隔离测试账户；用户查看实例没有注入合成设备和任务。
-- 全量 runtime 类型检查在未加入 UI 实现时已有错误：`mem0ai/oss` 依赖解析，以及 `life.ts`、`source-processing-agent.ts` 的可选 `quote` 类型。加入 UI 后错误集合未变；不能将本次定向验证视作全量构建通过。
+Historical console screenshots and test counts are records of the removed implementation, not evidence for the current release. Current results are recorded in the [implementation ledger](../design-notes/2026-10-23-space-host-client-full-plan.md).

@@ -1,4 +1,3 @@
-import type {LifeSyncClient} from '../hub/life-sync.js'
 import {sourceTagSchema} from '../memory/provenance.js'
 import type {TaskRecord} from './tasks.js'
 import {z} from 'zod'
@@ -23,7 +22,6 @@ export type LifeState=z.infer<typeof lifeStateSchema>
 export interface LifeProvenance {type:'accepted_candidate'|'explicit_candidate';row:EvaluatedCandidate;resolution?:LifeResolution}
 export interface LifeSnapshot {state:LifeState;revision:number}
 export interface LifeBackend {
- applySyncProjection?(value:{projection:unknown;requestId:string;expectedRevision:number}):Promise<LifeSnapshot>
  peek?():Promise<LifeSnapshot|null>
  load(legacy:LifeState,options?:{legacyPath?:string}):Promise<LifeSnapshot>
  mutate(value:{input:unknown;requestId:string;expectedRevision:number;provenance?:LifeProvenance}):Promise<LifeSnapshot&{result:{id:string;version:number}}>
@@ -130,7 +128,7 @@ export function applyLifeMutation(state:LifeState,raw:unknown,requestId:string,n
 
 // ponytail: bounded personal collections, linear link lookup; add indexes only beyond these small limits.
 export class LifeService{
- #store:BoundedJsonStore<LifeState>;#state:LifeState=emptyLifeState();#revision=0;#tail:Promise<unknown>=Promise.resolve();#backend:LifeBackend|undefined;#selectedAuthority=false;#hubSync:LifeSyncClient|undefined
+ #store:BoundedJsonStore<LifeState>;#state:LifeState=emptyLifeState();#revision=0;#tail:Promise<unknown>=Promise.resolve();#backend:LifeBackend|undefined;#selectedAuthority=false
  constructor(readonly path:string,readonly changed:()=>void=()=>{/* optional observer */},readonly backend?:LifeBackendSource){this.#store=new BoundedJsonStore(path,lifeStateSchema,8*1024*1024)}
  async open(){
   this.#backend=typeof this.backend==='function'?this.backend():this.backend
@@ -145,31 +143,7 @@ export class LifeService{
   catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
   const loaded=await this.#backend.load(legacy,legacyRead?{legacyPath:this.path}:undefined);this.#state=lifeStateSchema.parse(loaded.state);this.#revision=loaded.revision
  }
- async configureHubSync(options:{statePath:string;credentialsPath:string}):Promise<void>{
-  const previous=this.#hubSync;this.#hubSync=undefined;await previous?.close()
-  const {LifeSyncClient}=await import('../hub/life-sync.js')
-  const client=new LifeSyncClient(this,options.statePath,options.credentialsPath);await client.open();this.#hubSync=client
-  await client.sync()
- }
- syncHub(){return this.#hubSync?.sync()??Promise.resolve()}
- hubSyncStatus(){return this.#hubSync?.status()??{enabled:false}}
- #syncChanged(){void this.#hubSync?.sync().catch(()=>this.changed())}
- syncState(){return structuredClone(this.#state)}
- assertSyncSupported(){if(this.#backend&&!this.#backend.applySyncProjection)throw Error('unsupported_backend')}
- async applySyncProjection(projection:unknown,options:{requestId:string;expectedStateHash:string}):Promise<void>{
-  const run=this.#tail.then(async()=>{
-   this.assertSyncSupported()
-   const {applyLifeSyncProjection}=await import('../hub/life-projection.js')
-   const next=applyLifeSyncProjection(this.#state,projection,options.requestId)
-   if(!Object.hasOwn(this.#state.receipts,options.requestId)&&hash(JSON.stringify(this.#state))!==options.expectedStateHash)throw Error('local_state_changed')
-   if(this.#backend){
-    const value=await this.#backend.applySyncProjection!({projection,requestId:options.requestId,expectedRevision:this.#revision})
-    this.#state=lifeStateSchema.parse(value.state);this.#revision=value.revision
-   }else{await this.#store.write(next.state);this.#state=next.state}
-   this.changed()
-  });this.#tail=run.catch(()=>{/* keep serial queue usable after rejected sync */});return run
- }
- async close(){await this.#hubSync?.close();await this.#tail}
+ async close(){await this.#tail}
  async refresh():Promise<void>{const run=this.#tail.then(async()=>{
   if(!this.#backend?.peek)return
   const fresh=await this.#backend.peek();if(!fresh)throw Error('life_backend_unavailable')
@@ -196,13 +170,13 @@ export class LifeService{
   if(this.#backend){
    try{
     const value=await this.#backend.mutate({input:p,requestId,expectedRevision:this.#revision,...(provenance?{provenance}: {})})
-    this.#state=lifeStateSchema.parse(value.state);this.#revision=value.revision;this.changed();this.#syncChanged();return value.result
+    this.#state=lifeStateSchema.parse(value.state);this.#revision=value.revision;this.changed();return value.result
    }catch(error){
     if(error instanceof Error&&error.message==='version_conflict'){const fresh=await this.#backend.load(emptyLifeState());this.#state=lifeStateSchema.parse(fresh.state);this.#revision=fresh.revision;this.changed()}
     throw error
    }
   }
   const next=applyLifeMutation(this.#state,p,requestId)
-  await this.#store.write(next.state);this.#state=next.state;this.changed();this.#syncChanged();return next.result
+  await this.#store.write(next.state);this.#state=next.state;this.changed();return next.result
  });this.#tail=run.catch(()=>{/* keep serial queue usable after rejected command */});return run}
 }

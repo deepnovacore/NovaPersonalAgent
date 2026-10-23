@@ -3,7 +3,6 @@ import * as voicePreset from '../src/renderer/voice-preset.mjs'
 import {onButton} from '../src/renderer/button-action.mjs'
 import {createStartupNotice, startupMessage} from '../src/renderer/startup-notice.mjs'
 import {t, localizeDocument, currentLanguage} from '../src/renderer/locale.mjs'
-import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -76,7 +75,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createSpaceHostPanel: () => ({load() {}}), ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createSkinPanel: () => ({render() {}, destroy() {}}),
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
@@ -90,7 +89,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
       createElement: () => ({children: [], append(...items) {this.children.push(...items)}}), addEventListener() {},
     },
     window: {addEventListener() {}, novaPersonalAgentDesktop: {settings: {
-      phoneAction: async () => ({state: 'idle'}), get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
+      get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
     }}},
   })
   await new Promise(resolve => setImmediate(resolve))
@@ -1057,7 +1056,7 @@ test('every settings block belongs to exactly one sidebar category', () => {
   // table would be hidden permanently by applyCategory.
   const blocks = [...html.matchAll(/<(?:section|details) (?:class="[^"]*" )?id="([^"]+)"/g)]
     .map(match => match[1])
-    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced'].includes(id))
+    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown'].includes(id))
   for (const id of blocks) assert.ok(sections.includes(id), `${id} is missing from a category`)
 })
 
@@ -1349,79 +1348,6 @@ test('memory prerecall switch stages and saves explicit off without hiding on in
   assert.equal(saved.memoryPrerecallEnabled,false)
   assert.equal(toggle.checked,false)
   assert.match(html,/回答前查找相关记忆/u)
-})
-
-test('pairing polling keeps the QR and regenerate button stable while manual refresh shows progress', async t => {
-  t.mock.timers.enable({apis: ['setInterval']})
-  const ready = {state: 'ready', image: 'data:image/png;base64,qr', devices: []}
-  let pending
-  const panel = await mountSettingsPanel(publicView(), {
-    phoneAction: async () => pending ? pending.promise : ready,
-  })
-  await panel.click('#category-phone')
-  await new Promise(resolve => setImmediate(resolve))
-  const button = panel.node('#phone-primary'), qr = panel.node('#phone-qr')
-  let imageWrites = 0, source = qr.src
-  qr.attributes.src = source
-  Object.defineProperty(qr, 'src', {get: () => source, set: value => {imageWrites++; source = value; qr.attributes.src = value}})
-  pending = deferred()
-  t.mock.timers.tick(3000)
-  assert.equal(button.textContent, '重新生成二维码')
-  assert.equal(button.disabled, false)
-  pending.resolve(ready)
-  await new Promise(resolve => setImmediate(resolve))
-  assert.equal(imageWrites, 0)
-  pending = deferred()
-  const refresh = panel.click('#phone-primary')
-  assert.equal(button.attributes['aria-busy'], 'true')
-  assert.equal(button.disabled, true)
-  assert.equal(button.textContent, '正在准备…')
-  pending.resolve({...ready, image: 'data:image/png;base64,new'})
-  await refresh
-  assert.equal(button.attributes['aria-busy'], 'false')
-  await new Promise(resolve => setImmediate(resolve))
-  assert.equal(qr.src, 'data:image/png;base64,new')
-  assert.equal(button.disabled, false)
-  pending = deferred()
-  t.mock.timers.tick(3000)
-  pending.resolve({state: 'paired', devices: []})
-  await new Promise(resolve => setImmediate(resolve))
-  assert.equal(panel.node('#phone-title').textContent, 'iPhone 已配对')
-  assert.equal(qr.hidden, true)
-  await panel.click('#category-general')
-})
-
-test('phone settings stage together and open pairing only after persistence succeeds', async () => {
-  let opened = 0
-  let savedPatch
-  const panel = await mountSettingsPanel(publicView({phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: ''}), {
-    set: async ({settingsPatch}) => {
-      savedPatch = settingsPatch
-      return publicView({...settingsPatch})
-    },
-    phoneAction: async action => { if (action === 'enable') opened += 1; return {state: 'idle'} },
-  })
-  for (const [id, value] of [['phone-server-port', '18080'], ['phone-server-token-file', '/tmp/nova/token'], ['phone-server-url', 'wss://host.ts.net']]) {
-    panel.node(`#${id}`).value = value
-    panel.node(`#${id}`).listeners.input()
-  }
-  await panel.click('#category-phone')
-  await new Promise(resolve => setImmediate(resolve))
-  await panel.click('#phone-pairing-open')
-  await new Promise(resolve => setImmediate(resolve))
-  assert.equal(savedPatch.phoneServerPort, 18080)
-  assert.equal(savedPatch.phoneServerTokenFile, '/tmp/nova/token')
-  assert.equal(savedPatch.phoneServerUrl, 'wss://host.ts.net')
-  assert.equal(opened, 1)
-
-  const failed = await mountSettingsPanel(publicView(), {
-    set: async () => { throw new Error('disk unavailable') },
-    phoneAction: async action => { if (action === 'enable') opened += 1; return {state: 'idle'} },
-  })
-  failed.node('#phone-server-port').value = '18080'
-  failed.node('#phone-server-port').listeners.input()
-  await failed.click('#phone-pairing-open')
-  assert.equal(opened, 1)
 })
 
 test('startup retry reports backend status without managed workspace recovery wording', async () => {

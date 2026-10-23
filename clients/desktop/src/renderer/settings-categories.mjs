@@ -18,8 +18,6 @@ export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'privacy', label: t("隐私与数据"), sections: Object.freeze(['privacy-section'])}),
   Object.freeze({id: 'knowledge', label: t("知识库"), sections: Object.freeze(['knowledge-section'])}),
   Object.freeze({id: 'secrets', label: t("API 密钥"), sections: Object.freeze(['chatgpt-settings','secrets'])}),
-  Object.freeze({id: 'hub', label: t("手机同步 Hub"), sections: Object.freeze(['hub-connection-section'])}),
-  Object.freeze({id: 'phone', label: t("连接 iPhone"), sections: Object.freeze(['phone-connection-section'])}),
   Object.freeze({id: 'codex', label: t("编程"), sections: Object.freeze([
     'local-tool-approval-section', 'codex-approval-section', 'codex-projects',
   ])}),

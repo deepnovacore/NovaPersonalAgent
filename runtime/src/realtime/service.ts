@@ -420,6 +420,7 @@ export class RealtimeService {
       throw new TypeError('agent controller registry does not match compiled tool descriptors')
     }
     this.#continuations = new ToolContinuations({
+      ...(options.spaceMobile?{spaceMobile:options.spaceMobile}:{}),
       ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
       ...(options.requestPlanMode?{requestPlanMode:options.requestPlanMode}:{}),
       ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import '../space/space_storage.dart';
 import '../agent_core/agent_core_host.dart';
 import '../agent_core/tool_registry.dart';
 import '../conversation/local_conversation_store.dart';
@@ -38,7 +38,7 @@ class VoiceDelegateBridge extends ChangeNotifier {
   String? get activeTool => worker.activeTool;
 
   static Future<VoiceDelegateBridge> open(AgentCoreHost primary) async {
-    final directory = await getApplicationSupportDirectory();
+    final directory = await SpaceStorage.directory();
     final store = ConversationStore(
       FileLifePersistence(
         File('${directory.path}/voice-delegate-contexts-v1.json'),

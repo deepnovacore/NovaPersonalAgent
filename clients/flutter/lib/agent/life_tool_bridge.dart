@@ -32,7 +32,6 @@ class LifeToolBridge {
         'todos': (life['todos'] as List).take(100).toList(),
         'goals': life['goals'],
         'todo_limit': 100,
-        'conflict': repository.conflict != null,
       };
     }
     if (!['validate', 'mutate'].contains(method)) {
@@ -43,7 +42,6 @@ class LifeToolBridge {
         !['create', 'update'].contains(input['op'])) {
       throw StateError('unsupported_life_tool');
     }
-    if (repository.conflict != null) throw StateError('resolve_conflict_first');
     if (method == 'validate') {
       reduceLife(repository.life, input, 'validation');
       return {'valid': true};

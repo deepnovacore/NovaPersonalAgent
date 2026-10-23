@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/connectors/feishu/host.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/personal/personal_store.dart';
 import 'package:nova_mobile/ui/local_profile_results.dart';
 import 'package:nova_mobile/ui/theme.dart';
@@ -39,13 +39,13 @@ class _Fixture {
   final now = DateTime(2026, 10, 18, 18);
   late final sources = SourceStore(MemoryLifePersistence(), now: () => now);
   late final host = _ReadyHost(sources);
-  final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+  final publication = LocalPublicationContext(MemoryLifePersistence());
   final disk = _ControlledPersistence();
-  late final profile = ProfileRepository(disk, authority, sources);
+  late final profile = ProfileRepository(disk, publication, sources);
   final life = PersonalStore(send: (_) => false);
 
   Future<void> open({bool publish = true}) async {
-    await authority.open();
+    await publication.open();
     await sources.bind('self', 1);
     final times = [
       DateTime(2026, 10, 16, 10),
@@ -96,7 +96,7 @@ class _Fixture {
                   : [refs[times[i].millisecondsSinceEpoch]],
             },
         ]),
-        epoch: authority.epoch,
+
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: 'p',
@@ -123,7 +123,7 @@ class _Fixture {
           language: language,
           sourceTimeline: LocalProfileResults(
             host: host,
-            authority: authority,
+            publication: publication,
             repository: profile,
             kind: 'timeline',
             language: language,
@@ -135,7 +135,7 @@ class _Fixture {
 
   void dispose() {
     host.dispose();
-    authority.dispose();
+    publication.dispose();
     life.dispose();
   }
 }

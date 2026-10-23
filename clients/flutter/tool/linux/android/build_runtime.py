@@ -34,7 +34,10 @@ def main():
     parser.add_argument('--ndk', type=Path, required=True)
     args = parser.parse_args()
     external = args.external_root.resolve()
-    if not external.is_mount():
+    # pathlib misses same-device bind mounts used by managed workspaces.
+    mounted = external.is_mount() or (platform.system() == 'Linux' and shutil.which('mountpoint') is not None and
+        subprocess.run(['mountpoint', '-q', str(external)]).returncode == 0)
+    if not mounted:
         parser.error('external-root is not mounted; refusing internal-disk fallback')
     session = args.session_root.resolve()
     if not session.is_relative_to(external) or session == external:
@@ -90,6 +93,13 @@ def main():
 ''')
     subprocess.run([str(cc), '-c', str(talloc / 'talloc.c'), '-o', str(build / 'talloc.o'), '-I' + str(talloc), '-fPIC', '-O2', '-std=gnu99', '-DHAVE_STDARG_H=1', '-DHAVE_VA_COPY=1', '-DHAVE_UNISTD_H=1', '-DHAVE_INTPTR_T=1'], check=True)
     subprocess.run([str(toolchain / 'llvm-ar'), 'rcs', str(build / 'libtalloc.a'), str(build / 'talloc.o')], check=True)
+    # The pinned loader awk uses GNU strtonum/word-boundaries. Use a POSIX
+    # equivalent so the documented Linux build works with mawk as well.
+    (proot / 'src/loader/loader-info.awk').write_text('''function hex(s, n,i,c) { n=0; for(i=1;i<=length(s);i++){c=index("0123456789abcdef",tolower(substr(s,i,1)))-1;if(c<0)return 0;n=n*16+c}return n }
+$8 == "pokedata_workaround" { pokedata_workaround=hex($2) }
+$8 == "_start" { start=hex($2) }
+END { print "#include <unistd.h>"; print "const ssize_t offset_to_pokedata_workaround=" (pokedata_workaround-start) ";" }
+''')
     subprocess.run(['make', '-j4', 'CC=' + str(cc), 'STRIP=' + str(toolchain / 'llvm-strip'), 'OBJCOPY=' + str(toolchain / 'llvm-objcopy'), 'OBJDUMP=' + str(toolchain / 'llvm-objdump'), f'CPPFLAGS=-D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -I. -DARG_MAX=131072 -I{talloc}', 'CFLAGS=-O2 -Wall -Wextra -fPIE', f'LDFLAGS=-Wl,-z,noexecstack -Wl,-z,max-page-size=16384 -pie -L{build} -ltalloc'], cwd=proot / 'src', check=True)
     libs = output / 'jniLibs/arm64-v8a'
     assets = output / 'assets/nova-linux'

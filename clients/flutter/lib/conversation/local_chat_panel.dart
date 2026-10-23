@@ -206,8 +206,8 @@ Future<void> showLocalModelSettings(
                 children: [
                   Text(
                     t(
-                      '对话和任务所需内容会发送给所选模型服务。API 密钥仅保存在这台设备，不会同步到 Hub。',
-                      'Content needed for conversations and tasks is sent to the selected model provider. Your API key stays on this device and is not synced to Hub.',
+                      '对话和任务所需内容会发送给所选模型服务。API 密钥仅保存在这台设备，保存在当前 Space 的安全存储中。',
+                      'Content needed for conversations and tasks is sent to the selected model provider. Your API key stays on this device and is stored in the current Space secure storage.',
                     ),
                   ),
                   TextButton(
@@ -426,7 +426,7 @@ class LocalChatPanel extends StatefulWidget {
     this.audioOwner,
     this.dictationAudio,
     this.requestMicrophone,
-    this.voiceSettings = const VoiceSettings(),
+    this.voiceSettings,
     this.onVoiceText,
     this.externalTaskBusy = false,
     this.onCancelExternalTask,
@@ -435,7 +435,7 @@ class LocalChatPanel extends StatefulWidget {
   final AudioOwner? audioOwner;
   final AudioPort? dictationAudio;
   final Future<bool> Function()? requestMicrophone;
-  final VoiceSettings voiceSettings;
+  final VoiceSettings? voiceSettings;
   final Future<void> Function(String)? onVoiceText;
   final bool externalTaskBusy;
   final VoidCallback? onCancelExternalTask;
@@ -455,6 +455,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   String? model;
   PhoneDictation? dictation;
   String _dictationBase = '';
+  late final VoiceSettings _voiceSettings =
+      widget.voiceSettings ?? VoiceSettings();
   bool atBottom = true;
   String t(String zh, String en) => widget.language == 'zh' ? zh : en;
   @override
@@ -467,7 +469,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
         audioOwner: widget.audioOwner!,
         audio: widget.dictationAudio!,
         requestMicrophone: widget.requestMicrophone!,
-        readConfiguration: widget.voiceSettings.readForDictation,
+        readConfiguration: _voiceSettings.readForDictation,
         onText: (text) {
           input.text = _dictationBase.isEmpty ? text : '$_dictationBase\n$text';
         },
@@ -1076,7 +1078,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                               try {
                                 await showVoiceSettings(
                                   context,
-                                  widget.voiceSettings,
+                                  _voiceSettings,
                                   dictationOnly: true,
                                   language: widget.language,
                                 );

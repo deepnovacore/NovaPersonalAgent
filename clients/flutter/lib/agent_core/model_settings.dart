@@ -1,3 +1,4 @@
+import '../space/space_storage.dart';
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../agent/local_agent.dart';
@@ -13,7 +14,7 @@ class ModelSettings {
   final FlutterSecureStorage storage;
   final LocalAgent native;
   final bool headless;
-  static String? _projection;
+  String? _projection;
   late final chatGpt = ChatGptAccounts(storage: storage);
 
   Future<void> clearNativeChatGpt() async {
@@ -30,6 +31,7 @@ class ModelSettings {
     }
   }
 
+  final String _scopedKey = SpaceStorage.secureKey(storageKey);
   static const storageKey = 'nova.dart-model.v1';
 
   Future<ModelConfiguration?> read() async {
@@ -81,7 +83,7 @@ class ModelSettings {
 
   Future<ModelConfiguration?> readApiKey() async {
     try {
-      final raw = await storage.read(key: storageKey);
+      final raw = await storage.read(key: _scopedKey);
       if (raw == null) return null;
       final value = jsonDecode(raw) as Map;
       return ModelConfiguration(
@@ -115,7 +117,7 @@ class ModelSettings {
     try {
       await chatGpt.useApiKey();
       // Dart is authoritative; a failed projection is visible and can be retried.
-      await storage.write(key: storageKey, value: jsonEncode(value.toJson()));
+      await storage.write(key: _scopedKey, value: jsonEncode(value.toJson()));
       await native.call('saveModelSettings', value.toJson());
     } catch (_) {
       throw const AgentFailure('model_settings_projection_failed');

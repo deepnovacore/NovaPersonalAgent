@@ -227,9 +227,9 @@ test('shared worker creates a private database and rejects symlink targets',asyn
   await client.open();await client.open()
   if(process.platform!=='win32'){assert.equal((await stat(path)).mode&0o777,0o600);assert.equal((await stat(join(root,'new'))).mode&0o777,0o700)}
   await client.close()
-  const target=join(root,'other.sqlite');await writeFile(target,'',{mode:0o644});const linked=join(root,'linked.sqlite');await symlink(target,linked)
+  const target=join(root,'other.sqlite');await writeFile(target,'',{mode:0o644});const targetMode=(await stat(target)).mode&0o777;const linked=join(root,'linked.sqlite');await symlink(target,linked)
   const rejected=new MemoryLedgerClient(linked)
-  try{await assert.rejects(rejected.open());if(process.platform!=='win32')assert.equal((await stat(target)).mode&0o777,0o644)}finally{await rejected.close()}
+  try{await assert.rejects(rejected.open());if(process.platform!=='win32')assert.equal((await stat(target)).mode&0o777,targetMode)}finally{await rejected.close()}
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 

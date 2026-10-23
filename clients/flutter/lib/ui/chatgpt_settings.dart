@@ -67,7 +67,7 @@ Future<void> showChatGptSettings(
                   const Padding(
                     padding: EdgeInsets.only(bottom: 4),
                     child: Text(
-                      '使用这台手机独立登录的 ChatGPT 账号。账号与密钥只保存在本机，不从电脑或 Hub 同步。',
+                      '使用这台手机独立登录的 ChatGPT 账号。账号与密钥只保存在本机，不与其他 Space 共享。',
                       style: TextStyle(
                         color: Nova.secondary,
                         fontSize: 13,

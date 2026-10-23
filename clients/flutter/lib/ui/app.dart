@@ -1,3 +1,5 @@
+import '../space/space_root.dart';
+import '../space/space_storage.dart';
 import 'dart:convert';
 import '../connectors/feishu/host.dart';
 import '../context/profile_corrections.dart';
@@ -17,7 +19,6 @@ import '../voice/voice_delegate.dart';
 import '../voice/voice_settings.dart';
 import '../voice/voice_settings_sheet.dart';
 import '../voice/voice_provider_factory.dart';
-import '../agent/hub_tasks.dart';
 import '../agent/native_chat_task.dart';
 import '../agent_core/agent_workspace.dart';
 import '../agent_core/workspace_shell.dart';
@@ -71,13 +72,20 @@ class NovaApp extends StatelessWidget {
     theme: novaTheme(),
     builder: (context, child) =>
         DecoratedBox(decoration: novaBackground, child: child),
-    home: _WorkbenchShell(
-      audio: audio,
-      requestMicrophone: requestMicrophone,
-      preferences: preferences,
-      lifeHost: lifeHost,
-      agentCore: agentCore,
-    ),
+    home:
+        (audio != null ||
+            requestMicrophone != null ||
+            preferences != null ||
+            lifeHost != null ||
+            agentCore != null)
+        ? _WorkbenchShell(
+            audio: audio,
+            requestMicrophone: requestMicrophone,
+            preferences: preferences,
+            lifeHost: lifeHost,
+            agentCore: agentCore,
+          )
+        : SpaceRoot(standaloneBuilder: (_) => const _WorkbenchShell()),
   );
 }
 
@@ -132,11 +140,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   @override
   void initState() {
     super.initState();
+    SpaceStorage.runScoped(SpaceStorage.active, _initialize);
+  }
+
+  void _initialize() {
     lifeHost = widget.lifeHost ?? LifeHost();
-    lifeHost.applyContextTombstones = (ids) async {
-      final connector = feishu ??= FeishuHost();
-      await connector.applyTombstones(lifeHost.authority.hubId!, ids);
-    };
     lifeHost.addListener(_lifeChanged);
     unawaited(lifeHost.open().catchError((Object _) {}));
     final nativeAudio = ChannelAudio();
@@ -190,7 +198,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     }
   }
 
-  /// Phone chat owns execution; cross-device actions use the Hub.
+  /// Standalone Space chat owns local execution.
   Future<void> _openAgentCore() async {
     try {
       final nativeTasks = NativeChatTaskRunner();
@@ -207,20 +215,17 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           await AgentCoreHost.open(
             additionalContext: (model) async {
               final provider = '${model.endpoint}|${model.model}';
-              final shared =
-                  lifeHost.contextSync?.modelCorrections(provider) ??
-                  <String, String>{};
               final connector = feishu ??= FeishuHost();
               await connector.open();
               final corrections = ProfileCorrections();
               await corrections.open();
               final merged = corrections.merged(
                 connector.ready
-                    ? '${lifeHost.authority.record['space_id']}|${connector.sources.identity}'
+                    ? '${lifeHost.publication.spaceId}|${connector.sources.identity}'
                     : '',
                 provider,
-                shared,
-                lifeHost.contextSync?.correctionTimes ?? {},
+                const <String, String>{},
+                const <String, String>{},
               );
               return merged.isEmpty
                   ? ''
@@ -319,7 +324,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     await connector.open();
     final models = agentCore?.settings;
     if (!mounted || models == null) return;
-    final profile = ProfileAgent(connector, lifeHost.authority, models);
+    final profile = ProfileAgent(connector, lifeHost.publication, models);
     final generation = ProfileGenerationCoordinator(
       pauseAfterRound:
           ProfileAgent.budgetId.isNotEmpty &&
@@ -339,7 +344,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       failureCode: profileRunErrorCode,
       processedRecords: () =>
           profile.lastCoverage['validated_observation_records'] ?? 0,
-      inputs: [connector, lifeHost.authority],
+      inputs: [connector, lifeHost.publication],
       progress: profile,
     );
     generation.addListener(_profileChanged);
@@ -603,7 +608,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                 ? null
                                 : (excludeAbout) => LocalProfileResults(
                                     host: feishu!,
-                                    authority: lifeHost.authority,
+                                    publication: lifeHost.publication,
                                     kind: 'profile',
                                     language: language,
                                     repository: profileAgent?.repository,
@@ -684,7 +689,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 ),
                 (
                   'sync',
-                  _t('资料同步', 'Data sync'),
+                  _t('本机事项', 'Local data'),
                   CupertinoIcons.arrow_2_circlepath,
                 ),
               ]),
@@ -719,8 +724,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 models: agentCore?.settings ?? ModelSettings(),
                 profileAgent: profileAgent,
                 generation: profileGeneration,
-                authority: lifeHost.authority,
-                contextSync: lifeHost.getContextSync,
+                publication: lifeHost.publication,
                 adoptTodo: (input, operation) =>
                     lifeHost.mutate(input, operationId: operation),
               ),
@@ -766,16 +770,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       case 'language':
         await _languageSettings();
       case 'tasks':
-        HubTasks? hub;
-        try {
-          hub = await lifeHost.getTasks();
-        } catch (_) {
-          /* Local history remains available. */
-        }
         if (!mounted) return;
         await Navigator.of(context).push<void>(
           CupertinoPageRoute(
-            builder: (_) => LocalTasksPage(life: lifeHost.repo, hub: hub),
+            builder: (_) => LocalTasksPage(life: lifeHost.repo),
           ),
         );
         if (mounted) setState(() => _modelRevision++);
@@ -784,7 +782,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           CupertinoPageRoute(
             builder: (_) => Scaffold(
               backgroundColor: Nova.sheet,
-              appBar: AppBar(title: Text(_t('资料同步', 'Data sync'))),
+              appBar: AppBar(title: Text(_t('本机事项', 'Local data'))),
               body: SingleChildScrollView(child: LifeControls(host: lifeHost)),
             ),
           ),
@@ -1196,7 +1194,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                 ? null
                                 : LocalProfileResults(
                                     host: feishu!,
-                                    authority: lifeHost.authority,
+                                    publication: lifeHost.publication,
                                     kind: 'timeline',
                                     repository: profileAgent?.repository,
                                     generation: profileGeneration,

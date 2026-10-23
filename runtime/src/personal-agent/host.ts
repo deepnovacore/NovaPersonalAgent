@@ -1,3 +1,5 @@
+import type {JsonValue} from '../core/events.js';
+import {spaceMobileArguments} from '../space-host/mobile-tools.js';
 import {computerUseCommandSchema,type ComputerUseState,type ComputerUseCommandResult,type ComputerPreflightItem} from './computer-use/contract.js'
 import {loadComputerConfig} from '../executors/computer-config.js'
 import {supportsVision} from '../model/vision-capability.js'
@@ -17,6 +19,8 @@ import type {StopRevoker} from '../device/port.js';
 import {SourceProcessingAgent} from './source-processing-agent.js';
 import {notificationResultText} from '../notifications/content.js';
 import {NotificationService} from '../notifications/service.js';
+import type {SpaceHostController} from '../space-host/config.js';
+import {spaceRelayNotificationAdapter} from '../notifications/adapters/space-relay.js';
 import {novaNotificationAdapter} from '../notifications/adapters/nova.js';
 import {feedNotification,feedNotificationKey} from '../notifications/feed.js';
 import type {NotificationChannelAdapter,NotificationInput} from '../notifications/contracts.js';
@@ -484,7 +488,6 @@ export class PersonalAgentHost {
     scheduledTaskTick():Promise<void>{
         const operation=this.#scheduledTail.then(async()=>{
             if(!this.#opened||!this.#sourceReady||this.#recovering)return
-            try{await this.schedules.syncShared()}catch{/* Shared claims fail closed; unrelated local rules remain available. */}
             await this.sourceProcessingAgent.tick();await this.schedules.claimDue();await this.#reconcileScheduledRuns()
             for(const run of this.schedules.activeRuns()){
                 const task=run.task_id?this.tasks.get(run.task_id):null
@@ -531,7 +534,7 @@ export class PersonalAgentHost {
         const guard=message.guard;if(guard?.requires_runtime&&!this.#runtimeNotificationGuards.get(message.event_key)?.())return 'invalid';
         if(guard?.task_id){const task=this.tasks.list().find(t=>t.id===guard.task_id);if(!task||task.goal_revision!==guard.goal_revision||task.phase==='cancelled'||(message.kind==='task_progress'&&['completed','failed'].includes(task.phase))||(guard.work_id&&!task.work_ids.includes(guard.work_id)))return 'invalid';}
         if(guard?.evidence_refs&&!await this.#valid({evidence_refs:guard.evidence_refs,memory_refs:[]}))return 'invalid';
-        if(message.source.type==='feed'){const item=this.#state.feed.find(f=>f.id===message.source.id);if(!item||item.lifecycle==='invalidated'||item.user_state==='dismissed'||feedNotificationKey(this.#feedNotification(item))!==feedNotificationKey(message))return 'invalid';if(!await this.#valid(item))return 'invalid';if(item.snooze_until&&Date.parse(item.snooze_until)>this.#now().getTime())return 'defer';}
+        if(message.source.type==='feed'){const item=this.#state.feed.find(f=>f.id===message.source.id);if(!item||item.lifecycle==='invalidated'||item.user_state==='dismissed'||feedNotificationKey(this.#feedNotification(item))!==feedNotificationKey(message))return 'invalid';if(item.schedule_ref?.run_id?!await this.scheduledResultAuthorized(item.schedule_ref.run_id):!await this.#valid(item))return 'invalid';if(item.snooze_until&&Date.parse(item.snooze_until)>this.#now().getTime())return 'defer';}
         if(message.source.type==='conversation_runtime'&&!this.#state.conversations.items.some(c=>c.id===message.source.id&&String(c.generation)===message.source.version))return 'invalid';
         if(message.source.type==='task_waiting'&&!this.tasks.list().some(t=>t.id===message.source.id&&t.phase==='waiting'&&(!t.trigger||!this.schedules.findRun(t.trigger.run_id)?.processing)))return 'invalid';
         if(message.source.type==='approval'&&!this.#pendingDecisions().pending_approvals.some(a=>a.approval_id===message.source.id))return 'invalid';
@@ -642,6 +645,15 @@ export class PersonalAgentHost {
     #voiceTransition=false;
     #clearingConversations=new Set<string>();
     #conversationEmit:((frame:Record<string,unknown>)=>void)|undefined;
+    #spaceHost:SpaceHostController|undefined;
+    setSpaceHost(controller:SpaceHostController){if(this.#opened)throw Error('space_host_already_started');this.#spaceHost=controller}
+    async invokeSpaceMobile(raw:unknown,context:{request_id:string;stillWanted:()=>boolean}):Promise<JsonValue>{const args=spaceMobileArguments.parse(raw),space=this.#spaceHost?.service;if(!space)throw Error('space_host_unconfigured');if(!context.stillWanted())throw Error('superseded');if(args.operation==='list')return {devices:this.#spaceHost!.status().clients};if(args.operation==='result')return space.mobileResult(args.action_id) as JsonValue??{status:'pending'};return {...await space.requestMobileAction(args.device,args.action,60000,hash(context.request_id)),status:'pending'}}
+    spaceHostStatus(){return this.#spaceHost?.status()??{mode:'independent'}}
+    #spaceFrameListeners=new Set<(frame:Record<string,unknown>)=>void>();
+    subscribeSpaceFrames(listener:(frame:Record<string,unknown>)=>void):()=>void{this.#spaceFrameListeners.add(listener);return()=>this.#spaceFrameListeners.delete(listener)}
+    spaceChatMessages(){return this.#state.conversations.items.filter(item=>item.kind!=='schedule'&&item.kind!=='build').flatMap(item=>item.messages.map(message=>({...structuredClone(message),status:message.generation_status??message.delivery??'completed'})))}
+    spaceChatResult(requestId:string,id:string):{text:string;status:string;message_id:string}|undefined{const item=this.#state.conversations.items.find(item=>item.id===id),user=item?.messages.find(message=>message.request_id===requestId);if(!user)return;const reply=item?.messages.find(message=>message.reply_to===user.id);if(reply)return {text:reply.text,status:'completed',message_id:reply.id};return {text:'',status:user.generation_status==='interrupted'?'cancelled':user.generation_status==='pending'?'interrupted':'failed',message_id:user.id+':result'}}
+    async cancelSpaceChat(id:string):Promise<void>{await this.#conversationPool?.clear(id);await this.waitConversation(id)}
     #conversationRuns=new Map<string,Promise<void>>();
     #planModeTransitions=new Map<string,{call_id:string;promise:Promise<void>}>();
     waitConversation(id:string):Promise<void>{return this.#conversationRuns.get(id)??Promise.resolve()}
@@ -650,7 +662,7 @@ export class PersonalAgentHost {
     setConversationRuntime(factory:ConversationRuntimeFactory,emit:(frame:Record<string,unknown>)=>void):void {
         this.#recoveryFactory=factory;
         this.#conversationEmit=emit;
-        this.#conversationPool=new ConversationRuntimePool(factory,frame=>{if(this.#state.conversations.items.some(item=>item.id===frame.conversation_id&&item.kind==='schedule'))return;if(!this.localNotifications&&((frame.delivery_class==='proactive'||frame.delivery_class==='task_output')||typeof frame.turn_id==='string'&&frame.turn_id.startsWith('task:')))return;emit(frame);void this.#persistConversationFrame(frame).catch(()=>{ /* retry via next snapshot */ })});
+        this.#conversationPool=new ConversationRuntimePool(factory,frame=>{if(this.#state.conversations.items.some(item=>item.id===frame.conversation_id&&item.kind==='schedule'))return;if(!this.localNotifications&&((frame.delivery_class==='proactive'||frame.delivery_class==='task_output')||typeof frame.turn_id==='string'&&frame.turn_id.startsWith('task:')))return;for(const listener of this.#spaceFrameListeners)listener(frame);emit(frame);void this.#persistConversationFrame(frame).catch(()=>{ /* retry via next snapshot */ })});
         if(this.#opened&&this.tasks.list().length)void this.recoverTasks().then(()=>this.scheduledTaskTick()).catch(()=>{/* durable recovery retries on next wake */});
     }
     async #persistConversationFrame(frame:Record<string,unknown>):Promise<void>{
@@ -912,7 +924,7 @@ export class PersonalAgentHost {
       this.timeline=new TimelineBrief(options.path+'.timeline.json',options.generateTimeline?async(inputs,context,signal,progress)=>{
         const authorize=async()=>{signal.throwIfAborted();const allowed=await this.#timelineInputs();signal.throwIfAborted();if(inputs.some(input=>!allowed.some(current=>current.id===input.id&&current.version===input.version))){this.timeline.invalidate();throw Error('processing_consent_required')}}
         await authorize();const result=await options.generateTimeline!(inputs,context,signal,async partial=>{await authorize();await progress?.(partial)});await authorize();return result
-      }:undefined,()=>this.#notify()); this.notifications=new NotificationService({path:options.path+'.notifications.json',userScope:options.userScope,adapters:[novaNotificationAdapter(message=>this.#presentNotification(message)),...(options.notificationAdapters??[])],now:()=>this.#now().getTime(),valid:message=>this.notificationValidity(message),changed:()=>this.#notify()}); this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',!options.memory()?.sourceProcessing&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?async(entries,signal)=>{
+      }:undefined,()=>this.#notify()); this.notifications=new NotificationService({path:options.path+'.notifications.json',userScope:options.userScope,adapters:[novaNotificationAdapter(message=>this.#presentNotification(message)),spaceRelayNotificationAdapter(()=>this.#spaceHost?.service),...(options.notificationAdapters??[])],now:()=>this.#now().getTime(),valid:message=>this.notificationValidity(message),changed:()=>this.#notify()}); this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',!options.memory()?.sourceProcessing&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?async(entries,signal)=>{
           const authorize=async()=>{signal.throwIfAborted();const memory=options.memory(),current=await this.#generationMemories(entries.map(e=>e.id));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[]),...await memory?.profileSources?.(entries.filter(entry=>entry.source?.kind).map(entry=>entry.id))??[]],digests=new Map(profileInputsFromDigests(this.projectDigests.digests()).map(input=>[input.id,input]));if(entries.some(e=>{const digest=digests.get(e.id);return digest?digest.version!==e.version||digest.refs.some(ref=>!allowed.some(a=>a.id===ref.entry_id&&a.version===ref.version)):!allowed.some(a=>a.id===e.id&&a.version===e.version)}))throw Error('processing_consent_required');};
           await authorize();signal.throwIfAborted();appendAcceptanceCounts('profile_model',{source_entries:entries.filter(entry=>!!entry.source).length,stated_entries:entries.filter(entry=>entry.origin==='stated').length,model_calls:1});
           const result=await withModelPurpose('profile',()=>options.generateProfile!(entries,signal));
@@ -978,6 +990,7 @@ export class PersonalAgentHost {
             for (const item of this.#state.feed) {
                 if (item.lifecycle === 'active' && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime())) this.#pool(item);
             }
+            await this.#spaceHost?.open();
             this.#readingCopies?.start();
             if(!deferBackground)this.startBackgroundWork();
         } catch (error) {
@@ -1024,6 +1037,7 @@ export class PersonalAgentHost {
         return run;
     }
     async #close(): Promise<void> {
+        await this.#spaceHost?.close();
         this.#opened = false;
         this.#sourceReady = false;
         this.#memoryReady = false;
@@ -1558,6 +1572,7 @@ export class PersonalAgentHost {
         return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context));if(parsed.method==='tasks.input'){this.#taskInputRuns.add(run);void run.finally(()=>{this.#taskInputRuns.delete(run);this.#pendingCommands--}).catch(()=>{ /* caller receives rejection */ });return run} this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
         if(context?.client_id!=='desktop:local'&&typeof command.params.id==='string'&&this.#state.conversations.items.some(item=>item.id===command.params.id&&item.kind==='build'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
+        if(command.method.startsWith('space.')&&context?.client_id!=='desktop:local')return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_desktop_required'};
         const localCommand=command.method.startsWith('build.')||command.method.startsWith('plans.')||command.method==='conversations.mode';
         if(localCommand&&(context?.client_id!=='desktop:local'||this.#presentationMode!=='workbench'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
         if(this.activeLocalBuild()&&(['conversations.create','conversations.select','conversations.open_work','conversations.open_feed','conversations.discuss','conversations.clear','conversations.voice','build.start'].includes(command.method))&&!(command.method==='conversations.select'&&command.params.id===this.activeLocalBuild()!.id))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
@@ -1574,7 +1589,16 @@ export class PersonalAgentHost {
         return prior.payload === payload ? prior.result : { type: 'personal.result', request_id: command.request_id, ok: false, error: scoped?'request_conflict':'request_id_conflict' }; let result: unknown,inputStatus:'failed'|'unknown'='failed'; try {
         let data: unknown;
         const m = this.options.memory(), p = command.params;
-        if(command.method==='notifications.configure'){const q=z.object({binding_id:z.string()}).strict().parse(p);await this.configureNotifications(q.binding_id);data=this.notifications.snapshot();}
+        if(command.method==='space.status'){data=this.spaceHostStatus()}
+        else if(command.method.startsWith('space.')){if(!this.#spaceHost)throw Error('space_host_unconfigured');
+            if(command.method==='space.invitation')data=await this.#spaceHost.invitation();
+            else if(command.method==='space.pairings')data=await this.#spaceHost.pairings();
+            else if(command.method==='space.confirm_pairing'){const q=z.object({id:z.string(),fingerprint:z.string()}).strict().parse(p);data=await this.#spaceHost.confirmPairing(q.id,q.fingerprint)}
+            else if(command.method==='space.revoke'){const q=z.object({device:z.string()}).strict().parse(p);data=await this.#spaceHost.revoke(q.device)}
+            else if(command.method==='space.mobile_action'){const q=z.object({device:z.string(),action:z.unknown()}).strict().parse(p);data=await this.#spaceHost.service!.requestMobileAction(q.device,q.action)}
+            else if(command.method==='space.mobile_result'){const q=z.object({action_id:z.string()}).strict().parse(p);data=this.#spaceHost.service!.mobileResult(q.action_id)}
+        }
+        else if(command.method==='notifications.configure'){const q=z.object({binding_id:z.string()}).strict().parse(p);await this.configureNotifications(q.binding_id);data=this.notifications.snapshot();}
         else if(command.method==='notifications.retry'){const q=z.object({id:z.string(),confirm_unknown:z.boolean().optional()}).strict().parse(p);await this.notifications.retry(q.id,q.confirm_unknown);await this.flushNotifications();data=this.notifications.snapshot();}
         else if(command.method==='notifications.status'){data=this.notifications.snapshot();}
         else if(command.method==='feed.action' && p.action==='act') {

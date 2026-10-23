@@ -52,7 +52,7 @@ static NSString *decodeUTF8(NSData *data) {
     @synchronized(self) {
         if (mountedWorkspace) {
             if ([mountedWorkspace isEqualToString:workspace] && [runtimeRoot isEqualToString:root]) return YES;
-            if (error) *error = failure(@"Cannot change an active Linux workspace."); return NO;
+            if (error) *error = failure(@"space_runtime_restart_required"); return NO;
         }
         NSFileManager *fm = NSFileManager.defaultManager;
         if (![fm fileExistsAtPath:[root stringByAppendingPathComponent:@"meta.db"]]) {

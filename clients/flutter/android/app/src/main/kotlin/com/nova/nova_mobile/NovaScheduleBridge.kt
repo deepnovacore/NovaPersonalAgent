@@ -42,6 +42,7 @@ object NovaScheduleBridge {
 
     fun install(app: Context, engine: FlutterEngine) {
         context = app.applicationContext
+        NovaSpaceScope.install(engine.dartExecutor.binaryMessenger)
         val candidate = MethodChannel(engine.dartExecutor.binaryMessenger, "nova/schedule/v1")
         candidate.setMethodCallHandler { call, result ->
             try {

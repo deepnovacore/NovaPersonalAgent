@@ -1,3 +1,4 @@
+import type {SpaceMobilePort} from '../space-host/mobile-tools.js'
 import {scheduledToolResult} from '../personal-agent/scheduled-tool-runtime.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import type {TaskToolHost} from '../core/task-tools.js'
@@ -52,6 +53,7 @@ import type {UserOriginBindingLedger} from './user-origin-binding.js'
 const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirmation', state: 'refused'})
 interface ToolContinuationPorts {
   readonly taskHost?: TaskToolHost
+  readonly spaceMobile?:SpaceMobilePort
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
   readonly requestPlanMode?:(callId:string,originRef:string,stillWanted:()=>boolean)=>Promise<unknown>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
@@ -1228,6 +1230,13 @@ export class ToolContinuations {
       return this.#refusalAcceptance(event, 'unknown_confirmation', UNKNOWN_CONFIRMATION_TOOL_RESULT)
     }
     if(this.#ports.taskHost?.isCurrent?.()===false)return this.#refusalAcceptance(event,'superseded','{"code":"superseded"}')
+    if(event.name==='mobile__action'){
+      const user=standalone?.user??this.#ports.intakeUser(),authority=standalone?.authority??this.#ports.currentUserTurn(event,originRef),host=this.#ports.spaceMobile
+      if(!host)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')
+      if(!authority||!user||event.session_epoch<=this.#ports.discardedInputEpoch()||user.epoch!==event.session_epoch||originRef!==user.origin_ref)return this.#refusalAcceptance(event,'missing_origin_ref','{"code":"missing_origin_ref"}')
+      const args={...event.arguments};delete args.origin_ref
+      try{const result=await host.invoke(args,{request_id:originRef+':'+event.call_id,stillWanted:authority.stillWanted});return scheduledToolResult(event,result)}catch(error){const code=error instanceof Error?error.message:'mobile_action_failed';return scheduledToolResult(event,{code,state:'refused'},code,false)}
+    }
     if(event.name==='schedule'){
       const user=standalone?.user??this.#ports.intakeUser(),authority=standalone?.authority??this.#ports.currentUserTurn(event,originRef),host=this.#ports.scheduleHost
       if(!host)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')

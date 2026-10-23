@@ -301,7 +301,7 @@ void main() {
       final host = FeishuHost();
       await host.sources.bind('new-account', 1);
       expect(
-        await const SecureContextPersistence(
+        await SecureContextPersistence(
           ProfileObservationCheckpoint.storageKey,
         ).read(),
         'null',

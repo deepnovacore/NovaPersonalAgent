@@ -8,7 +8,7 @@ class ProfileCorrections {
   ProfileCorrections({LifePersistence? persistence})
     : persistence =
           persistence ??
-          const SecureContextPersistence('nova.profile.corrections.v1');
+          SecureContextPersistence('nova.profile.corrections.v1');
   final LifePersistence persistence;
   static const categories = {
     'about': '个人概况',

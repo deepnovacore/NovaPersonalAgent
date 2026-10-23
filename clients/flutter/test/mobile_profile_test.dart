@@ -1,9 +1,11 @@
 import 'dart:convert';
+
 import 'package:nova_mobile/context/profile_corrections.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
+
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
@@ -95,14 +97,14 @@ void main() {
         windowEnd: now,
       );
       await sources.grantProcessing('p', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final correctionDisk = MemoryLifePersistence(),
           corrections = ProfileCorrections(persistence: correctionDisk);
       final projectionDisk = MemoryLifePersistence(),
           profile = ProfileRepository(
             projectionDisk,
-            authority,
+            publication,
             sources,
             corrections: corrections,
           );
@@ -115,7 +117,7 @@ void main() {
             'evidence_ids': [sources.messages('c').single['evidence_id']],
           },
         ]),
-        epoch: 1,
+
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: 'p',
@@ -135,7 +137,7 @@ void main() {
       await reopened.open();
       final restored = ProfileRepository(
         projectionDisk,
-        authority,
+        publication,
         reopened,
         corrections: ProfileCorrections(persistence: correctionDisk),
       );
@@ -173,18 +175,18 @@ void main() {
         windowEnd: DateTime.utc(2026, 10, 17),
       );
       await sources.grantProcessing('p', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final repo = ProfileRepository(
         MemoryLifePersistence(),
-        authority,
+        publication,
         sources,
       );
       await repo.open();
       final evidence = sources.messages('chat').single['evidence_id'];
       Future<dynamic> publish(Map<String, dynamic> entry) => repo.publish(
         jsonEncode([entry]),
-        epoch: 1,
+
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: 'p',
@@ -218,7 +220,7 @@ void main() {
     },
   );
   test(
-    'a grounded local projection cannot publish after consent withdrawal or PC binding',
+    'a grounded local projection cannot publish after its local Space scope closes',
     () async {
       final sources = SourceStore(
         MemoryLifePersistence(),
@@ -242,11 +244,11 @@ void main() {
         windowEnd: DateTime.utc(2026, 10, 17),
       );
       await sources.grantProcessing('provider', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final profile = ProfileRepository(
         MemoryLifePersistence(),
-        authority,
+        publication,
         sources,
       );
       await profile.open();
@@ -259,28 +261,15 @@ void main() {
       ]);
       Future<dynamic> publish() => profile.publish(
         entries,
-        epoch: 1,
+
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: 'provider',
       );
       await publish();
       expect(profile.value?['revision'], 1);
-      await authority.freezePublication();
+      publication.dispose();
       await expectLater(publish(), throwsStateError);
-      await authority.bind(
-        hubId: 'hub',
-        deviceId: 'phone',
-        record: {
-          'protocol_version': 1,
-          'space_id': 'space',
-          'authority_epoch': 2,
-          'membership_revision': 2,
-          'primary_device_id': 'pc',
-          'mode': 'pc_primary',
-          'pending': null,
-        },
-      );
       await expectLater(publish(), throwsStateError);
       expect(profile.value, null);
       await sources.grantProcessing('provider', 'profile', false);
@@ -310,11 +299,11 @@ void main() {
         windowEnd: now,
       );
       await sources.grantProcessing('p', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final profile = ProfileRepository(
         MemoryLifePersistence(),
-        authority,
+        publication,
         sources,
       );
       await profile.open();
@@ -326,7 +315,7 @@ void main() {
             'evidence_ids': [sources.messages('c').single['evidence_id']],
           },
         ]),
-        epoch: 1,
+
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: 'p',

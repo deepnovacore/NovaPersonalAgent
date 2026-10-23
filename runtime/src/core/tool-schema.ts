@@ -1,3 +1,4 @@
+import {SPACE_MOBILE_TOOL_SPEC} from '../space-host/mobile-tools.js'
 import {SOURCE_PROCESSING_TOOL_SPEC} from './source-processing-tools.js'
 import {explicitMemoryArguments,explicitMemoryLookup} from '../memory/explicit-memory.js'
 /**
@@ -60,7 +61,7 @@ export class ToolSchemaError extends Error {
 
 export function compileToolSchema(
   manifests: readonly ExecutorManifest[],
-  options: {readonly includeExplicitMemory?:boolean;readonly includeSchedules?:boolean; readonly includeSourceProcessing?: boolean;readonly includeEnterPlanMode?:boolean
+  options: {readonly includeSpaceMobile?:boolean;readonly includeExplicitMemory?:boolean;readonly includeSchedules?:boolean; readonly includeSourceProcessing?: boolean;readonly includeEnterPlanMode?:boolean
   readonly includeAppContext?:boolean; readonly includeTasks?: boolean; readonly includeMemoryRecall?: boolean; readonly agentDescriptors?: readonly AgentDescriptor[]} = {},
 ): CompiledTools {
   const schemas: Readonly<Record<string, JsonValue>>[] = []
@@ -128,6 +129,7 @@ export function compileToolSchema(
     bindings.set('memory__evidence', toolBindingSchema.parse({kind: 'query', logical_name: 'memory.evidence'}))
   }
 
+  if(options.includeSpaceMobile){schemas.push(compileHostTool(SPACE_MOBILE_TOOL_SPEC));bindings.set('mobile__action',toolBindingSchema.parse({kind:'host',logical_name:'mobile.action'}))}
   if(options.includeSourceProcessing){schemas.push(compileHostTool(SOURCE_PROCESSING_TOOL_SPEC));bindings.set('source__process',toolBindingSchema.parse({kind:'query',logical_name:'source.process'}))}
   if(options.includeAppContext){schemas.push(compileHostTool(APP_CONTEXT_TOOL_SPEC));bindings.set('app__context',toolBindingSchema.parse({kind:'query',logical_name:'app.context'}))}
   const seen = new Set<string>()

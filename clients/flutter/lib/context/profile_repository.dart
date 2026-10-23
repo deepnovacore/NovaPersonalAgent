@@ -1,5 +1,6 @@
 import 'dart:convert';
-import '../device/space_authority.dart';
+
+import '../context/local_publication.dart';
 import '../personal/local_life.dart';
 import '../personal/life_reducer.dart';
 import 'source_store.dart';
@@ -237,24 +238,23 @@ void validateProfileEntries(
 class ProfileRepository {
   ProfileRepository(
     this.persistence,
-    this.authority,
+    this.publication,
     this.sources, {
     this.corrections,
   });
   final ProfileCorrections? corrections;
-  String get correctionScope =>
-      '${authority.record['space_id']}|${sources.identity}';
+  String get correctionScope => '${publication.spaceId}|${sources.identity}';
   final LifePersistence persistence;
-  final SpaceAuthorityRepository authority;
+  final LocalPublicationContext publication;
   final SourceStore sources;
   Map<String, dynamic>? _value;
   Future<void> _tail = Future.value();
   Map<String, dynamic>? get value {
     final current = _value;
-    if (current == null ||
-        current['space_id'] != authority.record['space_id'] ||
-        current['authority_epoch'] != authority.epoch ||
-        current['publication_generation'] != authority.publicationGeneration) {
+    if (!publication.canPublish ||
+        current == null ||
+        current['space_id'] != publication.spaceId ||
+        current['publisher_device_id'] != publication.deviceId) {
       return null;
     }
     final historicalSnapshot =
@@ -403,7 +403,6 @@ class ProfileRepository {
 
   Future<Map<String, dynamic>> publish(
     String encoded, {
-    required int epoch,
     required int sourceRevision,
     required int consentRevision,
     required String provider,
@@ -415,8 +414,7 @@ class ProfileRepository {
   }) {
     final result = _tail.then((_) async {
       final previous = _value;
-      final generation = authority.publicationGeneration;
-      authority.validatePublish(epoch);
+      publication.requireCurrent();
       sources.validateProcessing(provider, 'profile', consentRevision);
       if (sources.revision != sourceRevision) throw StateError('stale_inputs');
       if (partial) {
@@ -439,7 +437,7 @@ class ProfileRepository {
       }
       final retained = value;
       final noNewContent = (entries as List).isEmpty && retained != null;
-      // value gates account/authority ownership. Preserve the underlying
+      // value gates account/publication ownership. Preserve the underlying
       // publication, not its temporary overlay of explicit user corrections.
       final oldEntries = retained == null
           ? <dynamic>[]
@@ -507,10 +505,8 @@ class ProfileRepository {
       };
       final next = {
         'version': 1,
-        'space_id': authority.record['space_id'],
-        'authority_epoch': epoch,
-        'publication_generation': generation,
-        'publisher_device_id': authority.deviceId,
+        'space_id': publication.spaceId,
+        'publisher_device_id': publication.deviceId,
         'revision': (_value?['revision'] as int? ?? 0) + 1,
         'generated_at': noNewContent
             ? _value!['generated_at']
@@ -535,10 +531,9 @@ class ProfileRepository {
       };
       await persistence.write(jsonEncode(next));
       try {
-        authority.validatePublish(epoch);
+        publication.requireCurrent();
         sources.validateProcessing(provider, 'profile', consentRevision);
-        if (sources.revision != sourceRevision ||
-            generation != authority.publicationGeneration) {
+        if (sources.revision != sourceRevision || !publication.canPublish) {
           throw StateError('stale_inputs');
         }
       } catch (_) {

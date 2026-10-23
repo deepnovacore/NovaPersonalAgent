@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
+import '../space/space_storage.dart';
 import 'workspace_posix.dart';
 import 'model_client.dart';
 
@@ -22,7 +22,7 @@ class AgentWorkspace {
       platform == TargetPlatform.iOS || platform == TargetPlatform.android;
 
   static Future<AgentWorkspace> open() async {
-    final support = await getApplicationSupportDirectory();
+    final support = await SpaceStorage.directory();
     final workspace = AgentWorkspace(
       Directory('${support.path}/nova-workspace'),
       inspect: (html, script) async => Map<String, dynamic>.from(

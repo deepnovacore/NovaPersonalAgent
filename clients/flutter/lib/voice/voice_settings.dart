@@ -1,3 +1,4 @@
+import '../space/space_storage.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -320,10 +321,11 @@ class VoiceConfiguration {
   }
 }
 
-/// Independent of text settings and never projected to a computer or Hub.
+/// Independent of text settings and never projected to a other Spaces.
 class VoiceSettings {
-  const VoiceSettings({this.storage = const FlutterSecureStorage()});
+  VoiceSettings({this.storage = const FlutterSecureStorage()});
   final FlutterSecureStorage storage;
+  final String _scopedKey = SpaceStorage.secureKey(storageKey);
   static const storageKey = 'nova.voice.v1';
 
   Future<VoiceConfiguration?> read() async {
@@ -349,7 +351,7 @@ class VoiceSettings {
 
   Future<VoiceConfiguration?> readDraft() async {
     try {
-      final raw = await storage.read(key: storageKey);
+      final raw = await storage.read(key: _scopedKey);
       if (raw == null) return null;
       final config = VoiceConfiguration.fromJson(
         jsonDecode(raw) as Map<String, dynamic>,
@@ -431,7 +433,7 @@ class VoiceSettings {
 
   Future<VoiceConfiguration> _write(VoiceConfiguration value) async {
     try {
-      await storage.write(key: storageKey, value: jsonEncode(value.toJson()));
+      await storage.write(key: _scopedKey, value: jsonEncode(value.toJson()));
     } catch (_) {
       throw const AgentFailure('voice_settings_save_failed');
     }

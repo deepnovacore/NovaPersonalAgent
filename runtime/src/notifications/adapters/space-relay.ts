@@ -1,0 +1,4 @@
+import type {NotificationChannelAdapter} from '../contracts.js';
+import type {SpaceHost} from '../../space-host/service.js';
+/** Existing NotificationService owns admission, dedupe, routing and unknown outcomes. */
+export function spaceRelayNotificationAdapter(space:()=>SpaceHost|undefined):NotificationChannelAdapter{return {providerId:'space-relay',inspect:()=>Promise.resolve(true),prepare:input=>Promise.resolve([{title:input.title,body:input.body}]),send:async(_part,context)=>{context.signal.throwIfAborted();const current=space();if(!current)return {kind:'retryable',definitelyNotAccepted:true};await current.notify({title:context.notification.title,body:context.notification.body,kind:context.notification.kind,created_at:context.notification.created_at},context.idempotency_key);return {kind:'accepted',receipt:{message_id:context.idempotency_key}}}}}

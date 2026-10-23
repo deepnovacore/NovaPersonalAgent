@@ -5,7 +5,7 @@ import type {LedgerDatabase} from '../memory-ledger/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {sha256} from './source-state.js'
 import {effectiveEvidence,processingStamp,type EvidenceRecord} from './store.js'
-import {profileDraftSchema,PROFILE_GENERATION_VERSION} from '../personal-agent/profile-warmup.js'
+import {type ProfileDraft,profileDraftSchema,PROFILE_GENERATION_VERSION} from '../personal-agent/profile-warmup.js'
 
 const id=z.string().min(1).max(512)
 const cursorSchema=z.object({seq:z.number().int().nonnegative(),offset:z.number().int().nonnegative()}).strict()
@@ -21,7 +21,7 @@ const batchSchema=z.object({profile_only:z.boolean().optional(),priority:z.boole
 export type ProcessingBatch=z.infer<typeof batchSchema>
 const stateSchema=z.object({cursor:cursorSchema,completed_batches:z.number().int().nonnegative(),processed_chars:z.number().int().nonnegative(),last_success:z.string().nullable()}).strict()
 export const SOURCE_PROCESSING_VERSION='source-processing-v5'
-const base=z.object({prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,recipe:id.default(SOURCE_PROCESSING_VERSION),participants:z.boolean().default(false)})
+const base=z.object({prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,recipe:id.default(SOURCE_PROCESSING_VERSION),participants:z.boolean().default(false),correction_provider:z.string().max(256).default('')})
 const owner={batch_id:id,task_id:id,run_id:id}
 export const processingRequestSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('claim')}).strict(),
@@ -201,9 +201,12 @@ function saveState(db:LedgerDatabase,prefix:string,provider:string,state:z.infer
 export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unknown{
  const fields=z.record(z.string(),z.unknown()).parse(input),{prefix,provider:consumer,recipe,participants}=base.parse(fields)
  const provider=sha256(canonicalJson({consumer,recipe,participants,algorithm:SOURCE_PROCESSING_VERSION}))
- const {prefix:ignoredPrefix,provider:ignoredProvider,recipe:ignoredRecipe,participants:ignoredParticipants,...request}=fields
- void ignoredPrefix;void ignoredProvider;void ignoredRecipe;void ignoredParticipants
+ const {prefix:ignoredPrefix,provider:ignoredProvider,recipe:ignoredRecipe,participants:ignoredParticipants,correction_provider:ignoredCorrectionProvider,...request}=fields
+ void ignoredPrefix;void ignoredProvider;void ignoredRecipe;void ignoredParticipants;void ignoredCorrectionProvider
  const q=processingRequestSchema.parse(request)
+ const correctionProvider=typeof fields.correction_provider==='string'?fields.correction_provider:''
+ const explicitCorrections=correctionProvider?Object.fromEntries(db.prepare('SELECT key,value FROM space_source_corrections WHERE prefix=? AND provider=?').all(prefix,correctionProvider).map(row=>[String(row.key),JSON.parse(String(row.value)) as {value:string;event_id:string;sender:string;provider:string}])):{}
+ const suppressCorrected=(draft:ProfileDraft):ProfileDraft=>({...draft,about:explicitCorrections.about?null:draft.about,work:explicitCorrections.work?[]:draft.work,interests:explicitCorrections.interests?[]:draft.interests})
  const decision=(kind:string,key:string,value:string)=>db.prepare('INSERT INTO processing_decisions VALUES(?,?,?,?) ON CONFLICT(prefix,kind,id) DO UPDATE SET value=excluded.value').run(prefix,kind,key,value)
  const priorRecipe=db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='active_recipe'").get(prefix)
  if(priorRecipe?priorRecipe.value!==provider:!!db.prepare('SELECT 1 FROM processing_profiles WHERE prefix=? AND provider<>? LIMIT 1').get(prefix,provider))decision('policy','cleanup','pending')
@@ -223,7 +226,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
 
  const saved=db.prepare('SELECT payload_json FROM processing_state WHERE prefix=? AND provider=?').get(prefix,provider)
  let state=saved?stateSchema.parse(JSON.parse(String(saved.payload_json))):{cursor:{seq:0,offset:0},completed_batches:0,processed_chars:0,last_success:null}
- const correctionVersion=()=>sha256(canonicalJson(db.prepare("SELECT id,value FROM processing_decisions WHERE prefix=? AND kind='project' ORDER BY id").all(prefix)))
+ const correctionVersion=()=>sha256(canonicalJson({projects:db.prepare("SELECT id,value FROM processing_decisions WHERE prefix=? AND kind='project' ORDER BY id").all(prefix),explicitCorrections}))
  const active=()=>{const row=db.prepare("SELECT payload_json FROM processing_batches WHERE prefix=? AND provider=? AND status IN ('claimed','bound')").get(prefix,provider);return row?batchSchema.parse(JSON.parse(String(row.payload_json))):null}
  if(q.action==='retire'){
   const row=db.prepare('SELECT payload_json FROM processing_batches WHERE id=? AND prefix=?').get(q.batch_id,prefix)
@@ -304,7 +307,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
  }
  if(q.action==='profile'||q.action==='products'){
   const saved=db.prepare('SELECT revision,payload_json FROM processing_profiles WHERE prefix=? AND provider=?').get(prefix,provider)
-  if(!saved&&q.action==='profile')return {revision:0,draft:null}
+  if(!saved&&q.action==='profile')return {revision:0,draft:null,...(Object.keys(explicitCorrections).length?{explicit_corrections:explicitCorrections}:{})}
   const content=profileCacheSchema.parse(saved?JSON.parse(String(saved.payload_json)):{draft:{about:null,work:[],interests:[]},refs:[]})
   const valid=(fact:{refs:{entry_id:string;version:unknown}[]})=>fact.refs.every(ref=>{
    const refs=content.refs.filter(item=>item.evidence_id===ref.entry_id)
@@ -316,8 +319,8 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
    if(db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='invalid_interests'").get(prefix)?.value!==invalidKey){decision('policy','cleanup','pending');decision('policy','invalid_interests',invalidKey)}
   }
   if(q.action==='profile'&&q.batch_id)track(q.batch_id,content.refs.filter(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)!==null))
-  const draft={...content.draft,about:content.about_parts?joinAbout(content.about_parts.filter(valid)):content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid)}
-  const result={revision:Number(saved?.revision??0),draft:draft.about||draft.work.length||draft.interests.length?draft:null}
+  const draft=suppressCorrected({...content.draft,about:content.about_parts?joinAbout(content.about_parts.filter(valid)):content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid)})
+  const result={revision:Number(saved?.revision??0),draft:draft.about||draft.work.length||draft.interests.length?draft:null,...(Object.keys(explicitCorrections).length?{explicit_corrections:explicitCorrections}:{})}
   if(q.action==='profile')return result
   const decisions=db.prepare('SELECT kind,id,value FROM processing_decisions WHERE prefix=?').all(prefix)
   const corrections=Object.fromEntries(decisions.filter(row=>row.kind==='project').map(row=>[String(row.id),String(row.value)]))
@@ -426,7 +429,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const retain=(fact:{refs:{entry_id:string;version:unknown}[]})=>!(old?.fact_scopes?.[factKey(fact)]??(old?.refs??[]).filter((r:ProcessingRef)=>fact.refs.some(ref=>ref.entry_id===r.evidence_id))).some((prior:ProcessingRef)=>(q.product_refs??q.refs).some(next=>next.evidence_id===prior.evidence_id&&next.start<prior.end&&prior.start<next.end))&&authorizedFact(fact)
   const merge=<T>(fresh:T[],prior:T[],key:(item:T)=>string,limit:number)=>[...new Map([...fresh,...prior].map(item=>[key(item),item] as const).reverse()).values()].reverse().slice(0,limit)
   const aboutParts=q.defer_profile?(old?.about_parts??(old?.draft.about?[old.draft.about]:[])).filter(authorizedFact):q.profile_context_key?(q.draft.about?[q.draft.about]:[]):[...(q.draft.about?[q.draft.about]:[]),...(old?.about_parts??(old?.draft.about?[old.draft.about]:[])).filter(retain)].slice(0,6)
-  const draft=profileDraftSchema.parse(q.defer_profile?{about:joinAbout(aboutParts),work:(old?.draft.work??[]).filter(authorizedFact),interests:(old?.draft.interests??[]).filter(authorizedFact)}:q.profile_context_key?q.draft:{...q.draft,about:joinAbout(aboutParts),work:merge(q.draft.work,(old?.draft.work??[]).filter(retain),(item)=>item.title,6),interests:merge(q.draft.interests,(old?.draft.interests??[]).filter(retain),(item)=>item.text,8)})
+  const draft=suppressCorrected(profileDraftSchema.parse(q.defer_profile?{about:joinAbout(aboutParts),work:(old?.draft.work??[]).filter(authorizedFact),interests:(old?.draft.interests??[]).filter(authorizedFact)}:q.profile_context_key?q.draft:{...q.draft,about:joinAbout(aboutParts),work:merge(q.draft.work,(old?.draft.work??[]).filter(retain),(item)=>item.title,6),interests:merge(q.draft.interests,(old?.draft.interests??[]).filter(retain),(item)=>item.text,8)}))
   const products=q.products?understandingProductsSchema.parse({projects:merge(q.products.projects,(old?.products?.projects??[]).filter(retain),(item)=>item.id,24),suggestions:merge(q.products.suggestions,(old?.products?.suggestions??[]).filter(retain),(item)=>item.id,24)}):batch.profile_only&&old?.products?{projects:old.products.projects.filter(authorizedFact),suggestions:old.products.suggestions.filter(authorizedFact)}:undefined
   const facts=[...(draft.about?[draft.about]:[]),...draft.work,...draft.interests,...(products?.projects??[]),...(products?.suggestions??[])],ids=new Set(facts.flatMap(f=>f.refs.map(r=>r.entry_id)))
   const refs=[...new Map([...q.refs,...(old?.refs??[])].filter((r:ProcessingRef)=>ids.has(r.evidence_id)&&readRefs(db,prefix,consumer,[r],recipe,participants)!==null).map((r:ProcessingRef)=>[canonicalJson(r),r])).values()]

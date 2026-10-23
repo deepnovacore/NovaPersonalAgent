@@ -32,6 +32,13 @@
 		B11234567890ABCDEF000003 /* ISHKernel.m in Sources */ = {isa = PBXBuildFile; fileRef = B01234567890ABCDEF000003 /* ISHKernel.m */; };
 		B11234567890ABCDEF000004 /* ISHShellExecutor.m in Sources */ = {isa = PBXBuildFile; fileRef = B01234567890ABCDEF000004 /* ISHShellExecutor.m */; };
 		B11234567890ABCDEF000005 /* CurrentRoot.m in Sources */ = {isa = PBXBuildFile; fileRef = B01234567890ABCDEF000005 /* CurrentRoot.m */; };
+		C10000000000000000000001 /* NovaSpacePush.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* NovaSpacePush.swift */; };
+		C10000000000000000000002 /* NovaPushCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* NovaPushCrypto.swift */; };
+		C10000000000000000000003 /* NovaSpaceTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* NovaSpaceTools.swift */; };
+		C10000000000000000000004 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000004 /* NotificationService.swift */; };
+		C10000000000000000000005 /* NovaPushCrypto.swift in Extension */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002; };
+		C10000000000000000000006 /* NovaNotificationService.appex in Embed */ = {isa = PBXBuildFile; fileRef = C00000000000000000000006; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D10000000000000000000001 = {isa = PBXBuildFile; fileRef = D00000000000000000000001; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,6 +49,7 @@
 			remoteGlobalIDString = 97C146ED1CF9000F007C117D;
 			remoteInfo = Runner;
 		};
+		C20000000000000000000001 = {isa = PBXContainerItemProxy; containerPortal = 97C146E61CF9000F007C117D; proxyType = 1; remoteGlobalIDString = C30000000000000000000001; remoteInfo = NovaNotificationService; };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -55,6 +63,7 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C40000000000000000000001 /* Embed App Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (C10000000000000000000006, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -91,6 +100,12 @@
 		B01234567890ABCDEF000003 /* ISHKernel.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "../Vendor/OpenMinis/ISHKernel.m"; sourceTree = "<group>"; };
 		B01234567890ABCDEF000004 /* ISHShellExecutor.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "../Vendor/OpenMinis/ISHShellExecutor.m"; sourceTree = "<group>"; };
 		B01234567890ABCDEF000005 /* CurrentRoot.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "../Vendor/OpenMinis/CurrentRoot.m"; sourceTree = "<group>"; };
+		C00000000000000000000001 /* NovaSpacePush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaSpacePush.swift"; sourceTree = "<group>"; };
+		C00000000000000000000002 /* NovaPushCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaPushCrypto.swift"; sourceTree = "<group>"; };
+		C00000000000000000000003 /* NovaSpaceTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaSpaceTools.swift"; sourceTree = "<group>"; };
+		C00000000000000000000004 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaNotificationService/NotificationService.swift"; sourceTree = "<group>"; };
+		C00000000000000000000006 /* NovaNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = NovaNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D00000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaSpaceScope.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -128,6 +143,7 @@
 		97C146E51CF9000F007C117D = {
 			isa = PBXGroup;
 			children = (
+				C00000000000000000000004 /* NotificationService.swift */,
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,
 				97C146EF1CF9000F007C117D /* Products */,
@@ -138,6 +154,7 @@
 		97C146EF1CF9000F007C117D /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				C00000000000000000000006 /* NovaNotificationService.appex */,
 				97C146EE1CF9000F007C117D /* Runner.app */,
 				331C8081294A63A400263BE5 /* RunnerTests.xctest */,
 			);
@@ -147,6 +164,10 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				D00000000000000000000001,
+				C00000000000000000000003 /* NovaSpaceTools.swift */,
+				C00000000000000000000002 /* NovaPushCrypto.swift */,
+				C00000000000000000000001 /* NovaSpacePush.swift */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -200,6 +221,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 97C147051CF9000F007C117D /* Build configuration list for PBXNativeTarget "Runner" */;
 			buildPhases = (
+				C40000000000000000000001 /* Embed App Extensions */,
 				9740EEB61CF901F6004384FC /* Run Script */,
 				97C146EA1CF9000F007C117D /* Sources */,
 				97C146EB1CF9000F007C117D /* Frameworks */,
@@ -211,6 +233,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				C20000000000000000000002,
 			);
 			name = Runner;
 			packageProductDependencies = (
@@ -220,6 +243,7 @@
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C30000000000000000000001 /* NovaNotificationService */ = {isa = PBXNativeTarget; buildConfigurationList = C50000000000000000000001; buildPhases = (C40000000000000000000002, ); buildRules = (); dependencies = (); name = NovaNotificationService; productName = NovaNotificationService; productReference = C00000000000000000000006; productType = "com.apple.product-type.app-extension"; };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -256,6 +280,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				C30000000000000000000001 /* NovaNotificationService */,
 				97C146ED1CF9000F007C117D /* Runner */,
 				331C8080294A63A400263BE5 /* RunnerTests */,
 			);
@@ -342,6 +367,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D10000000000000000000001,
+				C10000000000000000000003 /* NovaSpaceTools.swift in Sources */,
+				C10000000000000000000002 /* NovaPushCrypto.swift in Sources */,
+				C10000000000000000000001 /* NovaSpacePush.swift in Sources */,
 				B11234567890ABCDEF000000 /* NovaShellRuntime.m in Sources */,
 				B11234567890ABCDEF000001 /* NovaWorkspaceRequest.swift in Sources */,
 				B11234567890ABCDEF000002 /* NovaWorkspaceBridge.swift in Sources */,
@@ -364,6 +393,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C40000000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (C10000000000000000000004, C10000000000000000000005, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -372,6 +402,7 @@
 			target = 97C146ED1CF9000F007C117D /* Runner */;
 			targetProxy = 331C8085294A63A400263BE5 /* PBXContainerItemProxy */;
 		};
+		C20000000000000000000002 = {isa = PBXTargetDependency; target = C30000000000000000000001; targetProxy = C20000000000000000000001; };
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
@@ -397,6 +428,9 @@
 		249021D3217E4FDB00AE95B9 /* Profile */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				NOVA_PUSH_SHARED_IDENTIFIER = com.nova.novaMobile.push.shared;
+				NOVA_PUSH_EXTENSION_IDENTIFIER = com.nova.novaMobile.NotificationService;
+				NOVA_APNS_ENVIRONMENT = production;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -455,6 +489,7 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -517,6 +552,9 @@
 		97C147031CF9000F007C117D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				NOVA_PUSH_SHARED_IDENTIFIER = com.nova.novaMobile.push.shared;
+				NOVA_PUSH_EXTENSION_IDENTIFIER = com.nova.novaMobile.NotificationService;
+				NOVA_APNS_ENVIRONMENT = development;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -574,6 +612,9 @@
 		97C147041CF9000F007C117D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				NOVA_PUSH_SHARED_IDENTIFIER = com.nova.novaMobile.push.shared;
+				NOVA_PUSH_EXTENSION_IDENTIFIER = com.nova.novaMobile.NotificationService;
+				NOVA_APNS_ENVIRONMENT = production;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -634,6 +675,7 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -656,6 +698,7 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -668,6 +711,9 @@
 			};
 			name = Release;
 		};
+		C60000000000000000000001 = {isa = XCBuildConfiguration; baseConfigurationReference = 9740EEB21CF90195004384FC; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = NovaNotificationService/NovaNotificationService.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = NovaNotificationService/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = "$(NOVA_PUSH_EXTENSION_IDENTIFIER)"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		C60000000000000000000002 = {isa = XCBuildConfiguration; baseConfigurationReference = 7AFA3C8E1D35360C0083082E; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = NovaNotificationService/NovaNotificationService.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = NovaNotificationService/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = "$(NOVA_PUSH_EXTENSION_IDENTIFIER)"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		C60000000000000000000003 = {isa = XCBuildConfiguration; baseConfigurationReference = 7AFA3C8E1D35360C0083082E; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = NovaNotificationService/NovaNotificationService.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = NovaNotificationService/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = "$(NOVA_PUSH_EXTENSION_IDENTIFIER)"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Profile; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -701,6 +747,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		C50000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (C60000000000000000000001, C60000000000000000000002, C60000000000000000000003, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */

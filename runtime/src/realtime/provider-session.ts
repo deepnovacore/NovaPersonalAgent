@@ -492,7 +492,7 @@ export class RealtimeProviderSession {
       const withdrawUnverified=async()=>{
         if(!required||!this.#isCurrentConnection(owner))return
         const previous=this.#responseAdaptationAttempt
-        if(previous===null||previous.epoch!==owner.identity.epoch||(previous.confirmed&&previous.signature===WITHDRAWN_SIGNATURE))return
+        if(previous?.epoch!==owner.identity.epoch||(previous.confirmed&&previous.signature===WITHDRAWN_SIGNATURE))return
         try{
           await this.#provider.replaceResponseAdaptation!({revision:previous.revision,content:null},combinedSignal(owner.controller.signal,signal))
           this.#assertCurrentConnection(owner)

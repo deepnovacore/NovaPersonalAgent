@@ -22,10 +22,15 @@
     "./usage": {
       "types": "./dist/src/usage/index.d.ts",
       "default": "./dist/src/usage/index.js"
+    },
+    "./space-host": {
+      "types": "./dist/src/space-host/config.d.ts",
+      "default": "./dist/src/space-host/config.js"
     }
   },
   "bin": {
-    "nova-personal-agent-node": "./dist/src/cli.js"
+    "nova-personal-agent-node": "./dist/src/cli.js",
+    "nova-space-host": "./dist/src/space-host/cli.js"
   },
   "files": [
     "scripts/autoglm-bridge.py",
@@ -40,7 +45,6 @@
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json",
     "server": "node dist/src/server-entry.js",
-    "hub": "node dist/src/hub/cli.js",
     "server:pair": "node scripts/pair-device.mjs",
     "test:pair": "node --test scripts/pair-device.test.mjs",
     "server:token-init": "node dist/src/server-entry.js token-init",
@@ -58,7 +62,8 @@
     "smoke:knowledge": "npm run build && node scripts/live-smoke.mjs --target=knowledge",
     "test:live": "npm run build && node scripts/live-smoke.mjs",
     "test:live:contract": "npm run build && node --test scripts/live/*contract.test.mjs",
-    "test:win:platform": "npm run build && node scripts/test-windows.mjs --platform-only"
+    "test:win:platform": "npm run build && node scripts/test-windows.mjs --platform-only",
+    "prebuild": "npm run build --workspace @nova-personal-agent/relay"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.8.0",
@@ -83,7 +88,9 @@
     "undici": "7.29.0",
     "voicemem": "0.0.1",
     "ws": "8.21.3",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@nova-personal-agent/relay": "1.0.0",
+    "jose": "5.10.0"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

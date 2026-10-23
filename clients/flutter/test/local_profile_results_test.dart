@@ -7,7 +7,7 @@ import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/profile_generation_coordinator.dart';
 import 'package:nova_mobile/ui/profile_generation_status.dart';
 import 'package:nova_mobile/ui/theme.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/personal/models.dart';
 import 'package:nova_mobile/personal/personal_store.dart';
 import 'package:nova_mobile/ui/local_profile_results.dart';
@@ -28,7 +28,7 @@ class ReadyHost extends FeishuHost {
 }
 
 class _RetainedProfile extends ProfileRepository {
-  _RetainedProfile(super.persistence, super.authority, super.sources);
+  _RetainedProfile(super.persistence, super.publication, super.sources);
   @override
   Future<void> open() async {}
   @override
@@ -90,10 +90,10 @@ void main() {
         );
         await sources.grantProcessing('p', 'profile', true);
         final host = ReadyHost(sources);
-        final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-        await authority.open();
+        final publication = LocalPublicationContext(MemoryLifePersistence());
+        await publication.open();
         final disk = MemoryLifePersistence();
-        final profile = ProfileRepository(disk, authority, sources);
+        final profile = ProfileRepository(disk, publication, sources);
         final ref = sources.messages('c').single['evidence_id'];
         await profile.publish(
           jsonEncode([
@@ -111,7 +111,7 @@ void main() {
               'evidence_ids': [ref],
             },
           ]),
-          epoch: authority.epoch,
+
           sourceRevision: sources.revision,
           consentRevision: sources.processingRevision,
           provider: 'p',
@@ -129,7 +129,7 @@ void main() {
         await expectLater(
           profile.publish(
             jsonEncode(profile.value!['entries']),
-            epoch: authority.epoch,
+
             sourceRevision: sources.revision,
             consentRevision: sources.processingRevision,
             provider: 'p',
@@ -157,7 +157,7 @@ void main() {
               body: SingleChildScrollView(
                 child: LocalProfileResults(
                   host: host,
-                  authority: authority,
+                  publication: publication,
                   repository: profile,
                   kind: 'all',
                 ),
@@ -176,7 +176,7 @@ void main() {
         expect(find.textContaining('已整理 2 / 10 条消息'), findsOneWidget);
         expect(find.textContaining('还有 8 条待整理'), findsOneWidget);
         expect(find.textContaining('近况可能不完整'), findsOneWidget);
-        final reopened = ProfileRepository(disk, authority, sources);
+        final reopened = ProfileRepository(disk, publication, sources);
         await reopened.open();
         expect(reopened.value?['partial'], true);
         expect(reopened.value?['coverage']['final_original_records'], 1);
@@ -199,7 +199,7 @@ void main() {
         expect(find.text('Grounded profile'), findsOneWidget);
         await tester.pumpWidget(const SizedBox());
         host.dispose();
-        authority.dispose();
+        publication.dispose();
       },
     );
   }
@@ -221,11 +221,11 @@ void main() {
             addTearDown(tester.view.resetDevicePixelRatio);
             final sources = SourceStore(MemoryLifePersistence());
             final host = ReadyHost(sources);
-            final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-            await authority.open();
+            final publication = LocalPublicationContext(MemoryLifePersistence());
+            await publication.open();
             final repository = _RetainedProfile(
               MemoryLifePersistence(),
-              authority,
+              publication,
               sources,
             );
             final generation = ProfileGenerationCoordinator(
@@ -257,7 +257,7 @@ void main() {
                     padding: const EdgeInsets.all(20),
                     child: LocalProfileResults(
                       host: host,
-                      authority: authority,
+                      publication: publication,
                       repository: repository,
                       generation: generation,
                       kind: kind,
@@ -361,7 +361,7 @@ void main() {
             await tester.pumpWidget(const SizedBox());
             generation.dispose();
             host.dispose();
-            authority.dispose();
+            publication.dispose();
           },
         );
       }

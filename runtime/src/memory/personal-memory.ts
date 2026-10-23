@@ -108,7 +108,6 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly sourceProcessingTodoContext?:()=>Promise<{todos:ProductGenerationContext['todos'];authorize:()=>Promise<void>}>
   readonly sourceProcessingProducts?: (entries:readonly ProfileInput[],context:ProductGenerationContext,signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>)=>Promise<UnderstandingProducts>
   readonly sourceProcessingConsumer?: ()=>string
-  readonly syncSharedContext?: ()=>Promise<void>
   readonly sourceProcessing?: (request:ProcessingRequest)=>Promise<unknown>
   readonly profileSources?: (ids?:readonly string[]) => Promise<ProfileInput[]>
   readonly resolveLifeCandidate?: (row:EvaluatedCandidate,signal:AbortSignal,guard:()=>void)=>Promise<ResolvedLifeCandidate>
@@ -123,6 +122,7 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant
   readonly feishuProcessingConsent?: (mode:'suspend'|'reconcile'|'apply'|'activate',sources:string[],grant:ProcessingGrant,pending?:boolean)=>Promise<ProcessingGrant>
   readonly setProcessingConsent?: (sourceId:string,grant:ProcessingGrant)=>Promise<void>
+  readonly receiveSpaceSourceInput?: (scope:{space:string;sender:string;opId:string},input:unknown)=>Promise<unknown>
   readonly recordEvidence?: (input:{sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}) => Promise<{evidence_id:string}>
   readonly recordEvidenceBatch?: (inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}[]) => Promise<{evidence_id:string}[]>
   readonly evidenceFor?: (id:string,revision:MemoryVersion) => Promise<readonly {id:string;source_kind:string;locator:string;text:string;observed_at:string}[]>
