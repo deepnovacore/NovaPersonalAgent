@@ -523,6 +523,15 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
   })
 }
 
+/** Module status in the shape of `modules.search`; local memory is off without an embedding key. */
+export function memoryStatus(settings: Settings): {enabled: boolean; reason: string | null; fallback: null} {
+  const connection = resolveMemoryConnection(settings)
+  if (connection === 'disabled') return {enabled: false, reason: 'disabled', fallback: null}
+  if (connection === 'local' && stripLikePython(resolveModelApiKey(settings) ?? '') === '') return {enabled: false,
+    reason: `missing_environment:${settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'MODEL_API_KEY'}`, fallback: null}
+  return {enabled: true, reason: null, fallback: null}
+}
+
 function resolveMemoryConnection(settings: Settings): z.infer<typeof memoryConnectionSchema> {
   const connection = settings.memory_connection
   if (settings.memory_provider !== null && connection !== 'local') {

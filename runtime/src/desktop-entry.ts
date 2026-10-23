@@ -82,7 +82,7 @@ const exitCode = await runDesktopEntryWithStopSources({
     })
     usageSnapshot=()=>composition.usage.snapshot()
     phoneHandle = composition.phoneControl
-    capabilityView = () => ({...composition.realtime.capabilityStatus, state: 'running'})
+    capabilityView = () => ({...composition.realtime.capabilityStatus, modules: {...composition.realtime.capabilityStatus.modules, memory: composition.memoryStatus}, state: 'running'})
     clearConversation = () => composition.realtime.clearConversation()
     feishuHandle = (method, params) => handleFeishuSettings(input => composition.realtime.personalAgent.command(input), method, params)
     personalSettingsHandle = (method, params) => handlePersonalSettings(input => composition.realtime.personalAgent.command(input), method, params)
