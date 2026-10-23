@@ -236,3 +236,14 @@ test('suggestion chrome and empty states are fully translated in English',t=>{
   assert.doesNotMatch(text(h.panel),/[\u4e00-\u9fff]/u,`connected=${connected}`)
  }
 })
+
+test('goal card cadence menu sends a life.mutate update',async t=>{
+ class Listening extends Node{constructor(tag){super(tag);this.listeners={}}addEventListener(type,fn){this.listeners[type]=fn}}
+ const h=harness(t),commands=[];globalThis.document={createElement:tag=>new Listening(tag)}
+ const goal={id:'g',kind:'goal',title:'学英语',note:'',status:'active',version:3,cadence:'off',success_criteria:'',progress:{done:0,total:0}}
+ renderLife(h.panel,{...h,command:async(...args)=>{commands.push(args)},kind:'goal',state:{todos:[],ideas:[],goals:[goal]}})
+ const menu=all(h.panel).find(n=>n.tag==='select'&&n['aria-label']==='学英语的提醒节奏')
+ assert.deepEqual(menu.children.map(o=>o.value),['daily','progress','off']);assert.equal(menu.value,'off')
+ menu.value='daily';await menu.listeners.change()
+ assert.deepEqual(commands,[['life.mutate',{op:'update',kind:'goal',id:'g',expected_version:3,cadence:'daily'}]])
+})
