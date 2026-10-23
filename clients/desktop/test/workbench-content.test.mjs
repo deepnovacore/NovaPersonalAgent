@@ -246,7 +246,7 @@ test('goal card deletes only after confirmation and shows Nova-derived progress 
  answer=true;remove.action();assert.deepEqual(commands,[['life.mutate',{op:'delete',kind:'goal',id:'g',expected_version:3}]])
  assert.doesNotMatch(text(h.panel),/最近进展|由 Nova 整理/u,'no record, no progress block')
  const shown=harness(t);renderLife(shown.panel,{...shown,kind:'goal',state:{todos:[],ideas:[],goals:[{...goal,derived_progress:{summary:'本周跑了 3 次',next_step:'周六 15 公里',last_progress_at:null,stale:false}}]}})
- assert.match(text(shown.panel),/最近进展：本周跑了 3 次/u);assert.match(text(shown.panel),/下一步：周六 15 公里/u);assert.match(text(shown.panel),/由 Nova 整理，你修改目标后会重新整理/u)
+ assert.match(text(shown.panel),/最近进展：本周跑了 3 次/u);assert.match(text(shown.panel),/下一步：周六 15 公里/u);assert.match(text(shown.panel),/由 Nova 根据你的回复整理，下次回复进展时更新/u)
  const stale=harness(t);renderLife(stale.panel,{...stale,kind:'goal',state:{todos:[],ideas:[],goals:[{...goal,derived_progress:{summary:'旧进展',next_step:'',last_progress_at:null,stale:true}}]}})
  assert.match(text(stale.panel),/基于你修改前的目标/u);assert.doesNotMatch(text(stale.panel),/下一步/u)
  setLanguage('en');t.after(()=>setLanguage('zh-CN'))
