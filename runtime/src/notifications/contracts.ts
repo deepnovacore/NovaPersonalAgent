@@ -4,6 +4,8 @@ export const bindingSchema = z.object({ id, provider: id, user_scope: id, genera
 export type ChannelBinding = z.infer<typeof bindingSchema>;
 export const notificationSchema = z.object({ event_key: id, revision: id, occurrence: id, kind: z.enum(['brief', 'suggestion', 'task_progress', 'task_result', 'alert', 'attention_required']), title: z.string().max(200), body: z.string().max(131072), guard: z.object({task_id:id.optional(),goal_revision:z.number().int().nonnegative().optional(),work_id:id.optional(),evidence_refs:z.array(id).max(256).optional(),requires_runtime:z.boolean().optional()}).strict().optional(), source: z.object({ type: id, id, version: z.string().optional() }).strict(), created_at: z.number().finite(), expires_at: z.number().finite().nullable(), not_before: z.number().finite(), priority: z.number().finite(), coalesce_key: id.nullable(), feedback: z.array(z.enum(['open', 'snooze', 'dismiss'])).max(3) }).strict();
 export type NotificationInput = z.infer<typeof notificationSchema>;
+/** `source.id` is the goal id; the host re-checks the goal lifecycle before each send. */
+export const goalCheckinSource = 'goal_checkin';
 export const partSchema = z.object({ title: z.string().max(200), body: z.string().max(131072), payload: z.string().max(262144).optional() }).strict();
 export type PreparedPart = z.infer<typeof partSchema>;
 export interface ChannelReceipt {

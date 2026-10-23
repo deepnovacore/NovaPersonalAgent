@@ -39,6 +39,7 @@ export const lifeInputSchema=z.discriminatedUnion('op',[
  z.object({op:z.literal('update'),kind,id:z.string(),expected_version:z.number().int().nonnegative(),importance:importanceSchema.optional(),title:z.string().trim().min(1).max(200).optional(),note:z.string().max(4000).optional(),status:z.string().optional(),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
  z.object({op:z.literal('convert'),id:z.string(),target:z.enum(['todo','goal']),expected_version:z.number().int().nonnegative()}).strict(),
  z.object({op:z.literal('undo_create'),id:z.string(),kind:z.enum(['todo','goal']).optional(),expected_version:z.literal(1)}).strict(),
+ z.object({op:z.literal('delete'),kind:z.literal('goal'),id:z.string(),expected_version:z.number().int().nonnegative()}).strict(),
  z.object({op:z.literal('profile'),about:z.string().max(5000),expected_version:z.number().int().nonnegative()}).strict(),
 ])
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex')
@@ -69,6 +70,10 @@ export function applyLifeMutation(state:LifeState,raw:unknown,requestId:string,n
    else if(p.todo_id){const todo=next.todos.find(todo=>todo.id===p.todo_id);if(!todo)throw Error('item_not_found');todo.note=[todo.note,p.note].filter(Boolean).join('\n').slice(0,4000);todo.version++;todo.updated_at=now;todo.source_suggestion_id=p.suggestion_id;if(p.source)todo.suggestion_source=p.source;todo.provenance_refs=[...new Set([...(todo.provenance_refs??[]),...p.provenance_refs])];todo.sources=[...(todo.sources??[]),...p.sources];result=todo}
    else{const todo={...base(p.title,p.note),status:'open' as const,due:p.due,goal_id:null,idea_id:null,source_suggestion_id:p.suggestion_id,...(p.source?{suggestion_source:p.source}:{}),sources:p.sources,provenance_refs:p.provenance_refs};next.todos.push(todo);result=todo}
   }else if(p.op==='undo_create'){const rows=p.kind==='goal'?next.goals:next.todos,old=rows.find(r=>r.id===p.id);if(!old)throw Error('item_not_found');if(old.version!==p.expected_version)throw Error('version_conflict');if(p.kind==='goal'){if(next.todos.some(r=>r.goal_id===p.id)||next.ideas.some(r=>r.goal_id===p.id))throw Error('goal_has_links');next.goals=next.goals.filter(r=>r.id!==p.id)}else next.todos=next.todos.filter(r=>r.id!==p.id);result={id:p.id,version:old.version}}
+  else if(p.op==='delete'){const old=next.goals.find(r=>r.id===p.id);if(!old)throw Error('item_not_found');if(old.version!==p.expected_version)throw Error('version_conflict')
+   // Links point child-to-parent only, so deleting a goal detaches its todos and ideas instead of leaving a dangling goal_id.
+   for(const row of [...next.todos,...next.ideas])if(row.goal_id===p.id){row.goal_id=null;row.version++;row.updated_at=now}
+   next.goals=next.goals.filter(r=>r.id!==p.id);result={id:p.id,version:old.version}}
   else if(p.op==='profile'){if(next.profile.version!==p.expected_version)throw Error('version_conflict');next.profile={about:p.about,version:p.expected_version+1};result={id:'profile',version:next.profile.version}}
   else if(p.op==='from_workbench'){
    if(!p.source.refs.every(ref=>p.evidence.some(input=>input.id===ref.entry_id&&input.version===ref.version&&input.text.includes(ref.quote))))throw Error('workbench_invalid_evidence')
@@ -120,6 +125,13 @@ export function applyLifeMutation(state:LifeState,raw:unknown,requestId:string,n
  return {state:lifeStateSchema.parse(next),result:receipt}
 }
 
+/** Check-in lifecycle contract, re-checked before generation, commit and send. P3-4 adds `cadence!=='off'` here once goals carry a cadence. */
+export function goalCheckinEligible(life:{goals:readonly {id:string;status:string}[]},goalId:string):{eligible:boolean;reason:'eligible'|'goal_not_found'|'goal_not_active'}{
+ const goal=life.goals.find(g=>g.id===goalId)
+ if(!goal)return {eligible:false,reason:'goal_not_found'}
+ if(goal.status!=='active')return {eligible:false,reason:'goal_not_active'}
+ return {eligible:true,reason:'eligible'}
+}
 // ponytail: bounded personal collections, linear link lookup; add indexes only beyond these small limits.
 export class LifeService{
  #store:BoundedJsonStore<LifeState>;#state:LifeState=emptyLifeState();#revision=0;#tail:Promise<unknown>=Promise.resolve();#backend:LifeBackend|undefined;#selectedAuthority=false;#hubSync:LifeSyncClient|undefined

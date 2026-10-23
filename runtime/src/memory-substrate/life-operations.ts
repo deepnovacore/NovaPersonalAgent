@@ -68,7 +68,7 @@ function objects(state:LifeState):LifeObject[]{return [
  {kind:'profile',id:'profile',data:state.profile},
 ]}
 const entryId=(namespace:string,object:LifeObject)=>namespace+object.kind+':'+object.id
-function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState,evidenceId:string,now:string,legacy=false,processingGrant?:ProcessingGrant,automatic=false):void{
+function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState,evidenceId:string,now:string,legacy=false,processingGrant?:ProcessingGrant,automatic=false,removal:'undo_create'|'delete'='undo_create'):void{
  const profile=before.find(row=>row.kind==='profile'&&row.op!=='tombstone')
  const storageId=(item:LifeObject)=>item.kind==='profile'?(profile?.entry_id??(legacy?entryId(namespace,item):namespace+'profile:'+hash(evidenceId))):entryId(namespace,item)
  const current=new Map(before.map(row=>[row.entry_id,row])),next=objects(state).filter(item=>item.kind!=='profile'||profile!==undefined||item.data.about!==''||item.data.version!==0),ids=new Set(next.map(storageId))
@@ -84,7 +84,7 @@ function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState
   const order=typeof old?.content.life_order==='number'?old.content.life_order:nextOrder.get(item.kind)??0;nextOrder.set(item.kind,Math.max(nextOrder.get(item.kind)??0,order+1))
   run('merge',CandidateSchema.parse({entry_id:id,expected_revision:old?.revision??0,kind:item.kind,origin:legacy||automatic?'inferred':'stated',written_by:legacy||automatic?'merge':'user_correction',evidence_refs:[...new Set([objectEvidenceId,...(Array.isArray(item.data.provenance_refs)?item.data.provenance_refs.filter((ref):ref is string=>typeof ref==='string'&&run('retrieval_evidence',{id:ref})!==null):[])])],content:{life_id:item.id,life_data:item.data,life_order:order,text,...(item.kind==='profile'?{section:'explicit'}:{}),legacy},recorded_at:now}))
  }
- for(const old of before)if(old.op!=='tombstone'&&!ids.has(old.entry_id))run('merge',CandidateSchema.parse({entry_id:old.entry_id,expected_revision:old.revision,kind:old.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidenceId],content:{life_id:old.content.life_id,reason:'undo_create'},op:'tombstone',recorded_at:now}))
+ for(const old of before)if(old.op!=='tombstone'&&!ids.has(old.entry_id))run('merge',CandidateSchema.parse({entry_id:old.entry_id,expected_revision:old.revision,kind:old.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidenceId],content:{life_id:old.content.life_id,reason:removal},op:'tombstone',recorded_at:now}))
 }
 
 /** Called inside the worker transaction for add, update and NOOP, including unselected old entries. */
@@ -202,7 +202,7 @@ export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_muta
  if(q.input.op==='profile'){const version=Math.max(next.state.profile.version,(meta.profile_version??0)+1);next.state.profile.version=version;next.result.version=version;next.state.receipts[q.requestId]!.result.version=version}
  run('append_evidence',EvidenceRecordSchema.parse({id:evidenceId,source_id:q.namespace+'event:'+hash(q.requestId),source_kind:automaticWorkbench?'task_result':'user_correction',locator:evaluated?'host-source:'+evaluated.source.id:'life-command:'+q.requestId,observed_at:evaluated?.source.observed_at??now,recorded_at:now,raw_text:evaluated?.source.text??canonicalJson(command),hash:hash(canonicalJson({namespace:q.namespace,input:q.input,requestId:q.requestId,provenance:q.provenance??null})),trust:automaticWorkbench?'trusted_system':'trusted_user',extracted:{event:automaticWorkbench?'workbench_capture':q.provenance?.type??'life_command',command,...(evaluated?{source:evaluated.source,candidate:evaluated.candidate,decision:evaluated.decision}: {})}}))
  if(q.processingGrant)run('source_grant',{source_id:q.namespace+'event:'+hash(q.requestId),expected_revision:0,grant:q.processingGrant})
- persist(run,q.namespace,entries,next.state,evidenceId,now,false,undefined,automaticWorkbench)
+ persist(run,q.namespace,entries,next.state,evidenceId,now,false,undefined,automaticWorkbench,q.input.op==='delete'?'delete':'undo_create')
  const updated=rows(run,q.namespace),updatedMeta:Meta={...meta,profile_version:Math.max(meta.profile_version??0,next.state.profile.version),revision:meta.revision+1,receipts:next.state.receipts,signature:signature(updated),migrated:true}
  saveMeta(db,q.namespace,updatedMeta)
  return {state:stateFrom(updated,updatedMeta.receipts),revision:updatedMeta.revision,result:next.result}

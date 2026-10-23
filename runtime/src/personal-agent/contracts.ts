@@ -83,3 +83,6 @@ export const personalSettingsSchema = z.object({ assistant_name:identityNameSche
     proactive_daily_cap:z.number().int().min(1).max(10).default(5),
     news_rank_fallback:z.boolean().optional(),
 }).strict();
+/** Model-derived goal progress, kept apart from user-confirmed Life data; a different `goal_version` means it predates the user's latest edit. */
+export const goalProgressSchema=z.object({goal_id:z.string().min(1).max(512),goal_version:z.number().int().positive(),summary:z.string().trim().min(1).max(1000),next_step:z.string().trim().max(500),last_progress_at:z.iso.datetime().nullable(),evidence_refs:z.array(z.string().min(1).max(512)).max(16),basis_revision:z.string().min(1).max(128),updated_at:z.iso.datetime()}).strict();
+export type GoalProgress=z.infer<typeof goalProgressSchema>;
