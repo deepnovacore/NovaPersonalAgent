@@ -1,4 +1,5 @@
 import type {UsageContext} from '../usage/context.js'
+import {soulRoleContext} from './soul-context.js'
 import {acceptanceReadExistingOnly} from '../desktop/workbench-acceptance.js'
 import {resolveModelApiKey} from '../config/config.js'
 import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
@@ -209,7 +210,8 @@ async function responseAdaptationFor(
     `<memory_context>${canonicalJson({mode,trust:'untrusted_external',text:memory}).replace(/</g,'\\u003c')}</memory_context>`,
   ].join('\n') : null
   const explicit=fresh&&snapshot.explicitUserContext?'<user_stated_profile_data>'+canonicalJson(snapshot.explicitUserContext).replace(/</g,'\\u003c')+'</user_stated_profile_data>':null
-  return {revision: snapshot.revision, content: [preferences, understanding,explicit].filter(Boolean).join('\n') || null}
+  const soul = snapshot.soulRole ? soulRoleContext(snapshot.soulRole) : null
+  return {revision: snapshot.revision, content: [preferences, soul, understanding,explicit].filter(Boolean).join('\n') || null}
 }
 
 export interface RealtimeAssemblyOptions {

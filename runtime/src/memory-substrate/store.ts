@@ -33,7 +33,7 @@ export type EvidenceRecord = z.infer<typeof EvidenceRecordSchema>
 export const timelineEvidenceVersion=(record:EvidenceRecord,stamp:unknown):string=>sha256(canonicalJson({hash:record.hash,metadata:record.source_metadata??null,stamp}))
 export const CandidateSchema = z.object({
   entry_id:id, expected_revision:z.number().int().nonnegative().optional(),
-  kind:z.enum(['fact','preference','plan','concern','commitment','entity','topic','LogicalWorkspace','WorkspaceInstance','RelationCard','todo','idea','goal','profile','memory_summary']),
+  kind:z.enum(['fact','preference','plan','concern','commitment','entity','topic','LogicalWorkspace','WorkspaceInstance','RelationCard','todo','idea','goal','profile','memory_summary','soul']),
   origin:z.enum(['stated','inferred']), written_by:z.enum(['merge','user_correction']),
   evidence_refs:z.array(id).min(1).max(256), entity_refs:z.array(id).max(256).default([]),
   content:object, valid_until:date.nullable().default(null),
