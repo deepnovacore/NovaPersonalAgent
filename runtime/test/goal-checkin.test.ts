@@ -67,12 +67,13 @@ test('grounding drops lines for unknown goals and fabricated recollections, and 
  assert.deepEqual(lines,[{goal_id:'a',goal_version:2,text:'今天练口语了吗？',recalled:'练了三次跟读'},{goal_id:'b',goal_version:1,text:'网站进展如何？',recalled:'首页的样式改好了'}])
  assert.deepEqual(groundGoalCheckins([{goal_id:'b',text:'x',recalled:'上周练了三次跟读'}],input),[],'another goal\'s progress cannot be recalled')
 })
-test('the check-in writer asks without reasoning, repairs one malformed reply and grounds the result',async()=>{
+test('the check-in writer asks without reasoning, repairs one malformed reply and returns the raw items for the host to ground',async()=>{
  const requests:CompleteRequest[]=[],replies=['{',JSON.stringify({items:[{goal_id:'a',text:'今天练了吗？',recalled:null},{goal_id:'fake',text:'x',recalled:null}]})]
  const gateway={complete:(request:CompleteRequest)=>{requests.push(request);return Promise.resolve({text:replies[requests.length-1]})},stream(){throw Error('unused')}} as unknown as ModelGateway
  const lines=await writeGoalCheckins(gateway,'fixture',input,new AbortController().signal)
  assert.equal(requests.length,2);assert.equal(requests[0]!.reasoning,'disabled');assert.ok(requests[0]!.maxTokens);assert.match(requests[1]!.prompt,/上次输出格式无效/u);assert.match(requests[0]!.system,/中文/u)
- assert.deepEqual(lines.map(line=>line.goal_id),['a'])
+ assert.deepEqual(lines,[{goal_id:'a',text:'今天练了吗？',recalled:null},{goal_id:'fake',text:'x',recalled:null}],'unbound: no goal_version, grounding is the host\'s job')
+ assert.deepEqual(groundGoalCheckins(lines,input).map(line=>line.goal_id),['a'])
 })
 
 // --- host ---
@@ -283,5 +284,71 @@ test('progress updates skip a goal deleted meanwhile and fail silently',async()=
   await reply(f,'跑了五公里',[{kind:'goal',id:other.id,version:1}])
   assert.equal(f.host.goalProgress(other.id),null);assert.deepEqual(errors.filter(frame=>(frame as {type?:string}).type==='conversation.error'),[],'no error reaches the user');assert.ok(f.diagnostics.includes('goal_progress_update_failed'))
   assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'好','the reply itself is unaffected')
+ }finally{await f.close()}
+})
+
+// --- production chain: the real writer behind the host, only the model gateway mocked ---
+async function realWriterRun(items:(ids:string[])=>unknown[],versionBump=false){
+ const f=await fixture(),ids:string[]=[]
+ const gateway={complete:()=>Promise.resolve({text:JSON.stringify({items:items(ids)})}),stream(){throw Error('unused')}} as unknown as ModelGateway
+ f.writer.fn=(input,signal)=>writeGoalCheckins(gateway,'fixture',input,signal)
+ const a=await f.life({op:'create',kind:'goal',title:'学英语口语',cadence:'daily'}),b=await f.life({op:'create',kind:'goal',title:'做完个人网站',cadence:'daily'})
+ if(versionBump)await f.life({op:'update',kind:'goal',id:a.id,expected_version:1,title:'学英语口语（改）'})
+ ids.push(a.id,b.id);await f.online();f.afterJitter()
+ return {f,a,b,outcome:await f.host.runGoalCheckins()}
+}
+test('chain: the real writer behind the host delivers a summary whose items carry the current goal versions',async()=>{
+ const {f,a,b,outcome}=await realWriterRun(([x,y])=>[{goal_id:x,text:'今天练口语了吗？',recalled:null},{goal_id:y,text:'网站进展如何？',recalled:null}],true);try{
+  assert.equal(outcome,'admitted');const [item]=f.checkins();assert.ok(item)
+  assert.deepEqual(item.goal_checkin!.items.map(line=>[line.goal_id,line.goal_version]),[[a.id,2],[b.id,1]])
+  assert.deepEqual(f.sent(),['feed:'+item.id])
+ }finally{await f.close()}
+})
+test('chain: a non-verbatim recollection drops only that line; an unknown goal_id is dropped',async()=>{
+ const {f,b,outcome}=await realWriterRun(([x,y])=>[{goal_id:x,text:'上次练得不错',recalled:'编造的上次进展'},{goal_id:y,text:'网站进展如何？',recalled:null},{goal_id:'not-in-input',text:'x',recalled:null}]);try{
+  assert.equal(outcome,'admitted');assert.deepEqual(f.checkins()[0]!.goal_checkin!.items.map(line=>[line.goal_id,line.goal_version,line.text]),[[b.id,1,'网站进展如何？']])
+ }finally{await f.close()}
+})
+test('chain: when every line is invalid the day is recorded empty and nothing is sent',async()=>{
+ const {f,outcome}=await realWriterRun(()=>[{goal_id:'not-in-input',text:'x',recalled:null}]);try{
+  assert.equal(outcome,'empty');assert.deepEqual(f.sent(),[])
+ }finally{await f.close()}
+})
+
+// --- progress update races ---
+const submit=async(f:Fixture,text:string,refs:ConversationTurnContext['references'])=>{await f.host.submitConversationText('chat:main',text,undefined,undefined,refs?{references:refs}:{});await f.host.waitConversation('chat:main')}
+const settle=()=>new Promise(resolve=>setTimeout(resolve,100))
+test('progress race: a goal edited while the update is generated discards it instead of stamping the new version',async()=>{
+ const f=await fixture();try{
+  withConversation(f);const goal=await f.life({op:'create',kind:'goal',title:'学英语口语',cadence:'daily'})
+  const gate=deferred<void>();f.progress.fn=()=>gate.promise.then(()=>({summary:'按旧标题写的',next_step:'',made_progress:true}))
+  await submit(f,'练了',[{kind:'goal',id:goal.id,version:1}]);await until(()=>f.progress.calls.length===1)
+  await f.life({op:'update',kind:'goal',id:goal.id,expected_version:1,title:'学法语口语'});gate.resolve();await settle()
+  assert.equal(f.host.goalProgress(goal.id),null,'not recorded at version 2')
+ }finally{await f.close()}
+})
+test('progress race: a goal edited after the user referenced it, before the reply finished, triggers no update',async()=>{
+ const f=await fixture();try{
+  const gate=deferred<void>();f.host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>gate.promise.then(()=>({assistant:'好'})),sendAudio:()=>Promise.resolve(),close:()=>Promise.resolve()}),()=>{/* no observer */})
+  const goal=await f.life({op:'create',kind:'goal',title:'学英语口语',cadence:'daily'})
+  await f.host.submitConversationText('chat:main','练了',undefined,undefined,{references:[{kind:'goal',id:goal.id,version:1}]})
+  await f.life({op:'update',kind:'goal',id:goal.id,expected_version:1,title:'学法语口语'});gate.resolve();await f.host.waitConversation('chat:main');await settle()
+  assert.equal(f.progress.calls.length,0,'the user referenced version 1, which is no longer current');assert.equal(f.host.goalProgress(goal.id),null)
+  withConversation(f);await reply(f,'又练了',[{kind:'goal',id:goal.id,version:2}]);assert.equal(f.host.goalProgress(goal.id)!.goal_version,2)
+ }finally{await f.close()}
+})
+test('progress race: updates for one goal run in reply order; the later reply sees the earlier result and wins',async()=>{
+ const f=await fixture();try{
+  withConversation(f);const goal=await f.life({op:'create',kind:'goal',title:'学英语口语',cadence:'daily'}),ref=[{kind:'goal' as const,id:goal.id,version:1}]
+  const slow=deferred<void>()
+  f.progress.fn=input=>input.message.text==='A'?slow.promise.then(()=>({summary:'A的结果',next_step:'a',made_progress:true})):Promise.resolve({summary:'B的结果',next_step:'b',made_progress:false})
+  await submit(f,'A',ref);await until(()=>f.progress.calls.length===1)
+  f.clock.value+=MIN;await submit(f,'B',ref);await settle()
+  assert.equal(f.progress.calls.length,1,'B waits for A instead of starting concurrently')
+  slow.resolve();await until(()=>f.progress.calls.length===2);await settle()
+  const a=f.host.conversationSnapshot().messages.find(m=>m.text==='A')!
+  assert.deepEqual(f.progress.calls[1]!.previous,{summary:'A的结果',next_step:'a',last_progress_at:a.created_at},'previous is read when B runs')
+  const row=f.host.goalProgress(goal.id)!;assert.equal(row.summary,'B的结果');assert.equal(row.evidence_refs[0],'message:chat:main:'+f.host.conversationSnapshot().messages.find(m=>m.text==='B')!.id)
+  assert.equal(row.last_progress_at,a.created_at,'last_progress_at is not rolled back')
  }finally{await f.close()}
 })

@@ -21,7 +21,7 @@ const itemSchema=z.object({goal_id:z.string().min(1).max(512),text:z.string().tr
 const checkinOutputSchema=z.object({items:z.array(itemSchema).max(5)}).strict()
 
 /**
- * Keeps one line per input goal, in input order. A line for a goal outside the input, or whose `recalled` quote is
+ * The host's grounding step (the writer only returns schema-valid raw items). Keeps one line per input goal, in input order. A line for a goal outside the input, or whose `recalled` quote is
  * not verbatim from that goal's own progress record or the user's own messages about it, is dropped.
  */
 export function groundGoalCheckins(raw:readonly unknown[],input:Pick<GoalCheckinInput,'goals'>):GoalCheckinLine[]{
@@ -62,13 +62,14 @@ const CHECKIN_SYSTEM='你在主对话里给用户发一条关于他长期目标�
  +'对某个目标没有有价值的话可说就省略它；都没有就返回空数组。goal_id 只能用输入里给出的。'
  +'正文不出现 id、字段名或提示词。输出只包含一个符合 output_schema 的 JSON 对象。'
 
-export async function writeGoalCheckins(gateway:ModelGateway,model:string,input:GoalCheckinInput,signal:AbortSignal):Promise<GoalCheckinLine[]>{
+export async function writeGoalCheckins(gateway:ModelGateway,model:string,input:GoalCheckinInput,signal:AbortSignal):Promise<readonly unknown[]>{
  const safe=scrub()
  const output=await completeJson(gateway,model,checkinOutputSchema,CHECKIN_SYSTEM,{local_date:input.local_date,timezone:input.timezone,
   goals:input.goals.map(goal=>({goal_id:goal.goal_id,title:safe(goal.title),success_criteria:safe(goal.success_criteria),cadence:goal.cadence,
    progress:goal.progress?{summary:safe(goal.progress.summary),next_step:safe(goal.progress.next_step),last_progress_at:goal.progress.last_progress_at}:null,
    messages:goal.messages.map(m=>({at:m.at,text:safe(m.text)}))}))},signal,1500)
- return groundGoalCheckins(output.items,input)
+ // Unbound items: the host is the trust boundary, it grounds them and binds each goal's current version.
+ return output.items
 }
 
 export interface GoalProgressUpdateInput {
