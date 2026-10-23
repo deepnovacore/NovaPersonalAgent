@@ -126,11 +126,12 @@ export function applyLifeMutation(state:LifeState,raw:unknown,requestId:string,n
  return {state:lifeStateSchema.parse(next),result:receipt}
 }
 
-/** Check-in lifecycle contract, re-checked before generation, commit and send. P3-4 adds `cadence!=='off'` here once goals carry a cadence. */
-export function goalCheckinEligible(life:{goals:readonly {id:string;status:string}[]},goalId:string):{eligible:boolean;reason:'eligible'|'goal_not_found'|'goal_not_active'}{
+/** Check-in lifecycle contract, re-checked before generation, commit and send. */
+export function goalCheckinEligible(life:{goals:readonly {id:string;status:string;cadence:string}[]},goalId:string):{eligible:boolean;reason:'eligible'|'goal_not_found'|'goal_not_active'|'goal_cadence_off'}{
  const goal=life.goals.find(g=>g.id===goalId)
  if(!goal)return {eligible:false,reason:'goal_not_found'}
  if(goal.status!=='active')return {eligible:false,reason:'goal_not_active'}
+ if(goal.cadence==='off')return {eligible:false,reason:'goal_cadence_off'}
  return {eligible:true,reason:'eligible'}
 }
 // ponytail: bounded personal collections, linear link lookup; add indexes only beyond these small limits.

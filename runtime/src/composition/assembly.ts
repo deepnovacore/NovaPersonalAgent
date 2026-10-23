@@ -1,6 +1,7 @@
 import {createWorkbenchGenerator} from '../model/workbench-writer.js'
 import {observeOperation} from '../usage/context.js'
 import {proposeGoals,type GoalProposerInput} from '../model/goal-writer.js'
+import {writeGoalCheckins,writeGoalProgress,type GoalCheckinInput,type GoalProgressUpdateInput} from '../model/goal-checkin-writer.js'
 import type {UsageReporter} from '../realtime/usage.js'
 import {GatewayProactivity} from '../model/proactivity.js'
 import {GatewayTaskVerifier} from '../model/task-verifier.js'
@@ -119,7 +120,7 @@ export interface Assembly {
     profileParticipantMessages?: boolean
     models: Required<Pick<HostOptions,
       'generateProfile' | 'generateDigests' | 'generateContext' | 'generateWorkbench' | 'generateTimeline' | 'rankNews' | 'understand'
-      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover' | 'proposeGoals'>> & Pick<HostOptions, 'rankNewsFallback'>
+      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover' | 'proposeGoals' | 'prepareGoalCheckin' | 'updateGoalProgress'>> & Pick<HostOptions, 'rankNewsFallback'>
     taskVerifier: Pick<GatewayTaskVerifier, 'evaluateTask'>
   }
 
@@ -420,6 +421,8 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       summarizeMemory: observeOperation('memory',writer.summarizeMemory.bind(writer)),
       discover: observeOperation('proactivity',proactive.discover.bind(proactive)),
       proposeGoals: observeOperation('proactivity',(input:GoalProposerInput,signal:AbortSignal)=>proposeGoals(gateway,settings.support_model,input,signal)),
+      prepareGoalCheckin: observeOperation('proactivity',(input:GoalCheckinInput,signal:AbortSignal)=>writeGoalCheckins(gateway,settings.support_model,input,signal)),
+      updateGoalProgress: observeOperation('proactivity',(input:GoalProgressUpdateInput,signal:AbortSignal)=>writeGoalProgress(gateway,settings.support_model,input,signal)),
     }}}),
     capabilities,
     capabilityStatus: capabilityStatus(capabilities, tools.schemas.length),

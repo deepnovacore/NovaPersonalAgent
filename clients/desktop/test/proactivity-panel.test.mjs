@@ -81,3 +81,7 @@ test('news fallback row shows only without an OpenRouter key and sends news_rank
  const off=harness({news_rank_fallback:false},{rankFallback:()=>({keyMissing:true,provider:null})});await off.panel.load()
  assert.equal(rows(off)[0].checked,false);assert.equal(rankFallbackNote(null),'没有 OpenRouter 密钥时，会用你的对话模型判断资讯相关度：你的兴趣、文章标题和摘要会发给它。','unnamed provider stays generic')
 })
+test('the discovery switch says it also covers goal proposals and goal check-ins',async()=>{
+ const h=harness();await h.panel.load()
+ assert.ok(all(h.root).some(n=>n.textContent==='有依据才提出建议；也包括提议目标和按节奏问候目标进展。关闭后这些都会停止，仍可主动交办任务。'))
+})

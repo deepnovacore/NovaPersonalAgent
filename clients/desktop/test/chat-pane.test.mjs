@@ -655,3 +655,13 @@ test('main conversation keeps one companion outside the transcript through messa
  m.view.receive(feedState(3,'other',{feed:[]}));assert.equal(companion.hidden,true)
  m.view.receive(snapshot(4));assert.equal(companion.hidden,false)
 })
+test('a goal check-in card in the main chat puts the goal into the composer and mutes through feed.action',async()=>{
+ const m=mount({defaultHome:true}),c=m.view.controller
+ const checkin={id:'ck',kind:'question',title:'问问你的目标',why_now:'',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},expires_at:null,memory_refs:[],evidence_refs:[],goal_checkin:{local_date:'2026-10-12',items:[{goal_id:'g',goal_version:1,text:'今天练口语了吗？',recalled:null}]}}
+ m.view.receive(feedState(1,'chat:main',{feed:[checkin],life:{todos:[],goals:[{id:'g',title:'学英语口语',status:'active',cadence:'daily',version:2}]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[{id:'feed:ck',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'问问你的目标\n· 今天练口语了吗？'}],home_messages:[]}}))
+ c.draft='已有草稿'
+ await m.all().find(n=>n.tag==='button'&&n.textContent==='回复进展').listeners.click();await tick()
+ assert.deepEqual(c.state('chat:main').references,[{kind:'goal',id:'g',version:2}]);assert.equal(c.draft,'已有草稿','the draft is kept')
+ void m.all().find(n=>n.tag==='button'&&n.textContent==='不再提醒').listeners.click();await tick()
+ assert.deepEqual(m.sent.filter(f=>f.method==='feed.action'&&f.params.action!=='presented').map(f=>f.params),[{id:'ck',action:'goal_checkin_mute',goal_id:'g'}])
+})

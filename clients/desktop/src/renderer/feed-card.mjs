@@ -20,9 +20,10 @@ export function sendPresented(item,{presented,command}){
  * Renders one feed card into `parent`. `presented` is a shared Set so the
  * `presented` receipt is sent once per item and can be retried when it fails.
  */
-export function renderFeedCard(parent,item,{el,button,chips,command,openFeed,visible=true,presented,body,memory,connected=true,currentItem}){
+export function renderFeedCard(parent,item,{el,button,chips,command,openFeed,visible=true,presented,body,memory,connected=true,currentItem,goals,reference}){
  const card=el('article',undefined,'feed-card');card.dataset.feedId=item.id
  const dismissed=isDismissed(item);if(dismissed)card.dataset.dismissed='true'
+ if(item.goal_checkin)return renderGoalCheckin(parent,card,item,{el,button,command,visible,presented,connected,dismissed,goals,reference})
  card.append(el('h3',item.title))
  // Briefings carry their substance in prepared.text (mirrored into the message); why_now alone would drop it.
  const goal=item.goal_proposal
@@ -50,5 +51,29 @@ export function renderFeedCard(parent,item,{el,button,chips,command,openFeed,vis
   const label=feedActionLabel(item);const primary=button(t(label),()=>openFeed(item.id,label),actions);primary.className='soft';primary.disabled=Boolean(unavailable);if(unavailable)primary.title=t(unavailable)
   if(item.lifecycle==='active'&&!expired&&connected){button(t('稍后'),()=>command('feed.action',{id:item.id,action:'snooze',snooze_until:new Date(Date.now()+3600000).toISOString()}),actions);button(t('忽略'),()=>command('feed.action',{id:item.id,action:'dismiss'}),actions)}
  }
+ parent.append(card);return card
+}
+/**
+ * A goal check-in summary: one line per goal, each with "reply with progress" (puts the goal's current
+ * version into the main-chat composer as a reference) and "stop reminding" (turns that goal's cadence off).
+ */
+function renderGoalCheckin(parent,card,item,{el,button,command,visible,presented,connected,dismissed,goals,reference}){
+ card.append(el('h3',t('问问你的目标')))
+ const expired=item.lifecycle!=='active'||Boolean(item.expires_at&&Date.parse(item.expires_at)<=Date.now())
+ for(const line of item.goal_checkin.items){
+  const row=el('div',undefined,'feed-checkin');row.dataset.goalId=line.goal_id;card.append(row)
+  row.append(el('p',line.text,'feed-body'))
+  if(line.recalled)row.append(el('p',t('上次：{0}',line.recalled),'feed-why'))
+  if(dismissed||!connected)continue
+  const goal=goals?.find(g=>g.id===line.goal_id)
+  if(goals&&!goal){row.append(el('p',t('这个目标已删除。'),'feed-unavailable'));continue}
+  const actions=el('div',undefined,'feed-actions');row.append(actions)
+  const reply=button(t('回复进展'),()=>reference([{kind:'goal',id:line.goal_id,version:goal?.version??line.goal_version}]),actions);reply.className='soft';reply.title=t('在主对话输入框引用这个目标；发送后 Nova 据此更新进展')
+  if(goal?.cadence==='off')actions.append(el('small',t('已不再提醒'),'hint'))
+  else button(t('不再提醒'),()=>command('feed.action',{id:item.id,action:'goal_checkin_mute',goal_id:line.goal_id}),actions).title=t('这个目标以后不再主动问候；可在目标卡片里改回提醒节奏')
+ }
+ if(!connected&&!dismissed)card.append(el('p',t('连接后可继续讨论。'),'feed-unavailable'))
+ else if(expired&&!dismissed)card.append(el('p',t('这条问候已过期。'),'feed-unavailable'))
+ if(visible&&connected)sendPresented(item,{presented,command})
  parent.append(card);return card
 }
