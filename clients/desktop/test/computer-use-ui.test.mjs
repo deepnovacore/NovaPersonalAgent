@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {readFile} from 'node:fs/promises'
+import {readFile,readdir} from 'node:fs/promises'
 import {test} from 'node:test'
 import {setLanguage,t} from '../src/renderer/locale.mjs'
 import {computerOverlayDetail,computerOverlayFrame,computerOverlayMark} from '../src/renderer/computer-overlay-view.mjs'
@@ -133,8 +133,14 @@ test('overlay pages and new workbench strings are translated',async context=>{
   assert.doesNotMatch(t(source),/\p{Script=Han}/u,source)
 })
 
-test('active desktop tools, prompts and user guides contain no nested desktop delegation tool',async()=>{
- for(const path of ['runtime/src/personal-agent/computer-use/contract.ts','runtime/src/personal-agent/computer-use/tools.ts','runtime/src/personal-agent/computer-use/skill.ts','runtime/src/personal-agent/workbench-instructions.ts','docs/en/executors/computer-use-build.md','docs/zh-CN/executors/computer-use-build.md','docs/verification/build-computer-use.md']){
-  assert.doesNotMatch(await readFile(new URL('../../../'+path,import.meta.url),'utf8'),/computer_run/,path)
+test('active desktop tools, prompts and docs contain no nested desktop delegation tool',async()=>{
+ const historical='docs/design-notes/2026-10-24-unified-window-computer-use.md'
+ async function inspect(directory){
+  for(const entry of await readdir(new URL('../../../'+directory+'/',import.meta.url),{withFileTypes:true})){
+   const path=directory+'/'+entry.name
+   if(entry.isDirectory())await inspect(path)
+   else if(path!==historical&&/\.(?:ts|mjs|md|html|css|json)$/.test(path))assert.doesNotMatch(await readFile(new URL('../../../'+path,import.meta.url),'utf8'),/computer_run/,path)
+  }
  }
+ for(const root of ['runtime/src','clients/desktop/src','docs'])await inspect(root)
 })

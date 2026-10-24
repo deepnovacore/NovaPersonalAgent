@@ -20,19 +20,19 @@ async function fixture(approve:(name:string)=>Promise<boolean>=()=>Promise.resol
  const image='data:image/png;base64,'+(await sharp({create:{width:2560,height:1440,channels:3,background:'white'}}).png().toBuffer()).toString('base64')
  let target='window-one',closed=0,connected=0,cleanup=true,width=1024
  let backendWindow:unknown
- let closeGate=Promise.resolve(),writeFailure=false,afterWrite=()=>{ /* Optional failure hook. */ }
+ let closeGate=Promise.resolve(),writeGate=Promise.resolve(),writeFailure=false,afterWrite=()=>{ /* Optional failure hook. */ }
  const acting:string[]=[],events:string[]=[],points:({x:number;y:number}|undefined)[]=[]
  const writes:{name:string;params:unknown}[]=[],approvals:string[]=[]
  const backend:Awaited<ReturnType<typeof startComputerBackend>>={
   pid:process.pid,device:{interfaceType:'computer',size:()=>Promise.resolve({width,height:576}),screenshotBase64:()=>Promise.resolve(image),
-   actionSpace:()=>['Tap','Input','Scroll','KeyboardPress'].map(name=>({name,paramSchema:name==='Tap'?actionTapParamSchema:name==='Input'?z.object({value:z.string()}):name==='Scroll'?actionScrollParamSchema:actionKeyboardPressParamSchema,call:(params:unknown)=>{events.push('input');writes.push({name,params});afterWrite();return writeFailure?Promise.reject(Error('cleanup_unknown')):Promise.resolve()}}))},
+   actionSpace:()=>['Tap','Input','Scroll','KeyboardPress'].map(name=>({name,paramSchema:name==='Tap'?actionTapParamSchema:name==='Input'?z.object({value:z.string()}):name==='Scroll'?actionScrollParamSchema:actionKeyboardPressParamSchema,call:(params:unknown)=>{events.push('input');writes.push({name,params});afterWrite();return writeFailure?Promise.reject(Error('cleanup_unknown')):writeGate}}))},
   connect:()=>{connected++;return Promise.resolve()},listDisplays:()=>Promise.resolve([{id:'1'}]),close:async()=>{closed++;await closeGate;return cleanup},
   windowTarget:()=>Promise.resolve({target,width,height:576}),releaseInput:()=>Promise.resolve(),
  }
  let observationId=''
  const session=new ComputerSession({signal:new AbortController().signal,config:{displayId:'1',lockRoot:root,baseUrl:'https://example.test',apiKey:'test',model:'test',modelFamily:'qwen3-vl',maxSteps:10,budgetMs:1000,settleMs:0},
   backend:(_display,_signal,_budget,_worker,_resources,_hold,window)=>{backendWindow=window;return Promise.resolve(backend)},foreground:()=>Promise.resolve({target,width,height:576}),approve:name=>{approvals.push(name);return approve(name)},acting:(name,point)=>{events.push('acting');acting.push(name);points.push(point)},...settings})
- return {session,backendWindow:()=>backendWindow,setWidth:(value:number)=>{width=value},observe:async()=>{const value=await session.observe();observationId=value.id;return value.image},action:(name:Parameters<ComputerSession['action']>[0],args:Record<string,unknown>)=>session.action(name,{observationId,...args}),writes,approvals,acting,events,points,afterWrite:(effect:()=>void)=>{afterWrite=effect},failWrite:()=>{writeFailure=true},setTarget:(value:string)=>{target=value},setCleanup:(value:boolean)=>{cleanup=value},delayClose:(gate:Promise<void>)=>{closeGate=gate},connected:()=>connected,closed:()=>closed,
+ return {session,delayWrite:(gate:Promise<void>)=>{writeGate=gate},backendWindow:()=>backendWindow,setWidth:(value:number)=>{width=value},observe:async()=>{const value=await session.observe();observationId=value.id;return value.image},action:(name:Parameters<ComputerSession['action']>[0],args:Record<string,unknown>)=>session.action(name,{observationId,...args}),writes,approvals,acting,events,points,afterWrite:(effect:()=>void)=>{afterWrite=effect},failWrite:()=>{writeFailure=true},setTarget:(value:string)=>{target=value},setCleanup:(value:boolean)=>{cleanup=value},delayClose:(gate:Promise<void>)=>{closeGate=gate},connected:()=>connected,closed:()=>closed,
   dispose:async()=>{await session.close().catch(()=>{ /* test asserts cleanup errors separately */ });releaseQuarantinedTaskResources([COMPUTER_RESOURCE]);await rm(root,{recursive:true,force:true})}}
 }
 test('computer tools require a vision model',{timeout:5000},()=>{
@@ -230,4 +230,44 @@ test('external lease retains uncertain cleanup for lifecycle quarantine',async()
   await f.observe();f.failWrite();await assert.rejects(f.action('computer_click',{x:10,y:10}),/cleanup_unknown/)
   await assert.rejects(f.session.close(),/cleanup_unknown/);assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),true)
  }finally{release();await f.dispose()}
+})
+
+for(const reobserve of [false,true])test(`old observation cannot write after target change; reobserve=${reobserve}`,async()=>{
+ const f=await fixture()
+ try{
+  const old=await f.session.observe();f.setTarget('new-window')
+  const latest=reobserve?await f.session.observe():undefined
+  await assert.rejects(f.session.action('computer_click',{x:10,y:10,observationId:old.id}),reobserve?/observe_required/:/screen_changed/)
+  assert.equal(f.writes.length,0)
+  if(latest){await f.session.action('computer_click',{x:10,y:10,observationId:latest.id});assert.equal(f.writes.length,1)}
+ }finally{await f.dispose()}
+})
+for(const lost of [false,true])test(`cancel mid-action waits for receipt; lost=${lost}`,async()=>{
+ const controller=new AbortController(),f=await fixture(undefined,{signal:controller.signal})
+ let finish!:()=>void,lose!:(error:Error)=>void,settled=false
+ const gate=new Promise<void>((resolve,reject)=>{finish=resolve;lose=reject})
+ try{
+  await f.observe();f.delayWrite(gate)
+  const pending=f.action('computer_type',{text:'fixture'}).finally(()=>{settled=true})
+  const rejected=assert.rejects(pending,lost?/cleanup_unknown/:/cancelled/)
+  while(!f.writes.length)await new Promise(resolve=>setImmediate(resolve))
+  controller.abort();await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(settled,false);assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),true);assert.equal(f.closed(),0)
+  if(lost)lose(Error('lost receipt'));else finish()
+  await rejected
+  if(lost){await assert.rejects(f.session.close(),/cleanup_unknown/);assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),true)}
+  else{await f.session.close();assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),false)}
+  assert.equal(f.writes.length,1)
+ }finally{finish();await f.dispose()}
+})
+test('non-darwin platform branch never invokes the native AX reader',async t=>{
+ const {MacNativeReader}=await import('../src/connectors/macos/reader.js')
+ const f=await fixture(undefined,{foreground:()=>Promise.resolve({target:JSON.stringify([123,456,[0,0,1024,576]]),width:1024,height:576})})
+ const platform=process.platform
+ const reader=t.mock.method(MacNativeReader.prototype,'request',()=>Promise.reject(Error('native reader must not run')))
+ try{
+  Object.defineProperty(process,'platform',{value:'win32'})
+  const observed=await f.session.observe();assert.equal(observed.ax.status,'unavailable');assert.equal(reader.mock.callCount(),0)
+  await f.session.action('computer_type',{text:'fixture',observationId:observed.id});assert.equal(f.writes.length,1)
+ }finally{Object.defineProperty(process,'platform',{value:platform});await f.dispose()}
 })
