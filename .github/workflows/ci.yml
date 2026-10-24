@@ -21,7 +21,11 @@ jobs:
       - run: node --test .github/scripts/pr-review.test.cjs
 
   space-stack:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +37,12 @@ jobs:
       - run: npm run build:space -- --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
       - run: npm run test:space -- --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
       - run: node push-gateway/test/native-crypto-checks.mjs --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Verify Space tests with a symlinked temporary directory
+        run: |
+          temp_root="$RUNNER_TEMP/space-temp-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$temp_root/real"
+          ln -s "$temp_root/real" "$temp_root/alias"
+          TMPDIR="$temp_root/alias" npm run test:space -- --output-root "$RUNNER_TEMP" --run-id "space-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   electron:
     strategy:
