@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {spawn, spawnSync} from 'node:child_process'
 import {once} from 'node:events'
+import {createRequire} from 'node:module'
 import {mkdtemp, readFile, writeFile, stat, rm, realpath, open} from 'node:fs/promises'
 import {createServer} from 'node:https'
 import {createServer as createProbe} from 'node:net'
@@ -27,6 +28,18 @@ async function exchange(port, path, frame) {
 }
 try {
   const packageRoot = resolve(dirname(await realpath(executable)), '..')
+  // Resolve from the installed runtime, never from this repository's workspace.
+  const configEntry = join(packageRoot, 'runtime/dist/src/space-host/config.js')
+  const installedRequire = createRequire(configEntry)
+  const {RelayServer} = await import(pathToFileURL(installedRequire.resolve('@nova-personal-agent/relay/server')))
+  const {initializeHostSpace, readHostSpaceConfig} = await import(pathToFileURL(configEntry))
+  const relay = new RelayServer({securityPath: ':memory:', mailboxPath: ':memory:', bootstrapToken: 'installed-package-smoke-bootstrap-credential'})
+  try {
+    const relayUrl = await relay.listen()
+    const configPath = join(root, 'space-host.json')
+    const initialized = await initializeHostSpace({configPath, personalPath: join(root, 'personal.json'), relayUrl, bootstrapToken: 'installed-package-smoke-bootstrap-credential'})
+    assert.equal(readHostSpaceConfig(configPath).space, initialized.space)
+  } finally { await relay.close() }
   const {loadProjectNativeHostFromResources} = await import(pathToFileURL(join(packageRoot, 'runtime/dist/src/projects/project-native-resource.js')))
   const {loadCodexSandboxProbeFromResources} = await import(pathToFileURL(join(packageRoot, 'runtime/dist/src/executors/codex/production-host.js')))
   const nativeOptions = {resourcesPath: join(packageRoot, 'resources'), platform: process.platform, arch: process.arch, electronAbi: process.versions.modules}
@@ -122,7 +135,7 @@ try {
   child.kill('SIGTERM')
   assert.equal((await exited)[0], 0)
   assert.ok(!output.includes(token) && !output.includes(device.token))
-  console.log('installed headless package passed: native probe/project lock/VAD, no display/stdin, private credentials, one-use pairing, interactive QR cancellation, client handshake, SIGTERM cleanup')
+  console.log('installed headless package passed: bundled Relay/Host initialization, native probe/project lock/VAD, no display/stdin, private credentials, one-use pairing, interactive QR cancellation, client handshake, SIGTERM cleanup')
 } catch (error) {
   console.error(output.replace(/[a-f0-9]{32}/g, '[redacted]').slice(-4000))
   throw error
