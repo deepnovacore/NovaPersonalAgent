@@ -197,7 +197,7 @@ export class GatewayPersonalWriter {
     for(let attempt=0;attempt<2;attempt++){
       const response=await gateway.complete({...request,usage:{...request.usage,feature:'profile',operation:(request.usage?.operation??'summarize')+(attempt?'.retry':'')}})
       try{
-        const parsed:unknown=JSON.parse(response.text)
+        const parsed:unknown=JSON.parse(response.text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/u,'$1'))
         // A bare list has the same unambiguous review content; keep it instead of
         // spending another model call that may change the valid factual feedback.
         return schema.parse(schema===profileReviewSchema&&Array.isArray(parsed)?{review_notes:parsed}:parsed)

@@ -17,7 +17,7 @@ if(compile.error)throw compile.error;
 if(compile.status!==0)process.exit(compile.status??1);
 const key=new Uint8Array(32).fill(7),plain=JSON.stringify({title:'Nova',body:'跨端 JWE contract'});
 const compact=await new CompactEncrypt(Buffer.from(plain)).setProtectedHeader({alg:'dir',enc:'A256GCM'}).encrypt(key);
-const check=spawnSync('java',['-cp',output,'com.nova.nova_mobile.NovaPushJweChecks',Buffer.from(key).toString('base64url'),compact,plain],{stdio:'inherit'});
+const check=spawnSync('java',['-cp',output,'com.nova.nova_mobile.NovaPushJweChecks',Buffer.from(key).toString('base64url'),compact,Buffer.from(plain).toString('base64url')],{stdio:'inherit'});
 if(check.status!==0)process.exit(check.status??1);
 if(process.platform==='darwin'){
  const binary=join(output,'space-date-check');

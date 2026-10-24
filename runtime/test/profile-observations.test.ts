@@ -81,3 +81,14 @@ test('a bare review-note array is normalized without regenerating valid review f
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateProfile([{id:'project',version:1,origin:'stated',content:'I develop Orchard.'}],new AbortController().signal)
  assert.equal(result.about?.text,'You develop Orchard.');assert.equal(requests.length,3)
 })
+
+
+test('profile JSON accepts a complete fence without retry but still validates its content',async()=>{
+ const entries=[{id:'m',version:1,origin:'stated' as const,content:'I develop Orchard.'}]
+ for(const [response,valid] of [["```json\n{\"observations\":[]}\n```",true],["```json\n{\"observations\":\"invalid\"}\n```",false],["Explanation\n```json\n{\"observations\":[]}\n```",false]] as const){
+  let calls=0
+  const gateway={complete:async()=>{calls++;return {text:response}}} as unknown as ModelGateway
+  const result=new GatewayPersonalWriter({gateway,model:'fixture'}).observeProfile(entries,new AbortController().signal)
+  if(valid){assert.deepEqual(await result,[]);assert.equal(calls,1)}else{await assert.rejects(result);assert.equal(calls,2)}
+ }
+})

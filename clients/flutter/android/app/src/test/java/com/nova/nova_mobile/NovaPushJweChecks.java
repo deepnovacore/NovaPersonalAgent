@@ -1,6 +1,5 @@
 package com.nova.nova_mobile;
 
-import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
 import java.util.Base64;
@@ -13,7 +12,7 @@ public final class NovaPushJweChecks {
         byte[] encrypted = Base64.getUrlDecoder().decode(parts[3]);
         byte[] tag = Base64.getUrlDecoder().decode(parts[4]);
         byte[] result = NovaPushJwe.decrypt(key, parts[0], iv, encrypted, tag);
-        if (!new String(result, StandardCharsets.UTF_8).equals(args[2])) throw new AssertionError("JWE plaintext mismatch");
+        if (!Arrays.equals(result, Base64.getUrlDecoder().decode(args[2]))) throw new AssertionError("JWE plaintext mismatch");
         byte[] changed = tag.clone(); changed[0] ^= 1;
         try { NovaPushJwe.decrypt(key, parts[0], iv, encrypted, changed); throw new AssertionError("tampered tag accepted"); }
         catch (GeneralSecurityException expected) { }
