@@ -1,3 +1,4 @@
+import {realtimeCapabilities} from './capabilities.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {randomUUID} from 'node:crypto'
 import {abortable} from '../core/camera-session.js'
@@ -18,6 +19,7 @@ const failure=()=>new Error('Gemini Live protocol or connection failed')
  * Internal transport replacement retains the host epoch but invalidates every old socket reader.
  */
 export class GeminiLiveAdapter implements RealtimeProvider {
+  readonly capabilities = realtimeCapabilities.gemini
   readonly userResponseMode='automatic' as const
   readonly responseAdaptationMode='session_setup' as const
   readonly mediaCapability={originalImageInput:false} as const

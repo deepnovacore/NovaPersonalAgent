@@ -1,3 +1,4 @@
+import {probeNativeVoice} from './native-voice-service.mjs'
 import {createHubService} from './hub-service.mjs'
 import {createHubNetwork} from './hub-network.mjs'
 import {createHubConnection} from './hub-connection.mjs'
@@ -1900,6 +1901,11 @@ async function startSelectedCamera(camera, smokeChannel) {
       const known = ['voiceprint_busy','voiceprint_configuration_required','voiceprint_audio_invalid','voiceprint_rate_limited','voiceprint_provider_failed','voiceprint_response_invalid','voiceprint_request_failed']
       return {error:known.includes(error.message) ? error.message : 'voiceprint_request_failed'}
     } finally {voiceprintBusy = false; endVoiceprintRecording()}
+  })
+  ipcMain.handle('nova:settings:native-voice', async (event, provider) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents) throw Error('settings request rejected')
+    const secrets=await accessCredentials(()=>decryptSecretsForSpawn(currentSettings,secretCodec))
+    return probeNativeVoice(provider,currentSettings,secrets)
   })
   ipcMain.handle('nova:settings:get', async event => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {

@@ -347,12 +347,26 @@ EXECUTOR_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           </label>
         </fieldset>
         <section id="integrated-pipeline">
+          <div id="native-minicpm-o" hidden>
+            <p class="hint">实验性纯语音对话：不支持工具调用、文字输入或历史恢复；其他文字会话仍可使用工具 agent。</p>
+            <label for="minicpmRealtimeUrl">MiniCPM-o 服务地址</label><input id="minicpmRealtimeUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false">
+            <div class="secret" data-key="minicpmRealtimeApiKey"><label for="minicpmRealtimeApiKey">服务密钥（可选）</label><span class="badge" id="badge-minicpmRealtimeApiKey">未设置</span><span class="key-usage" id="usage-minicpmRealtimeApiKey"></span><input type="password" id="minicpmRealtimeApiKey" autocomplete="off" spellcheck="false"><button type="button" class="clear" data-key="minicpmRealtimeApiKey">清除</button></div>
+            <button type="button" id="probe-minicpm-o">检查已保存的服务配置</button><span id="probe-status-minicpm-o" role="status"></span>
+          </div>
+          <div id="native-personaplex" hidden>
+            <p class="hint">实验性纯语音对话：不支持工具调用、文字输入或历史恢复；其他文字会话仍可使用工具 agent。</p>
+            <label for="personaplexRealtimeUrl">PersonaPlex 服务地址</label><input id="personaplexRealtimeUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false">
+            <div class="secret" data-key="personaplexRealtimeApiKey"><label for="personaplexRealtimeApiKey">服务密钥（可选）</label><span class="badge" id="badge-personaplexRealtimeApiKey">未设置</span><span class="key-usage" id="usage-personaplexRealtimeApiKey"></span><input type="password" id="personaplexRealtimeApiKey" autocomplete="off" spellcheck="false"><button type="button" class="clear" data-key="personaplexRealtimeApiKey">清除</button></div>
+            <button type="button" id="probe-personaplex">检查已保存的服务配置</button><span id="probe-status-personaplex" role="status"></span>
+          </div>
           <div class="pipeline-card">
             <h3>集成式实时语音</h3>
             <p id="gemini-live-limit" class="hint" hidden>Gemini Live 当前用于语音对话；语音执行任务请选择级联管线。</p>
             <div class="field">
               <label for="integratedProvider">服务商</label>
               <select id="integratedProvider">
+                <option value="minicpm-o">MiniCPM-o · 实验性原生语音</option>
+                <option value="personaplex">PersonaPlex · 实验性原生语音</option>
                 <option value="openai">OpenAI</option>
                 <option value="gemini">Google Gemini</option>
                 <option value="qwen">Qwen（通义）</option>

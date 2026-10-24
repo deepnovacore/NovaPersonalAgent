@@ -1,3 +1,4 @@
+import {SglangNativeDuplexAdapter} from '../realtime/sglang-native.js'
 import {ResponsesModelGateway} from '../model/responses-model-gateway.js'
 import {createCompatibleAsrFactory,createCompatibleTtsFactory} from '../realtime/cascaded/openai-compatible-speech.js'
 import type {CompatibleSpeechConfig} from '../config/cascaded-realtime-config.js'
@@ -45,7 +46,7 @@ import {RealClock, type Clock} from '../core/clock.js'
 import {type CodingExecutorResource} from '../executors/coding-executor.js'
 import {MonotonicIdFactory, type IdFactory} from '../core/ids.js'
 import {personalMemoryFactory} from '../memory/factory.js'
-import {OpenAIModelGateway, type ModelGateway} from '../model/model-gateway.js'
+import {unconfiguredModelGateway, OpenAIModelGateway, type ModelGateway} from '../model/model-gateway.js'
 import {stripLikePython} from '../text/python-text.js'
 import {
   composeRealtime,
@@ -580,9 +581,10 @@ export function buildQwenRealtimeAssembly(
   const ids = options.ids ?? new MonotonicIdFactory()
   const support = resolveSupportModelConnection(options.settings, {
     baseUrl: options.settings.integrated_provider === 'openai' ? OPENAI_BASE_URL : options.settings.integrated_provider === 'gemini' ? GEMINI_BASE_URL : stepfunOwnSupport ? STEPFUN_COMPATIBLE_BASE_URL : DASHSCOPE_COMPATIBLE_BASE_URL,
-    apiKey: qwen.apiKey,
+    // A local serving credential must never become a cloud support-model credential.
+    apiKey: options.settings.integrated_provider === 'minicpm-o' || options.settings.integrated_provider === 'personaplex' ? '' : qwen.apiKey,
   })
-  const gateway = new OpenAIModelGateway({
+  const gateway = ['minicpm-o','personaplex'].includes(options.settings.integrated_provider) && support.source !== 'generic' ? unconfiguredModelGateway : new OpenAIModelGateway({
     ...(options.onUsage?{onUsage:options.onUsage}:{}),
     baseUrl: support.baseUrl,
     apiKey: support.apiKey,
@@ -644,6 +646,8 @@ export type IntegratedProviderRegistry = Readonly<Partial<Record<
 >>>
 
 export const integratedProviderRegistry: Required<IntegratedProviderRegistry> = Object.freeze({
+  'minicpm-o': input => new SglangNativeDuplexAdapter({model:'minicpm-o', url:input.config.url, apiKey:input.config.apiKey, voice:input.config.voice, ...(input.connector ? {connector:input.connector} : {})}),
+  personaplex: input => new SglangNativeDuplexAdapter({model:'personaplex', url:input.config.url, apiKey:input.config.apiKey, voice:input.config.voice, ...(input.connector ? {connector:input.connector} : {})}),
   qwen: input => buildQwenRealtimeAssembly(input),
   stepfun: input => buildIntegratedWireProvider(input, createStepFunWireProfile()),
   openai: input => buildIntegratedWireProvider(input, createOpenAIWireProfile()),

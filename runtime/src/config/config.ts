@@ -7,7 +7,7 @@ import {supportsVision} from '../model/vision-capability.js'
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
 const promptLanguageSchema = z.enum(['zh-CN', 'en'])
-const integratedProviderNameSchema = z.enum(['qwen', 'stepfun', 'openai', 'gemini'])
+const integratedProviderNameSchema = z.enum(['qwen', 'stepfun', 'openai', 'gemini', 'minicpm-o', 'personaplex'])
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
 const cascadedAsrProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted', 'openai-compatible'])
 const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted', 'openai-compatible'])
@@ -46,6 +46,9 @@ export const settingsSchema = z.object({
   news_language: promptLanguageSchema.default('en'),
   pipeline_mode: pipelineModeSchema.default('integrated'),
   integrated_provider: integratedProviderNameSchema.default('qwen'),
+  native_realtime_url: z.string().default('ws://127.0.0.1:8000/v1/realtime'),
+  native_realtime_api_key: z.string().nullable().default(null),
+  native_realtime_voice: z.string().default(''),
   cascade_endpointing_provider: cascadedEndpointingProviderNameSchema.default('auto'),
   cascade_asr_provider: cascadedAsrProviderNameSchema.default('volcengine'),
   cascade_llm_provider: cascadedLlmProviderNameSchema.default('deepseek'),
@@ -330,6 +333,9 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     openai_realtime_url: optionalString(environment.OPENAI_REALTIME_URL),
     openai_realtime_model: optionalString(environment.OPENAI_REALTIME_MODEL),
     openai_realtime_voice: optionalString(environment.OPENAI_REALTIME_VOICE),
+    native_realtime_url: optionalString(environment.NATIVE_REALTIME_URL),
+    native_realtime_api_key: optionalString(environment.NATIVE_REALTIME_API_KEY),
+    native_realtime_voice: optionalString(environment.NATIVE_REALTIME_VOICE),
     gemini_realtime_url: optionalString(environment.GEMINI_REALTIME_URL),
     gemini_realtime_model: optionalString(environment.GEMINI_REALTIME_MODEL),
     gemini_realtime_voice: optionalString(environment.GEMINI_REALTIME_VOICE),
@@ -564,6 +570,12 @@ export function requireQwenRealtime(settings: Settings): QwenRealtimeConfig {
 
 export function requireIntegratedRealtime(settings: Settings): QwenRealtimeConfig {
   const provider = settings.integrated_provider
+  if (provider === 'minicpm-o' || provider === 'personaplex') {
+    let url: URL
+    try { url = new URL(settings.native_realtime_url) } catch { throw new ConfigurationError('NATIVE_REALTIME_URL 无效') }
+    if ((url.protocol !== 'wss:' && !(url.protocol === 'ws:' && ['localhost','127.0.0.1','[::1]'].includes(url.hostname))) || url.username || url.password || url.hash || url.search) throw new ConfigurationError('NATIVE_REALTIME_URL 需要 wss 或本机 ws 隧道，不能包含凭据')
+    return Object.freeze({url:url.toString(), model:provider, voice:settings.native_realtime_voice, apiKey:settings.native_realtime_api_key ?? ''})
+  }
   if (provider === 'openai' || provider === 'gemini') return Object.freeze({
     url: secureEndpoint(settings[`${provider}_realtime_url`], 'wss', `${provider.toUpperCase()}_REALTIME_URL`),
     model: requiredSetting(settings[`${provider}_realtime_model`], `${provider.toUpperCase()}_REALTIME_MODEL`),
@@ -661,6 +673,7 @@ export function withoutUncredentialedModules(registry: CapabilityRegistry, setti
 export function describeMissingBlockingCredentials(settings: Settings, textConversations = false): {readonly pipeline: PipelineMode; readonly missing: readonly string[]} {
   const present = (value: string | null) => stripLikePython(value ?? '') !== ''
   if (!textConversations && settings.pipeline_mode === 'integrated') {
+    if (settings.integrated_provider === 'minicpm-o' || settings.integrated_provider === 'personaplex') return {pipeline:'integrated', missing:[]}
     if (settings.integrated_provider === 'openai' || settings.integrated_provider === 'gemini') return {pipeline: 'integrated', missing: present(settings[`${settings.integrated_provider}_api_key`]) ? [] : [`${settings.integrated_provider.toUpperCase()}_API_KEY`]}
     if (settings.integrated_provider === 'stepfun') return {pipeline: 'integrated', missing: present(settings.stepfun_api_key) ? [] : ['STEPFUN_API_KEY']}
     const compatibleGenericKey = settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null

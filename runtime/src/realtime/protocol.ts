@@ -1,3 +1,4 @@
+import type {RealtimeCapabilities} from './capabilities.js'
 import type {PromptLanguage} from './prompt-language.js'
 import { z } from 'zod'
 import { jsonValueSchema, type JsonValue } from '../core/events.js'
@@ -387,9 +388,10 @@ export const responseTranscriptDeltaSchema = sessionEvent(
   z.literal('response_transcript_delta'),
   responseTextShape,
 )
+export const MAX_REALTIME_FINAL_TRANSCRIPT_BYTES = 65536
 export const responseTranscriptFinalSchema = sessionEvent(
   z.literal('response_transcript_final'),
-  responseTextShape,
+  {response_id: realtimeIdentifierSchema, text: z.string().refine(value => Buffer.byteLength(value, 'utf8') <= MAX_REALTIME_FINAL_TRANSCRIPT_BYTES, 'final transcript exceeds 64 KiB')},
 )
 export const toolCallReadySchema = sessionEvent(z.literal('tool_call_ready'), {
   call_id: realtimeIdentifierSchema,
@@ -463,6 +465,7 @@ export const responseAdaptationContextSchema = z.object({
 }).strict()
 
 export interface RealtimeProvider {
+  readonly capabilities?: RealtimeCapabilities
   /** Session-setup guidance cannot carry rolling source/recovery catalogs without interrupting live turns. */
   readonly responseAdaptationMode?: 'mutable' | 'session_setup'
   reportPlayback?(input: {readonly response_id:string; readonly played_ms:number | null; readonly disposition:string}, signal:AbortSignal):Promise<void>

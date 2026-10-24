@@ -32,6 +32,7 @@ export class PersonalController {
   isBuildFinished(id){return this.snapshot?.conversations?.items?.some(item=>item.id===id&&item.kind==='build'&&item.build?.status==='finished')===true}
   get buildWaitingApproval(){return this.selectedConversation?.kind==='build'&&this.selectedConversation.build?.status==='awaiting_approval'}
   async guardBuildSwitch(){const active=this.activeBuild;if(!active)return true;if(!await this.confirmBuildSwitch())return false;await this.command('build.stop',{id:active.id});return true}
+  get voiceCapabilities(){return this.connected&&this.voiceId?this.state(this.voiceId).voiceCapabilities?.capabilities??null:null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
   state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',submission:null});return this.drafts.get(id)}
   get draft(){return this.state().draft} set draft(value){this.state().draft=value;if(!value.trim())this.state().source_todo=null}
@@ -40,6 +41,7 @@ export class PersonalController {
   get submittedDraft(){return this.state().submission?.text??null}
   get isVoiceConversation(){return Boolean(this.selectedId&&(this.voiceId===this.selectedId||(!this.dictationId&&['starting','voice'].includes(this.mode)&&this.captureConversationId===this.selectedId)))}
   async connect(){
+    for(const state of this.drafts.values())delete state.voiceCapabilities
     this.connected=true;this.everConnected=true;this.error='';this.capabilities=[];this.snapshot=null
     if(this.applyPresentation){
       this.presentationReady=false
@@ -125,6 +127,12 @@ export class PersonalController {
   }
   collapse(value){this.collapsed=value;if(value&&this.dictationId)void this.text();this.changed()}
   receive(frame){
+    if(frame.type==='conversation.capabilities'&&frame.mode==='voice'&&typeof frame.conversation_id==='string'&&Number.isSafeInteger(frame.conversation_generation)&&frame.conversation_generation>=0){
+      const caps=frame.capabilities
+      const valid=caps&&['functionCalling','audioInput','textInput','audioOutput','textOutput','nativeFullDuplex'].every(key=>typeof caps.model?.[key]==='boolean')&&['conversationItems','clientResponses','mutableSession','restoreConversationContext','cancelResponse','inputTranscription'].every(key=>typeof caps.protocol?.[key]==='boolean')&&['turn','session'].includes(caps.protocol.responseBoundary)
+      const state=this.state(frame.conversation_id)
+      if(valid&&frame.conversation_generation>=(state.voiceCapabilities?.generation??-1))state.voiceCapabilities={generation:frame.conversation_generation,capabilities:caps}
+    }
     if(frame.type==='conversation.notice'&&typeof frame.conversation_id==='string'&&typeof frame.message==='string')this.state(frame.conversation_id).error=frame.message
     if(frame.type==='conversation.error'&&typeof frame.conversation_id==='string')this.state(frame.conversation_id).error=typeof frame.reason==='string'&&Object.hasOwn(MODEL_FAILURES,frame.reason)?MODEL_FAILURES[frame.reason]:typeof frame.reason==='string'&&/^model_protocol(?:_[a-z_]{1,64})?$/u.test(frame.reason)?'模型回复格式异常，请重试。':'回复失败，请重试。'
     if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
@@ -138,6 +146,8 @@ export class PersonalController {
     if(['client.ready','desktop.capabilities'].includes(frame.type)){this.capabilities=frame.capabilities??[];this.inputInstance=frame.input_instance_id??null}
     if(frame.type==='personal.state'&&Number.isSafeInteger(frame.revision)&&(!this.snapshot||frame.revision>this.snapshot.revision)){
       const previous=this.selectedId;this.snapshot=frame
+      const voice=frame.conversations?.items?.find(item=>item.id===frame.conversations.voice_id)
+      if(voice&&frame.conversations.voice_capabilities)this.receive({type:'conversation.capabilities',mode:'voice',conversation_id:voice.id,conversation_generation:voice.generation,capabilities:frame.conversations.voice_capabilities})
       if(this.applyPresentation&&this.presentationReady&&!this.presentationPending&&['background','workbench','orb'].includes(frame.presentation_mode)&&frame.presentation_mode!==this.presentationMode){this.desiredPresentation=frame.presentation_mode;void this.applyMode(frame.presentation_mode).catch(error=>{this.error=error.message;this.changed()})}
       if(this.mode==='voice'&&this.voiceId!==this.captureConversationId){this.generation++;this.mode='text';this.captureConversationId=null;void this.stop()}
       if(this.voiceId&&this.dictationId)void this.text()

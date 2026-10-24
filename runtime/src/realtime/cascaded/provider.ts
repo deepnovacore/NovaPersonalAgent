@@ -1,3 +1,4 @@
+import {realtimeCapabilities} from '../capabilities.js'
 import type {CommittedConversationPair} from '../history.js'
 import type {PreparedMemoryContext} from './adapter.js'
 import type {PromptLanguage} from '../prompt-language.js'
@@ -41,6 +42,7 @@ type ProviderState = 'disconnected' | 'connecting' | 'connected' | 'closing'
 
 /** Lazily owns one complete, independently fenced cascaded epoch per successful connect. */
 export class CascadedRealtimeProvider implements RealtimeProvider {
+  readonly capabilities = realtimeCapabilities.cascaded
   readonly userResponseMode = 'requested' as const
   readonly #defaultLanguage: PromptLanguage
   #language: PromptLanguage

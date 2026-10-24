@@ -37,7 +37,7 @@ import { RealClock, type Clock } from '../core/clock.js'
 import { capabilitiesFromSettings, resolveModelApiKey, resolveProactivity, resolveWatchModelConnection, type Settings } from '../config/config.js'
 import { MonotonicIdFactory, type IdFactory } from '../core/ids.js'
 import { GatewayCompressor } from '../model/model-adapters.js'
-import { OpenAIModelGateway, type MetricsSink, type ModelGateway } from '../model/model-gateway.js'
+import { unconfiguredModelGateway, OpenAIModelGateway, type MetricsSink, type ModelGateway } from '../model/model-gateway.js'
 import { classifyProactiveSelection, runProactiveSelection } from '../core/calls.js'
 import {
   VisionAgentController,
@@ -236,13 +236,14 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
 
   // Preserve Python's validation order: the model credential is checked before
   // Tavily when neither production transport is injected.
-  const gateway = options.gateway ?? new OpenAIModelGateway({
+  const nativeWithoutSupport = settings.pipeline_mode === 'integrated' && ['minicpm-o','personaplex'].includes(settings.integrated_provider) && !(settings.model_api_key ?? '').trim()
+  const gateway = options.gateway ?? (nativeWithoutSupport ? unconfiguredModelGateway : new OpenAIModelGateway({
     ...(options.onUsage?{onUsage:options.onUsage}:{}),
     baseUrl: settings.model_base_url,
     apiKey: requireApiKey(settings),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
-  })
+  }))
   const searchTransport: SearchTransport | undefined = !capabilities.modules.search.enabled ? undefined : options.searchTransport
     ?? (capabilities.modules.search.provider === 'mcp'
       ? new McpSearchTransport(capabilities.modules.search.mcp!)

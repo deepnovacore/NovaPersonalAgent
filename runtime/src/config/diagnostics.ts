@@ -13,7 +13,7 @@ import {stripLikePython} from '../text/python-text.js'
 const diagnosticIdSchema = z.enum([
   'node.version',
   'configuration.parse',
-  'provider.qwen',
+  'provider.qwen', 'provider.minicpm-o', 'provider.personaplex',
   'provider.stepfun', 'provider.openai', 'provider.gemini',
   'provider.volcengine',
   'executors.contract',
@@ -25,6 +25,8 @@ const diagnosticCodeSchema = z.enum([
   'node_version_unsupported',
   'configuration_valid',
   'configuration_invalid',
+  'minicpm-o_configuration_valid', 'minicpm-o_configuration_invalid',
+  'personaplex_configuration_valid', 'personaplex_configuration_invalid',
   'qwen_configuration_valid',
   'qwen_configuration_invalid',
   'stepfun_configuration_valid',

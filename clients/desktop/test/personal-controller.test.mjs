@@ -286,3 +286,22 @@ test('starting a conversation sends one command, keeps drafts and reuses the req
  assert.equal(sent.at(-1).request_id,retry.request_id,'after an unknown outcome the same request id is retried');answer(sent.at(-1),{ok:true,data:{accepted:true,conversation_id:'n'}});assert.deepEqual(await third,{accepted:true,conversation_id:'n'})
  const fourth=c.startConversationWithReference(request);await new Promise(resolve=>setImmediate(resolve));assert.notEqual(sent.at(-1).request_id,retry.request_id,'a settled request is not reused');answer(sent.at(-1),{ok:true,data:{}});await fourth
 })
+test('voice capabilities are generation-scoped and do not leak into another conversation',()=>{
+ const h=harness();h.snapshot('a','a')
+ const capabilities={model:{functionCalling:false,audioInput:true,textInput:false,audioOutput:true,textOutput:true,nativeFullDuplex:true},protocol:{conversationItems:false,clientResponses:false,mutableSession:false,restoreConversationContext:false,cancelResponse:false,inputTranscription:false,responseBoundary:'session'}}
+ h.c.receive({type:'conversation.capabilities',conversation_id:'a',conversation_generation:2,mode:'voice',capabilities})
+ assert.equal(h.c.voiceCapabilities.model.nativeFullDuplex,true)
+ h.c.receive({type:'conversation.capabilities',conversation_id:'a',conversation_generation:1,mode:'voice',capabilities:{...capabilities,model:{...capabilities.model,nativeFullDuplex:false}}})
+ assert.equal(h.c.voiceCapabilities.model.nativeFullDuplex,true)
+ h.snapshot('b','a');assert.equal(h.c.voiceCapabilities.model.nativeFullDuplex,true)
+ h.snapshot('b','b');assert.equal(h.c.voiceCapabilities,null)
+ h.c.disconnect();assert.equal(h.c.voiceCapabilities,null)
+})
+
+test('reconnect restores voice capabilities from the host snapshot',async()=>{
+ const h=harness();await h.c.connect()
+ const caps={model:{functionCalling:false,audioInput:true,textInput:false,audioOutput:true,textOutput:true,nativeFullDuplex:true},protocol:{conversationItems:false,clientResponses:false,mutableSession:false,restoreConversationContext:false,cancelResponse:false,inputTranscription:false,responseBoundary:'session'}}
+ h.c.receive({type:'personal.state',revision:100,conversations:{selected_id:'a',voice_id:'a',voice_capabilities:caps,items:[{id:'a',generation:3}]}})
+ assert.equal(h.c.voiceCapabilities,caps)
+ h.c.disconnect();assert.equal(h.c.voiceCapabilities,null)
+})

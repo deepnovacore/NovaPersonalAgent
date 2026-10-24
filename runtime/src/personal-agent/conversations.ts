@@ -1,3 +1,4 @@
+import type {RealtimeCapabilities} from '../realtime/capabilities.js'
 import {scheduleReferenceSchema} from './schedule-reference.js'
 import type {Suggestion} from '../core/suggestions.js'
 import type {WakeReason} from '../core/slots.js'
@@ -25,6 +26,7 @@ export function createConversation(kind:Conversation['kind'],title:string,subjec
 export function nextConversationTitle(items:readonly Pick<Conversation,'title'>[]):string{const titles=new Set(items.map(item=>item.title));let number=1;while(titles.has(`新对话 ${number}`))number++;return `新对话 ${number}`}
 export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat',nextConversationTitle([]),null,'chat:main')],work_owners:{},approval_owners:{}}}
 export interface ConversationRuntime {
+ readonly capabilities?:RealtimeCapabilities|undefined
  toolBridge?:{readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
  stopBuild?():Promise<void>
  localApproval?(id:string,approved:boolean,always?:boolean):Promise<void>
@@ -84,6 +86,7 @@ export class ConversationRuntimePool {
   return operation.finally(()=>{const count=(this.#busy.get(id)??1)-1;if(count)this.#busy.set(id,count);else this.#busy.delete(id)})
  }
  canChangeTarget(id:string):boolean{return !this.#busy.has(id)&&this.#ready.get(id)?.canSwitch?.()!==false}
+ capabilities(id:string){return this.#modes.get(id)==='voice'?this.#ready.get(id)?.capabilities:undefined}
  hasVoice(id:string):boolean{return this.#modes.get(id)==='voice'}
  acceptsText(id:string):boolean{return this.#modes.get(id)!=='voice'&&(this.#modes.get(id)!=='parked'||this.#ready.get(id)?.canSwitch?.()!==false)}
  async stopVoice(id:string):Promise<void>{const runtime=this.#ready.get(id);await runtime?.parkVoice?.();this.#modes.set(id,'parked')}

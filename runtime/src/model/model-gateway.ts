@@ -86,6 +86,12 @@ export interface ModelGateway {
   complete(request: CompleteRequest): Promise<GatewayCompletion>
 }
 
+/** Pure voice can run without a support LLM; auxiliary work fails locally until explicitly configured. */
+export const unconfiguredModelGateway: ModelGateway = {
+  async *stream() { yield await Promise.reject(new GatewayError('support_model_unconfigured')) },
+  complete() { return Promise.reject(new GatewayError('support_model_unconfigured')) },
+}
+
 /** A provider failure whose message carries only a stable classification. */
 export class GatewayError extends Error {
   constructor(readonly classification: string) {

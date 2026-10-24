@@ -22,6 +22,7 @@ import {
 } from '../src/main/settings-store.mjs'
 
 const ALL_SECRET_KEYS = Object.freeze([
+  'minicpmRealtimeApiKey', 'personaplexRealtimeApiKey',
   'openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey',
   'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey',
   'composioApiKey',
@@ -108,6 +109,7 @@ test('the default settings are the documented schema', () => {
     openaiCompatibleBaseUrl:'https://api.openai.com/v1', openaiCompatibleProtocol:'chat-completions',
     compatibleAsrBaseUrl:'https://api.openai.com/v1', compatibleAsrModel:'whisper-1', compatibleAsrOmitResponseFormat:false,
     compatibleTtsBaseUrl:'https://api.openai.com/v1', compatibleTtsModel:'tts-1', compatibleTtsVoice:'alloy', compatibleTtsSendSampleRate:false,
+    minicpmRealtimeUrl: 'ws://127.0.0.1:18580/v1/realtime', personaplexRealtimeUrl: 'ws://127.0.0.1:18581/v1/realtime',
     selfHostedAsrUrl: '', selfHostedLlmBaseUrl: '', selfHostedTtsUrl: '',
     geminiAsrModel: 'gemini-3.5-flash', geminiTtsModel: 'gemini-3.8-flash-tts', geminiTtsVoice: 'Kore',
     cascadedEndpointingProvider: 'auto',
@@ -296,6 +298,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     openaiCompatibleBaseUrl:'https://api.openai.com/v1', openaiCompatibleProtocol:'chat-completions',
     compatibleAsrBaseUrl:'https://api.openai.com/v1', compatibleAsrModel:'whisper-1', compatibleAsrOmitResponseFormat:false,
     compatibleTtsBaseUrl:'https://api.openai.com/v1', compatibleTtsModel:'tts-1', compatibleTtsVoice:'alloy', compatibleTtsSendSampleRate:false,
+    minicpmRealtimeUrl: 'ws://127.0.0.1:18580/v1/realtime', personaplexRealtimeUrl: 'ws://127.0.0.1:18581/v1/realtime',
     selfHostedAsrUrl: '', selfHostedLlmBaseUrl: '', selfHostedTtsUrl: '',
     geminiAsrModel: 'gemini-3.5-flash', geminiTtsModel: 'gemini-3.8-flash-tts', geminiTtsVoice: 'Kore',
     cascadedEndpointingProvider: 'auto',
@@ -397,10 +400,12 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'lastPresentation',
     'localToolApproval',
     'memoryPrerecallEnabled',
+    'minicpmRealtimeUrl',
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
+    'personaplexRealtimeUrl',
     'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
@@ -608,10 +613,12 @@ test('publicSettings never carries the secrets object', () => {
     'language',
     'localToolApproval',
     'memoryPrerecallEnabled',
+    'minicpmRealtimeUrl',
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
+    'personaplexRealtimeUrl',
     'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
@@ -648,6 +655,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   )
 
   assert.deepEqual(secretsPresent(settings), {
+    minicpmRealtimeApiKey:false, personaplexRealtimeApiKey:false,
     openaiCompatibleApiKey:false, compatibleAsrApiKey:false, compatibleTtsApiKey:false,
     selfHostedAsrApiKey: false, selfHostedLlmApiKey: false, selfHostedTtsApiKey: false,
     composioApiKey: false,
@@ -665,6 +673,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   })
   assert.doesNotMatch(JSON.stringify(secretsPresent(settings)), /sk-dash|sk-codex|sealed/)
   assert.deepEqual(secretsPresent(undefined), {
+    minicpmRealtimeApiKey:false, personaplexRealtimeApiKey:false,
     openaiCompatibleApiKey:false, compatibleAsrApiKey:false, compatibleTtsApiKey:false,
     selfHostedAsrApiKey: false, selfHostedLlmApiKey: false, selfHostedTtsApiKey: false,
     composioApiKey: false,
@@ -698,7 +707,7 @@ test('all secret fields seal, report presence, round-trip, and clear independent
     { secrets: Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, ''])) },
     codec,
   )
-  assert.deepEqual(cleared.secrets, Object.fromEntries(['openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey', 'composioApiKey', 'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey'].map(key => [key, {enc:'cleared',data:''}])))
+  assert.deepEqual(cleared.secrets, Object.fromEntries(['minicpmRealtimeApiKey', 'personaplexRealtimeApiKey', 'openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey', 'composioApiKey', 'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey'].map(key => [key, {enc:'cleared',data:''}])))
   assert.deepEqual(secretsPresent(cleared), Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, false])))
 })
 

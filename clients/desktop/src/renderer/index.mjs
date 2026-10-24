@@ -603,7 +603,7 @@ function detectLocalOnset(pcm) {
   axes.capture = onsetTracker.active
     ? 'listening'
     : onsetTracker.pending ? 'candidate' : 'idle'
-  if (verdict) {
+  if (verdict && !personalView?.controller.voiceCapabilities?.model.nativeFullDuplex) {
     alertTone.stop()
     if (verdict.type === 'onset') clearAssistantCaption()
     send({ type: 'speech.onset', speech_id: verdict.speechId, t_render_ms: now })
