@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import {Linter} from 'eslint'
 import { acceptanceWakeSettings } from '../src/main/workbench-native-acceptance.mjs'
 import { createWorkbenchFrame } from '../src/main/workbench-frame.mjs'
 import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import { createContext, runInContext } from 'node:vm'
+
+test('desktop main has no unresolved globals after module removal', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const globals = Object.fromEntries(Object.getOwnPropertyNames(globalThis).map(name => [name, 'readonly']))
+  const diagnostics = new Linter().verify(source, {
+    languageOptions: {ecmaVersion: 'latest', sourceType: 'module', globals},
+    rules: {'no-undef': 'error'},
+  })
+  assert.deepEqual(diagnostics.map(({line, column, message}) => ({line, column, message})), [])
+})
 
 test('main owns single-instance lifecycle and denies renderer escape', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')

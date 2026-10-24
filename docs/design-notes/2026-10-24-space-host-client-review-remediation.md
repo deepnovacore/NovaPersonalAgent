@@ -34,3 +34,6 @@
 
 
 Windows 三方对照已确认本 PR 引入退出回归：基线 `5652030e` desktop 测试通过，原 PR `ff378da4` 与初轮修复 `6cda332e` 都超时停在 `will_quit`。读码与行为测试确定设置窗口 `closed` 回调仍调用已删除的 `cancelPhonePairing()`，导致 ReferenceError 并中断后续清理。实际执行该回调的 VM 回归先红，移除这唯一悬空调用后 185 项相关桌面测试通过。未增加 20 秒退出期限；修复后的 Windows 原生 CI 仍需运行确认。
+
+
+macOS 逐文件对照中，基线和初轮修复 head 均只剩既有 `computer-use-host.test` 的 `STORE_WRITE_FAILED`，没有单文件超时。该 fixture 同样直接使用非规范 tmpdir；symlink TMPDIR 下已复现。现仅修测试 realpath，并把 cleanup 注册提前到可能失败的 open 之前，保留生产 guard。修后 2/2、目标 ESLint 与 runtime TypeScript 检查通过。桌面新增 main.mjs 通用 `no-undef` 守卫，原审阅源码准确报出悬空调用，修复版相关 97 项通过。原 PR 对照组和最终完整 CI 仍待汇总，不能据此宣称旧 macOS job 超时完全归因。

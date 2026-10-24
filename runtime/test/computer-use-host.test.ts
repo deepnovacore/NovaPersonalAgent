@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,rm,writeFile} from 'node:fs/promises'
+import {mkdtemp,realpath,rm,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
@@ -19,11 +19,14 @@ test('legacy builds remain readable and computer state is strict',()=>{
 test('computer switch requires local selected Build and fails closed without permissions/configuration',{timeout:10000},async t=>{
  const platform=Object.getOwnPropertyDescriptor(process,'platform')!;Object.defineProperty(process,'platform',{value:'darwin'});t.after(()=>Object.defineProperty(process,'platform',platform))
  const env=process.env;process.env={...env,COMPUTER_DISPLAY_ID:'1',COMPUTER_BASE_URL:'https://example.com/v1',COMPUTER_MODEL:'test',COMPUTER_MODEL_FAMILY:'qwen3-vl',COMPUTER_API_KEY:'test',COMPUTER_MAC_WINDOW_PID:'',COMPUTER_MAC_WINDOW_ID:''};t.after(()=>{process.env=env})
- const root=await mkdtemp(join(tmpdir(),'computer-host-')),path=join(root,'state.json'),state=initialState()
+ const root=await mkdtemp(join(await realpath(tmpdir()),'computer-host-')),path=join(root,'state.json'),state=initialState()
+ let ownedHost:PersonalAgentHost|undefined=undefined
+ t.after(async()=>{try{await ownedHost?.close()}finally{await rm(root,{recursive:true,force:true})}})
  const item=createConversation('build','Build',null,'build:test');item.build=build;state.conversations.items.push(item);state.conversations.selected_id=item.id
  await writeFile(path,JSON.stringify(state),{mode:0o600})
  const host=new PersonalAgentHost({path,userScope:'test',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null})
- await host.open();t.after(async()=>{await host.close();await rm(root,{recursive:true,force:true})})
+ ownedHost=host
+ await host.open()
  let n=0
  const command=(method:string,params:Record<string,unknown>,local=true)=>host.command({type:'personal.command',request_id:String(n++),method,params},{client_id:local?'desktop:local':'remote'}) as Promise<{ok:boolean;error?:string;data:{ok:boolean;state:{enabled:boolean;direct:boolean};missing:string[]}}>
  await command('presentation.set',{mode:'workbench'})
