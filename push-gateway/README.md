@@ -10,18 +10,28 @@ All deployed traffic must use HTTPS, normally through a TLS reverse proxy. The C
 
 | Request | Authorization | JSON / result |
 | --- | --- | --- |
-| `POST /v1/registrations` | `Bearer <admission key>` | `{provider:"apns"|"fcm"|"mipush",token,environment?:"sandbox"|"production"}` → `201 {handle,credential}` |
-| `POST /v1/push` | `Bearer <handle credential>` | `{handle,notificationId,ciphertext}` → `{status,retryable:false}` |
-| `PUT /v1/registrations/<handle>` | `Bearer <handle credential>` | `{provider,token,environment?}` → `{status:"updated",handle}`; preserves handle, credential and notification key on token rotation |
+| `GET /v1/installation` | `Bearer <installation credential>` | `{installationId,expiresAt}`; recovers a completed exchange after its invitation expires, without making that invitation reusable |
+| `POST /v1/installations` | `Bearer <one-time invitation>` | `{credential:<Client-generated 32-byte base64url secret>}` → `201 {installationId,expiresAt}`; persist the credential before sending so an interrupted exchange can resume |
+| `POST /v1/registrations` | `Bearer <installation credential>` | `{provider:"apns"|"fcm"|"mipush",token,environment?:"sandbox"|"production",registrationId?:<persisted opaque request ID>}` → `201 {handle,credential,expiresAt}`; the same live request ID returns the same result |
+| `POST /v1/push` | `Bearer <handle credential>` | `{handle,notificationId,ciphertext,expiresAt?:<epoch milliseconds>}` → `{status,retryable:false}` |
+| `PUT /v1/registrations/<handle>` | `Bearer <handle credential>` | `{provider,token,environment?}` → `{status:"updated",handle,expiresAt}`; preserves handle, credential, absolute lease deadline and notification key on token rotation |
 | `DELETE /v1/registrations/<handle>` | `Bearer <handle credential>` | `{status:"unregistered"}` |
 
 Only the documented fields are accepted. `notificationId` is an opaque ASCII identifier (letters, numbers, underscore or dash; at most 128 characters). Ciphertext is at most 3000 bytes; JWE protected headers contain only `alg` and `enc`. Private content is a JSON `{title,body}` encrypted by the Host. Native title/body limits are 120/1024 characters. Oversized Host content becomes an encrypted generic notification.
 
-Multiple Spaces in one installation keep separate live handles for the same token; their token-level quota is shared. Token rotation updates each saved Space's handle using authenticated PUT, preserving its Host key and handle; invalid-token feedback revokes all handles using that token. Credential hashes, tokens, quotas and delivery receipts persist in a private `0600` atomic/fsynced JSON state file. A single-process lock prevents two writers; after a process crash an operator must verify the old process is stopped before removing its `.lock` file. Reserve-before-send records `unknown` before external I/O. An ambiguous error, timeout or process crash does not trigger another send for that ID. Definitive APNs/FCM invalid-token feedback revokes the registration. Unknown MiPush rejection codes do not guess token invalidity.
+Multiple Spaces in one installation keep separate live handles; their installation and token budgets are shared. A handle has a fixed 30-day lease. Token rotation does not extend that lease; the Client registers a new random handle before expiry, delivers it to the Host, and revokes the old one after replacing its key. At most 16 live handles belong to one installation. Invalid-token feedback revokes handles sharing the exact provider/token/environment identity; APNs sandbox feedback cannot revoke a production registration.
 
-Default send limits are 100 attempts per device per UTC day and 10,000 global attempts per UTC day; new handles do not reset a token's budget. MiPush additionally caps a token at five attempts per rolling 24 hours, conservatively covering vendor day boundaries. Unknown sends consume quota. At the durable receipt capacity (one million) new sends fail closed with `quota_exceeded`; operators rotate storage only after revoking the affected handles. App mailbox sync remains the source of truth.
+The operator's signing key is server-only. It is **not** accepted as a registration bearer, and no shared enrollment key is compiled into the mobile app. An operator issues an HMAC-signed, single-use invitation valid for at most 15 minutes. The Client redeems it using a newly generated installation credential stored only in secure local storage; only its hash is persisted on the gateway. A lost response may be retried with that same credential before invitation expiry; changing the credential on replay is rejected. Installation credentials never go to the Host. A copied app or arbitrary fake token cannot obtain an installation without an operator-issued invitation. This is controlled invitation enrollment, not App Attest/Play Integrity or proof that a device token is genuine.
 
-Admission is a deployment-provisioned, at-least-32-character bearer secret, not anonymous public enrollment. Deliver it through trusted provisioning and do not compile a shared admission secret into a public mobile build. This package does not implement an identity/enrollment service. The gateway state directory and credential files must be private to its service account.
+Default budgets reserve 100 sends per installation per UTC day out of the 10,000/day global capacity. Enrollment refuses additional installations when their reserved budgets would exceed that capacity. Thus the default configuration admits at most 100 active installations; deployments must deliberately size capacity and issue invitations accordingly. Multiple handles, fake tokens, and token rotation do not increase an admitted installation's budget. Existing per-handle and per-token caps remain. MiPush additionally caps each installation, token and handle at five attempts per rolling 24 hours. Ambiguous sends consume quota. An installation expires after 30 days without authenticated status recovery, enrollment retry, registration, successful new send, or token update; expiry releases its reserved budget and invalidates its handles. Rejoining after inactivity requires a new invitation.
+
+State now resides in a private `0600` SQLite WAL database at `<NOVA_PUSH_STATE_FILE>.sqlite`. Indexed transactions reserve a durable `unknown` receipt and quota **before** external I/O, then update only that receipt after the provider returns. Unknown receipts are never automatically resent. Receipts are kept for the complete handle lease, then deleted by indexed, cascading expiry/revocation cleanup. Expired or revoked handles cannot authenticate again, so deleting their receipts cannot resurrect an old send. There is no lifetime one-million-receipt cutoff and no full-state JSON rewrite per notification. Cleanup runs on startup and at most once a minute during traffic; no traffic causes no growth. A connection-lifetime SQLite exclusive lock in `.owner.sqlite` enforces one writer and is released by the OS after a process crash; no manual stale-lock deletion is needed.
+
+Before upgrading, stop the old service and preserve its private state. The first new start transactionally imports the original JSON, retaining that file unchanged as a recovery copy. Existing handles receive one bounded migration lease and retain their unknown receipts and quotas. Legacy installations are grouped by device/environment; when the configured budget cannot cover them, startup fails with `migration_capacity_exceeded` so the operator can size limits explicitly. Invalid legacy state fails closed. Reducing the global limit below existing reserved installation budgets also fails startup (`configured_capacity_below_reservations`), rather than silently taking budget from another installation. Do not run the old JSON writer concurrently with the new gateway, restore a stale JSON over an active SQLite database, or delete SQLite state while handles remain valid. Back up the WAL consistently using SQLite backup tooling or stop the service before copying its files.
+
+Provider retention defaults to 24 hours, capped by an optional Host-supplied business deadline. The gateway and each provider reject already expired requests without sending. APNs receives an absolute expiration plus a stable opaque collapse ID, FCM the remaining TTL plus a collapse key, and MiPush the remaining TTL plus a stable notification replacement ID. APNs/FCM coalesce updates per handle; MiPush's replacement ID replaces the displayed notification and is not a promise of server-side queue coalescing. FCM's documented limit on concurrently stored collapse keys still applies to installations with many Spaces. A provider-accepted push cannot be recalled when business state later changes; opening the app revalidates against Host data. Mailbox sync remains authoritative, and a push is only a wake hint. Signed-device tests must still verify lock-screen, extended-offline and overnight behavior.
+
+HTTP admission is also bounded before parsing request bodies: per-source request/enrollment/registration limits, global request and concurrency limits, and a bounded source map. Only explicitly configured immediate proxies may supply `X-Forwarded-For`; the rightmost untrusted address is used. Without that configuration, a proxy's socket address intentionally remains the source, so all its clients share a limit. Configure an exact allowlist of controlled proxy IPs, make the proxy overwrite/append forwarding headers correctly, and block direct public access to the origin. Never trust all addresses. The CLI caps connections and headers and applies request/header timeouts.
 
 ## Run and verify
 
@@ -35,15 +45,25 @@ The harness prints no credentials and never sends a real vendor push. Compiled o
 
 | Variable | Configuration |
 | --- | --- |
-| `NOVA_PUSH_STATE_FILE` | Private durable state file |
-| `NOVA_PUSH_ADMISSION_KEY_FILE` | File containing the trusted-enrollment admission secret |
+| `NOVA_PUSH_STATE_FILE` | Private state namespace; `.sqlite` data and `.owner.sqlite` ownership files are created beside any legacy JSON |
+| `NOVA_PUSH_ADMISSION_KEY_FILE` | Server-only invitation signing key file; never ship it in a Client |
 | `NOVA_PUSH_BIND`, `NOVA_PUSH_PORT` | Default `127.0.0.1:8788` |
 | `NOVA_PUSH_DEVICE_DAILY_LIMIT`, `NOVA_PUSH_GLOBAL_DAILY_LIMIT` | Optional positive integer attempt caps |
+| `NOVA_PUSH_INSTALLATION_DAILY_LIMIT` | Reserved daily budget per installation, default 100 |
+| `NOVA_PUSH_TRUSTED_PROXIES` | Optional comma-separated exact trusted proxy IPv4/IPv6 addresses; default empty |
 | `NOVA_APNS_KEY_FILE` | Apple `.p8` file, used only by gateway |
 | `NOVA_APNS_TEAM_ID`, `NOVA_APNS_KEY_ID`, `NOVA_APNS_TOPIC` | Apple team/key IDs and app bundle ID |
 | `NOVA_FCM_SERVICE_ACCOUNT_FILE` | Google service-account JSON with FCM send permission; OAuth v1, no legacy server key |
 | `NOVA_MIPUSH_SECRET_FILE` | MiPush server app-secret file |
 | `NOVA_MIPUSH_PACKAGE`, `NOVA_MIPUSH_PUBLIC_CHANNEL` | Registered package and approved public-message channel |
+
+Issue an invitation with the isolated build's operator CLI. It reads a private signing key file and creates a new private output file without printing the invitation:
+
+```sh
+node /absolute/gateway-output/src/admission-cli.js --key-file /private/gateway-invitation-key --output /private/new-invitation
+```
+
+Deliver that invitation to the intended Client within 15 minutes. Protect the issuer and invitation delivery path; extracting the app must not reveal the issuer key. Existing enabled Clients may use their bounded migration handle until renewal, when an invitation is required to establish their installation identity.
 
 Provider classes accept an injected HTTP boundary for offline contract tests. APNs uses Node HTTP/2 plus JOSE ES256 provider JWTs; FCM exchanges a JOSE RS256 service-account assertion for a cached OAuth token and sends data-only HTTP v1 messages. MiPush calls its registration-ID v3 endpoint using the approved public channel. Regional MiPush endpoint selection is available in its constructor and must match the publisher account.
 

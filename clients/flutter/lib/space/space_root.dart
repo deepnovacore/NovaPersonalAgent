@@ -1,3 +1,4 @@
+import 'push_invitation_dialog.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -413,6 +414,28 @@ class _ClientSpaceState extends State<_ClientSpace> {
     super.dispose();
   }
 
+  Future<void> enablePushNotifications() async {
+    final push = controller?.push;
+    if (push == null) return;
+    if (push.gatewayUrl.isEmpty) {
+      message('此构建尚未配置通知网关');
+      return;
+    }
+    try {
+      await push.enable(
+        requestInvitation: () async {
+          if (!mounted) return null;
+          return showDialog<String>(
+            context: context,
+            builder: (_) => const PushInvitationDialog(),
+          );
+        },
+      );
+    } catch (_) {
+      message('通知启用失败，请检查邀请、通知权限或网络后重试');
+    }
+  }
+
   void message(String text) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -812,13 +835,7 @@ class _ClientSpaceState extends State<_ClientSpace> {
                   const SizedBox(height: 12),
                   Text(c.push?.status ?? '推送未就绪'),
                   FilledButton(
-                    onPressed: () async {
-                      try {
-                        await c.push?.enable();
-                      } catch (error) {
-                        message('$error');
-                      }
-                    },
+                    onPressed: enablePushNotifications,
                     child: const Text('启用锁屏通知'),
                   ),
                   TextButton(

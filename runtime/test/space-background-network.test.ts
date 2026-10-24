@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {realpath,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
@@ -11,7 +11,7 @@ import {loadRelayFixture} from './helpers/relay-fixture.js';
 
 test('scheduled Host result survives an offline Client and arrives once through the real relay',async()=>{
 const {RelayServer,RelayClient,crypto}=await loadRelayFixture();
-const dir=await mkdtemp(join(tmpdir(),'host-background-network-'));const relay=new RelayServer({securityPath:':memory:',mailboxPath:':memory:',bootstrapToken:'operator-only-bootstrap-secret'});const url=await relay.listen();
+const dir=await mkdtemp(join(await realpath(tmpdir()),'host-background-network-'));const relay=new RelayServer({securityPath:':memory:',mailboxPath:':memory:',bootstrapToken:'operator-only-bootstrap-secret'});const url=await relay.listen();
 const identity=await crypto.generateDeviceIdentity(),phone=await crypto.generateDeviceIdentity(),space=crypto.spaceId(identity.signingPublicKey),key=crypto.generateContentKey();
 const make=(identity:SpaceIdentity)=>new RelayClient({url,space,device:identity.device,pollIntervalMs:30,reconnectMinMs:20,signChallenge:(c:{id:string;nonce:string;space:string;device:string;epoch:number;expiresAt:number})=>crypto.signControl({v:1,purpose:'relay-login',challengeId:c.id,nonce:c.nonce,space:c.space,device:c.device,epoch:c.epoch,expiresAt:c.expiresAt},identity.signingPrivateKey)});
 const h=make(identity),p=make(phone),record={device:identity.device,signingPublicKey:identity.signingPublicKey,encryptionPublicKey:identity.encryptionPublicKey};await h.createSpace({space,host:record,proof:await crypto.signControl({v:1,purpose:'space-create',space,host:record},identity.signingPrivateKey)},'operator-only-bootstrap-secret');
@@ -21,6 +21,8 @@ const config:HostSpaceConfig={v:1,mode:'host',space,personal_path:host.path,rela
 const controller=new SpaceHostController(join(dir,'config.json'),config,host,{crypto,RelayClient});host.setSpaceHost(controller);
 try {
  await host.open();
+ // This fixture exercises immediate delivery, independently of the wall-clock quiet window.
+ await host.command({type:'personal.command',request_id:'delivery-hours',method:'discovery.configure',params:{timezone:'UTC',quiet_start:'00:00',quiet_end:'00:00'}});
  const invitation=await controller.invitation();
  const input={v:1,purpose:'pair-request',invitationId:invitation.id,secret:invitation.secret,device:phone.device,signingPublicKey:phone.signingPublicKey,encryptionPublicKey:phone.encryptionPublicKey,business_versions:[1]};
  const request=await p.requestPairing({...input,proof:await crypto.signControl(input,phone.signingPrivateKey)});

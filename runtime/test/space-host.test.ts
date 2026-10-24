@@ -3,7 +3,7 @@ import type {RelaySdkClient,SignedEnvelope} from '../src/space-host/relay-transp
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {realpath,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
@@ -12,7 +12,7 @@ import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {displaySnapshot} from '../src/space-host/projection.js';
 
 test('source processing display exports only bounded aggregate status and never profile inference details',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'space-source-status-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'one-space',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-source-status-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'one-space',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  try{await host.open({deferBackground:true});const read=host.snapshot.bind(host);host.snapshot=()=>({...read(),profile_preparation:{...read().profile_preparation,status:'working',needs_update:true,draft:{about:{text:'private inferred portrait',refs:[]},work:[],interests:[]},sources:[{id:'private-ref',version:'private-version',observed_at:new Date().toISOString(),label:'private source'}]}}) as ReturnType<typeof host.snapshot>;
   const snapshot=displaySnapshot(host) as unknown as Record<string,unknown>;assert.deepEqual(snapshot.source_processing,{status:'working',needs_update:true});assert.equal(JSON.stringify(snapshot).includes('private'),false);assert.equal('profile_preparation' in snapshot,false);
   host.snapshot=()=>({...read(),profile_preparation:{...read().profile_preparation,status:'future-private-status',needs_update:false}}) as unknown as ReturnType<typeof host.snapshot>;assert.deepEqual((displaySnapshot(host) as unknown as Record<string,unknown>).source_processing,{status:'idle',needs_update:false});
@@ -20,7 +20,7 @@ test('source processing display exports only bounded aggregate status and never 
 });
 
 test('Host retains Life idempotency, remaps dependencies, conflicts, and display allowlist after restart',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'space-host-'));const sent:Record<string,unknown>[]=[];
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-host-'));const sent:Record<string,unknown>[]=[];
  const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve();},stream:()=>Promise.resolve(),clients:()=>['phone']};
  const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  let host=make(),space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport});
@@ -38,7 +38,7 @@ test('Host retains Life idempotency, remaps dependencies, conflicts, and display
 });
 
 test('real PersonalAgentHost model path streams preview, survives disconnect and executes retried chat once',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'space-chat-'));const sent:Record<string,unknown>[]=[];const previews:Record<string,unknown>[]=[];let calls=0,finish!:()=>void;const gate=new Promise<void>(r=>{finish=r});let offline=false;
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-chat-'));const sent:Record<string,unknown>[]=[];const previews:Record<string,unknown>[]=[];let calls=0,finish!:()=>void;const gate=new Promise<void>(r=>{finish=r});let offline=false;
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  host.setConversationRuntime((_conversation,emit)=>Promise.resolve(({runTurn:async()=>{calls++;emit({type:'caption',role:'assistant',text:'preview',final:false});await gate;return {assistant:'durable reply'}},close:()=>Promise.resolve()})),()=>{ /* Test callback intentionally has no side effects. */ });
  const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{if(offline)return Promise.reject(Error('offline'));sent.push(body);return Promise.resolve();},stream:(_to,body)=>{previews.push(body);return Promise.resolve();},clients:()=>['phone']};
@@ -47,7 +47,7 @@ test('real PersonalAgentHost model path streams preview, survives disconnect and
 });
 
 test('Host cancellation aborts active model and rejects goal-shaped mobile actions',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'space-cancel-'));let calls=0;const sent:Record<string,unknown>[]=[];
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-cancel-'));let calls=0;const sent:Record<string,unknown>[]=[];
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  host.setConversationRuntime(()=>Promise.resolve(({runTurn:(_text,signal)=>{calls++;return new Promise<never>((_resolve,reject)=>signal.addEventListener('abort',()=>reject(Error('conversation_cleared')),{once:true}));},close:()=>Promise.resolve()})),()=>{ /* Test callback intentionally has no side effects. */ });
  const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve();},stream:()=>Promise.resolve(),clients:()=>['phone']};const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport});
@@ -55,13 +55,13 @@ test('Host cancellation aborts active model and rejects goal-shaped mobile actio
 });
 
 test('key delivery persists one randomized envelope per epoch and recipient across ambiguous retry and restart',async()=>{
- const {DurableKeyDelivery}=await import('../src/space-host/key-delivery.js');const dir=await mkdtemp(join(tmpdir(),'space-keys-'));let generated=0,sends=0;const payloads:unknown[]=[];
+ const {DurableKeyDelivery}=await import('../src/space-host/key-delivery.js');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-keys-'));let generated=0,sends=0;const payloads:unknown[]=[];
  const options={path:join(dir,'keys.json'),create:()=>Promise.resolve(({random:++generated})),send:(value:Record<string,unknown>)=>{payloads.push(value);if(++sends===1)return Promise.reject(Error('lost response'));;return Promise.resolve();}};
  try{let delivery=new DurableKeyDelivery(options);await delivery.open();await assert.rejects(delivery.deliver(1,'phone'));delivery=new DurableKeyDelivery(options);await delivery.open();await delivery.deliver(1,'phone');await delivery.deliver(1,'phone');assert.equal(generated,1);assert.deepEqual(payloads[0],payloads[1]);assert.equal(sends,2);await delivery.deliver(2,'phone');assert.equal(generated,2)}finally{await rm(dir,{recursive:true,force:true})}
 });
 
 test('pairing computes fingerprint locally, pins returned keys, and invitation uses local Host key',async()=>{
- const {SpaceHostController}=await import('../src/space-host/config.js');const dir=await mkdtemp(join(tmpdir(),'space-pinning-'));const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ const {SpaceHostController}=await import('../src/space-host/config.js');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-pinning-'));const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  const pinned={selected_version:1,device:'phone',signingPublicKey:{x:'signed'},encryptionPublicKey:{x:'encrypted'}},identity={device:'host',signingPublicKey:{x:'host-sign'},signingPrivateKey:{d:'host'},encryptionPublicKey:{x:'host-enc'},encryptionPrivateKey:{d:'enc'}};
  let confirmations=0;const sdk={crypto:{deviceFingerprint:()=> 'local-fingerprint'},RelayClient:class { pendingPairings(){return Promise.resolve([{...pinned,id:'request',space:'s',expiresAt:Date.now()+10000,fingerprint:'relay-forged'}]);} confirmPairing(){confirmations++;return Promise.resolve({...pinned,encryptionPublicKey:{x:'attacker'}});} createInvitation(){return Promise.resolve({id:'invite',space:'attacker',host:'attacker',hostSigningPublicKey:{x:'attacker'}});}}} as unknown as SpaceHostModules;
  const config={v:1 as const,mode:'host' as const,space:'s',personal_path:host.path,relay_url:'https://relay.example',epoch:1,identity,content_key:'x'.repeat(43),members:[]};const controller=new SpaceHostController(join(dir,'config.json'),config,host,sdk);
@@ -74,7 +74,7 @@ test('mobile model tool schema advertises explicit actions and rejects a plannin
 });
 
 test('transport verifies and skips stale epoch before cursor ACK; key delivery precedes business send',async()=>{
- const {createRelaySpaceTransport}=await import('../src/space-host/relay-transport.js');const dir=await mkdtemp(join(tmpdir(),'space-transport-'));let subscription:Parameters<RelaySdkClient['start']>[0]|undefined;const order:string[]=[];let received=0;
+ const {createRelaySpaceTransport}=await import('../src/space-host/relay-transport.js');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-transport-'));let subscription:Parameters<RelaySdkClient['start']>[0]|undefined;const order:string[]=[];let received=0;
  const client={send:()=>{order.push('business');return Promise.resolve();},stream:()=>Promise.resolve(),start:(value:NonNullable<typeof subscription>)=>{subscription=value;return()=>{ /* Test callback intentionally has no side effects. */ }}};
  const crypto={encryptBody:()=> Promise.resolve('cipher'),decryptBody:()=>Promise.resolve(({v:1,type:'intent'})),signEnvelope:(value:Omit<SignedEnvelope,'sig'>)=>Promise.resolve(({...value,sig:'sig'})),verifyEnvelope:()=>{order.push('verified')},signControl:()=>Promise.resolve('')};
  try{const transport=await createRelaySpaceTransport({path:join(dir,'cache.json'),space:'s',epoch:2,identity:{device:'host',signingPublicKey:{},signingPrivateKey:{},encryptionPublicKey:{},encryptionPrivateKey:{}},members:{phone:{}},historicalMembers:{revoked:{}},contentKey:new Uint8Array(32),client,crypto,beforeSend:()=>{order.push('key');return Promise.resolve();}});const stop=await transport.start(()=>{received++;return Promise.resolve();},{load:()=>0,save:()=>Promise.resolve()});const old={v:1 as const,space:'s',id:'old',from:'phone',to:'host',chan:'mailbox' as const,epoch:1,expiresAt:null,body:'cipher',sig:'sig'};await subscription!.onMailbox(old,1);assert.equal(received,0);assert.deepEqual(order,['verified']);await subscription!.onMailbox({...old,from:'revoked'},2);assert.equal(received,0);assert.deepEqual(order,['verified','verified']);await subscription!.onMailbox({...old,epoch:2},2);assert.equal(received,1);await transport.send('phone',{type:'snapshot'},'msg');assert.deepEqual(order.slice(-2),['key','business']);await stop()}finally{await rm(dir,{recursive:true,force:true})}
@@ -87,14 +87,14 @@ test('Space settings isolate blackboard, knowledge, memory, owner and usage path
 });
 
 test('successful envelope cache compacts and settles while ambiguous failures reuse exact ciphertext',async()=>{
- const {createRelaySpaceTransport}=await import('../src/space-host/relay-transport.js');const {readFile}=await import('node:fs/promises');const dir=await mkdtemp(join(tmpdir(),'space-cache-'));const envelopes:SignedEnvelope[]=[];let fail=true;
+ const {createRelaySpaceTransport}=await import('../src/space-host/relay-transport.js');const {readFile}=await import('node:fs/promises');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-cache-'));const envelopes:SignedEnvelope[]=[];let fail=true;
  const client={send:(value:SignedEnvelope)=>{envelopes.push(value);if(fail)return Promise.reject(Error('lost response'));;return Promise.resolve();},stream:()=>Promise.resolve(),start:()=>()=>{ /* Test callback intentionally has no side effects. */ }};
  const crypto={encryptBody:()=> Promise.resolve('x'.repeat(100000)),decryptBody:()=>Promise.resolve(({})),signEnvelope:(value:Omit<SignedEnvelope,'sig'>)=>Promise.resolve(({...value,sig:'sig'})),verifyEnvelope:()=>{ /* Test callback intentionally has no side effects. */ },signControl:()=>Promise.resolve('')};
  try{const transport=await createRelaySpaceTransport({path:join(dir,'cache.json'),space:'s',epoch:1,identity:{device:'host',signingPublicKey:{},signingPrivateKey:{},encryptionPublicKey:{},encryptionPrivateKey:{}},members:{phone:{}},contentKey:new Uint8Array(32),client,crypto});const payload={text:'a'.repeat(300000)};await assert.rejects(transport.send('phone',payload,'uncertain'));fail=false;await transport.send('phone',payload,'uncertain');assert.deepEqual(envelopes[0],envelopes[1]);await transport.settle?.('uncertain');for(let index=0;index<120;index++){await transport.send('phone',payload,'snapshot-'+index);await transport.settle?.('snapshot-'+index)}assert.ok((await readFile(join(dir,'cache.json'))).length<1024);assert.equal(envelopes.length,122)}finally{await rm(dir,{recursive:true,force:true})}
 });
 
 test('completed chat enters existing notification outbox and scoped push once while phone disconnects',async()=>{
- const {SpacePushDelivery}=await import('../src/space-host/push.js');const {spaceRelayNotificationAdapter}=await import('../src/notifications/adapters/space-relay.js');const dir=await mkdtemp(join(tmpdir(),'space-chat-push-'));let pushes=0,offline=false,finish!:()=>void;const gate=new Promise<void>(resolve=>{finish=resolve});const spaceRef:{value?:SpaceHost}={};
+ const {SpacePushDelivery}=await import('../src/space-host/push.js');const {spaceRelayNotificationAdapter}=await import('../src/notifications/adapters/space-relay.js');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-chat-push-'));let pushes=0,offline=false,finish!:()=>void;const gate=new Promise<void>(resolve=>{finish=resolve});const spaceRef:{value?:SpaceHost}={};
  const push=new SpacePushDelivery({path:join(dir,'push.json'),gatewayUrl:'https://gateway.example',request:()=>{pushes++;return Promise.resolve(new Response(JSON.stringify({status:'accepted'}),{status:200,headers:{'content-type':'application/json'}}));}});
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null,notificationAdapters:[spaceRelayNotificationAdapter(()=>spaceRef.value)]});
  host.setConversationRuntime(()=>Promise.resolve(({runTurn:async()=>{await gate;return {assistant:'finished after disconnection'}},close:()=>Promise.resolve()})),()=>{ /* Test callback intentionally has no side effects. */ });
@@ -103,13 +103,13 @@ test('completed chat enters existing notification outbox and scoped push once wh
 });
 
 test('Host reconnect republishes authoritative snapshot after an accepted receipt survived a crash alone',async()=>{
- const {readFile,writeFile}=await import('node:fs/promises');const dir=await mkdtemp(join(tmpdir(),'space-receipt-crash-'));let sent:Record<string,unknown>[]=[];let offline=true;const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),stream:()=>Promise.resolve(),send:(_to,body)=>{if(offline)return Promise.reject(Error('offline'));sent.push(body);return Promise.resolve();}};
+ const {readFile,writeFile}=await import('node:fs/promises');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-receipt-crash-'));let sent:Record<string,unknown>[]=[];let offline=true;const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),stream:()=>Promise.resolve(),send:(_to,body)=>{if(offline)return Promise.reject(Error('offline'));sent.push(body);return Promise.resolve();}};
  const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});let host=make(),space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport});
  try{await host.open({deferBackground:true});await space.open();await space.receive('phone',{v:1,type:'intent',op_id:'created',kind:'life.mutate',created_at:Date.now(),input:{op:'create',kind:'todo',title:'durable authoritative change'}});await space.close();await host.close();const journal=JSON.parse(await readFile(join(dir,'space.json'),'utf8')) as {outbox:{body:{type:string}}[]};journal.outbox=journal.outbox.filter((row:{body:{type:string}})=>row.body.type==='receipt');await writeFile(join(dir,'space.json'),JSON.stringify(journal));host=make();space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport});offline=false;sent=[];await host.open({deferBackground:true});await space.open();const snapshot=sent.find(row=>row.type==='snapshot')?.snapshot as {todos:{title:string}[]}|undefined;assert.equal(snapshot?.todos[0]?.title,'durable authoritative change');assert.equal(host.life.snapshot().todos.length,1)}finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
 });
 
 test('source intent text is never retained in the Host journal before or after ledger application',async()=>{
- const {readFile}=await import('node:fs/promises');const dir=await mkdtemp(join(tmpdir(),'space-source-private-'));const secret='private-source-text-that-must-have-one-authority';const journalPath=join(dir,'space.json');let inspected=false;
+ const {readFile}=await import('node:fs/promises');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-source-private-'));const secret='private-source-text-that-must-have-one-authority';const journalPath=join(dir,'space.json');let inspected=false;
  const memory={open:()=>Promise.resolve(),close:()=>Promise.resolve(),receiveSpaceSourceInput:async()=>{const admitted=await readFile(journalPath,'utf8');assert.equal(admitted.includes(secret),false);inspected=true;return {evidence_id:'evidence',retained:true}}} as unknown as PersonalMemoryResource;
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null});const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),stream:()=>Promise.resolve(),send:()=>Promise.resolve()};const space=new SpaceHost({path:journalPath,space:'s',host,transport});
  try{await host.open({deferBackground:true});await space.open();await space.receive('phone',{v:1,type:'intent',op_id:'source',kind:'source.input',created_at:Date.now(),input:{kind:'source_fact',source_id:'calendar',grant_revision:1,resource_id:'event',source_version:'v1',text:secret,relation:'self',occurred_at:'2026-10-23T00:00:00.000Z'}});assert.equal(inspected,true);assert.equal((await readFile(journalPath,'utf8')).includes(secret),false)}finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}

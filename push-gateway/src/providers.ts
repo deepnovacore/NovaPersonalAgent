@@ -1,22 +1,28 @@
+import {createHash} from 'node:crypto';
 import {connect} from 'node:http2';
 import {importPKCS8, SignJWT} from 'jose';
 export type ProviderName = 'apns' | 'fcm' | 'mipush';
 export type PushStatus = 'accepted' | 'invalid_token' | 'quota_exceeded' | 'rejected' | 'unknown';
-export interface PushMessage {token:string;handle:string;notificationId:string;ciphertext:string;environment?:'sandbox'|'production'}
+export interface PushMessage {token:string;handle:string;notificationId:string;ciphertext:string;expiresAt?:number;environment?:'sandbox'|'production'}
 export interface PushProvider {send(message:PushMessage):Promise<{status:PushStatus}>}
+const MAX_RETENTION_MS=24*60*60*1000;
+function deadline(m:PushMessage):number|undefined {const now=Date.now(),value=m.expiresAt??now+MAX_RETENTION_MS;return Number.isSafeInteger(value)&&value>now?Math.min(value,now+MAX_RETENTION_MS):undefined;}
+const collapse=(m:PushMessage)=>createHash('sha256').update(m.handle).digest('hex').slice(0,32);
 export const genericNotification = {title:'Nova',body:'Open Nova to view new updates.'} as const;
 /** Credentials live only in this process. Responses and logs never include provider bodies. */
 export class ApnsProvider implements PushProvider {
  private cached: {jwt:string;until:number}|undefined;
  constructor(private readonly config:{teamId:string;keyId:string;privateKey:string;topic:string}, private readonly transport = apnsHttp2) {}
  async send(m:PushMessage):Promise<{status:PushStatus}> {
+  const expiresAt=deadline(m);if(expiresAt===undefined)return {status:'rejected'};
   if(!this.cached || this.cached.until<Date.now()) {
    const key=await importPKCS8(this.config.privateKey,'ES256');
    this.cached={jwt:await new SignJWT({}).setProtectedHeader({alg:'ES256',kid:this.config.keyId}).setIssuer(this.config.teamId).setIssuedAt().sign(key),until:Date.now()+45*60_000};
   }
+  if(expiresAt<=Date.now())return {status:'rejected'};
   const payload={aps:{alert:genericNotification,'mutable-content':1,sound:'default'},handle:m.handle,notificationId:m.notificationId,ciphertext:m.ciphertext};
   if(Buffer.byteLength(JSON.stringify(payload))>4096) return {status:'rejected'};
-  const r=await this.transport(m.environment==='sandbox'?'https://api.sandbox.push.apple.com':'https://api.push.apple.com',`/3/device/${encodeURIComponent(m.token)}`,{'authorization':`bearer ${this.cached.jwt}`,'apns-topic':this.config.topic,'apns-push-type':'alert','apns-priority':'10','apns-expiration':'0'},JSON.stringify(payload));
+  const r=await this.transport(m.environment==='sandbox'?'https://api.sandbox.push.apple.com':'https://api.push.apple.com',`/3/device/${encodeURIComponent(m.token)}`,{'authorization':`bearer ${this.cached.jwt}`,'apns-topic':this.config.topic,'apns-push-type':'alert','apns-priority':'10','apns-expiration':String(Math.floor(expiresAt/1000)),'apns-collapse-id':collapse(m)},JSON.stringify(payload));
   if(r.status===200)return {status:'accepted'};
   if(r.status===410 || (r.status===400 && ['BadDeviceToken','DeviceTokenNotForTopic'].includes(r.reason))) return {status:'invalid_token'};
   return {status:r.status===429?'quota_exceeded':r.status>=500?'unknown':'rejected'};
@@ -39,6 +45,7 @@ export class FcmProvider implements PushProvider {
  private cached:{token:string;until:number}|undefined;
  constructor(private readonly config:{projectId:string;clientEmail:string;privateKey:string},private readonly request:typeof fetch=fetch){}
  async send(m:PushMessage):Promise<{status:PushStatus}> {
+  const expiresAt=deadline(m);if(expiresAt===undefined)return {status:'rejected'};
   if(!this.cached || this.cached.until<Date.now()) {
    const key=await importPKCS8(this.config.privateKey,'RS256');
    const assertion=await new SignJWT({scope:'https://www.googleapis.com/auth/firebase.messaging'}).setProtectedHeader({alg:'RS256'}).setIssuer(this.config.clientEmail).setSubject(this.config.clientEmail).setAudience('https://oauth2.googleapis.com/token').setIssuedAt().setExpirationTime('1h').sign(key);
@@ -48,7 +55,8 @@ export class FcmProvider implements PushProvider {
    if(!body.access_token)return {status:'rejected'};
    this.cached={token:body.access_token,until:Date.now()+Math.max(0,Math.min(body.expires_in??3600,3600)-60)*1000};
   }
-  const payload={message:{token:m.token,data:{handle:m.handle,notificationId:m.notificationId,ciphertext:m.ciphertext},android:{priority:'HIGH',ttl:'60s'}}};
+  const remaining=Math.floor((expiresAt-Date.now())/1000);if(remaining<=0)return {status:'rejected'};
+  const payload={message:{token:m.token,data:{handle:m.handle,notificationId:m.notificationId,ciphertext:m.ciphertext},android:{priority:'HIGH',ttl:`${remaining}s`,collapse_key:collapse(m)}}};
   if(Buffer.byteLength(JSON.stringify(payload))>4096)return {status:'rejected'};
   const response=await this.request(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(this.config.projectId)}/messages:send`,{method:'POST',headers:{authorization:`Bearer ${this.cached.token}`,'content-type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(10_000)});
   if(response.ok)return {status:'accepted'};
@@ -61,7 +69,9 @@ export class FcmProvider implements PushProvider {
 export class MiPushProvider implements PushProvider {
  constructor(private readonly config:{appSecret:string;packageName:string;channelId:string;origin?:'https://api.xmpush.xiaomi.com'|'https://api.xmpush.global.xiaomi.com'},private readonly request:typeof fetch=fetch){}
  async send(m:PushMessage):Promise<{status:PushStatus}> {
-  const body=new URLSearchParams({registration_id:m.token,restricted_package_name:this.config.packageName,title:genericNotification.title,description:genericNotification.body,payload:JSON.stringify({handle:m.handle,notificationId:m.notificationId}),pass_through:'0',notify_type:'-1','extra.channel_id':this.config.channelId,'extra.notify_effect':'1',time_to_live:'60000'});
+  const expiresAt=deadline(m);if(expiresAt===undefined)return {status:'rejected'};
+  const remaining=expiresAt-Date.now();if(remaining<=0)return {status:'rejected'};
+  const body=new URLSearchParams({registration_id:m.token,restricted_package_name:this.config.packageName,title:genericNotification.title,description:genericNotification.body,payload:JSON.stringify({handle:m.handle,notificationId:m.notificationId}),pass_through:'0',notify_type:'-1','extra.channel_id':this.config.channelId,'extra.notify_effect':'1',time_to_live:String(remaining),notify_id:String(parseInt(collapse(m).slice(0,7),16))});
   const response=await this.request(`${this.config.origin??'https://api.xmpush.xiaomi.com'}/v3/message/regid`,{method:'POST',headers:{authorization:`key=${this.config.appSecret}`,'content-type':'application/x-www-form-urlencoded'},body,signal:AbortSignal.timeout(10_000)});
   if(response.status>=500)return {status:'unknown'};
   if(response.status===429)return {status:'quota_exceeded'};

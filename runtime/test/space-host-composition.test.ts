@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,rm,stat} from 'node:fs/promises';
+import {realpath,mkdtemp,writeFile,rm,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {buildTextRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js';
@@ -10,7 +10,7 @@ import {scopeHostSpaceSettings,type HostSpaceConfig} from '../src/space-host/con
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js';
 
 test('Space composition retains disabled conversation capture while source input and Life use its private ledger',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'space-disabled-memory-')),configPath=join(dir,'space.json'),personalPath=join(dir,'personal.json');
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-disabled-memory-')),configPath=join(dir,'space.json'),personalPath=join(dir,'personal.json');
  const config:HostSpaceConfig={v:1,mode:'host',space:'isolated',personal_path:personalPath,relay_url:'https://relay.invalid',epoch:1,identity:{device:'host',signingPublicKey:{},signingPrivateKey:{},encryptionPublicKey:{},encryptionPrivateKey:{}},content_key:'x'.repeat(43),members:[]};
  await writeFile(configPath,JSON.stringify(config),{mode:0o600});
  const base=loadSettings({MEMORY_CONNECTION:'disabled',MEMORY_LEDGER_PATH:join(dir,'old-ledger.sqlite'),MEMORY_PATH:join(dir,'old-memory.sqlite'),PIPELINE_MODE:'cascaded',CASCADE_LLM_PROVIDER:'deepseek',DEEPSEEK_API_KEY:'fixture',MODEL_API_KEY:'fixture'},true);

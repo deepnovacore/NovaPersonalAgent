@@ -49,9 +49,9 @@ test('explicit corrections stay provider scoped and retain authenticated origin 
 });
 
 test('Host profile processing honors local explicit corrections without a Hub bridge',async()=>{
- const {mkdtemp,rm}=await import('node:fs/promises');
+ const {mkdtemp,rm,realpath}=await import('node:fs/promises');
  const {MemoryLedgerClient}=await import('../src/memory-ledger/store-client.js');const {SubstrateMemoryResource}=await import('../src/memory-substrate/resource.js');
- const root=await mkdtemp(join(tmpdir(),'space-source-profile-'));
+ const root=await mkdtemp(join(await realpath(tmpdir()),'space-source-profile-'));
  const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'fixture',model:'fixture',sourceProcessingLlm:{baseUrl:'https://model.invalid',apiKey:'fixture'},personalMemoryEnabled:false,gateway:{stream(){return {[Symbol.asyncIterator]:()=>({next:()=>Promise.reject(Error('unused'))})}},complete(request){assert.match(request.system,/I design software/);return Promise.reject(Error('fixture_stop'))}}});
  try{
   await memory.open({deferBackground:true});
