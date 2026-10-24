@@ -316,6 +316,9 @@ class _CreateSpaceState extends State<_CreateSpace> {
             ),
           TextField(
             controller: code,
+            autocorrect: false,
+            smartQuotesType: SmartQuotesType.disabled,
+            smartDashesType: SmartDashesType.disabled,
             minLines: 2,
             maxLines: 4,
             decoration: const InputDecoration(labelText: '或粘贴邀请码'),
