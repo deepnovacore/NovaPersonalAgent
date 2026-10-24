@@ -34,7 +34,7 @@ test('renderer stops the guard tone before replacement PCM and local onset', asy
   const toneStop = source.indexOf('alertTone.stop()', handler)
   const decode = source.indexOf('decodeAudioFrame', handler)
   assert.ok(handler >= 0 && toneStop > handler && decode > toneStop)
-  assert.match(source, /if \(verdict\) \{\n    alertTone\.stop\(\)\n    if \(verdict.type === 'onset'\) clearAssistantCaption\(\)\n    send\(/)
+  assert.match(source, /if \(verdict && !personalView\?\.controller\.voiceCapabilities\?\.model\.nativeFullDuplex\) \{\n    alertTone\.stop\(\)\n    if \(verdict.type === 'onset'\) clearAssistantCaption\(\)\n    send\(/)
 })
 
 test('renderer accepts the closed public Codex project message', async () => {

@@ -38,3 +38,23 @@ test('native capability probe uses the saved provider endpoint and never returns
  assert.ok(!JSON.stringify(result).includes('private-token'))
  await assert.rejects(probeNativeVoice('personaplex',settings,{},async()=>new Response(JSON.stringify({native_full_duplex:false}))),/native_service_incompatible/)
 })
+
+test('native capability probe binds its endpoint and credential to one queued settings snapshot',async()=>{
+ const {readFile}=await import('node:fs/promises')
+ const {runInNewContext}=await import('node:vm')
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const handlerSource=source.slice(source.indexOf("ipcMain.handle('nova:settings:native-voice'"),source.indexOf("ipcMain.handle('nova:settings:get'"))
+ const sender={},previous={personaplexRealtimeUrl:'wss://old.example/v1/realtime',key:'old-key'}
+ let handler,request
+ const context={settingsWindow:{webContents:sender},currentSettings:previous,secretCodec:{},
+  decryptSecretsForSpawn:settings=>({personaplexRealtimeApiKey:settings.key}),
+  accessCredentials:async operation=>{const result=operation();context.currentSettings={personaplexRealtimeUrl:'wss://new.example/v1/realtime',key:''};return result},
+  probeNativeVoice:async(provider,settings,secrets)=>{request={provider,url:settings.personaplexRealtimeUrl,key:secrets.personaplexRealtimeApiKey};return {}},
+  ipcMain:{handle(_channel,fn){handler=fn}},
+ }
+ runInNewContext(handlerSource,context)
+ await assert.rejects(handler({sender:{}},'personaplex'),/settings request rejected/)
+ assert.equal(request,undefined)
+ await handler({sender},'personaplex')
+ assert.deepEqual(request,{provider:'personaplex',url:previous.personaplexRealtimeUrl,key:'old-key'})
+})

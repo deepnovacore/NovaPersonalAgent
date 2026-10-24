@@ -25,6 +25,7 @@ import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-conf
 import {prerecallContext} from '../memory/prerecall.js'
 import {ProjectConfirmationController} from '../projects/project-confirmation.js'
 import {buildConversationVoiceProvider} from '../conversation-voice-provider.js'
+import {realtimeCapabilities} from '../realtime/capabilities.js'
 import {randomUUID} from 'node:crypto'
 import {createHash} from 'node:crypto'
 import {buildAssembly,type AssemblyOptions} from '../composition/assembly.js'
@@ -70,6 +71,9 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  createVoiceProvider?:typeof buildConversationVoiceProvider;
  host:PersonalAgentHost; memory:()=>PersonalMemoryResource|undefined
 }):ConversationRuntimeFactory {
+ const selectedVoice=options.settings.pipeline_mode==='cascaded'?'cascaded':options.settings.integrated_provider
+ const voiceCapabilities=realtimeCapabilities[selectedVoice==='minicpm-o'?'sglang-minicpm-o':selectedVoice==='personaplex'?'sglang-personaplex':selectedVoice]
+ options.host.setVoiceAnnouncementsEnabled(voiceCapabilities.protocol.conversationItems&&voiceCapabilities.protocol.clientResponses)
  // Capability preflight must not make an unconfigured desktop fail to initialize.
  try{const selected=requireSelectedCascadedLlmConfig(options.settings);options.host.setWorkbenchModel({provider:selected.provider,model:selected.config.model})}
  catch{options.host.setWorkbenchModel({provider:'',model:''})}

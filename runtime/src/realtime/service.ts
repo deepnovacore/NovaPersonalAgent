@@ -189,6 +189,7 @@ export class RealtimeService {
   }
 
   onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
+    if (this.#provider.capabilities?.protocol.conversationItems === false || this.#provider.capabilities?.protocol.clientResponses === false) return
     this.#projection.onSuggestionSelected(suggestion, reason)
   }
 

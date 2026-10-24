@@ -1787,8 +1787,10 @@ export class PersonalAgentHost {
         item.delivery.im_sent_at ??= this.#now().toISOString();
         await this.#commit(next);
     }); }
+    #voiceAnnouncementsEnabled=true;
+    setVoiceAnnouncementsEnabled(enabled:boolean):void{this.#voiceAnnouncementsEnabled=enabled}
     routePersonalSuggestion(suggestion:Suggestion,reason:WakeReason):boolean{
-        if(!this.localNotifications)return true;
+        if(!this.localNotifications||!this.#voiceAnnouncementsEnabled)return true;
         if(this.#presentationMode){
             if(this.#presentationMode!=='orb'||!this.#conversationPool)return true;
             const generation=this.#announcementGeneration,current=()=>generation===this.#announcementGeneration,pool=this.#conversationPool;

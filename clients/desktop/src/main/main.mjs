@@ -1904,8 +1904,8 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   ipcMain.handle('nova:settings:native-voice', async (event, provider) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw Error('settings request rejected')
-    const secrets=await accessCredentials(()=>decryptSecretsForSpawn(currentSettings,secretCodec))
-    return probeNativeVoice(provider,currentSettings,secrets)
+    const snapshot=await accessCredentials(()=>({settings:currentSettings,secrets:decryptSecretsForSpawn(currentSettings,secretCodec)}))
+    return probeNativeVoice(provider,snapshot.settings,snapshot.secrets)
   })
   ipcMain.handle('nova:settings:get', async event => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {

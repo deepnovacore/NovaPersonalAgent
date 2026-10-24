@@ -282,7 +282,7 @@ async function runCapabilityStatus() {
         process: {env: environment, cwd: () => root}, app: {isPackaged: false, getAppPath: () => packageRoot, getPreferredSystemLanguages: () => ['en']}, packageRoot,
         currentSettings: {capabilitiesConfigPath: path, pipelineMode: 'integrated', cascadedLlmProvider: 'qwen'}, desktopConfig: {workspace: root, modelBaseUrl: `https://127.0.0.1:${port}`}, codexStatus: {status: 'ready'},
         settingsGeneration: 9, launchGeneration: 0, runtimeCapabilities: null, backendControl: null, backend: null, backendGeneration: 0,
-        mainWindow: null, secretCodec: {}, decryptSecretsForSpawn: () => ({}), nodeRuntimeEntry: () => resolve(packageRoot, '../../runtime/dist/src/desktop-entry.js'),
+        mainWindow: null, computerOverlay: null, secretCodec: {}, decryptSecretsForSpawn: () => ({}), nodeRuntimeEntry: () => resolve(packageRoot, '../../runtime/dist/src/desktop-entry.js'),
         backendKind: 'node', smokeChannel: null, settingsApplyStatus: 'idle', backendStatus: {state: 'stopped', connection: null}, backendSupervisor: null,
         console: {error: trace}, sendToOrb: () => {},
         settingsView: () => ({runtime: context.runtimeCapabilities, backend: context.backendStatus.state}),

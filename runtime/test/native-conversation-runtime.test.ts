@@ -10,6 +10,7 @@ import {createConversation} from '../src/personal-agent/conversations.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {realtimeCapabilities} from '../src/realtime/capabilities.js'
 import type {RealtimeProvider} from '../src/realtime/protocol.js'
+import {RealtimeService} from '../src/realtime/service.js'
 
 for(const boundary of ['idle','playing','disconnect'] as const)test(`native conversation ${boundary}: capabilities, no context injection, and explicit fresh close`,{timeout:5000},async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-native-runtime-'))
@@ -32,6 +33,10 @@ for(const boundary of ['idle','playing','disconnect'] as const)test(`native conv
   const runtime=await factory(conversation,frame=>{frames.push(frame)},'voice')
   try{
    assert.deepEqual(runtime.capabilities,provider.capabilities)
+   assert.ok(runtime.bridgeService instanceof RealtimeService)
+   const suggestion=host.options.pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready'},salience:40,expires_at:1e15})
+   runtime.bridgeService.onSuggestionSelected(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id})
+   assert.deepEqual(runtime.bridgeService.queuedHostItems(),[],'an active native session never queues unsupported announcements')
    assert.ok(frames.some(frame=>frame.type==='conversation.capabilities'&&frame.conversation_id===conversation.id&&frame.conversation_generation===conversation.generation))
    release()
    if(boundary!=='idle'){
@@ -39,10 +44,27 @@ for(const boundary of ['idle','playing','disconnect'] as const)test(`native conv
     assert.ok(audioFrames>0,'actual native response reaches playback')
    }
    if(boundary==='disconnect'){
-    await assert.rejects(runtime.bridgeService!.discardInputAudio!(),/native_session_requires_restart/)
+    await assert.rejects(runtime.bridgeService.discardInputAudio(),/native_session_requires_restart/)
     assert.equal(connects,1,'disconnect must not silently open a replacement')
    }else await runtime.parkVoice?.()
    assert.ok(closes>0)
   }finally{await runtime.close()}
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+for(const provider of ['minicpm-o','personaplex'] as const)test(`${provider} orb reminders do not open a hidden voice session`,async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-native-announcement-')),pool=new SuggestionPool()
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool,evidence:()=>null})
+ let starts=0
+ try{
+  await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,pipeline_mode:'integrated',integrated_provider:provider}),createVoiceProvider:()=>{starts++;throw Error('unexpected_native_announcement')}}),()=>{ /* no renderer */ })
+  await host.command({type:'personal.command',request_id:'orb',method:'presentation.set',params:{mode:'orb'}})
+  const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready'},salience:40,expires_at:1e15})
+  host.routePersonalSuggestion(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id})
+  for(let tick=0;tick<10;tick++)await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(starts,0,'unsupported announcements must not even connect the native provider')
+  assert.equal(host.sourceProcessingForegroundBusy(),false)
+  assert.equal(host.conversationSnapshot().voice_id,null)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })

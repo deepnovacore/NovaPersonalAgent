@@ -134,7 +134,7 @@ void main() {
         'Goals': 'goal',
       }.entries) {
         await openLibrary(tester, entry.key);
-        expect(find.text('Local ${entry.value}'), findsOneWidget);
+        expect(find.text('Local ${entry.value}').hitTestable(), findsOneWidget);
         expect(identical(host.store, store), isTrue);
         await tester.pageBack();
         await tester.pump();

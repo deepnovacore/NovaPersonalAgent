@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nova_mobile/ui/components.dart';
+import 'package:nova_mobile/ui/my_overview.dart';
 import 'package:nova_mobile/ui/app.dart' show BottomAppBarTabs;
 
 Future<void> openSettingsItem(WidgetTester tester, String item) async {
@@ -34,9 +34,12 @@ Future<void> openLibrary(WidgetTester tester, String page) async {
   );
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 500));
-  await tester.tap(
-    find.widgetWithText(NovaTile, page == 'Todos' ? 'To-dos' : page),
+  final entry = find.descendant(
+    of: find.byType(MyOverview),
+    matching: find.text(page == 'Todos' ? 'To-dos' : page),
   );
+  await tester.ensureVisible(entry);
+  await tester.tap(entry);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 500));
 }

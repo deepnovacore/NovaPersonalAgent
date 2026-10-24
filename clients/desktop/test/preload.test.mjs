@@ -64,7 +64,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   const { exposed, ipcRenderer, invokes } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
-    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'hubAction', 'knowledgeAction', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'personalCommand', 'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'voicePreset', 'voiceprint',
+    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'hubAction', 'knowledgeAction', 'nativeVoiceCapabilities', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'personalCommand', 'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'voicePreset', 'voiceprint',
   ])
   assert.ok(Object.isFrozen(exposed.settings))
 
@@ -77,6 +77,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   await exposed.settings.clearCurrentManagedWorkspace()
   await exposed.settings.clearAllManagedWorkspaces()
   await exposed.settings.knowledgeAction({action: 'status'})
+  await exposed.settings.nativeVoiceCapabilities('personaplex')
   assert.deepEqual(invokes, [
     { channel: 'nova:settings:get', payload: undefined },
     { channel: 'nova:settings:set', payload: {settingsPatch: {palette: 'graphite'}} },
@@ -87,6 +88,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
     { channel: 'nova:workspaces:clear-current', payload: undefined },
     { channel: 'nova:workspaces:clear-all', payload: undefined },
     { channel: 'nova:knowledge:action', payload: {action: 'status'} },
+    { channel: 'nova:settings:native-voice', payload: 'personaplex' },
   ])
 
   const seen = []

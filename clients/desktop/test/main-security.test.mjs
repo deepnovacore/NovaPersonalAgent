@@ -79,6 +79,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:settings:changed',
     'nova:settings:feishu',
     'nova:settings:get',
+    'nova:settings:native-voice',
     'nova:settings:open',
     'nova:settings:personal',
     'nova:settings:set',

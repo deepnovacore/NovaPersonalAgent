@@ -110,7 +110,7 @@ for (const cleanupThrows of [false,true]) test(`Connect fences expired authority
   await writeFile(join(root, 'backend.mjs'), `export let connects=0, closes=0;export async function startComputerBackend(){return {pid:1,listDisplays:async()=>[{id:'1'}],connect:async()=>{connects++},close:async()=>{closes++;if(${cleanupThrows})throw Error("lost cleanup");return true},device:{size:async()=>({width:800,height:600})}}}`)
   await writeFile(join(root, 'device.mjs'), `export {connectComputerDevice,validComputerDisplayId} from ${JSON.stringify(realDevice)};export async function computerForeground(){return {target:'fixture',width:800,height:600}}`)
   const sessionUrl = new URL('../src/personal-agent/computer-use/session.js', import.meta.url)
-  const sessionSource=(await readFile(sessionUrl,'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path.endsWith('/computer-backend.js')?backendUrl:path.endsWith('/computer-device.js')?deviceUrl:new URL(path,sessionUrl).href)}`)
+  const sessionSource=(await readFile(sessionUrl,'utf8')).replace(/from ['"]([^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path.endsWith('/computer-backend.js')?backendUrl:path.endsWith('/computer-device.js')?deviceUrl:path.startsWith('.')?new URL(path,sessionUrl).href:import.meta.resolve(path))}`)
   await writeFile(join(root,'session.mjs'),sessionSource)
   const sourceUrl = new URL('../src/executors/computer.js', import.meta.url)
   const source = (await readFile(sourceUrl, 'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu, (_match, path: string) => `from ${JSON.stringify(path === '../personal-agent/computer-use/session.js' ? pathToFileURL(join(root,'session.mjs')).href : new URL(path, sourceUrl).href)}`)
@@ -158,7 +158,7 @@ test('voice executor through real shared session quarantines an uncertain write 
  const realRunner=new URL('../src/executors/gui-runner.js',import.meta.url).href
  await writeFile(join(root,'runner.mjs'),`export {validGuiConfig} from ${JSON.stringify(realRunner)};export async function runGui(instruction,device,options){await device.screenshotBase64();try{await device.actionSpace()[0].call({locate:{prompt:'fixture',center:[100,100]}})}catch(error){if(error.message!=='cleanup_unknown')throw error}return 'model_failed'}`)
  const sessionUrl=new URL('../src/personal-agent/computer-use/session.js',import.meta.url)
- await writeFile(join(root,'session.mjs'),(await readFile(sessionUrl,'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path.endsWith('/computer-backend.js')?backendUrl:path.endsWith('/computer-device.js')?deviceUrl:new URL(path,sessionUrl).href)}`))
+ await writeFile(join(root,'session.mjs'),(await readFile(sessionUrl,'utf8')).replace(/from ['"]([^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path.endsWith('/computer-backend.js')?backendUrl:path.endsWith('/computer-device.js')?deviceUrl:path.startsWith('.')?new URL(path,sessionUrl).href:import.meta.resolve(path))}`))
  const computerUrl=new URL('../src/executors/computer.js',import.meta.url)
  await writeFile(join(root,'computer.mjs'),(await readFile(computerUrl,'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path==='../personal-agent/computer-use/session.js'?pathToFileURL(join(root,'session.mjs')).href:path==='./gui-runner.js'?runnerUrl:new URL(path,computerUrl).href)}`))
  const {ComputerExecutor:SharedExecutor}=await import(pathToFileURL(join(root,'computer.mjs')).href) as {ComputerExecutor:typeof ComputerExecutor}

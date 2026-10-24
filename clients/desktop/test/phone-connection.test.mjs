@@ -115,7 +115,9 @@ test('acceptance rejects phone actions before any settings, service, or pairing 
 
 test('desktop-owned phone entry drains on parent shutdown before exiting', async () => {
   const {spawnSync} = await import('node:child_process')
-  const target = new URL('../../../runtime/dist/src/desktop/phone-desktop-entry.js', import.meta.url).href
+  const {realpath} = await import('node:fs/promises')
+  const {pathToFileURL} = await import('node:url')
+  const target = pathToFileURL(await realpath(new URL('../../../runtime/dist/src/desktop/phone-desktop-entry.js', import.meta.url))).href
   const replacement = `import {writeSync} from 'node:fs'; export async function runServerEntry({stop, onDiagnostic}) {
     onDiagnostic('[server-ready] loopback');
     await new Promise(resolve => stop.signal.addEventListener('abort', resolve, {once: true}));

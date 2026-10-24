@@ -144,7 +144,7 @@ test('queued voiceprint registration reads upload target, key and previous ID fr
     decryptSecretsForSpawn:settings=>({doubaoBigmodelApiKey:settings.key}),voiceprintHealth:async url=>{calls.push(url);return true},
     registerVoiceprint:async input=>{calls.push([input.uploadUrl,input.apiKey]);return {id:'new',name:'new-name'}},
     deleteVoiceprint:async input=>{calls.push(input.id)},applyDesktopSettings:async()=>{context.currentSettings.voiceprintId='new';return {saved:true}},
-    endVoiceprintRecording(){},ipcMain:{handle(_channel,fn){handler=fn}},
+    endVoiceprintRecording(){},ipcMain:{handle(channel,fn){if(channel==='nova:settings:voiceprint')handler=fn}},
   }
   runInNewContext(handlerSource,context)
   const result = handler({sender},{action:'register',audio:new Uint8Array()})
@@ -199,7 +199,7 @@ test('registration cleanup respects failed recovery and pending backend configur
       accessCredentials:async operation=>{credentialReads++;await Promise.resolve();if(scenario.startsWith('credential_')&&credentialReads===2)throw Error('credential unavailable');return operation()},
       registerVoiceprint:async()=>({id:'new',name:'new-name'}),
       deleteVoiceprint:async({id})=>{deleted.push(id);events.push(`delete:${id}`);if(scenario==='credential_discard_failed')throw Error('delete unavailable')},
-      endVoiceprintRecording(){},ipcMain:{handle(_channel,fn){handler=fn}},
+      endVoiceprintRecording(){},ipcMain:{handle(channel,fn){if(channel==='nova:settings:voiceprint')handler=fn}},
       applyDesktopSettings:async(payload,restart)=>applySettingsTransaction({
         coordinator:{run:async(_key,fn)=>({status:'done',value:await fn()})},patch:payload,
         write:async value=>{context.currentSettings={...context.currentSettings,...value.settingsPatch};context.settingsRecoveryAvailable=true;return context.currentSettings},
