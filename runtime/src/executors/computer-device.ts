@@ -1,3 +1,5 @@
+import type {ComputerSession} from '../personal-agent/computer-use/session.js'
+import type {ComputerObservation} from '../personal-agent/computer-use/contract.js'
 import type {ComputerConfig} from './computer-config.js'
 import type {startComputerBackend} from './computer-backend.js'
 /** Local desktop binding. No accessibility/UI control tree, only display and foreground-window metadata. */
@@ -214,4 +216,12 @@ export async function connectComputerDevice(backend: Awaited<ReturnType<typeof s
   if (size.width !== baseline.width || size.height !== baseline.height) throw Error('screen_changed')
   return guardComputerDevice(backend.device, target, {...options, displayId: config.displayId,
     maxSteps: config.maxSteps, budgetMs: config.budgetMs})
+}
+
+/** Midscene already maps screenshot centers to size() logical space; never scale them twice. */
+export function computerSessionDevice(session:Pick<ComputerSession,'observe'|'actions'|'deviceAction'>,initial:ComputerObservation):AbstractInterface{
+ let observation=initial
+ return {interfaceType:'computer',size:()=>Promise.resolve({width:observation.space.logical_width,height:observation.space.logical_height}),
+  screenshotBase64:async()=>{observation=await session.observe();return `data:${observation.image.media_type};base64,${observation.image.data_base64}`},
+  actionSpace:()=>session.actions().map(action=>({...action,call:async(params,context)=>{await session.deviceAction(observation.id,action.name,params,context)}}))}
 }

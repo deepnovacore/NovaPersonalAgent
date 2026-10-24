@@ -155,6 +155,7 @@ export class GuiExecutionLifecycle implements ExecutorAdapter {
             if (event?.phase === 'action_returned') {
               observed.last_returned_step = event.steps
               if (event.actionName !== undefined) observed.last_action = event.actionName
+              if (event.executionMode !== undefined) observed.execution_mode = event.executionMode
             }
             if (signal.aborted) return
             const summary = event?.phase === 'planning' ? '正在观察屏幕并规划下一步'
