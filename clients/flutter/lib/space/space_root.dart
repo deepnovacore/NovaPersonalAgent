@@ -449,8 +449,12 @@ class _ClientSpaceState extends State<_ClientSpace> {
     try {
       await controller!.sendChat(text);
       chat.clear();
-    } catch (_) {
-      message('Host 不在线或连接中断。请恢复连接以确认发送结果；不会自动重发。');
+    } catch (error) {
+      message(
+        error is StateError && error.message == 'chat_message_too_large'
+            ? '消息过长，请缩短内容后再发送。'
+            : 'Host 不在线或连接中断。请恢复连接以确认发送结果；不会自动重发。',
+      );
     } finally {
       if (mounted) setState(() => sending = false);
     }

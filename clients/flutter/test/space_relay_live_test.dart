@@ -204,6 +204,18 @@ void main() {
           base64UrlEncode(List.filled(32, 7)).replaceAll('=', ''),
         );
 
+        final countBeforeOversize = state.messages.length;
+        await expectLater(
+          controller.sendChat('船' * 5000),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              'chat_message_too_large',
+            ),
+          ),
+        );
+        expect(state.messages.length, countBeforeOversize);
         final turn = await controller.sendChat('Dart to Host 中文🙂');
         final previewDeadline = DateTime.now().add(const Duration(seconds: 5));
         while (state.previews[turn] == null &&

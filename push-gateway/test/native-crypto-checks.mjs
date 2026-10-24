@@ -18,4 +18,10 @@ if(compile.status!==0)process.exit(compile.status??1);
 const key=new Uint8Array(32).fill(7),plain=JSON.stringify({title:'Nova',body:'跨端 JWE contract'});
 const compact=await new CompactEncrypt(Buffer.from(plain)).setProtectedHeader({alg:'dir',enc:'A256GCM'}).encrypt(key);
 const check=spawnSync('java',['-cp',output,'com.nova.nova_mobile.NovaPushJweChecks',Buffer.from(key).toString('base64url'),compact,plain],{stdio:'inherit'});
-process.exit(check.status??1);
+if(check.status!==0)process.exit(check.status??1);
+if(process.platform==='darwin'){
+ const binary=join(output,'space-date-check');
+ const compiled=spawnSync('swiftc',['-module-cache-path',join(output,'swift-cache'),join(worktree,'clients/flutter/ios/Runner/NovaSpaceDate.swift'),join(worktree,'clients/flutter/tool/space_date_test.swift'),'-o',binary],{stdio:'inherit'});
+ if(compiled.error)throw compiled.error;if(compiled.status!==0)process.exit(compiled.status??1);
+ const dates=spawnSync(binary,[],{stdio:'inherit'});if(dates.error)throw dates.error;if(dates.status!==0)process.exit(dates.status??1);
+}

@@ -27,7 +27,7 @@ async function fixture() {
 }
 test('persistent key identity and JOSE ciphertext interoperate with jose and bind metadata',async()=>{
  const f=await fixture();try{
-  const file=join(f.dir,'identity.json');saveDeviceIdentity(file,f.host);assert.deepEqual(loadDeviceIdentity(file),f.host);assert.equal(statSync(file).mode & 0o777,0o600);
+  const file=join(f.dir,'identity.json');saveDeviceIdentity(file,f.host);assert.deepEqual(loadDeviceIdentity(file),f.host);if(process.platform!=='win32')assert.equal(statSync(file).mode & 0o777,0o600);
   const key=generateContentKey();const body=await encryptBody({private:'secret'},key);
   assert.deepEqual(await decryptBody(body,key),{private:'secret'});
   const raw=Buffer.from(body,'base64').toString('utf8');const independent=await compactDecrypt(raw,key,{keyManagementAlgorithms:['dir'],contentEncryptionAlgorithms:['A256GCM']});assert.equal(Buffer.from(independent.plaintext).toString(),'{"private":"secret"}');

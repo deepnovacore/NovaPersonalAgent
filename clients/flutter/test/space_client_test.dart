@@ -13,6 +13,20 @@ class MemorySpacePersistence implements SpacePersistence {
 
 void main() {
   test(
+    'interrupted chat displays unknown after restart without resending',
+    () async {
+      final disk = MemorySpacePersistence();
+      final state = SpaceClientState(disk);
+      await state.beginChat('interrupted', 'hello', 1);
+      final recovered = SpaceClientState(disk);
+      await recovered.open();
+      expect(recovered.chatRequests['interrupted']?['status'], 'unknown');
+      expect(recovered.messages.single['status'], 'unknown');
+      expect(recovered.pending, isEmpty);
+    },
+  );
+
+  test(
     'pending survives restart; dependency remap and conflicts retain edit',
     () async {
       final disk = MemorySpacePersistence();

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'client_state.dart';
@@ -39,7 +40,10 @@ class SpaceClientController with WidgetsBindingObserver {
     await crypto.load();
     final directory = await SpaceStorage.directory(space: space);
     final state = SpaceClientState(
-      SpaceFilePersistence(File('${directory.path}/client-v1.json')),
+      SpaceFilePersistence(
+        File('${directory.path}/client-v1.json'),
+        SpaceSecurePersistence('nova.space.client-storage-key.${space.id}'),
+      ),
     );
     await state.open();
     final controller = SpaceClientController(
@@ -266,6 +270,10 @@ class SpaceClientController with WidgetsBindingObserver {
       channel: 'stream',
       expiresAt: now + 45000,
     );
+    if (text.length > 16000 ||
+        utf8.encode(jsonEncode(envelope)).length > 64 * 1024) {
+      throw StateError('chat_message_too_large');
+    }
     await state.beginChat(id, text, now);
     try {
       await transport.send(envelope); // No durable offline queue or retry.

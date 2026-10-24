@@ -83,7 +83,7 @@ import EventKit
     let formatter = ISO8601DateFormatter()
     guard Set(args.keys).isSubset(of: ["start", "end"]),
           let startText = args["start"] as? String, let endText = args["end"] as? String,
-          let start = formatter.date(from: startText), let end = formatter.date(from: endText),
+          let start = NovaSpaceDate.parse(startText), let end = NovaSpaceDate.parse(endText),
           end > start, end.timeIntervalSince(start) <= 366 * 86400 else {
       finish(reply, error: "invalid_arguments"); return
     }
@@ -105,7 +105,7 @@ import EventKit
       finish(reply, error: "invalid_arguments"); return
     }
     let dueText = args["due"] as? String
-    let due = dueText.flatMap { ISO8601DateFormatter().date(from: $0) }
+    let due = dueText.flatMap { NovaSpaceDate.parse($0) }
     guard args["due"] == nil || args["due"] is NSNull || due != nil else { finish(reply, error: "invalid_arguments"); return }
     let alert = UIAlertController(title: "Create reminder?", message: title + (dueText.map { "\n" + $0 } ?? ""), preferredStyle: .alert)
     alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in self.finish(reply, error: "permission_denied") })

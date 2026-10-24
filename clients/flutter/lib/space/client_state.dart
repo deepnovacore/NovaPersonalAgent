@@ -60,6 +60,12 @@ class SpaceClientState extends ChangeNotifier {
           request['status'] = 'unknown';
         }
       }
+      for (final message in messages) {
+        if (message['role'] == 'user' &&
+            chatRequests[message['turn_id']]?['status'] == 'unknown') {
+          message['status'] = 'unknown';
+        }
+      }
       effects.addAll(
         (value['effects'] as Map? ?? {}).map(
           (k, v) => MapEntry(k as String, _copy(v as Map)),

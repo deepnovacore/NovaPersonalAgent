@@ -14,7 +14,8 @@ test('CLI deployment has explicit operator admission secret, private data direct
     const config=loadDeploymentConfig(path);
     assert.equal(config.bind,undefined);assert.equal(config.port,8080);
     assert.equal(config.bootstrapToken,'deployment-test-token-32-random-bytes');
-    assert.equal(statSync(join(dir,'data')).mode & 0o777,0o700);
+    // Windows reports synthetic mode bits; POSIX permission checks apply on Unix.
+    if(process.platform!=='win32')assert.equal(statSync(join(dir,'data')).mode & 0o777,0o700);
     await assert.rejects(()=>main([]),/Usage/);
     writeFileSync(path,JSON.stringify({dataDirectory:join(dir,'data'),bootstrapTokenFile:tokenPath,trustedProxyAddresses:['127.0.0.1'],maxControlOperationsPerSpace:12}));
     const proxyConfig=loadDeploymentConfig(path);assert.deepEqual(proxyConfig.trustedProxyAddresses,['127.0.0.1']);assert.equal(proxyConfig.maxControlOperationsPerSpace,12);

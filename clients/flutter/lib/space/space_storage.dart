@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -17,16 +18,43 @@ abstract interface class SpacePersistence {
 }
 
 class SpaceFilePersistence implements SpacePersistence {
-  SpaceFilePersistence(this.file);
+  SpaceFilePersistence(this.file, this.keyStorage);
   final File file;
+  final SpacePersistence keyStorage;
+  static final cipher = AesGcm.with256bits();
   @override
-  Future<String?> read() async =>
-      await file.exists() ? file.readAsString() : null;
+  Future<String?> read() async {
+    if (!await file.exists()) return null;
+    final key = await keyStorage.read();
+    if (key == null) throw StateError('missing_client_storage_key');
+    final box = SecretBox.fromConcatenation(
+      await file.readAsBytes(),
+      nonceLength: 12,
+      macLength: 16,
+    );
+    return utf8.decode(
+      await cipher.decrypt(box, secretKey: SecretKey(base64Decode(key))),
+    );
+  }
+
   @override
   Future<void> write(String value) async {
+    var encoded = await keyStorage.read();
+    if (encoded == null) {
+      // Never replace an existing encrypted store when its key is unavailable.
+      if (await file.exists()) throw StateError('missing_client_storage_key');
+      encoded = base64Encode(
+        await (await cipher.newSecretKey()).extractBytes(),
+      );
+      await keyStorage.write(encoded);
+    }
+    final box = await cipher.encrypt(
+      utf8.encode(value),
+      secretKey: SecretKey(base64Decode(encoded)),
+    );
     await file.parent.create(recursive: true);
     final temporary = File('${file.path}.writing');
-    await temporary.writeAsString(value, flush: true);
+    await temporary.writeAsBytes(box.concatenation(), flush: true);
     await temporary.rename(file.path);
   }
 }
