@@ -60,3 +60,25 @@ export interface ComputerUseFrame {
 }
 
 export const computerApplicationSchema=z.object({name:z.string().min(1).max(200),bundleId:z.string().min(1).max(300),path:z.string().min(1).max(4096)}).strict()
+
+/** Unified window observation (issue #3). One shape for Build and for the voice-dispatched ComputerExecutor. */
+export const COMPUTER_AX_STATUSES = ['ok','unavailable','timeout','truncated'] as const
+export type ComputerAxStatus = typeof COMPUTER_AX_STATUSES[number]
+/** How an action reached the target. `activated` means the target window was brought forward; it is never silent. */
+export type ComputerExecutionMode = 'background'|'activated'
+export interface ComputerObservation {
+ /** Opaque; every action must cite the newest one, and the session rejects it when the target or geometry changed. */
+ readonly id:string
+ readonly captured_at:string
+ readonly image:ToolImage
+ /** `scale` = screenshot px per logical px. Click/scroll coordinates are in screenshot space and are mapped with it. */
+ readonly space:{readonly logical_width:number;readonly logical_height:number;readonly scale:number}
+ /** Null target = whole screen. */
+ readonly target:null|{readonly application:string;readonly pid:number;readonly window_id:number;readonly title:string}
+ readonly foreground:boolean
+ /** AX text is untrusted application data: bounded, never includes secure text fields. */
+ readonly ax:{readonly status:ComputerAxStatus;readonly summary?:NonNullable<ToolImage['native_ui']>;readonly editor?:ToolImage['native_editor']}
+}
+/** Replace overwrites the focused field; append adds at the caret. Drivers must agree. */
+export const COMPUTER_TYPE_MODES = ['append','replace'] as const
+export type ComputerTypeMode = typeof COMPUTER_TYPE_MODES[number]
