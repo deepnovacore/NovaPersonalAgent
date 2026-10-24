@@ -110,8 +110,31 @@ jobs:
           path: ${{ runner.temp }}/nova-desktop-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: warn
           retention-days: 14
-      - run: npm run smoke:capability-status --workspace @nova-personal-agent/desktop
+      - name: Run macOS capability status smoke
         if: runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "nova-capability-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          npm run smoke:capability-status --workspace @nova-personal-agent/desktop 2>&1 | Tee-Object -FilePath "$evidence/capability-smoke.log"
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Set-Content "$evidence/result.txt"
+          if ($code -ne 0) {
+            $lines = @(Get-Content "$evidence/capability-smoke.log" | Select-Object -Last 30 | ForEach-Object {
+              if ($_.Length -gt 300) { $_.Substring(0, 300) } else { $_ }
+            })
+            $safe = ($lines -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=macOS capability smoke diagnostic::$safe"
+          }
+          exit $code
+      - name: Retain capability smoke evidence
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: capability-smoke-${{ runner.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nova-capability-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 14
       - run: npm run build
       - name: Accept native workbench Agent Loop in Electron
         if: runner.os == 'macOS' || runner.os == 'Windows'
