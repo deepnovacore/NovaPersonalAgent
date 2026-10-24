@@ -20,6 +20,18 @@ abstract final class Nova {
 
 const novaBackground = BoxDecoration(color: Nova.ink);
 
+// Match desktop workbench.css timeline and default brief colors.
+const novaTimelineAccent = Color(0xff087fae);
+const novaTimelineWash = Color(0xffe9f5fb);
+const novaTimelineBackground = BoxDecoration(
+  gradient: LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xffe8f0f9), Color(0xfff4f5f7), Color(0xfff7efe5)],
+    stops: [0, .42, 1],
+  ),
+);
+
 ThemeData novaTheme() {
   final scheme = ColorScheme.fromSeed(
     seedColor: Nova.mint,

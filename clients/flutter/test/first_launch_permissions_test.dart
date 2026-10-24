@@ -91,11 +91,11 @@ void main() {
           isTrue,
         );
         expect(microphoneRequests, 0);
-        await tester.tap(find.text('New chat'));
+        await tester.tap(find.text('Tasks').last);
         await tester.pumpAndSettle();
-        await tester.tap(find.byTooltip('All conversations'));
+        await tester.tap(find.text('Nova').last);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('New chat'));
+        await tester.tap(find.text('Tasks').last);
         await tester.pumpAndSettle();
         expect(calls.where((e) => e == 'preparePermissions'), hasLength(1));
         expect(

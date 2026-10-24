@@ -24,6 +24,7 @@ import '../agent_core/workspace_shell.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'conversation_home.dart';
 import 'timeline_page.dart';
+import 'my_overview.dart';
 import 'local_tasks.dart';
 import '../agent_core/model_settings.dart';
 import 'dart:async';
@@ -48,6 +49,7 @@ import '../agent_core/ios_model_client.dart';
 import '../agent_core/tool_registry.dart';
 import '../agent_core/web_fetch.dart';
 import '../conversation/local_chat_panel.dart';
+import '../conversation/local_conversation_store.dart';
 
 const ink = Nova.ink, mint = Nova.mint;
 
@@ -126,8 +128,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   final _profileChanges = ValueNotifier<int>(0);
   Future<void>? _profileOpening;
   ScheduledAgentRunner? localSchedules;
-  String? chatId;
-  bool _showHome = true, _creatingChat = false;
+  String? taskChatId;
+  bool _taskOpen = false, _creatingChat = false;
+  String? get chatId => agentCore == null
+      ? null
+      : (_tab == 1 && _taskOpen ? taskChatId : ConversationStore.mainId);
   int _modelRevision = 0;
   @override
   void initState() {
@@ -258,6 +263,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               requestDeviceTask: iosTasks != null ? null : nativeTasks.run,
             ),
           );
+      await host.store.ensureMain();
       if (!mounted) {
         if (widget.agentCore == null) host.dispose();
         return;
@@ -435,32 +441,34 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   Future<void> _newChat() async {
     final host = agentCore;
-    if (host == null || host.busy || _creatingChat) return;
+    if (host == null || _creatingChat) return;
     setState(() => _creatingChat = true);
     try {
-      await phoneVoice?.stop();
-      _phoneVoiceShown = false;
       final empty = host.store.conversations
           .where(
-            (c) => c['backend'] == 'local' && (c['messages'] as List).isEmpty,
+            (c) =>
+                c['id'] != ConversationStore.mainId &&
+                c['source_todo'] == null &&
+                c['backend'] == 'local' &&
+                (c['messages'] as List).isEmpty,
           )
           .toList();
       final id =
-          empty.where((c) => c['id'] == chatId).firstOrNull?['id'] as String? ??
+          empty.where((c) => c['id'] == taskChatId).firstOrNull?['id']
+              as String? ??
           (empty.lastOrNull?['id'] as String?) ??
           await host.store.create();
       if (mounted) {
         setState(() {
-          chatId = id;
-          _showHome = false;
+          taskChatId = id;
+          _taskOpen = true;
+          _tab = 1;
         });
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_t('无法创建对话，请重试', 'Could not create conversation')),
-          ),
+          SnackBar(content: Text(_t('无法创建任务，请重试', 'Could not create task'))),
         );
       }
     } finally {
@@ -472,24 +480,122 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     if (agentCore == null) {
       return;
     }
-    if (chatId == null) await _newChat();
     if (!mounted || chatId == null) return;
     setState(() {
       _tab = 0;
-      _showHome = false;
     });
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
-    localConversation.currentState?.prefill(text);
+    localConversation.currentState?.appendDraft(
+      text,
+      conversationId: ConversationStore.mainId,
+    );
   }
 
+  Future<void> _startTodoTask(Map<String, dynamic> todo) async {
+    final host = agentCore;
+    if (host == null || _creatingChat) return;
+    final latest = _todo(todo['id'] as String);
+    if (latest == null || ['done', 'cancelled'].contains(latest['status'])) {
+      return;
+    }
+    setState(() => _creatingChat = true);
+    try {
+      final id = await host.store.taskForTodo(latest);
+      if (!mounted) return;
+      setState(() {
+        taskChatId = id;
+        _taskOpen = true;
+        _tab = 1;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || chatId != id) return;
+      if ((host.store.conversation(id)['messages'] as List).isEmpty) {
+        localConversation.currentState?.prefillIfEmpty(
+          [
+            _t('请帮我处理这个待办：', 'Help me with this to-do: ') +
+                (latest['title'] as String),
+            if ((latest['note'] as String? ?? '').isNotEmpty)
+              latest['note'] as String,
+            if (latest['due'] != null)
+              _t('截止日期：', 'Due: ') + latest['due'].toString(),
+            _t('当前状态：', 'Status: ') + (latest['status'] as String? ?? 'open'),
+          ].join('\n'),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t('无法打开任务，请重试', 'Could not open task. Please retry.'),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _creatingChat = false);
+    }
+  }
+
+  Map<String, dynamic>? _todo(String id) =>
+      ((lifeHost.store?.snapshot?.object('life')['todos'] as List?) ?? [])
+          .whereType<Map<String, dynamic>>()
+          .where((row) => row['id'] == id)
+          .firstOrNull;
+
+  Widget? _taskContext(AgentCoreHost host) {
+    final source = host.store.conversation(chatId!)['source_todo'] as Map?;
+    if (source == null) return null;
+    final todo = _todo(source['id'] as String);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      child: Text(
+        todo == null
+            ? _t(
+                '关联待办已删除或暂不可用，保留此前对话。',
+                'Linked to-do is deleted or unavailable. Previous messages are retained.',
+              )
+            : '${_t('关联待办：', 'Linked to-do: ')}${todo['title']} · ${todo['status']}'
+                  '${todo['version'] != source['version'] ? _t(' · 待办已更新，请核对已有草稿', ' · Updated; review your draft') : ''}',
+        style: const TextStyle(fontSize: 12, color: Nova.secondary),
+      ),
+    );
+  }
+
+  Widget _myPage() => MyOverview(
+    life: lifeHost.store?.snapshot?.object('life') ?? {},
+    draft:
+        (lifeHost.store?.snapshot?.object('profile_preparation')['draft']
+                as Map?)
+            ?.cast<String, dynamic>() ??
+        {},
+    language: language,
+    onOpen: _workspace,
+    onSettings: _settings,
+    generatedProfile: feishu == null
+        ? null
+        : LocalProfileResults(
+            host: feishu!,
+            authority: lifeHost.authority,
+            kind: 'profile',
+            compact: true,
+            repository: profileAgent?.repository,
+            generation: profileGeneration,
+            revision: _profileRevision,
+            language: language,
+          ),
+  );
+
   void _openVoice() {
+    if (phoneVoice?.active == true || phoneVoice?.connecting == true) {
+      _expandPhoneVoice();
+      return;
+    }
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _phoneVoiceShown = true;
       _phoneVoiceExpanded = true;
-      _tab = 0;
-      _showHome = false;
     });
     if (phoneVoice?.active != true && phoneVoice?.connecting != true) {
       unawaited(_startPhoneVoice());
@@ -501,9 +607,12 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     setState(() {
       _phoneVoiceExpanded = true;
       _phoneVoiceShown = true;
-      _tab = 0;
-      _showHome = false;
-      chatId = phoneVoice?.conversationId ?? chatId;
+      final id = phoneVoice?.conversationId;
+      _tab = id == null || id == ConversationStore.mainId ? 0 : 1;
+      if (_tab == 1) {
+        taskChatId = id;
+        _taskOpen = true;
+      }
     });
   }
 
@@ -615,7 +724,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                             onDelegate: _delegate,
                             onOpenConversation: () {
                               Navigator.pop(context);
-                              setState(() => _showHome = false);
+                              setState(() => _tab = 0);
                             },
                           ),
                   ),
@@ -677,11 +786,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   CupertinoIcons.calendar,
                 ),
                 ('tasks', _t('执行记录', 'Activity'), CupertinoIcons.clock),
-                (
-                  'library',
-                  _t('我的资料', 'My library'),
-                  CupertinoIcons.square_stack_3d_up,
-                ),
                 (
                   'sync',
                   _t('资料同步', 'Data sync'),
@@ -789,8 +893,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             ),
           ),
         );
-      case 'library':
-        await _personal();
     }
   }
 
@@ -850,103 +952,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     }
   }
 
-  Future<void> _personal() async {
-    final page = await showModalBottomSheet<int>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      clipBehavior: Clip.antiAlias,
-      builder: (context) => FractionallySizedBox(
-        heightFactor: .82,
-        child: Scaffold(
-          backgroundColor: Nova.sheet,
-          appBar: AppBar(
-            automaticallyImplyLeading: false,
-            centerTitle: true,
-            title: Text(
-              _t('我的', 'Personal'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(_t('完成', 'Done')),
-              ),
-            ],
-          ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
-                child: Text(
-                  _t(
-                    '让 Nova 了解你，也接着做你在意的事。',
-                    'A place for what matters to you.',
-                  ),
-                  style: const TextStyle(
-                    fontSize: 14,
-                    height: 1.5,
-                    color: Nova.secondary,
-                  ),
-                ),
-              ),
-              NovaSection(
-                surface: Nova.sheetCell,
-                children: [
-                  for (final entry in [
-                    (
-                      5,
-                      _t('记忆与偏好', 'Profile'),
-                      _t(
-                        '关于你，以及你希望 Nova 记住的事',
-                        'About you and what Nova remembers',
-                      ),
-                      CupertinoIcons.person_crop_circle,
-                    ),
-                    (
-                      4,
-                      _t('目标', 'Goals'),
-                      _t('持续关注的方向', 'What you’re working towards'),
-                      CupertinoIcons.flag,
-                    ),
-                    (
-                      3,
-                      _t('想法', 'Ideas'),
-                      _t('留下灵感，之后接着聊', 'Ideas to come back to'),
-                      CupertinoIcons.lightbulb,
-                    ),
-                    (
-                      2,
-                      _t('待办', 'Todos'),
-                      _t('需要跟进的事', 'Things to follow up on'),
-                      CupertinoIcons.checkmark_circle,
-                    ),
-                    (
-                      1,
-                      _t('资讯', 'Feeds'),
-                      _t('来自你关注的信息源', 'From sources you follow'),
-                      CupertinoIcons.news,
-                    ),
-                  ])
-                    NovaTile(
-                      surface: Nova.sheetCell,
-                      leading: NovaIconTile(entry.$4),
-                      title: entry.$2,
-                      subtitle: Text(entry.$3),
-                      trailing: const CupertinoListTileChevron(),
-                      onTap: () => Navigator.pop(context, entry.$1),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (mounted && page != null) await _workspace(page);
-  }
-
   Widget _settingGroup(
     BuildContext context,
     String title,
@@ -995,16 +1000,16 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     final hasChat = host != null && chatId != null;
     final fullCall = _phoneVoiceExpanded && phoneVoice != null;
     return PopScope(
-      canPop: !fullCall && ((_tab == 0 && _showHome) || host == null),
+      canPop: !fullCall && (_tab == 0 || host == null),
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
           setState(() {
             if (fullCall) {
               _phoneVoiceExpanded = false;
-            } else if (_tab != 0) {
-              _tab = 0;
+            } else if (_tab == 1 && _taskOpen) {
+              _taskOpen = false;
             } else {
-              _showHome = true;
+              _tab = 0;
             }
           });
         }
@@ -1025,9 +1030,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   automaticallyImplyLeading: false,
                   // Back to the conversation list only inside an open chat;
                   // settings now has a single, fixed home on the right.
-                  leading: _tab == 0 && !_showHome && host != null
+                  leading: _tab == 1 && _taskOpen && host != null
                       ? IconButton(
-                          tooltip: _t('所有对话', 'All conversations'),
+                          tooltip: _t('所有任务', 'All tasks'),
                           icon: const Icon(
                             CupertinoIcons.chevron_left,
                             size: 23,
@@ -1035,7 +1040,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           onPressed: () {
                             FocusManager.instance.primaryFocus?.unfocus();
                             setState(() {
-                              _showHome = true;
+                              _taskOpen = false;
                             });
                           },
                         )
@@ -1045,9 +1050,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                         ? 'Nova'
                         : [
                             '',
+                            _t('任务', 'Tasks'),
                             _t('时间线', 'Timeline'),
-                            _t('目标', 'Goals'),
-                            _t('资讯', 'Feeds'),
+                            _t('我的', 'Me'),
                           ][_tab],
                     style: const TextStyle(
                       fontSize: 22,
@@ -1055,22 +1060,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                       letterSpacing: -.5,
                     ),
                   ),
-                  actions: [
-                    IconButton(
-                      tooltip: _t('个人资料', 'Profile'),
-                      icon: const Icon(
-                        CupertinoIcons.person_crop_circle,
-                        size: 25,
-                      ),
-                      onPressed: () => _workspace(5),
-                    ),
-                    IconButton(
-                      tooltip: _t('设置', 'Settings'),
-                      icon: const Icon(CupertinoIcons.gear, size: 25),
-                      onPressed: _settings,
-                    ),
-                    const SizedBox(width: 10),
-                  ],
                 ),
                 bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
                     ? null
@@ -1084,7 +1073,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           (
                             CupertinoIcons.chat_bubble,
                             CupertinoIcons.chat_bubble_fill,
-                            _t('对话', 'Chat'),
+                            'Nova',
+                            0,
+                          ),
+                          (
+                            CupertinoIcons.square_stack,
+                            CupertinoIcons.square_stack_fill,
+                            _t('任务', 'Tasks'),
                             0,
                           ),
                           (
@@ -1094,15 +1089,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                             0,
                           ),
                           (
-                            CupertinoIcons.flag,
-                            CupertinoIcons.flag_fill,
-                            _t('目标', 'Goals'),
-                            0,
-                          ),
-                          (
-                            CupertinoIcons.news,
-                            CupertinoIcons.news_solid,
-                            _t('资讯', 'Feeds'),
+                            CupertinoIcons.person,
+                            CupertinoIcons.person_fill,
+                            _t('我的', 'Me'),
                             0,
                           ),
                         ],
@@ -1125,25 +1114,23 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                       ),
                     Expanded(
                       child: IndexedStack(
-                        index: _tab != 0
-                            ? _tab + 1
-                            : _showHome
+                        index: host == null && _tab < 2
                             ? 0
-                            : 1,
+                            : _tab == 0
+                            ? 1
+                            : _tab == 1
+                            ? (_taskOpen ? 1 : 0)
+                            : _tab,
                         children: [
                           if (host != null)
                             ConversationHome(
                               host: host,
-                              activeConversationId: chatId,
+                              activeConversationId: taskChatId,
                               language: language,
                               onNew: _newChat,
                               onOpen: (id) => setState(() {
-                                if (id != chatId) {
-                                  unawaited(phoneVoice?.stop());
-                                  _phoneVoiceShown = false;
-                                }
-                                chatId = id;
-                                _showHome = false;
+                                taskChatId = id;
+                                _taskOpen = true;
                               }),
                             )
                           else
@@ -1175,12 +1162,19 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                               dictationAudio: audio,
                               requestMicrophone: requestMicrophone,
                               voiceSettings: voiceSettings,
-                              externalTaskBusy: voiceDelegates?.busy == true,
+                              externalTaskBusy:
+                                  voiceDelegates?.busy == true &&
+                                  phoneVoice?.conversationId == chatId,
                               onCancelExternalTask: phoneVoice?.cancelDelegate,
-                              onVoiceText: phoneVoice?.active == true
+                              onVoiceText:
+                                  phoneVoice?.active == true &&
+                                      phoneVoice?.conversationId == chatId
                                   ? phoneVoice!.submitText
                                   : null,
-                              active: _tab == 0 && !_showHome && !fullCall,
+                              active:
+                                  (_tab == 0 || (_tab == 1 && _taskOpen)) &&
+                                  !fullCall,
+                              header: _taskContext(host),
                               host: host,
                               conversationId: chatId!,
                               language: language,
@@ -1204,22 +1198,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     revision: _profileRevision,
                                   ),
                             onDiscuss: (text) => unawaited(_delegate(text)),
+                            onStartTask: (todo) =>
+                                unawaited(_startTodoTask(todo)),
                           ),
-                          WorkbenchPage(
-                            store: lifeHost.store ?? emptyStore,
-                            page: 4,
-                            language: language,
-                            showHeading: false,
-                            onSettings: _settings,
-                            onDelegate: _delegate,
-                          ),
-                          WorkbenchPage(
-                            store: lifeHost.store ?? emptyStore,
-                            page: 1,
-                            language: language,
-                            showHeading: false,
-                            onSettings: _settings,
-                          ),
+                          _myPage(),
                         ],
                       ),
                     ),

@@ -34,12 +34,19 @@ class ProfileGenerationStatus extends StatelessWidget {
         ProfileGenerationPhase.blocked =>
           code == 'profile_budget_exhausted'
               ? t('本次整理已暂停', 'Paused')
+              : code == 'profile_timeline_invalid'
+              ? t('这次近况未通过校验', 'Updates failed validation')
               : t('暂时无法继续整理', 'Updates paused'),
         ProfileGenerationPhase.ready =>
           emptyLabel ?? t('暂时没有可确认的内容', 'No confirmed updates yet'),
         _ => t('消息同步后，会自动整理到这里', 'Waiting for sync'),
       };
-      final detail = code == 'profile_budget_exhausted'
+      final detail = code == 'profile_timeline_invalid'
+          ? t(
+              '生成内容的格式或原文引用不符合要求，已停止自动重试。已有内容会保留。',
+              'Generated content failed format or source checks. Automatic retries stopped. Existing results kept.',
+            )
+          : code == 'profile_budget_exhausted'
           ? t('已达到本次费用上限，现有内容会保留。', 'Cost limit reached. Results kept.')
           : {
               'processing_not_allowed',

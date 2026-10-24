@@ -141,6 +141,47 @@ class _Fixture {
 }
 
 void main() {
+  testWidgets(
+    'compact profile uses validated saved profile, not timeline text',
+    (tester) async {
+      final f = _Fixture();
+      await f.open();
+      await f.profile.publish(
+        jsonEncode([
+          {
+            'key': 'about',
+            'kind': 'profile',
+            'text': '关注自然交互与个人工具',
+            'evidence_ids': [f.sources.messages('c').first['evidence_id']],
+          },
+        ]),
+        epoch: f.authority.epoch,
+        sourceRevision: f.sources.revision,
+        consentRevision: f.sources.processingRevision,
+        provider: 'p',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalProfileResults(
+              host: f.host,
+              authority: f.authority,
+              repository: f.profile,
+              kind: 'profile',
+              compact: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('关注自然交互与个人工具'), findsOneWidget);
+      expect(find.textContaining('Nova 整理'), findsOneWidget);
+      expect(find.text('重试'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      f.host.dispose();
+    },
+  );
+
   for (final width in [320.0, 360.0]) {
     testWidgets(
       'generated source timeline orders cards newest first and fits $width at large text',
@@ -200,14 +241,14 @@ void main() {
       f.disk.pending = Completer<String?>();
       await tester.pumpWidget(f.app());
       expect(find.text('正在加载近况…'), findsOneWidget);
-      expect(find.text('还没有飞书近况'), findsNothing);
+      expect(find.text('还没有近况'), findsNothing);
       f.disk.pending!.completeError(StateError('locked'));
       await tester.pumpAndSettle();
       expect(find.text('暂时无法加载近况'), findsOneWidget);
       f.disk.pending = null;
       await tester.tap(find.text('重试'));
       await tester.pumpAndSettle();
-      expect(find.text('还没有飞书近况'), findsOneWidget);
+      expect(find.text('还没有近况'), findsOneWidget);
       expect(find.text('暂时无法加载近况'), findsNothing);
       expect(find.text('独立的待办安排'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
@@ -235,7 +276,7 @@ void main() {
         f.disk.pending = null;
         await tester.tap(find.text('Retry'));
         await tester.pumpAndSettle();
-        expect(find.text('No Feishu updates yet'), findsOneWidget);
+        expect(find.text('No updates yet'), findsOneWidget);
         expect(
           find.text(
             'Updates appear automatically after messages sync and access is allowed.',

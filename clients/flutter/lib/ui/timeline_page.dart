@@ -64,11 +64,13 @@ class TimelinePage extends StatelessWidget {
     required this.store,
     required this.language,
     this.onDiscuss,
+    this.onStartTask,
     this.sourceTimeline,
   });
   final PersonalStore store;
   final String language;
   final ValueChanged<String>? onDiscuss;
+  final ValueChanged<Map<String, dynamic>>? onStartTask;
   final Widget? sourceTimeline;
   String t(String zh, String en) => language == 'zh' ? zh : en;
   @override
@@ -76,42 +78,45 @@ class TimelinePage extends StatelessWidget {
     listenable: store,
     builder: (context, _) {
       final groups = timelineGroups(store.snapshot?.object('life') ?? {});
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        children: [
-          ?sourceTimeline,
-          Padding(
-            padding: const EdgeInsets.only(bottom: 22),
-            child: Text(
-              t('我的安排', 'My plans'),
-              style: const TextStyle(color: Nova.secondary, fontSize: 15),
-            ),
-          ),
-          if (groups.isEmpty)
-            EmptyNote(t('还没有安排', 'No plans yet'), icon: CupertinoIcons.clock),
-          for (final group in groups) ...[
+      return DecoratedBox(
+        decoration: novaTimelineBackground,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          children: [
+            ?sourceTimeline,
             Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 10),
+              padding: const EdgeInsets.only(bottom: 22),
               child: Text(
-                switch (group['id']) {
-                  'overdue' => t('已逾期', 'Past due'),
-                  'current' => t('今天', 'Today'),
-                  'soon' => t('接下来 7 天', 'Next 7 days'),
-                  'later' => t('之后', 'Later'),
-                  'waiting' => t('等待中', 'Waiting'),
-                  'completed' => t('已完成', 'Completed'),
-                  _ => t('未定日期', 'Unscheduled'),
-                },
-                style: const TextStyle(
-                  color: Nova.secondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
+                t('我的安排', 'My plans'),
+                style: const TextStyle(color: Nova.secondary, fontSize: 15),
               ),
             ),
-            _group(context, group),
+            if (groups.isEmpty)
+              EmptyNote(t('还没有安排', 'No plans yet'), icon: CupertinoIcons.clock),
+            for (final group in groups) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 10),
+                child: Text(
+                  switch (group['id']) {
+                    'overdue' => t('已逾期', 'Past due'),
+                    'current' => t('今天', 'Today'),
+                    'soon' => t('接下来 7 天', 'Next 7 days'),
+                    'later' => t('之后', 'Later'),
+                    'waiting' => t('等待中', 'Waiting'),
+                    'completed' => t('已完成', 'Completed'),
+                    _ => t('未定日期', 'Unscheduled'),
+                  },
+                  style: const TextStyle(
+                    color: Nova.secondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              _group(context, group),
+            ],
           ],
-        ],
+        ),
       );
     },
   );
@@ -268,6 +273,17 @@ class TimelinePage extends StatelessWidget {
               row['due'] as String,
               style: const TextStyle(color: Nova.secondary, fontSize: 12),
             ),
+      trailing:
+          onStartTask != null && !['done', 'cancelled'].contains(row['status'])
+          ? IconButton(
+              tooltip: t('处理此事', 'Work on this'),
+              onPressed: () => onStartTask!(row),
+              icon: const Icon(
+                CupertinoIcons.arrow_up_right_square,
+                color: Nova.mint,
+              ),
+            )
+          : null,
       onTap: () => showModalBottomSheet<void>(
         context: context,
         useSafeArea: true,
@@ -292,6 +308,18 @@ class TimelinePage extends StatelessWidget {
                 const SizedBox(height: 12),
                 if ((row['note'] as String? ?? '').isNotEmpty)
                   SelectableText(row['note'] as String),
+                if (onStartTask != null &&
+                    !['done', 'cancelled'].contains(row['status']))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 20),
+                    child: FilledButton(
+                      onPressed: () {
+                        Navigator.pop(sheet);
+                        onStartTask!(row);
+                      },
+                      child: Text(t('处理此事', 'Work on this')),
+                    ),
+                  ),
                 if (onDiscuss != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 20),

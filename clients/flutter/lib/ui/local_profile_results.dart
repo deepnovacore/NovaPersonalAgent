@@ -21,6 +21,7 @@ class LocalProfileResults extends StatelessWidget {
     this.generation,
     this.revision = 0,
     this.excludeAbout = false,
+    this.compact = false,
     this.language = 'zh',
     this.onOpenFeishu,
     this.adoptTodo,
@@ -32,6 +33,7 @@ class LocalProfileResults extends StatelessWidget {
   final String kind;
   final int revision;
   final bool excludeAbout;
+  final bool compact;
   final String language;
   final VoidCallback? onOpenFeishu;
   String t(String zh, String en) => language == 'zh' ? zh : en;
@@ -56,6 +58,65 @@ class LocalProfileResults extends StatelessWidget {
     revision: revision,
     changes: generation,
     builder: (context, profile, value, loading, failed, retry) {
+      if (compact) {
+        final rows = (value?['entries'] as List? ?? [])
+            .whereType<Map>()
+            .where(
+              (e) =>
+                  (e['kind'] ?? 'profile') == 'profile' &&
+                  '${e['text'] ?? ''}'.trim().isNotEmpty,
+            )
+            .toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (rows.isEmpty)
+              Text(
+                t('还没有个人介绍', 'No introduction yet'),
+                style: const TextStyle(fontSize: 14, color: Nova.secondary),
+              ),
+            for (final key in ProfileCorrections.categories.keys)
+              for (final row in rows.where((e) => e['key'] == key).take(1))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        language == 'zh'
+                            ? ProfileCorrections.categories[key]!
+                            : {
+                                'about': 'About you',
+                                'work': 'Work',
+                                'interests': 'Interests',
+                              }[key]!,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: novaTimelineAccent,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        row['text'] as String,
+                        maxLines: key == 'about' ? 3 : 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14, height: 1.65),
+                      ),
+                    ],
+                  ),
+                ),
+            if (rows.isNotEmpty)
+              Text(
+                t(
+                  'Nova 整理 · 来源与修正见完整资料',
+                  'Organized by Nova · Sources and corrections in Profile',
+                ),
+                style: const TextStyle(fontSize: 11, color: Nova.secondary),
+              ),
+          ],
+        );
+      }
       if (generation != null && value == null) {
         return ProfileGenerationStatus(
           generation: generation!,
@@ -157,7 +218,7 @@ class LocalProfileResults extends StatelessWidget {
                 ListTile(
                   title: Text(
                     section == 'timeline'
-                        ? t('飞书近况', 'Feishu updates')
+                        ? t('近况', 'Updates')
                         : section == 'todo_candidate'
                         ? t('可能需要做的事', 'Suggested to-dos')
                         : t('个人信息', 'About you'),
@@ -241,7 +302,7 @@ class LocalProfileResults extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          t('飞书近况', 'Feishu updates'),
+          t('近况', 'Updates'),
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 12),
@@ -256,7 +317,7 @@ class LocalProfileResults extends StatelessWidget {
           Text(
             failed
                 ? t('暂时无法加载近况', 'Could not load updates')
-                : t('还没有飞书近况', 'No Feishu updates yet'),
+                : t('还没有近况', 'No updates yet'),
             style: const TextStyle(color: Nova.secondary, height: 1.5),
           ),
           if (failed)
@@ -296,36 +357,153 @@ class LocalProfileResults extends StatelessWidget {
         b['observed_at'] as String,
       ).compareTo(DateTime.parse(a['observed_at'] as String)),
     );
+    final days = <DateTime, List<Map>>{};
+    for (final entry in entries) {
+      final date = DateTime.parse(entry['observed_at'] as String).toLocal();
+      days
+          .putIfAbsent(DateTime(date.year, date.month, date.day), () => [])
+          .add(entry);
+    }
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            t('飞书近况', 'Feishu updates'),
+            t('近况', 'Updates'),
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 16),
-          for (final entry in entries)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: DecoratedBox(
-                key: ValueKey('timeline-card-${entry['key']}'),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Nova.separator),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 6,
-                  ),
-                  child: entry['brief'] is Map
-                      ? _briefCard(context, profile, entry, value)
-                      : _entry(context, profile, entry, 'timeline', value),
+          Stack(
+            children: [
+              Positioned(
+                left: 5,
+                top: 10,
+                bottom: 0,
+                child: Container(
+                  key: const ValueKey('brief-timeline-line'),
+                  width: 1,
+                  color: const Color(0x2e14181f),
                 ),
               ),
-            ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final day in days.entries)
+                    Stack(
+                      children: [
+                        Positioned(
+                          left: 5,
+                          top: 10,
+                          child: Container(
+                            width: 21,
+                            height: 1,
+                            color: const Color(0x2e14181f),
+                          ),
+                        ),
+                        Positioned(
+                          left: 1,
+                          top: 6,
+                          child: Container(
+                            key: ValueKey(
+                              'brief-timeline-marker-${day.key.toIso8601String()}',
+                            ),
+                            width: 9,
+                            height: 9,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: day.key == today
+                                  ? const Color(0xff2f6fde)
+                                  : const Color(0xfff4f5f7),
+                              border: Border.all(
+                                color: day.key == today
+                                    ? const Color(0xff2f6fde)
+                                    : const Color(0x2e14181f),
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 26, bottom: 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Text(
+                                  '${day.key == today ? t('今天 · ', 'Today · ') : ''}'
+                                  '${t('${day.key.year}年${day.key.month}月${day.key.day}日', '${day.key.year}-${day.key.month.toString().padLeft(2, '0')}-${day.key.day.toString().padLeft(2, '0')}')}',
+                                  key: ValueKey(
+                                    'brief-timeline-date-${day.key.toIso8601String()}',
+                                  ),
+                                  style: TextStyle(
+                                    color: Nova.text,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.6,
+                                  ),
+                                ),
+                              ),
+                              for (final entry in day.value)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 16),
+                                  child: Material(
+                                    key: ValueKey(
+                                      'timeline-card-${entry['key']}',
+                                    ),
+                                    color: Colors.white,
+                                    elevation: 2,
+                                    shadowColor: const Color(0x18203248),
+                                    borderRadius: BorderRadius.circular(20),
+                                    child: Ink(
+                                      decoration: BoxDecoration(
+                                        gradient: const LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: [
+                                            Color(0xfff3f9fd),
+                                            Colors.white,
+                                          ],
+                                          stops: [0, .65],
+                                        ),
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(color: Colors.white),
+                                      ),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 6,
+                                        ),
+                                        child: entry['brief'] is Map
+                                            ? _briefCard(
+                                                context,
+                                                profile,
+                                                entry,
+                                                value,
+                                              )
+                                            : _entry(
+                                                context,
+                                                profile,
+                                                entry,
+                                                'timeline',
+                                                value,
+                                              ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -347,81 +525,158 @@ class LocalProfileResults extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (status.isNotEmpty) ...[
-            Text(
-              status,
-              style: const TextStyle(
-                color: Nova.secondary,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
+            Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const Text(
+                  '◇',
+                  style: TextStyle(color: novaTimelineAccent, fontSize: 20),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: novaTimelineAccent.withValues(alpha: .05),
+                    border: Border.all(
+                      color: novaTimelineAccent.withValues(alpha: .15),
+                    ),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    status,
+                    style: const TextStyle(
+                      color: novaTimelineAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 12),
           ],
           Text(
             brief['title'] as String,
             style: const TextStyle(
-              fontSize: 18,
+              fontSize: 17,
               height: 1.4,
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           for (final fact in facts)
             Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.only(bottom: 8),
               child: Text(
                 fact['text'] as String,
-                style: const TextStyle(fontSize: 15, height: 1.6),
+                style: const TextStyle(
+                  fontSize: 13,
+                  height: 1.6,
+                  color: Nova.secondary,
+                ),
               ),
             ),
           if ((brief['why_now'] as String? ?? '').isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text(
-              brief['why_now'] as String,
-              style: const TextStyle(
-                fontSize: 15,
-                height: 1.6,
-                fontWeight: FontWeight.w500,
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: novaTimelineAccent.withValues(alpha: .07),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t('判断', 'Assessment'),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: novaTimelineAccent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    brief['why_now'] as String,
+                    style: const TextStyle(fontSize: 13, height: 1.6),
+                  ),
+                ],
               ),
             ),
           ],
           if (steps.isNotEmpty) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
             Text(
               t('下一步', 'Next steps'),
-              style: const TextStyle(fontSize: 13, color: Nova.secondary),
+              style: const TextStyle(fontSize: 11, color: Nova.secondary),
             ),
-            for (final step in steps) ...[
-              const SizedBox(height: 8),
-              Text(
-                step['title'] as String,
-                style: const TextStyle(
-                  fontSize: 15,
-                  height: 1.5,
-                  fontWeight: FontWeight.w600,
+            for (final (index, step) in steps.indexed)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xfff2f5f9),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      (index + 1).toString().padLeft(2, '0'),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        height: 1.8,
+                        color: novaTimelineAccent,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            step['title'] as String,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              height: 1.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            step['detail'] as String,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              height: 1.6,
+                              color: Nova.secondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                step['detail'] as String,
-                style: const TextStyle(fontSize: 14, height: 1.6),
-              ),
-            ],
           ],
           if (uncertainty.isNotEmpty) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Text(
               uncertainty,
               style: const TextStyle(
-                fontSize: 13,
+                fontSize: 12,
                 height: 1.5,
                 color: Nova.secondary,
               ),
             ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           if (!(entry['evidence_ids'] as List).every(
             ((value['available_evidence_ids'] as List?) ?? []).contains,
           ))
@@ -430,7 +685,11 @@ class LocalProfileResults extends StatelessWidget {
                 '原始来源已不可用 · 保留此前整理内容',
                 'Original source unavailable · saved result retained',
               ),
-              style: const TextStyle(color: Nova.secondary, fontSize: 12),
+              style: const TextStyle(
+                color: Nova.secondary,
+                fontSize: 11,
+                height: 1.5,
+              ),
             ),
           Text(
             t(
@@ -439,16 +698,36 @@ class LocalProfileResults extends StatelessWidget {
             ),
             style: const TextStyle(
               color: Nova.secondary,
-              fontSize: 12,
+              fontSize: 11,
               height: 1.6,
             ),
           ),
-          TextButton(
-            onPressed: () => _showSources(context, profile, entry),
-            child: Text(
-              t(
-                '查看 ${(entry['evidence_ids'] as List).length} 条原文 ›',
-                'View ${(entry['evidence_ids'] as List).length} source messages ›',
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: novaTimelineAccent,
+                backgroundColor: novaTimelineWash,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                textStyle: const TextStyle(
+                  fontFamily: 'CupertinoSystemText',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onPressed: () => _showSources(context, profile, entry),
+              child: Text(
+                t(
+                  '查看 ${(entry['evidence_ids'] as List).length} 条原文 ›',
+                  'View ${(entry['evidence_ids'] as List).length} source messages ›',
+                ),
               ),
             ),
           ),
@@ -521,7 +800,10 @@ class LocalProfileResults extends StatelessWidget {
                         '查看 ${(entry['evidence_ids'] as List).length} 条原文 ›',
                         'View ${(entry['evidence_ids'] as List).length} source messages ›',
                       ),
-                      style: const TextStyle(color: Nova.mint, fontSize: 13),
+                      style: const TextStyle(
+                        color: novaTimelineAccent,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),

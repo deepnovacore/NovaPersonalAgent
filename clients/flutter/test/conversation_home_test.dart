@@ -24,7 +24,7 @@ void main() {
       );
       await tester.pumpWidget(home());
       expect(find.text('新的对话'), findsNothing);
-      expect(find.text('想聊点什么？'), findsOneWidget);
+      expect(find.text('独立的事，在这里处理'), findsOneWidget);
       expect(store.conversations, hasLength(3));
       await store.append(first, {
         'role': 'user',
@@ -34,7 +34,7 @@ void main() {
       await tester.pump();
       expect(find.text('Synthetic first message'), findsWidgets);
       expect(find.byType(ListTile), findsOneWidget);
-      expect(find.text('想聊点什么？'), findsNothing);
+      expect(find.text('独立的事，在这里处理'), findsNothing);
       expect(store.conversations, hasLength(3));
       await tester.pumpWidget(const SizedBox());
     },

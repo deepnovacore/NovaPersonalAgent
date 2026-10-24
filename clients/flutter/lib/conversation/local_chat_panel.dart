@@ -430,7 +430,9 @@ class LocalChatPanel extends StatefulWidget {
     this.onVoiceText,
     this.externalTaskBusy = false,
     this.onCancelExternalTask,
+    this.header,
   });
+  final Widget? header;
   final AgentCoreHost host;
   final AudioOwner? audioOwner;
   final AudioPort? dictationAudio;
@@ -490,6 +492,24 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     FocusManager.instance.primaryFocus?.unfocus();
     _dictationBase = input.text;
     unawaited(dictation?.begin(widget.language));
+  }
+
+  void appendDraft(String text, {required String conversationId}) {
+    final current = conversationId == widget.conversationId;
+    final previous = current ? input.text : drafts[conversationId] ?? '';
+    final next = [
+      previous,
+      text,
+    ].where((part) => part.trim().isNotEmpty).join('\n\n');
+    if (current) {
+      prefill(next);
+    } else {
+      drafts[conversationId] = next;
+    }
+  }
+
+  void prefillIfEmpty(String text) {
+    if (input.text.isEmpty) prefill(text);
   }
 
   void prefill(String text) {
@@ -598,6 +618,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   Future<void> cancelDictation() async => dictation?.cancel();
 
   Future<void> _send() async {
+    final origin = widget.conversationId;
     if (dictation?.busy == true) return;
     if (widget.externalTaskBusy && widget.onVoiceText == null) {
       widget.onCancelExternalTask?.call();
@@ -608,7 +629,13 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       if (text.isNotEmpty) {
         try {
           await widget.onVoiceText!(text);
-          if (mounted && input.text.trim() == text) input.clear();
+          if (mounted) {
+            if (widget.conversationId == origin) {
+              if (input.text.trim() == text) input.clear();
+            } else if (drafts[origin]?.trim() == text) {
+              drafts[origin] = '';
+            }
+          }
         } catch (_) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -628,27 +655,40 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     }
     final host = widget.host;
     if (host.busy) {
-      host.cancel();
+      if (host.activeConversationId == widget.conversationId) {
+        host.cancel();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t(
+                '另一项任务正在处理，草稿已保留，请稍后发送。',
+                'Another task is running. Your draft is kept; send it when that task finishes.',
+              ),
+            ),
+          ),
+        );
+      }
       return;
     }
     final text = input.text.trim();
     if (text.isEmpty) return;
     atBottom = true;
-    final before =
-        (host.store.conversation(widget.conversationId)['messages'] as List)
-            .length;
+    final before = (host.store.conversation(origin)['messages'] as List).length;
     input.clear();
-    await host.send(widget.conversationId, text, approve: _approve);
+    await host.send(origin, text, approve: _approve);
     // Preserve a message that could not reach the conversation store.
-    final messages =
-        host.store.conversation(widget.conversationId)['messages'] as List;
+    final messages = host.store.conversation(origin)['messages'] as List;
     if (mounted &&
         host.error != null &&
-        input.text.isEmpty &&
         !messages
             .skip(before)
             .any((m) => m['role'] == 'user' && m['content'] == text)) {
-      input.text = text;
+      if (widget.conversationId == origin) {
+        if (input.text.isEmpty) input.text = text;
+      } else if ((drafts[origin] ?? '').isEmpty) {
+        drafts[origin] = text;
+      }
     }
   }
 
@@ -853,6 +893,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     listenable: widget.host,
     builder: (context, _) {
       final host = widget.host;
+      final runningHere =
+          host.busy && host.activeConversationId == widget.conversationId;
       final conversation = host.store.conversation(widget.conversationId);
       final messages = conversation['messages'] as List;
       return LayoutBuilder(
@@ -860,6 +902,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           final compact = constraints.maxHeight < 260;
           return Column(
             children: [
+              ?widget.header,
               if (!compact)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -1217,7 +1260,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                             valueListenable: input,
                             builder: (context, value, _) => IconButton.filled(
                               tooltip:
-                                  host.busy ||
+                                  runningHere ||
                                       (widget.externalTaskBusy &&
                                           widget.onVoiceText == null)
                                   ? t('停止', 'Stop')
@@ -1230,14 +1273,14 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                               ),
                               onPressed:
                                   dictation?.busy == true ||
-                                      (!host.busy &&
+                                      (!runningHere &&
                                           !(widget.externalTaskBusy &&
                                               widget.onVoiceText == null) &&
                                           value.text.trim().isEmpty)
                                   ? null
                                   : _send,
                               icon: Icon(
-                                host.busy ||
+                                runningHere ||
                                         (widget.externalTaskBusy &&
                                             widget.onVoiceText == null)
                                     ? CupertinoIcons.stop_fill
