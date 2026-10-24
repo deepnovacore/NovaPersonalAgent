@@ -663,7 +663,6 @@ function openSettingsWindow(launchId, { category } = {}) {
   })
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
-    void cancelPhonePairing()
     endVoiceprintRecording()
     settingsWindow = null
     pendingSettingsCategory = null

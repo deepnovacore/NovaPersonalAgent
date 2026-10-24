@@ -33,7 +33,7 @@ npm run test:space -- --output-root /your/build-disk --run-id your-task
 
 ## 通知与手机工具
 
-锁屏通知另需部署 [push gateway](../../push-gateway/README.md) 和厂商配置。Host 私有配置的 `push_gateway_url` 固定为所信任的 HTTPS gateway；手机直接向同一 gateway 登记令牌，只把随机句柄和受限凭据交给 Host。App 内数据补拉不依赖推送成功。小米公信使用通用文案且受配额限制。
+锁屏通知另需部署 [push gateway](../../push-gateway/README.md) 和厂商配置。Host 私有配置的 `push_gateway_url` 固定为所信任的 HTTPS gateway；手机首次启用通知时输入运营端签发的一次性邀请，兑换本安装独有的凭据，再直接向同一 gateway 登记令牌；运营端签名密钥不得编译进 App。手机只把随机句柄和受限凭据交给 Host，安装凭据不交给 Host。固定期限的句柄由 Client 在到期前轮换，详见 gateway 部署说明。App 内数据补拉不依赖推送成功。小米公信使用通用文案且受配额限制。
 
 Client 的系统工具只执行 Host 明确下发的动作，并检查前台状态、系统权限、用户确认和持久化 action-id。当前包含日历读取、相机拍摄；提醒创建限 iOS，Android 返回明确不支持。Client 不运行本地模型或自主规划循环。
 

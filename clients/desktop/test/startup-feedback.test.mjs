@@ -31,6 +31,25 @@ test('the first paint fence accepts a visible same-stage spinner and requires cr
   await assert.rejects(context.paintStartup('credentials'),error=>error.code==='startup_presentation_required')
 })
 
+test('closing settings releases recording and clears UI ownership after phone migration', () => {
+  const open = source.indexOf('function openSettingsWindow(')
+  const begin = source.indexOf("window.on('closed', () => {", open)
+  const body = source.slice(begin, source.indexOf('\n  })', begin) + 5)
+  const handlers = new Map()
+  let released = 0
+  const context = vm.createContext({
+    window: {on: (event, callback) => handlers.set(event, callback)},
+    endVoiceprintRecording: () => { released++ },
+    settingsWindow: {}, pendingSettingsCategory: 'connections',
+  })
+  vm.runInContext(body, context)
+  assert.equal(typeof handlers.get('closed'), 'function')
+  assert.doesNotThrow(() => handlers.get('closed')())
+  assert.equal(released, 1)
+  assert.equal(context.settingsWindow, null)
+  assert.equal(context.pendingSettingsCategory, null)
+})
+
 test('settings public projection never opens the keychain or capability files', () => {
   const body = source.slice(source.indexOf('function settingsView()'), source.indexOf('async function loadMemoryBoardExport()'))
   const touched = () => {throw Error('keychain/file access')}
