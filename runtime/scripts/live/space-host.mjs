@@ -1,6 +1,6 @@
 /** Explicit live acceptance: genuine production conversation factory, synthetic E2E clients. */
 import assert from 'node:assert/strict'
-import {mkdir,mkdtemp,writeFile,rm} from 'node:fs/promises'
+import {mkdir,mkdtemp,realpath,writeFile,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join,resolve} from 'node:path'
 import {pathToFileURL} from 'node:url'
@@ -12,7 +12,7 @@ const output=resolve(arg('output')??join(tmpdir(),`nova-space-live-${Date.now()}
 await mkdir(output,{recursive:true,mode:0o700})
 const load=path=>import(pathToFileURL(join(build,path)).href)
 const report={v:1,run_id:randomUUID(),synthetic:true,status:'running',started_at:new Date().toISOString(),model_owner:'Host',limits:{source_timeout_ms:600000,source_model_requests:20},checks:[],model_requests:[],usage:[]}
-const directory=await mkdtemp(join(tmpdir(),'nova-space-live-'))
+const directory=await realpath(await mkdtemp(join(tmpdir(),'nova-space-live-')))
 let host,memory,relay,phoneClient,hostClient,stopPhone,activeKey,cursor=0,stopOnPreview=true,firstPreview=false
 const nativeFetch=globalThis.fetch
 // Managed execution environments expose an outbound proxy; preserve normal TLS verification.
@@ -92,7 +92,7 @@ try{
  stopOnPreview=false;stopPhone=connect()
  await wait(()=>messages.some(message=>message.type==='chat.final'&&message.op_id===opId),'offline_durable_final')
  const final=messages.find(message=>message.type==='chat.final'&&message.op_id===opId)
- assert.match(final.text,/boat/iu);assert.ok(final.text.length>40)
+ assert.match(final.text,/boat|纸船/iu);assert.ok(final.text.length>40)
  const requestsBefore=report.model_requests.length;assert.ok(requestsBefore>0,'genuine_model_http_request_observed')
  await wait(()=>relay.live.presence({space,device:phone.device,epoch:1},identity.device),'reconnected_presence');await send();await new Promise(resolve=>setTimeout(resolve,1500))
  assert.equal(report.model_requests.length,requestsBefore,'duplicate_operation_must_not_call_provider')

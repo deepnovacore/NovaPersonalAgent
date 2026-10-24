@@ -32,7 +32,7 @@ export class Gateway {
   // A connection-lifetime SQLite owner lock is released by the OS after SIGKILL.
   // A separate lock database leaves the data WAL readable for backup/inspection.
   this.owner=new DatabaseSync(options.statePath+'.owner.sqlite');chmodSync(options.statePath+'.owner.sqlite',0o600);
-  try {this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE; CREATE TABLE IF NOT EXISTS owner(value INTEGER)');this.store=new GatewayStore(options.statePath,this.now(),this.globalLimit,this.installationLimit,this.leaseMs)}catch(error){this.owner.close();throw error}
+  try {this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE; CREATE TABLE IF NOT EXISTS owner(value INTEGER)');this.store=new GatewayStore(options.statePath,this.now(),this.globalLimit)}catch(error){this.owner.close();throw error}
  }
  private now(){return (this.options.now??Date.now)()}
  private maintain(now=this.now()){if(this.closed)throw Error('gateway_closed');if(now>=this.cleanupAt){this.store.cleanup(now);this.cleanupAt=now+60_000}}
@@ -86,7 +86,6 @@ export class Gateway {
   if(!validString(input.handle,128)||!validString(input.credential,128)||!validString(input.notificationId,128)||!/^[A-Za-z0-9_-]+$/.test(input.notificationId)||!validString(input.ciphertext,3000)||!validJwe(input.ciphertext)||(input.expiresAt!==undefined&&!Number.isSafeInteger(input.expiresAt)))throw new GatewayError(400,'invalid_push');
   const now=this.now(),registration=this.authenticate(input.handle,input.credential,now),receiptKey=hash(input.handle+'\0'+input.notificationId),digest=hash(JSON.stringify([input.ciphertext,input.expiresAt??null]));
   const receipt=this.store.receipt(receiptKey);if(receipt){if(receipt.digest!==digest)throw new GatewayError(409,'notification_conflict');return {status:receipt.status,retryable:false}}
-  if(registration.installationId.startsWith('legacy-')){const legacy=this.store.legacyReceipt(receiptKey,now);if(legacy){if(legacy.digest!==hash(input.ciphertext))throw new GatewayError(409,'notification_conflict');return {status:legacy.status,retryable:false}}}
   const expiresAt=Math.min(input.expiresAt??now+86400_000,now+86400_000);if(expiresAt<=now)return {status:'rejected',retryable:false};
   this.store.touchInstallation(registration.installationId,now);
   const day=new Date(now).toISOString().slice(0,10),installation=this.store.installation(registration.installationId)!;

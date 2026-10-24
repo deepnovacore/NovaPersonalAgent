@@ -19,7 +19,7 @@
 
 - 隔离 TypeScript 构建、runtime 全量 ESLint、整栈 **124/124**，真实 Client→Host→gateway HTTP 联验通过。
 - Flutter 全量静态分析无问题，15 个相关文件 **62/62**，含真实 Dart→Gateway 邀请兑换、响应丢失、租期轮换；独立审查另亲跑 13/13。
-- Gateway 的真实 SIGKILL/多 owner 互斥、跨 35 天回执 GC、安装预算隔离/重启、legacy JSON 迁移与 24 小时 TTL 均有回归。
+- Gateway 的真实 SIGKILL/多 owner 互斥、跨 35 天回执 GC、安装预算隔离/重启、24 小时 TTL 均有回归。
 - Android FCM/MiPush 5.1.2-C 的最终源码 APK 构建通过，各 **65/65**；未运行 App 或发送厂商推送。
 - FCM APK SHA-256：`9ed73937f8657958b4446d9b083276711ecc6cac31749fa054188573625331b4`。
 - MiPush APK SHA-256：`5b5c595c6341c817a13bbc806a5f7239393ba3a1cd44fd71dd23727c8c23e6c1`。

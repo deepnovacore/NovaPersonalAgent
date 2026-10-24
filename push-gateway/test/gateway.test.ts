@@ -1,10 +1,10 @@
 import {DatabaseSync} from 'node:sqlite';
-import {createHash,randomBytes} from 'node:crypto';
+import {randomBytes} from 'node:crypto';
 import {mintInvitation} from '../src/admission.js';
 import type {RegistrationInput} from '../src/gateway.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
@@ -170,21 +170,6 @@ test('lease GC bounds receipt history without making unknown or revoked requests
  assert.equal(calls,35);assert.equal(Number(db.prepare('SELECT count(*) AS n FROM registrations').get()!.n),1);
  gateway.unregister(old!.handle,old!.credential);assert.equal(Number(db.prepare('SELECT count(*) AS n FROM receipts').get()!.n),0);
  }finally{db.close();gateway.close();rmSync(dir,{recursive:true,force:true})}
-});
-test('legacy unknown receipts migrate transactionally and expire only with their old handle lease',async()=>{
- const dir=mkdtempSync(join(tmpdir(),'nova-legacy-receipts-'));const path=join(dir,'state.json');let now=Date.now(),sends=0;
- const hash=(s:string)=>createHash('sha256').update(s).digest('hex'),handle='h'.repeat(43),credential='c'.repeat(43),device=hash('fcm\0old-token'),key=hash(handle+'\0old');
- const legacy={version:1,mipush:{},registrations:{[handle]:{provider:'fcm',token:'old-token',credentialHash:hash(credential),device}},quota:{day:new Date(now).toISOString().slice(0,10),global:1,handles:{[handle]:1},devices:{[device]:1}},receipts:{[key]:{status:'unknown',digest:hash(jwe)}}};
- const original=JSON.stringify(legacy);writeFileSync(path,original,{mode:0o600});
- const gateway=new Gateway({statePath:path,admissionKey:'install-admission-key-at-least-32-chars',providers:{fcm:{send:async()=>{sends++;return {status:'accepted'}}}},registrationTtlMs:60_000,now:()=>now});
- const db=new DatabaseSync(path+'.sqlite',{readOnly:true});
- try{assert.equal((await gateway.push({handle,credential,notificationId:'old',ciphertext:jwe})).status,'unknown');assert.equal(sends,0);assert.equal(readFileSync(path,'utf8'),original);
- now+=60_001;await assert.rejects(gateway.push({handle,credential,notificationId:'old',ciphertext:jwe}),/unauthorized/);assert.equal(Number(db.prepare('SELECT count(*) AS n FROM legacy_receipts').get()!.n),0);
- }finally{db.close();gateway.close();rmSync(dir,{recursive:true,force:true})}
-});
-test('invalid or over-budget legacy state fails without silently discarding recovery data',()=>{
- const dir=mkdtempSync(join(tmpdir(),'nova-legacy-invalid-'));const path=join(dir,'state.json');writeFileSync(path,'{"version":1,"registrations":{}}');
- assert.throws(()=>new Gateway({statePath:path,admissionKey:'install-admission-key-at-least-32-chars',providers:{}}),/invalid_legacy_state/);assert.equal(readFileSync(path,'utf8'),'{"version":1,"registrations":{}}');rmSync(dir,{recursive:true,force:true});
 });
 test('HTTP admission limit is enforced before reading an unauthenticated enrollment body',async()=>{
  const f=fixture(),server=createServer(createGatewayServer(f.gateway,{enrollmentsPerMinute:1}));await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address();assert.ok(address&&typeof address!=='string');const url=`http://127.0.0.1:${address.port}/v1/installations`;
