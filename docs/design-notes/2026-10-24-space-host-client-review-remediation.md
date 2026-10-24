@@ -39,3 +39,5 @@ Windows 三方对照已确认本 PR 引入退出回归：基线 `5652030e` deskt
 macOS 逐文件对照中，基线和初轮修复 head 均只剩既有 `computer-use-host.test` 的 `STORE_WRITE_FAILED`，没有单文件超时。该 fixture 同样直接使用非规范 tmpdir；symlink TMPDIR 下已复现。现仅修测试 realpath，并把 cleanup 注册提前到可能失败的 open 之前，保留生产 guard。修后 2/2、目标 ESLint 与 runtime TypeScript 检查通过。桌面新增 main.mjs 通用 `no-undef` 守卫，原审阅源码准确报出悬空调用，修复版相关 97 项通过。`2fad993b` macOS 的 runtime 与 desktop 阶段均通过，完整 job 后续步骤继续核对。原 PR 的 network fixture 另存在初始化失败后的监听器泄漏：非规范路径下原测试失败后仍挂到外部 12 秒截止，提前注册所有资源清理后 860ms 正确失败退出，规范路径真实 HTTP/WS 测试通过。清理异常不会掩盖其他资源关闭。
 
 最终产品代码 `2fad993b` 的 [iOS run 40054822390](https://github.com/FishWoWater/NovaAudioAgent/actions/runs/40054822390) 通过；[完整 CI 40054822216](https://github.com/FishWoWater/NovaAudioAgent/actions/runs/40054822216) 的 Ubuntu、Windows electron 已通过。后续测试清理与 CI 诊断改动保留原命令、失败退出码和超时；失败摘要输出有界且转义的 annotations，默认仅运行 head 诊断，基线对照可按需开启。
+
+`2fad993b` macOS 完整 job 随后在 capability-status smoke 失败（runtime/desktop 已通过）。本地精确执行 smoke 抽取的真实 supervisor 回调，复现 VM 未声明 `computerOverlay` 的 ReferenceError；补齐 fixture 为 null 后，真实状态回调和相关 98/98 通过。新增检查从 fixture AST 读取其全局变量，验证真实回调没有缺失依赖。工具数量仍为四个 memory 工具加一个 MCP，未改断言或生产行为；最终 macOS CI 仍需核实。
