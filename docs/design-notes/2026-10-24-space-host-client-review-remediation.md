@@ -26,14 +26,16 @@
 
 ## 跨平台 CI 与退出回归
 
-本轮移动/协议代码 `6cda332e` 的 [iOS PR run 40053693747](https://github.com/FishWoWater/NovaAudioAgent/actions/runs/40053693747) 已通过：Xcode 16.4、iPhoneOS 18.5、Runner/NSE arm64 及真实 iSH/Alpine、Flutter 资源断言全部成功。完整 CI 的 Ubuntu/macOS space-stack（含 symlink TMPDIR）也已通过。原 PR 的 Ubuntu 404 已本地复现及修复，完整安装包 CI 仍在运行；macOS runtime 阶段 job 超时尚待对照归因。诊断矩阵分别检出基线 `5652030e`、原审阅版本 `ff378da4`、修复 head；记录逐文件进度与失败，不放宽产品退出期限。
+本轮移动/协议代码 `6cda332e` 的 [iOS PR run 40053693747](https://github.com/FishWoWater/NovaAudioAgent/actions/runs/40053693747) 已通过：Xcode 16.4、iPhoneOS 18.5、Runner/NSE arm64 及真实 iSH/Alpine、Flutter 资源断言全部成功。完整 CI 的 Ubuntu/macOS space-stack（含 symlink TMPDIR）也已通过。原 PR 的 Ubuntu 404 已本地复现及修复，Ubuntu 完整安装包 CI 已通过；macOS 原超时另做逐文件对照。诊断矩阵分别检出基线 `5652030e`、原审阅版本 `ff378da4`、修复 head；记录逐文件进度与失败，不放宽产品退出期限。
 
 原始日志下载曾在云代理 CONNECT 到 GitHub 重定向的 Azure 存储时收到 403；未绕过代理。新增诊断 workflow 输出 GitHub annotations 并始终保存证据，使失败能被定位。
 
 真机锁屏/隔夜送达、系统杀进程恢复、签名配置、最新小米 SDK 和外部密码学评审仍不在上述自动化证据中。此次未更改 Relay 其余历史容量上限，不将这份修复记录表述为无限托管容量承诺。升级 gateway 需停旧服务并备份，旧 JSON 保留，按 README 迁移；旧无期限 pending push 不会重新获得新的保留期，权威信箱数据不因此删除。
 
 
-Windows 三方对照已确认本 PR 引入退出回归：基线 `5652030e` desktop 测试通过，原 PR `ff378da4` 与初轮修复 `6cda332e` 都超时停在 `will_quit`。读码与行为测试确定设置窗口 `closed` 回调仍调用已删除的 `cancelPhonePairing()`，导致 ReferenceError 并中断后续清理。实际执行该回调的 VM 回归先红，移除这唯一悬空调用后 185 项相关桌面测试通过。未增加 20 秒退出期限；修复后的 Windows 原生 CI 仍需运行确认。
+Windows 三方对照已确认本 PR 引入退出回归：基线 `5652030e` desktop 测试通过，原 PR `ff378da4` 与初轮修复 `6cda332e` 都超时停在 `will_quit`。读码与行为测试确定设置窗口 `closed` 回调仍调用已删除的 `cancelPhonePairing()`，导致 ReferenceError 并中断后续清理。实际执行该回调的 VM 回归先红，移除这唯一悬空调用后 185 项相关桌面测试通过。未增加 20 秒退出期限；后续 `5f48ebb5` Windows desktop 仍有失败，因日志下载 403 未得到具体原因，不将其归因于同一退出问题。`2fad993b` 的 Windows 完整 electron job 已成功，包含原 20 秒 source smoke。
 
 
-macOS 逐文件对照中，基线和初轮修复 head 均只剩既有 `computer-use-host.test` 的 `STORE_WRITE_FAILED`，没有单文件超时。该 fixture 同样直接使用非规范 tmpdir；symlink TMPDIR 下已复现。现仅修测试 realpath，并把 cleanup 注册提前到可能失败的 open 之前，保留生产 guard。修后 2/2、目标 ESLint 与 runtime TypeScript 检查通过。桌面新增 main.mjs 通用 `no-undef` 守卫，原审阅源码准确报出悬空调用，修复版相关 97 项通过。原 PR 对照组和最终完整 CI 仍待汇总，不能据此宣称旧 macOS job 超时完全归因。
+macOS 逐文件对照中，基线和初轮修复 head 均只剩既有 `computer-use-host.test` 的 `STORE_WRITE_FAILED`，没有单文件超时。该 fixture 同样直接使用非规范 tmpdir；symlink TMPDIR 下已复现。现仅修测试 realpath，并把 cleanup 注册提前到可能失败的 open 之前，保留生产 guard。修后 2/2、目标 ESLint 与 runtime TypeScript 检查通过。桌面新增 main.mjs 通用 `no-undef` 守卫，原审阅源码准确报出悬空调用，修复版相关 97 项通过。`2fad993b` macOS 的 runtime 与 desktop 阶段均通过，完整 job 后续步骤继续核对。原 PR 的 network fixture 另存在初始化失败后的监听器泄漏：非规范路径下原测试失败后仍挂到外部 12 秒截止，提前注册所有资源清理后 860ms 正确失败退出，规范路径真实 HTTP/WS 测试通过。清理异常不会掩盖其他资源关闭。
+
+最终产品代码 `2fad993b` 的 [iOS run 40054822390](https://github.com/FishWoWater/NovaAudioAgent/actions/runs/40054822390) 通过；[完整 CI 40054822216](https://github.com/FishWoWater/NovaAudioAgent/actions/runs/40054822216) 的 Ubuntu、Windows electron 已通过。后续测试清理与 CI 诊断改动保留原命令、失败退出码和超时；失败摘要输出有界且转义的 annotations，默认仅运行 head 诊断，基线对照可按需开启。

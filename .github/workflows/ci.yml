@@ -82,7 +82,34 @@ jobs:
       - name: Configure Linux V8 header compatibility
         if: runner.os == 'Linux'
         run: echo "CXXFLAGS=-UV8_DEPRECATION_WARNINGS" >> "$GITHUB_ENV"
-      - run: npm run test:desktop
+      - name: Run npm run test:desktop
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "nova-desktop-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          npm run test:desktop 2>&1 | Tee-Object "$evidence/desktop-tests.log"
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Set-Content "$evidence/result.txt"
+          if ($code -ne 0 -and '${{ runner.os }}' -eq 'Windows') {
+            $match = Select-String -Path "$evidence/desktop-tests.log" -Pattern 'source_startup_smoke_(timeout|failed)[^\r\n]*' | Select-Object -Last 1
+            $detail = if ($match) { $match.Matches[0].Value } else {
+              $failures = @(Select-String -Path "$evidence/desktop-tests.log" -Pattern @('not ok\b', '^\s*[✖✗×]\s', '^\s*(?:[A-Za-z]*Error(?:\s+\[[A-Z0-9_]+\])?:|error:)', 'error TS[0-9]+:', '^\s*npm (?:ERR!|error)\b') | Select-Object -First 12 | ForEach-Object {
+                if ($_.Line.Length -gt 300) { $_.Line.Substring(0, 300) } else { $_.Line }
+              })
+              if ($failures.Count -gt 0) { $failures -join "`n" } else { 'Desktop command failed without matching error lines; inspect retained artifact.' }
+            }
+            $safe = $detail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows desktop diagnostic::$safe"
+          }
+          exit $code
+      - name: Retain desktop test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-tests-${{ runner.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nova-desktop-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 14
       - run: npm run smoke:capability-status --workspace @nova-personal-agent/desktop
         if: runner.os == 'macOS'
       - run: npm run build

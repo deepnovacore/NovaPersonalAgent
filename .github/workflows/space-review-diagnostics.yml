@@ -4,6 +4,12 @@ on:
   push:
     paths: ['.github/workflows/space-review-diagnostics.yml']
   workflow_dispatch:
+    inputs:
+      include_baselines:
+        description: 'Also rerun the already-public baseline and original reviewed revision'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -15,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-        revision: [baseline, reviewed, head]
+        revision: ${{ fromJSON(inputs.include_baselines && '["baseline","reviewed","head"]' || '["head"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
@@ -24,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Both revisions are already public. Never push a recovery/baseline ref.
+          # All comparison revisions are already public. Never push a recovery/baseline ref.
           ref: ${{ matrix.revision == 'baseline' && '5652030ed755512e7d464866205b9229f27f2bab' || matrix.revision == 'reviewed' && 'ff378da412a0240455cb1c98d92a98a88e0aca79' || github.sha }}
           path: checkout
       - uses: actions/setup-node@v4
@@ -78,7 +84,12 @@ jobs:
           "exit_code=$code" | Set-Content "$env:NOVA_DIAG_ROOT/evidence/desktop-result.txt"
           if ($code -ne 0) {
             $match = Select-String -Path "$env:NOVA_DIAG_ROOT/evidence/desktop-and-source-smoke.log" -Pattern 'source_startup_smoke_(timeout|failed)[^\r\n]*' | Select-Object -Last 1
-            $detail = if ($match) { $match.Matches[0].Value } else { 'Desktop command failed before a source-smoke diagnostic; inspect artifact.' }
+            $detail = if ($match) { $match.Matches[0].Value } else {
+              $failures = @(Select-String -Path "$env:NOVA_DIAG_ROOT/evidence/desktop-and-source-smoke.log" -Pattern @('not ok\b', '^\s*[✖✗×]\s', '^\s*(?:[A-Za-z]*Error(?:\s+\[[A-Z0-9_]+\])?:|error:)', 'error TS[0-9]+:', '^\s*npm (?:ERR!|error)\b') | Select-Object -First 12 | ForEach-Object {
+                if ($_.Line.Length -gt 300) { $_.Line.Substring(0, 300) } else { $_.Line }
+              })
+              if ($failures.Count -gt 0) { $failures -join "`n" } else { 'Desktop command failed without matching error lines; inspect retained artifact.' }
+            }
             $safe = $detail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Output "::error title=Windows ${{ matrix.revision }} diagnostic::$safe"
           }
