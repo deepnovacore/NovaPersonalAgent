@@ -46,13 +46,21 @@ These are yours to edit directly, but Nova also proposes changes. When something
 
 Suggestion cards, drawn from the sources you've connected, offer to adopt something as an Idea or a Goal, continue talking about it in chat, or dismiss it.
 
-Goal progress counts the Todos linked to it and excludes any that were cancelled; whether a Goal is actually done is always your call, never inferred automatically.
+Goal task progress counts the Todos linked to it and excludes any that were cancelled; whether a Goal is actually done is always your call, never inferred automatically.
+
+Nova can propose long-term goals from recent conversations, creating them only when you accept. Choose daily check-ins, progress-based follow-ups or no reminders. Use a check-in’s reply action before answering to update the goal’s derived progress summary; pausing a goal stops its check-ins. Proactive messages default to five per day, adjustable in Settings → General → Proactivity.
 
 Direct @mentions of you in the Feishu chats you selected feed the Timeline briefing once you have given both Feishu consents; they are not recorded as Todos. See [Sources and connectors](sources-and-connectors.md#feishu).
 
 ## Daily briefs
 
-Optional morning and evening briefs summarize your Todos, calendar events and direct Feishu mentions as proactive reminders. Both are off by default. Turn them on in Settings → Connections & permissions → Daily briefs, where you can also set the times (08:30 and 18:30 by default), the repeat days (weekdays by default), the time zone and quiet hours (22:00 to 08:00 by default); no reminders are sent during quiet hours.
+Optional morning and evening briefs summarize your Todos, calendar events and direct Feishu mentions as proactive reminders. Both are off by default. Turn them on in Settings → General → Proactivity → Daily briefs, where you can also set the times (08:30 and 18:30 by default), the repeat days (weekdays by default), the time zone and quiet hours (22:00 to 08:00 by default); no reminders are sent during quiet hours.
+
+## Daily diary
+
+The diary under Profile summarizes memories changed yesterday that are authorized for model processing. It is enabled by default and has an independent switch in Proactivity settings. Days without eligible memories are skipped, and older dates are not backfilled. Entries retain memory references and can be expanded or deleted; they never enter retrieval or subsequent model context. Deleting a diary leaves its source memories intact and prevents that day from being regenerated.
+
+Opening a conversation from a card supplies its references to ordinary chat. Conversations with references do not automatically enter Plan; Build still requires a plan and separate authorization.
 
 ## Feeds
 

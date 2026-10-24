@@ -1,3 +1,4 @@
+import {renderDiarySection} from './diary-view.mjs'
 import {memoryOverview} from './memory-overview.mjs'
 /** The memory section under Profile: host-generated overview first, editable records behind a disclosure. */
 export function renderMemorySection(parent,{snapshot:s,caps,el,button,chips,command,continueChat,connected,bindPending,local={}}){
@@ -48,5 +49,6 @@ export function renderMemorySection(parent,{snapshot:s,caps,el,button,chips,comm
   if(s?.memory?.cursor)button('下一页',()=>command('memory.list',{cursor:s.memory.cursor,limit:50,include_expired:includeExpired}),pager,'memory:list')
   button('返回第一页',()=>command('memory.list',{limit:50,include_expired:includeExpired}),pager,'memory:list')
  }
+ renderDiarySection(section,{memory:s?.memory,caps,el,button,command,connected})
  return section
 }

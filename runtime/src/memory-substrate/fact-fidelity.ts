@@ -13,9 +13,8 @@ const pad=(value:string):string=>value.padStart(2,'0')
 const FULL_DATE=/(?<![\d.])(\d{4})(?:[-/](\d{1,2})[-/](\d{1,2})|\s{0,2}年\s{0,2}(\d{1,2})\s{0,2}月\s{0,2}(\d{1,2})(?:\s{0,2}[日号])?)(?!\d)/gu
 const SHORT_DATE=/(?<![\d年])(\d{1,2})\s{0,2}月\s{0,2}(\d{1,2})\s{0,2}[日号]/gu
 const NUMBER_TEXT=String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?`
-const UNITS=String.raw`%|元|块|万|千|小时|分钟|天|周|月(?!份)|年|公里|次|yuan|usd|rmb|dollars?|kg|km`
-const MEASURED=new RegExp(String.raw`(?<![A-Za-z0-9_.,])(?:([¥$])\s?(${NUMBER_TEXT})|(${NUMBER_TEXT})\s?(?:${UNITS})(?![a-z]))`,'giu')
-const NUMBER=/(?<![A-Za-z0-9_.,])(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/gu
+const UNITS=String.raw`(?:万|千)?(?:元|块|yuan|rmb)|美元|usd|dollars?|小时|分钟|天|周|月(?!份)|年|公里|次|kg|km|%`
+const MEASURED=new RegExp(String.raw`(?<![A-Za-z0-9_.,])(?:([¥$])\s?(${NUMBER_TEXT})([万千])?|(${NUMBER_TEXT})\s?(${UNITS})(?![a-z]))`,'giu')
 
 function normalizeNumber(raw:string):string{
  const [integer='0',fraction='']=raw.replaceAll(',','').split('.')
@@ -32,9 +31,24 @@ function extractDates(text:string):{dates:Dates;rest:string}{
  rest=rest.replace(SHORT_DATE,(_,m:string,d:string)=>{const key=`${pad(m)}-${pad(d)}`;dates.monthDay.add(key);dates.shortOnly.add(key);return ' '})
  return {dates,rest}
 }
-function numbersOf(text:string):Set<string>{return new Set([...text.matchAll(NUMBER)].map(match=>normalizeNumber(match[0])))}
-/** Numbers directly attached to a currency symbol, percent sign or unit word. */
-function measuredNumbers(text:string):Set<string>{return new Set([...text.matchAll(MEASURED)].map(match=>normalizeNumber(match[2]??match[3]!)))}
+/** Decimal multiplication stays exact, including fractional minutes and currency magnitudes. */
+function scaled(raw:string,factor:number):string{
+ const [whole,fraction='']=normalizeNumber(raw).split('.')
+ const digits=(BigInt(whole!+fraction)*BigInt(factor)).toString().padStart(fraction.length+1,'0')
+ return normalizeNumber(fraction.length?digits.slice(0,-fraction.length)+'.'+digits.slice(-fraction.length):digits)
+}
+function measuredNumbers(text:string):Set<string>{
+ const result=new Set<string>()
+ for(const match of text.matchAll(MEASURED)){
+  const unit=(match[1]??match[5]!).toLowerCase(),raw=match[2]??match[4]!
+  const currency=/^(?:[万千])?(?:元|块|yuan|rmb)$|^¥$/u.test(unit)
+  const minutes:Record<string,number>={'分钟':1,'小时':60,'天':1440,'周':10080}
+  const family=currency?'cny':/^(?:\$|美元|usd|dollars?)$/u.test(unit)?'usd':minutes[unit]?'duration':unit
+  const factor=match[3]?(match[3]==='万'?10000:1000):currency?(unit.startsWith('万')?10000:unit.startsWith('千')?1000:1):minutes[unit]??1
+  result.add(family+':'+scaled(raw,factor))
+ }
+ return result
+}
 
 export function checkFactFidelity(generated:string,sources:readonly string[]):FactFidelityResult{
  if(!generated.trim()||!sources.some(source=>source.trim()))return {ok:true}
@@ -45,7 +59,7 @@ export function checkFactFidelity(generated:string,sources:readonly string[]):Fa
  for(const date of generatedDates.full)if(!sourceDates.full.has(date)&&!sourceDates.shortOnly.has(date.slice(5)))return {ok:false,reason:'date_not_in_sources',detail:date}
  for(const key of generatedDates.monthDay)if(!sourceDates.monthDay.has(key))return {ok:false,reason:'date_not_in_sources',detail:key}
  const sourceNumbers=new Set<string>()
- for(const source of origin)for(const value of numbersOf(source))sourceNumbers.add(value)
+ for(const source of origin)for(const value of measuredNumbers(extractDates(source).rest))sourceNumbers.add(value)
  for(const value of measuredNumbers(rest))if(!sourceNumbers.has(value))return {ok:false,reason:'number_not_in_sources',detail:value}
  return {ok:true}
 }

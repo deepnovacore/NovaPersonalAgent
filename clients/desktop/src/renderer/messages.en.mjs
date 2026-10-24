@@ -1,4 +1,13 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "每日日记": "Daily diary",
+  "根据昨天经授权的记忆写日记，只供你浏览，不作为模型记忆。": "Write a diary from yesterday’s authorized memories, for your reading only.",
+  "写每日日记": "Write a daily diary",
+  "由模型整理，可能不完整；不会作为新的事实输入模型。": "Written by the model and may be incomplete. It is not fed back as new facts.",
+  "暂无日记。有昨天的授权记忆时会自动生成。": "No diary yet. One will be generated when authorized memories from yesterday are available.",
+  "删除日记": "Delete diary",
+  "更早的日记": "Older diaries",
+  "最新日记": "Latest diaries",
+
   "模型返回的工具参数不是有效 JSON，请重试。": "The model returned invalid JSON tool arguments. Please retry.",
   "模型返回了重复或无效的工具调用标识，请重试。": "The model returned duplicate or invalid tool call IDs. Please retry.",
   "单次回复的工具调用数量超出限制，请重试。": "The response exceeded the tool call limit. Please retry.",

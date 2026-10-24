@@ -85,3 +85,8 @@ test('the discovery switch says it also covers goal proposals and goal check-ins
  const h=harness();await h.panel.load()
  assert.ok(all(h.root).some(n=>n.textContent==='有依据才提出建议；也包括提议目标和按节奏问候目标进展。关闭后这些都会停止，仍可主动交办任务。'))
 })
+
+test('daily diary defaults on and saves its independent switch',async()=>{
+ const h=harness();await h.panel.load();const box=all(h.root).find(n=>n['aria-label']==='写每日日记');assert.ok(box);assert.equal(box.checked,true)
+ box.checked=false;box.listeners.change();await h.tick();assert.deepEqual(h.calls[1],['discovery.configure',{diary_enabled:false}])
+})

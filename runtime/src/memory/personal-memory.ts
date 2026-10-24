@@ -1,3 +1,4 @@
+import type {DiaryEntry} from '../memory-substrate/diary.js'
 import type {TimelineInput} from '../personal-agent/timeline-brief.js'
 import type {ExplicitMemoryTurn,ExplicitMemoryArguments,ExplicitMemoryLookup,ExplicitMemoryReceipt,ExplicitMemoryPage} from './explicit-memory.js'
 import type {UnderstandingProducts,ProductGenerationContext} from '../personal-agent/understanding-products.js'
@@ -140,6 +141,8 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   /** Explicit local-user erasure only; never expose this operation as a model tool. */
   /** Role text the user wrote for the agent; the card reads it regardless of model-provider authorization. */
   readonly soulState?: ()=>Promise<{role:string;version:number;updated_at:string|null;reply_style:string|null}>
+  readonly configureDiary?: (settings:{enabled:boolean;timezone:string})=>void
+  readonly diaries?: (before?:string)=>Promise<DiaryEntry[]>
   readonly setSoul?: (role:string,expectedVersion:number|undefined,requestId:string)=>Promise<{role:string;version:number;updated_at:string|null;reply_style:string|null}>
   readonly purgeEntry?: (id:string,version:MemoryVersion,requestId:string)=>Promise<PersonalMemoryPurgeResult>
   readonly completePurgeIndex?: (id:string,operationId:string)=>Promise<PersonalMemoryPurgeResult>

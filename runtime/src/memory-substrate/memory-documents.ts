@@ -20,7 +20,7 @@ export function memoryDocumentPath(row:EntryRevision):string{
 function latest(revisions:readonly EntryRevision[]):EntryRevision[]{
  const rows=new Map<string,EntryRevision>()
  for(const row of revisions)if(!rows.has(row.entry_id)||rows.get(row.entry_id)!.revision<row.revision)rows.set(row.entry_id,row)
- return [...rows.values()].filter(row=>row.op!=='tombstone'&&row.kind!=='memory_summary').sort((a,b)=>a.entry_id.localeCompare(b.entry_id))
+ return [...rows.values()].filter(row=>row.op!=='tombstone'&&row.kind!=='memory_summary'&&row.kind!=='diary').sort((a,b)=>a.entry_id.localeCompare(b.entry_id))
 }
 function heading(path:string):string{if(path==='SOUL.md')return '# Soul\n\n<!-- 角色设定请先在应用「我的样子」里保存一次，之后可在下面直接修改正文；名字、说话方式、联系方式在应用里设置。 -->\n\n';return path==='USER.md'?'# User\n\nStable user information. Edit record bodies; keep identity and source markers intact.\n\n':'# Memory document\n\nEdit record bodies; status and links are maintained through Nova.\n\n'}
 function parts(row:EntryRevision):{before:string;text:string;after:string}{

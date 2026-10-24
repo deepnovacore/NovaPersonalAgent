@@ -82,7 +82,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
-    createProactivityPanel: () => ({load: () => Promise.resolve(), setMemory() {}}),
+    createProactivityPanel: ({rankFallback}) => {assert.equal(rankFallback(),null,'initial render precedes settings load');return {load: () => Promise.resolve(), setMemory() {}}},
     memoryEmbeddingNote,
     createKnowledgePanel: () => ({render() {}}),
     createVoiceprintPanel: () => ({render() {}}),

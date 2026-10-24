@@ -272,7 +272,7 @@ class Session implements CascadedLlmSession {
   }
   /** Reads at most a small error body for an allowlisted account code, then the status. */
   async #accountFailure(response: Response, active: Active): Promise<'auth' | 'quota' | 'rate_limited' | null> {
-    const reader = response.body?.getReader() ?? null
+    const reader: ReadableStreamDefaultReader<Uint8Array> | null = response.body?.getReader() ?? null
     let code: unknown, timer: ReturnType<typeof setTimeout> | undefined
     // One absolute budget for the whole body: a per-read idle timeout would let a trickling body hold the turn.
     const expired = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('error body deadline')), ERROR_BODY_DEADLINE_MS) })

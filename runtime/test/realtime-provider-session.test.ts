@@ -642,7 +642,7 @@ test('a cancelled memory replacement is retried before the next input instead of
  const provider=Object.assign(new FakeProvider(),{submitText:()=>{order.push('input');return Promise.resolve()}})
  let hold:{resolve:()=>void}|undefined
  const replace=provider.replaceResponseAdaptation.bind(provider)
- provider.replaceResponseAdaptation=(context,signal)=>{order.push(`memory:${context.content}`);if(context.content===null&&hold===undefined)return new Promise<void>((_resolve,reject)=>{hold={resolve:()=>undefined};signal.addEventListener('abort',()=>reject(signal.reason),{once:true})});return replace(context,signal)}
+ provider.replaceResponseAdaptation=(context,signal)=>{order.push(`memory:${context.content}`);if(context.content===null&&hold===undefined)return new Promise<void>((_resolve,reject)=>{hold={resolve:()=>undefined};signal.addEventListener('abort',()=>reject(signal.reason instanceof Error?signal.reason:Error('aborted')),{once:true})});return replace(context,signal)}
  const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,responseAdaptation:()=>({revision:content===null?2:1,content})})
  await session.connect();content=null
  const cancelled=new AbortController(),first=session.submitText('first',cancelled.signal)

@@ -1,3 +1,4 @@
+import type {CascadedLlmSession} from '../src/realtime/cascaded/llm.js'
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,mkdir,rm,realpath,symlink} from 'node:fs/promises'
@@ -125,7 +126,7 @@ test('start without a conversation runtime fails before creating anything',async
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
-test('explicit plan mode opens a Plan conversation for the local workbench only',async()=>{
+test('explicit plan with references stays in chat and retains the local workbench guard',async()=>{
  const f=await fixture()
  try{
   const item=await f.todo(),params={title:'Plan it',text:'Plan',references:[{kind:'todo',id:item.id,version:item.version}],mode:'plan'}
@@ -134,13 +135,13 @@ test('explicit plan mode opens a Plan conversation for the local workbench only'
   assert.deepEqual(f.ids(),['chat:main'])
   await f.workbench()
   const planned=await f.start(params,undefined,local);assert.equal(planned.ok,true,planned.error)
-  assert.equal(f.host.conversationSnapshot().items.find(value=>value.id===planned.data!.conversation_id)!.mode,'plan')
+  assert.equal(f.host.conversationSnapshot().items.find(value=>value.id===planned.data!.conversation_id)!.mode,'chat')
   const chat=await f.start({...params,mode:'chat'},undefined,local);assert.equal(chat.ok,true)
   assert.equal(f.host.conversationSnapshot().items.find(value=>value.id===chat.data!.conversation_id)!.mode,'chat')
  }finally{await f.close()}
 })
 
-test('a card whose source root is a registered coding project opens in Plan after realpath normalization',async()=>{
+test('a card with prepared references stays in chat even when its project matches',async()=>{
  const f=await fixture()
  try{
   // Probe: the source root and the registered directory can be different spellings of one directory.
@@ -158,7 +159,7 @@ test('a card whose source root is a registered coding project opens in Plan afte
   const unavailable=await f.start(params,undefined,local);assert.equal(unavailable.ok,true,unavailable.error);assert.equal(modeOf(unavailable),'chat')
   // Directory registered under the real spelling matches the symlinked root.
   setTargets(()=>Promise.resolve([target(real)]))
-  const matched=await f.start(params,undefined,local);assert.equal(matched.ok,true,matched.error);assert.equal(modeOf(matched),'plan')
+  const matched=await f.start(params,undefined,local);assert.equal(matched.ok,true,matched.error);assert.equal(modeOf(matched),'chat')
   await f.host.waitConversation(matched.data!.conversation_id)
   assert.match(f.host.conversationSnapshot().messages[0]!.text,/\[project: Demo App\]/u)
   // A different directory, an unreadable one and a failing port all stay chat.
@@ -176,5 +177,27 @@ test('a card whose source root is a registered coding project opens in Plan afte
   const remote=await f.start(params,undefined,{client_id:'remote:test'});assert.equal(remote.ok,true);assert.equal(modeOf(remote),'chat')
   // A todo-only reference has no project to match.
   const item=await f.todo();const todoStart=await f.start({title:'T',text:'T',references:[{kind:'todo',id:item.id,version:item.version}]},undefined,local);assert.equal(modeOf(todoStart),'chat')
+ }finally{await f.close()}
+})
+
+test('a referenced Plan request reaches the real chat adapter with card facts and an untrusted envelope',async()=>{
+ const {conversationRuntimeFactory}=await import('../src/personal-agent/conversation-runtime.js')
+ const {settingsSchema}=await import('../src/config/config.js'),{VirtualClock}=await import('../src/core/clock.js')
+ const {buildCascadedTextProvider}=await import('../src/cascaded-text-provider.js'),{cascadedProviderRegistries}=await import('../src/composition/cascaded-realtime-assembly.js')
+ const f=await fixture(),requests:string[]=[]
+ const llm:CascadedLlmSession={
+  async *stream(input){requests.push(JSON.stringify(input.inputs));await Promise.resolve();yield {kind:'response_started',response_id:'r'};yield {kind:'text_delta',text:'Draft ready'};yield {kind:'response_completed',response_id:'r'}},
+  restoreHistory:()=>Promise.resolve(),abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()
+ }
+ try{
+  f.host.setConversationRuntime(conversationRuntimeFactory({host:f.host,clock:new VirtualClock(),memory:()=>undefined,
+   settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),
+   searchTransport:{search:()=>Promise.reject(Error('unexpected search'))},gateway:{complete:()=>Promise.reject(Error('unexpected model')),async *stream(){await Promise.resolve();throw Error('unused')}},
+   createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>llm})}})
+  }),()=>undefined)
+  await f.workbench();const card=await f.todo('The release checklist is still open')
+  const started=await f.start({title:'Draft',text:'Write the draft from the reference',mode:'plan',references:[{kind:'todo',id:card.id,version:card.version}]},undefined,local)
+  assert.equal(started.ok,true,started.error);await f.host.waitConversation(started.data!.conversation_id)
+  assert.ok(requests.length,JSON.stringify(f.host.conversationSnapshot().messages));assert.match(requests.join('\n'),/release checklist is still open/);assert.match(requests.join('\n'),/untrusted_external/)
  }finally{await f.close()}
 })

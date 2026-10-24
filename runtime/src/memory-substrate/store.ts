@@ -1,3 +1,4 @@
+import {diaryContentSchema} from './diary.js'
 import {initializeExplicitMemory,explicitMemoryOperation} from './explicit-memory.js'
 import {imMetadataSchema} from '../memory/provenance.js'
 import {searchSourceEvidence} from './source-retrieval.js'
@@ -33,7 +34,7 @@ export type EvidenceRecord = z.infer<typeof EvidenceRecordSchema>
 export const timelineEvidenceVersion=(record:EvidenceRecord,stamp:unknown):string=>sha256(canonicalJson({hash:record.hash,metadata:record.source_metadata??null,stamp}))
 export const CandidateSchema = z.object({
   entry_id:id, expected_revision:z.number().int().nonnegative().optional(),
-  kind:z.enum(['fact','preference','plan','concern','commitment','entity','topic','LogicalWorkspace','WorkspaceInstance','RelationCard','todo','idea','goal','profile','memory_summary','soul']),
+  kind:z.enum(['fact','preference','plan','concern','commitment','entity','topic','LogicalWorkspace','WorkspaceInstance','RelationCard','todo','idea','goal','profile','memory_summary','soul','diary']),
   origin:z.enum(['stated','inferred']), written_by:z.enum(['merge','user_correction']),
   evidence_refs:z.array(id).min(1).max(256), entity_refs:z.array(id).max(256).default([]),
   content:object, valid_until:date.nullable().default(null),
@@ -140,14 +141,14 @@ function write(db:LedgerDatabase,candidate:Candidate,deleted=false):EntryRevisio
     db.prepare('DELETE FROM memory_vectors WHERE entry_id=?').run(next.entry_id)
     projectWorkspaceRevision(db,next,previous)
     queueMemoryFiles(db)
-    if(previous && candidate.written_by==='user_correction'){
+    if(previous && previous.kind!=='diary' && candidate.written_by==='user_correction'){
       for(const ref of previous.evidence_refs){const old=evidence(db,ref);if(old&&!candidate.evidence_refs.includes(ref))db.prepare('INSERT OR IGNORE INTO memory_suppressed VALUES(?)').run(old.hash)}
       db.exec("DELETE FROM memory_vectors WHERE entry_id IN (SELECT r.entry_id FROM memory_revisions r,json_each(r.payload_json,'$.evidence_refs') refs JOIN memory_evidence e ON e.id=refs.value JOIN memory_suppressed s ON s.hash=e.hash)")
     }
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'explicit_begin'|'explicit_write'|'explicit_lookup'|'timeline_evidence'|'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'life_sync_projection'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
+export type MemoryOperation = 'explicit_begin'|'explicit_write'|'explicit_lookup'|'timeline_evidence'|'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_diary'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'life_sync_projection'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   const ledgerOnly=isLedgerOnlyOperation(operation,value)
@@ -285,17 +286,19 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         if(['im','mail'].includes(safe.source_kind))db.prepare('INSERT INTO memory_message_heads VALUES(?,?) ON CONFLICT(key) DO UPDATE SET evidence_id=excluded.evidence_id').run(createHash('sha256').update(canonicalJson([safe.source_id,safe.locator])).digest('hex'),safe.id)
         result=refreshed??safe;break
       }
+      case 'commit_diary':
       case 'commit_consolidation': {
         const q=z.object({entry_prefix:id,provider:id,candidate:CandidateSchema,contexts:z.array(z.object({entry_id:id,revision:z.number().int().positive(),stamp:z.string().min(1)}).strict()).min(1).max(32)}).strict().parse(value)
         const c=q.candidate
-        if(c.kind!=='memory_summary'||c.origin!=='inferred'||c.written_by!=='merge'||c.op==='tombstone'||c.expected_revision===undefined||!c.entry_id.startsWith(q.entry_prefix)||new Set(q.contexts.map(r=>r.entry_id)).size!==q.contexts.length)throw Error('STORE_INVALID_OPERATION')
+        if(operation==='commit_diary'){const content=diaryContentSchema.parse(c.content);if(c.entry_id!==q.entry_prefix+'diary:'+content.day||c.expected_revision!==0)throw Error('STORE_INVALID_OPERATION')}
+        if(c.kind!==(operation==='commit_diary'?'diary':'memory_summary')||c.origin!=='inferred'||c.written_by!=='merge'||c.op==='tombstone'||c.expected_revision===undefined||!c.entry_id.startsWith(q.entry_prefix)||new Set(q.contexts.map(r=>r.entry_id)).size!==q.contexts.length)throw Error('STORE_INVALID_OPERATION')
         const basis=z.array(z.object({id,revision:z.number().int().positive()}).strict()).parse(c.content.basis)
         const expected=q.contexts.map(r=>({id:r.entry_id,revision:r.revision})).sort((a,b)=>a.id.localeCompare(b.id))
         if(canonicalJson([...basis].sort((a,b)=>a.id.localeCompare(b.id)))!==canonicalJson(expected))throw Error('STORE_INVALID_OPERATION')
         const refs=new Set<string>();let valid=true
         for(const context of q.contexts){
           const row=current(db,context.entry_id)
-          if(!row||!row.entry_id.startsWith(q.entry_prefix)||row.kind==='memory_summary'||row.op==='tombstone'||row.revision!==context.revision||(row.valid_until!==null&&Date.parse(row.valid_until)<=Date.now())||processingStamp(db,row.evidence_refs,'extraction',q.provider)!==context.stamp){valid=false;break}
+          if(!row||!row.entry_id.startsWith(q.entry_prefix)||(row.kind==='memory_summary'||row.kind==='diary')||row.op==='tombstone'||row.revision!==context.revision||(row.valid_until!==null&&Date.parse(row.valid_until)<=Date.now())||processingStamp(db,row.evidence_refs,'extraction',q.provider)!==context.stamp){valid=false;break}
           for(const ref of row.evidence_refs)refs.add(ref)
         }
         if(!valid){result={applied:false};break}
@@ -352,7 +355,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         const correction=CandidateSchema.parse(value.candidate)
         if(correction.entry_id!==entry.entry_id || correction.written_by!=='user_correction' || correction.op!=='tombstone')throw new Error('STORE_INVALID_OPERATION')
         result=write(db,correction)
-        for(const ref of entry.evidence_refs){const source=evidence(db,ref);if(source)db.prepare('INSERT OR IGNORE INTO memory_suppressed VALUES(?)').run(source.hash)}
+        for(const ref of entry.kind==='diary'?[]:entry.evidence_refs){const source=evidence(db,ref);if(source)db.prepare('INSERT OR IGNORE INTO memory_suppressed VALUES(?)').run(source.hash)}
         break
       }
       case 'delete_source': {

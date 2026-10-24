@@ -65,6 +65,7 @@ const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
 // Named only when the settings pick a provider with a known name; anything else stays generic in the panel.
 const RANK_PROVIDER_NAMES = {qwen: 'Qwen', openai: 'OpenAI', gemini: 'Google Gemini', stepfun: 'StepFun', deepseek: 'DeepSeek', ark: 'Ark'}
+let currentView = null
 const proactivityPanel = createProactivityPanel({document, api, moduleStatusNote, rankFallback: () => {
   if (!currentView?.secretsPresent) return null
   const provider = currentView.pipelineMode === 'integrated' ? currentView.integratedProvider : currentView.cascadedLlmProvider
@@ -121,7 +122,6 @@ const WORKSPACE_STATUS_TEXT = Object.freeze({
 
 const secretRevisions = createSecretRevisions(SECRET_KEYS)
 const dirtySecretKeys = new Set()
-let currentView = null
 let controllerState = {dirty: false, busy: false}
 let workspaceBusy = false
 

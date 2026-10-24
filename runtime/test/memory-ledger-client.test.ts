@@ -12,8 +12,8 @@ function heldWorker(){
  const worker:MemoryLedgerWorker={
   postMessage(value){const request=value as {request_id:number;operation:string;memoryOperation?:string};if(held)throw Error('a second request reached the worker while one was in service');seen.push(request.memoryOperation??request.operation);held=request},
   on(event:string,listener:(value:never)=>void){listeners.set(event,listener);return worker},
-  terminate:async()=>0,
- } as MemoryLedgerWorker
+  terminate:()=>Promise.resolve(0),
+ }
  const release=async()=>{const request=held!;held=undefined;listeners.get('message')!({kind:'response',request_id:request.request_id,ok:true,result:null} as never);await new Promise(resolve=>setImmediate(resolve))}
  return {worker,seen,release,fail:()=>listeners.get('exit')!(1 as never)}
 }

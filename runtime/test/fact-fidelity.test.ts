@@ -70,3 +70,24 @@ test('normal consolidation is not killed',()=>{
 test('empty inputs are allowed',()=>{
  assert.equal(reason('预算 99999',[]),'ok');assert.equal(reason('预算 99999',['  ']),'ok');assert.equal(reason('',['预算100']),'ok')
 })
+
+for(const [source,generated,expected] of [
+ ['预算3万元','预算3元','number_not_in_sources'],
+ ['每天2分钟','每天2小时','number_not_in_sources'],
+ ['每天120分钟','每天2小时','ok'],
+ ['预算100元','预算100 yuan','ok'],
+ ['预算3万元','预算30000元','ok'],
+ ['预算1.2万元','预算12000元','ok'],
+ ['预算100元','$100','number_not_in_sources'],
+ ['每月2次','每月2小时','number_not_in_sources'],
+ ['走了2公里','走了2km','number_not_in_sources'],
+ ['每天0.1小时','每天6分钟','ok'],
+ ['每月1次','每30天1次','number_not_in_sources'],
+ ['10 月份的 12 个任务','共 3 项','ok'],
+] as const)test(`unit fidelity: ${source} -> ${generated}`,()=>assert.equal(reason(generated,[source]),expected))
+
+test('currency symbol retains magnitudes',()=>{
+ assert.equal(reason('预算¥3',['预算¥3万']),'number_not_in_sources')
+ assert.equal(reason('预算¥3万',['预算3万元']),'ok')
+ assert.equal(reason('$2千',['2000美元']),'ok')
+})

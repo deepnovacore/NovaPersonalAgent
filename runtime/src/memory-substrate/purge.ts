@@ -163,7 +163,7 @@ export function purgeEntry(db:LedgerDatabase,path:string,input:unknown):PurgeRes
  const current=snapshot.revisions.filter(row=>row.entry_id===q.selection.id).at(-1)
  if(!current)throw Error('STORE_NOT_FOUND');if(current.revision!==q.selection.expected_revision)throw Error('STORE_STALE_REVISION')
  const selectedIds=new Set([current.entry_id]);let changed=true
- while(changed){changed=false;for(const row of snapshot.revisions)if(row.kind==='memory_summary'&&Array.isArray(row.content.basis)&&row.content.basis.some(item=>item&&typeof item==='object'&&!Array.isArray(item)&&typeof item.id==='string'&&selectedIds.has(item.id))&&!selectedIds.has(row.entry_id)){selectedIds.add(row.entry_id);changed=true}}
+ while(changed){changed=false;for(const row of snapshot.revisions)if((row.kind==='memory_summary'||row.kind==='diary')&&Array.isArray(row.content.basis)&&row.content.basis.some(item=>item&&typeof item==='object'&&!Array.isArray(item)&&typeof item.id==='string'&&selectedIds.has(item.id))&&!selectedIds.has(row.entry_id)){selectedIds.add(row.entry_id);changed=true}}
  const selected=snapshot.revisions.filter(row=>selectedIds.has(row.entry_id)),refs=[...new Set(snapshot.revisions.filter(row=>row.entry_id===current.entry_id).flatMap(row=>row.evidence_refs))]
  if(selectedIds.size>4096||refs.length>4096)throw Error('STORE_INVALID_OPERATION')
  const evidence=refs.flatMap(id=>{const row=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(id);return row?[EvidenceRecordSchema.parse(JSON.parse(String(row.payload_json)))]:[]})

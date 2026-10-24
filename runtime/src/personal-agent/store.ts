@@ -1,5 +1,5 @@
 import {notificationSchema,type NotificationInput} from '../notifications/contracts.js';
-import {conversationsStateSchema,initialConversations,type ConversationsState} from './conversations.js';
+import {conversationSchema,conversationsStateSchema,initialConversations,type ConversationsState} from './conversations.js';
 import {Worker} from 'node:worker_threads';
 import { z } from 'zod';
 import { constants } from 'node:fs';
@@ -58,19 +58,37 @@ export async function renamePersonalStoreFile(
     }
 }
 const stateSchema = z.object({ notification_task_baseline:z.array(z.string()).default([]),notification_intents:z.record(z.string(),notificationSchema).default({}),notification_fingerprints:z.record(z.string(),z.string()).default({}),notifications_initialized:z.boolean().default(false),conversations:conversationsStateSchema.default(initialConversations), user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), brief_runs:z.record(z.string().max(128),z.object({status:z.enum(['processing','success','failed','empty']),attempts:z.number().int().min(1).max(3),last_attempt_at:z.iso.datetime()})).default({}), goal_progress:z.array(goalProgressSchema).max(200).refine(rows=>new Set(rows.map(r=>r.goal_id)).size===rows.length).default([]), goal_proposal_rejections:z.array(z.object({topic_key:z.string().max(64),title:z.string().max(80),rejected_at:z.iso.datetime(),until:z.iso.datetime()}).strict()).max(200).default([]), goal_proposer:z.object({last_run_date:z.string().date().nullable(),consumed_through:z.iso.datetime().nullable(),last_outcome:z.enum(['processing','success','empty','failed']).nullable()}).strict().default({last_run_date:null,consumed_through:null,last_outcome:null}), goal_checkins:z.object({runs:z.record(z.string().date(),z.object({status:z.enum(['processing','success','failed','empty','invalidated','delivered']),attempts:z.number().int().min(0).max(3),last_attempt_at:z.iso.datetime(),feed_id:z.string().max(128).nullable()}).strict()).refine(r=>Object.keys(r).length<=31),last_at:z.record(z.string().max(512),z.iso.datetime()).refine(r=>Object.keys(r).length<=200)}).strict().default({runs:{},last_at:{}}), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
+const storedStateSchema=stateSchema.extend({conversations:z.object({...conversationsStateSchema.shape,items:z.array(z.union([conversationSchema,conversationSchema.extend({kind:z.literal('proactive')})])).min(1).max(192)}).strict().default(initialConversations)});
+function parseStoredState(value:unknown):PersonalState {
+    const state=storedStateSchema.parse(value), conversations=state.conversations;
+    const legacy=conversations.items.filter(item=>item.kind==='proactive');
+    for(const item of legacy){
+        // Keep historical messages as ordinary topics; deleting the old navigation must not delete history.
+        const retained=item.messages.length>0||item.feed_ids.length>0;
+        const id=retained?`history:${item.id}`:'chat:main';
+        if(retained&&conversations.items.some(other=>other.id===id))throw Error('legacy_conversation_id_collision');
+        if(conversations.selected_id===item.id)conversations.selected_id='chat:main';
+        if(conversations.voice_id===item.id)conversations.voice_id='chat:main';
+        for(const owners of [conversations.work_owners,conversations.approval_owners])for(const key of Object.keys(owners))if(owners[key]===item.id)owners[key]=id;
+        for(const other of conversations.items)if(other.build?.source_conversation_id===item.id)other.build.source_conversation_id=id;
+        if(retained)conversations.items=conversations.items.map(other=>other===item?{...item,id,kind:'topic',messages:item.messages.map(message=>({...message,conversation_id:id}))}:other);
+        else conversations.items=conversations.items.filter(other=>other!==item);
+    }
+    return stateSchema.parse(state);
+}
 export class PersonalStore {
     constructor(readonly path: string) { }
     async ensureScheduleBackup():Promise<void>{
         const path=this.path+'.before-schedules.json'
         // An empty backup (a truncating reset) is treated as missing and recreated below; any other invalid backup still fails.
         let empty=false
-        try{const saved=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await saved.stat();if(info.size>MAX_STORE_BYTES||(process.platform!=='win32'&&(info.mode&0o777)!==0o600))throw Error('invalid_schedule_backup');if(info.size===0&&info.isFile())empty=true;else{stateSchema.parse(JSON.parse(await saved.readFile('utf8')));return}}finally{await saved.close()}}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
+        try{const saved=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await saved.stat();if(info.size>MAX_STORE_BYTES||(process.platform!=='win32'&&(info.mode&0o777)!==0o600))throw Error('invalid_schedule_backup');if(info.size===0&&info.isFile())empty=true;else{parseStoredState(JSON.parse(await saved.readFile('utf8')));return}}finally{await saved.close()}}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
         if(empty)await unlink(path)
         const original=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW)
         let text:string
         try{if((await original.stat()).size>MAX_STORE_BYTES)throw Error('personal_store_capacity');text=await original.readFile('utf8')}finally{await original.close()}
         if(!text)text=JSON.stringify(initialState())
-        stateSchema.parse(JSON.parse(text))
+        parseStoredState(JSON.parse(text))
         const backup=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600)
         try{await backup.writeFile(text);await backup.sync()}finally{await backup.close()}
         const check=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW)
@@ -83,7 +101,7 @@ export class PersonalStore {
             if ((await file.stat()).size > MAX_STORE_BYTES)
                 throw Error('personal_store_capacity');
             const text = await file.readFile('utf8');
-            return text === '' ? initialState() : stateSchema.parse(JSON.parse(text));
+            return text === '' ? initialState() : parseStoredState(JSON.parse(text));
         }
         finally {
             await file.close();

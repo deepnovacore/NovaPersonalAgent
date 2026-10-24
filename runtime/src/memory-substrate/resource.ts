@@ -1,3 +1,4 @@
+import {prepareDiary,generateDiary,diaryContentSchema,type DiaryEntry} from './diary.js'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 import {generateUnderstandingProducts} from '../model/understanding-writer.js'
 import type {ProductGenerationContext} from '../personal-agent/understanding-products.js'
@@ -102,6 +103,44 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #refreshEpoch=0
   #preparedRevision=0
   #preparedSignatures=new Map<string,{signature:string;revision:number}>()
+  #diarySettings={enabled:false,timezone:'UTC'}
+  #diaryEpoch=0
+  #diaryRun:Promise<void>|null=null
+  #diaryAttempts:{day:string;count:number;at:number}|null=null
+  configureDiary(settings:{enabled:boolean;timezone:string}):void{
+    if(JSON.stringify(settings)!==JSON.stringify(this.#diarySettings)){this.#diaryEpoch++;this.#diarySettings={...settings}}
+    this.#queueDiary()
+  }
+  async diaries(before?:string):Promise<DiaryEntry[]>{
+    return (await this.#rows()).filter(row=>row.kind==='diary'&&(!before||typeof row.content.day==='string'&&row.content.day<before)).flatMap(row=>{const parsed=diaryContentSchema.safeParse(row.content);return parsed.success?[{id:row.entry_id,version:row.revision,day:parsed.data.day,text:parsed.data.text}]:[]}).sort((a,b)=>b.day.localeCompare(a.day)).slice(0,30)
+  }
+  #queueDiary():void{
+    if(!this.#opened||!this.#diarySettings.enabled||this.options.personalMemoryEnabled===false||this.#diaryRun)return
+    this.#diaryRun=this.#writeDiary().catch(()=>{/* No partial entry; retry at the next eligible maintenance tick. */}).finally(()=>{this.#diaryRun=null})
+  }
+  async #writeDiary():Promise<void>{
+    const epoch=this.#diaryEpoch,workEpoch=this.#memoryWorkEpoch
+    await this.#pending
+    const authorized=await this.#authorizedRows(await this.#rows(false,false,true))
+    const plan=prepareDiary(authorized.entries,new Date(),this.#diarySettings.timezone)
+    if(!plan)return
+    const id=this.prefix+'diary:'+plan.day
+    if((await this.#rows(true)).some(row=>row.entry_id===id))return
+    const attempts=this.#diaryAttempts
+    if(attempts?.day===plan.day&&(attempts.count>=3||Date.now()-attempts.at<300000))return
+    for(const entry of plan.entries)if(await this.options.client.memory('processing_stamp',{ids:entry.evidence_refs,purpose:'extraction',provider:this.#extractionFingerprint()})!==authorized.contexts.get(entry.entry_id)!.stamp)return
+    if(!this.#opened||epoch!==this.#diaryEpoch||workEpoch!==this.#memoryWorkEpoch||!this.#diarySettings.enabled)return
+    this.#diaryAttempts={day:plan.day,count:attempts?.day===plan.day?attempts.count+1:1,at:Date.now()}
+    const content=await generateDiary(plan,{gateway:this.options.gateway,model:this.options.model,signal:this.#abort.signal})
+    if(!this.#opened||epoch!==this.#diaryEpoch||workEpoch!==this.#memoryWorkEpoch)return
+    const fresh=await this.#authorizedRows(await this.#rows(false,false,true)),current=prepareDiary(fresh.entries,new Date(),this.#diarySettings.timezone)
+    const contexts=plan.basis.map(ref=>authorized.contexts.get(ref.id)!)
+    if(current?.day!==plan.day||JSON.stringify(current.basis)!==JSON.stringify(plan.basis)||contexts.some(c=>fresh.contexts.get(c.entry_id)?.stamp!==c.stamp))return
+    const candidate=prepareAutomaticCandidate({entry_id:id,kind:'diary',origin:'inferred',evidence_refs:plan.evidence_refs,content:{...content},recorded_at:new Date().toISOString()},null)
+    if(!this.#opened||epoch!==this.#diaryEpoch||workEpoch!==this.#memoryWorkEpoch)return
+    await this.options.client.memory('commit_diary',{entry_prefix:this.prefix,provider:this.#extractionFingerprint(),candidate,contexts})
+    if(this.#opened)await this.#refresh()
+  }
   #consolidating:Promise<void>|null=null
   /** In-memory retry budget: a failing derivation must not become one model call per maintenance tick. */
   #consolidationFailures:{day:string;count:number;at:number}|null=null
@@ -122,8 +161,8 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const maintain=()=>{if(!this.#opened||this.#maintenanceRun)return;this.#maintenanceRun=runInMemoryBackground(()=>this.#maintain()).catch(()=>{/* Durable work retries at the next tick. */}).finally(()=>{this.#maintenanceRun=undefined})}
     maintain();this.#maintenance=setInterval(maintain,60000);this.#maintenance.unref()
   }
-  async close():Promise<void>{this.#opened=false;this.#backgroundStarted=false;this.#preparedSignatures.clear();this.#snapshotSignature='';clearInterval(this.#maintenance);this.#abort.abort();await this.#maintenanceRun;await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;await this.#consolidating;this.#adaptation={revision:0,replyPreferences:[]};if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}}
-  async #maintain():Promise<void>{this.#wakeSources();await this.options.client.memory('expire',{});if(!this.#opened||this.options.personalMemoryEnabled===false)return;await this.#refresh();if(!this.#opened)return;this.#queueIndex();const pending=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('pending_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),limit:20}));if(!this.#opened)return;for(const e of pending)this.#queue(e);this.#queueConsolidation()}
+  async close():Promise<void>{this.#opened=false;this.#backgroundStarted=false;this.#preparedSignatures.clear();this.#snapshotSignature='';clearInterval(this.#maintenance);this.#abort.abort();await this.#maintenanceRun;await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;await this.#consolidating;await this.#diaryRun;this.#adaptation={revision:0,replyPreferences:[]};if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}}
+  async #maintain():Promise<void>{this.#wakeSources();await this.options.client.memory('expire',{});if(!this.#opened||this.options.personalMemoryEnabled===false)return;await this.#refresh();if(!this.#opened)return;this.#queueIndex();const pending=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('pending_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),limit:20}));if(!this.#opened)return;for(const e of pending)this.#queue(e);this.#queueConsolidation();this.#queueDiary()}
   #ready():void{if(!this.#opened)throw Error('personal_memory_unavailable')}
   async beginExplicitTurn(input:ExplicitMemoryTurn):Promise<ExplicitMemoryTurn>{
     this.#ready();if(this.options.personalMemoryEnabled===false||this.options.inputConsent!==true)throw Error('personal_memory_disabled')
@@ -267,7 +306,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   }
   async #authorizedRows(rows:EntryRevision[]):Promise<{entries:EntryRevision[];contexts:Map<string,ResolutionContext>}>{
     const entries:EntryRevision[]=[],contexts=new Map<string,ResolutionContext>()
-    const eligible=rows.filter(row=>row.kind!=='memory_summary'&&row.evidence_refs.length>0&&row.evidence_refs.length<=256)
+    const eligible=rows.filter(row=>row.kind!=='memory_summary'&&row.kind!=='diary'&&row.evidence_refs.length>0&&row.evidence_refs.length<=256)
     for(let offset=0;offset<eligible.length;offset+=256){
       const batch=eligible.slice(offset,offset+256)
       const stamps=z.array(z.string().nullable()).length(batch.length).parse(await this.options.client.memory('processing_stamp',{groups:batch.map(row=>row.evidence_refs),purpose:'extraction',provider:this.#extractionFingerprint()}))
@@ -315,12 +354,12 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     await this.options.client.memory('commit_consolidation',{entry_prefix:this.prefix,provider:this.#extractionFingerprint(),candidate,contexts})
     if(this.#opened)await this.#refresh()
   }
-  async list(options:Parameters<NonNullable<PersonalMemoryResource['list']>>[0]={}){const q=MemoryListOptionsSchema.parse(options);const offset=q.cursor?Number(q.cursor):0;if(!Number.isSafeInteger(offset)||offset<0)throw Error('invalid_cursor');const rows=(await this.#rows(q.include_expired??false,true,true)).filter(row=>row.op!=='tombstone'&&row.kind!=='memory_summary'&&row.kind!=='soul'&&!(row.kind==='entity'&&row.content.entity_kind==='person')&&!(row.entry_id.startsWith('workspace:')&&['inactive','suppressed','stale'].includes(displayText(row.content.status))));const limit=q.limit??100;return {entries:await this.#entries(rows.slice(offset,offset+limit)),cursor:offset+limit<rows.length?String(offset+limit):null}}
-  async get(id:string):Promise<MemoryEntry|null>{const row=(await this.#rows(true,true,true)).find(r=>r.entry_id===id&&r.kind!=='soul');return row?this.#entry(row):null}
+  async list(options:Parameters<NonNullable<PersonalMemoryResource['list']>>[0]={}){const q=MemoryListOptionsSchema.parse(options);const offset=q.cursor?Number(q.cursor):0;if(!Number.isSafeInteger(offset)||offset<0)throw Error('invalid_cursor');const rows=(await this.#rows(q.include_expired??false,true,true)).filter(row=>row.op!=='tombstone'&&row.kind!=='memory_summary'&&row.kind!=='diary'&&row.kind!=='soul'&&!(row.kind==='entity'&&row.content.entity_kind==='person')&&!(row.entry_id.startsWith('workspace:')&&['inactive','suppressed','stale'].includes(displayText(row.content.status))));const limit=q.limit??100;return {entries:await this.#entries(rows.slice(offset,offset+limit)),cursor:offset+limit<rows.length?String(offset+limit):null}}
+  async get(id:string):Promise<MemoryEntry|null>{const row=(await this.#rows(true,true,true)).find(r=>r.entry_id===id&&r.kind!=='soul'&&r.kind!=='diary');return row?this.#entry(row):null}
   async getMany(ids:readonly string[]):Promise<(MemoryEntry|null)[]>{
     if(!ids.length)return []
     const wanted=new Set(ids),rows=new Map<string,EntryRevision>()
-    for(const row of await this.#rows(true,true,true))if(wanted.has(row.entry_id)&&row.kind!=='soul'&&!rows.has(row.entry_id))rows.set(row.entry_id,row)
+    for(const row of await this.#rows(true,true,true))if(wanted.has(row.entry_id)&&row.kind!=='soul'&&row.kind!=='diary'&&!rows.has(row.entry_id))rows.set(row.entry_id,row)
     const entries=new Map<string,MemoryEntry>()
     for(const entry of await this.#entries([...rows.values()]))entries.set(entry.id,entry)
     return ids.map(id=>entries.get(id)??null)
@@ -478,7 +517,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return changed
   }
   /** Wait for currently admitted extraction work; admission itself only waits for persistence. */
-  async flush():Promise<void>{await this.#sourceWork;await this.#pending;await this.#notifySources();await this.#indexing;this.#queueIndex();await this.#indexing;await this.#consolidating}
+  async flush():Promise<void>{await this.#sourceWork;await this.#pending;await this.#notifySources();await this.#indexing;this.#queueIndex();await this.#indexing;await this.#consolidating;await this.#diaryRun}
   #queue(evidence:EvidenceRecord):void{if(this.options.personalMemoryEnabled===false||this.#queued.has(evidence.id)||this.#queued.size>=20)return;this.#queued.add(evidence.id);const work=runInMemoryBackground(async()=>{if(this.#opened)await this.#extract(evidence)}).catch(()=>{ /* durable pending evidence is retried by maintenance */ }).finally(()=>{this.#queued.delete(evidence.id)});this.#pending=Promise.all([this.#pending,work]).then(()=>undefined)}
   async #extract(evidence:EvidenceRecord,topic?:string,force=false):Promise<void>{
     const raw=await this.options.client.memory('extraction_ticket',{evidence_id:evidence.id,provider:this.#extractionFingerprint(),force})
@@ -718,7 +757,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     await this.#refresh()
     return this.soulState()
   }
-  async correct(id:string,version:MemoryVersion,content:string,source:MemorySourceRef){const old=await this.#current(id,version);if(!content.trim()||content.length>500||source.type!=='conversation')throw Error('STORE_INVALID_INPUT');const evidence=await this.#admit(MemorySourceRefSchema.parse(source),content,'user_correction',source.ref,undefined,true,undefined,await this.#inheritsConsent(old));const candidate=CandidateSchema.parse({entry_id:id,expected_revision:version,kind:old.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidence.id],entity_refs:old.entity_refs,content:{...old.content,text:content,...(old.kind==='commitment'?{due:null}: {})},valid_until:null,recorded_at:new Date().toISOString()});const row=EntryRevisionSchema.parse(await this.options.client.memory('merge',candidate));await this.#refresh();return {previous:await this.#entry(old),entry:await this.#entry(row)}}
+  async correct(id:string,version:MemoryVersion,content:string,source:MemorySourceRef){const old=await this.#current(id,version);if(old.kind==='diary')throw Error('diary_read_only');if(!content.trim()||content.length>500||source.type!=='conversation')throw Error('STORE_INVALID_INPUT');const evidence=await this.#admit(MemorySourceRefSchema.parse(source),content,'user_correction',source.ref,undefined,true,undefined,await this.#inheritsConsent(old));const candidate=CandidateSchema.parse({entry_id:id,expected_revision:version,kind:old.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidence.id],entity_refs:old.entity_refs,content:{...old.content,text:content,...(old.kind==='commitment'?{due:null}: {})},valid_until:null,recorded_at:new Date().toISOString()});const row=EntryRevisionSchema.parse(await this.options.client.memory('merge',candidate));await this.#refresh();return {previous:await this.#entry(old),entry:await this.#entry(row)}}
   async forgetEntry(id:string,version:MemoryVersion){const old=await this.#current(id,version);const now=new Date().toISOString();const evidence=await this.#admit({type:'conversation',ref:'forget:'+randomUUID(),observed_at:now},'用户删除这条记忆','user_correction');const candidate=CandidateSchema.parse({entry_id:id,expected_revision:version,kind:old.kind,origin:'stated',written_by:'user_correction',evidence_refs:[evidence.id],content:{text:''},op:'tombstone',recorded_at:now});const row=EntryRevisionSchema.parse(await this.options.client.memory('forget',{entry_id:id,candidate}));await this.#refresh();return this.#entry(row)}
   async purgeEntry(id:string,version:MemoryVersion,requestId:string):Promise<PersonalMemoryPurgeResult>{
     this.#ready()

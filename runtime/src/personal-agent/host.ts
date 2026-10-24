@@ -1,3 +1,4 @@
+import type {DiaryEntry} from '../memory-substrate/diary.js'
 import {computerUseCommandSchema,type ComputerUseState,type ComputerUseCommandResult,type ComputerPreflightItem} from './computer-use/contract.js'
 import {loadComputerConfig} from '../executors/computer-config.js'
 import {supportsVision} from '../model/vision-capability.js'
@@ -807,7 +808,8 @@ export class PersonalAgentHost {
         const context=await this.discussionContext(q.references),item=createConversation('chat',q.title);
         // Without an explicit mode, a card about a registered coding project opens as Plan; Build and the project directory stay the user's choice.
         const project=q.mode===undefined&&local?await this.#cardProject(q.references):undefined,text=project?`${q.text}\n\n[project: ${project}]`:q.text;
-        if(q.mode==='plan'||project)item.mode='plan';
+        // shortcut: Plan does not consume prepared references; retain chat until it shares the authorized injection path.
+        if(!context.prepared&&(q.mode==='plan'||project))item.mode='plan';
         await this.#serial(async()=>{const next=structuredClone(this.#state);if(next.conversations.items.filter(value=>value.kind!=='schedule').length>=128)throw Error('conversation_limit');next.conversations.items.push(item);await this.#commit(next)});
         try{await this.submitConversationText(item.id,text,requestId,context.source_todo,context)}
         catch(error){
@@ -910,7 +912,10 @@ export class PersonalAgentHost {
     #state: PersonalState = initialState();
     #includeExpired=false;
     #soul: {role:string;version:number;updated_at:string|null;reply_style:string|null}|null=null;
+    #diaryBefore:string|undefined;
     #memory: {
+        diaries?:DiaryEntry[];
+        diary_before?:string;
         include_expired?: boolean;
         entries: MemoryEntry[];
         cursor: string | null;
@@ -1481,6 +1486,8 @@ export class PersonalAgentHost {
         this.#includeExpired=includeExpired;
         this.#invalidateOverview();
         const refresh = this.#memoryRefresh, memory = this.options.memory();
+        memory?.configureDiary?.({enabled:this.#state.settings.diary_enabled!==false,timezone:dailyBriefSettings(this.#state.settings).timezone});
+        const diaries=await memory?.diaries?.(this.#diaryBefore)??[];
         const page = memory?.list ? await memory.list({ ...(cursor ? { cursor } : {}), limit,...(includeExpired?{include_expired:true}:{}) }) : {entries: [], cursor: null};
         const pending_purges=await memory?.pendingPurges?.()??[];
         const soul=await memory?.soulState?.().catch(()=>null)??null;
@@ -1520,7 +1527,7 @@ export class PersonalAgentHost {
         const key = hash(page);
         this.#overviewAbort.abort();
         this.#overviewKey = key;
-        this.#memory = {...page, pending_purges, include_expired:includeExpired, overview: this.#overviewCache?.key === key ? this.#overviewCache.value : null};
+        this.#memory = {...page,diaries,...(this.#diaryBefore?{diary_before:this.#diaryBefore}:{}), pending_purges, include_expired:includeExpired, overview: this.#overviewCache?.key === key ? this.#overviewCache.value : null};
         this.#soul=soul;
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
@@ -1604,7 +1611,7 @@ export class PersonalAgentHost {
         for(const todo of life.todos)if(todo.context_source)todo.sources=this.workbenchContext.sourcesForRefs(todo.context_source.refs);
         return {...life,goals:life.goals.map(goal=>{const row=this.goalProgress(goal.id);return row?{...goal,derived_progress:{summary:row.summary,next_step:row.next_step,last_progress_at:row.last_progress_at,stale:row.stale}}:goal})};
     }
-    snapshot() { const account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id;this.sourceProcessingAgent.setPresentationAccount(account);this.timeline.setAccess({scope:account?'feishu:'+account:'local',allowed:true,legacy_refs:[]});const m = this.options.memory(); const snapshot={ type: 'personal.state' as const, notifications:{...this.notifications.snapshot(),admission_error:this.#notificationError,pending_intents:Object.keys(this.#state.notification_intents).length}, timeline:this.timeline.snapshot(), workbench_context:this.workbenchContext.snapshot(),derived_understanding:this.sourceProcessingAgent.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), schedules:{items:this.schedules.list().filter(item=>!item.processing).map(item=>{const view=scheduleView(item);return {id:view.id,title:view.title,revision:view.revision,enabled:view.enabled,rule:view.rule,next_slot:view.next_slot,missed_count:view.missed_count,dst_gap_count:view.dst_gap_count}}),active_runs:this.schedules.activeRuns().filter(run=>!run.processing).map(scheduleRunView)}, tasks:this.tasks.list().filter(task=>!task.trigger||!this.schedules.findRun(task.trigger.run_id)?.processing).map(({approved_plan,...task})=>({...task,...(approved_plan?{approved_plan_ref:{id:approved_plan.id,version:approved_plan.version,title:approved_plan.title}}:{})})), conversations:this.conversationSnapshot(0), news:this.news.snapshot(), profile_preparation:this.sourceProcessingAgent.enabled?this.sourceProcessingAgent.profileSnapshot():this.profileWarmup.snapshot(), life:this.#lifeSnapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), soul:this.#soulView(), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { schedules:this.#conversationPool!==undefined, tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; snapshot.conversations=this.conversationSnapshot(Math.max(0,Math.min(256*1024,1024*1024-Buffer.byteLength(JSON.stringify(snapshot))-1024)));return snapshot; }
+    snapshot() { const account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id;this.sourceProcessingAgent.setPresentationAccount(account);this.timeline.setAccess({scope:account?'feishu:'+account:'local',allowed:true,legacy_refs:[]});const m = this.options.memory(); const snapshot={ type: 'personal.state' as const, notifications:{...this.notifications.snapshot(),admission_error:this.#notificationError,pending_intents:Object.keys(this.#state.notification_intents).length}, timeline:this.timeline.snapshot(), workbench_context:this.workbenchContext.snapshot(),derived_understanding:this.sourceProcessingAgent.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), schedules:{items:this.schedules.list().filter(item=>!item.processing).map(item=>{const view=scheduleView(item);return {id:view.id,title:view.title,revision:view.revision,enabled:view.enabled,rule:view.rule,next_slot:view.next_slot,missed_count:view.missed_count,dst_gap_count:view.dst_gap_count}}),active_runs:this.schedules.activeRuns().filter(run=>!run.processing).map(scheduleRunView)}, tasks:this.tasks.list().filter(task=>!task.trigger||!this.schedules.findRun(task.trigger.run_id)?.processing).map(({approved_plan,...task})=>({...task,...(approved_plan?{approved_plan_ref:{id:approved_plan.id,version:approved_plan.version,title:approved_plan.title}}:{})})), conversations:this.conversationSnapshot(0), news:this.news.snapshot(), profile_preparation:this.sourceProcessingAgent.enabled?this.sourceProcessingAgent.profileSnapshot():this.profileWarmup.snapshot(), life:this.#lifeSnapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), soul:this.#soulView(), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { schedules:this.#conversationPool!==undefined, tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { diaries:!!m?.diaries, list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; snapshot.conversations=this.conversationSnapshot(Math.max(0,Math.min(256*1024,1024*1024-Buffer.byteLength(JSON.stringify(snapshot))-1024)));return snapshot; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];if(m?.references?.some(ref=>ref.kind==='timeline'&&ref.interaction))return null;return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).filter(m=>!m.schedule_ref?.run_id).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         if (!this.#release || !this.#loaded) throw Error('personal_store_not_ready');
@@ -2028,6 +2035,11 @@ export class PersonalAgentHost {
             if (!m?.reextract) throw Error('unsupported');
             await m.reextract(q.id);await this.revalidate();await this.refreshMemory();
         }
+        else if (command.method === 'memory.diaries') {
+            const q=z.object({before:z.string().date().optional()}).strict().parse(p);
+            if(!m?.diaries)throw Error('unsupported');
+            this.#diaryBefore=q.before;await this.refreshMemory();data=this.#memory;
+        }
         else if (command.method === 'memory.list') {
             const q = z.object({ cursor: z.string().max(256).optional(), limit: z.number().int().min(1).max(100).optional(),include_expired:z.boolean().optional() }).strict().parse(p);
             if (!m?.list)
@@ -2098,6 +2110,7 @@ export class PersonalAgentHost {
             await this.#serial(async () => { const next = structuredClone(this.#state);const settings={...q};delete settings.enabled;delete settings.interval_minutes;Object.assign(next.settings,settings); if (q.enabled !== undefined)
                 next.settings.discovery_enabled = q.enabled; if (q.interval_minutes !== undefined)
                 next.settings.discovery_interval_minutes = q.interval_minutes; await this.#commit(next); });
+            this.options.memory()?.configureDiary?.({enabled:this.#state.settings.diary_enabled!==false,timezone:dailyBriefSettings(this.#state.settings).timezone});
             this.#abort.abort();this.#abort=new AbortController();
             this.#schedule();
         }

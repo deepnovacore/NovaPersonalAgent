@@ -70,6 +70,10 @@ export function createProactivityPanel({document, api, moduleStatusNote = () => 
    box.addEventListener('change', () => {void command('discovery.configure', {news_rank_fallback: box.checked}).catch(onError)})
    label.append(box, el('span', t('用对话模型判断资讯相关度'))); news.append(label)
   }
+  const diary=card(t('每日日记'),t('根据昨天经授权的记忆写日记，只供你浏览，不作为模型记忆。'))
+  const diaryLabel=el('label'),diaryBox=el('input');diaryBox.type='checkbox';diaryBox.checked=settings.diary_enabled!==false;diaryBox.disabled=!connected;diaryBox.setAttribute('aria-label',t('写每日日记'))
+  diaryBox.addEventListener('change',()=>{void command('discovery.configure',{diary_enabled:diaryBox.checked}).catch(onError)})
+  diaryLabel.append(diaryBox,el('span',t('写每日日记')));diary.append(diaryLabel)
   renderDailyBrief({settings, connected, card, el, button, command})
   const note = memoryEmbeddingNote(memory, moduleStatusNote)
   if (note) card(t('记忆'), note).dataset.memoryStatus = memory.enabled ? 'on' : 'off'
