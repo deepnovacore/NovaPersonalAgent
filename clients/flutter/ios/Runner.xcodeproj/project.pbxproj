@@ -35,7 +35,7 @@
 		C10000000000000000000001 /* NovaSpacePush.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* NovaSpacePush.swift */; };
 		C10000000000000000000002 /* NovaPushCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* NovaPushCrypto.swift */; };
 		C10000000000000000000003 /* NovaSpaceTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* NovaSpaceTools.swift */; };
-		C10000000000000000000004 /* NovaSpaceDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000004 /* NovaSpaceDate.swift */; };
+		C10000000000000000000007 /* NovaSpaceDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000007 /* NovaSpaceDate.swift */; };
 		C10000000000000000000004 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000004 /* NotificationService.swift */; };
 		C10000000000000000000005 /* NovaPushCrypto.swift in Extension */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002; };
 		C10000000000000000000006 /* NovaNotificationService.appex in Embed */ = {isa = PBXBuildFile; fileRef = C00000000000000000000006; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -104,7 +104,7 @@
 		C00000000000000000000001 /* NovaSpacePush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaSpacePush.swift"; sourceTree = "<group>"; };
 		C00000000000000000000002 /* NovaPushCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaPushCrypto.swift"; sourceTree = "<group>"; };
 		C00000000000000000000003 /* NovaSpaceTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaSpaceTools.swift"; sourceTree = "<group>"; };
-		C00000000000000000000004 /* NovaSpaceDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaSpaceDate.swift"; sourceTree = "<group>"; };
+		C00000000000000000000007 /* NovaSpaceDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaSpaceDate.swift"; sourceTree = "<group>"; };
 		C00000000000000000000004 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaNotificationService/NotificationService.swift"; sourceTree = "<group>"; };
 		C00000000000000000000006 /* NovaNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = NovaNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D00000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NovaSpaceScope.swift; sourceTree = "<group>"; };
@@ -168,7 +168,7 @@
 			children = (
 				D00000000000000000000001,
 				C00000000000000000000003 /* NovaSpaceTools.swift */,
-				C00000000000000000000004 /* NovaSpaceDate.swift */,
+				C00000000000000000000007 /* NovaSpaceDate.swift */,
 				C00000000000000000000002 /* NovaPushCrypto.swift */,
 				C00000000000000000000001 /* NovaSpacePush.swift */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
@@ -372,7 +372,7 @@
 			files = (
 				D10000000000000000000001,
 				C10000000000000000000003 /* NovaSpaceTools.swift in Sources */,
-				C10000000000000000000004 /* NovaSpaceDate.swift in Sources */,
+				C10000000000000000000007 /* NovaSpaceDate.swift in Sources */,
 				C10000000000000000000002 /* NovaPushCrypto.swift in Sources */,
 				C10000000000000000000001 /* NovaSpacePush.swift in Sources */,
 				B11234567890ABCDEF000000 /* NovaShellRuntime.m in Sources */,
