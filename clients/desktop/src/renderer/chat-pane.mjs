@@ -182,7 +182,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const unread=items.reduce((sum,item)=>sum+(item.unread_count??0),0)
   unreadBadge.hidden=!unread;unreadBadge.textContent=unread?String(unread):''
   const voiceConversation=items.find(item=>item.id===c.voiceId)
-  voiceStatus.textContent=c.voiceId?`语音：${conversationTitle(voiceConversation)??'另一会话'}`:''
+  voiceStatus.textContent=c.voiceId?`语音：${conversationTitle(voiceConversation)??'另一会话'}${c.voiceCapabilities?.model.nativeFullDuplex?' · 原生双工对话（无工具调用、无历史恢复）':''}`:''
   resumeVoice.hidden=!c.voiceId||c.mode!=='text';resumeVoice.disabled=!c.connected||!c.presentationReady;
   endVoice.hidden=!c.voiceId;endVoice.disabled=!c.connected;voiceLine.hidden=!c.voiceId
  }
@@ -257,7 +257,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   voice.disabled=!c.presentationReady||!c.connected||!c.selectedId||(Boolean(c.voiceId)&&!c.isVoiceConversation)||(c.mode!=='text'&&!c.isVoiceConversation)
   syncActions();syncStage()
   hint.textContent=t(!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 再点一下麦克风结束'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行');hint.title=hint.textContent
-  targetMenu.update();if(c.selectedId==='chat:main'||c.selectedConversation?.kind==='build')targetMenu.element.hidden=true;if(c.selectedConversation?.kind==='build'||c.selectedConversation?.mode==='plan')dictate.disabled=true;executionCard.update((c.snapshot?.pending_confirmations??[]).find(item=>item.proposal_id&&item.workspace&&item.conversation_id===c.selectedId)??null,c.selectedId);renderConversations();renderHistory();deliverPresented();read()
+  targetMenu.update();if(c.selectedId==='chat:main'||c.selectedConversation?.kind==='build'||(c.isVoiceConversation&&c.voiceCapabilities?.model.functionCalling!==true))targetMenu.element.hidden=true;if(c.selectedConversation?.kind==='build'||c.selectedConversation?.mode==='plan')dictate.disabled=true;executionCard.update((c.snapshot?.pending_confirmations??[]).find(item=>item.proposal_id&&item.workspace&&item.conversation_id===c.selectedId)??null,c.selectedId);renderConversations();renderHistory();deliverPresented();read()
  }
  async function focusDraft(text,source=null){
   if(source&&c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main'))return focusReference([{kind:'todo',...source}],text)

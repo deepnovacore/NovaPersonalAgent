@@ -1,3 +1,4 @@
+import type {RealtimeCapabilities} from './capabilities.js'
 /**
  * The realtime session: one provider conversation, reduced.
  *
@@ -61,6 +62,7 @@ export interface HostResponseDelivery {
 
 /** Just enough of the provider port for the session; the adapter implements more. */
 export interface SessionProvider {
+  readonly capabilities?:RealtimeCapabilities|undefined
   reportPlayback?(input: PlaybackCompletion):Promise<void>
   readonly userResponseMode?: 'automatic' | 'requested'
   connect(options: {readonly tools: readonly Record<string, unknown>[]}): Promise<{
@@ -1002,7 +1004,7 @@ export class RealtimeSession {
       this.#markLocallyFenced(responseId)
       if (this.#state.premapResponseId === responseId) this.#state.clearPremapAudio()
       this.#onDiagnostic('[realtime-diagnostic] unmatched_user_response_request')
-      await this.#provider.cancelResponse(responseId)
+      await this.#cancelProviderResponse(responseId)
       return false
     }
 
@@ -1015,7 +1017,7 @@ export class RealtimeSession {
       turn.phase = 'cancel_requested'
       if (this.#state.premapResponseId === responseId) this.#state.clearPremapAudio()
       this.#state.advanceSnapshot()
-      await this.#provider.cancelResponse(responseId)
+      await this.#cancelProviderResponse(responseId)
       return false
     }
     // The user holds the floor, so the queued host utterance loses its turn rather than talking
@@ -1367,7 +1369,7 @@ export class RealtimeSession {
       turn.phase = 'cancel_requested'
       turn.defer_playback_fence = true
       this.#hostPreemptResponseId = responseId
-      await this.#provider.cancelResponse(responseId)
+      await this.#cancelProviderResponse(responseId)
       return true
     }
     if (generation !== null && generation.session_epoch === this.sessionEpoch) {
@@ -1442,7 +1444,7 @@ export class RealtimeSession {
         this.#markResponseInterrupted(activeResponseId)
         this.#state.advanceSnapshot()
       }
-      await this.#provider.cancelResponse(activeResponseId)
+      await this.#cancelProviderResponse(activeResponseId)
       return true
     }
 
@@ -1481,7 +1483,7 @@ export class RealtimeSession {
     this.#abandonPendingResponse()
     this.#state.clearPremapAudio()
     this.#state.advanceSnapshot()
-    await this.#provider.cancelResponse(premapResponseId)
+    await this.#cancelProviderResponse(premapResponseId)
     return true
   }
 
@@ -1510,7 +1512,7 @@ export class RealtimeSession {
     }
     this.#state.clearPremapAudio()
     this.#state.advanceSnapshot()
-    await this.#provider.cancelResponse(responseId)
+    await this.#cancelProviderResponse(responseId)
   }
 
   #markHeadPendingFenced(): readonly string[] {
@@ -1745,9 +1747,15 @@ export class RealtimeSession {
       && this.#providerResponseId === generation.response_id
     ) {
       this.#state.openProviderTurn(generation.response_id).phase = 'cancel_requested'
-      await this.#provider.cancelResponse(generation.response_id)
+      await this.#cancelProviderResponse(generation.response_id)
     }
     return true
+  }
+
+  #cancelProviderResponse(responseId:string):Promise<void> {
+    // Continuous native sessions can stop generation only by closing their transport.
+    return this.#provider.capabilities?.protocol.cancelResponse===false
+      ? this.#provider.close() : this.#provider.cancelResponse(responseId)
   }
 
   /** Fence or pre-arm cancellation when the renderer connection disappears. */
@@ -1915,7 +1923,7 @@ export class RealtimeSession {
     const providerIntent = this.#mergeContinuationIntents(intents, options.originSpoken ?? false)
     try{await this.#createResponse(providerIntent, intents)}catch(error){
       if(error instanceof ProviderResponseRejectedError){
-        if(yielded&&this.#yielded===yielded)await this.#provider.cancelResponse(yielded.responseId)
+        if(yielded&&this.#yielded===yielded)await this.#cancelProviderResponse(yielded.responseId)
         return 'rejected'
       }
       throw error

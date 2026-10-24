@@ -270,3 +270,22 @@ test('every finished Build is locked, not just the first one in the list',()=>{
  c.receive({type:'personal.state',revision:1000,feed:[],memory:{entries:[]},conversations:{selected_id:'b2',voice_id:null,items:[item('b1','finished'),item('b2','finished'),item('b3','running'),{id:'chat',kind:'chat'}]}})
  assert.deepEqual(['b1','b2','b3','chat'].map(id=>c.isBuildFinished(id)),[true,true,false,false])
 })
+test('voice capabilities are generation-scoped and do not leak into another conversation',()=>{
+ const h=harness();h.snapshot('a','a')
+ const capabilities={model:{functionCalling:false,audioInput:true,textInput:false,audioOutput:true,textOutput:true,nativeFullDuplex:true},protocol:{conversationItems:false,clientResponses:false,mutableSession:false,restoreConversationContext:false,cancelResponse:false,inputTranscription:false,responseBoundary:'session'}}
+ h.c.receive({type:'conversation.capabilities',conversation_id:'a',conversation_generation:2,mode:'voice',capabilities})
+ assert.equal(h.c.voiceCapabilities.model.nativeFullDuplex,true)
+ h.c.receive({type:'conversation.capabilities',conversation_id:'a',conversation_generation:1,mode:'voice',capabilities:{...capabilities,model:{...capabilities.model,nativeFullDuplex:false}}})
+ assert.equal(h.c.voiceCapabilities.model.nativeFullDuplex,true)
+ h.snapshot('b','a');assert.equal(h.c.voiceCapabilities.model.nativeFullDuplex,true)
+ h.snapshot('b','b');assert.equal(h.c.voiceCapabilities,null)
+ h.c.disconnect();assert.equal(h.c.voiceCapabilities,null)
+})
+
+test('reconnect restores voice capabilities from the host snapshot',async()=>{
+ const h=harness();await h.c.connect()
+ const caps={model:{functionCalling:false,audioInput:true,textInput:false,audioOutput:true,textOutput:true,nativeFullDuplex:true},protocol:{conversationItems:false,clientResponses:false,mutableSession:false,restoreConversationContext:false,cancelResponse:false,inputTranscription:false,responseBoundary:'session'}}
+ h.c.receive({type:'personal.state',revision:100,conversations:{selected_id:'a',voice_id:'a',voice_capabilities:caps,items:[{id:'a',generation:3}]}})
+ assert.equal(h.c.voiceCapabilities,caps)
+ h.c.disconnect();assert.equal(h.c.voiceCapabilities,null)
+})

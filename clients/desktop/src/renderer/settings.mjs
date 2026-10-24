@@ -1,3 +1,4 @@
+import {NATIVE_VOICE_PROVIDERS} from './native-voice.mjs'
 import {renderSkillsPage} from './skills-page.mjs'
 import {createChatGptPanel} from './chatgpt-panel.mjs'
 import {COMPATIBLE_STAGES, COMPATIBLE_FIELDS, COMPATIBLE_PRESETS, isEndpointSecret} from './compatible-providers.mjs'
@@ -64,6 +65,7 @@ const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
 const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
+  'minicpmRealtimeApiKey','personaplexRealtimeApiKey',
   'openaiCompatibleApiKey',
   'compatibleAsrApiKey',
   'compatibleTtsApiKey',
@@ -75,6 +77,7 @@ const SECRET_KEYS = [
   'arkApiKey', 'deepseekApiKey', 'openaiApiKey', 'geminiApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
+  minicpmRealtimeApiKey:'MiniCPM-o', personaplexRealtimeApiKey:'PersonaPlex',
   openaiCompatibleApiKey: 'OpenAI-compatible LLM',
   compatibleAsrApiKey: 'OpenAI-compatible ASR',
   compatibleTtsApiKey: 'OpenAI-compatible TTS',
@@ -113,6 +116,7 @@ const WORKSPACE_STATUS_TEXT = Object.freeze({
 
 const secretRevisions = createSecretRevisions(SECRET_KEYS)
 const dirtySecretKeys = new Set()
+const nativeVoices = new Map()
 let currentView = null
 let controllerState = {dirty: false, busy: false}
 let workspaceBusy = false
@@ -535,7 +539,13 @@ function render(view, drafts, state) {
   cascadedSection.hidden = view.pipelineMode !== 'cascaded'
   document.getElementById('gemini-live-limit').hidden = view.integratedProvider !== 'gemini'
   integratedProvider.value = view.integratedProvider
-  const integratedModels = view.integratedProvider === 'openai' ? ['gpt-realtime-2.1-mini','gpt-realtime-2.1'].map(value=>({value,label:value}))
+  for(const [provider,profile] of Object.entries(NATIVE_VOICE_PROVIDERS)) {
+    document.getElementById('native-'+provider).hidden=view.integratedProvider!==provider
+    const input=document.getElementById(profile.endpoint)
+    if(document.activeElement!==input)input.value=view[profile.endpoint]??profile.defaultUrl
+  }
+  integratedVoicePreset.closest('.field').hidden=view.integratedProvider==='minicpm-o'
+  const integratedModels = NATIVE_VOICE_PROVIDERS[view.integratedProvider] ? [{value:view.integratedProvider,label:view.integratedProvider==='minicpm-o'?'MiniCPM-o 4.5':'PersonaPlex 7B'}] : view.integratedProvider === 'openai' ? ['gpt-realtime-2.1-mini','gpt-realtime-2.1'].map(value=>({value,label:value}))
     : view.integratedProvider === 'gemini' ? [{value:'gemini-3.8-live',label:'Gemini 3.8 Live'}]
     : view.integratedProvider === 'stepfun'
     ? [{value: 'stepaudio-3-realtime-preview', label: 'StepAudio 3 Realtime Preview'}]
@@ -551,7 +561,7 @@ function render(view, drafts, state) {
     const option = document.createElement('option'); option.value = view.integratedModel; option.textContent = view.integratedModel; integratedModel.append(option)
   }
   integratedModel.value = view.integratedModel ?? ''
-  const voices = view.integratedProvider === 'openai' ? ['marin','cedar','alloy','coral'].map(value=>({value,label:value}))
+  const voices = NATIVE_VOICE_PROVIDERS[view.integratedProvider] ? (nativeVoices.get(view.personaplexRealtimeUrl)??['NATF2']).map(value=>({value,label:value})) : view.integratedProvider === 'openai' ? ['marin','cedar','alloy','coral'].map(value=>({value,label:value}))
     : view.integratedProvider === 'gemini' ? ['Kore','Puck','Aoede','Charon','Fenrir'].map(value=>({value,label:value}))
     : view.integratedProvider === 'stepfun' ? STEPFUN_VOICES
     : view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : view.integratedModel === 'qwen-audio-3.1-realtime-plus' ? QWEN_31_VOICES : QWEN_VOICES
@@ -708,12 +718,12 @@ bindStage(codexWorkspace, 'input', () => ({codexWorkspace: codexWorkspace.value}
 bindStage(codexManagedRoot, 'input', () => ({codexManagedRoot: codexManagedRoot.value}))
 bindStage(integratedProvider, 'change', () => ({
   integratedProvider: integratedProvider.value,
-  integratedModel: integratedProvider.value === 'openai' ? 'gpt-realtime-2.1-mini' : integratedProvider.value === 'gemini' ? 'gemini-3.8-live' : integratedProvider.value === 'stepfun' ? 'stepaudio-3-realtime-preview' : 'qwen-audio-3.0-realtime-plus',
-  integratedVoice: integratedProvider.value === 'openai' ? 'marin' : integratedProvider.value === 'gemini' ? 'Kore' : integratedProvider.value === 'stepfun' ? 'default' : 'longanqian',
+  integratedModel: NATIVE_VOICE_PROVIDERS[integratedProvider.value]?.model ?? (integratedProvider.value === 'openai' ? 'gpt-realtime-2.1-mini' : integratedProvider.value === 'gemini' ? 'gemini-3.8-live' : integratedProvider.value === 'stepfun' ? 'stepaudio-3-realtime-preview' : 'qwen-audio-3.0-realtime-plus'),
+  integratedVoice: NATIVE_VOICE_PROVIDERS[integratedProvider.value]?.voice ?? (integratedProvider.value === 'openai' ? 'marin' : integratedProvider.value === 'gemini' ? 'Kore' : integratedProvider.value === 'stepfun' ? 'default' : 'longanqian'),
 }))
 bindStage(integratedModel, 'change', () => ({
   integratedModel: integratedModel.value,
-  ...(integratedModel.value !== currentView?.integratedModel
+  ...(!NATIVE_VOICE_PROVIDERS[integratedProvider.value] && integratedModel.value !== currentView?.integratedModel
     ? {integratedVoice: integratedProvider.value === 'openai' ? 'marin' : integratedProvider.value === 'gemini' ? 'Kore' : integratedProvider.value === 'stepfun' ? 'default' : integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : integratedModel.value === 'qwen-audio-3.1-realtime-plus' ? 'longanqian_v3.1' : 'longanqian'} : {}),
 }))
 bindStage(geminiAsrModel, 'input', () => ({geminiAsrModel: geminiAsrModel.value}))
@@ -807,6 +817,16 @@ function bindVoicePicker(field, select, customInput) {
   customInput.addEventListener('input', () => { controller.stage({[typeof field === 'function' ? field() : field]: customInput.value}) })
 }
 
+for(const [provider,profile] of Object.entries(NATIVE_VOICE_PROVIDERS)) {
+  document.getElementById(profile.endpoint).addEventListener('input',event=>controller.stage({[profile.endpoint]:event.target.value}))
+  document.getElementById('probe-'+provider).addEventListener('click',async()=>{
+    const label=document.getElementById('probe-status-'+provider),button=document.getElementById('probe-'+provider)
+    button.disabled=true;label.textContent=t('正在检查服务…')
+    try {const result=await api.nativeVoiceCapabilities(provider);if(provider==='personaplex')nativeVoices.set(result.endpoint,result.voices);label.textContent=t('服务已就绪');if(provider===currentView.integratedProvider&&result.endpoint===currentView[profile.endpoint]){const voices=result.voices.map(value=>({value,label:value}));populatePresetOptions(integratedVoicePreset,voices);renderPreset(integratedVoicePreset,integratedVoiceCustom,currentView.integratedVoice,voices)}}
+    catch {label.textContent=t('无法确认服务能力，请先保存设置，并检查服务地址、连接和密钥。')}
+    finally {button.disabled=false}
+  })
+}
 bindVoicePicker('integratedVoice', integratedVoicePreset, integratedVoiceCustom)
 bindVoicePicker(() => cascadedTtsProvider.value === 'gemini' ? 'geminiTtsVoice' : 'cascadedTtsVoice', cascadedTtsVoicePreset, cascadedTtsVoiceCustom)
 

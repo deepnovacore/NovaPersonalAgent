@@ -99,6 +99,8 @@ export class RealtimeProviderSession {
     this.#onDiagnostic = options.onDiagnostic
   }
 
+  get capabilities() { return this.#provider.capabilities }
+
   get userResponseMode(): 'automatic' | 'requested' {
     return this.#provider.userResponseMode ?? 'automatic'
   }
@@ -139,7 +141,7 @@ export class RealtimeProviderSession {
     this.#state = 'connecting'
     try {
       const identity = sessionIdentitySchema.parse(await this.#provider.connect({
-        tools: structuredClone(parsedTools),
+        tools: this.capabilities?.model.functionCalling === false ? [] : structuredClone(parsedTools),
         signal: combinedSignal(connectionAbort.signal, signal),
       }))
       if (identity.epoch <= this.#lastEpoch) {
@@ -200,6 +202,7 @@ export class RealtimeProviderSession {
   }
 
   async submitText(text: string, signal?: AbortSignal): Promise<void> {
+    if (this.capabilities?.model.textInput === false) throw new RealtimeProtocolError('text input unavailable')
     if (typeof text !== 'string' || !text.trim() || text.length > 4000 || !this.#provider.submitText) throw new RealtimeProtocolError('text input unavailable')
     const owner = this.#requiredConnectionOwner()
     if (this.#responseAdaptationRequired?.() === true) await this.#refreshResponseAdaptation(owner, signal)
@@ -224,6 +227,7 @@ export class RealtimeProviderSession {
     if (pcm.byteLength > MAX_REALTIME_PCM_BYTES) {
       throw new RealtimeProtocolError('input PCM frame is too large')
     }
+    if (this.capabilities?.model.audioInput === false) throw new RealtimeProtocolError('audio input unavailable')
     const owned = pcm.slice()
     const owner = this.#requiredConnectionOwner()
     try {
@@ -254,6 +258,7 @@ export class RealtimeProviderSession {
     input: HostContextItem,
     options: InjectHostItemOptions = {},
   ): Promise<ItemIdentity> {
+    if (this.capabilities?.protocol.conversationItems === false) throw new RealtimeProtocolError('conversation items unavailable')
     const item = hostContextItemSchema.parse(input)
     if (item.kind === 'workspace_context') {
       throw new RealtimeProtocolError(
@@ -344,6 +349,7 @@ export class RealtimeProviderSession {
   }
 
   async createResponse(intent: HostResponseIntent, signal?: AbortSignal): Promise<void> {
+    if (this.capabilities?.protocol.clientResponses === false) throw new RealtimeProtocolError('client responses unavailable')
     const parsed = hostResponseIntentSchema.parse(intent)
     const owner = this.#requiredConnectionOwner()
     try {
@@ -360,7 +366,7 @@ export class RealtimeProviderSession {
   }
 
   async ensureResponse(userItemId?: string, signal?: AbortSignal, requestId?: string): Promise<boolean> {
-    if (this.#provider.ensureResponse === undefined) {
+    if (this.capabilities?.protocol.clientResponses === false || this.#provider.ensureResponse === undefined) {
       throw new RealtimeProtocolError('provider response ensuring is unavailable')
     }
     const owner = this.#requiredConnectionOwner()
@@ -391,6 +397,7 @@ export class RealtimeProviderSession {
   }
 
   async cancelResponse(responseId: string, signal?: AbortSignal): Promise<void> {
+    if (this.capabilities?.protocol.cancelResponse === false) throw new RealtimeProtocolError('response cancellation unavailable')
     const parsed = realtimeIdentifierSchema.parse(responseId)
     const owner = this.#requiredConnectionOwner()
     try {
@@ -421,6 +428,7 @@ export class RealtimeProviderSession {
           throw new InternalProtocolError('provider emitted an invalid realtime event')
         }
         if (event.session_epoch !== owner.identity.epoch) continue
+        if (this.capabilities?.model.functionCalling === false && (event.kind === 'tool_call_ready' || event.kind === 'response_yielded')) throw new InternalProtocolError('tool event from a conversation-only provider')
         yield cloneProviderEvent(event)
       }
     } catch (error) {
@@ -492,7 +500,7 @@ export class RealtimeProviderSession {
       const withdrawUnverified=async()=>{
         if(!required||!this.#isCurrentConnection(owner))return
         const previous=this.#responseAdaptationAttempt
-        if(previous===null||previous.epoch!==owner.identity.epoch||(previous.confirmed&&previous.signature===WITHDRAWN_SIGNATURE))return
+        if(previous?.epoch!==owner.identity.epoch||(previous.confirmed&&previous.signature===WITHDRAWN_SIGNATURE))return
         try{
           await this.#provider.replaceResponseAdaptation!({revision:previous.revision,content:null},combinedSignal(owner.controller.signal,signal))
           this.#assertCurrentConnection(owner)

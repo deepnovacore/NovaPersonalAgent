@@ -1,3 +1,4 @@
+import {NATIVE_VOICE_PROVIDERS} from '../renderer/native-voice.mjs'
 import {isEndpointSecret, COMPATIBLE_STAGES} from '../renderer/compatible-providers.mjs'
 import { createServer } from 'node:net'
 import { timingSafeEqual } from 'node:crypto'
@@ -15,6 +16,8 @@ const NEWLINE = 0x0a
 // `.env` (or parent environment) keeps winning. Names match the Settings
 // aliases accepted by the Node runtime configuration contract exactly.
 export const SECRET_ENV_MAP = Object.freeze({
+  minicpmRealtimeApiKey: 'MINICPM_REALTIME_API_KEY',
+  personaplexRealtimeApiKey: 'PERSONAPLEX_REALTIME_API_KEY',
   openaiCompatibleApiKey: 'OPENAI_COMPATIBLE_API_KEY',
   compatibleAsrApiKey: 'COMPATIBLE_ASR_API_KEY',
   compatibleTtsApiKey: 'COMPATIBLE_TTS_API_KEY',
@@ -297,15 +300,17 @@ export function backendLaunchSpec({
     })
   } else {
     const provider = settings?.integratedProvider ?? SETTINGS_DEFAULTS.integratedProvider
-    const prefix = provider.toUpperCase()
+    const native = NATIVE_VOICE_PROVIDERS[provider]
+    const prefix = native ? 'NATIVE' : provider.toUpperCase()
     const providerDefaults = {openai: ['gpt-realtime-2.1-mini','marin'], gemini: ['gemini-3.8-live','Kore']}[provider]
     Object.assign(env, {
+      ...(native ? {NATIVE_REALTIME_URL:settings?.[native.endpoint] ?? native.defaultUrl,NATIVE_REALTIME_VOICE:provider==='personaplex' ? settings?.integratedVoice ?? native.voice : ''} : {}),
       INTEGRATED_PROVIDER: settings?.integratedProvider
         ?? SETTINGS_DEFAULTS.integratedProvider,
       [`${prefix}_REALTIME_MODEL`]:
         settings?.integratedModel ?? providerDefaults?.[0] ?? SETTINGS_DEFAULTS.integratedModel,
       [`${prefix}_REALTIME_VOICE`]:
-        settings?.integratedVoice ?? providerDefaults?.[1] ?? SETTINGS_DEFAULTS.integratedVoice,
+        native ? (provider==='personaplex' ? settings?.integratedVoice ?? native.voice : '') : settings?.integratedVoice ?? providerDefaults?.[1] ?? SETTINGS_DEFAULTS.integratedVoice,
     })
   }
   // The inherited fd-3 readiness pipe is gone: stdio stops at stderr and the
@@ -691,5 +696,11 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
       if (trimmed) env[envName] = trimmed
     }
   }
+  const native = pipelineMode === 'integrated' ? NATIVE_VOICE_PROVIDERS[settings?.integratedProvider] : undefined
+  delete env.MINICPM_REALTIME_API_KEY; delete env.PERSONAPLEX_REALTIME_API_KEY
+  if(native) {
+    const key=decryptedSecrets?.[native.secret]
+    env.NATIVE_REALTIME_API_KEY=typeof key==='string' && !CONTROL_CHARACTERS.test(key) ? key.trim() : ''
+  } else delete env.NATIVE_REALTIME_API_KEY
   return env
 }

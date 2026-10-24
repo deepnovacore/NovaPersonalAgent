@@ -1,3 +1,4 @@
+import {NATIVE_VOICE_PROVIDERS} from '../src/renderer/native-voice.mjs'
 import * as compatibleProviders from '../src/renderer/compatible-providers.mjs'
 import * as voicePreset from '../src/renderer/voice-preset.mjs'
 import {onButton} from '../src/renderer/button-action.mjs'
@@ -71,12 +72,13 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
       setAttribute(name, value) { this.attributes[name] = String(value) },
       getAttribute(name) { return this.attributes[name] ?? null },
       focus() { this.focused += 1 },
+      closest() {return this},
     })
     return nodes.get(selector)
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    NATIVE_VOICE_PROVIDERS, onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createSkinPanel: () => ({render() {}, destroy() {}}),
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
@@ -617,7 +619,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
   assert.match(html, /火山语音/)
-  assert.equal((html.match(/type="password"/g) || []).length, 16)
+  assert.equal((html.match(/type="password"/g) || []).length, 18)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {

@@ -1,3 +1,4 @@
+import {realtimeCapabilities} from './capabilities.js'
 import {TASK_CONTINUATION_INSTRUCTIONS,SCHEDULED_TASK_INSTRUCTIONS} from './cascaded/llm.js'
 import {abortable} from '../core/camera-session.js'
 import {committedConversationPairsSchema,MAX_PACKED_RECOVERY_CONTENT,type CommittedConversationPair} from './history.js'
@@ -134,6 +135,7 @@ interface OwnedResponseAdaptation {
 const providerEventEnvelope = z.record(z.string(), jsonValueSchema)
 
 export class QwenAudioRealtimeAdapter implements RealtimeProvider {
+  get capabilities() { return realtimeCapabilities[this.#wireProfile.provider] }
   /** Qwen receives the bounded host text projection, never original camera bytes. */
   readonly mediaCapability = Object.freeze({originalImageInput: false as const})
   readonly #onUsage: UsageReporter | undefined

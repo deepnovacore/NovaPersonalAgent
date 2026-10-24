@@ -694,6 +694,7 @@ export class RealtimeAssembly {
     hostWorkspaceId: string | null,
     requireDelivery: boolean,
   ): Promise<void> {
+    if (this.provider.capabilities?.protocol.conversationItems === false) return
     const activeExecutorContext = renderActiveExecutorContext(
       this.session.snapshot().active_delegates,
       channel => this.service.agentNameForChannel(channel),
@@ -900,8 +901,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   let responseAdaptationRevision = 0
   let responseAdaptationSignature: string | undefined
   const providerSession = new RealtimeProviderSession(provider, {
-    responseAdaptationRequired: () => !options.suppressMemoryAdaptation&&personalMemoryHolder.current?.prepareResponseAdaptation !== undefined,
+    responseAdaptationRequired: () => provider.capabilities?.protocol.conversationItems !== false && !options.suppressMemoryAdaptation&&personalMemoryHolder.current?.prepareResponseAdaptation !== undefined,
     responseAdaptation: async signal => {
+      if (provider.capabilities?.protocol.conversationItems === false) return undefined
       const preferences = options.suppressMemoryAdaptation?undefined:await responseAdaptationFor(personalMemoryHolder.current, options.memoryReadMode, options.memoryConsumerFingerprint, signal)
       const conversationContext=await options.conversationContext?.()
       signal?.throwIfAborted()

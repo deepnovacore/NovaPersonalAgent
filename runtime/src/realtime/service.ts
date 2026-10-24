@@ -710,6 +710,12 @@ export class RealtimeService {
     const previous = this.#inputReady
     const replace = async () => {
       this.#discardedInputEpoch = this.session.sessionEpoch
+      if(this.#provider.capabilities?.model.nativeFullDuplex){
+        try {await this.playbackDisconnected({resumeDelivery:false})}
+        finally {await this.#provider.close()}
+        this.#notifyProviderEvent({kind:'provider_error',session_epoch:this.session.sessionEpoch,code:'native_session_requires_restart',recoverable:false})
+        throw Error('native_session_requires_restart')
+      }
       await this.#reconnectProviderSession({reason: 'client_disconnect'})
     }
     const ready = previous === null ? replace() : previous.then(replace, replace)
@@ -742,7 +748,7 @@ export class RealtimeService {
   }
 
   async localSpeechOnset(speechId: string): Promise<void> {
-    if (this.#clearingConversation) return
+    if (this.#clearingConversation || this.#provider.capabilities?.model.nativeFullDuplex === true) return
     if (speechId !== this.#lastLocalSpeechOnsetId) {
       this.#lastLocalSpeechOnsetId = speechId
       this.#localSpeechOnsetRevision += 1
@@ -845,6 +851,7 @@ export class RealtimeService {
    * its own, and CP3 says the two are never held together.
    */
   async #deliveryPass(): Promise<void> {
+    if (this.#provider.capabilities?.protocol.conversationItems === false || this.#provider.capabilities?.protocol.clientResponses === false) return
     if (await this.#host.deliveryPass()) await this.driveContinuations()
   }
 
