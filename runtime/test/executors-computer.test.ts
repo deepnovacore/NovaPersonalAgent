@@ -108,15 +108,38 @@ for (const cleanupThrows of [false,true]) test(`Connect fences expired authority
   const realDevice = new URL('../src/executors/computer-device.js', import.meta.url).href
   await writeFile(join(root, 'backend.mjs'), `export let connects=0, closes=0;export async function startComputerBackend(){return {pid:1,listDisplays:async()=>[{id:'1'}],connect:async()=>{connects++},close:async()=>{closes++;if(${cleanupThrows})throw Error("lost cleanup");return true},device:{size:async()=>({width:800,height:600})}}}`)
   await writeFile(join(root, 'device.mjs'), `export {connectComputerDevice,validComputerDisplayId} from ${JSON.stringify(realDevice)};export async function computerForeground(){return {target:'fixture',width:800,height:600}}`)
+  const sessionUrl = new URL('../src/personal-agent/computer-use/session.js', import.meta.url)
+  const sessionSource=(await readFile(sessionUrl,'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path.endsWith('/computer-backend.js')?backendUrl:path.endsWith('/computer-device.js')?deviceUrl:new URL(path,sessionUrl).href)}`)
+  await writeFile(join(root,'session.mjs'),sessionSource)
   const sourceUrl = new URL('../src/executors/computer.js', import.meta.url)
-  const source = (await readFile(sourceUrl, 'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu, (_match, path: string) => `from ${JSON.stringify(path === './computer-backend.js' ? backendUrl : path === './computer-device.js' ? deviceUrl : new URL(path, sourceUrl).href)}`)
+  const source = (await readFile(sourceUrl, 'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu, (_match, path: string) => `from ${JSON.stringify(path === '../personal-agent/computer-use/session.js' ? pathToFileURL(join(root,'session.mjs')).href : new URL(path, sourceUrl).href)}`)
   await writeFile(join(root, 'computer.mjs'), source)
   const {runComputer} = await import(pathToFileURL(join(root, 'computer.mjs')).href) as {runComputer: typeof RunComputer}
   let checked = 0
-  const result = await runComputer(loadComputerConfig(env), 'tap center', {signal: new AbortController().signal, approve: () => Promise.resolve(true), progress: () => undefined, beforeWrite: () => {checked++; throw Error('superseded')}})
+  const result = await runComputer({...loadComputerConfig(env),lockRoot:root}, 'tap center', {recordProcess:()=>Promise.resolve(),signal: new AbortController().signal, approve: () => Promise.resolve(true), progress: () => undefined, beforeWrite: () => {checked++; throw Error('superseded')}})
   const backend = await import(backendUrl) as {connects: number; closes: number}
   assert.equal(checked, 1)
   assert.equal(backend.connects, 0)
   assert.equal(backend.closes, 1)
   if(cleanupThrows)assert.equal(result.code,'cleanup_unknown')
+})
+
+for(const cleanupThrows of [false,true])test(`voice runner passes shared startup AX and cleanup overrides cancellation: ${cleanupThrows}`,{skip:!['darwin','win32'].includes(process.platform)},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-shared-session-'))
+ t.after(()=>rm(root,{recursive:true,force:true}))
+ const sessionPath=join(root,'session.mjs'),runnerPath=join(root,'runner.mjs')
+ await writeFile(sessionPath,`export let settings,closed=0;export class ComputerSession{constructor(options){settings=options}async observe(){return {id:'startup-id',captured_at:'test-time',image:{media_type:'image/png',data_base64:'test',width:1280,height:720},space:{logical_width:1024,logical_height:576,scale:1.25},target:null,focus:null,foreground:true,ax:{status:'ok',summary:{source:'accessibility',content:[{role:'AXText',text:'fixture content',url:''}],truncated:false}}}}actions(){return []}planning(){}steps(){return 2}failure(){}async close(){closed++;if(${cleanupThrows})throw Error('cleanup_unknown')}}`)
+ const realRunner=new URL('../src/executors/gui-runner.js',import.meta.url).href
+ await writeFile(runnerPath,`export {validGuiConfig} from ${JSON.stringify(realRunner)};export let captured;export async function runGui(instruction,device,options){captured={context:options.context,size:await device.size()};options.progress({phase:'planning',steps:2});return 'model_finished'}`)
+ const sourceUrl=new URL('../src/executors/computer.js',import.meta.url)
+ const source=(await readFile(sourceUrl,'utf8')).replace(/from ['"](\.\.?\/[^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path==='../personal-agent/computer-use/session.js'?pathToFileURL(sessionPath).href:path==='./gui-runner.js'?pathToFileURL(runnerPath).href:new URL(path,sourceUrl).href)}`)
+ await writeFile(join(root,'computer.mjs'),source)
+ const {runComputer}=await import(pathToFileURL(join(root,'computer.mjs')).href) as {runComputer:typeof RunComputer}
+ const controller=new AbortController(),recordProcess=()=>Promise.resolve()
+ const result=await runComputer({...loadComputerConfig(env),lockRoot:root},'fixture task',{signal:controller.signal,recordProcess,approve:()=>Promise.resolve(true),progress:()=>controller.abort()})
+ const runner=await import(pathToFileURL(runnerPath).href) as {captured:{context:string;size:unknown}}
+ const session=await import(pathToFileURL(sessionPath).href) as {closed:number;settings:{externalLease:{recordProcess:unknown}}}
+ assert.match(runner.captured.context,/startup-id/);assert.match(runner.captured.context,/fixture content/);assert.match(runner.captured.context,/may be stale/)
+ assert.deepEqual(runner.captured.size,{width:1024,height:576});assert.equal(session.settings.externalLease.recordProcess,recordProcess)
+ assert.equal(session.closed,1);assert.equal(result.steps,2);assert.equal(result.code,cleanupThrows?'cleanup_unknown':'cancelled')
 })

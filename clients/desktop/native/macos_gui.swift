@@ -185,7 +185,11 @@ private struct Binding: Equatable {
         return true
     }
     private static func metadata(_ binding: Binding) -> [String: Any] {
-        ["target":binding.identity,"width":binding.bounds.width,"height":binding.bounds.height,"keyWindowMatches":binding.keyWindow==binding.windowID]
+        let app=NSRunningApplication(processIdentifier:binding.pid)
+        let window=attribute(AXUIElementCreateApplication(binding.pid),kAXFocusedWindowAttribute)
+        let title=window.flatMap { CFGetTypeID($0)==AXUIElementGetTypeID() ? attribute(unsafeBitCast($0,to:AXUIElement.self),kAXTitleAttribute) as? String : nil } ?? ""
+        return ["target":binding.identity,"width":binding.bounds.width,"height":binding.bounds.height,"keyWindowMatches":binding.keyWindow==binding.windowID,
+                "title":String(title.prefix(200)),"application":["name":app?.localizedName ?? "","bundleId":app?.bundleIdentifier ?? "","path":app?.bundleURL?.standardizedFileURL.path ?? ""]]
     }
     static func execute(_ request: [String: Any]) async throws -> [String: Any] {
         if request["op"] as? String=="focusRestore" {try restoreFocus(request);return ["restored":true]}

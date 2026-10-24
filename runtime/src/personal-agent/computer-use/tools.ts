@@ -8,7 +8,6 @@ const descriptions:Record<ComputerToolName,string>={
  computer_type:'Type into the current focus: append inserts at the caret, replace overwrites the field. Click the field first, then observe again.',
  computer_scroll:'Scroll once at the screenshot point.',
  computer_key:'Press a keyboard shortcut in the current focus.',
- computer_run:'Delegate a complete interface task to the supervised computer agent and wait for its result.',
 }
 export function computerTools(direct:boolean):CascadedLlmTool[]{
  return (Object.keys(computerToolArguments) as ComputerToolName[])

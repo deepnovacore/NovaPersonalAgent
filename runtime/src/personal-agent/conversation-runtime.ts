@@ -300,10 +300,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    },
   })
   const unsubscribeTaskCapture=options.host.subscribe(()=>{captureTaskResponse();const response=graph.playback.current?.response_id??currentResponse;if(response&&!options.host.localNotifications&&graph.service.isProactiveResponse(response))void graph.service.session.quarantineActiveOrAwaitingResponse().catch(()=>options.onDiagnostic?.('[runtime-diagnostic] notification_audio_fence_failed'))})
-  let closed=false,computerRuns=0
-  const toolBridge=conversationToolBridge(core,graph,active=>{computerRuns+=active?1:-1})
+  let closed=false
+  const toolBridge=conversationToolBridge(core,graph)
   const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();unsubscribeTaskCapture();detachTaskRuntime();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
-  const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&computerRuns===0&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
+  const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {
    toolBridge,
    retainTasks:ownsTask,

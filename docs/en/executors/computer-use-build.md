@@ -12,7 +12,7 @@ Enable Computer Use from the local desktop Build conversation. Preflight reports
 
 ## Tools and models
 
-A vision-capable Build model receives screenshot, click, type, scroll and key tools, plus `computer_run` for synchronous delegation. Coordinates refer to the latest returned screenshot, scaled to a longest edge of 1280 pixels. Each click or scroll needs a fresh screenshot; typing and keys may follow a click directly.
+A vision-capable Build model receives screenshot, click, type, scroll and key tools. Coordinates refer to the latest returned screenshot, scaled to a longest edge of 1280 pixels. Every input requires a fresh observation and its observationId.
 
 The current Build vision allowlist is:
 
@@ -20,15 +20,15 @@ The current Build vision allowlist is:
 - StepFun: `step-3.7-flash`.
 - Ark: `doubao-seed-2-0-pro-260215`.
 
-Other model IDs are not assumed to support images. They receive delegation only, with a `vision_model` preflight notice. The Build model and the computer executor's `EXECUTOR_MODEL` are separate settings.
+Other model IDs are not assumed to support images. Desktop operation is unavailable for them: `vision_model` blocks enabling and `vision_model_required` explains that a vision model is required. The Build model and the computer executor's `EXECUTOR_MODEL` are separate settings.
 
 ## Approval, Stop and recovery
 
-Every new direct-control lease requires Connect approval. With local tool approval set to `ask`, each input also requires approval; with `never`, Connect still requires approval. Delegated computer tasks retain their executor approvals.
+Every new direct-control lease requires Connect approval. With local tool approval set to `ask`, each input also requires approval; with `never`, Connect still requires approval.
 
 Stop aborts the turn and waits for backend cleanup. Turning Computer Use off does the same. A timeout or unconfirmed cleanup is not success: uncertain input is recorded as `outcome_unknown`, and uncertain device cleanup retains both resource and device quarantine. Do not remove locks to force another action.
 
-Resume requires a fresh observation before any direct input. Build cannot finish after an input until a newer screenshot is available; delegation returns a final observation. An executor's model-finished response alone is not proof that the user's goal was achieved.
+Resume requires a fresh observation before any direct input. Build cannot finish after an input until a newer screenshot is available.. An executor's model-finished response alone is not proof that the user's goal was achieved.
 
 Screenshots are private Build artifacts with owner-only file permissions. Journals keep references instead of image bytes; model history retains only the newest two images and replaces older ones with text placeholders. Screenshots sent to the selected model may contain sensitive screen content.
 
@@ -36,6 +36,6 @@ Screenshots are private Build artifacts with owner-only file permissions. Journa
 
 Automated tests use fake backends and never operate the real screen. A passing unit test is not macOS or Windows device acceptance. Real-device validation must separately check permissions, coordinate accuracy, approvals, Stop/Resume, competing task ownership, and that desktop overlays are visible to the user but absent from model screenshots.
 
-Integration still requires the synchronous delegation bridge, selected Build-model capability wiring and executor queue behavior to be verified together. Do not treat this setup guide as a release or real-device verification record.
+Integration still requires selected Build-model capability wiring and executor resource ownership to be verified together. Do not treat this setup guide as a release or real-device verification record.
 
 Use the [device acceptance checklist](../../verification/build-computer-use.md) for separate macOS and Windows verification.

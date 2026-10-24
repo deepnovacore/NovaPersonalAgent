@@ -6,7 +6,7 @@ Status: **not verified on real macOS or Windows devices**. Fake-backend tests an
 - [ ] macOS: deny Screen Recording or Accessibility and verify preflight refuses; grant both and retry.
 - [ ] Windows: verify the packaged process guardian starts and can terminate the backend on Stop.
 - [ ] With a vision Build model, inspect a harmless test window, click known targets and confirm scaled screenshot coordinates match.
-- [ ] With a nonvision Build model, expose only computer_run; verify synchronous handoff and final observation.
+- [ ] With a nonvision Build model, expose no desktop tools; verify enabling is blocked with an explicit vision_model_required limitation.
 - [ ] With ask approval, refuse Connect, then refuse an input; neither refusal may send input.
 - [ ] With never approval, Connect still requires approval; disabling control must prevent any subsequent input.
 - [ ] Stop during an input; verify backend cleanup, overlay removal, and no replay on Resume.

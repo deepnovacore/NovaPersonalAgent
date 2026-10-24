@@ -644,21 +644,16 @@ test('Stop interrupts a computer input and Resume observes before writing withou
  }finally{await f.close()}
 })
 
-test('computer_run releases direct lease before delegation and returns final observation',{skip:!supported,timeout:10000},async()=>{
- let held=false,delegated=0
+test('nonvision Build desktop calls return an explicit capability limitation',{skip:!supported,timeout:10000},async()=>{
  const f=await fixture((request,step)=>{
+  assert.equal(request.tools.some(tool=>tool.name.startsWith('computer_')),false)
   if(step===0)return {call:{name:'computer_screenshot',arguments:{}}}
-  if(step===1)return {call:{name:'computer_run',arguments:{instruction:'inspect fake interface'}}}
-  assert.equal(request.inputs.find(input=>input.kind==='tool_result')?.images?.length,1)
-  return {call:{name:'finish_build',arguments:{summary:'observed'}}}
- },'never',undefined,()=>({
-  observe:()=>{held=true;return Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}))},
-  action:()=>Promise.resolve({executionMode:'background' as const}),close:()=>{held=false;return Promise.resolve()},
- }))
- f.host.computerUseState=()=>({enabled:true,direct:true})
- f.bridge.computerRun=()=>{assert.equal(held,false);delegated++;return Promise.resolve({outcome:'ok',verified:false})}
- try{const id=await f.build();await f.host.waitConversation(id);assert.equal(delegated,1);assert.equal(held,false);assert.equal(buildView(f.host,id).status,'finished')}
- finally{await f.close()}
+  const result=request.inputs.find(input=>input.kind==='tool_result')?.output as {code:string;message:string}
+  assert.equal(result.code,'vision_model_required');assert.match(result.message,/视觉/)
+  return {text:'switch model'}
+ })
+ f.host.computerUseState=()=>({enabled:true,direct:false})
+ try{const id=await f.build();await f.host.waitConversation(id);assert.equal(f.script.requests.length,2)}finally{await f.close()}
 })
 
 test('screen change discards the failed session before the next observation',{skip:!supported,timeout:10000},async()=>{
