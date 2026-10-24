@@ -4,7 +4,7 @@ import {exportPKCS8,generateKeyPair,jwtVerify} from 'jose';
 import {ApnsProvider,FcmProvider,MiPushProvider} from '../src/providers.js';
 const message={token:'device-private-token',handle:'opaque',notificationId:'n1',ciphertext:'opaque-encrypted-body'};
 test('APNs uses HTTP/2 bearer ES256 JWT and visible mutable encrypted alert',async()=>{
- const pair=await generateKeyPair('ES256');const privateKey=await exportPKCS8(pair.privateKey);let count=0;
+ const pair=await generateKeyPair('ES256',{extractable:true});const privateKey=await exportPKCS8(pair.privateKey);let count=0;
  const p=new ApnsProvider({teamId:'team',keyId:'key',privateKey,topic:'example.nova'},async(origin,path,headers,body)=>{
   count++;assert.equal(origin,'https://api.sandbox.push.apple.com');assert.equal(path,'/3/device/device-private-token');
   const {payload,protectedHeader}=await jwtVerify(headers.authorization!.slice(7),pair.publicKey,{issuer:'team',algorithms:['ES256']});
@@ -17,7 +17,7 @@ test('APNs uses HTTP/2 bearer ES256 JWT and visible mutable encrypted alert',asy
  assert.equal((await p.send({...message,environment:'sandbox'})).status,'invalid_token');assert.equal(count,1);
 });
 test('FCM exchanges service account RS256 OAuth assertion then sends data-only v1 payload',async()=>{
- const pair=await generateKeyPair('RS256');const privateKey=await exportPKCS8(pair.privateKey);let count=0;
+ const pair=await generateKeyPair('RS256',{extractable:true});const privateKey=await exportPKCS8(pair.privateKey);let count=0;
  const request:typeof fetch=async(input,init)=>{
   count++;
   if(String(input)==='https://oauth2.googleapis.com/token'){
@@ -48,7 +48,7 @@ test('expired notification is rejected before any provider credential or transpo
  for(const provider of [apns,fcm,mi])assert.deepEqual(await provider.send({...message,expiresAt:Date.now()-1}),{status:'rejected'});
 });
 test('notification validity bounds provider retention rather than extending stale reminders',async()=>{
- const pair=await generateKeyPair('ES256'),privateKey=await exportPKCS8(pair.privateKey);const expiresAt=Date.now()+600_000;
+ const pair=await generateKeyPair('ES256',{extractable:true}),privateKey=await exportPKCS8(pair.privateKey);const expiresAt=Date.now()+600_000;
  const apns=new ApnsProvider({teamId:'team',keyId:'key',privateKey,topic:'example.nova'},async(_origin,_path,headers)=>{assert.equal(headers['apns-expiration'],String(Math.floor(expiresAt/1000)));return {status:200,reason:''}});
  assert.equal((await apns.send({...message,expiresAt})).status,'accepted');
  const mi=new MiPushProvider({appSecret:'secret',packageName:'example.nova',channelId:'public'},async(_url,init)=>{const ttl=Number(new URLSearchParams(String(init!.body)).get('time_to_live'));assert.ok(ttl>590_000&&ttl<=600_000);return new Response('{"code":0}')});

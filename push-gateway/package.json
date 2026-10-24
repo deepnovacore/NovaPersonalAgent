@@ -13,7 +13,7 @@
     "build": "tsc -p tsconfig.json --noEmit false --outDir dist"
   },
   "dependencies": {
-    "jose": "5.10.0"
+    "jose": "6.2.10"
   },
   "license": "GPL-3.0-or-later",
   "files": [

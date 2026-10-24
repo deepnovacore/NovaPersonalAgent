@@ -90,7 +90,7 @@
     "ws": "8.21.3",
     "zod": "4.4.3",
     "@nova-personal-agent/relay": "1.0.0",
-    "jose": "5.10.0"
+    "jose": "6.2.10"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

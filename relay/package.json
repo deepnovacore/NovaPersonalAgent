@@ -14,7 +14,7 @@
   },
   "license": "GPL-3.0-or-later",
   "dependencies": {
-    "jose": "5.10.0",
+    "jose": "6.2.10",
     "ws": "8.21.3"
   },
   "devDependencies": {
