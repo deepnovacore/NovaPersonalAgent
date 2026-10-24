@@ -84,7 +84,7 @@ export async function guardComputerDevice(raw: AbstractInterface, target: () => 
         validateCoordinates(params, baseline)
         const input = params as {locate?: unknown; value?: unknown; mode?: unknown; keyName?: unknown; scrollType?: unknown; distance?: unknown}
         // Input/key actions use existing focus; SDK target autofocusing can emit extra clicks.
-        if (action.name === 'Input' && (input.locate || (input.mode !== undefined && input.mode !== 'typeOnly') || typeof input.value !== 'string'
+        if (action.name === 'Input' && (input.locate || (input.mode !== undefined && (typeof input.mode!=='string'||!['typeOnly','append','replace'].includes(input.mode))) || typeof input.value !== 'string'
           || !input.value || input.value.length > 4000)) throw new Error('needs_user_action')
         if (action.name === 'KeyboardPress' && (input.locate || typeof input.keyName !== 'string'
           || !input.keyName || input.keyName.length > 100)) throw new Error('needs_user_action')
@@ -202,7 +202,7 @@ export async function connectComputerDevice(backend: Awaited<ReturnType<typeof s
   const baseline = await target()
   if (!await guiApproval(options.approve('Connect', config.macWindow
     ? {window: config.macWindow, ...(config.macApplication?{application:config.macApplication}:{}), mode: 'background', healthCheck: 'window identity only', pointerInput: 'window-bound AX actions or targeted events; no foreground activation'}
-    : {displayId: config.displayId, healthCheck: 'moves and restores pointer'}), options.signal)) throw Error('declined')
+    : {displayId: config.displayId, mode:'activated', healthCheck: 'moves and restores pointer'}), options.signal)) throw Error('declined')
   const approved = await target()
   // Whole-screen consent binds the display; the first screenshot binds the input target.
   if (approved.width !== baseline.width || approved.height !== baseline.height

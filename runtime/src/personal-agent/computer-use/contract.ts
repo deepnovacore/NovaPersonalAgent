@@ -13,10 +13,10 @@ export const COMPUTER_RESOURCE = 'desktop:local-input'
 
 export const computerToolArguments = {
  computer_screenshot: z.object({application:z.string().trim().min(1).max(200).optional()}).strict(),
- computer_click: z.object({x:z.number().int().min(0),y:z.number().int().min(0)}).strict(),
- computer_type: z.object({text:z.string().min(1).max(4000)}).strict(),
- computer_scroll: z.object({x:z.number().int().min(0),y:z.number().int().min(0),direction:z.enum(['up','down','left','right']),amount:z.number().int().min(1).max(10).default(3)}).strict(),
- computer_key: z.object({keys:z.string().min(1).max(100)}).strict(),
+ computer_click: z.object({observationId:z.string().min(1),x:z.number().int().min(0),y:z.number().int().min(0)}).strict(),
+ computer_type: z.object({observationId:z.string().min(1),mode:z.enum(['append','replace']).default('append'),text:z.string().min(1).max(4000)}).strict(),
+ computer_scroll: z.object({observationId:z.string().min(1),x:z.number().int().min(0),y:z.number().int().min(0),direction:z.enum(['up','down','left','right']),amount:z.number().int().min(1).max(10).default(3)}).strict(),
+ computer_key: z.object({observationId:z.string().min(1),keys:z.string().min(1).max(100)}).strict(),
  computer_run: z.object({instruction:z.string().trim().min(1).max(4000)}).strict(),
 } as const
 export type ComputerToolName = keyof typeof computerToolArguments
@@ -64,7 +64,7 @@ export const computerApplicationSchema=z.object({name:z.string().min(1).max(200)
 /** Unified window observation (issue #3). One shape for Build and for the voice-dispatched ComputerExecutor. */
 export const COMPUTER_AX_STATUSES = ['ok','unavailable','timeout','truncated'] as const
 export type ComputerAxStatus = typeof COMPUTER_AX_STATUSES[number]
-/** How an action reached the target. `activated` means the target window was brought forward; it is never silent. */
+/** How an action reached the target. `activated` is foreground/global input (including an already-active window), not permission to activate another window. */
 export type ComputerExecutionMode = 'background'|'activated'
 export interface ComputerObservation {
  /** Opaque; every action must cite the newest one, and the session rejects it when the target or geometry changed. */
@@ -75,9 +75,10 @@ export interface ComputerObservation {
  readonly space:{readonly logical_width:number;readonly logical_height:number;readonly scale:number}
  /** Null target = whole screen. */
  readonly target:null|{readonly application:string;readonly pid:number;readonly window_id:number;readonly title:string}
+ readonly focus:{readonly pid:number;readonly window_id:number}|null
  readonly foreground:boolean
  /** AX text is untrusted application data: bounded, never includes secure text fields. */
- readonly ax:{readonly status:ComputerAxStatus;readonly summary?:NonNullable<ToolImage['native_ui']>;readonly editor?:ToolImage['native_editor']}
+ readonly ax:{readonly status:ComputerAxStatus;readonly summary?:NonNullable<ToolImage['native_ui']>;readonly editor?:NonNullable<ToolImage['native_editor']>}
 }
 /** Replace overwrites the focused field; append adds at the caret. Drivers must agree. */
 export const COMPUTER_TYPE_MODES = ['append','replace'] as const

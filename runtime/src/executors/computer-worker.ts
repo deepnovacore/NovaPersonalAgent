@@ -34,12 +34,12 @@ input.on('line', (line: string) => {
     try {
       let value: unknown
       if (native && macWindow) {
-        const params = request.params as {locate?: {center?: [number, number]}; value?: string; keyName?: string; direction?: string; distance?: number; focusLease?: {focus: unknown; targetStarted: unknown; clickGroup: number}}
+        const params = request.params as {locate?: {center?: [number, number]}; value?: string; mode?:'append'|'replace'|'typeOnly'; keyName?: string; direction?: string; distance?: number; focusLease?: {focus: unknown; targetStarted: unknown; clickGroup: number}}
         const point = params?.locate?.center
         const body: Record<string, unknown> = {...macWindow, op: request.op, target: binding}
         if (request.op === 'Tap') Object.assign(body, {x: point?.[0], y: point?.[1], holdMs: clickHoldMs, focus: params?.focusLease?.focus, targetStarted: params?.focusLease?.targetStarted, clickGroup: params?.focusLease?.clickGroup})
         if (['Input','KeyboardPress'].includes(request.op) && editorPoint) body.editorPoint=editorPoint
-        if (request.op === 'Input') body.value = params?.value
+        if (request.op === 'Input') {body.value = params?.value;body.mode=params?.mode==='replace'?'replace':'append'}
         if (request.op === 'KeyboardPress') body.keyName = params?.keyName
         if (request.op === 'Scroll') {
           const size = await native.request({...macWindow, op: 'size'})
@@ -92,7 +92,7 @@ input.on('line', (line: string) => {
       } else {
         const action = device.actionSpace().find(item => item.name === request.op)
         if (!action || !['Input', 'Scroll', 'KeyboardPress'].includes(request.op)) throw new Error('invalid action')
-        await action.call(request.op === 'Input' ? {...request.params as {value: string}, mode: 'typeOnly'} : request.params)
+        await action.call(request.op === 'Input' ? {...request.params as {value: string}, mode: (request.params as {mode?:string}).mode==='replace'?'replace':'typeOnly'} : request.params)
       }
       process.stdout.write(JSON.stringify({id: request.id, ok: true, value}) + '\n')
     } catch(error) {process.stdout.write(JSON.stringify({id: request.id, ok: false,...(error instanceof Error&&/^native_gui:[a-z_]{1,80}$/u.test(error.message)?{detail:error.message}:{})}) + '\n')}
