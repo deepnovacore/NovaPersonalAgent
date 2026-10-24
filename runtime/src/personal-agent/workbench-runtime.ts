@@ -19,7 +19,7 @@ const publishTool:CascadedLlmTool={name:'publish_plan',description:'Publish the 
 const finishArguments=z.object({summary:z.string().min(1).max(12000)}).strict()
 const finishTool:CascadedLlmTool={name:'finish_build',description:'End this Build conversation after the confirmed work and verification are complete. Provide the final user-facing summary. This permanently locks the conversation; use only when no further Build interaction is needed.',parameters:{type:'object',properties:{summary:{type:'string',minLength:1,maxLength:12000}},required:['summary'],additionalProperties:false}}
 const RESUME_CHECK='Resume the confirmed plan. Inspect actual state before continuing any cancelled, timed-out or unknown operation. Never replay a completed call.'
-export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never';shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'screenshot'|'action'|'close'>;onDiagnostic?:(message:string)=>void}):Promise<ConversationRuntime>{
+export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never';shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'observe'|'action'|'close'>;onDiagnostic?:(message:string)=>void}):Promise<ConversationRuntime>{
  const {conversation,host}=options,build=conversation.kind==='build',store=host.workbench
  const turnToolLimit=build?128:24
  const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
@@ -29,7 +29,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  const workspaceContext=confirmedPlan?JSON.stringify({confirmed_plan:{id:confirmedPlan.id,version:confirmedPlan.version,title:confirmedPlan.title,content:confirmedPlan.content},project:conversation.build!.project}):null
  let session:CascadedLlmSession|undefined,bridgeRuntime:ConversationRuntime|undefined
  let closed=false,controller:AbortController|undefined,active:Promise<{assistant:string;turn_id?:string}>|undefined,version=state.run_version
- let computer:Pick<ComputerSession,'screenshot'|'action'|'close'>|undefined
+ let computer:Pick<ComputerSession,'observe'|'action'|'close'>|undefined
  let currentComputerCall:WorkbenchCall|undefined
  let computerInputStarted=false
  let observeRequired=true
@@ -132,10 +132,10 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
          }
          const capture=async(application?:string)=>{
           computerFrame('active',name)
-          const image=await (await getComputer()).screenshot(application)
+          const {image,...observation}=await (await getComputer()).observe(application)
           const ref=await store.saveImage(conversation.id,conversation.generation,image)
           observeRequired=false;coordinateObservationRequired=false
-          return {image_ref:ref,...(image.native_ui?{native_ui:image.native_ui}:{}),...(image.native_editor?{native_editor:image.native_editor}:{})}
+          return {image_ref:ref,...observation,untrusted_application_data:['ax.summary','ax.editor']}
          }
          try{
           signal.throwIfAborted()
@@ -151,8 +151,8 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
            verificationRequired=false
           }else{
            verificationRequired=true
-           await (await getComputer()).action(name,call.arguments);coordinateObservationRequired=true
-           call.result={status:'completed',verified:false};computerFrame('active',name)
+           const receipt=await (await getComputer()).action(name,call.arguments);observeRequired=true;coordinateObservationRequired=true
+           call.result={status:'completed',verified:false,...receipt};computerFrame('active',name)
           }
          }catch(error){
           let code=error instanceof Error?error.message:'action_failed'
