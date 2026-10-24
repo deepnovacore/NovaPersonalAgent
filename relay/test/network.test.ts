@@ -195,3 +195,70 @@ test('lost pair claim, confirmation and revoke HTTP responses resume the same du
   assert.deepEqual(revoked.remainingDevices.map(d=>d.device),[f.host.device]);
  }finally{f.h.stop();f.p.stop();await f.service.close();}
 });
+
+
+test('mailbox rejects sender controlled expiry before storing any poison message',async()=>{
+ const f=await fixture();try{
+  await paired(f);
+  const envelope=await signEnvelope({v:1,space:f.space,id:'poison',from:f.phone.device,to:f.host.device,chan:'mailbox',epoch:1,expiresAt:Date.now()+50,body:await encryptBody({test:true},generateContentKey())},f.phone.signingPrivateKey);
+  await assert.rejects(()=>f.p.send(envelope),/mailbox_deadline_forbidden/);
+  assert.equal((await f.h.status()).lastCursor,0);
+  await f.h.revokeDevice(f.phone.device,'revoke-poisoner');
+  assert.equal((await f.h.read()).messages.length,0);
+ }finally{f.h.stop();f.p.stop();await f.service.close();}
+});
+
+test('trusted reverse proxy separates real source budgets while forged prefixes cannot evade them',async()=>{
+ const options={securityPath:':memory:',mailboxPath:':memory:',bootstrapToken:'operator-only-bootstrap-secret',trustedProxyAddresses:['127.0.0.1'],requestsPerMinute:1};
+ const service=new RelayServer(options);const url=await service.listen();
+ try{
+  const request=(xff:string)=>fetch(`${url}/v1/mailbox`,{headers:{'x-forwarded-for':xff}});
+  assert.equal((await request('192.0.2.1')).status,401);
+  assert.equal((await request('192.0.2.2')).status,401);
+  assert.equal((await request('198.51.100.4, 192.0.2.1')).status,429);
+  assert.equal((await request('192.0.2.3, malformed')).status,400);
+ }finally{await service.close();}
+});
+
+test('untrusted direct callers cannot choose their rate bucket through forwarding headers',async()=>{
+ const service=new RelayServer({securityPath:':memory:',mailboxPath:':memory:',bootstrapToken:'operator-only-bootstrap-secret',requestsPerMinute:1});const url=await service.listen();
+ try{
+  assert.equal((await fetch(`${url}/v1/mailbox`,{headers:{'x-forwarded-for':'192.0.2.1'}})).status,401);
+  assert.equal((await fetch(`${url}/v1/mailbox`,{headers:{'x-forwarded-for':'192.0.2.2'}})).status,429);
+ }finally{await service.close();}
+});
+
+test('trusted proxy HTTP and WebSocket concurrency belongs to the verified source, not the proxy socket',async()=>{
+ const f=await fixture({trustedProxyAddresses:['127.0.0.1'],maxConnectionsPerIp:1});const sockets:WebSocket[]=[];
+ const session=async(identity:DeviceIdentity)=>{const c=f.service.security.beginLogin(f.space,identity.device);const proof=await signControl({v:1,purpose:'relay-login',challengeId:c.id,nonce:c.nonce,space:c.space,device:c.device,epoch:c.epoch,expiresAt:c.expiresAt},identity.signingPrivateKey);return f.service.security.completeLogin({challengeId:c.id,proof}).token;};
+ const connect=(token:string,ip:string)=>new Promise<WebSocket>((resolve,reject)=>{const ws=new WebSocket(f.url.replace('http:','ws:')+'/v1/live',{headers:{authorization:`Bearer ${token}`,'x-forwarded-for':ip}});sockets.push(ws);ws.once('open',()=>resolve(ws));ws.once('error',reject);});
+ try{
+  await paired(f);const hostToken=await session(f.host),phoneToken=await session(f.phone);
+  const first=await connect(hostToken,'192.0.2.1');await connect(phoneToken,'192.0.2.2');
+  assert.equal((await fetch(`${f.url}/v1/mailbox`,{headers:{'x-forwarded-for':'192.0.2.1'}})).status,429);
+  assert.equal((await fetch(`${f.url}/v1/mailbox`,{headers:{'x-forwarded-for':'192.0.2.3'}})).status,401);
+  await assert.rejects(()=>connect(hostToken,'198.51.100.5, 192.0.2.1'),/429/);
+  const closed=new Promise<void>(resolve=>first.once('close',()=>resolve()));first.terminate();await closed;await until(()=>!f.service.live.presence({space:f.space,device:f.phone.device,epoch:1},f.host.device));
+  await connect(hostToken,'192.0.2.1');
+ }finally{for(const socket of sockets)socket.terminate();f.h.stop();f.p.stop();await f.service.close();}
+});
+
+import {mkdtempSync,rmSync,realpathSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+test('a revoked sender legacy expired envelope cannot block Host mailbox or cursor ACK',async()=>{
+ const dir=mkdtempSync(join(realpathSync(tmpdir()),'relay-legacy-')),path=join(dir,'mail.sqlite');
+ const f=await fixture({mailboxPath:path});try{
+  await paired(f);
+  const old=await signEnvelope({v:1,space:f.space,id:'legacy-poison',from:f.phone.device,to:f.host.device,chan:'mailbox',epoch:1,expiresAt:null,body:await encryptBody({test:true},generateContentKey())},f.phone.signingPrivateKey);
+  await f.p.send(old);
+  // Model a row admitted by the pre-upgrade server, without bypassing current network admission.
+  const legacy=await signEnvelope({...old,expiresAt:1},f.phone.signingPrivateKey),db=new DatabaseSync(path);
+  try{db.prepare('UPDATE mailbox_messages SET expires=1,payload=? WHERE space=? AND recipient=?').run(JSON.stringify(legacy),f.space,f.host.device);}finally{db.close();}
+  await f.h.revokeDevice(f.phone.device,'remove-compromised-device');
+  const page=await f.h.read();assert.equal(page.messages.length,0);assert.equal(page.nextCursor,1);assert.equal(await f.h.acknowledge(page.nextCursor),1);
+  const valid=await signEnvelope({...old,id:'valid-after-revoke',from:f.host.device,epoch:2},f.host.signingPrivateKey);
+  await f.h.send(valid);assert.deepEqual((await f.h.read()).messages.map(m=>m.envelope.id),['valid-after-revoke']);
+ }finally{f.h.stop();f.p.stop();await f.service.close();rmSync(dir,{recursive:true,force:true});}
+});

@@ -6,6 +6,7 @@ import {MailboxStore, type MailboxOptions} from './mailbox.js';
 import {LiveRelay, type LiveOptions} from './live.js';
 import {RelayError, type RelayEnvelope, type RelayPrincipal} from './protocol.js';
 import {SecurityStore} from './security.js';
+import {canonicalAddress,sourceAddress,trustedAddresses} from './source-address.js';
 
 export interface RelayServerOptions {
   securityPath: string;
@@ -16,6 +17,9 @@ export interface RelayServerOptions {
   /** Direct TLS, or an explicitly configured HTTPS reverse proxy. */
   tls?: TlsOptions;
   externalTls?: boolean;
+  /** Exact transport-peer IP allowlist; only these peers may supply X-Forwarded-For. */
+  trustedProxyAddresses?: string[];
+  maxControlOperationsPerSpace?: number;
   publicUrl?: string;
   maxBodyBytes?: number;
   /** Entire JSON mailbox response budget; must fit one configured maximum envelope. */
@@ -43,6 +47,9 @@ export class RelayServer {
   readonly http: Server;
   private readonly sockets = new WebSocketServer({noServer:true, maxPayload:1024, perMessageDeflate:false});
   private readonly rates = new Map<string, RateBucket>();
+  private readonly trustedProxies:ReadonlySet<string>;
+  private readonly forwardedConnections=new Map<string,number>();
+  private readonly requestSources=new WeakMap<IncomingMessage,string>();
   private readonly ipConnections = new Map<string, number>();
   private readonly options: Required<Pick<RelayServerOptions, 'bind' | 'port' | 'maxBodyBytes' | 'maxConnections' |
     'maxResponseBytes' | 'maxConnectionsPerIp' | 'requestsPerMinute' | 'bootstrapPerMinute' | 'maxRateSources' | 'globalRequestsPerMinute' | 'globalBootstrapPerMinute'>> & RelayServerOptions;
@@ -57,7 +64,8 @@ export class RelayServer {
     if (!loopback(this.options.bind) && !options.tls &&
       !(options.externalTls && options.publicUrl && new URL(options.publicUrl).protocol === 'https:')) throw new RelayError('tls_required');
     if (this.options.maxResponseBytes < (options.mailbox?.maxMessageBytes ?? 512*1024) + 256) throw new RelayError('invalid_response_budget');
-    this.security = new SecurityStore(options.securityPath,{bootstrapToken:options.bootstrapToken});
+    this.trustedProxies=trustedAddresses(options.trustedProxyAddresses);
+    this.security = new SecurityStore(options.securityPath,{bootstrapToken:options.bootstrapToken,...(options.maxControlOperationsPerSpace===undefined?{}:{maxControlOperations:options.maxControlOperationsPerSpace})});
     this.mailbox = new MailboxStore(options.mailboxPath,this.security,{maxMessageBytes:512*1024,...options.mailbox});
     this.live = new LiveRelay(this.security,{...options.live,maxConnections:this.options.maxConnections});
     const listener = (req: IncomingMessage,res: ServerResponse): void => {void this.route(req,res);};
@@ -68,7 +76,10 @@ export class RelayServer {
     this.http.keepAliveTimeout = 5000;
     this.http.maxHeadersCount = 32;
     this.http.on('connection',socket => {
-      const ip = socket.remoteAddress ?? 'unknown';
+      let ip:string;try{ip=canonicalAddress(socket.remoteAddress??'0.0.0.0');}catch{socket.destroy();return;}
+      // Before HTTP headers exist, a trusted proxy is bounded by the global TCP cap.
+      // Its clients are counted separately for each HTTP request and WS lifetime below.
+      if(this.trustedProxies.has(ip))return;
       const count = this.ipConnections.get(ip) ?? 0;
       if (count >= this.options.maxConnectionsPerIp) {socket.destroy();return;}
       this.ipConnections.set(ip,count+1);
@@ -78,13 +89,16 @@ export class RelayServer {
       });
     });
     this.http.on('upgrade',(req,socket,head) => {
+      let release:(()=>void)|undefined;
       try {
+        release=this.reserveForwardedConnection(req);socket.once('close',release);
         this.rate(req,false);
         const url = new URL(req.url ?? '/', 'http://relay.invalid');
         if (url.pathname !== '/v1/live' || url.search) throw new RelayError('invalid_route');
         const p = this.security.authenticate(req.headers.authorization);
-        this.sockets.handleUpgrade(req,socket,head,ws => this.connected(p,ws,req));
+        this.sockets.handleUpgrade(req,socket,head,ws => {if(release)ws.once('close',release);this.connected(p,ws,req);});
       } catch (error) {
+        release?.();
         const code = this.errorCode(error);
         socket.end(`HTTP/1.1 ${this.errorStatus(code)} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
       }
@@ -115,10 +129,20 @@ export class RelayServer {
       }));
     } finally {this.security.close(); this.mailbox.close();}
   }
+  private source(req:IncomingMessage):string {
+    let value=this.requestSources.get(req);if(value===undefined){value=sourceAddress(req,this.trustedProxies);this.requestSources.set(req,value);}return value;
+  }
+  private reserveForwardedConnection(req:IncomingMessage):()=>void {
+    if(!this.trustedProxies.has(canonicalAddress(req.socket.remoteAddress??'0.0.0.0')))return ()=>{};
+    const ip=this.source(req),count=this.forwardedConnections.get(ip)??0;
+    if(count>=this.options.maxConnectionsPerIp)throw new RelayError('rate_limited');
+    this.forwardedConnections.set(ip,count+1);let released=false;
+    return ()=>{if(released)return;released=true;const remaining=(this.forwardedConnections.get(ip)??1)-1;if(remaining>0)this.forwardedConnections.set(ip,remaining);else this.forwardedConnections.delete(ip);};
+  }
   private rate(req: IncomingMessage,bootstrap: boolean): void {
     const now = Date.now();
     const prefix=bootstrap?'bootstrap':'all';
-    for (const [key,limit] of [[`${prefix}:source:${req.socket.remoteAddress ?? 'unknown'}`,bootstrap?this.options.bootstrapPerMinute:this.options.requestsPerMinute],
+    for (const [key,limit] of [[`${prefix}:source:${this.source(req)}`,bootstrap?this.options.bootstrapPerMinute:this.options.requestsPerMinute],
       [`${prefix}:global`,bootstrap?this.options.globalBootstrapPerMinute:this.options.globalRequestsPerMinute]] as const) {
       let bucket = this.rates.get(key);
       if (!bucket || now-bucket.start >= 60000) {
@@ -150,6 +174,7 @@ export class RelayServer {
   }
   private async route(req: IncomingMessage,res: ServerResponse): Promise<void> {
     try {
+      const release=this.reserveForwardedConnection(req);res.once('finish',release);res.once('close',release);
       this.rate(req,false);
       const url = new URL(req.url ?? '/', 'http://relay.invalid');
       const route = `${req.method} ${url.pathname}`;

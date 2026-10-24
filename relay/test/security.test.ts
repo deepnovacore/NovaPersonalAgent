@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {mkdtempSync,rmSync,readFileSync,statSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {compactDecrypt,importJWK} from 'jose';
@@ -159,18 +160,36 @@ test('pair claims and membership operations replay durable receipts without cons
   assert.deepEqual(f.store.revokeDevice(principal,f.client.device,'revoke-stable'),result);
   assert.equal(f.store.getSpace(f.space).epoch,2);
   assert.throws(()=>f.store.revokeDevice(principal,'different-device','revoke-stable'),/op_conflict/);
-  assert.throws(()=>f.store.confirmPairing(principal,first.id,'confirm-stable'),/stale_control_receipt/);
+  assert.throws(()=>f.store.confirmPairing(principal,first.id,'confirm-stable'),/invalid_pairing_request/);
   assert.throws(()=>f.store.requestPairing({...r.value,proof:r.proof}),/invalid_invitation/);
   assert.ok(!readFileSync(join(f.dir,'security.sqlite')).includes(Buffer.from(r.value.secret)));
  }finally{f.close();}
 });
-test('control receipt quota fails before mutation while existing receipts remain replayable',async()=> {
+test('full control receipt quota never prevents revocation and the new epoch receipt survives restart',async()=> {
  const f=await fixture();let limited:SecurityStore|undefined;try {
   const r=await f.request();const request=f.store.requestPairing({...r.value,proof:r.proof});
   const member=f.store.confirmPairing(f.p,request.id,'only-operation');
   limited=new SecurityStore(join(f.dir,'security.sqlite'),{bootstrapToken,now:()=>1000,maxControlOperations:1});
   assert.deepEqual(limited.confirmPairing(f.p,request.id,'only-operation'),member);
-  assert.throws(()=>limited!.revokeDevice(f.p,f.client.device,'over-quota'),/security_capacity_exceeded/);
-  assert.equal(f.store.getSpace(f.space).epoch,1);f.store.assertActive({...f.p,device:f.client.device});
+  const revoked=limited.revokeDevice(f.p,f.client.device,'over-quota');
+  assert.equal(revoked.epoch,2);f.restart();
+  assert.deepEqual(f.store.revokeDevice({...f.p,epoch:2},f.client.device,'over-quota'),revoked);
+  assert.throws(()=>f.store.assertActive({...f.p,epoch:2,device:f.client.device}),/device_inactive/);
  }finally{limited?.close();f.close();}
+});
+
+
+test('receipt capacity is isolated per Space and epoch cleanup permits repeated pairing/revocation',async()=>{
+ const f=await fixture();const path=join(f.dir,'security.sqlite');const limited=new SecurityStore(path,{bootstrapToken,maxControlOperations:1,now:()=>1000});
+ const pair=async(p:typeof f.p,phone:typeof f.client)=>{const i=limited.createInvitation(p);const body={invitationId:i.id,secret:i.secret,device:phone.device,signingPublicKey:phone.signingPublicKey,encryptionPublicKey:phone.encryptionPublicKey,business_versions:[1]};const request=limited.requestPairing({...body,proof:await signControl({v:1,purpose:'pair-request',...body},phone.signingPrivateKey)});return limited.confirmPairing(p,request.id,'confirm-'+request.id);};
+ try{
+  const other=await generateDeviceIdentity(),phone=await generateDeviceIdentity(),space=spaceId(other.signingPublicKey),host={device:other.device,signingPublicKey:other.signingPublicKey,encryptionPublicKey:other.encryptionPublicKey};
+  limited.createSpace({space,host,proof:await signControl({v:1,purpose:'space-create',space,host},other.signingPrivateKey)},bootstrapToken);
+  await pair(f.p,f.client);await pair({space,device:other.device,epoch:1},phone);
+  const first=limited.revokeDevice(f.p,f.client.device,'first-revoke');
+  const replacement=await generateDeviceIdentity();await pair({...f.p,epoch:first.epoch},replacement);
+  const second=limited.revokeDevice({...f.p,epoch:first.epoch},replacement.device,'second-revoke');assert.equal(second.epoch,3);
+  f.restart();assert.deepEqual(f.store.revokeDevice({...f.p,epoch:3},replacement.device,'second-revoke'),second);
+  const db=new DatabaseSync(path);try{const rows=db.prepare('SELECT epoch,kind FROM security_operations WHERE space=?').all(f.space);assert.deepEqual(rows.map(row=>({...row})),[{epoch:3,kind:'revoke'}]);}finally{db.close();}
+ }finally{limited.close();f.close();}
 });

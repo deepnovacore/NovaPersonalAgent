@@ -11,6 +11,8 @@ export interface RelayDeploymentConfig {
   port?: number;
   publicUrl?: string;
   externalTls?: boolean;
+  trustedProxyAddresses?: string[];
+  maxControlOperationsPerSpace?: number;
   tlsCertificateFile?: string;
   tlsKeyFile?: string;
   maxBodyBytes?: number;
@@ -35,6 +37,8 @@ export function loadDeploymentConfig(path: string): RelayServerOptions {
     port:config.port ?? 8080,...(config.bind===undefined?{}:{bind:config.bind}),
     ...(config.publicUrl===undefined?{}:{publicUrl:config.publicUrl}),
     ...(config.externalTls===undefined?{}:{externalTls:config.externalTls}),
+    ...(config.trustedProxyAddresses===undefined?{}:{trustedProxyAddresses:config.trustedProxyAddresses}),
+    ...(config.maxControlOperationsPerSpace===undefined?{}:{maxControlOperationsPerSpace:config.maxControlOperationsPerSpace}),
     ...(config.tlsCertificateFile && config.tlsKeyFile ? {tls:{cert:readFileSync(config.tlsCertificateFile),key:readFileSync(config.tlsKeyFile)}} : {}),
     ...(config.maxBodyBytes===undefined?{}:{maxBodyBytes:config.maxBodyBytes}),
     ...(config.maxResponseBytes===undefined?{}:{maxResponseBytes:config.maxResponseBytes}),

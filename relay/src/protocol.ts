@@ -59,6 +59,7 @@ export function validateEnvelope(envelope: RelayEnvelope, principal: RelayPrinci
   if (envelope.expiresAt !== null && (!Number.isSafeInteger(envelope.expiresAt) || envelope.expiresAt < 0)) {
     throw new RelayError('invalid_deadline');
   }
+  if (envelope.chan === 'mailbox' && envelope.expiresAt !== null) throw new RelayError('mailbox_deadline_forbidden');
   if (envelope.chan === 'stream' && envelope.expiresAt === null) throw new RelayError('deadline_required');
   for (const value of [envelope.body, envelope.sig]) {
     if (typeof value !== 'string' || value.length === 0 || value.length > maxBytes * 2 ||

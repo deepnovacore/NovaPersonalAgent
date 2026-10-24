@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {mkdtempSync, rmSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MailboxStore} from '../src/mailbox.js';
@@ -18,7 +19,7 @@ function setup(options:ConstructorParameters<typeof MailboxStore>[2] = {}) {
     assertCanSend(_p,e) {if(e.to === 'unknown') throw new RelayError('recipient_unknown');},
   };
   let store = new MailboxStore(join(directory,'mail.sqlite'),authority,options);
-  return {get store(){return store;},revoked,restart(){store.close();store = new MailboxStore(join(directory,'mail.sqlite'),authority,options);},close(){store.close();rmSync(directory,{recursive:true,force:true});}};
+  return {get store(){return store;},revoked,legacy(id:string,expires:number){const accepted=store.send(sender,envelope(id));const db=new DatabaseSync(join(directory,'mail.sqlite'));try{db.prepare('UPDATE mailbox_messages SET expires=?,payload=? WHERE seq=?').run(expires,JSON.stringify(envelope(id,{expiresAt:expires})),accepted.seq);}finally{db.close();}},restart(){store.close();store = new MailboxStore(join(directory,'mail.sqlite'),authority,options);},close(){store.close();rmSync(directory,{recursive:true,force:true});}};
 }
 test('durable send retry and lost ACK preserve logical delivery across restart',()=>{
   const f=setup();try {
@@ -53,7 +54,7 @@ test('every retry, read and ACK rechecks revocation and epoch',()=>{
 test('conflicting IDs, invalid envelopes and unauthorized recipients never deliver',()=>{
  const f=setup();try {
    f.store.send(sender,envelope('a'));
-   for(const changes of [{body:'Yw=='},{to:'c2'},{expiresAt:100},{sig:'ZA=='}])
+   for(const changes of [{body:'Yw=='},{to:'c2'},{sig:'ZA=='}])
      assert.throws(()=>f.store.send(sender,envelope('a',changes)),/id_conflict/);
    assert.throws(()=>f.store.send(sender,envelope('b',{from:'c1'})),/sender_mismatch/);
    assert.throws(()=>f.store.send(sender,envelope('b',{to:'unknown'})),/recipient_unknown/);
@@ -98,30 +99,27 @@ test('dedup history is bounded and retained after prune and restart',()=>{
    assert.throws(()=>f.store.send(sender,envelope('a',{body:'Yw=='})),/id_conflict/);
  }finally{f.close();}
 });
-test('expired messages require explicit prefix prune and never silently skip',()=>{
+test('mailbox rejects any deadline and safely traverses pre-upgrade expired rows after a lost ACK',()=>{
  let now=10;const f=setup({now:()=>now});try {
-   assert.throws(()=>f.store.send(sender,envelope('old',{expiresAt:10})),/message_expired/);
-   f.store.send(sender,envelope('a',{expiresAt:11}));f.store.send(sender,envelope('b'));now=12;
-   assert.throws(()=>f.store.read(client),/message_expired/);
+   for(const expiresAt of [0,10,11,100000])assert.throws(()=>f.store.send(sender,envelope('old',{expiresAt})),/mailbox_deadline_forbidden/);
+   f.legacy('a',11);f.store.send(sender,envelope('b'));now=12;
    assert.throws(()=>f.store.acknowledge(client,1),/cursor_not_delivered/);
-   f.store.prune(client,1);f.restart();assert.throws(()=>f.store.read(client),/cursor_expired/);
-   assert.equal(f.store.read(client,{after:1}).messages[0]?.envelope.id,'b');
-   assert.equal(f.store.send(sender,envelope('a',{expiresAt:11})).duplicate,true);
-   assert.throws(()=>f.store.prune(client,3),/invalid_cursor/);
+   let page=f.store.read(client);assert.deepEqual(page.messages.map(m=>m.envelope.id),['b']);assert.equal(page.nextCursor,2);
+   f.restart();page=f.store.read(client);assert.equal(page.nextCursor,2);assert.deepEqual(page.messages.map(m=>m.envelope.id),['b']);
+   assert.equal(f.store.acknowledge(client,2),2);assert.equal(f.store.read(client).messages.length,0);
  }finally{f.close();}
 });
 test('byte quotas and option validation are enforced',()=>{
  const f=setup({maxBytes:1});try {assert.throws(()=>f.store.send(sender,envelope('a')),/capacity_exceeded/);}finally{f.close();}
  assert.throws(()=>new MailboxStore(':memory:',{assertActive(){},assertCanSend(){}},{maxHistory:0}),/invalid_options/);
 });
-test('a page containing expired ciphertext does not mark any of that page delivered',()=>{
+test('a page of only expired legacy rows advances a bounded cursor without delivering their ciphertext',()=>{
  let now=10;const f=setup({now:()=>now});try {
-   f.store.send(sender,envelope('a'));f.store.send(sender,envelope('b',{expiresAt:11}));now=12;
-   assert.throws(()=>f.store.read(client,{limit:2}),/message_expired/);
-   assert.throws(()=>f.store.acknowledge(client,1),/cursor_not_delivered/);
-   assert.equal(f.store.read(client,{limit:1}).nextCursor,1);
-   assert.equal(f.store.acknowledge(client,1),1);
-   assert.throws(()=>f.store.read(client),/message_expired/);
+   f.legacy('a',11);f.legacy('b',11);now=12;
+   const first=f.store.read(client,{limit:1});assert.equal(first.nextCursor,1);assert.equal(first.messages.length,0);assert.equal(first.hasMore,true);
+   assert.throws(()=>f.store.acknowledge(client,2),/cursor_not_delivered/);
+   const second=f.store.read(client,{after:1,limit:1});assert.equal(second.nextCursor,2);assert.equal(second.messages.length,0);assert.equal(second.hasMore,false);
+   assert.equal(f.store.acknowledge(client,2),2);
  }finally{f.close();}
 });
 test('per-device byte limits and envelope limits cannot be bypassed by another destination',()=>{
@@ -160,22 +158,21 @@ test('status exposes durable recovery cursors without advancing delivery and enf
 });
 test('invalid clocks fail expiry checks without publishing or advancing delivery',()=>{
  let now=10;const f=setup({now:()=>now});try {
-   f.store.send(sender,envelope('a',{expiresAt:20}));
+   f.legacy('a',20);
    for (const invalid of [NaN,Infinity,-1,1.5,Number.MAX_SAFE_INTEGER+1]) {
      now=invalid;
-     assert.throws(()=>f.store.send(sender,envelope('b',{expiresAt:20})),/invalid_clock/);
+     assert.throws(()=>f.store.send(sender,envelope('b')),/invalid_clock/);
      assert.throws(()=>f.store.read(client),/invalid_clock/);
    }
    assert.throws(()=>f.store.acknowledge(client,1),/cursor_not_delivered/);
-   now=11;assert.equal(f.store.send(sender,envelope('b',{expiresAt:20})).seq,2);
+   now=11;assert.equal(f.store.send(sender,envelope('b')).seq,2);
  }finally{f.close();}
 });
 test('clock rollback cannot resurrect expired ciphertext within a store lifetime',()=>{
  let now=10;const f=setup({now:()=>now});try {
-   f.store.send(sender,envelope('a',{expiresAt:20}));
-   now=21;assert.throws(()=>f.store.read(client),/message_expired/);
-   now=11;assert.throws(()=>f.store.read(client),/message_expired/);
-   assert.throws(()=>f.store.send(sender,envelope('b',{expiresAt:20})),/message_expired/);
+   f.legacy('a',20);
+   now=21;assert.equal(f.store.read(client).messages.length,0);
+   now=11;assert.equal(f.store.read(client).messages.length,0);
  }finally{f.close();}
 });
 test('empty recovery page delivers the retained floor for durable ACK after snapshot',()=>{

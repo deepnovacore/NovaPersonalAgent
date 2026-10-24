@@ -107,7 +107,7 @@ export class MailboxStore {
         if (old.digest !== digest) throw new RelayError('id_conflict');
         return {seq: Number(old.seq),duplicate:true};
       }
-      if (envelope.expiresAt !== null && envelope.expiresAt <= this.now()) throw new RelayError('message_expired');
+      this.now();
       const global = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM mailbox_messages').get()!;
       const local = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM mailbox_messages WHERE space=? AND recipient=?')
         .get(p.space,envelope.to)!;
@@ -145,18 +145,20 @@ export class MailboxStore {
         .iterate(p.space,p.device,after,limit);
       const now = this.now();
       const messages: MailboxPage['messages'] = [];
-      let bytes = 0;
+      let bytes = 0;let nextCursor=after;
       for (const row of rows) {
+        // Pre-upgrade mailboxes may contain sender-controlled deadlines. Expired legacy
+        // rows are non-deliverable, but must not poison the recipient's entire cursor.
+        if (row.expires !== null && Number(row.expires) <= now) {nextCursor=Number(row.seq);continue;}
         const message = {seq:Number(row.seq),envelope:JSON.parse(String(row.payload)) as RelayEnvelope};
         const entryBytes = Buffer.byteLength(JSON.stringify(message)) + (messages.length ? 1 : 0);
         if (bytes + entryBytes > maxBytes) {
           if (!messages.length) throw new RelayError('page_too_small');
           break;
         }
-        if (row.expires !== null && Number(row.expires) <= now) throw new RelayError('message_expired');
-        bytes += entryBytes;messages.push(message);
+        bytes += entryBytes;messages.push(message);nextCursor=message.seq;
       }
-      const nextCursor = messages.at(-1)?.seq ?? after;
+      // Keep legacy rows until normal pruning so a lost ACK/restart can traverse the gap again.
       // An explicit post-snapshot read at the retained floor delivers that cursor even
       // when the page is empty, allowing recovery to be durably acknowledged.
       if (nextCursor > state.delivered) this.db.prepare('UPDATE mailbox_devices SET delivered=max(delivered,?) WHERE space=? AND device=?').run(nextCursor,p.space,p.device);

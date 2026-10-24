@@ -50,7 +50,10 @@ export class SecurityStore implements RelayAuthority {
   this.db.prepare('UPDATE security_clock SET value=max(value,?) WHERE id=1').run(value);
   return Number(this.db.prepare('SELECT value FROM security_clock WHERE id=1').get()!.value);
  }
- private cleanup():void{const now=this.now();for(const table of ['security_challenges','security_sessions','security_invitations','security_requests','security_pairing_claims'])this.db.prepare(`DELETE FROM ${table} WHERE expires<=?`).run(now);}
+ private cleanup(space:string):void{const now=this.now();for(const table of ['security_challenges','security_sessions','security_invitations','security_requests','security_pairing_claims'])this.db.prepare(`DELETE FROM ${table} WHERE expires<=?`).run(now);
+  // A receipt can only be replayed at its result epoch. Remove invalid history, never a live receipt.
+  this.db.prepare('DELETE FROM security_operations WHERE space=? AND epoch<>(SELECT epoch FROM security_spaces WHERE space=?)').run(space,space);
+ }
  private capacity(table:string,space:string,limit:number):void {if(Number(this.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE space=?`).get(space)!.n)>=limit)throw new RelayError('security_capacity_exceeded');}
  private device(space:string,device:string):DeviceRecord {
   assertId(space);assertId(device);const row=this.db.prepare('SELECT signing,encryption,versions,selected FROM security_devices WHERE space=? AND device=? AND revoked=0').get(space,device);
@@ -80,7 +83,7 @@ export class SecurityStore implements RelayAuthority {
  }
  listDevices(p:RelayPrincipal):DeviceRecord[]{this.assertActive(p);return this.db.prepare('SELECT device FROM security_devices WHERE space=? AND revoked=0 ORDER BY device').all(p.space).map(r=>this.device(p.space,String(r.device)));}
  beginLogin(space:string,device:string):LoginChallenge {
-  this.device(space,device);return this.transaction(()=>{this.device(space,device);this.cleanup();this.capacity('security_challenges',space,this.maxPending);
+  this.device(space,device);return this.transaction(()=>{this.device(space,device);this.cleanup(space);this.capacity('security_challenges',space,this.maxPending);
    const value={id:randomUUID(),nonce:randomBytes(32).toString('base64url'),space,device,epoch:this.getSpace(space).epoch,expiresAt:this.now()+60_000};
    this.db.prepare('INSERT INTO security_challenges VALUES(?,?,?,?,?,?)').run(value.id,space,device,value.epoch,value.nonce,value.expiresAt);return value;
   });
@@ -90,7 +93,7 @@ export class SecurityStore implements RelayAuthority {
    const row=this.db.prepare('SELECT * FROM security_challenges WHERE id=?').get(input.challengeId);if(!row||Number(row.expires)<=this.now())throw new RelayError('invalid_challenge');
    const principal={space:String(row.space),device:String(row.device),epoch:Number(row.epoch)};this.assertActive(principal);
    this.proof(input.proof,this.device(principal.space,principal.device).signingPublicKey,{v:1,purpose:'relay-login',challengeId:input.challengeId,nonce:row.nonce,...principal,expiresAt:Number(row.expires)});
-   this.cleanup();this.capacity('security_sessions',principal.space,this.maxSessions);const token=randomBytes(32).toString('base64url');const expiresAt=this.now()+900_000;
+   this.cleanup(principal.space);this.capacity('security_sessions',principal.space,this.maxSessions);const token=randomBytes(32).toString('base64url');const expiresAt=this.now()+900_000;
    this.db.prepare('DELETE FROM security_challenges WHERE id=?').run(input.challengeId);
    this.db.prepare('INSERT INTO security_sessions VALUES(?,?,?,?,?)').run(hash(token),principal.space,principal.device,principal.epoch,expiresAt);return {token,principal,expiresAt,selected_version:this.device(principal.space,principal.device).selected_version};
   });
@@ -108,8 +111,10 @@ export class SecurityStore implements RelayAuthority {
   if(Number(row.epoch)!==this.getSpace(p.space).epoch)throw new RelayError('stale_control_receipt');
   return JSON.parse(String(row.response)) as T;
  }
- private operationCapacity():void {
-  if(Number(this.db.prepare('SELECT count(*) AS n FROM security_operations').get()!.n)>=this.maxOperations)throw new RelayError('security_capacity_exceeded');
+ private operationCapacity(space:string):void {
+  this.cleanup(space);
+  // One current-epoch revocation receipt has reserved capacity, independently of confirmations.
+  if(Number(this.db.prepare("SELECT count(*) AS n FROM security_operations WHERE space=? AND kind='confirm'").get(space)!.n)>=this.maxOperations)throw new RelayError('security_capacity_exceeded');
  }
  private recordOperation(p:RelayPrincipal,opId:string,kind:string,target:string,epoch:number,result:unknown):void {
   this.db.prepare('INSERT INTO security_operations VALUES(?,?,?,?,?,?)').run(p.space,opId,kind,target,epoch,JSON.stringify(result));
@@ -118,7 +123,7 @@ export class SecurityStore implements RelayAuthority {
   const s=this.host(p);const ttl=options.ttlMs??300_000;if(!Number.isSafeInteger(ttl)||ttl<1||ttl>600_000)throw new RelayError('invalid_ttl');
   const versions=businessVersions(options.business_versions??supportedBusinessVersions);
   if(versions.some(v=>!supportedBusinessVersions.includes(v)))throw new RelayError('unsupported_business_version');
-  return this.transaction(()=>{this.host(p);this.cleanup();this.capacity('security_invitations',p.space,this.maxPending);
+  return this.transaction(()=>{this.host(p);this.cleanup(p.space);this.capacity('security_invitations',p.space,this.maxPending);
    const value={id:randomUUID(),space:p.space,secret:randomBytes(32).toString('base64url'),expiresAt:this.now()+ttl,host:s.host,hostSigningPublicKey:this.device(p.space,s.host).signingPublicKey,business_versions:versions};
    this.db.prepare('INSERT INTO security_invitations VALUES(?,?,?,?,?)').run(value.id,p.space,hash(value.secret),value.expiresAt,JSON.stringify(versions));return value;
   });
@@ -142,8 +147,8 @@ export class SecurityStore implements RelayAuthority {
    if(!compatible.length)throw new RelayError('unsupported_business_version');
    const selected=Math.max(...compatible),space=String(row.space);
    if(this.db.prepare('SELECT 1 FROM security_devices WHERE space=? AND (device=? OR signing=?)').get(space,d.device,JSON.stringify(d.signingPublicKey)))throw new RelayError('device_exists');
-   this.cleanup();this.capacity('security_requests',space,this.maxPending);
-   if(Number(this.db.prepare('SELECT count(*) AS n FROM security_pairing_claims').get()!.n)>=this.maxOperations)throw new RelayError('security_capacity_exceeded');
+   this.cleanup(space);this.capacity('security_requests',space,this.maxPending);
+   this.capacity('security_pairing_claims',space,this.maxPending);
    const request={id:randomUUID(),space,...d,expiresAt:Number(row.expires),fingerprint:deviceFingerprint(d.signingPublicKey,d.encryptionPublicKey),business_versions:versions,selected_version:selected};
    this.db.prepare('INSERT INTO security_requests VALUES(?,?,?,?,?,?,?,?)').run(request.id,space,d.device,JSON.stringify(d.signingPublicKey),JSON.stringify(d.encryptionPublicKey),request.expiresAt,JSON.stringify(versions),selected);
    this.db.prepare('INSERT INTO security_pairing_claims VALUES(?,?,?,?,?,?)').run(input.invitationId,space,digest,this.getSpace(space).epoch,request.expiresAt,JSON.stringify(request));
@@ -154,7 +159,7 @@ export class SecurityStore implements RelayAuthority {
  confirmPairing(p:RelayPrincipal,id:string,opId:string):DeviceRecord {
   this.host(p);assertId(id);assertId(opId);return this.transaction(()=>{
    this.host(p);const replay=this.operation<DeviceRecord>(p,opId,'confirm',id);if(replay)return replay;
-   this.operationCapacity();const row=this.db.prepare('SELECT * FROM security_requests WHERE id=? AND space=?').get(id,p.space);if(!row||Number(row.expires)<=this.now())throw new RelayError('invalid_pairing_request');
+   this.operationCapacity(p.space);const row=this.db.prepare('SELECT * FROM security_requests WHERE id=? AND space=?').get(id,p.space);if(!row||Number(row.expires)<=this.now())throw new RelayError('invalid_pairing_request');
    this.capacity('security_devices',p.space,this.maxDevices);
    if(this.db.prepare('SELECT 1 FROM security_devices WHERE space=? AND (device=? OR signing=?)').get(p.space,row.device!,row.signing!))throw new RelayError('device_exists');
    this.db.prepare('INSERT INTO security_devices(space,device,signing,encryption,versions,selected) VALUES(?,?,?,?,?,?)').run(p.space,row.device!,row.signing!,row.encryption!,row.versions!,row.selected!);
@@ -166,10 +171,13 @@ export class SecurityStore implements RelayAuthority {
   const s=this.host(p);assertId(device);assertId(opId);if(device===s.host)throw new RelayError('cannot_revoke_host');
   return this.transaction(()=>{
    const current=this.host(p);const replay=this.operation<{epoch:number;remainingDevices:DeviceRecord[]}>(p,opId,'revoke',device);if(replay)return replay;
-   this.operationCapacity();this.device(p.space,device);const epoch=current.epoch+1;if(!Number.isSafeInteger(epoch))throw new RelayError('epoch_exhausted');
+   this.device(p.space,device);const epoch=current.epoch+1;if(!Number.isSafeInteger(epoch))throw new RelayError('epoch_exhausted');
    this.db.prepare('UPDATE security_devices SET revoked=1 WHERE space=? AND device=?').run(p.space,device);
    this.db.prepare('UPDATE security_spaces SET epoch=? WHERE space=?').run(epoch,p.space);
    for(const table of ['security_sessions','security_challenges','security_invitations','security_requests','security_pairing_claims'])this.db.prepare(`DELETE FROM ${table} WHERE space=?`).run(p.space);
+   // Advancing the epoch invalidates all prior receipts, including confirmations. Revocation
+   // must remain available at capacity, and its new receipt must survive response loss/restart.
+   this.db.prepare('DELETE FROM security_operations WHERE space=?').run(p.space);
    const result={epoch,remainingDevices:this.listDevices({...p,epoch})};this.recordOperation(p,opId,'revoke',device,epoch,result);return result;
   });
  }
