@@ -42,7 +42,9 @@ void main() {
       'expected_version': 0,
     });
     await mount(tester, repo);
-    await tester.tap(find.byTooltip('Profile'));
+    await tester.tap(find.text('Me'));
+    await tester.pump();
+    await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('A phone-owned profile'), findsOneWidget);
     expect(find.textContaining('Reconnect to make changes'), findsNothing);

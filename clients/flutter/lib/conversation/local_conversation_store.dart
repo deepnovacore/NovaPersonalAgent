@@ -139,6 +139,35 @@ class ConversationStore {
     return result;
   }
 
+  static const mainId = 'chat:main';
+
+  Future<String> ensureMain() => _write((data) {
+    final rows = data['conversations'] as List;
+    if (!rows.any((row) => row['id'] == mainId)) {
+      rows.add({'id': mainId, 'backend': 'local', 'messages': <dynamic>[]});
+    }
+    return mainId;
+  });
+
+  Future<String> taskForTodo(Map<String, dynamic> todo) => _write((data) {
+    if (todo['id'] is! String ||
+        (todo['id'] as String).isEmpty ||
+        todo['title'] is! String) {
+      throw const FormatException('invalid_source_todo');
+    }
+    final rows = data['conversations'] as List;
+    final existing = rows
+        .where((row) => row['source_todo']?['id'] == todo['id'])
+        .firstOrNull;
+    final row =
+        existing ??
+        {'id': requestId(), 'backend': 'local', 'messages': <dynamic>[]};
+    row['title'] = todo['title'];
+    row['source_todo'] ??= {'id': todo['id'], 'version': todo['version']};
+    if (existing == null) rows.add(row);
+    return row['id'] as String;
+  });
+
   Future<String> create() => _write((data) {
     final id = requestId();
     (data['conversations'] as List).add({

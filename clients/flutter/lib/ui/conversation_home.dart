@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../agent_core/agent_core_host.dart';
+import '../conversation/local_conversation_store.dart';
 import 'components.dart';
 import 'theme.dart';
 
@@ -35,7 +36,13 @@ class _ConversationHomeState extends State<ConversationHome> {
       // Opening a composer is not yet a conversation in the history.
       // Keep empty records intact, including any active in-memory draft.
       final rows = widget.host.store.conversations
-          .where((row) => (row['messages'] as List).isNotEmpty)
+          .where(
+            (row) =>
+                row['id'] != ConversationStore.mainId &&
+                ((row['messages'] as List).isNotEmpty ||
+                    row['source_todo'] != null ||
+                    row['id'] == widget.activeConversationId),
+          )
           .toList();
       String latest(Map<String, dynamic> row) {
         final messages = row['messages'] as List;
@@ -47,7 +54,9 @@ class _ConversationHomeState extends State<ConversationHome> {
         final user = (row['messages'] as List)
             .where((m) => m['role'] == 'user')
             .firstOrNull;
-        return user?['content'] as String? ?? t('新的对话', 'New conversation');
+        return row['title'] as String? ??
+            user?['content'] as String? ??
+            t('新任务', 'New task');
       }
 
       String preview(Map<String, dynamic> row) {
@@ -78,7 +87,7 @@ class _ConversationHomeState extends State<ConversationHome> {
                 autofocus: true,
                 onChanged: (value) => setState(() => query = value),
                 decoration: InputDecoration(
-                  hintText: t('搜索对话', 'Search conversations'),
+                  hintText: t('搜索任务', 'Search tasks'),
                   prefixIcon: const Icon(CupertinoIcons.search, size: 19),
                 ),
               ),
@@ -92,7 +101,7 @@ class _ConversationHomeState extends State<ConversationHome> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            t('想聊点什么？', 'What’s on your mind?'),
+                            t('独立的事，在这里处理', 'A place for focused tasks'),
                             style: const TextStyle(
                               fontSize: 25,
                               fontWeight: FontWeight.w500,
@@ -102,8 +111,8 @@ class _ConversationHomeState extends State<ConversationHome> {
                           const SizedBox(height: 12),
                           Text(
                             t(
-                              '一个问题，一个想法，都可以。',
-                              'A question, an idea, anything.',
+                              '从时间线中的待办开始，或新建一个任务。',
+                              'Start from a timeline to-do, or create a task.',
                             ),
                             textAlign: TextAlign.center,
                             style: const TextStyle(
@@ -118,7 +127,7 @@ class _ConversationHomeState extends State<ConversationHome> {
                 : visible.isEmpty
                 ? Center(
                     child: Text(
-                      t('没有找到对话', 'No conversations found'),
+                      t('没有找到任务', 'No tasks found'),
                       style: const TextStyle(color: Nova.secondary),
                     ),
                   )
@@ -196,7 +205,7 @@ class _ConversationHomeState extends State<ConversationHome> {
               child: Row(
                 children: [
                   IconButton(
-                    tooltip: t('搜索对话', 'Search conversations'),
+                    tooltip: t('搜索任务', 'Search tasks'),
                     onPressed: () => setState(() {
                       searching = !searching;
                       query = '';
@@ -207,9 +216,9 @@ class _ConversationHomeState extends State<ConversationHome> {
                   ),
                   const Spacer(),
                   FilledButton.icon(
-                    onPressed: widget.host.busy ? null : widget.onNew,
+                    onPressed: widget.onNew,
                     icon: const Icon(CupertinoIcons.square_pencil, size: 19),
-                    label: Text(t('新对话', 'New chat')),
+                    label: Text(t('新建任务', 'New task')),
                   ),
                 ],
               ),

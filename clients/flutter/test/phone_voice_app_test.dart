@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:nova_mobile/personal/life_host.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -21,6 +22,7 @@ Future<({AgentCoreHost host, FakeAudio audio})> openChat(
   WidgetTester tester, {
   VoiceConfiguration? voiceConfiguration,
   FakeAudio? testAudio,
+  LifeHost? lifeHost,
 }) async {
   SharedPreferences.setMockInitialValues({'language': 'en'});
   final configuration =
@@ -47,12 +49,11 @@ Future<({AgentCoreHost host, FakeAudio audio})> openChat(
       audio: audioConfig.audio,
       requestMicrophone: audioConfig.requestMicrophone,
       agentCore: host,
+      lifeHost: lifeHost,
 
       preferences: Preferences(await SharedPreferences.getInstance()),
     ),
   );
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('New chat'));
   await tester.pumpAndSettle();
   await tester.enterText(find.byType(TextField), 'Keep this unsent draft');
   return (host: host, audio: audio);
@@ -103,7 +104,6 @@ void main() {
     expect(find.byKey(const ValueKey('voice-fullscreen')), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
-
 
   testWidgets('voice progress does not rebuild the hidden chat tree', (
     tester,
