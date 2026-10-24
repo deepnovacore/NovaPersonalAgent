@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {readFile} from 'node:fs/promises'
+import {readFile,readdir} from 'node:fs/promises'
 import {test} from 'node:test'
 import {setLanguage,t} from '../src/renderer/locale.mjs'
 import {computerOverlayDetail,computerOverlayFrame,computerOverlayMark} from '../src/renderer/computer-overlay-view.mjs'
@@ -31,7 +31,7 @@ test('bar detail puts pending approval first and shows click coordinates',()=>{
  assert.equal(computerOverlayDetail({state:'acting',action:'computer_click',point:{x:4,y:5},awaiting_approval:true}),'等待你在工作台批准下一步')
  assert.equal(computerOverlayDetail({state:'acting',action:'computer_click',point:{x:4,y:5}}),'点击 · 4, 5')
  assert.equal(computerOverlayDetail({state:'acting',action:'computer_type'}),'输入文字')
- assert.equal(computerOverlayDetail({state:'delegated'}),'已交给电脑助手执行')
+ assert.equal(computerOverlayFrame({type:'computer_use',conversation_id:'b',state:'delegated'}),null)
  assert.equal(computerOverlayDetail({state:'active'}),'观察屏幕中')
  assert.equal(computerOverlayDetail(null),'')
 })
@@ -46,7 +46,7 @@ test('computer calls read as actions in the Build log',()=>{
  assert.equal(computerCallTarget({name:'computer_click',input:'{"x":12,"y":34}'}),'点击 · 12, 34')
  assert.equal(computerCallTarget({name:'computer_scroll',input:'{"x":1,"y":2,"direction":"down"}'}),'滚动 · 向下')
  assert.equal(computerCallTarget({name:'computer_type',input:JSON.stringify({text:'a'.repeat(50)})}),'输入 · “'+'a'.repeat(40)+'…”')
- assert.equal(computerCallTarget({name:'computer_run',input:'{"instr'}),'电脑助手')
+ assert.equal(computerCallTarget({name:'obsolete_tool',input:'{"instr'}),null)
  assert.equal(computerCallTarget({name:'shell_execute',input:'{}'}),null)
 })
 
@@ -95,7 +95,7 @@ test('Computer Use switch appears only in Build sessions and reflects the stored
  const finished=controlFixture({id:'b',kind:'build',build:{status:'finished'}});finished.control.update();assert.equal(finished.toggle.hidden,true)
  const on=controlFixture({id:'b',kind:'build',build:{status:'paused',computer_use:{enabled:true,direct:false}}});on.control.update()
  assert.equal(on.toggle.hidden,false);assert.equal(on.toggle.attributes['aria-checked'],'true')
- assert.equal(on.toggle.children[2].textContent,'仅委派');assert.equal(on.toggle.children[2].hidden,false)
+ assert.equal(on.toggle.children[2].textContent,'不可用：需要视觉模型');assert.equal(on.toggle.children[2].hidden,false)
  on.c.connected=false;on.control.update();assert.equal(on.toggle.disabled,true)
 })
 
@@ -112,14 +112,14 @@ test('turning Computer Use on sends the permission readout and lists each missin
  assert.ok(texts(panel).includes('还不能打开 Computer Use'))
 })
 
-test('turning Computer Use off sends no permissions and a vision-less model is explained, not blocked',async()=>{
+test('turning Computer Use off sends no permissions and a vision-less model is explicitly blocked',async()=>{
  const item={id:'b',kind:'build',build:{status:'paused',computer_use:{enabled:true,direct:true}}}
  const off=controlFixture(item,{response:{ok:true,state:{enabled:false,direct:false},missing:[]}})
  off.control.update();off.toggle.listeners.click();await flush()
  assert.deepEqual(off.commands,[['build.computer_use',{conversation_id:'b',enabled:false}]]);assert.equal(off.panel.hidden,true)
- const limited=controlFixture({id:'b',kind:'build',build:{status:'paused'}},{response:{ok:true,state:{enabled:true,direct:false},missing:['vision_model']}})
+ const limited=controlFixture({id:'b',kind:'build',build:{status:'paused'}},{response:{ok:false,state:{enabled:false,direct:false},missing:['vision_model']}})
  limited.control.update();limited.toggle.listeners.click();await flush()
- assert.equal(limited.panel.attributes['data-tone'],'limited');assert.ok(texts(limited.panel).includes('Computer Use 已打开（仅委派）'))
+ assert.equal(limited.panel.attributes['data-tone'],'blocked');assert.ok(texts(limited.panel).includes('当前模型无视觉，Build 桌面操作不可用，请换视觉模型。'))
 })
 
 test('overlay pages and new workbench strings are translated',async context=>{
@@ -129,6 +129,18 @@ test('overlay pages and new workbench strings are translated',async context=>{
   const sources=[...html.matchAll(/>([^<>]+)</g)].map(m=>m[1].trim()).concat([...html.matchAll(/(?:title|aria-label)="([^"]+)"/g)].map(m=>m[1]))
   for(const source of sources.filter(s=>/\p{Script=Han}/u.test(s)))assert.doesNotMatch(t(source),/\p{Script=Han}/u,source)
  }
- for(const source of ['等待你在工作台批准下一步','正在停止…','停止失败，请在工作台点击停止','还不能打开 Computer Use','Computer Use 已打开（仅委派）','仅委派','操作后的屏幕','截图暂不可用。','尚未配置电脑操作模型和目标显示器。'])
+ for(const source of ['等待你在工作台批准下一步','正在停止…','停止失败，请在工作台点击停止','还不能打开 Computer Use','当前模型无视觉，Build 桌面操作不可用，请换视觉模型。','不可用：需要视觉模型','操作后的屏幕','截图暂不可用。','尚未配置电脑操作模型和目标显示器。'])
   assert.doesNotMatch(t(source),/\p{Script=Han}/u,source)
+})
+
+test('active desktop tools, prompts and docs contain no nested desktop delegation tool',async()=>{
+ const historical='docs/design-notes/2026-10-24-unified-window-computer-use.md'
+ async function inspect(directory){
+  for(const entry of await readdir(new URL('../../../'+directory+'/',import.meta.url),{withFileTypes:true})){
+   const path=directory+'/'+entry.name
+   if(entry.isDirectory())await inspect(path)
+   else if(path!==historical&&/\.(?:ts|mjs|md|html|css|json)$/.test(path))assert.doesNotMatch(await readFile(new URL('../../../'+path,import.meta.url),'utf8'),/computer_run/,path)
+  }
+ }
+ for(const root of ['runtime/src','clients/desktop/src','docs'])await inspect(root)
 })

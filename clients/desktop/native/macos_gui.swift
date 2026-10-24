@@ -89,9 +89,12 @@ private struct Binding: Equatable {
         guard nativeWindowID(unsafeBitCast(focused,to:AXUIElement.self), &keyWindow)==AXError.success else {try reject("needs_user_action")}
         return Binding(pid:pid,windowID:wid,started:started,bounds:bounds,keyWindow:keyWindow)
     }
+    private static var axTimedOut=false
     private static func attribute(_ element: AXUIElement,_ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element,name as CFString,&value) == .success else {return nil}
+        let status=AXUIElementCopyAttributeValue(element,name as CFString,&value)
+        if status == .cannotComplete {axTimedOut=true}
+        guard status == .success else {return nil}
         return value
     }
     private static func writable(_ element: AXUIElement,_ name: String) -> Bool {
@@ -154,7 +157,7 @@ private struct Binding: Equatable {
         guard AXUIElementPerformAction(element,kAXPressAction as CFString) == .success else {try reject("action_failed")}
         return "press"
     }
-    private static func editNative(_ binding: Binding,_ text: String?,selectAll: Bool=false) throws -> Bool {
+    private static func editNative(_ binding: Binding,_ text: String?,selectAll: Bool=false,replace: Bool=false) throws -> Bool {
         let element=try receiver(binding)
         let textAttribute=kAXValueAttribute
         guard let current=attribute(element,kAXValueAttribute) as? String,
@@ -169,12 +172,12 @@ private struct Binding: Equatable {
               let latestSelection=attribute(element,kAXSelectedTextRangeAttribute),CFEqual(selection,latestSelection) else {try reject("screen_changed")}
         if selectAll {range=CFRange(location:0,length:current.utf16.count)}
         else {
-            let replacement=text ?? "",next=(current as NSString).replacingCharacters(in:selected,with:replacement)
+            let replacement=text ?? "",next=replace ? replacement : (current as NSString).replacingCharacters(in:selected,with:replacement)
             let write=AXUIElementSetAttributeValue(element,textAttribute as CFString,next as CFString)
             if write == .attributeUnsupported || write == .notImplemented {return false}
             guard write == .success else {try reject("editor_write_rejected") }
             guard CFEqual(try receiver(binding),element),attribute(element,kAXValueAttribute) as? String==next else {try reject("editor_readback_changed")}
-            range=CFRange(location:range.location+replacement.utf16.count,length:0)
+            range=CFRange(location:(replace ? 0 : range.location)+replacement.utf16.count,length:0)
         }
         guard CFEqual(try receiver(binding),element),let value=AXValueCreate(.cfRange,&range),
               AXUIElementSetAttributeValue(element,kAXSelectedTextRangeAttribute as CFString,value) == .success else {try reject("action_failed")}
@@ -182,7 +185,11 @@ private struct Binding: Equatable {
         return true
     }
     private static func metadata(_ binding: Binding) -> [String: Any] {
-        ["target":binding.identity,"width":binding.bounds.width,"height":binding.bounds.height,"keyWindowMatches":binding.keyWindow==binding.windowID]
+        let app=NSRunningApplication(processIdentifier:binding.pid)
+        let window=attribute(AXUIElementCreateApplication(binding.pid),kAXFocusedWindowAttribute)
+        let title=window.flatMap { CFGetTypeID($0)==AXUIElementGetTypeID() ? attribute(unsafeBitCast($0,to:AXUIElement.self),kAXTitleAttribute) as? String : nil } ?? ""
+        return ["target":binding.identity,"width":binding.bounds.width,"height":binding.bounds.height,"keyWindowMatches":binding.keyWindow==binding.windowID,
+                "title":String(title.prefix(200)),"application":["name":app?.localizedName ?? "","bundleId":app?.bundleIdentifier ?? "","path":app?.bundleURL?.standardizedFileURL.path ?? ""]]
     }
     static func execute(_ request: [String: Any]) async throws -> [String: Any] {
         if request["op"] as? String=="focusRestore" {try restoreFocus(request);return ["restored":true]}
@@ -196,15 +203,18 @@ private struct Binding: Equatable {
             var id:CGWindowID=0
             guard nativeWindowID(unsafeBitCast(value,to:AXUIElement.self),&id) == .success else {try reject("needs_user_action")}
             let selected=try bind(["pid":app.processIdentifier,"windowId":id])
-            return ["pid":selected.pid,"windowId":selected.windowID,"target":selected.identity,"application":["name":app.localizedName ?? query,"bundleId":app.bundleIdentifier ?? "","path":app.bundleURL?.standardizedFileURL.path ?? ""]]
+            return ["pid":selected.pid,"windowId":selected.windowID,"title":String((attribute(unsafeBitCast(value,to:AXUIElement.self),kAXTitleAttribute) as? String ?? "").prefix(200)),"target":selected.identity,"application":["name":app.localizedName ?? query,"bundleId":app.bundleIdentifier ?? "","path":app.bundleURL?.standardizedFileURL.path ?? ""]]
         }
         let binding=try bind(request)
         guard let operation=request["op"] as? String else {try reject("invalid_configuration")}
         if operation=="target" || operation=="size" || operation=="connect" {return metadata(binding)}
         if operation=="editor" {
             guard request["target"] as? String==binding.identity else {try reject("screen_changed")}
-            var result:[String:Any]=["available":false],content:[[String:String]]=[]
+            axTimedOut=false
+            var result:[String:Any]=["available":false,"status":"unavailable"],content:[[String:String]]=[]
+            var truncated=false
             if let element=try? receiver(binding),let value=attribute(element,kAXValueAttribute) as? String {
+                truncated=value.count>200
                 result=["available":true,"role":attribute(element,kAXRoleAttribute) as? String ?? "","value":String(value.prefix(200)),"source":"accessibility"]
             }
             let app=AXUIElementCreateApplication(binding.pid)
@@ -222,12 +232,16 @@ private struct Binding: Equatable {
                     if [kAXStaticTextRole,kAXButtonRole,kAXTextFieldRole,kAXTextAreaRole,"AXWebArea"].contains(role) {
                         let text=(attribute(node,kAXValueAttribute) as? String) ?? (attribute(node,kAXTitleAttribute) as? String) ?? ""
                         let url=(attribute(node,kAXURLAttribute) as? URL)?.absoluteString ?? ""
+                        if text.count>300 || url.count>500 {truncated=true}
                         if !text.isEmpty || !url.isEmpty {content.append(["role":role,"text":String(text.prefix(300)),"url":String(url.prefix(500))])}
                     }
                     if let children=attribute(node,kAXChildrenAttribute) as? [AXUIElement] {queue.append(contentsOf:children.prefix(501))}
                 }
-                result["native_ui"]=["source":"accessibility","content":content,"truncated":index<queue.count]
+                result["native_ui"]=["source":"accessibility","content":content,"truncated":truncated || index<queue.count]
+                result["status"]=axTimedOut || Date()>=deadline ? "timeout" : truncated || index<queue.count ? "truncated" : "ok"
             }
+            if axTimedOut {result["status"]="timeout"}
+            if result["status"] == nil {result["status"]="unavailable"}
             guard try bind(request)==binding else {try reject("screen_changed")}
             return result
         }
@@ -297,7 +311,10 @@ private struct Binding: Equatable {
         case "Input":
             guard let text=request["value"] as? String, !text.isEmpty,text.utf16.count<=200 else {try reject("needs_user_action")}
             try fresh()
-            if try editNative(binding,text) {try fresh();return ["posted":true,"delivery":"accessibility"]}
+            let mode=request["mode"] as? String ?? "append"
+            guard ["append","replace"].contains(mode) else {try reject("invalid_configuration")}
+            if try editNative(binding,text,replace:mode=="replace") {try fresh();return ["posted":true,"delivery":"accessibility"]}
+            guard mode=="append" else {try reject("operation_unsupported")}
             try focusRecord(binding.pid,binding.windowID,true)
             for scalar in text.unicodeScalars {
                 let units=Array(String(scalar).utf16)

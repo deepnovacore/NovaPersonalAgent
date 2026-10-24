@@ -16,8 +16,10 @@ import {approvedPlanWorkOrder} from '../src/executors/codex/app-server-transport
 import {createChatCompletionsLlmFactory} from '../src/realtime/cascaded/chat-completions-llm.js'
 import {PLAN_LLM_TRANSPORT} from '../src/realtime/cascaded/llm-stream-limits.js'
 import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
+import type {ComputerObservation,ToolImage} from '../src/personal-agent/computer-use/contract.js'
 import {settingsSchema} from '../src/config/config.js'
 
+function observation(image:ToolImage):ComputerObservation{return {id:'test-observation',captured_at:image.captured_at,image,space:{logical_width:image.width,logical_height:image.height,scale:1},target:null,focus:null,foreground:true,ax:{status:image.native_ui?'truncated':'unavailable',...(image.native_ui?{summary:image.native_ui}:{}),...(image.native_editor?{editor:image.native_editor}:{})}}}
 type Request=Parameters<CascadedLlmSession['stream']>[0]
 interface Reply {text?:string;call?:{name:string;arguments:Record<string,JsonValue>;id?:string};calls?:{name:string;arguments:Record<string,JsonValue>;id:string}[]}
 function scripted(reply:(request:Request,step:number)=>Reply|Promise<Reply>){
@@ -519,7 +521,7 @@ test('Build admission errors preserve a conversation once its user message is du
 test('Build rejects disabled computer calls and Plan never exposes computer tools',{timeout:10000},async()=>{
  const f=await fixture((request,step)=>{
   assert.equal(request.tools?.some(tool=>tool.name.startsWith('computer_')),false)
-  if(step===0)return {call:{name:'computer_click',arguments:{x:1,y:1}}}
+  if(step===0)return {call:{name:'computer_click',arguments:{observationId:'test-observation',x:1,y:1}}}
   assert.equal((request.inputs.find(input=>input.kind==='tool_result')?.output as {code?:string})?.code,'computer_use_disabled')
   return {text:'disabled'}
  },'never',undefined,()=>{throw Error('real backend must not start')})
@@ -535,9 +537,9 @@ test('Build computer observation and verification gates survive calls and preser
  let actions=0,closed=0
  const f=await fixture((request,step)=>{
   const sequence=[
-   {name:'computer_click',arguments:{x:1,y:1}},
+   {name:'computer_click',arguments:{observationId:'test-observation',x:1,y:1}},
    {name:'computer_screenshot',arguments:{}},
-   {name:'computer_click',arguments:{x:1,y:1}},
+   {name:'computer_click',arguments:{observationId:'test-observation',x:1,y:1}},
    {name:'finish_build',arguments:{summary:'too early'}},
    {name:'computer_screenshot',arguments:{}},
    {name:'finish_build',arguments:{summary:'verified'}},
@@ -548,8 +550,8 @@ test('Build computer observation and verification gates survive calls and preser
   if(step===4)assert.equal((results[0]?.output as {code:string}).code,'verification_required')
   return sequence[step]?{call:sequence[step]}:{text:'done'}
  },'never',undefined,()=>({
-  screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
-  action:()=>{actions++;return Promise.resolve()},close:()=>{closed++;return Promise.resolve()},
+  observe:()=>Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
+  action:()=>{actions++;return Promise.resolve({executionMode:'background' as const})},close:()=>{closed++;return Promise.resolve()},
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
@@ -563,12 +565,12 @@ test('Build computer observation and verification gates survive calls and preser
 
 test('Build Connect approval is required even when per-input approval is never',{skip:!supported,timeout:10000},async()=>{
  let connected=false,actions=0
- const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{x:0,y:0}}}:{text:'done'},
+ const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}:{text:'done'},
  'never',undefined,options=>({
-  screenshot:async()=>{
+  observe:async()=>{
    assert.equal(await options.approve('Connect',{displayId:'fake'}),true);connected=true
-   return {media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}
-  },action:async()=>{assert.equal(await options.approve('Tap',{}),true);options.acting('computer_click',{x:0,y:0});actions++},close:()=>Promise.resolve(),
+   return observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})
+  },action:async()=>{assert.equal(await options.approve('Tap',{}),true);options.acting('computer_click',{x:0,y:0});actions++;return {executionMode:'background' as const}},close:()=>Promise.resolve(),
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
@@ -583,10 +585,10 @@ test('Build Connect approval is required even when per-input approval is never',
 })
 
 test('ask-mode computer approvals identify the current write, not the earlier screenshot',{skip:!supported,timeout:10000},async()=>{
- const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{x:0,y:0}}}:{text:'done'},
+ const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}:{text:'done'},
  'ask',undefined,options=>({
-  screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
-  action:async()=>{assert.equal(await options.approve('Tap',{}),true)},close:()=>Promise.resolve(),
+  observe:()=>Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
+  action:async()=>{assert.equal(await options.approve('Tap',{}),true);return {executionMode:'background' as const}},close:()=>Promise.resolve(),
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
@@ -600,8 +602,8 @@ test('ask-mode computer approvals identify the current write, not the earlier sc
 test('uncertain computer cleanup cannot permanently finish Build',{skip:!supported,timeout:10000},async()=>{
  const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:{call:{name:'finish_build',arguments:{summary:'not yet safe'}}},
  'never',undefined,()=>({
-  screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
-  action:()=>Promise.resolve(),close:()=>Promise.reject(Error('cleanup_unknown')),
+  observe:()=>Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
+  action:()=>Promise.resolve({executionMode:'background' as const}),close:()=>Promise.reject(Error('cleanup_unknown')),
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
@@ -616,18 +618,19 @@ test('Stop interrupts a computer input and Resume observes before writing withou
  const f=await fixture((request,step)=>{
   const sequence=[
    {name:'computer_screenshot',arguments:{}},
-   {name:'computer_click',arguments:{x:0,y:0}},
-   {name:'computer_click',arguments:{x:0,y:0}},
+   {name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}},
+   {name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}},
    {name:'computer_screenshot',arguments:{}},
-   {name:'computer_click',arguments:{x:0,y:0}},
+   {name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}},
   ]
   if(step===3)assert.equal((request.inputs.find(input=>input.kind==='tool_result')?.output as {code:string}).code,'observe_required')
   return sequence[step]?{call:sequence[step]}:{text:'resumed'}
  },'never',undefined,options=>({
-  screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
+  observe:()=>Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
   action:async()=>{
    options.acting('computer_click',{x:0,y:0});actions++
    if(actions===1){started=true;await new Promise<void>(resolve=>options.signal.addEventListener('abort',()=>resolve(),{once:true}));options.signal.throwIfAborted()}
+   return {executionMode:'background' as const}
   },close:()=>{closed++;return Promise.resolve()},
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
@@ -641,21 +644,16 @@ test('Stop interrupts a computer input and Resume observes before writing withou
  }finally{await f.close()}
 })
 
-test('computer_run releases direct lease before delegation and returns final observation',{skip:!supported,timeout:10000},async()=>{
- let held=false,delegated=0
+test('nonvision Build desktop calls return an explicit capability limitation',{skip:!supported,timeout:10000},async()=>{
  const f=await fixture((request,step)=>{
+  assert.equal(request.tools.some(tool=>tool.name.startsWith('computer_')),false)
   if(step===0)return {call:{name:'computer_screenshot',arguments:{}}}
-  if(step===1)return {call:{name:'computer_run',arguments:{instruction:'inspect fake interface'}}}
-  assert.equal(request.inputs.find(input=>input.kind==='tool_result')?.images?.length,1)
-  return {call:{name:'finish_build',arguments:{summary:'observed'}}}
- },'never',undefined,()=>({
-  screenshot:()=>{held=true;return Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})},
-  action:()=>Promise.resolve(),close:()=>{held=false;return Promise.resolve()},
- }))
- f.host.computerUseState=()=>({enabled:true,direct:true})
- f.bridge.computerRun=()=>{assert.equal(held,false);delegated++;return Promise.resolve({outcome:'ok',verified:false})}
- try{const id=await f.build();await f.host.waitConversation(id);assert.equal(delegated,1);assert.equal(held,false);assert.equal(buildView(f.host,id).status,'finished')}
- finally{await f.close()}
+  const result=request.inputs.find(input=>input.kind==='tool_result')?.output as {code:string;message:string}
+  assert.equal(result.code,'vision_model_required');assert.match(result.message,/视觉/)
+  return {text:'switch model'}
+ })
+ f.host.computerUseState=()=>({enabled:true,direct:false})
+ try{const id=await f.build();await f.host.waitConversation(id);assert.equal(f.script.requests.length,2)}finally{await f.close()}
 })
 
 test('screen change discards the failed session before the next observation',{skip:!supported,timeout:10000},async()=>{
@@ -663,8 +661,8 @@ test('screen change discards the failed session before the next observation',{sk
  const f=await fixture((_request,step)=>step<2?{call:{name:'computer_screenshot',arguments:{}}}:{text:'observed'},
  'never',undefined,()=>{
   const first=++sessions===1
-  return {screenshot:()=>first?Promise.reject(Error('screen_changed')):Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
-   action:()=>Promise.resolve(),close:()=>{closed++;return Promise.resolve()}}
+  return {observe:()=>first?Promise.reject(Error('screen_changed')):Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
+   action:()=>Promise.resolve({executionMode:'background' as const}),close:()=>{closed++;return Promise.resolve()}}
  })
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{const id=await f.build();await f.host.waitConversation(id);assert.equal(sessions,2);assert.equal(closed,2)}
@@ -676,8 +674,8 @@ test('Stop while finish waits for device cleanup cannot lock the Build',{skip:!s
  const gate=new Promise<void>(resolve=>{release=resolve})
  const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:{call:{name:'finish_build',arguments:{summary:'finish'}}},
  'never',undefined,()=>({
-  screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
-  action:()=>Promise.resolve(),close:()=>{closing=true;return gate},
+  observe:()=>Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
+  action:()=>Promise.resolve({executionMode:'background' as const}),close:()=>{closing=true;return gate},
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
@@ -692,23 +690,23 @@ test('restart marks an interrupted computer write unknown and requires observati
  let actions=0
  const f=await fixture((request,step)=>{
   if(step===0)return {text:'ready'}
-  if(step===1){assert.equal((request.inputs.find(input=>input.kind==='tool_result')?.output as {status:string}).status,'outcome_unknown');return {call:{name:'computer_click',arguments:{x:0,y:0}}}}
+  if(step===1){assert.equal((request.inputs.find(input=>input.kind==='tool_result')?.output as {status:string}).status,'outcome_unknown');return {call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}}
   if(step===2){assert.equal((request.inputs.find(input=>input.kind==='tool_result')?.output as {code:string}).code,'observe_required');return {call:{name:'computer_screenshot',arguments:{}}}}
-  if(step===3)return {call:{name:'computer_click',arguments:{x:0,y:0}}}
+  if(step===3)return {call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}
   return {text:'recovered'}
  },'never')
  let reopened:PersonalAgentHost|undefined
  try{
   const id=await f.build();await f.host.waitConversation(id);await f.host.close()
   const checkpoint=await f.host.workbench.checkpoint(id,0)
-  const interrupted={id:'interrupted',name:'computer_click',arguments:{x:0,y:0},state:'running' as const,started_at:new Date().toISOString()}
+  const interrupted={id:'interrupted',name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0},state:'running' as const,started_at:new Date().toISOString()}
   checkpoint.status='running';checkpoint.calls.push(interrupted);checkpoint.pending_calls.push(interrupted)
   await f.host.workbench.saveCheckpoint(checkpoint)
   reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
   const host=reopened;await host.open();host.computerUseState=()=>({enabled:true,direct:true})
   host.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never',computerSession:()=>({
-   screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
-   action:()=>{actions++;return Promise.resolve()},close:()=>Promise.resolve(),
+   observe:()=>Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
+   action:()=>{actions++;return Promise.resolve({executionMode:'background' as const})},close:()=>Promise.resolve(),
   })}),()=>{ /* no physical renderer */ })
   for(const [method,params] of [['presentation.set',{mode:'workbench'}],['build.resume',{id}]] as const){
    const result=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean;error?:string}
@@ -721,12 +719,13 @@ test('restart marks an interrupted computer write unknown and requires observati
 
 test('revocation immediately before input prevents the write even with never approval',{skip:!supported,timeout:10000},async()=>{
  let enabled=true,writes=0
- const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{x:0,y:0}}}:{text:'stopped'},
+ const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}:{text:'stopped'},
  'never',undefined,options=>({
-  screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
+  observe:()=>Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
   action:async()=>{
    assert.equal(await options.approve('Tap',{}),true)
    enabled=false;options.acting('computer_click',{x:0,y:0});writes++
+   return {executionMode:'background' as const}
   },close:()=>Promise.resolve(),
  }))
  f.host.computerUseState=()=>({enabled,direct:true})
@@ -734,26 +733,26 @@ test('revocation immediately before input prevents the write even with never app
  finally{await f.close()}
 })
 
-test('successful click allows typing and Enter but requires observation for another click',{skip:!supported,timeout:10000},async()=>{
+test('every successful input requires a new observation, including typing and Enter',{skip:!supported,timeout:10000},async()=>{
  const actions:string[]=[]
  const sequence=[
   {name:'computer_screenshot',arguments:{}},
-  {name:'computer_click',arguments:{x:0,y:0}},
-  {name:'computer_type',arguments:{text:'hello'}},
-  {name:'computer_key',arguments:{keys:'Enter'}},
-  {name:'computer_click',arguments:{x:0,y:0}},
+  {name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}},
+  {name:'computer_type',arguments:{observationId:'test-observation',text:'hello'}},
+  {name:'computer_key',arguments:{observationId:'test-observation',keys:'Enter'}},
+  {name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}},
  ]
  const f=await fixture((request,step)=>{
   if(step===5)assert.equal((request.inputs.find(input=>input.kind==='tool_result')?.output as {code:string}).code,'observe_required')
   return sequence[step]?{call:sequence[step]}:{text:'done'}
  },'never',undefined,()=>({
-  screenshot:()=>Promise.resolve({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}),
-  action:(name)=>{actions.push(name);return Promise.resolve()},close:()=>Promise.resolve(),
+  observe:()=>Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})),
+  action:(name)=>{actions.push(name);return Promise.resolve({executionMode:'background' as const})},close:()=>Promise.resolve(),
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
   const id=await f.build();await f.host.waitConversation(id)
-  assert.deepEqual(actions,['computer_click','computer_type','computer_key'])
+  assert.deepEqual(actions,['computer_click'])
  }finally{await f.close()}
 })
 
@@ -776,13 +775,13 @@ test('Build rejects async dispatch and refreshes computer tools after an in-turn
 for(const operation of ['computer_screenshot','computer_click'] as const){
  test(`Stop before ${operation} input is a clean pause`,{skip:!supported,timeout:10000},async()=>{
   let pending=false,writes=0
-  const f=await fixture((_request,step)=>({call:{name:step===0?'computer_screenshot':'computer_click',arguments:step===0?{}:{x:0,y:0}}}),
+  const f=await fixture((_request,step)=>({call:{name:step===0?'computer_screenshot':'computer_click',arguments:step===0?{}:{x:0,y:0,observationId:'test-observation'}}}),
   'ask',undefined,options=>({
-   screenshot:async()=>{
+   observe:async()=>{
     if(operation==='computer_screenshot'){pending=true;await options.approve('Connect',{});options.signal.throwIfAborted()}
-    return {media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}
+    return observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()})
    },
-   action:async()=>{pending=true;await options.approve('Tap',{});options.signal.throwIfAborted();options.acting('computer_click',{x:0,y:0});writes++},
+   action:async()=>{pending=true;await options.approve('Tap',{});options.signal.throwIfAborted();options.acting('computer_click',{x:0,y:0});writes++;return {executionMode:'background' as const}},
    close:()=>Promise.resolve(),
   }))
   f.host.computerUseState=()=>({enabled:true,direct:true})
@@ -798,12 +797,12 @@ for(const operation of ['computer_screenshot','computer_click'] as const){
 for(const decision of ['allow','always','deny','remembered'] as const)test(`native application consent ${decision} is scoped to binding and app identity`,{skip:!supported,timeout:15000},async()=>{
  const app={name:'Fixture Editor',bundleId:'test.fixture.editor',path:'/Applications/Fixture Editor.app'}
  let actions=0,observations=0
- const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{application:app.name}}}:step===1?{call:{name:'computer_type',arguments:{text:'test'}}}:{text:'done'},'ask',undefined,options=>({
-  screenshot:async application=>{
+ const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{application:app.name}}}:step===1?{call:{name:'computer_type',arguments:{observationId:'test-observation',text:'test'}}}:{text:'done'},'ask',undefined,options=>({
+  observe:async application=>{
    assert.equal(application,app.name);observations++
    if(!await options.approve('Connect',{mode:'background',application:app,window:{pid:123,windowId:456}}))throw Error('declined')
-   return {media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString(),native_editor:{role:'AXTextField',value:'今日美食',source:'accessibility'},native_ui:{source:'accessibility',content:Array.from({length:80},()=>({role:'AXStaticText',text:'x'.repeat(300),url:'https://example.test/results'})),truncated:true}}
-  },action:async()=>{assert.equal(await options.approve('Input',{value:'test'}),true);actions++},close:()=>Promise.resolve(),
+   return observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString(),native_editor:{role:'AXTextField',value:'今日美食',source:'accessibility'},native_ui:{source:'accessibility',content:Array.from({length:80},()=>({role:'AXStaticText',text:'x'.repeat(300),url:'https://example.test/results'})),truncated:true}})
+  },action:async()=>{assert.equal(await options.approve('Input',{value:'test'}),true);actions++;return {executionMode:'background' as const}},close:()=>Promise.resolve(),
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
@@ -816,7 +815,7 @@ for(const decision of ['allow','always','deny','remembered'] as const)test(`nati
   }
   await f.host.waitConversation(id)
   assert.equal(observations,1);assert.equal(actions,decision==='deny'?0:1)
-  if(decision!=='deny'){const checkpoint=await f.host.workbench.checkpoint(id,0);assert.deepEqual((checkpoint.calls[0]?.result as {native_editor:unknown}).native_editor,{role:'AXTextField',value:'今日美食',source:'accessibility'});assert.equal((checkpoint.calls[0]?.result as {native_ui:{content:{url:string}[]}}).native_ui.content[0]?.url,'https://example.test/results')}
+  if(decision!=='deny'){const checkpoint=await f.host.workbench.checkpoint(id,0);assert.deepEqual((checkpoint.calls[0]?.result as {ax:{editor:unknown}}).ax.editor,{role:'AXTextField',value:'今日美食',source:'accessibility'});assert.equal((checkpoint.calls[0]?.result as {ax:{summary:{content:{url:string}[]}}}).ax.summary.content[0]?.url,'https://example.test/results')}
   const persisted=new WorkbenchStore(f.host.workbench.root)
   assert.equal(await persisted.computerApplicationAllowed(app),decision==='always'||decision==='remembered')
   assert.equal(await persisted.computerApplicationAllowed({...app,path:'/Other/Fixture Editor.app'}),false)

@@ -28,6 +28,7 @@ export interface GuiProgress {
   phase: 'planning' | 'action_pending' | 'action_returned' | 'model_finished'
   steps: number
   actionName?: string
+  executionMode?: 'background'|'activated'
 }
 export interface GuiRunOptions extends GuiModelConfig {
   signal: AbortSignal

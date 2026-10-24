@@ -1,3 +1,5 @@
+import type {ComputerSession} from '../personal-agent/computer-use/session.js'
+import type {ComputerObservation} from '../personal-agent/computer-use/contract.js'
 import type {ComputerConfig} from './computer-config.js'
 import type {startComputerBackend} from './computer-backend.js'
 /** Local desktop binding. No accessibility/UI control tree, only display and foreground-window metadata. */
@@ -84,7 +86,7 @@ export async function guardComputerDevice(raw: AbstractInterface, target: () => 
         validateCoordinates(params, baseline)
         const input = params as {locate?: unknown; value?: unknown; mode?: unknown; keyName?: unknown; scrollType?: unknown; distance?: unknown}
         // Input/key actions use existing focus; SDK target autofocusing can emit extra clicks.
-        if (action.name === 'Input' && (input.locate || (input.mode !== undefined && input.mode !== 'typeOnly') || typeof input.value !== 'string'
+        if (action.name === 'Input' && (input.locate || (input.mode !== undefined && (typeof input.mode!=='string'||!['typeOnly','append','replace'].includes(input.mode))) || typeof input.value !== 'string'
           || !input.value || input.value.length > 4000)) throw new Error('needs_user_action')
         if (action.name === 'KeyboardPress' && (input.locate || typeof input.keyName !== 'string'
           || !input.keyName || input.keyName.length > 100)) throw new Error('needs_user_action')
@@ -202,7 +204,7 @@ export async function connectComputerDevice(backend: Awaited<ReturnType<typeof s
   const baseline = await target()
   if (!await guiApproval(options.approve('Connect', config.macWindow
     ? {window: config.macWindow, ...(config.macApplication?{application:config.macApplication}:{}), mode: 'background', healthCheck: 'window identity only', pointerInput: 'window-bound AX actions or targeted events; no foreground activation'}
-    : {displayId: config.displayId, healthCheck: 'moves and restores pointer'}), options.signal)) throw Error('declined')
+    : {displayId: config.displayId, mode:'activated', healthCheck: 'moves and restores pointer'}), options.signal)) throw Error('declined')
   const approved = await target()
   // Whole-screen consent binds the display; the first screenshot binds the input target.
   if (approved.width !== baseline.width || approved.height !== baseline.height
@@ -214,4 +216,12 @@ export async function connectComputerDevice(backend: Awaited<ReturnType<typeof s
   if (size.width !== baseline.width || size.height !== baseline.height) throw Error('screen_changed')
   return guardComputerDevice(backend.device, target, {...options, displayId: config.displayId,
     maxSteps: config.maxSteps, budgetMs: config.budgetMs})
+}
+
+/** Midscene already maps screenshot centers to size() logical space; never scale them twice. */
+export function computerSessionDevice(session:Pick<ComputerSession,'observe'|'actions'|'deviceAction'>,initial:ComputerObservation):AbstractInterface{
+ let observation=initial
+ return {interfaceType:'computer',size:()=>Promise.resolve({width:observation.space.logical_width,height:observation.space.logical_height}),
+  screenshotBase64:async()=>{observation=await session.observe();return `data:${observation.image.media_type};base64,${observation.image.data_base64}`},
+  actionSpace:()=>session.actions().map(action=>({...action,call:async(params,context)=>{await session.deviceAction(observation.id,action.name,params,context)}}))}
 }

@@ -1,3 +1,4 @@
+import {COMPUTER_VISION_REQUIRED_MESSAGE} from './computer-use/contract.js'
 import type {DiaryEntry} from '../memory-substrate/diary.js'
 import {computerUseCommandSchema,type ComputerUseState,type ComputerUseCommandResult,type ComputerPreflightItem} from './computer-use/contract.js'
 import {loadComputerConfig} from '../executors/computer-config.js'
@@ -246,7 +247,7 @@ export class PersonalAgentHost {
                 }
                 if(!direct)missing.push('vision_model');
             }
-            if(missing.some(value=>value!=='vision_model'))return {ok:false,state:this.computerUseState(item.id),missing} satisfies ComputerUseCommandResult;
+            if(missing.length)return {ok:false,state:this.computerUseState(item.id),missing,...(missing.includes('vision_model')?{code:'vision_model_required' as const,message:COMPUTER_VISION_REQUIRED_MESSAGE}:{})} satisfies ComputerUseCommandResult;
             const state:ComputerUseState=q.enabled?{enabled:true,direct,enabled_at:this.#now().toISOString()}:{enabled:false,direct:false};
             // Revoke before awaiting Stop so no new computer call can enter during cleanup.
             await this.#serial(async()=>{const next=structuredClone(this.#state),current=next.conversations.items.find(value=>value.id===item.id);if(current?.generation!==item.generation||!current.build)throw Error('build_not_found');current.build.computer_use=state;await this.#commit(next)});

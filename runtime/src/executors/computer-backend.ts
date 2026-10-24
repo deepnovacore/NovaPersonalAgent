@@ -109,7 +109,7 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
     return true
   }
   const descriptions: Record<string, string> = {Tap: 'Click once at the point.', Input: 'Append text to the already focused field; Tap it first.', Scroll: 'Scroll once by a bounded distance.', KeyboardPress: 'Press a shortcut in the current focus; use Command on macOS, Control on Windows.'}
-  const schemas = {Tap: actionTapParamSchema, Input: z.object({value: z.string().min(1).max(macWindow ? 200 : 4000)}).strict(), Scroll: actionScrollParamSchema, KeyboardPress: actionKeyboardPressParamSchema}
+  const schemas = {Tap: actionTapParamSchema, Input: z.object({value: z.string().min(1).max(macWindow ? 200 : 4000), mode:z.enum(['append','replace']).default('append')}).strict(), Scroll: actionScrollParamSchema, KeyboardPress: actionKeyboardPressParamSchema}
   const device: AbstractInterface = {interfaceType: 'computer',
     size: async () => {
       const value = await request('size') as {width?: unknown; height?: unknown}
