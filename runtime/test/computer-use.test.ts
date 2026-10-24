@@ -32,9 +32,9 @@ async function fixture(approve:(name:string)=>Promise<boolean>=()=>Promise.resol
  return {session,backendWindow:()=>backendWindow,setWidth:(value:number)=>{width=value},observe:async()=>{const value=await session.observe();observationId=value.id;return value.image},action:(name:Parameters<ComputerSession['action']>[0],args:Record<string,unknown>)=>session.action(name,{observationId,...args}),writes,approvals,acting,events,points,afterWrite:(effect:()=>void)=>{afterWrite=effect},failWrite:()=>{writeFailure=true},setTarget:(value:string)=>{target=value},setCleanup:(value:boolean)=>{cleanup=value},delayClose:(gate:Promise<void>)=>{closeGate=gate},connected:()=>connected,closed:()=>closed,
   dispose:async()=>{await session.close().catch(()=>{ /* test asserts cleanup errors separately */ });releaseQuarantinedTaskResources([COMPUTER_RESOURCE]);await rm(root,{recursive:true,force:true})}}
 }
-test('computer tools restrict non-vision models to delegation',{timeout:5000},()=>{
- assert.deepEqual(computerTools(false).map(tool=>tool.name),['computer_run'])
- assert.equal(computerTools(true).length,6)
+test('computer tools require a vision model',{timeout:5000},()=>{
+ assert.deepEqual(computerTools(false).map(tool=>tool.name),[])
+ assert.equal(computerTools(true).length,5)
 })
 test('session requires observation, approves Connect once, scales screenshots and releases lease',{timeout:5000},async()=>{
  const f=await fixture()

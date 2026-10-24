@@ -12,7 +12,7 @@ import type {WorkbenchCall} from './workbench-store.js'
 import type {ComputerSession,ComputerSessionOptions} from './computer-use/session.js'
 import {computerTools} from './computer-use/tools.js'
 import {computerUseSkill} from './computer-use/skill.js'
-import {isComputerTool,computerToolArguments,COMPUTER_WRITE_TOOLS,type ToolImage} from './computer-use/contract.js'
+import {isComputerTool,computerToolArguments,COMPUTER_VISION_REQUIRED_MESSAGE,COMPUTER_WRITE_TOOLS,type ToolImage} from './computer-use/contract.js'
 
 const publishArguments=z.object({title:z.string().min(1).max(120),content:z.string().min(1).max(131072)}).strict()
 const publishTool:CascadedLlmTool={name:'publish_plan',description:'Publish the complete detailed plan for the user to review and choose local Build or executor Build. This does not authorize or start execution. Call again to publish an amended version.',parameters:{type:'object',properties:{title:{type:'string',minLength:1,maxLength:120},content:{type:'string',minLength:1,maxLength:131072}},required:['title','content'],additionalProperties:false}}
@@ -36,13 +36,13 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  let coordinateObservationRequired=true
  let verificationRequired=false
  for(const call of state.calls){
-  if(isComputerTool(call.name)&&call.started_at&&(COMPUTER_WRITE_TOOLS.includes(call.name)||call.name==='computer_run'))verificationRequired=true
-  if((call.name==='computer_screenshot'||call.name==='computer_run')&&(call.result as {image_ref?:string}|undefined)?.image_ref)verificationRequired=false
+  if(call.name.startsWith('computer_')&&call.started_at&&call.name!=='computer_screenshot')verificationRequired=true
+  if(call.name==='computer_screenshot'&&(call.result as {image_ref?:string}|undefined)?.image_ref)verificationRequired=false
  }
  if(state.reason==='cleanup_unknown')verificationRequired=true
  const computerState=()=>build?host.computerUseState(conversation.id):{enabled:false,direct:false}
  let computerVisible=false
- const computerFrame=(state:'active'|'acting'|'delegated'|'idle',action?:string,point?:{x:number;y:number})=>{
+ const computerFrame=(state:'active'|'acting'|'idle',action?:string,point?:{x:number;y:number})=>{
   if(state==='idle'&&!computerVisible)return
   computerVisible=state!=='idle'
   options.emit({type:'computer_use',conversation_id:conversation.id,state,...(action?{action}:{}),...(point?{point}:{})})
@@ -100,11 +100,11 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
       if(call.state!=='completed'){
        toolRounds++
        if(isComputerTool(call.name)&&!computerState().enabled){call.result={code:'computer_use_disabled',message:'在 Build 会话里打开 Computer Use 后才能操作电脑'};call.state='completed'}
+       else if(isComputerTool(call.name)&&!computerState().direct){call.result={code:'vision_model_required',message:COMPUTER_VISION_REQUIRED_MESSAGE};call.state='completed'}
        else if(!allowed.has(call.name)){call.result={code:'tool_not_authorized',state:'refused'};call.state='completed'}
        else if(isComputerTool(call.name)){
         const name=call.name,validation=computerToolArguments[name].safeParse(call.arguments)
         if(!validation.success){call.result={code:'invalid_params'};call.state='completed'}
-        else if(!computerState().direct&&name!=='computer_run'){call.result={code:'vision_model_required'};call.state='completed'}
         else if((observeRequired&&COMPUTER_WRITE_TOOLS.includes(name))||(coordinateObservationRequired&&(name==='computer_click'||name==='computer_scroll'))){call.result={code:'observe_required'};call.state='completed'}
         else{
          if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
@@ -141,15 +141,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
           signal.throwIfAborted()
           if(!computerState().enabled)throw Error('computer_use_disabled')
           if(name==='computer_screenshot'){call.result=await capture('application' in validation.data?validation.data.application:undefined);verificationRequired=false}
-          else if(name==='computer_run'){
-           verificationRequired=true;await closeComputer();computerFrame('delegated',name)
-           if(!toolBridge.computerRun)throw Error('computer_executor_unavailable')
-           computerInputStarted=true
-           const result=await toolBridge.computerRun(state.last_user,call,signal)
-           signal.throwIfAborted()
-           call.result={result,...await capture()}
-           verificationRequired=false
-          }else{
+          else{
            verificationRequired=true
            const receipt=await (await getComputer()).action(name,call.arguments);observeRequired=true;coordinateObservationRequired=true
            call.result={status:'completed',verified:false,...receipt};computerFrame('active',name)

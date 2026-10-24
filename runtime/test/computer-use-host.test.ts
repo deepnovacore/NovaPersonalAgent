@@ -33,7 +33,7 @@ test('computer switch requires local selected Build and fails closed without per
  assert.equal(result.ok,true);assert.equal(result.data.ok,false);assert.equal(result.data.state.enabled,false)
  assert.deepEqual(result.data.missing,['screen_permission','accessibility_permission','vision_model'])
  const delegated=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted'}})
- assert.equal(delegated.data.ok,true);assert.equal(delegated.data.state.enabled,true);assert.equal(delegated.data.state.direct,false);assert.deepEqual(delegated.data.missing,['vision_model'])
+ assert.equal(delegated.data.ok,false);assert.equal(delegated.data.state.enabled,false);assert.equal(delegated.data.state.direct,false);assert.deepEqual(delegated.data.missing,['vision_model'])
  conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],cascade_llm_provider:'qwen',cascade_llm_model:'qwen3-vl-plus',dashscope_api_key:'test'})})
  const direct=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted'}})
  assert.equal(direct.data.state.direct,true);assert.deepEqual(direct.data.missing,[])
