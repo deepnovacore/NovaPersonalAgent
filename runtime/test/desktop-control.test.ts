@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict'
+import {mkdtemp, realpath, rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {SuggestionPool} from '../src/core/suggestions.js'
 import {EventEmitter} from 'node:events'
 import {test} from 'node:test'
 import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, connectionsProjection, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop/desktop-control.js'
@@ -122,4 +127,20 @@ test('settings Space port routes pairing controls but rejects mobile commands', 
   for (const method of ['space.mobile_action', 'space.mobile_result'])
     assert.deepEqual(await handlePersonalSettings(command, method, {}), {error: 'unsupported'})
   assert.equal(calls.length, 5)
+})
+
+
+test('private settings pass local identity to the real Host without authorizing remote Space administration', async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'desktop-space-control-'))
+  const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'fixture', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
+  try {
+    await host.open({deferBackground: true})
+    const status = host.spaceHostStatus()
+    assert.deepEqual(await handlePersonalSettings(host.command.bind(host), 'space.status', {}), status)
+    for (const context of [undefined, {client_id: 'phone:fixture'}]) {
+      const result = await host.command({type: 'personal.command', request_id: 'remote', method: 'space.status', params: {}}, context) as {ok: boolean; error: string}
+      assert.equal(result.ok, false)
+      assert.equal(result.error, 'local_desktop_required')
+    }
+  } finally {await host.close(); await rm(dir, {recursive: true, force: true})}
 })

@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto'
 import {personalCommandSchema} from '../personal-agent/contracts.js'
+import type {PersonalCommandContext} from '../personal-agent/host.js'
 import {BlockingConfigurationError} from '../config/config.js'
 import {DEFAULT_FRONTBRAIN_TOOL_BUDGET} from '../config/capability-registry.js'
 import type {CapabilityStatus} from '../config/capability-registry.js'
@@ -120,11 +121,11 @@ export function connectionsProjection(snapshot: unknown): Record<string, unknown
     capabilities: {sources: capabilities.sources === true, discovery: capabilities.discovery === true},
   }
 }
-export async function handlePersonalSettings(command: (input: unknown) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
+export async function handlePersonalSettings(command: (input: unknown, context?: PersonalCommandContext) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
   if (!PERSONAL_SETTINGS_METHODS.includes(method)) return {error: 'unsupported'}
   const parsed = personalCommandSchema.safeParse({type: 'personal.command', request_id: randomUUID(), method, params})
   if (!parsed.success) return {error: 'invalid_request'}
-  const result = await command(parsed.data) as {ok?: boolean; data?: unknown; error?: string}
+  const result = await command(parsed.data, {client_id: 'desktop:local'}) as {ok?: boolean; data?: unknown; error?: string}
   if (result.ok !== true) return {error: result.error ?? 'unavailable'}
   if (method === 'state') return connectionsProjection(result.data)
   // Commands that persist without a payload (discovery.configure) must still read as success across the port.

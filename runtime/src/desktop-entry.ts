@@ -85,7 +85,7 @@ const exitCode = await runDesktopEntryWithStopSources({
     capabilityView = () => ({...composition.realtime.capabilityStatus, state: 'running'})
     clearConversation = () => composition.realtime.clearConversation()
     feishuHandle = (method, params) => handleFeishuSettings(input => composition.realtime.personalAgent.command(input), method, params)
-    personalSettingsHandle = (method, params) => handlePersonalSettings(input => composition.realtime.personalAgent.command(input), method, params)
+    personalSettingsHandle = (method, params) => handlePersonalSettings(composition.realtime.personalAgent.command.bind(composition.realtime.personalAgent), method, params)
     control.publish()
     return composition
   },

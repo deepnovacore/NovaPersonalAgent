@@ -1615,7 +1615,7 @@ export class PersonalAgentHost {
             const q=z.object({assistant_name:identityNameSchema.min(1),user_name:userNameSchema}).strict().parse(p);
             await this.#configureIdentity(command.request_id,payload,q);this.#notify();data=this.identity();
         }
-        else if(command.method.startsWith('notifications.')){/* Handled above; never forward notification commands to source connectors. */}
+        else if(command.method.startsWith('notifications.')||command.method.startsWith('space.')){/* Handled above; never forward these commands to source connectors. */}
         else if(taskCommand){
             if(command.method==='tasks.list'){z.object({}).strict().parse(p);data=this.tasks.list()}
             else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512),after:z.number().int().nonnegative().default(0),input_request_id:z.string().min(1).max(128).optional()}).strict().parse(p);const inputKey=q.input_request_id?hash({client,request:q.input_request_id}):undefined,commandReceipt=inputKey?this.#state.receipts[inputKey]?.result as {input_status?:string;input_task_id?:string}|undefined:undefined;const receipt=inputKey?this.tasks.inputReceipts(q.task_id).find(r=>r.request_id===inputKey)??(commandReceipt?.input_status==='failed'&&commandReceipt.input_task_id===q.task_id?{status:'failed'}:undefined):undefined;data={viewer:{client_id:client,can_takeover:context?.can_takeover!==false},...(receipt?{input_receipt:{request_id:q.input_request_id,status:receipt.status}}:{}),...this.tasks.get(q.task_id),events:this.tasks.events(q.task_id,q.after),approvals:this.taskApprovals(q.task_id),input_receipts:this.tasks.inputReceipts(q.task_id),capabilities:this.taskCapabilities(q.task_id)}}
