@@ -99,8 +99,9 @@ export function desktopBudgetFailure(error: unknown): DesktopCapabilityState | u
 }
 
 
-/** The settings window may manage sources, connectors and discovery scheduling; nothing that reads memory, feeds or conversations. */
+/** The settings window may manage Space pairing, sources, connectors and discovery scheduling; nothing that reads memory, feeds or conversations. */
 export const PERSONAL_SETTINGS_METHODS: readonly string[] = Object.freeze([
+  'space.status', 'space.invitation', 'space.pairings', 'space.confirm_pairing', 'space.revoke',
   'state', 'identity.configure', 'sources.add', 'sources.authorize_computer', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete',
   'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent',
   'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete',

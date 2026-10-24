@@ -109,3 +109,17 @@ test('settings connections port admits only sources, connectors and discovery sc
   assert.ok(PERSONAL_SETTINGS_METHODS.every(method => !method.startsWith('feishu.')))
   assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:false,error:'unavailable'}),'sources.sync',{id:'s'}),{error:'unavailable'})
 })
+
+
+test('settings Space port routes pairing controls but rejects mobile commands', async () => {
+  const calls: unknown[] = []
+  const command = (input: unknown) => {calls.push(input); return Promise.resolve({ok: true, data: {available: true}})}
+  for (const method of ['space.status', 'space.invitation', 'space.pairings', 'space.confirm_pairing', 'space.revoke']) {
+    assert.ok(PERSONAL_SETTINGS_METHODS.includes(method), method)
+    assert.deepEqual(await handlePersonalSettings(command, method, {}), {available: true}, method)
+  }
+  assert.equal(calls.length, 5)
+  for (const method of ['space.mobile_action', 'space.mobile_result'])
+    assert.deepEqual(await handlePersonalSettings(command, method, {}), {error: 'unsupported'})
+  assert.equal(calls.length, 5)
+})
