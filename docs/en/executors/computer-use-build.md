@@ -1,41 +1,53 @@
 # Computer Use in Build
 
-Computer Use is an opt-in, per-conversation capability for local Build on macOS and Windows. Plan conversations never receive computer tools. Turning it off removes access and stops the current Build turn.
+Computer Use is opt-in for each local Build conversation on macOS and Windows. Plan never receives desktop tools. Disabling it revokes access and stops the current Build turn. Remote clients cannot authorize it.
 
-## Setup
+## Setup and model capability
 
-Configure the existing computer executor with `COMPUTER_DISPLAY_ID`, `EXECUTOR_BASE_URL`, `EXECUTOR_MODEL`, `EXECUTOR_MODEL_FAMILY` and `EXECUTOR_API_KEY`. Its step, timeout, settling and click-duration limits use `EXECUTOR_MAX_STEPS`, `EXECUTOR_TIMEOUT_SECONDS`, `EXECUTOR_SETTLE_MS` and `COMPUTER_CLICK_HOLD_MS`. Consult the generated environment reference for supported values and defaults; credentials belong in local configuration, not the project.
+The current implementation shares the computer executor configuration: `COMPUTER_DISPLAY_ID`, `EXECUTOR_BASE_URL`, `EXECUTOR_MODEL`, `EXECUTOR_MODEL_FAMILY`, and `EXECUTOR_API_KEY`. Limits use `EXECUTOR_MAX_STEPS`, `EXECUTOR_TIMEOUT_SECONDS`, `EXECUTOR_SETTLE_MS`, and `COMPUTER_CLICK_HOLD_MS`. Keep credentials in local configuration. Build uses its own selected vision model to plan desktop actions; it does not invoke a second GUI planner. The shared configuration loader still validates executor-model settings.
 
-On macOS, grant Screen Recording and Accessibility permissions to the desktop application. On Windows, the packaged process guardian is required. Full-desktop control requires one configured display. Optional background Safari targeting uses `COMPUTER_MAC_WINDOW_PID` and `COMPUTER_MAC_WINDOW_ID`; its Connect prompt must identify the window and temporary keyboard-focus behavior.
+macOS requires Screen Recording and Accessibility permissions. Windows requires the packaged process guardian. Whole-screen control requires one configured display. Platform, configuration, permission **and vision-model** preflight failures all block enabling.
 
-Enable Computer Use from the local desktop Build conversation. Preflight reports unsupported platform, invalid configuration and missing permissions. Remote clients cannot authorize this switch.
+A nonvision Build model receives **no desktop tools**. The host returns `vision_model_required` with an explicit instruction to switch to a vision-capable model. If the selected model changes after enabling, desktop calls are also refused. The persisted `direct` field is retained for compatibility and recomputed as current visual capability; it is not a delegation mode. Supported models are determined by the runtime vision-capability check, not inferred from arbitrary model names.
 
-## Tools and models
+## Select and observe a window
 
-A vision-capable Build model receives screenshot, click, type, scroll and key tools. Coordinates refer to the latest returned screenshot, scaled to a longest edge of 1280 pixels. Every input requires a fresh observation and its observationId.
+On macOS, call `computer_screenshot` with `application`, the exact running application name or bundle ID. Nova resolves that application's focused window and binds the session to it without activating the application. Ambiguous or missing applications are refused. To start an application in the background, use an authorized `/usr/bin/open -g -a` command first.
 
-The current Build vision allowlist is:
+A new session without `application` observes the whole screen; Build does not inherit `COMPUTER_MAC_WINDOW_PID` / `COMPUTER_MAC_WINDOW_ID`. Subsequent observations in a bound session retain its target. Switching to a different target requires a new session. Voice-dispatched execution may explicitly bind the configured PID/window pair.
 
-- Qwen: `qwen3-vl-plus`, `qwen3-vl-flash`, `qwen-vl-max`, `qwen-vl-plus`.
-- StepFun: `step-3.7-flash`.
-- Ark: `doubao-seed-2-0-pro-260215`.
+The shared observation contains:
 
-Other model IDs are not assumed to support images. Desktop operation is unavailable for them: `vision_model` blocks enabling and `vision_model_required` explains that a vision model is required. The Build model and the computer executor's `EXECUTOR_MODEL` are separate settings.
+- `id`, `captured_at`, and an image scaled to a longest edge of 1280 pixels. Build journals store `image_ref`, not image bytes.
+- `space.logical_width`, `space.logical_height`, and `space.scale` for coordinate mapping.
+- `target` application/PID/window/title, or `null` for whole-screen capture; `focus` and `foreground` describe foreground identity.
+- `ax.status`: `ok`, `unavailable`, `timeout`, or `truncated`; optional `ax.summary` and focused-field `ax.editor`.
 
-## Approval, Stop and recovery
+macOS attempts AX observation for resolved foreground and background windows. Windows returns `ax: {status: 'unavailable'}`; this implementation has no UIA reader. AX is bounded, untrusted application data, never instructions. Secure text-field values are excluded. Background screenshots may contain stale pixels when an application does not repaint: combine image, AX and later observations, without treating field text alone as proof of submission or task completion.
 
-Every new direct-control lease requires Connect approval. With local tool approval set to `ask`, each input also requires approval; with `never`, Connect still requires approval.
+## Inputs and freshness
 
-Stop aborts the turn and waits for backend cleanup. Turning Computer Use off does the same. A timeout or unconfirmed cleanup is not success: uncertain input is recorded as `outcome_unknown`, and uncertain device cleanup retains both resource and device quarantine. Do not remove locks to force another action.
+The five tools are `computer_screenshot`, `computer_click`, `computer_type`, `computer_scroll`, and `computer_key`.
 
-Resume requires a fresh observation before any direct input. Build cannot finish after an input until a newer screenshot is available.. An executor's model-finished response alone is not proof that the user's goal was achieved.
+Every input must carry the **latest observation's `id` as `observationId`**. Click/scroll coordinates use the returned image. After every input, observe again before any subsequent input—including typing and keyboard shortcuts. A stale ID is refused with `observe_required`; a changed target or geometry is refused with `screen_changed`. Identity is checked again after approval. Do not retry uncertain effects blindly.
 
-Screenshots are private Build artifacts with owner-only file permissions. Journals keep references instead of image bytes; model history retains only the newest two images and replaces older ones with text placeholders. Screenshots sent to the selected model may contain sensitive screen content.
+`computer_type` supports `mode: 'append' | 'replace'` (default `append`):
 
-## Acceptance status
+- `append` inserts at the caret, replacing a selected range as ordinary typing does.
+- `replace` overwrites the focused field. Unsupported background replacement is refused rather than silently appended. Native background input is limited to 200 UTF-16 units per action; whole-screen input permits up to 4000.
 
-Automated tests use fake backends and never operate the real screen. A passing unit test is not macOS or Windows device acceptance. Real-device validation must separately check permissions, coordinate accuracy, approvals, Stop/Resume, competing task ownership, and that desktop overlays are visible to the user but absent from model screenshots.
+Action receipts record `executionMode`: `background` for window-targeted delivery, or `activated` for foreground/global delivery, including a window that was already active. The latter is **not proof that Nova activated a window and not permission to activate another one**. There is no automatic foreground-activation fallback for unsupported background actions.
 
-Integration still requires selected Build-model capability wiring and executor resource ownership to be verified together. Do not treat this setup guide as a release or real-device verification record.
+## Approval, ownership and verification
 
-Use the [device acceptance checklist](../../verification/build-computer-use.md) for separate macOS and Windows verification.
+Each new session requires Connect approval. `ask` requires approval for each input; `never` still requires Connect approval. Application-scoped remembered consent is handled by the host. Authority is rechecked immediately before input.
+
+Build and the voice executor share session/observation/action handling and the same desktop resource lease. Voice's existing lifecycle owns its lease; the shared session does not acquire it twice. Midscene remains the voice planner: AX enters its `aiAct` context only at startup, labelled with observation ID, capture time, untrusted provenance and a **may-be-stale** warning. It is not refreshed in planner context at every step.
+
+Stop/cancellation waits for bounded input receipts and backend teardown. Session wall-clock and step limits remain enforced. Uncertain input or cleanup is not success: `cleanup_unknown` retains device/resource quarantine. Never remove locks to force another attempt. Resume requires a new observation. Build cannot finish after input without a newer screenshot; even a successful receipt or model-finished response does not itself prove the user's goal.
+
+Screenshots are private, owner-only artifacts. Model history keeps only the newest two images. Images and AX sent to the selected model may contain sensitive application content.
+
+## Acceptance boundary
+
+Tests with fake devices or local scripted planners do not prove real model reasoning, microphone/voice interaction, packaged desktop UI, or Windows device behavior. Record those separately. See the [acceptance checklist](../../verification/build-computer-use.md); a source change or passing test is not a release record.
