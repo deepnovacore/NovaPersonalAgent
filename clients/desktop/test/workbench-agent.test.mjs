@@ -49,7 +49,7 @@ test('local approval setting defaults to ask and is independent of executor appr
  assert.equal(normalizeSettings({}).localToolApproval,'ask')
  assert.equal(normalizeSettings({localToolApproval:'invalid'}).localToolApproval,'ask')
  const settings=normalizeSettings({localToolApproval:'never',codexApprovalMode:'ask'})
- assert.equal(settings.localToolApproval,'never');assert.equal(settings.codexApprovalMode,'ask');assert.equal(backendSettings(settings).localToolApproval,'never')
+ assert.equal(settings.localToolApproval,'never');assert.equal(settings.codexApprovalMode,'ask');assert.equal('localToolApproval' in backendSettings(settings),false,'the approval mode switches live and never forces a restart')
 })
 
 test('local Build controls stay hidden when the host reports that the platform is unsupported',async()=>{

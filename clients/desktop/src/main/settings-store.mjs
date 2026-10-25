@@ -355,7 +355,7 @@ export function startupPresentation(settings, argv = []) {
 }
 
 export function backendSettings(settings) {
-  const {skinId, importedSkins, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
+  const {skinId, importedSkins, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
   return backend
 }
 
