@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import '../ui/theme.dart';
 
+/// Same message look as the local chat: the user's words sit in a right-aligned
+/// bubble, the assistant's reply is plain full-width text.
 class SpaceChatMessage extends StatelessWidget {
   const SpaceChatMessage({super.key, required this.message});
   final Map<String, dynamic> message;
@@ -23,16 +26,72 @@ class SpaceChatMessage extends StatelessWidget {
       _ => '',
     };
     final text = message['text'] as String? ?? '';
-    return Card(
-      child: ListTile(
-        title: Text(user ? '我' : 'Host'),
-        subtitle: Text(
-          [
-            if (text.isNotEmpty) text,
-            if (explanation.isNotEmpty) explanation,
-          ].join('\n'),
-        ),
-      ),
+    final warn = status == 'failed' || status == 'unknown';
+    final note = explanation.isEmpty
+        ? null
+        : Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              explanation,
+              textAlign: user ? TextAlign.end : TextAlign.start,
+              style: TextStyle(
+                color: warn ? Nova.amber : Nova.secondary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: user
+          ? Align(
+              alignment: Alignment.centerRight,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 300),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (text.isNotEmpty)
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Nova.cell,
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 17,
+                            vertical: 13,
+                          ),
+                          child: SelectableText(
+                            text,
+                            style: const TextStyle(
+                              color: Nova.text,
+                              fontSize: 16,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ?note,
+                  ],
+                ),
+              ),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (text.isNotEmpty)
+                  SelectableText(
+                    text,
+                    style: const TextStyle(
+                      color: Nova.text,
+                      fontSize: 16,
+                      height: 1.6,
+                    ),
+                  ),
+                ?note,
+              ],
+            ),
     );
   }
 }

@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import '../ui/components.dart';
+import '../ui/theme.dart';
 import 'client_state.dart';
 import 'space_dialog.dart';
 
@@ -185,56 +188,73 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const SizedBox(height: 20),
-      Text('手机采集与授权', style: Theme.of(context).textTheme.titleLarge),
-      const Text('由你选择内容并授权 Host 处理。此设备不运行个人资料推断。'),
-      _processingSummary(),
-      Wrap(
-        spacing: 8,
+      NovaSection(
+        header: '手机采集与授权',
+        footer: '由你选择内容并授权 Host 处理。此设备不运行个人资料推断。',
         children: [
-          OutlinedButton.icon(
-            onPressed: collect,
-            icon: const Icon(Icons.note_add_outlined),
-            label: const Text('发送采集输入'),
+          _processingSummary(),
+          NovaTile(
+            title: '发送采集输入',
+            leading: const NovaIconTile(CupertinoIcons.doc_text),
+            trailing: const CupertinoListTileChevron(),
+            onTap: collect,
           ),
-          TextButton(onPressed: correction, child: const Text('纠正个人资料')),
+          NovaTile(
+            title: '纠正个人资料',
+            leading: const NovaIconTile(CupertinoIcons.person_crop_circle),
+            trailing: const CupertinoListTileChevron(),
+            onTap: correction,
+          ),
         ],
       ),
-      for (final source in widget.state.clientSources.values)
-        Card(
-          child: ListTile(
-            title: Text(source['name'] as String? ?? '手机输入'),
-            subtitle: Text(
-              '${_status(source['status'] as String?)} · ${source['allow_processing'] == true ? '允许模型处理' : '禁止模型处理'}${source['error'] == null ? '' : ' · ${source['error']}'}',
-            ),
-            trailing: source['status'] == 'deleted'
-                ? null
-                : PopupMenuButton<String>(
-                    onSelected: (action) {
-                      if (action == 'edit') {
-                        unawaited(collect(source: source));
-                      } else {
-                        unawaited(remove(source, action == 'delete'));
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Text('修改并重新授权'),
+      if (widget.state.clientSources.isNotEmpty)
+        NovaSection(
+          header: '已授权来源',
+          children: [
+            for (final source in widget.state.clientSources.values)
+              NovaTile(
+                title: source['name'] as String? ?? '手机输入',
+                subtitle: Text(
+                  '${_status(source['status'] as String?)} · ${source['allow_processing'] == true ? '允许模型处理' : '禁止模型处理'}${source['error'] == null ? '' : ' · ${source['error']}'}',
+                ),
+                trailing: source['status'] == 'deleted'
+                    ? null
+                    : PopupMenuButton<String>(
+                        icon: const Icon(
+                          CupertinoIcons.ellipsis,
+                          size: 20,
+                          color: Nova.secondary,
+                        ),
+                        onSelected: (action) {
+                          if (action == 'edit') {
+                            unawaited(collect(source: source));
+                          } else {
+                            unawaited(remove(source, action == 'delete'));
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Text('修改并重新授权'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'revoke',
+                            child: Text('撤销授权'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Text('删除来源及派生资料'),
+                          ),
+                        ],
                       ),
-                      const PopupMenuItem(value: 'revoke', child: Text('撤销授权')),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Text('删除来源及派生资料'),
-                      ),
-                    ],
-                  ),
-          ),
+              ),
+          ],
         ),
     ],
   );
 
   Widget _processingSummary() {
+    // Summary of the whole Space; per-source receipts are listed separately.
     final processing = widget.state.snapshot['source_processing'];
     final hasStatus = processing is Map;
     final status = hasStatus ? processing['status'] : null;
@@ -247,20 +267,16 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
             'failed' => 'Host 处理失败，请检查 Host',
             _ => '等待 Host 处理',
           };
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Host 处理汇总'),
-            Text(title),
-            const Text('当前 Space 的汇总状态，不代表每份来源均已完成。'),
-            if (needsUpdate) const Text('有新内容等待更新'),
-            if (!widget.state.hostOnline)
-              Text(hasStatus ? 'Host 不在线，显示上次处理状态' : 'Host 不在线，等待获取处理状态'),
-          ],
-        ),
+    return NovaTile(
+      title: 'Host 处理汇总',
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title),
+          if (needsUpdate) const Text('有新内容等待更新'),
+          if (!widget.state.hostOnline)
+            Text(hasStatus ? 'Host 不在线，显示上次处理状态' : 'Host 不在线，等待获取处理状态'),
+        ],
       ),
     );
   }
