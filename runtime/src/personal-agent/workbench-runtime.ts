@@ -19,8 +19,9 @@ const publishTool:CascadedLlmTool={name:'publish_plan',description:'Publish the 
 const finishArguments=z.object({summary:z.string().min(1).max(12000)}).strict()
 const finishTool:CascadedLlmTool={name:'finish_build',description:'End this Build conversation after the confirmed work and verification are complete. Provide the final user-facing summary. This permanently locks the conversation; use only when no further Build interaction is needed.',parameters:{type:'object',properties:{summary:{type:'string',minLength:1,maxLength:12000}},required:['summary'],additionalProperties:false}}
 const RESUME_CHECK='Resume the confirmed plan. Inspect actual state before continuing any cancelled, timed-out or unknown operation. Never replay a completed call.'
-export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never';shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'observe'|'action'|'close'>;onDiagnostic?:(message:string)=>void}):Promise<ConversationRuntime>{
+export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never'|(()=>'ask'|'never');shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'observe'|'action'|'close'>;onDiagnostic?:(message:string)=>void}):Promise<ConversationRuntime>{
  const {conversation,host}=options,build=conversation.kind==='build',store=host.workbench
+ const approvalMode=():'ask'|'never'=>typeof options.approval==='function'?options.approval():options.approval
  const turnToolLimit=build?128:24
  const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
  if(build&&(!conversation.build||!['darwin','win32'].includes(process.platform)))throw Error('local_build_unavailable')
@@ -117,7 +118,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
           let applicationAuthorized=false
           computer=create({
            signal,approve:async(action,params)=>{
-            if(action!=='Connect'&&(applicationAuthorized||options.approval==='never'))return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
+            if(action!=='Connect'&&(applicationAuthorized||approvalMode()==='never'))return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
             const app=action==='Connect'?computerApplicationSchema.safeParse((params as {application?:unknown})?.application):undefined
             if(app?.success&&await store.computerApplicationAllowed(app.data)){applicationAuthorized=true;return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)}
             const current=currentComputerCall!
@@ -163,7 +164,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
         else{
          if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
          // Reads inside the project stay free; a read that leaves it needs the same consent as a write.
-         const needsApproval=options.approval==='ask'&&(call.name!=='file_read'||await localPathEscapesProject(conversation.build!.project,(validation.data as {path:string}).path).catch(()=>true))
+         const needsApproval=approvalMode()==='ask'&&(call.name!=='file_read'||await localPathEscapesProject(conversation.build!.project,(validation.data as {path:string}).path).catch(()=>true))
          if(needsApproval&&!await ask(call,signal)){
           call.result={status:'denied',message:'This call was not executed. Wait for new user instructions.'};call.state='completed';state.reason=signal.aborted?'stopped':'approval_denied';await save();return
          }
@@ -209,7 +210,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
      }
      // The approval slot is single; a read that must ask therefore runs alone like a write.
      const askingReads=new Set<string>()
-     if(build&&options.approval==='ask')for(const call of state.pending_calls)if(call.name==='file_read'&&call.state!=='completed'){
+     if(build&&approvalMode()==='ask')for(const call of state.pending_calls)if(call.name==='file_read'&&call.state!=='completed'){
       const q=localToolArguments.file_read.safeParse(call.arguments)
       if(!q.success||await localPathEscapesProject(conversation.build!.project,q.data.path).catch(()=>true))askingReads.add(call.id)
      }

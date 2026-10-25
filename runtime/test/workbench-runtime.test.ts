@@ -41,7 +41,7 @@ async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[{name:'monitor',parameters:{type:'object'}},{name:'dispatch',parameters:{type:'object',properties:{executor:{enum:['codex']}}}}],readonlyNames:['monitor'],origin:()=>Promise.resolve('memory:test-user'),invoke:(_text,call,_signal,grant)=>{invocations.push(call);if(call.name!=='dispatch'||!grant)return Promise.resolve({accepted:true});const delegate_id='fixture-work-'+invocations.length;return host.tasks.bindWork(grant.fence,delegate_id).then(()=>({accepted:true,delegate_id}))}}
  const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
- const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval,...(computerSession?{computerSession}:{})}):plain,frame=>frames.push(frame))
+ const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{})}):plain,frame=>frames.push(frame))
  let request=0
  const raw=(method:string,params:Record<string,unknown>={},local=true)=>host.command({type:'personal.command',request_id:'r'+request++,method,params},{client_id:local?'desktop:local':'remote:test'}) as Promise<{ok:boolean;error?:string;data:unknown}>
  const command=async(method:string,params:Record<string,unknown>={})=>{const result=await raw(method,params);if(!result.ok)throw Error(result.error);return result.data}
@@ -253,6 +253,17 @@ test('Build requires approval before side effects, stops on denial and does not 
   await f.host.submitConversationText(id,'请重新写入',undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
   assert.deepEqual(f.script.requests[1]!.inputs.filter(input=>input.kind==='user_text').map(input=>input.text),['请重新写入'])
   assert.equal(f.host.tasks.list().length,0);assert.equal(f.host.life.snapshot().todos.length,0)
+ }finally{await f.close()}
+})
+
+test('switching the local tool approval at runtime applies to the next call without a restart',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'live.txt',content:'无需确认'}}}:{text:'已完成'})
+ try{
+  assert.deepEqual(await f.command('settings.local_tool_approval',{mode:'never'}),{mode:'never'})
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).status==='awaiting_approval',false)
+  assert.equal(await readFile(join(f.root,'live.txt'),'utf8'),'无需确认')
+  assert.equal((await f.raw('settings.local_tool_approval',{mode:'sometimes'})).ok,false)
  }finally{await f.close()}
 })
 

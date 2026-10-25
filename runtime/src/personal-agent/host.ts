@@ -185,6 +185,8 @@ export function announcedGoal(goal:string):string{const line=goal.trim().split(/
 export class PersonalAgentHost {
     readonly workbench:WorkbenchStore;
     readonly #localBuildAuthority=new Set<string>();
+    /** Live override of the local tool approval setting; the next tool call reads it, pending approvals are untouched. */
+    localToolApproval:'ask'|'never'|undefined;
     #workbenchModel:{provider:string;model:string}|undefined;
     setWorkbenchModel(model:{provider:string;model:string}):void{this.#workbenchModel={...model}}
     computerUseState(id:string):ComputerUseState{const state=this.#state.conversations.items.find(item=>item.id===id)?.build?.computer_use;return state?{...state,direct:state.enabled&&!!this.#workbenchModel&&supportsVision(this.#workbenchModel.provider,this.#workbenchModel.model)}:{enabled:false,direct:false}}
@@ -224,6 +226,7 @@ export class PersonalAgentHost {
             if(!q.final)return {offset:draft.text.length};if(!draft.text.trim())throw Error('empty_plan');
             const plan=await this.publishPlan(q.id,item.generation,item.plan.title,draft.text);this.#planEdits.delete(key);return {id:plan.id,version:plan.version};
         }
+        if(method==='settings.local_tool_approval'){const q=z.object({mode:z.enum(['ask','never'])}).strict().parse(p);this.localToolApproval=q.mode;return {mode:q.mode}}
         if(method==='conversations.mode'){
             const q=z.object({id:z.string(),mode:z.enum(['chat','plan'])}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);
         if(!item||item.kind==='build'||item.kind==='schedule')throw Error('mode_unavailable');if(this.#planModeTransitions.has(q.id)||this.#state.conversations.voice_id===q.id||this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
@@ -1858,7 +1861,7 @@ export class PersonalAgentHost {
         return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context));if(parsed.method==='tasks.input'){this.#taskInputRuns.add(run);void run.finally(()=>{this.#taskInputRuns.delete(run);this.#pendingCommands--}).catch(()=>{ /* caller receives rejection */ });return run} this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
         if(context?.client_id!=='desktop:local'&&typeof command.params.id==='string'&&this.#state.conversations.items.some(item=>item.id===command.params.id&&item.kind==='build'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
-        const localCommand=command.method.startsWith('build.')||command.method.startsWith('plans.')||command.method==='conversations.mode';
+        const localCommand=command.method.startsWith('build.')||command.method.startsWith('plans.')||command.method==='conversations.mode'||command.method==='settings.local_tool_approval';
         if(localCommand&&(context?.client_id!=='desktop:local'||this.#presentationMode!=='workbench'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
         if(this.activeLocalBuild()&&(['conversations.create','conversations.select','conversations.open_work','conversations.open_feed','conversations.discuss','conversations.start','conversations.clear','conversations.voice','build.start'].includes(command.method))&&!(command.method==='conversations.select'&&command.params.id===this.activeLocalBuild()!.id))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
         // Recovery owns task execution only: presentation, state and non-task commands keep working, and a handback made now is woken when recovery ends.
