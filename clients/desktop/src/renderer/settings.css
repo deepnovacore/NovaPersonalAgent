@@ -1062,7 +1062,7 @@ html { background: var(--page); }
 body {
   grid-template-columns: 208px minmax(0, 1fr);
   column-gap: 24px;
-  padding: 0 24px;
+  padding: 0 24px 104px;
   background: var(--page);
   font-size: 14px;
 }
@@ -1176,7 +1176,7 @@ footer {
 }
 
 @media (max-width: 640px) {
-  body { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
+  body { grid-template-columns: minmax(0, 1fr); padding: 0 14px 104px; }
   .setting-section,
   main > .setting-section:first-child { padding: 16px; }
   footer { padding: 12px 14px; }
@@ -1224,3 +1224,9 @@ select option{color:var(--ink);background:var(--surface)}
 #proactivity-section .cap-stepper { display: flex; align-items: center; gap: 8px; }
 #proactivity-section .cap-stepper input { width: 4.5em; text-align: center; }
 #proactivity-advanced { margin-top: 12px; }
+
+#local-tool-approval-section { padding: 16px 20px; }
+#local-tool-approval-section > h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--ink); }
+#local-tool-approval-section .field { grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 0; }
+#local-tool-approval-section .field > label { font-size: 12px; color: var(--ink-dim, var(--ink)); }
+#local-tool-approval-section .hint { margin: 8px 0 0; }
