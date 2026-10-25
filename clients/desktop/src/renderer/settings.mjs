@@ -150,7 +150,6 @@ const codingProgressNarrationInput = document.querySelector('#coding-progress-na
 const proactivityInputs = [...document.querySelectorAll('input[name="proactivity"]')]
 const pipelineModeInputs = [...document.querySelectorAll('input[name="pipelineMode"]')]
 const codexApprovalModeInputs = [...document.querySelectorAll('input[name="codexApprovalMode"]')]
-const localToolApprovalInput=document.querySelector('#localToolApproval')
 const generatePlanInput = document.querySelector('#generatePlan')
 const profileParticipantMessagesInput = document.querySelector('#profileParticipantMessages')
 const planReadbackInputs = [...document.querySelectorAll('input[name="planReadback"]')]
@@ -553,7 +552,6 @@ function render(view, drafts, state) {
   for (const input of planReadbackInputs) input.checked = input.value === view.planReadback
   for (const input of progressBubblesInputs) input.checked = input.value === view.progressBubbles
   yoloWarning.hidden = view.codexApprovalMode !== 'yolo'
-  localToolApprovalInput.value=view.localToolApproval??'ask'
   clarificationDepth.value = view.clarificationDepth
   heartbeat.value = String(view.codexHeartbeatSeconds)
   heartbeatValue.textContent = t("{0} 秒", view.codexHeartbeatSeconds)
@@ -732,7 +730,6 @@ bindStage(codingConfigPath, 'input', () => ({codingBackendPaths: {[codingProvide
 for (const input of codexApprovalModeInputs) {
   bindStage(input, 'change', () => ({codexApprovalMode: input.value}))
 }
-bindStage(localToolApprovalInput,'change',()=>({localToolApproval:localToolApprovalInput.value}))
 bindStage(generatePlanInput, 'change', () => ({generatePlan: generatePlanInput.checked}))
 bindStage(profileParticipantMessagesInput, 'change', () => ({profileParticipantMessages: profileParticipantMessagesInput.checked}))
 for (const input of planReadbackInputs) bindStage(input, 'change', () => ({planReadback: input.value}))
