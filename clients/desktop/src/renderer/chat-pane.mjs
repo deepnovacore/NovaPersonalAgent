@@ -1,6 +1,5 @@
 import {TASK_PHASE_LABEL,taskNextStep,isSourceProcessingTask,taskNotificationText} from './tasks-page.mjs'
 import {mountIdleAvatar} from './idle-avatar.mjs'
-import {mountAssistantWelcome} from './assistant-welcome.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {disposeSources} from './source-popover.mjs'
 import {renderFeedCard,sendPresented} from './feed-card.mjs'
@@ -68,8 +67,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const companion=el('div',undefined,'chat-companion'),companionImage=el('img');companion.hidden=true;companionImage.alt='';companion.append(companionImage);head.append(companion)
  const companionAnimation=mountIdleAvatar(companionImage,{movieUrl:new URL('./assets/nova-idle.mp4',import.meta.url).href})
  let identityView=null
- const assistantWelcome=api?.welcome?mountAssistantWelcome(intro,{api:api.welcome,c,onIdentity:value=>identity(value)}):null
- function identity(value){const firstIntroduction=!identityView&&!value.profile.introduced;identityView=value;feedNodes.clear();assistantWelcome?.update(value);homeButton.replaceChildren(el('span',value.profile.assistantName));companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true);if(firstIntroduction&&c.selectedId==='chat:main')history.scrollTop=0}
+ function identity(value){identityView=value;feedNodes.clear();homeButton.replaceChildren(el('span',value.profile.assistantName));companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true)}
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
  const stage=el('div',undefined,'voice-stage');stage.hidden=true
  const stageCanvas=el('canvas',undefined,'voice-stage-orb');stageCanvas.setAttribute('aria-hidden','true')
@@ -212,7 +210,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const previousNodes=[...history.children],focused=history.contains(document.activeElement)?document.activeElement:null
   history.replaceChildren()
   if(c.selectedId==='chat:main'&&c.snapshot?.conversations?.home_truncated)history.append(el('p',t('部分提醒历史已收起，可从会话列表查看原对话。'),'hint'))
-  if((c.selectedId==='chat:main'&&identityView&&!identityView.profile.introduced)||(!persisted.length&&!live.length))history.append(c.selectedId==='chat:main'?intro:emptyConversation)
+  if(!persisted.length&&!live.length)history.append(c.selectedId==='chat:main'?intro:emptyConversation)
   let day=null
   for(const message of [...persisted,...live]){
    if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
@@ -226,7 +224,6 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   renderedMessages=key;renderedConversation=c.selectedId
   const position=changedConversation?positions.get(c.selectedId):null
   history.scrollTop=changedConversation?(position&&!position.bottom?position.top:history.scrollHeight):nearBottom?history.scrollHeight:previousTop
-  if(c.selectedId==='chat:main'&&identityView&&!identityView.profile.introduced&&(changedConversation||previousTop===0))history.scrollTop=0
   newMessages.hidden=(!persisted.length&&!live.length)||changedConversation||nearBottom
  }
  /** Receipts follow visibility, not transcript rebuilds: expanding the workbench or reopening the pane re-checks every rendered card. */
@@ -240,7 +237,6 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  function update(){
   buildLog.update()
   workbenchAgent.update();composerMode.update()
-  assistantWelcome?.sync()
   syncCompanion()
   renderSource()
   const tasks=(c.snapshot?.tasks??[]).filter(t=>!isSourceProcessingTask(t)&&(c.selectedId==='chat:main'||t.conversation_id===c.selectedId))

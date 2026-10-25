@@ -2,7 +2,6 @@ import {NATIVE_VOICE_PROVIDERS} from './native-voice.mjs'
 import {renderSkillsPage} from './skills-page.mjs'
 import {createChatGptPanel} from './chatgpt-panel.mjs'
 import {COMPATIBLE_STAGES, COMPATIBLE_FIELDS, COMPATIBLE_PRESETS, isEndpointSecret} from './compatible-providers.mjs'
-import {mountIdentitySettings} from './assistant-welcome.mjs'
 import {mountPermissionCards} from './welcome-permissions.mjs'
 import {createSkinPanel} from './skin-panel.mjs'
 import {SELF_HOSTED_STAGES, endpointOrigin} from './voice-preset.mjs'
@@ -56,10 +55,9 @@ function renderSettingsSkills(){
 }
 const welcomeApi=window.novaPersonalAgentDesktop.welcome
 if(welcomeApi){
- const identity=mountIdentitySettings(document.querySelector('#assistant-identity-panel'),{api:welcomeApi,command:(method,params)=>api.personalCommand(method,params)})
  const permissions=mountPermissionCards(document.querySelector('#desktop-permissions-panel'),{api:welcomeApi})
- const update=value=>{identity.update(value);permissions.update(value.permissions);}
- const load=()=>welcomeApi.get().then(update).catch(()=>identity.error())
+ const update=value=>permissions.update(value.permissions)
+ const load=()=>welcomeApi.get().then(update).catch(()=>{})
  welcomeApi.onChanged(update);window.addEventListener('focus',()=>void load());void load()
 }
 const imPanel = createImPanel({document, api})
