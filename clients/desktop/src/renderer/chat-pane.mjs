@@ -7,7 +7,8 @@ import {currentLanguage,t} from './locale.mjs'
 import {mountExecutionCard} from './execution-card.mjs'
 import {mountCodingTargetMenu} from './coding-target-menu.mjs'
 import {mountWorkbenchAgent} from './workbench-agent.mjs'
-import {mountComposerMode} from './composer-mode.mjs'
+import {mountComposerMode,composerMode as currentComposerMode} from './composer-mode.mjs'
+import {mountComposerApproval} from './composer-approval.mjs'
 import {createBuildCallLog} from './build-call-log.mjs'
 import {createOrbVisualSafe} from './orb-visual.mjs'
 import {ORB_STATE_NAMES} from './state.mjs'
@@ -82,7 +83,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   // Shift+Tab cycles the mode only from the draft; elsewhere it keeps reverse focus navigation.
   else if(e.key==='Tab'&&e.shiftKey&&!e.isComposing&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&composerMode.cycle())e.preventDefault()
  })
- const inputActions=el('div',undefined,'composer-actions');const composerMode=mountComposerMode(inputActions,{c,el,run});const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
+ const inputActions=el('div',undefined,'composer-actions');const composerMode=mountComposerMode(inputActions,{c,el,run});const composerApproval=mountComposerApproval(inputActions,{c,el,run,api:api?.personal,visible:()=>{const item=c.selectedConversation;return Boolean(item)&&currentComposerMode(item,c.state(item.id))!=='chat'}});const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
  const hint=el('p','','hint composer-hint');inputActions.append(hint)
  inputActions.addEventListener('keydown',event=>{if(!event.defaultPrevented&&event.key==='Tab'&&event.shiftKey&&!event.isComposing&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&composerMode.cycle())event.preventDefault()})
  const dictate=el('button',undefined,'composer-dictate');dictate.type='button';dictate.append(glyph(GLYPH.mic));inputActions.append(dictate)
@@ -236,7 +237,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  }
  function update(){
   buildLog.update()
-  workbenchAgent.update();composerMode.update()
+  workbenchAgent.update();composerMode.update();composerApproval.update()
   syncCompanion()
   renderSource()
   const tasks=(c.snapshot?.tasks??[]).filter(t=>!isSourceProcessingTask(t)&&(c.selectedId==='chat:main'||t.conversation_id===c.selectedId))
