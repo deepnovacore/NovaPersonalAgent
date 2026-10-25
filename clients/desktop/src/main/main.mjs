@@ -1565,6 +1565,14 @@ async function startSelectedCamera(camera, smokeChannel) {
     trayUnread = value
     updateTrayUnread(tray, backendStatus.state === 'connected' ? value : 0)
   })
+  // The live switch lives in the runtime; this only reads and persists the value the next backend starts with.
+  ipcMain.handle('nova:personal:local-tool-approval', async (event, mode) => {
+    if (event.sender !== mainWindow.webContents) throw new Error('approval request rejected')
+    if (mode === undefined) return currentSettings.localToolApproval
+    if (mode !== 'ask' && mode !== 'never') throw new Error('invalid approval mode')
+    if (currentSettings.localToolApproval !== mode) await accessCredentials(() => settingsWriter({localToolApproval: mode}, undefined, {preserveSecrets: true}))
+    return currentSettings.localToolApproval
+  })
   ipcMain.handle('nova:personal:wake', event => {
     if (event.sender !== mainWindow.webContents) throw new Error('wake request rejected')
     if(presentationMode !== 'background') wakeWord?.wake()

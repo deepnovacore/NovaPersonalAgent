@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     chooseBuildDirectory: () => ipcRenderer.invoke('nova:personal:build-directory'),
     setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
+    localToolApproval: mode => ipcRenderer.invoke('nova:personal:local-tool-approval', mode),
     showPresentationError: message => ipcRenderer.invoke('nova:personal:presentation-error', message),
     setPresentation: (mode,activate=true) => ipcRenderer.invoke('nova:personal:presentation', mode,activate),
     onPresentationRequest: callback => {
