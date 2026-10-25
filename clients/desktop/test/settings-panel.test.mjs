@@ -84,7 +84,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
-    createProactivityPanel: ({rankFallback}) => {assert.equal(rankFallback(),null,'initial render precedes settings load');return {load: () => Promise.resolve(), setMemory() {}}},
+    createProactivityPanel: ({rankFallback = () => null}) => {assert.equal(rankFallback(),null,'initial render precedes settings load');return {load: () => Promise.resolve(), setMemory() {}}},
     memoryEmbeddingNote,
     createKnowledgePanel: () => ({render() {}}),
     createVoiceprintPanel: () => ({render() {}}),
@@ -1094,7 +1094,7 @@ test('the sidebar renders one button per category with the first current', () =>
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {
   const {categoryTabForKey} = settingsCategories
-  assert.equal(categoryTabForKey('general', 'ArrowDown'), 'themes')
+  assert.equal(categoryTabForKey('general', 'ArrowDown'), 'diary')
   assert.equal(categoryTabForKey('general', 'ArrowUp'), 'codex', 'wraps backwards')
   assert.equal(categoryTabForKey('codex', 'ArrowDown'), 'general', 'wraps forwards')
   assert.equal(categoryTabForKey('secrets', 'Home'), 'general')

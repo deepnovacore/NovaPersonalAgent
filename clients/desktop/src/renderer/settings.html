@@ -21,6 +21,7 @@
     </header>
     <nav class="settings-nav" id="settings-nav" aria-label="设置分类">
       <button type="button" class="nav-item" id="category-general" data-category="general" aria-current="true">通用</button>
+      <button type="button" class="nav-item" id="category-diary" data-category="diary" aria-current="false" tabindex="-1">日记与简报</button>
       <button type="button" class="nav-item" id="category-themes" data-category="themes" aria-current="false" tabindex="-1">主题</button>
       <button type="button" class="nav-item" id="category-usage" data-category="usage" aria-current="false" tabindex="-1">用量</button>
       <button type="button" class="nav-item" id="category-pipeline" data-category="pipeline" aria-current="false" tabindex="-1">语音管线</button>
@@ -316,6 +317,11 @@ EXECUTOR_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             <output id="heartbeat-value" for="heartbeat">30 秒</output>
           </div>
         </details>
+      </section>
+      <section class="setting-section" id="diary-section">
+        <h2>日记与简报</h2>
+        <div id="diary-panel"></div>
+        <p id="diary-error" role="status" aria-live="polite"></p>
       </section>
       <section id="pipeline" class="setting-section">
         <h2>语音管线</h2>

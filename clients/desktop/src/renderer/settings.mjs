@@ -62,14 +62,12 @@ if(welcomeApi){
 }
 const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
-// Named only when the settings pick a provider with a known name; anything else stays generic in the panel.
-const RANK_PROVIDER_NAMES = {qwen: 'Qwen', openai: 'OpenAI', gemini: 'Google Gemini', stepfun: 'StepFun', deepseek: 'DeepSeek', ark: 'Ark'}
 let currentView = null
 const proactivityPanel = createProactivityPanel({document, api, moduleStatusNote, rankFallback: () => {
   if (!currentView?.secretsPresent) return null
-  const provider = currentView.pipelineMode === 'integrated' ? currentView.integratedProvider : currentView.cascadedLlmProvider
-  return {keyMissing: currentView.secretsPresent.openrouterApiKey !== true, provider: RANK_PROVIDER_NAMES[provider] ?? null}
+  return {keyMissing: currentView.secretsPresent.openrouterApiKey !== true}
 }})
+const diaryPanel = createProactivityPanel({document, api, moduleStatusNote, rootSelector: '#diary-panel', errorSelector: '#diary-error', parts: ['diary', 'brief']})
 const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
   'minicpmRealtimeApiKey','personaplexRealtimeApiKey',
@@ -212,6 +210,7 @@ function applyCategory(id) {
   if (id === 'im') void imPanel.load()
   if (id === 'connections') void connectionsPanel.load()
   if (id === 'general') void proactivityPanel.load()
+  if (id === 'diary') void diaryPanel.load()
   hubPanel.setActive(id === 'hub')
   phonePanel.setActive(id === 'phone')
   document.querySelector('footer').hidden = id === 'phone' || id === 'hub'

@@ -1,6 +1,6 @@
 import {onButton} from './button-action.mjs'
 import {t} from './locale.mjs'
-import {renderDailyBrief} from './daily-brief-view.mjs'
+import {renderDailyBrief, renderDiary} from './daily-brief-view.mjs'
 
 export const DAILY_CAP_MIN = 1
 export const DAILY_CAP_MAX = 10
@@ -17,18 +17,13 @@ export function memoryEmbeddingNote(module, moduleStatusNote) {
 }
 
 /** Discovery cadence, briefings, quiet hours and the daily proactive cap, all saved through `discovery.configure`. */
-/**
- * The row telling the user that, without an OpenRouter key, interests and article titles go to the chat model.
- * `provider` is null when the settings do not name one; the wording stays generic instead of guessing.
- */
-export function rankFallbackNote(provider) {
- return provider
-  ? t('没有 OpenRouter 密钥时，会用你的对话模型（{0}）判断资讯相关度：你的兴趣、文章标题和摘要会发给它。', provider)
-  : t('没有 OpenRouter 密钥时，会用你的对话模型判断资讯相关度：你的兴趣、文章标题和摘要会发给它。')
+/** The row telling the user that, without a ranking key, interests and article titles go to the chat model. */
+export function rankFallbackNote() {
+ return t('未配置资讯评分密钥时，会用对话模型判断相关度；你的兴趣、文章标题和摘要会发给它。')
 }
 
-export function createProactivityPanel({document, api, moduleStatusNote = () => '', rankFallback = () => null}) {
- const root = document.querySelector('#proactivity-panel'), error = document.querySelector('#proactivity-error')
+export function createProactivityPanel({document, api, moduleStatusNote = () => '', rankFallback = () => null, rootSelector = '#proactivity-panel', errorSelector = '#proactivity-error', parts = ['discovery', 'cap', 'news', 'memory']}) {
+ const root = document.querySelector(rootSelector), error = document.querySelector(errorSelector), has = part => parts.includes(part)
  let state = null, busy = false, memory
  const onError = caught => { error.textContent = caught?.message || t('主动性设置暂时不可用') }
  const el = (tag, text, cls) => {const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (cls) node.className = cls; return node}
@@ -49,6 +44,7 @@ export function createProactivityPanel({document, api, moduleStatusNote = () => 
  function render() {
   root.replaceChildren()
   const connected = state !== null && !busy, caps = state?.capabilities ?? {}, settings = state?.settings ?? {}
+  if (has('discovery')) {
   const discovery = card(t('主动发现'), t('有依据才提出建议；也包括提议目标和按节奏问候目标进展。关闭后这些都会停止，仍可主动交办任务。'))
   const select = el('select'); select.setAttribute('aria-label', t('主动发现间隔'))
   for (const [value, label] of [['0', t('关闭')], ['15', t('每 15 分钟')], ['30', t('每 30 分钟')], ['60', t('每小时')], ['120', t('每两小时')]]) {const option = el('option', label); option.value = value; select.append(option)}
@@ -56,6 +52,8 @@ export function createProactivityPanel({document, api, moduleStatusNote = () => 
   select.disabled = !connected || !caps.discovery
   select.addEventListener('change', () => {void command('discovery.configure', {enabled: select.value !== '0', ...(select.value !== '0' ? {interval_minutes: Number(select.value)} : {})}).catch(onError)})
   discovery.append(select)
+  }
+  if (has('cap')) {
   const cap = card(t('每日主动消息上限'), t('agent 主动找你的消息每天最多几条；你自己发起的任务结果不计入。'))
   const row = el('div', undefined, 'cap-stepper'), input = el('input'), value = clampDailyCap(settings.proactive_daily_cap ?? DAILY_CAP_DEFAULT)
   input.type = 'number'; input.min = String(DAILY_CAP_MIN); input.max = String(DAILY_CAP_MAX); input.step = '1'; input.value = String(value); input.setAttribute('aria-label', t('每日主动消息上限')); input.disabled = !connected
@@ -63,19 +61,17 @@ export function createProactivityPanel({document, api, moduleStatusNote = () => 
   input.addEventListener('change', () => apply(input.value))
   const step = (label, delta) => {const b = button(label, () => apply(Number(input.value) + delta), row); b.setAttribute('aria-label', delta < 0 ? t('减少上限') : t('增加上限')); b.disabled = !connected; return b}
   step('−', -1); row.append(input); step('+', 1); cap.append(row)
-  const fallback = rankFallback()
+  }
+  const fallback = has('news') ? rankFallback() : null
   if (fallback?.keyMissing === true) {
-   const news = card(t('资讯相关度'), rankFallbackNote(fallback.provider ?? null)), enabled = settings.news_rank_fallback !== false
+   const news = card(t('资讯相关度'), rankFallbackNote()), enabled = settings.news_rank_fallback !== false
    const label = el('label'), box = el('input'); box.type = 'checkbox'; box.checked = enabled; box.disabled = !connected; box.setAttribute('aria-label', t('用对话模型判断资讯相关度'))
    box.addEventListener('change', () => {void command('discovery.configure', {news_rank_fallback: box.checked}).catch(onError)})
    label.append(box, el('span', t('用对话模型判断资讯相关度'))); news.append(label)
   }
-  const diary=card(t('每日日记'),t('根据昨天经授权的记忆写日记，只供你浏览，不作为模型记忆。'))
-  const diaryLabel=el('label'),diaryBox=el('input');diaryBox.type='checkbox';diaryBox.checked=settings.diary_enabled!==false;diaryBox.disabled=!connected;diaryBox.setAttribute('aria-label',t('写每日日记'))
-  diaryBox.addEventListener('change',()=>{void command('discovery.configure',{diary_enabled:diaryBox.checked}).catch(onError)})
-  diaryLabel.append(diaryBox,el('span',t('写每日日记')));diary.append(diaryLabel)
-  renderDailyBrief({settings, connected, card, el, button, command})
-  const note = memoryEmbeddingNote(memory, moduleStatusNote)
+  if (has('diary')) renderDiary({settings, connected, card, el, command, onError})
+  if (has('brief')) renderDailyBrief({settings, connected, card, el, button, command})
+  const note = has('memory') ? memoryEmbeddingNote(memory, moduleStatusNote) : null
   if (note) card(t('记忆'), note).dataset.memoryStatus = memory.enabled ? 'on' : 'off'
  }
  async function load() {
