@@ -23,11 +23,11 @@ function fixture(item){
  return {c,commands,control,root,button}
 }
 
-test('modes cycle Chat, Plan, Build, Delegate in both directions',()=>{
- assert.deepEqual(COMPOSER_MODES,['chat','plan','build','delegate'])
- assert.equal(nextComposerMode('chat'),'plan');assert.equal(nextComposerMode('delegate'),'chat')
- assert.equal(nextComposerMode('chat',-1),'delegate');assert.equal(nextComposerMode('unknown'),'plan')
- assert.equal(composerMode({kind:'chat'}),'chat');assert.equal(composerMode({kind:'chat',mode:'plan'},{}),'plan')
+test('modes cycle Chat, Build, Delegate in both directions',()=>{
+ assert.deepEqual(COMPOSER_MODES,['chat','build','delegate'])
+ assert.equal(nextComposerMode('chat'),'build');assert.equal(nextComposerMode('delegate'),'chat')
+ assert.equal(nextComposerMode('chat',-1),'delegate');assert.equal(nextComposerMode('unknown'),'build')
+ assert.equal(composerMode({kind:'chat'}),'chat');assert.equal(composerMode({kind:'chat',mode:'plan'},{}),'chat','plan without an execution choice shows as Chat')
  assert.equal(composerMode({kind:'chat',mode:'plan'},{execution:'delegate'}),'delegate')
  assert.equal(composerMode({kind:'chat'},{execution:'build'}),'chat','a stale execution choice never outlives Plan')
  assert.equal(composerMode({kind:'build'}),'build')
@@ -36,8 +36,8 @@ test('modes cycle Chat, Plan, Build, Delegate in both directions',()=>{
 test('Shift+Tab steps through every mode with one host command per conversation-mode change',async()=>{
  const item={id:'chat:main',kind:'chat'},{c,commands,control,root}=fixture(item)
  const seen=[]
- for(let i=0;i<4;i++){assert.equal(control.cycle(),true);await flush();seen.push(root.attributes['data-mode'])}
- assert.deepEqual(seen,['plan','build','delegate','chat'])
+ for(let i=0;i<3;i++){assert.equal(control.cycle(),true);await flush();seen.push(root.attributes['data-mode'])}
+ assert.deepEqual(seen,['build','delegate','chat'])
  assert.deepEqual(commands,[['conversations.mode',{id:'chat:main',mode:'plan'}],['conversations.mode',{id:'chat:main',mode:'chat'}]])
  assert.equal(c.state('chat:main').execution,undefined)
 })
@@ -83,7 +83,7 @@ test('Shift+Tab on the mode button cycles without moving focus, but modified Tab
 test('switching keeps the focused mode button enabled while the host command is pending',async()=>{
  const {c,button,control}=fixture({id:'chat:main',kind:'chat'})
  let release;c.command=()=>new Promise(resolve=>{release=resolve})
- const pending=control.select('plan')
+ const pending=control.select('build')
  assert.equal(button.disabled,false);assert.equal(button.attributes['aria-busy'],'true')
  release();await pending;assert.equal(button.attributes['aria-busy'],'false')
 })
