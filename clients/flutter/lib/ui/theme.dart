@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Quiet surfaces, readable ink and a restrained green accent.
 abstract final class Nova {
@@ -62,6 +63,7 @@ ThemeData novaTheme() {
       barBackgroundColor: Color(0xfaffffff),
     ),
     appBarTheme: const AppBarTheme(
+      systemOverlayStyle: SystemUiOverlayStyle.dark,
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
