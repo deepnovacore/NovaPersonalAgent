@@ -26,7 +26,7 @@ test('browser controller forwards the host task grant and cancels only its match
   const task = await tasks.delegate('req', {execution_route: 'browser', conversation_id: 'c', goal: 'Confirm', acceptance: [], origin_ref: 'user:1'})
   const grant = tasks.continuationContext({task_id: task.id, control_revision: 0, goal_revision: 0})
   const clock = new RealClock(), approvals = new HostApprovalController({clock, idFactory: randomUUID})
-  const executor = new BrowserExecutor({...loadBrowserConfig({BROWSER_URL: 'http://127.0.0.1', BROWSER_BASE_URL: 'http://127.0.0.1/v1', BROWSER_API_KEY: 'local', BROWSER_MODEL: 'test', BROWSER_MODEL_FAMILY: 'qwen3-vl'}), lockRoot: root}, approvals,
+  const executor = new BrowserExecutor({...loadBrowserConfig({BROWSER_URL: 'http://127.0.0.1', EXECUTOR_BASE_URL: 'http://127.0.0.1/v1', EXECUTOR_API_KEY: 'local', EXECUTOR_MODEL: 'test', EXECUTOR_MODEL_FAMILY: 'qwen3-vl'}), lockRoot: root}, approvals,
     (_config, _instruction, options) => new Promise(resolve => {options.signal.addEventListener('abort', () => resolve({code: 'cancelled', steps: 0}), {once: true})}))
   t.after(() => executor.close())
   let request: Readonly<Record<string, unknown>> = {}, forwarded: unknown

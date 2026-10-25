@@ -77,6 +77,8 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:personal:connector-authorization',
     'nova:personal:directory',
     'nova:personal:feishu-verification',
+    'nova:personal:local-tool-approval',
+    'nova:personal:maximized',
     'nova:personal:presentation',
     'nova:personal:presentation-error',
     'nova:personal:presentation-request',
@@ -87,6 +89,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:settings:changed',
     'nova:settings:feishu',
     'nova:settings:get',
+    'nova:settings:native-voice',
     'nova:settings:open',
     'nova:settings:personal',
     'nova:settings:set',
@@ -1302,9 +1305,81 @@ test('the expanded workbench casts a native shadow and the resting orb does not'
  const shadow=[],bounds={x:0,y:0,width:100,height:100}
  const mainWindow={getBounds:()=>bounds,setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds(){},setHasShadow:value=>shadow.push(value)}
  const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}})}
- const set=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame','windowsPresentation',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame,null)
+ const set=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame','windowsPresentation','currentSettings','settingsReady','settingsWriter',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame,null,{workbenchMaximized:false},false,async()=>{})
  set(false);set(true);set(false)
  assert.deepEqual(shadow,[true,false,true])
+})
+
+test('expanding fills the work area while the preference is on, restore persists false, maximize persists true',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf('  let personalCollapsed = false')
+ const body=source.slice(start,source.indexOf("  ipcMain.handle('nova:personal:presentation-error'",start))
+ const area={x:0,y:25,width:1440,height:875},orb={x:1300,y:700,width:64,height:64}
+ let bounds={...orb}
+ const mainWindow={getBounds:()=>({...bounds}),setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds:b=>{bounds={...b}},setHasShadow(){}}
+ const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:area}),getDisplayMatching:()=>({workArea:area})}
+ const sent=[],writes=[],settings={workbenchMaximized:true}
+ const fixture=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame','windowsPresentation','currentSettings','settingsReady','settingsWriter',`${body};return {set:setPersonalCollapsed,frame:workbenchFrame}`)(mainWindow,screen,{sync(){}},(channel,value)=>sent.push([channel,value]),createWorkbenchFrame,null,settings,true,async patch=>{writes.push(patch);Object.assign(settings,patch)})
+ fixture.set(false)
+ assert.deepEqual(bounds,area)
+ assert.equal(sent.filter(([c])=>c==='nova:personal:maximized').at(-1)[1],true)
+ assert.deepEqual(writes,[],'the automatic fill must not write')
+ fixture.frame.toggleMaximize()
+ assert.deepEqual(writes,[{workbenchMaximized:false}])
+ assert.equal(sent.filter(([c])=>c==='nova:personal:maximized').at(-1)[1],false)
+ fixture.set(true);fixture.set(false)
+ assert.notDeepEqual(bounds,area,'a remembered restore expands to the natural size')
+ assert.equal(fixture.frame.maximized,false)
+ fixture.frame.toggleMaximize()
+ assert.deepEqual(writes.at(-1),{workbenchMaximized:true})
+ fixture.set(true)
+ assert.deepEqual(bounds,orb,'collapsing returns the orb to its resting place')
+ assert.equal(sent.filter(([c])=>c==='nova:personal:maximized').at(-1)[1],false)
+})
+
+test('rapid restore then maximize while the first save is in flight persists the last choice',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf('  let personalCollapsed = false')
+ const body=source.slice(start,source.indexOf("  ipcMain.handle('nova:personal:presentation-error'",start))
+ const area={x:0,y:25,width:1440,height:875}
+ let bounds={x:1300,y:700,width:64,height:64}
+ const mainWindow={getBounds:()=>({...bounds}),setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds:b=>{bounds={...b}},setHasShadow(){}}
+ const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:area}),getDisplayMatching:()=>({workArea:area})}
+ const settings={workbenchMaximized:true},writes=[],releases=[]
+ // Each write stays in flight until released; commits apply in call order, as the real writer's queue does.
+ const writer=async patch=>{writes.push(patch);await new Promise(resolve=>releases.push(resolve));Object.assign(settings,patch)}
+ const fixture=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame','windowsPresentation','currentSettings','settingsReady','settingsWriter',`${body};return {set:setPersonalCollapsed,frame:workbenchFrame}`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame,null,settings,true,writer)
+ fixture.set(false)
+ assert.equal(fixture.frame.maximized,true)
+ fixture.frame.toggleMaximize()
+ fixture.frame.toggleMaximize()
+ assert.equal(fixture.frame.maximized,true)
+ releases.splice(0).forEach(release=>release())
+ await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(settings.workbenchMaximized,true,'the last user choice is what ends up stored')
+ assert.deepEqual(writes.at(-1),{workbenchMaximized:true})
+})
+
+test('a maximize that needs no write leaves no stale choice shadowing a later committed preference',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf('  let personalCollapsed = false')
+ const body=source.slice(start,source.indexOf("  ipcMain.handle('nova:personal:presentation-error'",start))
+ const area={x:0,y:25,width:1440,height:875}
+ let bounds={x:1300,y:700,width:64,height:64}
+ const mainWindow={getBounds:()=>({...bounds}),setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds:b=>{bounds={...b}},setHasShadow(){}}
+ const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:area}),getDisplayMatching:()=>({workArea:area})}
+ const settings={workbenchMaximized:true},writes=[]
+ const fixture=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame','windowsPresentation','currentSettings','settingsReady','settingsWriter',`${body};return {set:setPersonalCollapsed,frame:workbenchFrame,setSettings:value=>{currentSettings=value}}`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame,null,settings,true,async patch=>{writes.push(patch);Object.assign(settings,patch)})
+ fixture.set(false)
+ assert.equal(fixture.frame.maximized,true)
+ bounds={x:100,y:100,width:900,height:600}
+ assert.equal(fixture.frame.maximized,false,'a manual resize leaves the filled state')
+ fixture.frame.toggleMaximize()
+ assert.equal(fixture.frame.maximized,true)
+ assert.deepEqual(writes,[],'the stored preference already says true')
+ fixture.setSettings({workbenchMaximized:false})
+ fixture.set(true);fixture.set(false)
+ assert.equal(fixture.frame.maximized,false,'the committed preference wins over an earlier no-op choice')
 })
 
 test('keyboard activation wakes a sleeping orb and expands an awake one', async () => {

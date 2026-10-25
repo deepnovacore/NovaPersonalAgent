@@ -1,8 +1,8 @@
 import {createSpaceHostPanel} from './space-host-panel.mjs'
+import {NATIVE_VOICE_PROVIDERS} from './native-voice.mjs'
 import {renderSkillsPage} from './skills-page.mjs'
 import {createChatGptPanel} from './chatgpt-panel.mjs'
 import {COMPATIBLE_STAGES, COMPATIBLE_FIELDS, COMPATIBLE_PRESETS, isEndpointSecret} from './compatible-providers.mjs'
-import {mountIdentitySettings} from './assistant-welcome.mjs'
 import {mountPermissionCards} from './welcome-permissions.mjs'
 import {createSkinPanel} from './skin-panel.mjs'
 import {SELF_HOSTED_STAGES, endpointOrigin} from './voice-preset.mjs'
@@ -11,11 +11,12 @@ import {createVoiceprintPanel} from './voiceprint-panel.mjs'
 import {createStartupNotice, startupMessage} from './startup-notice.mjs'
 import {createImPanel} from './im-panel.mjs'
 import {createConnectionsPanel} from './connections-panel.mjs'
+import {createProactivityPanel, memoryEmbeddingNote} from './proactivity-panel.mjs'
 import {t, currentLanguage} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
-import {createCapabilitiesEditor} from './capabilities-editor.mjs'
+import {createCapabilitiesEditor, moduleStatusNote} from './capabilities-editor.mjs'
 import {createKnowledgePanel} from './knowledge-panel.mjs'
 // Settings are edited as one local transaction. Public drafts live in the
 // controller; secret plaintext remains only in password inputs until Save.
@@ -41,29 +42,35 @@ import {
 
 createChatGptPanel(document,window.novaPersonalAgentDesktop.chatgpt)
 const api = window.novaPersonalAgentDesktop.settings
-const skillsState={status:null,loading:false,error:'',group:'system',query:''}
+const skillsState={skills:null,loading:false,error:'',query:''}
 const skillElement=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
 function renderSettingsSkills(){
  const panel=document.querySelector('#skills-panel'),search=panel.querySelector('.skills-search'),focused=search===document.activeElement,selection=focused?[search.selectionStart,search.selectionEnd]:null;panel.replaceChildren()
  renderSkillsPage(panel,{el:skillElement,button:(label,action,parent)=>{const node=skillElement('button',label);node.type='button';node.addEventListener('click',()=>void action());parent.append(node);return node},state:skillsState,refresh:async()=>{
   skillsState.loading=true;skillsState.error='';renderSettingsSkills()
-  try{const view=await api.get();skillsState.status=view?.capabilities?.status??null;if(!skillsState.status)skillsState.error='暂时无法读取技能，请稍后刷新。'}catch{skillsState.error='暂时无法读取技能，请稍后刷新。'}finally{skillsState.loading=false;renderSettingsSkills()}
- },manage:()=>applyCategory('capabilities')})
+  try{const view=await api.get();skillsState.skills=Array.isArray(view?.skills)?view.skills:null;if(!skillsState.skills)skillsState.error='暂时无法读取技能，请稍后刷新。'}catch{skillsState.error='暂时无法读取技能，请稍后刷新。'}finally{skillsState.loading=false;renderSettingsSkills()}
+ }})
  if(focused){const next=panel.querySelector('.skills-search');next.focus();if(selection?.every(Number.isInteger))next.setSelectionRange(...selection)}
 }
 const welcomeApi=window.novaPersonalAgentDesktop.welcome
 if(welcomeApi){
- const identity=mountIdentitySettings(document.querySelector('#assistant-identity-panel'),{api:welcomeApi,command:(method,params)=>api.personalCommand(method,params)})
  const permissions=mountPermissionCards(document.querySelector('#desktop-permissions-panel'),{api:welcomeApi})
- const update=value=>{identity.update(value);permissions.update(value.permissions);}
- const load=()=>welcomeApi.get().then(update).catch(()=>identity.error())
+ const update=value=>permissions.update(value.permissions)
+ const load=()=>welcomeApi.get().then(update).catch(()=>{})
  welcomeApi.onChanged(update);window.addEventListener('focus',()=>void load());void load()
 }
 const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
 const spaceHostPanel = createSpaceHostPanel({document, api})
+let currentView = null
+const proactivityPanel = createProactivityPanel({document, api, moduleStatusNote, rankFallback: () => {
+  if (!currentView?.secretsPresent) return null
+  return {keyMissing: currentView.secretsPresent.openrouterApiKey !== true}
+}})
+const diaryPanel = createProactivityPanel({document, api, moduleStatusNote, rootSelector: '#diary-panel', errorSelector: '#diary-error', parts: ['diary', 'brief']})
 const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
+  'minicpmRealtimeApiKey','personaplexRealtimeApiKey',
   'openaiCompatibleApiKey',
   'compatibleAsrApiKey',
   'compatibleTtsApiKey',
@@ -75,6 +82,7 @@ const SECRET_KEYS = [
   'arkApiKey', 'deepseekApiKey', 'openaiApiKey', 'geminiApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
+  minicpmRealtimeApiKey:'MiniCPM-o', personaplexRealtimeApiKey:'PersonaPlex',
   openaiCompatibleApiKey: 'OpenAI-compatible LLM',
   compatibleAsrApiKey: 'OpenAI-compatible ASR',
   compatibleTtsApiKey: 'OpenAI-compatible TTS',
@@ -113,7 +121,7 @@ const WORKSPACE_STATUS_TEXT = Object.freeze({
 
 const secretRevisions = createSecretRevisions(SECRET_KEYS)
 const dirtySecretKeys = new Set()
-let currentView = null
+const nativeVoices = new Map()
 let controllerState = {dirty: false, busy: false}
 let workspaceBusy = false
 
@@ -138,7 +146,6 @@ const codingProgressNarrationInput = document.querySelector('#coding-progress-na
 const proactivityInputs = [...document.querySelectorAll('input[name="proactivity"]')]
 const pipelineModeInputs = [...document.querySelectorAll('input[name="pipelineMode"]')]
 const codexApprovalModeInputs = [...document.querySelectorAll('input[name="codexApprovalMode"]')]
-const localToolApprovalInput=document.querySelector('#localToolApproval')
 const generatePlanInput = document.querySelector('#generatePlan')
 const profileParticipantMessagesInput = document.querySelector('#profileParticipantMessages')
 const planReadbackInputs = [...document.querySelectorAll('input[name="planReadback"]')]
@@ -198,6 +205,8 @@ function applyCategory(id) {
   if (id === 'skills') renderSettingsSkills()
   if (id === 'im') void imPanel.load()
   if (id === 'connections') {void connectionsPanel.load();void spaceHostPanel.load()}
+  if (id === 'general') void proactivityPanel.load()
+  if (id === 'diary') void diaryPanel.load()
   for (const category of SETTINGS_CATEGORIES) {
     const visible = category.id === id
     for (const sectionId of category.sections) {
@@ -299,7 +308,8 @@ function keyUsage(view) {
     dashscopeApiKey: (view.pipelineMode === 'integrated' && view.integratedProvider === 'qwen')
       || (view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'qwen') ? t("必需")
       : view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun'
-        ? t("仅本地记忆嵌入需要") : t("当前未使用"),
+        ? memoryEmbeddingNote(view.capabilities?.runtime?.modules?.memory, moduleStatusNote) ?? t("仅本地记忆嵌入需要")
+        : memoryEmbeddingNote(view.capabilities?.runtime?.modules?.memory, moduleStatusNote) ?? t("可选；不配则联网搜索回退与本地记忆嵌入关闭"),
     stepfunApiKey: view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun' ? t("必需") : t("当前未使用"),
     openaiApiKey: (view.pipelineMode === 'integrated' ? view.integratedProvider : view.cascadedLlmProvider) === 'openai' ? t('必需') : t('当前未使用'),
     geminiApiKey: (view.pipelineMode === 'integrated' ? view.integratedProvider === 'gemini' : [view.cascadedAsrProvider,view.cascadedLlmProvider,view.cascadedTtsProvider].includes('gemini')) ? t('必需') : t('当前未使用'),
@@ -308,15 +318,40 @@ function keyUsage(view) {
       && view.cascadedLlmProvider === 'ark' ? t("必需") : t("当前未使用"),
     doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' && [view.cascadedAsrProvider,view.cascadedTtsProvider].includes('volcengine') ? t("必需") : t("当前未使用"),
     composioApiKey: t('应用连接；修改后需重启'),
-    tavilyApiKey: t("可选"),
-    openrouterApiKey: 'Jev',
+    tavilyApiKey: searchKeyUsage(view.capabilities?.runtime?.modules?.search),
+    openrouterApiKey: t("增强个性化（可选）；不配则改用对话模型判断资讯相关度，可在“主动性”里关闭"),
+  }
+}
+
+// Search without a Tavily key reuses the DashScope key through the Bailian preset, or turns off (capability-registry.ts).
+function searchKeyUsage(search) {
+  const note = moduleStatusNote(search)
+  return note || t("可选；不配则回退百炼联网搜索（需 DashScope 密钥），两者都没有则搜索关闭")
+}
+
+// Required keys stay in view; the rest fold into 高级 so a first-time user sees one key to fill in.
+const MODEL_SECRET_KEYS = ['dashscopeApiKey', 'stepfunApiKey', 'openrouterApiKey', 'geminiApiKey', 'openaiApiKey', 'deepseekApiKey', 'arkApiKey', 'doubaoBigmodelApiKey']
+function arrangeSecrets(usage) {
+  const primary = document.querySelector('#secrets-primary')
+  const advanced = document.querySelector('#secrets-advanced-list')
+  let required = 0
+  for (const key of MODEL_SECRET_KEYS) {
+    const row = document.querySelector(`.secret[data-key="${key}"]`)
+    const isRequired = usage[key] === t("必需")
+    if (isRequired) required += 1
+    ;(isRequired ? primary : advanced).append(row)
+  }
+  document.querySelector('#secrets-advanced').open ||= required === 0
+  for (const key of SECRET_KEYS) {
+    const endpoint = document.querySelector(`details[data-endpoint="${key}"]`)
+    if (endpoint && usage[key] === t("必需")) endpoint.open = true
   }
 }
 
 function renderKeyUsage(view) {
-  for (const [key, usage] of Object.entries(keyUsage(view))) {
-    document.querySelector(`#usage-${key}`).textContent = usage
-  }
+  const usage = keyUsage(view)
+  for (const [key, text] of Object.entries(usage)) document.querySelector(`#usage-${key}`).textContent = text
+  arrangeSecrets(usage)
 }
 
 function renderPreset(select, customInput, value, presets) {
@@ -479,8 +514,8 @@ function render(view, drafts, state) {
   document.getElementById('language').value = view.language ?? 'zh-CN'
   document.getElementById('language-restart-hint').hidden = (view.language ?? 'zh-CN') === currentLanguage()
   currentView = view
-  const skillStatus=view.capabilities?.status??null
-  if(JSON.stringify(skillStatus)!==JSON.stringify(skillsState.status)){skillsState.status=skillStatus;if(activeCategory==='skills')renderSettingsSkills()}
+  const skillList=Array.isArray(view.skills)?view.skills:null
+  if(JSON.stringify(skillList)!==JSON.stringify(skillsState.skills)){skillsState.skills=skillList;if(activeCategory==='skills')renderSettingsSkills()}
   skinPanel.render(view, state)
   renderUsage()
   renderVision(view)
@@ -497,6 +532,7 @@ function render(view, drafts, state) {
 
   codingProgressNarrationInput.value = view.codingProgressNarration
   for (const input of proactivityInputs) input.checked = input.value === view.proactivity
+  proactivityPanel.setMemory(view.capabilities?.runtime?.modules?.memory)
   for (const input of pipelineModeInputs) input.checked = input.value === view.pipelineMode
   for (const input of codexApprovalModeInputs) {
     input.checked = input.value === view.codexApprovalMode
@@ -506,7 +542,6 @@ function render(view, drafts, state) {
   for (const input of planReadbackInputs) input.checked = input.value === view.planReadback
   for (const input of progressBubblesInputs) input.checked = input.value === view.progressBubbles
   yoloWarning.hidden = view.codexApprovalMode !== 'yolo'
-  localToolApprovalInput.value=view.localToolApproval??'ask'
   clarificationDepth.value = view.clarificationDepth
   heartbeat.value = String(view.codexHeartbeatSeconds)
   heartbeatValue.textContent = t("{0} 秒", view.codexHeartbeatSeconds)
@@ -526,7 +561,13 @@ function render(view, drafts, state) {
   cascadedSection.hidden = view.pipelineMode !== 'cascaded'
   document.getElementById('gemini-live-limit').hidden = view.integratedProvider !== 'gemini'
   integratedProvider.value = view.integratedProvider
-  const integratedModels = view.integratedProvider === 'openai' ? ['gpt-realtime-2.1-mini','gpt-realtime-2.1'].map(value=>({value,label:value}))
+  for(const [provider,profile] of Object.entries(NATIVE_VOICE_PROVIDERS)) {
+    document.getElementById('native-'+provider).hidden=view.integratedProvider!==provider
+    const input=document.getElementById(profile.endpoint)
+    if(document.activeElement!==input)input.value=view[profile.endpoint]??profile.defaultUrl
+  }
+  integratedVoicePreset.closest('.field').hidden=view.integratedProvider==='minicpm-o'
+  const integratedModels = NATIVE_VOICE_PROVIDERS[view.integratedProvider] ? [{value:view.integratedProvider,label:view.integratedProvider==='minicpm-o'?'MiniCPM-o 4.5':'PersonaPlex 7B'}] : view.integratedProvider === 'openai' ? ['gpt-realtime-2.1-mini','gpt-realtime-2.1'].map(value=>({value,label:value}))
     : view.integratedProvider === 'gemini' ? [{value:'gemini-3.8-live',label:'Gemini 3.8 Live'}]
     : view.integratedProvider === 'stepfun'
     ? [{value: 'stepaudio-3-realtime-preview', label: 'StepAudio 3 Realtime Preview'}]
@@ -542,7 +583,7 @@ function render(view, drafts, state) {
     const option = document.createElement('option'); option.value = view.integratedModel; option.textContent = view.integratedModel; integratedModel.append(option)
   }
   integratedModel.value = view.integratedModel ?? ''
-  const voices = view.integratedProvider === 'openai' ? ['marin','cedar','alloy','coral'].map(value=>({value,label:value}))
+  const voices = NATIVE_VOICE_PROVIDERS[view.integratedProvider] ? (nativeVoices.get(view.personaplexRealtimeUrl)??['NATF2']).map(value=>({value,label:value})) : view.integratedProvider === 'openai' ? ['marin','cedar','alloy','coral'].map(value=>({value,label:value}))
     : view.integratedProvider === 'gemini' ? ['Kore','Puck','Aoede','Charon','Fenrir'].map(value=>({value,label:value}))
     : view.integratedProvider === 'stepfun' ? STEPFUN_VOICES
     : view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : view.integratedModel === 'qwen-audio-3.1-realtime-plus' ? QWEN_31_VOICES : QWEN_VOICES
@@ -678,7 +719,6 @@ bindStage(codingConfigPath, 'input', () => ({codingBackendPaths: {[codingProvide
 for (const input of codexApprovalModeInputs) {
   bindStage(input, 'change', () => ({codexApprovalMode: input.value}))
 }
-bindStage(localToolApprovalInput,'change',()=>({localToolApproval:localToolApprovalInput.value}))
 bindStage(generatePlanInput, 'change', () => ({generatePlan: generatePlanInput.checked}))
 bindStage(profileParticipantMessagesInput, 'change', () => ({profileParticipantMessages: profileParticipantMessagesInput.checked}))
 for (const input of planReadbackInputs) bindStage(input, 'change', () => ({planReadback: input.value}))
@@ -698,12 +738,12 @@ bindStage(codexWorkspace, 'input', () => ({codexWorkspace: codexWorkspace.value}
 bindStage(codexManagedRoot, 'input', () => ({codexManagedRoot: codexManagedRoot.value}))
 bindStage(integratedProvider, 'change', () => ({
   integratedProvider: integratedProvider.value,
-  integratedModel: integratedProvider.value === 'openai' ? 'gpt-realtime-2.1-mini' : integratedProvider.value === 'gemini' ? 'gemini-3.8-live' : integratedProvider.value === 'stepfun' ? 'stepaudio-3-realtime-preview' : 'qwen-audio-3.0-realtime-plus',
-  integratedVoice: integratedProvider.value === 'openai' ? 'marin' : integratedProvider.value === 'gemini' ? 'Kore' : integratedProvider.value === 'stepfun' ? 'default' : 'longanqian',
+  integratedModel: NATIVE_VOICE_PROVIDERS[integratedProvider.value]?.model ?? (integratedProvider.value === 'openai' ? 'gpt-realtime-2.1-mini' : integratedProvider.value === 'gemini' ? 'gemini-3.8-live' : integratedProvider.value === 'stepfun' ? 'stepaudio-3-realtime-preview' : 'qwen-audio-3.0-realtime-plus'),
+  integratedVoice: NATIVE_VOICE_PROVIDERS[integratedProvider.value]?.voice ?? (integratedProvider.value === 'openai' ? 'marin' : integratedProvider.value === 'gemini' ? 'Kore' : integratedProvider.value === 'stepfun' ? 'default' : 'longanqian'),
 }))
 bindStage(integratedModel, 'change', () => ({
   integratedModel: integratedModel.value,
-  ...(integratedModel.value !== currentView?.integratedModel
+  ...(!NATIVE_VOICE_PROVIDERS[integratedProvider.value] && integratedModel.value !== currentView?.integratedModel
     ? {integratedVoice: integratedProvider.value === 'openai' ? 'marin' : integratedProvider.value === 'gemini' ? 'Kore' : integratedProvider.value === 'stepfun' ? 'default' : integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : integratedModel.value === 'qwen-audio-3.1-realtime-plus' ? 'longanqian_v3.1' : 'longanqian'} : {}),
 }))
 bindStage(geminiAsrModel, 'input', () => ({geminiAsrModel: geminiAsrModel.value}))
@@ -797,6 +837,16 @@ function bindVoicePicker(field, select, customInput) {
   customInput.addEventListener('input', () => { controller.stage({[typeof field === 'function' ? field() : field]: customInput.value}) })
 }
 
+for(const [provider,profile] of Object.entries(NATIVE_VOICE_PROVIDERS)) {
+  document.getElementById(profile.endpoint).addEventListener('input',event=>controller.stage({[profile.endpoint]:event.target.value}))
+  document.getElementById('probe-'+provider).addEventListener('click',async()=>{
+    const label=document.getElementById('probe-status-'+provider),button=document.getElementById('probe-'+provider)
+    button.disabled=true;label.textContent=t('正在检查服务…')
+    try {const result=await api.nativeVoiceCapabilities(provider);if(provider==='personaplex')nativeVoices.set(result.endpoint,result.voices);label.textContent=t('服务已就绪');if(provider===currentView.integratedProvider&&result.endpoint===currentView[profile.endpoint]){const voices=result.voices.map(value=>({value,label:value}));populatePresetOptions(integratedVoicePreset,voices);renderPreset(integratedVoicePreset,integratedVoiceCustom,currentView.integratedVoice,voices)}}
+    catch {label.textContent=t('无法确认服务能力，请先保存设置，并检查服务地址、连接和密钥。')}
+    finally {button.disabled=false}
+  })
+}
 bindVoicePicker('integratedVoice', integratedVoicePreset, integratedVoiceCustom)
 bindVoicePicker(() => cascadedTtsProvider.value === 'gemini' ? 'geminiTtsVoice' : 'cascadedTtsVoice', cascadedTtsVoicePreset, cascadedTtsVoiceCustom)
 

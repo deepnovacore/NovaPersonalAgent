@@ -139,7 +139,10 @@ export class MarkdownRepository {
   return snapshot
  }
 
- needsDocumentMigration():boolean {return hasPath(join(this.root,MARKER))&&this.readFile(MARKER)===legacyMarkerText}
+ needsDocumentMigration():boolean {
+  if(!hasPath(join(this.root,MARKER)))return false
+  return this.readFile(MARKER)===legacyMarkerText||(!hasPath(join(this.root,'SOUL.md'))&&this.head()!==null&&!this.git(['ls-tree','--name-only','HEAD']).split('\n').includes('SOUL.md'))
+ }
 
  read():MarkdownSnapshot {
   this.initialize()
@@ -167,7 +170,7 @@ export class MarkdownRepository {
   try{
    const hash=createHash('sha256'),add=(relative:string)=>{hash.update(relative+'\0');hash.update(hasPath(join(this.root,relative))?this.readFile(relative):'\u0000absent');hash.update('\0')}
    add(MARKER)
-   for(const name of ['USER.md','MEMORY.md'])add(name)
+   for(const name of ['USER.md','MEMORY.md','SOUL.md'])add(name)
    for(const folder of ['entries','goals','todos','ideas','memory','entities']){
     const directory=join(this.root,folder);if(!hasPath(directory)){hash.update(folder+'\0absent\0');continue}
     this.assertSafe(directory,true)
@@ -222,6 +225,8 @@ export class MarkdownRepository {
   if(documents){
    const expected=memoryDocuments(revisions),paths=new Set([...expected.keys(),...tracked.filter(path=>semanticPath.test(path))])
    for(const path of paths){
+    // A pre-SOUL repository needs its empty projection published, not a user-data reset.
+    if(path==='SOUL.md'&&!tracked.includes(path)&&!hasPath(join(this.root,path))&&!revisions.some(row=>row.kind==='soul'))continue
     if(!tracked.includes(path)||!hasPath(join(this.root,path)))throw failure('CONFLICT')
     const text=this.readFile(path);bytes+=Buffer.byteLength(text);if(bytes>MAX_BATCH)throw failure('LIMIT')
     baselines[path]=digest(text)

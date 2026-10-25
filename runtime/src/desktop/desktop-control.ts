@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto'
 import {personalCommandSchema} from '../personal-agent/contracts.js'
 import type {PersonalCommandContext} from '../personal-agent/host.js'
-import {BlockingConfigurationError} from '../config/config.js'
+import {BlockingConfigurationError, type memoryStatus} from '../config/config.js'
 import {DEFAULT_FRONTBRAIN_TOOL_BUDGET} from '../config/capability-registry.js'
 import type {CapabilityStatus} from '../config/capability-registry.js'
 import type {DesktopStopParentSource} from './desktop-session.js'
@@ -10,6 +10,7 @@ import {CODING_BACKEND_IDS, type CodingBackendId} from '../config/coding-backend
 
 type ParentPort = DesktopStopParentSource & {postMessage(message: unknown): void}
 export interface DesktopCapabilityState extends Partial<CapabilityStatus> {
+  readonly modules?: CapabilityStatus['modules'] & {readonly memory?: ReturnType<typeof memoryStatus>}
   readonly toolCount: number | null
   readonly toolBudget: number
   readonly state: 'running' | 'startup_failed'

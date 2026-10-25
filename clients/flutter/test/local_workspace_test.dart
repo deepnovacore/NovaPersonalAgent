@@ -42,7 +42,9 @@ void main() {
       'expected_version': 0,
     });
     await mount(tester, repo);
-    await tester.tap(find.byTooltip('Profile'));
+    await tester.tap(find.text('Me'));
+    await tester.pump();
+    await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('A phone-owned profile'), findsOneWidget);
     expect(find.textContaining('Reconnect to make changes'), findsNothing);
@@ -102,7 +104,7 @@ void main() {
         'Goals': 'goal',
       }.entries) {
         await openLibrary(tester, entry.key);
-        expect(find.text('Local ${entry.value}'), findsOneWidget);
+        expect(find.text('Local ${entry.value}').hitTestable(), findsOneWidget);
         expect(identical(host.store, store), isTrue);
         await tester.pageBack();
         await tester.pump();

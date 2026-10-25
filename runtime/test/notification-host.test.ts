@@ -11,9 +11,23 @@ test('external channel receives feed and task result without local chat or unrea
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-notification-host-'));const received:string[]=[]
  const adapter:NotificationChannelAdapter={providerId:'test-im',inspect:()=>Promise.resolve(true),prepare:n=>Promise.resolve([{title:n.title,body:n.body}]),send:p=>{received.push(p.body);return Promise.resolve({kind:'accepted',receipt:{message_id:String(received.length)}})}}
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'u',pool:new SuggestionPool(),memory:()=>undefined,evidence:ref=>({subject_key:ref,source:{type:'conversation',ref}}),now:()=>now,notificationAdapters:[adapter]})
- try{await host.open();await host.notifications.bind({id:'im',provider:'test-im',user_scope:'u',identity:'self',generation:1,status:'ready'});await host.configureNotifications('im');await host.admit({kind:'notify',summary:'Reminder',why_now:'Evidence',evidence_refs:['conversation:1'],memory_refs:[]},{...(await host.discoverySnapshot()),evidence_refs:['conversation:1']});await host.flushNotifications();assert.deepEqual(received,['Evidence']);assert.equal(host.conversationSnapshot().unread_count,0);assert.equal(host.snapshot().feed.length,1)
- await host.taskResult('work-a','Complete result');await host.flushNotifications();assert.equal(received.at(-1),'Complete result');assert.equal(host.conversationSnapshot().unread_count,0)
+ try{await host.open();await host.notifications.bind({id:'im',provider:'test-im',user_scope:'u',identity:'self',generation:1,status:'ready'});await host.configureNotifications('im');await host.admit({kind:'notify',summary:'Reminder',why_now:'Evidence',evidence_refs:['conversation:1'],memory_refs:[]},{...(await host.discoverySnapshot()),evidence_refs:['conversation:1']});await host.flushNotifications();assert.deepEqual(received,['Evidence']);assert.equal(host.conversationSnapshot().unread_count,0);assert.deepEqual(host.conversationSnapshot().messages,[],'the external channel never also writes the main chat');assert.equal(host.snapshot().feed.length,1)
+ await host.taskResult('work-a','Complete result');await host.flushNotifications();assert.equal(received.at(-1),'Complete result');assert.equal(host.conversationSnapshot().unread_count,0);assert.deepEqual(host.conversationSnapshot().messages,[])
  host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'Direct reply'}),sendAudio:()=>Promise.resolve(),close:()=>Promise.resolve()}),()=>{/* no observer */});await host.submitConversationText('chat:main','Hello');await new Promise(r=>setTimeout(r,100));assert.equal(host.conversationSnapshot().messages.at(-1)?.text,'Direct reply');assert.equal(received.length,2)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('local notifications land once in the main chat as unread proactive messages; direct replies never count',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-notification-main-'))
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'u',pool:new SuggestionPool(),memory:()=>undefined,evidence:ref=>({subject_key:ref,source:{type:'conversation',ref}}),now:()=>now})
+ try{await host.open();assert.deepEqual(host.conversationSnapshot().items.map(item=>item.id),['chat:main'])
+  host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'Direct reply'}),close:()=>Promise.resolve()}),()=>{/* no observer */})
+  await host.submitConversationText('chat:main','Hello');await host.waitConversation('chat:main');assert.equal(host.conversationSnapshot().unread_count,0,'a reply to the user is not unread')
+  await host.admit({kind:'notify',summary:'Reminder',why_now:'Evidence',evidence_refs:['conversation:1'],memory_refs:[]},{...(await host.discoverySnapshot()),evidence_refs:['conversation:1']});await host.flushNotifications();await host.flushNotifications()
+  const feed=host.snapshot().feed[0]!,notices=host.conversationSnapshot().messages.filter(m=>m.origin==='proactive')
+  assert.deepEqual(notices.map(m=>[m.id,m.conversation_id]),[['feed:'+feed.id,'chat:main']],'one message with a stable id in the main chat')
+  assert.equal(host.conversationSnapshot().unread_count,1);assert.equal(host.conversationSnapshot().items[0]!.unread_count,1)
+  await host.command({type:'personal.command',request_id:'read',method:'conversations.read',params:{id:'chat:main',through_message_id:notices[0]!.id}});assert.equal(host.conversationSnapshot().unread_count,0)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 

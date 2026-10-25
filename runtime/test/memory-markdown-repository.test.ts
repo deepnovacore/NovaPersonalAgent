@@ -281,3 +281,11 @@ test('every input of a cached read invalidates it',t=>{
  calls.length=0;writeFileSync(join(root,'entries','unexpected.md'),'stray');assert.throws(()=>repo.read(),/CONFLICT|UNSAFE_PATH/u);rmSync(join(root,'entries','unexpected.md'))
  repo.read();repo.prepare([first,next]);assert.throws(()=>repo.read(),/PENDING_OPERATION/u)
 })
+
+test('an existing document repository gains an empty SOUL projection without losing revisions',t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root);repo.open([first,next])
+ git(root,'read-tree','HEAD');git(root,'rm','SOUL.md');git(root,'-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-m','pre-SOUL document layout')
+ const reopened=new MarkdownRepository(root)
+ assert.deepEqual(reopened.open([]).revisions,[first,next]);assert.ok(existsSync(join(root,'SOUL.md')))
+ assert.match(readFileSync(document(root),'utf8'),/Prefer detailed replies/)
+})

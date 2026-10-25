@@ -42,7 +42,9 @@ void main() {
     await tester.pumpAndSettle();
     await binding.convertFlutterSurfaceToImage();
     await binding.takeScreenshot('phone-home');
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.text('Me'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Devices'));
     await tester.pumpAndSettle();
@@ -50,7 +52,7 @@ void main() {
     await binding.takeScreenshot('phone-devices');
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('New chat'));
+    await tester.tap(find.text('Nova').last);
     await tester.pumpAndSettle();
     final id = store.conversations.single['id'] as String;
     await store.append(id, {'role': 'user', 'content': 'A synthetic question'});

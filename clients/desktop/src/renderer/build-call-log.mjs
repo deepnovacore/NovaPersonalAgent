@@ -3,7 +3,7 @@ import {iconNode,withIcon} from './icons.mjs'
 
 const labels={prepared:'等待执行',awaiting_approval:'待确认',running:'执行中',completed:'已完成',failed:'失败',denied:'已拒绝',refused:'已拒绝',timed_out:'已超时',cancelled:'已取消',cancelled_before_execution:'未执行',outcome_unknown:'结果不确定'}
 const failed=new Set(['failed','timed_out','outcome_unknown','refused'])
-const COMPUTER_LABELS={computer_screenshot:'截图',computer_click:'点击',computer_type:'输入',computer_scroll:'滚动',computer_key:'快捷键',computer_run:'电脑助手'}
+const COMPUTER_LABELS={computer_screenshot:'截图',computer_click:'点击',computer_type:'输入',computer_scroll:'滚动',computer_key:'快捷键'}
 const SHOT_CACHE=12
 
 /** Computer calls read as actions ("点击 · 412, 220"), not as raw JSON arguments. */
@@ -14,7 +14,7 @@ export function computerCallTarget(item){
   :item.name==='computer_scroll'&&typeof args.direction==='string'?t(({up:'向上',down:'向下',left:'向左',right:'向右'})[args.direction]??args.direction)
   :item.name==='computer_type'&&typeof args.text==='string'?`“${args.text.length>40?args.text.slice(0,40)+'…':args.text}”`
   :item.name==='computer_key'&&typeof args.keys==='string'?args.keys
-  :item.name==='computer_run'&&typeof args.instruction==='string'?args.instruction:''
+  :''
  return t(COMPUTER_LABELS[item.name])+(detail?' · '+detail:'')
 }
 

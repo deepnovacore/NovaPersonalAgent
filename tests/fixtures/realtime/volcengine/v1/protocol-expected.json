@@ -118,13 +118,13 @@
       },
       "ok": true
     },
-    "dedicated-key-and-overrides": {
+    "shared-key-and-overrides": {
       "config": {
         "ark_api_key": "ark",
         "ark_base_url": "https://ark.example/v3/?region=cn",
         "ark_model": "model-a",
         "ark_support_model": "model-b",
-        "asr_api_key": "asr_dedicated",
+        "asr_api_key": "tts_fallback",
         "asr_chunk_ms": 200,
         "asr_endpoint": "wss://speech.example/asr?mode=full",
         "asr_resource_id": "asr-resource",

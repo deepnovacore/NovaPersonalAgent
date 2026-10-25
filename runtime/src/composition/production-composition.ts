@@ -29,7 +29,7 @@ import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from '../config/capability-registry.js'
 import type {CodingBackendId} from '../config/coding-backends.js'
 import {prepareExternalMcp} from '../executors/mcp.js'
-import {loadSettings, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
+import {loadSettings, memoryStatus, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
 import {requireSelectedCascadedLlmConfig, requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
 import {remoteClientMedia} from '../server/server-config.js'
 import type {ClientMedia} from '../server/client-protocol.js'
@@ -335,7 +335,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     snapshot:()=>feishu.snapshot(),
     restore:()=>feishu.restore(),
     command:async(method,params)=>{const result=await feishu.command(method,z.record(z.string(),z.unknown()).parse(params));await syncNotificationBinding();return result},
-    open:async()=>{await feishu.open();await syncNotificationBinding();await host.notifications.migrate(feishu.snapshot().bot_enabled?'feishu':null)},
+    open:async()=>{await feishu.open();await syncNotificationBinding();await host.notifications.migrate()},
     close:async()=>{await feishu.close()},
   })
   ownership.own(() => composition.desktop.server.close())
@@ -371,6 +371,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     ...composition,
     phoneControl,
     usage,
+    memoryStatus: memoryStatus(loadedSettings),
     closeAuxiliary: async () => {
       try { await phoneQueue; await closePhone(); await Promise.all(guiExecutors.map(phone => phone.close())) } finally { closeSharedApproval(); telemetry.close(); await usage.close() }
     },

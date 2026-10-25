@@ -17,10 +17,10 @@ function mount(options={}){
  const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{},onPresentationRequest:fn=>{callbacks.presentation=fn},onCollapsed:fn=>{callbacks.collapsed=fn}}},...options})
  controllers.push(view.controller);view.controller.connect();view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input']})
  const all=n=>[n,...n.children.flatMap(all)]
- if(!options.defaultHome)all(body).find(n=>n.dataset.page==='todos').listeners.click()
+ if(!options.defaultHome)all(body).find(n=>n.dataset.page==='ideas').listeners.click()
  return {body,sent,view,callbacks,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
-const feedState=(revision,selected='chat:proactive',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:proactive',kind:'proactive',title:'主动提醒',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'T\n## 前瞻\n- 一条'}]},...extra})
+const feedState=(revision,selected='chat:main',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:main',kind:'chat',title:'主对话',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'T\n## 前瞻\n- 一条'}]},...extra})
 test('workbench chrome and composer follow the selected language without translating conversation content',()=>{
  try{for(const [language,title,placeholder,status]of [['zh-CN','主对话','输入消息…','运行中 · 0 个后台任务'],['en','Main conversation','Type a message…','Running · 0 background tasks']]){
   setLanguage(language);const m=mount()
@@ -144,7 +144,7 @@ test('durable cards browse a persistent central detail through snapshots, execut
  m.all().find(n=>n.className==='task-detail').listeners.keydown({key:'Escape',preventDefault(){}});assert.equal(document.activeElement,cards[0]);assert.equal(m.sent.some(f=>f.method==='tasks.control'),false)
 })
 test('suggestion body is an accessible control and remains expanded after a snapshot refresh',()=>{
- const m=mount();const context={cards:[{id:'s1',tab:'todos',title:'Review',body:'A long recommendation '.repeat(30),refs:[]}],status:'ready'}
+ const m=mount();const context={cards:[{id:'s1',tab:'ideas',title:'Review',body:'A long recommendation '.repeat(30),refs:[]}],status:'ready'}
  m.view.receive(feedState(1,'c',{workbench_context:context,sources:[{id:'local'}]}))
  const body=()=>m.all().find(n=>n.className==='card-body')
  assert.equal(body().tag,'button')
@@ -156,9 +156,9 @@ test('suggestion body is an accessible control and remains expanded after a snap
  assert.equal(body().attrs['aria-expanded'],'true')
  assert.equal(document.activeElement,body())
 })
-test('a personal todo with a long note can expand its four-line body',()=>{
- const m=mount();m.view.receive(feedState(1,'c',{sources:[{id:'local'}],life:{todos:[{id:'todo1',title:'Prepare',note:'Detailed note '.repeat(30),status:'open',version:1}],ideas:[],goals:[]}}))
- const note=m.all().find(n=>n.className==='card-body'&&n.dataset.cardBodyId==='life:todo:todo1')
+test('a personal idea with a long note can expand its four-line body',()=>{
+ const m=mount();m.view.receive(feedState(1,'c',{sources:[{id:'local'}],life:{todos:[],ideas:[{id:'idea1',title:'Prepare',note:'Detailed note '.repeat(30),status:'active',version:1}],goals:[]}}))
+ const note=m.all().find(n=>n.className==='card-body'&&n.dataset.cardBodyId==='life:idea:idea1')
  assert.equal(note?.tag,'button')
  note.listeners.click()
  assert.equal(note.attrs['aria-expanded'],'true')
@@ -242,21 +242,21 @@ const resultFor=(id,summary)=>({delegateId:id,executor:'codex',outcome:'ok',summ
 test('task progress fills only the original draft, preserves voice and pending state, and never sends',async()=>{
  const m=mount({tasks:()=>({connected:true,tasks:[taskRow('a','completed')]})}),c=m.view.controller
  try{
-  m.view.receive(feedState(1,'c',{feed:[]}));c.state('chat:proactive').draft='原有内容';c.state('c').draft='别的草稿'
-  const pending={request_id:'kept',text:'sending'};c.state('chat:proactive').submission=pending
+  m.view.receive(feedState(1,'c',{feed:[]}));c.state('chat:main').draft='原有内容';c.state('c').draft='别的草稿'
+  const pending={request_id:'kept',text:'sending'};c.state('chat:main').submission=pending
   selectPage(m,'任务')
   clickProgress(m,'a');const request=m.sent.findLast(f=>f.method==='conversations.open_work')
   assert.ok(request);assert.deepEqual(request.params,{work_id:'a'})
-  const owner=feedState(2,'chat:proactive',{feed:[]});owner.conversations.voice_id='chat:proactive';m.view.receive(owner)
+  const owner=feedState(2,'chat:main',{feed:[]});owner.conversations.voice_id='chat:main';m.view.receive(owner)
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
-  const filled=c.state('chat:proactive').draft
+  const filled=c.state('chat:main').draft
   assert.equal(filled,'原有内容\n请告诉我「任务 a」（任务 a）的最新进展。')
-  assert.equal(c.state('c').draft,'别的草稿');assert.equal(c.state('chat:proactive').submission,pending)
-  assert.equal(c.voiceId,'chat:proactive');assert.equal(m.all().find(n=>n.id==='chat-pane').hidden,false)
+  assert.equal(c.state('c').draft,'别的草稿');assert.equal(c.state('chat:main').submission,pending)
+  assert.equal(c.voiceId,'chat:main');assert.equal(m.all().find(n=>n.id==='chat-pane').hidden,false)
   assert.equal(m.all().find(n=>n.attrs['aria-label']==='消息草稿').disabled,true)
   clickProgress(m,'a');const repeated=m.sent.findLast(f=>f.method==='conversations.open_work')
   m.view.receive({type:'personal.result',request_id:repeated.request_id,ok:true,data:owner.conversations});await tick()
-  assert.equal(c.state('chat:proactive').draft,filled,'repeat click must not duplicate the trailing prompt')
+  assert.equal(c.state('chat:main').draft,filled,'repeat click must not duplicate the trailing prompt')
   assert.equal(m.sent.some(f=>f.type==='input.text'||['conversations.create','conversations.open_feed'].includes(f.method)),false)
  }finally{c.disconnect();await tick()}
 })
@@ -266,32 +266,32 @@ test('task progress races and failures remain scoped to the owning draft and ori
  try{
   m.view.receive(feedState(1,'c',{feed:[]}));selectPage(m,'任务');c.state('c').draft='Other draft'
   clickProgress(m,'a');let request=m.sent.findLast(f=>f.method==='conversations.open_work');assert.ok(request)
-  const owner=feedState(2,'chat:proactive',{feed:[]});m.view.receive(owner)
+  const owner=feedState(2,'chat:main',{feed:[]});m.view.receive(owner)
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations})
   m.view.receive(feedState(3,'c',{feed:[]}));await tick()
-  assert.equal(c.selectedId,'c');assert.equal(c.state('c').draft,'Other draft');assert.match(c.state('chat:proactive').draft,/任务 a/u)
-  for(const response of [{ok:false,error:'conversation_not_found'},{ok:false,error:'network failed'},{ok:true},{ok:true,data:{selected_id:''}},{ok:true,data:{selected_id:'missing'}},{ok:true,data:{selected_id:'chat:proactive',items:{}}},{ok:true,data:{selected_id:'chat:proactive',items:[null]}}]){
-   const before=c.state('chat:proactive').draft
+  assert.equal(c.selectedId,'c');assert.equal(c.state('c').draft,'Other draft');assert.match(c.state('chat:main').draft,/任务 a/u)
+  for(const response of [{ok:false,error:'conversation_not_found'},{ok:false,error:'network failed'},{ok:true},{ok:true,data:{selected_id:''}},{ok:true,data:{selected_id:'missing'}},{ok:true,data:{selected_id:'chat:main',items:{}}},{ok:true,data:{selected_id:'chat:main',items:[null]}}]){
+   const before=c.state('chat:main').draft
    clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
    m.view.receive({type:'personal.result',request_id:request.request_id,...response});await tick()
    const errors=descendants(taskCard(m,'a')).filter(n=>n.attrs.role==='alert')
    assert.equal(errors.length,1);assert.ok(errors[0].textContent)
    assert.equal(descendants(taskCard(m,'b')).some(n=>n.attrs.role==='alert'),false)
-   assert.equal(c.state('chat:proactive').draft,before);assert.equal(c.state('c').draft,'Other draft')
+   assert.equal(c.state('chat:main').draft,before);assert.equal(c.state('c').draft,'Other draft')
   }
-  c.state('chat:proactive').draft='x'.repeat(4000)
+  c.state('chat:main').draft='x'.repeat(4000)
   clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
-  assert.equal(c.state('chat:proactive').draft,'x'.repeat(4000));assert.match(textOf(taskCard(m,'a')),/4000/u)
+  assert.equal(c.state('chat:main').draft,'x'.repeat(4000));assert.match(textOf(taskCard(m,'a')),/4000/u)
   const prompt='请告诉我「任务 a」（任务 a）的最新进展。'
-  c.state('chat:proactive').draft='x'.repeat(4000-prompt.length-1)
+  c.state('chat:main').draft='x'.repeat(4000-prompt.length-1)
   clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
-  assert.equal(c.state('chat:proactive').draft.length,4000);assert.ok(c.state('chat:proactive').draft.endsWith(prompt))
-  c.state('chat:proactive').draft='😀'.repeat(2000)
+  assert.equal(c.state('chat:main').draft.length,4000);assert.ok(c.state('chat:main').draft.endsWith(prompt))
+  c.state('chat:main').draft='😀'.repeat(2000)
   clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
-  assert.equal(c.state('chat:proactive').draft,'😀'.repeat(2000));assert.match(textOf(taskCard(m,'a')),/4000/u)
+  assert.equal(c.state('chat:main').draft,'😀'.repeat(2000));assert.match(textOf(taskCard(m,'a')),/4000/u)
   assert.equal(c.drafts.has(undefined),false);assert.equal(c.drafts.has('missing'),false)
  }finally{c.disconnect();await tick()}
 })
@@ -314,7 +314,7 @@ test('native task details isolate results, preserve expansion across refresh/res
   m.view.refresh();assert.equal(details('b').open,true);assert.match(textOf(details('b')),/B result/u)
   assert.match(textOf(details('b')),/<b>literal<\/b>/u);assert.equal(descendants(details('b')).some(n=>n.tag==='b'),false)
   assert.match(textOf(details('b')),/2/u);assert.match(textOf(details('b')),/耗时：10\.0 秒/u)
-  selectPage(m,'待办');selectPage(m,'任务');assert.equal(details('b').open,true)
+  selectPage(m,'想法');selectPage(m,'任务');assert.equal(details('b').open,true)
   results=[];m.view.refresh();assert.equal(details('b').open,true);assert.match(textOf(details('b')),/暂无结果/u)
   assert.doesNotMatch(textOf(details('b')),/B result/u)
   details('a').open=true;details('a').listeners.toggle()
@@ -361,7 +361,7 @@ test('new task result text and progress drafts use English UI translations witho
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'conversation_not_found'});await tick()
   assert.match(textOf(taskCard(m,'a')),/original task conversation no longer exists/u)
   clickProgress(m,'a');request=m.sent.findLast(f=>f.method==='conversations.open_work')
-  const owner=feedState(2,'chat:proactive',{feed:[]});m.view.receive(owner)
+  const owner=feedState(2,'chat:main',{feed:[]});m.view.receive(owner)
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
   assert.equal(c.draft,'Please update me on “任务 a” (task a).')
   results.push(resultFor('a','User summary 中文'));m.view.refresh()
@@ -396,13 +396,15 @@ test('task progress accepts the command owner snapshot before a later state broa
  const m=mount({tasks:()=>({connected:true,tasks:[taskRow('a')]})}),c=m.view.controller
  try{
   m.view.receive(feedState(1,'c',{feed:[]}));c.draft='Keep current draft';selectPage(m,'任务')
+  // The first snapshot's one-time return to the main chat is not part of this flow.
+  const before=m.sent.length
   clickProgress(m,'a');const request=m.sent.findLast(f=>f.method==='conversations.open_work')
   const owner=feedState(2,'late-owner',{feed:[]});owner.conversations.items.push({id:'late-owner',kind:'chat',title:'Original owner'})
   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:owner.conversations});await tick()
   assert.equal(c.state('late-owner').draft,'请告诉我「任务 a」（任务 a）的最新进展。')
   assert.equal(c.selectedId,'c');assert.equal(c.draft,'Keep current draft')
   m.view.receive(owner);assert.equal(c.draft,'请告诉我「任务 a」（任务 a）的最新进展。')
-  assert.equal(m.sent.some(f=>f.type==='input.text'||['conversations.select','conversations.create'].includes(f.method)),false)
+  assert.equal(m.sent.slice(before).some(f=>f.type==='input.text'||['conversations.select','conversations.create'].includes(f.method)),false)
  }finally{c.disconnect();await tick()}
 })
 test('routine startup keeps the text notice hidden; failed start exposes settings',()=>{
@@ -477,10 +479,10 @@ test('continuous voice shows the orb stage with its status line and removes it w
  }finally{m.view.controller.disconnect();await tick()}
 })
 test('pending suggestion actions survive refresh, reject double clicks and recover after failure',async()=>{
- const m=mount(),context={cards:[{id:'s1',tab:'todos',title:'Review',body:'Details',next:'Start',refs:[]}],status:'ready'}
+ const m=mount(),context={cards:[{id:'s1',tab:'ideas',title:'Review',body:'Details',next:'Start',refs:[]}],status:'ready'}
  const state=revision=>feedState(revision,'c',{workbench_context:context,sources:[{id:'local',health:String(revision)}],conversations:{selected_id:'c',voice_id:'c',items:[{id:'c',title:'C'}],messages:[]}})
  m.view.receive(state(1))
- const action=()=>m.all().find(n=>n.textContent==='帮我做')
+ const action=()=>m.all().find(n=>n.textContent==='聊聊这个')
  const first=action();first.listeners.click();const request=m.sent.at(-1)
  assert.equal(request.method,'conversations.create');assert.equal(first.attrs['aria-busy'],'true');assert.equal(first.disabled,true)
  first.listeners.click();m.view.receive(state(2));assert.notEqual(action(),first)
@@ -491,17 +493,17 @@ test('pending suggestion actions survive refresh, reject double clicks and recov
  assert.match(m.view.controller.error,/超时/)
 })
 test('life status shows saving, survives refresh and does not restore an obsolete focused value',async()=>{
- const m=mount(),row={id:'todo1',title:'Prepare',note:'',status:'open',version:1}
- const state=(revision,item)=>feedState(revision,'c',{life:{todos:[item],ideas:[],goals:[]}})
- m.view.receive(state(1,row));const select=()=>m.all().find(n=>n.attrs['aria-label']==='Prepare状态')
- select().focus();select().value='doing';select().listeners.change();const request=m.sent.at(-1)
+ const m=mount(),row={id:'goal1',kind:'goal',title:'Prepare',note:'',status:'active',version:1,progress:{total:0,done:0}}
+ const state=(revision,item)=>feedState(revision,'c',{life:{todos:[],ideas:[],goals:[item]}})
+ m.view.receive(state(1,row));m.all().find(n=>n.dataset.page==='goals').listeners.click();const select=()=>m.all().find(n=>n.attrs['aria-label']==='Prepare状态')
+ select().focus();select().value='paused';select().listeners.change();const request=m.sent.at(-1)
  assert.equal(request.method,'life.mutate');assert.equal(select().attrs['aria-busy'],'true')
  assert.equal(m.all().find(n=>n.textContent==='正在保存…').hidden,false)
  m.view.receive(state(2,{...row,note:'Updated elsewhere'}));assert.equal(select().disabled,true);select().listeners.change()
  assert.equal(m.sent.filter(f=>f.method==='life.mutate').length,1)
- m.view.receive(state(3,{...row,status:'doing',version:2}));m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick()
- assert.equal(select().disabled,false);assert.equal(select().value,'doing')
- select().focus();m.view.receive(state(4,{...row,status:'waiting',version:3}));assert.equal(select().value,'waiting')
+ m.view.receive(state(3,{...row,status:'paused',version:2}));m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick()
+ assert.equal(select().disabled,false);assert.equal(select().value,'paused')
+ select().focus();m.view.receive(state(4,{...row,status:'active',version:3}));assert.equal(select().value,'active')
 })
 test('goal adoption and status changes use the shared pending guard; conflicts refresh with readable feedback',async()=>{
  const m=mount(),goal={id:'g1',kind:'goal',title:'Goal',note:'',status:'active',version:1,progress:{total:0,done:0}}
@@ -521,13 +523,13 @@ test('goal adoption and status changes use the shared pending guard; conflicts r
 })
 
  test('the permanent Nova conversation opens beside the full Timeline and keeps reminder identity',async()=>{
- const m=mount({defaultHome:true});const main={id:'chat:main',kind:'chat',title:'Historical main',unread_count:0};
- m.view.receive(feedState(1,'chat:main',{life:{todos:[],goals:[]},conversations:{selected_id:'chat:main',items:[main,{id:'chat:proactive',kind:'proactive',unread_count:1}],messages:[],home_messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'Reminder'}]}}));
+ const m=mount({defaultHome:true});const main={id:'chat:main',kind:'chat',title:'Historical main',unread_count:1};
+ m.view.receive(feedState(1,'chat:main',{life:{todos:[],goals:[]},conversations:{selected_id:'chat:main',items:[main],messages:[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'Reminder'}],home_messages:[]}}));
  assert.equal(m.all().find(n=>n.dataset.page==='timeline').attrs['aria-selected'],'true');
  assert.ok(m.all().some(n=>n.className==='timeline-axis'),'default right pane renders a date axis');assert.ok(m.all().some(n=>n.className==='feed-card'));
  assert.equal(m.all().some(n=>n.dataset.page==='nova'),false);
  assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,'主对话');
- const request=m.sent.find(f=>f.method==='conversations.read');assert.equal(request.params.id,'chat:proactive');
+ const request=m.sent.find(f=>f.method==='conversations.read');assert.equal(request.params.id,'chat:main','the unread reminder is acknowledged in the main chat');
  assert.equal(request.params.through_message_id,'feed:f1');
  })
 
@@ -557,15 +559,6 @@ test('adding a Timeline reference preserves the draft and earlier references; li
  assert.deepEqual(c.state().references.map(ref=>ref.id),['a','b']);assert.equal(c.draft,'Existing draft');assert.match(c.error,/2/)
 })
 
-test('an oversized Todo assistance append leaves draft references unchanged',async()=>{
- const m=mount(),c=m.view.controller,todos=['a','b'].map(id=>({id,title:'Item '+id,status:'open',due:null,version:1,note:''}))
- m.view.receive(feedState(1,'chat:main',{feed:[],life:{todos,goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
- c.draft='x'.repeat(4000);c.state().references=[{kind:'todo',id:'a',version:1}]
- await m.all().filter(n=>n.textContent==='请 Nova 协助')[1].listeners.click();await tick()
- assert.equal(c.draft,'x'.repeat(4000));assert.deepEqual(c.state().references,[{kind:'todo',id:'a',version:1}]);assert.equal(c.state().source_todo??null,null)
-})
-
-
 test('right pane switches keep Nova mounted, visible, and preserve the main draft at every window width',async()=>{
  const previous=globalThis.matchMedia
  try{
@@ -578,7 +571,7 @@ test('right pane switches keep Nova mounted, visible, and preserve the main draf
    assert.equal(m.all().find(n=>n.dataset.page==='timeline').attrs['aria-selected'],'true')
    assert.ok(m.all().some(n=>n.className==='timeline-axis'))
    const commandCount=m.sent.length
-   for(const page of ['todos','ideas','profile','timeline']){
+   for(const page of ['goals','ideas','profile','timeline']){
     await m.all().find(n=>n.dataset.page===page).listeners.click()
     assert.equal(pane.hidden,false,String(width));assert.equal(pane.parentElement,parent)
     assert.equal(c.selectedId,'chat:main');assert.equal(c.draft,'Keep this thought')
@@ -599,7 +592,7 @@ test('an unchanged Feed keeps its open evidence and focus when another message a
  info.listeners.click({stopPropagation(){}})
  const popover=m.all().find(node=>node.className==='source-popover'),read=m.all().find(node=>node.className==='feed-evidence-read')
  read.focus();const pending=read.listeners.click(),request=m.sent.findLast(frame=>frame.method==='memory.evidence')
- const next=structuredClone(state);next.revision=2;next.memory.entries=[{id:'unrelated',version:1,status:'active',content:'New independent memory'}];next.conversations.messages.push({id:'new',conversation_id:'chat:proactive',role:'assistant',text:'New message'})
+ const next=structuredClone(state);next.revision=2;next.memory.entries=[{id:'unrelated',version:1,status:'active',content:'New independent memory'}];next.conversations.messages.push({id:'new',conversation_id:'chat:main',role:'assistant',text:'New message'})
  m.view.receive(next)
  assert.ok(m.all().includes(card),'unchanged card survives transcript update')
  assert.equal(popover.hidden,false);assert.equal(document.activeElement,read)
@@ -636,19 +629,6 @@ test('internal source tasks disappear from main chat while user tasks remain',()
  assert.ok(m.all().some(n=>n.textContent==='运行中 · 0 个后台任务'))
 })
 
-test('the first main-conversation greeting starts at the top instead of hiding behind auto-scroll',()=>{
- const m=mount({defaultHome:true,api:{orbMenu:{},personal:{setUnread(){},onPresentationRequest(){},onCollapsed(){}},welcome:{}}})
- m.view.receive(feedState(1,'chat:main',{feed:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages:[]}}))
- const history=m.all().find(n=>n.className==='chat-history')
- history.scrollHeight=900;history.clientHeight=300;history.scrollTop=600
- m.view.identity({profile:{assistantName:'nova',userName:'',avatar:null,introduced:false},defaultAvatar:''})
- assert.equal(history.scrollTop,0)
- history.scrollTop=200
- m.view.identity({profile:{assistantName:'nova',userName:'',avatar:null,introduced:false},defaultAvatar:''})
- assert.equal(history.scrollTop,200)
- assert.equal(m.all().find(n=>n.className==='chat-new-messages').hidden,true)
-})
-
 test('main conversation keeps one companion outside the transcript through messages, sending and voice states',()=>{
  const m=mount({defaultHome:true,api:{orbMenu:{},personal:{setUnread(){},onPresentationRequest(){},onCollapsed(){}},welcome:{}}})
  const snapshot=(revision,messages=[])=>feedState(revision,'chat:main',{feed:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages}})
@@ -661,4 +641,14 @@ test('main conversation keeps one companion outside the transcript through messa
  m.view.controller.disconnect();m.view.refresh();assert.equal(companion.hidden,false)
  m.view.receive(feedState(3,'other',{feed:[]}));assert.equal(companion.hidden,true)
  m.view.receive(snapshot(4));assert.equal(companion.hidden,false)
+})
+test('a goal check-in card in the main chat puts the goal into the composer and mutes through feed.action',async()=>{
+ const m=mount({defaultHome:true}),c=m.view.controller
+ const checkin={id:'ck',kind:'question',title:'问问你的目标',why_now:'',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},expires_at:null,memory_refs:[],evidence_refs:[],goal_checkin:{local_date:'2026-10-12',items:[{goal_id:'g',goal_version:1,text:'今天练口语了吗？',recalled:null}]}}
+ m.view.receive(feedState(1,'chat:main',{feed:[checkin],life:{todos:[],goals:[{id:'g',title:'学英语口语',status:'active',cadence:'daily',version:2}]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[{id:'feed:ck',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'问问你的目标\n· 今天练口语了吗？'}],home_messages:[]}}))
+ c.draft='已有草稿'
+ await m.all().find(n=>n.tag==='button'&&n.textContent==='回复进展').listeners.click();await tick()
+ assert.deepEqual(c.state('chat:main').references,[{kind:'goal',id:'g',version:2}]);assert.equal(c.draft,'已有草稿','the draft is kept')
+ void m.all().find(n=>n.tag==='button'&&n.textContent==='不再提醒').listeners.click();await tick()
+ assert.deepEqual(m.sent.filter(f=>f.method==='feed.action'&&f.params.action!=='presented').map(f=>f.params),[{id:'ck',action:'goal_checkin_mute',goal_id:'g'}])
 })

@@ -73,3 +73,31 @@ test('inactive and expired suggestions explain their disabled action; task recei
  assert.equal(card.children.find(node=>node.className==='feed-actions').children[0].disabled,false)
  assert.equal(card.children.some(node=>node.className==='feed-unavailable'),false)
 })
+
+test('a goal proposal offers "set as goal" with its revision and "no thanks", and states the cadence',async()=>{
+ const h=harness(),goal={title:'学习英语口语',success_criteria:'能用英语聊十分钟',cadence:'daily',topic_key:'k',revision:'rev1',evidence_refs:['message:chat:main:m1']}
+ const card=renderFeedCard(h.parent,item({kind:'question',goal_proposal:goal}),h)
+ assert.deepEqual(buttons(card),['设为目标','不用了'])
+ const texts=card.children.map(n=>n.textContent);assert.ok(texts.includes('目标：学习英语口语'));assert.ok(texts.includes('建议节奏：每天陪你练一点'));assert.ok(!texts.includes('W'),'the runtime why_now line is replaced by the localized cadence')
+ const find=label=>card.children.flatMap(function walk(n){return n.tag==='button'&&n.textContent===label?[n]:n.children.flatMap(walk)})[0]
+ await find('设为目标').action();assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'adopt_goal',goal_revision:'rev1'}])
+ await find('不用了').action();assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'decline_goal'}])
+ assert.deepEqual(buttons(renderFeedCard(h.parent,item({kind:'question',lifecycle:'resolved',goal_proposal:goal}),h)),[],'an adopted proposal has no actions left')
+})
+
+test('a goal check-in shows one line per goal with "reply with progress" and "stop reminding"',async()=>{
+ const h=harness(),references=[]
+ const checkin={local_date:'2026-10-12',items:[{goal_id:'a',goal_version:1,text:'今天练口语了吗？',recalled:'练了三次跟读'},{goal_id:'b',goal_version:1,text:'网站进展如何？',recalled:null},{goal_id:'gone',goal_version:1,text:'已删除的目标',recalled:null}]}
+ const goals=[{id:'a',version:3,cadence:'daily'},{id:'b',version:1,cadence:'off'}]
+ const card=renderFeedCard(h.parent,item({kind:'question',title:'运行时标题',goal_checkin:checkin}),{...h,goals,reference:refs=>{references.push(refs)}})
+ const rows=card.children.filter(n=>n.className==='feed-checkin'),texts=node=>[node.textContent,...node.children.flatMap(texts)].filter(Boolean)
+ assert.equal(card.children[0].textContent,'问问你的目标','a localized title instead of the runtime string')
+ assert.deepEqual(rows.map(row=>row.dataset.goalId),['a','b','gone'])
+ assert.ok(texts(rows[0]).includes('上次：练了三次跟读'))
+ assert.deepEqual(buttons(rows[0]),['回复进展','不再提醒']);assert.deepEqual(buttons(rows[1]),['回复进展'],'a muted goal offers no second mute');assert.ok(texts(rows[1]).includes('已不再提醒'))
+ assert.deepEqual(buttons(rows[2]),[],'a deleted goal has no actions');assert.ok(texts(rows[2]).includes('这个目标已删除。'))
+ const find=(row,label)=>row.children.flatMap(function walk(n){return n.tag==='button'&&n.textContent===label?[n]:n.children.flatMap(walk)})[0]
+ await find(rows[0],'回复进展').action();assert.deepEqual(references,[[{kind:'goal',id:'a',version:3}]],'the reference carries the goal\'s current version')
+ await find(rows[0],'不再提醒').action();assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'goal_checkin_mute',goal_id:'a'}])
+ assert.deepEqual(buttons(renderFeedCard(h.parent,item({goal_checkin:checkin}),{...h,goals,reference:()=>{},connected:false})),[],'offline shows no actions')
+})

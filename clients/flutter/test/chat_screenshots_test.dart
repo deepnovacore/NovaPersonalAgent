@@ -62,6 +62,15 @@ void main() {
       );
       final store = ConversationStore(MemoryLifePersistence());
       await store.open();
+      final archived = await store.create();
+      await store.append(archived, {
+        'role': 'user',
+        'content': 'Plan a quieter weekend',
+      });
+      await store.append(archived, {
+        'role': 'assistant',
+        'content': 'Keep Saturday afternoon open.',
+      });
       final host = AgentCoreHost(store: store, settings: ModelSettings());
 
       addTearDown(host.dispose);
@@ -80,18 +89,16 @@ void main() {
         find.byType(NovaApp),
         matchesGoldenFile('goldens/chat-home-empty.png'),
       );
-      await tester.tap(find.text('New chat'));
-      await tester.pumpAndSettle();
-      final id = store.conversations.single['id'] as String;
+      final id = ConversationStore.mainId;
       await store.append(id, {'role': 'user', 'content': 'A quieter weekend'});
       await store.append(id, {
         'role': 'assistant',
         'content':
             'Leave one afternoon open. A walk, a book, and nowhere you need to be.\n\nWhat would you like to make time for?',
       });
-      await tester.tap(find.byTooltip('All conversations'));
+      await tester.tap(find.text('Me'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(NovaApp),
@@ -103,7 +110,7 @@ void main() {
         find.byType(NovaApp),
         matchesGoldenFile('goldens/chat-home.png'),
       );
-      await tester.tap(find.byTooltip('Profile'));
+      await tester.tap(find.text('Profile'));
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(NovaApp),
@@ -111,12 +118,31 @@ void main() {
       );
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('A quieter weekend'));
+      await tester.tap(find.text('Nova').last);
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(NovaApp),
         matchesGoldenFile('goldens/chat-conversation.png'),
       );
+      await tester.tap(find.text('Tasks'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'New task'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Prepare a weekend plan');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await expectLater(
+        find.byType(NovaApp),
+        matchesGoldenFile('goldens/chat-task-draft.png'),
+      );
+      await tester.tap(find.byTooltip('All tasks'));
+      await tester.pumpAndSettle();
+      await expectLater(
+        find.byType(NovaApp),
+        matchesGoldenFile('goldens/chat-tasks.png'),
+      );
+      await tester.tap(find.text('Nova').last);
+      await tester.pumpAndSettle();
       // Exercise both compact and landscape layouts at accessible text sizes.
       for (final size in [const Size(320, 640), const Size(844, 390)]) {
         tester.view.physicalSize = size;

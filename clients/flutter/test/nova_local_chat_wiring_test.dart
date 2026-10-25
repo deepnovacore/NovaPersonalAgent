@@ -41,29 +41,26 @@ void main() {
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    expect(find.byType(ConversationHome), findsOneWidget);
-    expect(store.conversations, isEmpty);
-    await tester.tap(find.text('New chat'));
-    await tester.pumpAndSettle();
+    expect(find.byType(ConversationHome), findsNothing);
+    expect(store.conversations.single['id'], 'chat:main');
     expect(find.byType(LocalChatPanel), findsOneWidget);
     expect(find.byType(BottomAppBarTabs), findsOneWidget);
     expect(find.text('Timeline'), findsOneWidget);
-    await tester.tap(find.text('Goals').last);
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('Profile'), findsOneWidget);
-    await tester.tap(find.text('Chat').last);
-    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Keep this draft');
-    await tester.tap(find.byTooltip('All conversations'));
+    FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
-    expect(find.text('New conversation'), findsNothing);
-    await tester.tap(find.text('New chat'));
+    await tester.tap(find.text('Me'));
+    await tester.pumpAndSettle();
+    expect(find.text('Profile'), findsOneWidget);
+    await tester.tap(find.text('Nova').last);
     await tester.pumpAndSettle();
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
       'Keep this draft',
     );
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.text('Me'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Model provider'), findsOneWidget);
     await tester.tap(find.text('Devices'));
@@ -100,13 +97,13 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('想聊点什么？'), findsOneWidget);
-      expect(find.byTooltip('设置'), findsOneWidget);
-      expect(find.byTooltip('个人资料'), findsOneWidget);
-      expect(find.text('对话'), findsOneWidget);
+      expect(find.text('新对话'), findsNothing);
+      expect(find.text('我的'), findsOneWidget);
+      expect(find.byType(LocalChatPanel), findsOneWidget);
+      expect(find.text('Nova'), findsNWidgets(2));
       expect(find.text('时间线'), findsOneWidget);
-      expect(find.text('目标'), findsOneWidget);
-      expect(find.text('资讯'), findsOneWidget);
+      expect(find.text('任务'), findsOneWidget);
+      expect(find.text('资讯'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );

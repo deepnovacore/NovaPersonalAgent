@@ -18,7 +18,7 @@ export function resolveWorkbenchGroups(matters:readonly WorkbenchMatter[],raw:un
   const members=group.members.map(id=>byId.get(id)!),current=byId.get(group.current)!,basis=group.basis.map(id=>byId.get(id)!)
   let state=group.state
   if((state==='completed'||state==='cancelled')&&(current.state!==state||current.assertion!=='direct'||!basis.some(m=>m.state===state&&m.assertion==='direct')))state='uncertain'
-  if(new Set(members.filter(m=>m.kind!=='topic').map(m=>m.kind)).size>1||members.some(m=>m.ownership==='other')&&members.some(m=>m.ownership==='user'))state='uncertain'
+  if(members.some(m=>m.ownership==='other')&&members.some(m=>m.ownership==='user'))state='uncertain'
   // A claimed reopening must be confirmed; message receipt time cannot reopen a closed event.
   if(state==='open'&&(members.some(m=>m.state==='completed'||m.state==='cancelled')||current.assertion!=='direct'||current.state!=='open'||members.some(m=>m.ownership==='other')&&members.some(m=>m.ownership==='user')))state='uncertain'
   return {id:workbenchHash([...group.members].sort()),members,state,current,basis}

@@ -138,6 +138,13 @@ void main() {
           'entries': [
             _entry(),
             {
+              'key': 'same-day',
+              'kind': 'timeline',
+              'text': '同一天的补充记录',
+              'evidence_ids': ['old'],
+              'observed_at': '2026-10-19T08:00:00',
+            },
+            {
               'key': 'legacy',
               'kind': 'timeline',
               'text': '此前保留的项目讨论',
@@ -186,7 +193,38 @@ void main() {
         expect(find.text('确认测试环境'), findsOneWidget);
         expect(find.text('兼容旧客户端的完整正文'), findsNothing);
         expect(find.text('此前保留的项目讨论'), findsOneWidget);
-        expect(find.textContaining('更新依据 ·'), findsNWidgets(2));
+        expect(find.textContaining('更新依据 ·'), findsNWidgets(3));
+        final line = find.byKey(const ValueKey('brief-timeline-line'));
+        final date = find.byKey(
+          const ValueKey('brief-timeline-date-2026-10-19T00:00:00.000'),
+        );
+        final marker = find.byKey(
+          const ValueKey('brief-timeline-marker-2026-10-19T00:00:00.000'),
+        );
+        expect(date, findsOneWidget);
+        expect(find.text('2026年10月19日'), findsOneWidget);
+        expect(find.text('2026年10月18日'), findsOneWidget);
+        expect(tester.getSize(line).width, 1);
+        expect(tester.getSize(line).height, greaterThan(150));
+        expect(
+          tester.getTopLeft(marker).dx,
+          lessThan(tester.getTopLeft(date).dx),
+        );
+        final first = find.byKey(const ValueKey('timeline-card-brief'));
+        final sameDay = find.byKey(const ValueKey('timeline-card-same-day'));
+        final older = find.byKey(const ValueKey('timeline-card-legacy'));
+        expect(
+          tester.getTopLeft(marker).dx,
+          lessThan(tester.getTopLeft(first).dx),
+        );
+        expect(
+          tester.getTopLeft(first).dy,
+          lessThan(tester.getTopLeft(sameDay).dy),
+        );
+        expect(
+          tester.getTopLeft(sameDay).dy,
+          lessThan(tester.getTopLeft(older).dy),
+        );
         expect(find.textContaining('消息日期 ·'), findsNothing);
         expect(find.text('部分内容'), findsOneWidget);
         expect(find.text('还有部分内容待整理，后续进展可能尚未包含。'), findsNothing);

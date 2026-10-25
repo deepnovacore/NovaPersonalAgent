@@ -18,14 +18,14 @@ const entry = (id = 'plan', version = 1): MemoryEntry => ({ id, version, content
 const proposal = (id = 'plan', version = 1) => ({ kind: 'question' as const, summary: 'Check demo materials?', why_now: 'You said the demo is today', evidence_refs: [] as string[], memory_refs: [{ entry_id: id, version }] });
 test('acceptance source-to-card proof requires a current source ref and version',()=>{
  const cards=[
-  {tab:'todos' as const,refs:[{entry_id:'source:file-a',version:'v2'}]},
+  {tab:'goals' as const,refs:[{entry_id:'source:file-a',version:'v2'}]},
   {tab:'ideas' as const,refs:[{entry_id:'source:file-a',version:'v1'}]},
   {tab:'ideas' as const,refs:[{entry_id:'memory:unrelated',version:3}]},
   {tab:'ideas' as const,refs:[{entry_id:'memory:stated',version:4},{entry_id:'source:file-b',version:'v7'}]},
  ];
  const entries=[{kind:'file' as const,id:'source:file-a',version:'v2',content:'Current'}, {kind:'file' as const,id:'source:file-b',version:'v7',content:'Current'}];
- assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,todos:1,ideas:1,goals:0});
- assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,todos:0,ideas:0,goals:0});
+ assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,ideas:1,goals:1});
+ assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,ideas:0,goals:0});
 });
 test('discovery prioritizes dated open Life objects and excludes inactive objects without hiding history',async()=>{
  const f=await fixture()
@@ -434,7 +434,7 @@ test('failed orb transition can retry backlog admission without changing mode ag
 for(const timing of ['before','during'] as const)test(`startup source notification ${timing} host loading preserves the owned store and drains after initialization`,async t=>{
  const {PersonalStore,initialState}=await import('../src/personal-agent/store.js'),{readFile}=await import('node:fs/promises')
  const dir=await mkdtemp(join(await realpath(tmpdir()),'host-startup-source-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState()
- state.user_scope='local';state.revision=77;state.settings={discovery_enabled:false,discovery_interval_minutes:17};state.receipts.saved={payload:'unchanged',result:{ok:true}};state.dedupe=['retained']
+ state.user_scope='local';state.revision=77;state.settings={discovery_enabled:false,discovery_interval_minutes:17,proactive_daily_cap:5};state.receipts.saved={payload:'unchanged',result:{ok:true}};state.dedupe=['retained']
  state.conversations.items.find(item=>item.id==='chat:main')!.messages.push({id:'original',conversation_id:'chat:main',role:'assistant',text:'Original retained transcript',created_at:now.toISOString()});await store.write(state)
  const original=await readFile(path,'utf8'),host=new PersonalAgentHost({path,userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  let release=()=>undefined as void,opening:Promise<void>|undefined
@@ -576,7 +576,7 @@ test('adopting a goal suggestion creates one goal even across retries and a fail
 test('source invalidation hides generated cards even when memory refresh fails',async()=>{
  const f=await fixture();await f.host.close();let available=true
  const host=new PersonalAgentHost({...f.host.options,generateContext:candidates=>Promise.resolve({cards:candidates.slice(0,1).map(candidate=>({candidate_id:candidate.candidate_id,tab:candidate.tab,title:'Review design',body:'Suggested from a local document.',why:null,next:null,refs:candidate.refs.map(ref=>({entry_id:ref.entry_id,version:ref.version}))}))})})
- const file:ContextInput={kind:'file',id:'source:document',version:'v1',content:'TODO: review the product design notes.',source_id:'source',file_id:'document',root:'/project',rel_path:'design.md',role:'document',mtime_ms:1,priority:2}
+ const file:ContextInput={kind:'file',id:'source:document',version:'v1',content:'An idea: review the product design notes.',source_id:'source',file_id:'document',root:'/project',rel_path:'design.md',role:'document',mtime_ms:1,priority:2}
  host.setSources({list:()=>[],contextEntries:()=>available?[file]:[],command:()=>Promise.resolve({})})
  try{
   await host.open();await host.workbenchContext.refresh();assert.equal(host.snapshot().workbench_context.cards.length,1)
@@ -589,7 +589,7 @@ test('source invalidation hides generated cards even when memory refresh fails',
 test('purge retires main runtime and removes a selected feed turn while preserving unrelated user history',async()=>{
  const f=await fixture();let closed=0,erased=false
  Object.assign(f.host.options.memory()!,{purgeEntry:()=>{erased=true;f.entries.delete('plan');return Promise.resolve({status:'complete',operation_id:'purge-selected',removed_entries:1,removed_evidence:0,removed_entry_ids:['plan'],removed_evidence_ids:[],backup_cleanup:{status:'complete',unresolved:[]}})}})
- try{f.host.setConversationRuntime(()=>Promise.resolve({runTurn:text=>Promise.resolve({assistant:'Reply '+text}),close:()=>{closed++;return Promise.resolve()}}),()=>{ /* no transport */ });await f.host.submitConversationText('chat:main','Unrelated history');await f.host.waitConversation('chat:main');assert.equal(await f.host.admit(proposal(),await f.host.discoverySnapshot()),'admitted');const feed=f.host.snapshot().feed[0]!;await f.host.command({type:'personal.command',request_id:'selected-feed',method:'conversations.discuss',params:{text:'Use this material',references:[{kind:'feed',id:feed.id,updated_at:feed.updated_at}]}});await f.host.waitConversation('chat:main');assert.equal(f.host.conversationSnapshot().messages.length,4);await f.host.command({type:'personal.command',request_id:'purge-selected',method:'memory.purge',params:{id:'plan',expected_version:1}});assert.equal(erased,true);assert.equal(closed,1);assert.deepEqual(f.host.conversationSnapshot().messages.map(m=>m.text),['Unrelated history','Reply Unrelated history'])}finally{await f.close()}
+ try{f.host.setConversationRuntime(()=>Promise.resolve({runTurn:text=>Promise.resolve({assistant:'Reply '+text}),close:()=>{closed++;return Promise.resolve()}}),()=>{ /* no transport */ });await f.host.submitConversationText('chat:main','Unrelated history');await f.host.waitConversation('chat:main');assert.equal(await f.host.admit(proposal(),await f.host.discoverySnapshot()),'admitted');const feed=f.host.snapshot().feed[0]!;await f.host.command({type:'personal.command',request_id:'selected-feed',method:'conversations.discuss',params:{text:'Use this material',references:[{kind:'feed',id:feed.id,updated_at:feed.updated_at}]}});await f.host.waitConversation('chat:main');assert.equal(f.host.conversationSnapshot().messages.length,5,'the feed notification lands in the main transcript');await f.host.command({type:'personal.command',request_id:'purge-selected',method:'memory.purge',params:{id:'plan',expected_version:1}});assert.equal(erased,true);assert.equal(closed,1);assert.deepEqual(f.host.conversationSnapshot().messages.map(m=>m.text),['Unrelated history','Reply Unrelated history'])}finally{await f.close()}
 })
 
 test('turning the participant switch off removes the news interests guessed from that draft, but not confirmed ones',async()=>{
@@ -631,23 +631,17 @@ test('a failed cleanup of guessed news interests is retried on the next start, n
  }finally{await host.close();await f.close()}
 })
 
-test('a source todo suggestion is adopted explicitly without inventing a deadline, dedupes completed items, and keeps refs',async()=>{
+test('a stale todo card from an earlier build cannot be adopted into a todo',async()=>{
  const f=await fixture()
  try{
   const card={id:'todo-source',candidate_id:'todo-source',tab:'todos',title:'Review the draft',body:'A grounded suggestion',why:null,next:'Check acceptance criteria',refs:[{entry_id:'source:doc',version:'v1'}]}
   const context=f.host.workbenchContext as unknown as {snapshot:()=>unknown;dismiss:(id:string)=>Promise<void>};const snapshot=context.snapshot.bind(context)
   context.snapshot=()=>({...snapshot() as object,cards:[card]});context.dismiss=()=>Promise.resolve()
   const adopt=(id:string)=>f.host.command({type:'personal.command',request_id:id,method:'context.adopt',params:{id:card.id}}) as Promise<{ok:boolean;error?:string}>
-  assert.equal((await adopt('adopt')).ok,true)
-  const todo=f.host.life.snapshot().todos[0]!
-  assert.equal(todo.due,null);assert.equal(todo.note,'A grounded suggestion\n下一步：Check acceptance criteria')
-  assert.deepEqual((todo as unknown as {context_source:unknown}).context_source,{candidate_id:card.id,refs:card.refs})
-  await f.host.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,status:'done'},'done')
-  for(let n=0;n<260;n++)await f.host.life.mutate({op:'profile',about:String(n),expected_version:n},'evict'+n)
-  assert.equal((await adopt('again')).ok,true)
-  assert.equal(f.host.life.snapshot().todos.length,1);assert.equal(f.host.life.snapshot().todos[0]!.status,'done')
-  context.snapshot=()=>({...snapshot() as object,cards:[]})
-  assert.equal((await adopt('stale')).ok,false)
+  const result=await adopt('adopt');assert.equal(result.ok,false);assert.equal(result.error,'card_not_found')
+  assert.equal(f.host.life.snapshot().todos.length,0)
+  const legacy=await f.host.command({type:'personal.command',request_id:'from-context',method:'life.mutate',params:{op:'from_context',title:'x',note:'',source:{candidate_id:'x',refs:[]}}}) as {ok:boolean}
+  assert.equal(legacy.ok,false);assert.equal(f.host.life.snapshot().todos.length,0)
  }finally{await f.close()}
 })
 

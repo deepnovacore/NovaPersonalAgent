@@ -1021,7 +1021,7 @@ html { background: var(--page); }
 body {
   grid-template-columns: 208px minmax(0, 1fr);
   column-gap: 24px;
-  padding: 0 24px;
+  padding: 0 24px 104px;
   background: var(--page);
   font-size: 14px;
 }
@@ -1133,7 +1133,7 @@ footer {
 }
 
 @media (max-width: 640px) {
-  body { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
+  body { grid-template-columns: minmax(0, 1fr); padding: 0 14px 104px; }
   .setting-section,
   main > .setting-section:first-child { padding: 16px; }
   footer { padding: 12px 14px; }
@@ -1165,4 +1165,38 @@ footer {
 
 select{height:36px;min-height:36px;padding:0 36px 0 12px;border-radius:8px;line-height:1.4;background-color:var(--surface);text-overflow:ellipsis;box-shadow:0 1px 2px rgba(0,0,0,.025)}
 select option{color:var(--ink);background:var(--surface)}
+#category-diary{--nav-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3.5h11a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6zM6 3.5v17M10 8h5M10 12h5'/%3E%3C/svg%3E")}
 #category-skills{--nav-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linejoin='round'%3E%3Cpath d='M12 2l9 5v10l-9 5-9-5V7zM12 12l9-5M12 12v10M12 12L3 7'/%3E%3C/svg%3E")}
+
+.advanced-keys { margin: 10px 0 0; }
+.advanced-keys > summary { cursor: pointer; color: var(--ink-dim); font-size: 12px; padding: 6px 2px; }
+.custom-endpoint { margin: 4px 0 0; }
+
+/* Proactivity panel: the same card language as the connections page, inside the general category. */
+#proactivity-section .im-card { padding: 20px; margin: 16px 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+#proactivity-section .im-card p { line-height: 1.7; color: var(--ink-dim); }
+#proactivity-section .im-card button { margin: 6px 8px 6px 0; }
+#proactivity-section .im-field, #proactivity-section .personal-consent { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+#proactivity-section .im-field:has(input[role="switch"]) { justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); }
+#proactivity-section fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 18px 0; display: flex; flex-wrap: wrap; gap: 8px 16px; }
+#proactivity-section .cap-stepper { display: flex; align-items: center; gap: 8px; }
+#proactivity-section .cap-stepper input { width: 4.5em; text-align: center; }
+#proactivity-advanced { margin-top: 12px; }
+
+/* 日记与简报: one card per feature, switch rows instead of stacked centred labels. */
+#diary-section .im-card { margin: 0 0 14px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+#diary-section .im-card h3 { margin: 0 0 4px; font-size: 14px; font-weight: 620; }
+#diary-section .im-card > p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.6; color: var(--ink-dim); }
+#diary-section .brief-slot, #proactivity-section .brief-slot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+#diary-section .brief-toggle, #proactivity-section .brief-toggle { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 13px; cursor: pointer; }
+#diary-section .brief-days { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
+#diary-section .day-chip { position: relative; display: inline-flex; margin: 0; }
+#diary-section .day-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+#diary-section .day-chip span { min-width: 40px; padding: 6px 10px; text-align: center; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--ink-dim); }
+#diary-section .day-chip input:checked + span { border-color: var(--accent); background: var(--accent-wash); color: var(--accent); }
+#diary-section .day-chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+#diary-section .brief-advanced { margin: 0 0 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+#diary-section .brief-advanced summary { cursor: pointer; font-size: 13px; color: var(--ink-dim); }
+#diary-section .brief-quiet { display: flex; align-items: center; gap: 10px; padding: 10px 0 2px; font-size: 13px; }
+#diary-section .im-card button { margin: 4px 0 0; }
+#diary-error { margin: 8px 0 0; color: var(--ink-dim); }

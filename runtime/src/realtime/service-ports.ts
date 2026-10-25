@@ -1,4 +1,5 @@
 import type {SpaceMobilePort} from '../space-host/mobile-tools.js'
+import type {RealtimeCapabilities} from './capabilities.js'
 import type {ToolAcceptance,ToolCallReady} from './bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import type {IntakeSession} from '../executors/coding/intake.js'
@@ -158,6 +159,7 @@ export type ProviderReconnectReason =
 
 /** The provider surface the service uses directly: three calls, everything else via the session. */
 export interface ServiceProvider {
+  readonly capabilities?: RealtimeCapabilities | undefined
   setLanguage?(language?: PromptLanguage): Promise<void>
 
   transcribeDraft?(pcm: Uint8Array, signal: AbortSignal): Promise<string>

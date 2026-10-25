@@ -28,6 +28,14 @@ test('running Build switch waits for user decision, applies stop receipt and lea
  await c.select('build');assert.equal(asked,2,'paused sessions switch without another prompt')
 })
 
+test('starting a conversation from a card never stops a running Build without confirmation',async()=>{
+ let approve=false,asked=0
+ const {c,sent}=fixture(async()=>{asked++;return approve}),request={title:'卡片',text:'聊聊',references:[{kind:'goal',id:'g',version:1}]}
+ await assert.rejects(c.startConversationWithReference(request),/切换已取消/);assert.equal(asked,1);assert.deepEqual(sent,[],'cancelling sends nothing at all')
+ approve=true;await c.startConversationWithReference(request)
+ assert.deepEqual(sent.map(frame=>frame.method),['build.stop','conversations.start']);assert.deepEqual(sent[1].params,request)
+})
+
 test('switching from running Build to voice stops first and routes microphone ownership to Chat',async()=>{
  const {c,sent}=fixture(async()=>true)
  // Stop just before capture: this test checks routing without claiming microphone hardware coverage.
@@ -41,7 +49,7 @@ test('local approval setting defaults to ask and is independent of executor appr
  assert.equal(normalizeSettings({}).localToolApproval,'ask')
  assert.equal(normalizeSettings({localToolApproval:'invalid'}).localToolApproval,'ask')
  const settings=normalizeSettings({localToolApproval:'never',codexApprovalMode:'ask'})
- assert.equal(settings.localToolApproval,'never');assert.equal(settings.codexApprovalMode,'ask');assert.equal(backendSettings(settings).localToolApproval,'never')
+ assert.equal(settings.localToolApproval,'never');assert.equal(settings.codexApprovalMode,'ask');assert.equal('localToolApproval' in backendSettings(settings),false,'the approval mode switches live and never forces a restart')
 })
 
 test('local Build controls stay hidden when the host reports that the platform is unsupported',async()=>{
@@ -133,7 +141,7 @@ test('Build status bar keeps state, project path and restart reason as separate 
   addEventListener(name,callback){this.listeners[name]=callback}
   focus(){}
  }
- const project='/Volumes/sqxh-junjie/nova-builds/build-cu-01a15eb3/demo'
+ const project='/Volumes/External/nova-builds/build-cu-example/demo'
  const item={id:'build',kind:'build',build:{status:'paused',project,reason:'restart_requires_resume'}}
  const c={connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})}
  const parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}})

@@ -32,3 +32,17 @@ The owner also explicitly approved the following five UI regression screenshots 
 | `clients/flutter/test/goldens/chat-home.png` | `83560c8d249fb7102d43690edc059f0f3322eab017e20174c30124127cea14fc` |
 | `clients/flutter/test/goldens/chat-conversation.png` | `2067fa863ecdf3910e979c3b8a353eda7a6876a113ba1fe65c44a8ebac212f0f` |
 | `clients/flutter/test/goldens/workbench-nova.png` | `e2d50403d7c67fa45bdf6ba1ddf37a704cf3ff1166416b31f7cf19579c65103e` |
+
+## Generic UI screenshot review (2026-10-24)
+
+For the requested v1.0.0dev integration push, the following widget-test screenshots were visually reviewed. They contain generic controls and synthetic test text, with no character media or organization data. This is source screenshot review, not physical-device acceptance. The approved character media above remain byte-for-byte unchanged.
+
+| File | SHA-256 |
+| --- | --- |
+| `clients/flutter/test/goldens/chat-conversation.png` | `d59353f189a44f7c7daaf68e44e89dac6071f7454b6339d3e876fb5c5907510b` |
+| `clients/flutter/test/goldens/chat-home-empty.png` | `ae2c31b8a509e39411100d5fad7f2c51b80aad9751413919168c0fa9c816560e` |
+| `clients/flutter/test/goldens/chat-home.png` | `6bb0b56a194968bb551829fa69a7a43287e5d515dd692f0b305776242bf79457` |
+| `clients/flutter/test/goldens/chat-settings.png` | `a01f14158740e3d105940d5d93b682b18d6f184ae365d8b48fb003e43da92d0b` |
+| `clients/flutter/test/goldens/chat-task-draft.png` | `4d348ce713b62157f61272c67a65263c31252b5e875d8fdee4bcb01a88271f45` |
+| `clients/flutter/test/goldens/chat-tasks.png` | `b23eff5ae2da3f6c97f00b11caffcfe661c0f5d6c8807f9c35460145838c340e` |
+| `clients/flutter/test/goldens/workbench-nova.png` | `ae2c31b8a509e39411100d5fad7f2c51b80aad9751413919168c0fa9c816560e` |

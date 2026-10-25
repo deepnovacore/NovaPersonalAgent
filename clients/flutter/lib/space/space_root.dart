@@ -1078,7 +1078,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
       );
     }
     final state = c.state;
-    final notice = tab < 3 ? _notice(state) : null;
+    final notice = tab < 2 ? _notice(state) : null;
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 64,

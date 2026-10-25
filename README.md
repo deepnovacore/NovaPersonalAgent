@@ -52,7 +52,7 @@ https://github.com/user-attachments/assets/89a52d5a-b8c8-4587-b0c9-e082cf27fae9
 
 Your context informs the conversation; the front brain coordinates work with the back brain. Nova checks results and speaks when it matters.
 
-- **Your proactive personal agent.** Todos, Ideas, Goals, Feeds and Profile turn what Nova knows about you into suggestions you can act on.
+- **Your proactive personal agent.** Timeline, Ideas, Goals, Feeds and Profile turn what Nova knows about you into suggestions you can act on.
 - **Wide and unstructured context.** Bring folders, mail, calendars, conversations and documents; keep personal memory traceable, editable and removable.
 - **Always-on voice assistant with dual brains.** The front brain stays in conversation while the back brain handles long-running work.
 - **A thin frontend task coordinator.** Clarify, authorize and delegate to a coding agent; check evidence against your criteria, take over and hand control back.
@@ -72,8 +72,8 @@ Connect the sources you choose: folders, mail, calendars and conversations. Pers
   <tr>
     <td width="50%" valign="top">
       <h3>Your personal workbench</h3>
-      <p>Turn scattered context into source-backed recaps and suggested todos. Choose what to do next, then continue with Nova.</p>
-      <a href="assets/features/workbench-original.en.png"><img src="assets/features/workbench-original.en.png" alt="Nova workbench with project recaps, suggested todos and conversation" width="100%"></a>
+      <p>Turn scattered context into source-backed suggestions for ideas and goals. Choose what to do next, then continue with Nova.</p>
+      <a href="assets/features/workbench-original.en.png"><img src="assets/features/workbench-original.en.png" alt="Nova workbench with source-backed suggestions and conversation" width="100%"></a>
     </td>
     <td width="50%" valign="top">
       <h3>Profile and personal memory</h3>
@@ -84,7 +84,7 @@ Connect the sources you choose: folders, mail, calendars and conversations. Pers
   <tr>
     <td width="50%" valign="top">
       <h3>Ideas and goals</h3>
-      <p>Keep an idea, choose a direction, and turn it into a todo when you are ready. Suggestions wait for you to adopt them.</p>
+      <p>Keep an idea, choose a direction, and turn it into a goal when you are ready. Suggestions wait for you to adopt them.</p>
       <a href="assets/features/ideas-goals-original.en.png"><img src="assets/features/ideas-goals-original.en.png" alt="Nova Ideas and Goals with actual suggestions and adoption controls" width="100%"></a>
     </td>
     <td width="50%" valign="top">

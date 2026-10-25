@@ -18,7 +18,7 @@ test('legacy builds remain readable and computer state is strict',()=>{
 })
 test('computer switch requires local selected Build and fails closed without permissions/configuration',{timeout:10000},async t=>{
  const platform=Object.getOwnPropertyDescriptor(process,'platform')!;Object.defineProperty(process,'platform',{value:'darwin'});t.after(()=>Object.defineProperty(process,'platform',platform))
- const env=process.env;process.env={...env,COMPUTER_DISPLAY_ID:'1',COMPUTER_BASE_URL:'https://example.com/v1',COMPUTER_MODEL:'test',COMPUTER_MODEL_FAMILY:'qwen3-vl',COMPUTER_API_KEY:'test',COMPUTER_MAC_WINDOW_PID:'',COMPUTER_MAC_WINDOW_ID:''};t.after(()=>{process.env=env})
+ const env=process.env;process.env={...env,COMPUTER_DISPLAY_ID:'1',EXECUTOR_BASE_URL:'https://example.com/v1',EXECUTOR_MODEL:'test',EXECUTOR_MODEL_FAMILY:'qwen3-vl',EXECUTOR_API_KEY:'test',COMPUTER_MAC_WINDOW_PID:'',COMPUTER_MAC_WINDOW_ID:''};t.after(()=>{process.env=env})
  const root=await mkdtemp(join(await realpath(tmpdir()),'computer-host-')),path=join(root,'state.json'),state=initialState()
  let ownedHost:PersonalAgentHost|undefined=undefined
  t.after(async()=>{try{await ownedHost?.close()}finally{await rm(root,{recursive:true,force:true})}})
@@ -36,7 +36,7 @@ test('computer switch requires local selected Build and fails closed without per
  assert.equal(result.ok,true);assert.equal(result.data.ok,false);assert.equal(result.data.state.enabled,false)
  assert.deepEqual(result.data.missing,['screen_permission','accessibility_permission','vision_model'])
  const delegated=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted'}})
- assert.equal(delegated.data.ok,true);assert.equal(delegated.data.state.enabled,true);assert.equal(delegated.data.state.direct,false);assert.deepEqual(delegated.data.missing,['vision_model'])
+ assert.equal(delegated.data.ok,false);assert.equal(delegated.data.state.enabled,false);assert.equal(delegated.data.state.direct,false);assert.deepEqual(delegated.data.missing,['vision_model'])
  conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],cascade_llm_provider:'qwen',cascade_llm_model:'qwen3-vl-plus',dashscope_api_key:'test'})})
  const direct=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted'}})
  assert.equal(direct.data.state.direct,true);assert.deepEqual(direct.data.missing,[])
@@ -64,7 +64,7 @@ test('computer switch requires local selected Build and fails closed without per
  conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],cascade_llm_provider:'self-hosted',cascade_llm_model:null})})
  assert.equal(host.computerUseState(item.id).direct,false)
 
- Object.defineProperty(process,'platform',{value:'linux'});process.env.COMPUTER_BASE_URL='invalid'
+ Object.defineProperty(process,'platform',{value:'linux'});process.env.EXECUTOR_BASE_URL='invalid'
  const unsupported=await command('build.computer_use',{conversation_id:item.id,enabled:true})
  assert.deepEqual(unsupported.data.missing,['platform','configuration','vision_model']);assert.equal(unsupported.data.ok,false)
 })

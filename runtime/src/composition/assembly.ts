@@ -1,5 +1,7 @@
 import {createWorkbenchGenerator} from '../model/workbench-writer.js'
 import {observeOperation} from '../usage/context.js'
+import {proposeGoals,type GoalProposerInput} from '../model/goal-writer.js'
+import {writeGoalCheckins,writeGoalProgress,type GoalCheckinInput,type GoalProgressUpdateInput} from '../model/goal-checkin-writer.js'
 import type {UsageReporter} from '../realtime/usage.js'
 import {GatewayProactivity} from '../model/proactivity.js'
 import {GatewayTaskVerifier} from '../model/task-verifier.js'
@@ -7,6 +9,7 @@ import {GatewayPersonalWriter} from '../model/personal-writer.js'
 import {createUnderstandingPipeline} from '../understanding/pipeline.js'
 import {createJevJudge} from '../understanding/jev.js'
 import {createJevNewsRanker} from '../news/jev-ranking.js'
+import {createNewsRanker} from '../news/ranking.js'
 import type {HostOptions} from '../personal-agent/host.js'
 import {CodingProgressNarrationState} from '../realtime/coding-progress-narration.js'
 import type {BlackboardSessionOptions} from '../memory/blackboard-session.js'
@@ -34,7 +37,7 @@ import { RealClock, type Clock } from '../core/clock.js'
 import { capabilitiesFromSettings, resolveModelApiKey, resolveProactivity, resolveWatchModelConnection, type Settings } from '../config/config.js'
 import { MonotonicIdFactory, type IdFactory } from '../core/ids.js'
 import { GatewayCompressor } from '../model/model-adapters.js'
-import { OpenAIModelGateway, type MetricsSink, type ModelGateway } from '../model/model-gateway.js'
+import { unconfiguredModelGateway, OpenAIModelGateway, type MetricsSink, type ModelGateway } from '../model/model-gateway.js'
 import { classifyProactiveSelection, runProactiveSelection } from '../core/calls.js'
 import {
   VisionAgentController,
@@ -118,7 +121,7 @@ export interface Assembly {
     profileParticipantMessages?: boolean
     models: Required<Pick<HostOptions,
       'generateProfile' | 'generateDigests' | 'generateContext' | 'generateWorkbench' | 'generateTimeline' | 'rankNews' | 'understand'
-      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover'>>
+      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover' | 'proposeGoals' | 'prepareGoalCheckin' | 'updateGoalProgress'>> & Pick<HostOptions, 'rankNewsFallback'>
     taskVerifier: Pick<GatewayTaskVerifier, 'evaluateTask'>
   }
 
@@ -234,13 +237,14 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
 
   // Preserve Python's validation order: the model credential is checked before
   // Tavily when neither production transport is injected.
-  const gateway = options.gateway ?? new OpenAIModelGateway({
+  const nativeWithoutSupport = settings.pipeline_mode === 'integrated' && ['minicpm-o','personaplex'].includes(settings.integrated_provider) && !(settings.model_api_key ?? '').trim()
+  const gateway = options.gateway ?? (nativeWithoutSupport ? unconfiguredModelGateway : new OpenAIModelGateway({
     ...(options.onUsage?{onUsage:options.onUsage}:{}),
     baseUrl: settings.model_base_url,
     apiKey: requireApiKey(settings),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
-  })
+  }))
   const searchTransport: SearchTransport | undefined = !capabilities.modules.search.enabled ? undefined : options.searchTransport
     ?? (capabilities.modules.search.provider === 'mcp'
       ? new McpSearchTransport(capabilities.modules.search.mcp!)
@@ -411,11 +415,16 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       generateWorkbench: observeOperation('context',createWorkbenchGenerator(gateway,settings.support_model)),
       generateTimeline:observeOperation('timeline',writer.generateTimeline),
       rankNews: observeOperation('news',createJevNewsRanker(jev)),
+      // Only without an OpenRouter key; the host decides per ranking whether the user still allows it.
+      ...(jev.apiKey.trim()?{}:{rankNewsFallback: observeOperation('news',createNewsRanker(gateway,settings.support_model))}),
       understand: observeOperation('understanding',createUnderstandingPipeline({gateway,model:settings.support_model,judge:createJevJudge(jev)})),
       prepareBrief: observeOperation('digest',writer.prepareBrief.bind(writer)),
       prepareProposal: observeOperation('proactivity',writer.prepareProposal.bind(writer)),
       summarizeMemory: observeOperation('memory',writer.summarizeMemory.bind(writer)),
       discover: observeOperation('proactivity',proactive.discover.bind(proactive)),
+      proposeGoals: observeOperation('proactivity',(input:GoalProposerInput,signal:AbortSignal)=>proposeGoals(gateway,settings.support_model,input,signal)),
+      prepareGoalCheckin: observeOperation('proactivity',(input:GoalCheckinInput,signal:AbortSignal)=>writeGoalCheckins(gateway,settings.support_model,input,signal)),
+      updateGoalProgress: observeOperation('proactivity',(input:GoalProgressUpdateInput,signal:AbortSignal)=>writeGoalProgress(gateway,settings.support_model,input,signal)),
     }}}),
     capabilities,
     capabilityStatus: capabilityStatus(capabilities, tools.schemas.length),

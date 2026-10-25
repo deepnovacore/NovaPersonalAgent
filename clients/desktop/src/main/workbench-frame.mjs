@@ -5,7 +5,7 @@ const sameBounds=(a,b)=>!!a&&!!b&&a.x===b.x&&a.y===b.y&&a.width===b.width&&a.hei
  * A window counts as maximized only while its bounds still equal what this toggle set, so a manual move or
  * resize afterwards makes the next toggle maximize again instead of jumping back to a stale rectangle.
  */
-export function createWorkbenchFrame({getBounds,setBounds,getWorkArea,platform=process.platform}){
+export function createWorkbenchFrame({getBounds,setBounds,getWorkArea,platform=process.platform,onChange=()=>{}}){
  let restoreBounds=null,maximizedBounds=null
  // A display change can make the OS re-fit a maximized window; one that still fills its work area is still maximized.
  const maximized=()=>{
@@ -16,12 +16,13 @@ export function createWorkbenchFrame({getBounds,setBounds,getWorkArea,platform=p
  return {
   get maximized(){return maximized()},
   toggleMaximize(){
-   if(maximized()){const back=restoreBounds;restoreBounds=null;maximizedBounds=null;setBounds(back);return false}
+   if(maximized()){const back=restoreBounds;restoreBounds=null;maximizedBounds=null;setBounds(back);onChange(false);return false}
    const current=getBounds(),area=getWorkArea(current)
    restoreBounds=current;maximizedBounds={x:area.x,y:area.y,width:area.width,height:area.height}
    setBounds(maximizedBounds)
    // Windows can round the requested work area outwards at fractional DPI.
    if(platform==='win32')maximizedBounds=getBounds()
+   onChange(true)
    return true
   },
   /** The rectangle the workbench should come back to: the pre-maximize one while maximized. */

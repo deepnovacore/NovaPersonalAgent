@@ -208,10 +208,10 @@ test('Nova stays visible while all contextual tabs live in the right topbar',asy
  const calls=[];mountPersonalView({send:frame=>(calls.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}})
  const pane=body.querySelectorAll('aside').find(node=>node.id==='chat-pane'),parent=pane.parentElement
  assert.equal(body.querySelectorAll('select').find(node=>node['aria-label']==='显示模式').disabled,false)
- for(const page of ['todos','profile','timeline']){await body.querySelectorAll('button').find(node=>node.dataset.page===page).listeners.click();assert.equal(pane.hidden,false);assert.equal(pane.parentElement,parent)}
+ for(const page of ['goals','profile','timeline']){await body.querySelectorAll('button').find(node=>node.dataset.page===page).listeners.click();assert.equal(pane.hidden,false);assert.equal(pane.parentElement,parent)}
  assert.equal(body.querySelectorAll('button').some(node=>node.className==='chat-toggle'||node.className==='chat-close'),false)
  const tabs=body.querySelectorAll('button').filter(node=>node.className==='workspace-tab').map(node=>node.children.find(c=>c.className==='workspace-tab-label')?.textContent)
- assert.deepEqual(tabs,['时间线','待办','想法','目标','资讯','任务','个人资料']);assert.equal(calls.length,0)
+ assert.deepEqual(tabs,['时间线','想法','目标','资讯','任务','个人资料']);assert.equal(calls.length,0)
 })
 
 test('guide progress follows actual application and OAuth state, with an explicit waiting handoff',()=>{

@@ -1,3 +1,4 @@
+import {probeNativeVoice} from './native-voice-service.mjs'
 import {ChatGptAccounts} from './chatgpt-auth.mjs'
 import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
 import {isEndpointSecret} from '../renderer/compatible-providers.mjs'
@@ -14,6 +15,7 @@ import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {codingBackendStatus} from './coding-settings.mjs'
+import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
 import {FeishuConnector, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
@@ -212,6 +214,8 @@ function endVoiceprintRecording() {
 let launchGeneration = 0
 let runtimeCapabilities = null
 let capabilityEditorCache = null
+// Listed from disk only when the settings panel asks (nova:settings:get); settingsView() itself never reads files.
+let skillsCache = []
 const feishuSetupOwner = createFeishuSetupOwner({Connector: FeishuConnector})
 let backendControl = null
 let settingsApplyStatus = 'idle'
@@ -392,6 +396,7 @@ function settingsView() {
     ...publicSettings(currentSettings),
     codexStatus,
     codingBackends: codingBackendStatus(currentSettings, process.env),
+    skills: skillsCache,
     frontendUsage: frontendUsage.snapshot(),
     visionModels: VISION_MODELS,
     backendStatus: backendStatus.state,
@@ -1326,19 +1331,41 @@ async function startSelectedCamera(camera, smokeChannel) {
 
   let personalCollapsed = false
   let personalBounds = null
+  let wantedMaximized = null, savesInFlight = 0, autoFilling = false
   let initialOrbBounds = mainWindow.getBounds()
   const workbenchFrame = createWorkbenchFrame({
     getBounds: () => mainWindow.getBounds(),
     setBounds: bounds => mainWindow.setBounds(bounds),
     getWorkArea: bounds => screen.getDisplayMatching(bounds).workArea,
+    onChange: value => {
+      publishMaximized()
+      // The automatic fill on expand is not a user choice and must not touch the stored preference.
+      if (autoFilling || !settingsReady) return
+      // currentSettings only advances when a write commits, so deduplicating against it would drop a choice made while an earlier save is still in flight.
+      if (savesInFlight === 0 && currentSettings.workbenchMaximized === value) return
+      wantedMaximized = value
+      savesInFlight++
+      settingsWriter({workbenchMaximized: value}, undefined, {preserveSecrets: true}).catch(error => {
+        console.error(`[desktop-diagnostic] workbench_maximized_save_failure type=${error.name}`)
+      }).finally(() => { if (--savesInFlight === 0) wantedMaximized = null })
+    },
   })
+  let lastMaximized = null
+  const publishMaximized = () => {
+    const value = workbenchFrame.maximized
+    if (value === lastMaximized) return
+    lastMaximized = value
+    sendToOrb('nova:personal:maximized', value)
+  }
+  mainWindow.on?.('resize', publishMaximized)
   const setPersonalCollapsed = value => {
     if (value === personalCollapsed && personalBounds !== null) return
     const wasVisible = windowsPresentation && mainWindow.isVisible()
     if (value) {
       personalBounds = workbenchFrame.naturalBounds()
-      if (windowsPresentation && workbenchFrame.maximized) mainWindow.setBounds(personalBounds)
-      workbenchFrame.forget()
+      // A maximized Windows shell stays maximized while hidden: its restore rectangle is kept as the stable
+      // baseline, because writing the rounded DIP readback back would grow it by a pixel on every cycle at fractional DPI.
+      if (!(windowsPresentation && workbenchFrame.maximized)) workbenchFrame.forget()
       if (windowsPresentation) mainWindow = windowsPresentation.select(true)
       personalCollapsed = true
       mainWindow.setResizable(false)
@@ -1364,7 +1391,13 @@ async function startSelectedCamera(camera, smokeChannel) {
       // DIP readback on every mode switch would gradually grow it at 175% DPI.
       if (!windowsPresentation || personalBounds === null) mainWindow.setBounds(personalBounds ?? {x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2),width,height})
       personalBounds = mainWindow.getBounds()
+      const wantMaximized = (wantedMaximized ?? currentSettings?.workbenchMaximized) !== false
+      if (wantMaximized !== workbenchFrame.maximized) {
+        autoFilling = true
+        try { workbenchFrame.toggleMaximize() } finally { autoFilling = false }
+      }
     }
+    publishMaximized()
     sendToOrb('nova:personal:collapsed', value)
     if (windowsPresentation && wasVisible) mainWindow.showInactive()
   }
@@ -1398,6 +1431,14 @@ async function startSelectedCamera(camera, smokeChannel) {
     if (event.sender !== mainWindow.webContents || !Number.isSafeInteger(value) || value < 0 || value > 1000000) throw new Error('unread request rejected')
     trayUnread = value
     updateTrayUnread(tray, backendStatus.state === 'connected' ? value : 0)
+  })
+  // The live switch lives in the runtime; this only reads and persists the value the next backend starts with.
+  ipcMain.handle('nova:personal:local-tool-approval', async (event, mode) => {
+    if (event.sender !== mainWindow.webContents) throw new Error('approval request rejected')
+    if (mode === undefined) return currentSettings.localToolApproval
+    if (mode !== 'ask' && mode !== 'never') throw new Error('invalid approval mode')
+    if (currentSettings.localToolApproval !== mode) await accessCredentials(() => settingsWriter({localToolApproval: mode}, undefined, {preserveSecrets: true}))
+    return currentSettings.localToolApproval
   })
   ipcMain.handle('nova:personal:wake', event => {
     if (event.sender !== mainWindow.webContents) throw new Error('wake request rejected')
@@ -1664,7 +1705,7 @@ async function startSelectedCamera(camera, smokeChannel) {
         const settings = currentSettings
         return {secrets: decryptSecretsForSpawn(settings, secretCodec),uploadUrl: settings.voiceprintUploadUrl}
       })
-      if (!(secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey) || !uploadUrl) return {error:'voiceprint_configuration_required'}
+      if (!secrets.doubaoBigmodelApiKey || !uploadUrl) return {error:'voiceprint_configuration_required'}
       if (!await voiceprintHealth(uploadUrl, (url, init) => net.fetch(url, init))) return {error:'voiceprint_unhealthy'}
       if (voiceprintRecording || voiceprintBusy || settingsWindow?.webContents !== event.sender) return {error:'voiceprint_busy'}
       voiceprintRecording = true
@@ -1686,7 +1727,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     const fetcher = (url, init) => net.fetch(url, init)
     const speechKey = settings => {
       const secrets = decryptSecretsForSpawn(settings, secretCodec)
-      return secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey
+      return secrets.doubaoBigmodelApiKey
     }
     try {
       // Main owns the upload target: only the saved URL receives audio.
@@ -1729,12 +1770,18 @@ async function startSelectedCamera(camera, smokeChannel) {
       return {error:known.includes(error.message) ? error.message : 'voiceprint_request_failed'}
     } finally {voiceprintBusy = false; endVoiceprintRecording()}
   })
+  ipcMain.handle('nova:settings:native-voice', async (event, provider) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents) throw Error('settings request rejected')
+    const snapshot=await accessCredentials(()=>({settings:currentSettings,secrets:decryptSecretsForSpawn(currentSettings,secretCodec)}))
+    return probeNativeVoice(provider,snapshot.settings,snapshot.secrets)
+  })
   ipcMain.handle('nova:settings:get', async event => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
       throw new Error('settings request rejected')
     }
     await refreshManagedWorkspaceCapabilities()
     await refreshSettingsCapabilities()
+    ensureBuiltInSkills();skillsCache = listSkills()
     // A cold open cannot be told which category to show by a push: the panel
     // subscribes only after its module evaluates, and this reply is the first
     // thing it is guaranteed to receive. Consumed once so a later plain open

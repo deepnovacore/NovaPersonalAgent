@@ -1,7 +1,6 @@
 import {Authority, type Bindings, type Clock, type DispatchRequest, type Fence} from './authority.js'
 import {advanceAttempt} from './attempt.js'
 import {recordReceipt, type Receipt, type RequestIdentity} from './ownership.js'
-import {merge, type TodoState, type TodoVersion} from './todo-sync.js'
 import type {DeviceLedger, DeviceState} from './ledger.js'
 import type {StopRevoker} from './port.js'
 
@@ -75,14 +74,5 @@ export class DeviceGateway implements StopRevoker {
   }
   bumpLifecycleGeneration(): Promise<number> {
     return this.change((_state, authority) => authority.bumpLifecycleGeneration())
-  }
-  mergeTodo(local: TodoState, incoming: TodoVersion): Promise<TodoState> {
-    return this.change(state => {
-      const index = state.todos.findIndex(todo => todo.id === local.id)
-      const merged = merge(index < 0 ? local : state.todos[index]!, incoming)
-      if (index < 0) state.todos.push(merged)
-      else state.todos[index] = merged
-      return merged
-    })
   }
 }

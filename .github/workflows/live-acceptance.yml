@@ -40,7 +40,6 @@ jobs:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           ARK_API_KEY: ${{ secrets.ARK_API_KEY }}
           DOUBAO_BIGMODEL_API_KEY: ${{ secrets.DOUBAO_BIGMODEL_API_KEY }}
-          DOUBAO_ASR_API_KEY: ${{ secrets.DOUBAO_ASR_API_KEY }}
         run: |
           if [ -z "$CASCADE_LLM_MODEL" ]; then unset CASCADE_LLM_MODEL; fi
           node runtime/scripts/live-smoke.mjs --target "$LIVE_TARGET" --repeat "$LIVE_REPEAT" --output artifacts/live.json

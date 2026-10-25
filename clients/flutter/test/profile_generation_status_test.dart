@@ -6,6 +6,42 @@ import 'package:nova_mobile/ui/profile_generation_status.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  testWidgets('invalid timeline explains validation failure without retrying', (
+    tester,
+  ) async {
+    var calls = 0;
+    final c = ProfileGenerationCoordinator(
+      persistence: MemoryLifePersistence(),
+      autoSchedule: false,
+      inspect: () async => const ProfileGenerationSnapshot(
+        scope: 's',
+        complete: false,
+        hasResult: false,
+        covered: 0,
+        total: 10,
+      ),
+      generate:
+          ({required savedObservationsOnly, required maxNewBatches}) async {
+            calls++;
+            throw 'profile_timeline_invalid';
+          },
+      cancel: () {},
+      failureCode: (e) => '$e',
+    );
+    await c.start();
+    await c.poll();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: ProfileGenerationStatus(generation: c)),
+      ),
+    );
+    expect(find.text('这次近况未通过校验'), findsOneWidget);
+    expect(find.text('生成内容的格式或原文引用不符合要求，已停止自动重试。已有内容会保留。'), findsOneWidget);
+    await c.poll();
+    expect(calls, 1);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
   testWidgets(
     'empty working state is truthful and budget block has no retry action',
     (tester) async {

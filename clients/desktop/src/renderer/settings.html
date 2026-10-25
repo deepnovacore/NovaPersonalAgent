@@ -21,6 +21,7 @@
     </header>
     <nav class="settings-nav" id="settings-nav" aria-label="设置分类">
       <button type="button" class="nav-item" id="category-general" data-category="general" aria-current="true">通用</button>
+      <button type="button" class="nav-item" id="category-diary" data-category="diary" aria-current="false" tabindex="-1">日记与简报</button>
       <button type="button" class="nav-item" id="category-themes" data-category="themes" aria-current="false" tabindex="-1">主题</button>
       <button type="button" class="nav-item" id="category-usage" data-category="usage" aria-current="false" tabindex="-1">用量</button>
       <button type="button" class="nav-item" id="category-pipeline" data-category="pipeline" aria-current="false" tabindex="-1">语音管线</button>
@@ -34,13 +35,12 @@
       <button type="button" class="nav-item" id="category-codex" data-category="codex" aria-current="false" tabindex="-1">编程</button>
     </nav>
     <main>
-      <section class="setting-section" id="assistant-identity-section"><h2>你的助手</h2><div id="assistant-identity-panel"></div></section>
       <section class="setting-section" id="desktop-permissions-section"><h2>电脑操作与系统权限</h2><div id="desktop-permissions-panel"></div><details class="computer-configuration"><summary>高级配置</summary><p>当前需要在启动环境中选择 computer 执行器，并配置 GUI 模型和目标显示器。整屏模式仅支持一个显示器。</p><pre>EXECUTORS=computer,codex
 COMPUTER_DISPLAY_ID=0
-COMPUTER_BASE_URL=你的 GUI 模型地址
-COMPUTER_MODEL=模型名称
-COMPUTER_MODEL_FAMILY=qwen3-vl
-COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 名称；系统没有 macOS 的辅助功能授权开关。修改启动配置后重启 Nova。</p></details></section>
+EXECUTOR_BASE_URL=你的 GUI 模型地址
+EXECUTOR_MODEL=模型名称
+EXECUTOR_MODEL_FAMILY=qwen3-vl
+EXECUTOR_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 名称；系统没有 macOS 的辅助功能授权开关。修改启动配置后重启 Nova。</p></details></section>
       <section class="setting-section" id="visor-section">
         <h2>Nova Visor · 桌面驾驶舱</h2>
         <p class="hint">在桌面上叠加一层半透明的 Nova 状态面板。</p>
@@ -183,15 +183,6 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           YOLO 已选中：保存并重启后将关闭沙箱和审批，Coding 执行器可访问主机文件与网络。
         </p>
       </section>
-      <section class="setting-section" id="local-tool-approval-section">
-        <h2>本地 Build 工具</h2>
-        <label for="localToolApproval">本地工具确认</label>
-        <select id="localToolApproval">
-          <option value="ask">写入和命令逐次确认</option>
-          <option value="never">无需确认</option>
-        </select>
-        <p class="hint">只影响工作台本地 Build；读取直接执行。保存并重启后生效。</p>
-      </section>
       <section class="setting-section" id="intent-section">
         <h2>意图理解</h2>
         <div class="field">
@@ -272,11 +263,21 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             <option value="continuous" title="持续转述新的编程进展，等待你说完后播报；会增加语音用量。">连续转述</option>
           </select>
         </div>
-        <div class="field interval-field">
-          <label for="heartbeat" title="后台编程进度播报的最小间隔，避免频繁打断对话。">编程执行器播报间隔</label>
-          <input type="range" id="heartbeat" min="15" max="120" step="1" value="30">
-          <output id="heartbeat-value" for="heartbeat">30 秒</output>
-        </div>
+        <div id="proactivity-panel"></div>
+        <p id="proactivity-error" role="status" aria-live="polite"></p>
+        <details id="proactivity-advanced">
+          <summary>高级</summary>
+          <div class="field interval-field">
+            <label for="heartbeat" title="后台编程进度播报的最小间隔，避免频繁打断对话。">编程执行器播报间隔</label>
+            <input type="range" id="heartbeat" min="15" max="120" step="1" value="30">
+            <output id="heartbeat-value" for="heartbeat">30 秒</output>
+          </div>
+        </details>
+      </section>
+      <section class="setting-section" id="diary-section">
+        <h2>日记与简报</h2>
+        <div id="diary-panel"></div>
+        <p id="diary-error" role="status" aria-live="polite"></p>
       </section>
       <section id="pipeline" class="setting-section">
         <h2>语音管线</h2>
@@ -298,12 +299,26 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
           </label>
         </fieldset>
         <section id="integrated-pipeline">
+          <div id="native-minicpm-o" hidden>
+            <p class="hint">实验性纯语音对话：不支持工具调用、文字输入或历史恢复；其他文字会话仍可使用工具 agent。</p>
+            <label for="minicpmRealtimeUrl">MiniCPM-o 服务地址</label><input id="minicpmRealtimeUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false">
+            <div class="secret" data-key="minicpmRealtimeApiKey"><label for="minicpmRealtimeApiKey">服务密钥（可选）</label><span class="badge" id="badge-minicpmRealtimeApiKey">未设置</span><span class="key-usage" id="usage-minicpmRealtimeApiKey"></span><input type="password" id="minicpmRealtimeApiKey" autocomplete="off" spellcheck="false"><button type="button" class="clear" data-key="minicpmRealtimeApiKey">清除</button></div>
+            <button type="button" id="probe-minicpm-o">检查已保存的服务配置</button><span id="probe-status-minicpm-o" role="status"></span>
+          </div>
+          <div id="native-personaplex" hidden>
+            <p class="hint">实验性纯语音对话：不支持工具调用、文字输入或历史恢复；其他文字会话仍可使用工具 agent。</p>
+            <label for="personaplexRealtimeUrl">PersonaPlex 服务地址</label><input id="personaplexRealtimeUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false">
+            <div class="secret" data-key="personaplexRealtimeApiKey"><label for="personaplexRealtimeApiKey">服务密钥（可选）</label><span class="badge" id="badge-personaplexRealtimeApiKey">未设置</span><span class="key-usage" id="usage-personaplexRealtimeApiKey"></span><input type="password" id="personaplexRealtimeApiKey" autocomplete="off" spellcheck="false"><button type="button" class="clear" data-key="personaplexRealtimeApiKey">清除</button></div>
+            <button type="button" id="probe-personaplex">检查已保存的服务配置</button><span id="probe-status-personaplex" role="status"></span>
+          </div>
           <div class="pipeline-card">
             <h3>集成式实时语音</h3>
             <p id="gemini-live-limit" class="hint" hidden>Gemini Live 当前用于语音对话；语音执行任务请选择级联管线。</p>
             <div class="field">
               <label for="integratedProvider">服务商</label>
               <select id="integratedProvider">
+                <option value="minicpm-o">MiniCPM-o · 实验性原生语音</option>
+                <option value="personaplex">PersonaPlex · 实验性原生语音</option>
                 <option value="openai">OpenAI</option>
                 <option value="gemini">Google Gemini</option>
                 <option value="qwen">Qwen（通义）</option>
@@ -352,21 +367,25 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
               <div class="field"><label for="compatibleAsrModel">模型 ID</label><input id="compatibleAsrModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
               <p class="hint">说完一句后才显示识别结果。</p>
               <label class="toggle-row"><input type="checkbox" role="switch" id="compatibleAsrOmitResponseFormat">省略 ASR response_format 参数（Mistral、智谱）</label>
+              <details class="advanced-keys custom-endpoint" data-endpoint="compatibleAsrApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="compatibleAsrApiKey">
                 <label for="compatibleAsrApiKey">本阶段 API 密钥</label>
                 <span class="badge" id="badge-compatibleAsrApiKey">未设置</span><span class="key-usage" id="usage-compatibleAsrApiKey"></span>
                 <input type="password" id="compatibleAsrApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
                 <button type="button" class="clear" data-key="compatibleAsrApiKey">清除</button>
               </div>
+              </details>
             </div>
             <div id="self-hosted-asr-settings" hidden>
               <div class="field"><label for="selfHostedAsrUrl">自托管 ASR 地址</label><input id="selfHostedAsrUrl" type="url" placeholder="wss://host/asr" maxlength="2048" autocomplete="off" spellcheck="false"></div>
+              <details class="advanced-keys custom-endpoint" data-endpoint="selfHostedAsrApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="selfHostedAsrApiKey">
                 <label for="selfHostedAsrApiKey">自托管 ASR 密钥（可选）</label>
                 <span class="badge" id="badge-selfHostedAsrApiKey">未设置</span><span class="key-usage" id="usage-selfHostedAsrApiKey"></span>
                 <input type="password" id="selfHostedAsrApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
                 <button type="button" class="clear" data-key="selfHostedAsrApiKey">清除</button>
               </div>
+              </details>
             </div>
             <div id="gemini-asr-settings" hidden><label for="geminiAsrModel">Gemini ASR 模型</label><input id="geminiAsrModel" type="text" maxlength="64" autocomplete="off"><p class="hint">说完一句后才显示识别结果。</p></div>
             <section aria-label="声纹验证">
@@ -407,21 +426,25 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
               <div class="field"><label for="openaiCompatibleBaseUrl">API Base URL</label><input id="openaiCompatibleBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
               <div class="field"><label for="openaiCompatibleProtocol">协议</label><select id="openaiCompatibleProtocol"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></div>
               <p class="hint">请在下方填写模型 ID，部分能力取决于所选模型。</p>
+              <details class="advanced-keys custom-endpoint" data-endpoint="openaiCompatibleApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="openaiCompatibleApiKey">
                 <label for="openaiCompatibleApiKey">本阶段 API 密钥</label>
                 <span class="badge" id="badge-openaiCompatibleApiKey">未设置</span><span class="key-usage" id="usage-openaiCompatibleApiKey"></span>
                 <input type="password" id="openaiCompatibleApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
                 <button type="button" class="clear" data-key="openaiCompatibleApiKey">清除</button>
               </div>
+              </details>
             </div>
             <div id="self-hosted-llm-settings" hidden>
               <div class="field"><label for="selfHostedLlmBaseUrl">自托管 LLM 地址</label><input id="selfHostedLlmBaseUrl" type="url" placeholder="https://host/v1" maxlength="2048" autocomplete="off" spellcheck="false"></div>
+              <details class="advanced-keys custom-endpoint" data-endpoint="selfHostedLlmApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="selfHostedLlmApiKey">
                 <label for="selfHostedLlmApiKey">自托管 LLM 密钥（可选）</label>
                 <span class="badge" id="badge-selfHostedLlmApiKey">未设置</span><span class="key-usage" id="usage-selfHostedLlmApiKey"></span>
                 <input type="password" id="selfHostedLlmApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
                 <button type="button" class="clear" data-key="selfHostedLlmApiKey">清除</button>
               </div>
+              </details>
             </div>
             <div class="field">
               <label for="cascadedLlmModelPreset">当前模型</label>
@@ -448,21 +471,25 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
               <div class="field"><label for="compatibleTtsVoice">音色 ID</label><input id="compatibleTtsVoice" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
               <label class="toggle-row"><input type="checkbox" role="switch" id="compatibleTtsSendSampleRate">发送 24000 Hz 采样率参数</label>
               <p class="hint">仅在服务支持时开启。</p>
+              <details class="advanced-keys custom-endpoint" data-endpoint="compatibleTtsApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="compatibleTtsApiKey">
                 <label for="compatibleTtsApiKey">本阶段 API 密钥</label>
                 <span class="badge" id="badge-compatibleTtsApiKey">未设置</span><span class="key-usage" id="usage-compatibleTtsApiKey"></span>
                 <input type="password" id="compatibleTtsApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
                 <button type="button" class="clear" data-key="compatibleTtsApiKey">清除</button>
               </div>
+              </details>
             </div>
             <div id="self-hosted-tts-settings" hidden>
               <div class="field"><label for="selfHostedTtsUrl">自托管 TTS 地址</label><input id="selfHostedTtsUrl" type="url" placeholder="https://host/tts" maxlength="2048" autocomplete="off" spellcheck="false"></div>
+              <details class="advanced-keys custom-endpoint" data-endpoint="selfHostedTtsApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="selfHostedTtsApiKey">
                 <label for="selfHostedTtsApiKey">自托管 TTS 密钥（可选）</label>
                 <span class="badge" id="badge-selfHostedTtsApiKey">未设置</span><span class="key-usage" id="usage-selfHostedTtsApiKey"></span>
                 <input type="password" id="selfHostedTtsApiKey" autocomplete="off" spellcheck="false" placeholder="输入新密钥">
                 <button type="button" class="clear" data-key="selfHostedTtsApiKey">清除</button>
               </div>
+              </details>
             </div>
             <div class="field" id="cascaded-tts-voice-settings">
               <div id="gemini-tts-settings" hidden><label for="geminiTtsModel">Gemini TTS 模型</label><input id="geminiTtsModel" type="text" maxlength="64" autocomplete="off"><p class="hint">分段合成并播放，每段会有短暂等待。</p></div>
@@ -505,7 +532,10 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             <button type="button" id="secret-tab-connections" role="tab" aria-selected="false" aria-controls="secret-panel-connections" tabindex="-1">搜索与应用连接</button>
           </div>
           <div id="secret-panel-models" role="tabpanel" aria-labelledby="secret-tab-models">
-          <div class="secret" data-key="dashscopeApiKey">
+          <div id="secrets-primary"></div>
+          <details id="secrets-advanced" class="advanced-keys"><summary>高级：其他供应商与增强项</summary>
+<div id="secrets-advanced-list">
+<div class="secret" data-key="dashscopeApiKey">
             <label for="dashscopeApiKey">DashScope</label>
             <span class="badge" id="badge-dashscopeApiKey">未设置</span>
             <span class="key-usage" id="usage-dashscopeApiKey">当前未使用</span>
@@ -568,8 +598,11 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             <a class="key-link" href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
           </div>
           </div>
+          </details>
+          </div>
           <div id="secret-panel-connections" role="tabpanel" aria-labelledby="secret-tab-connections" hidden>
-          <div class="secret" data-key="composioApiKey">
+          <details class="advanced-keys"><summary>高级：联网搜索与应用连接</summary>
+<div class="secret" data-key="composioApiKey">
             <label for="composioApiKey">Composio</label>
             <span class="badge" id="badge-composioApiKey">未设置</span>
             <span class="key-usage" id="usage-composioApiKey">应用连接；修改后需重启</span>
@@ -584,6 +617,7 @@ COMPUTER_API_KEY=模型密钥</pre><p>Windows 的显示器 ID 使用其 DISPLAY 
             <button type="button" class="clear" data-key="tavilyApiKey">清除</button>
             <a class="key-link" href="https://app.tavily.com/" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
           </div>
+</details>
           </div>
         </div>
       </details>

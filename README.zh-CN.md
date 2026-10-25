@@ -52,7 +52,7 @@ https://github.com/user-attachments/assets/6f050c21-aede-4b2a-8f79-e7794d5137d4
 
 你的上下文帮助 Nova 理解需求，前脑通过对话协调后脑执行。结果按证据核对，提醒在合适时机开口。
 
-- **你的主动式个人 Agent。** 待办、想法、目标、资讯和 Profile，把 Nova 对你的了解变成可以行动的建议。
+- **你的主动式个人 Agent。** 时间线、想法、目标、资讯和 Profile，把 Nova 对你的了解变成可以行动的建议。
 - **理解广泛、非结构化的上下文。** 接入文件夹、邮件、日历、对话和文档；个人记忆可追溯、可编辑、可删除。
 - **常驻语音助手，前后双脑协作。** 前脑陪你交流，后脑处理长时间运行的工作。
 - **薄而清晰的前台任务协调层。** 问清目标、确认授权，再委派给 coding agent；按标准核对证据，随时接管和交还。
@@ -72,8 +72,8 @@ https://github.com/user-attachments/assets/6f050c21-aede-4b2a-8f79-e7794d5137d4
   <tr>
     <td width="50%" valign="top">
       <h3>你的个人工作台</h3>
-      <p>把零散上下文整理成有出处的近况与待办建议。选好下一步，再和 Nova 接着做。</p>
-      <a href="assets/features/workbench-original.png"><img src="assets/features/workbench-original.png" alt="Nova 工作台中的项目近况、待办建议和对话" width="100%"></a>
+      <p>把零散上下文整理成有出处的想法与目标建议。选好下一步，再和 Nova 接着做。</p>
+      <a href="assets/features/workbench-original.png"><img src="assets/features/workbench-original.png" alt="Nova 工作台中的有出处的建议和对话" width="100%"></a>
     </td>
     <td width="50%" valign="top">
       <h3>关于你，也由你来改</h3>
@@ -84,7 +84,7 @@ https://github.com/user-attachments/assets/6f050c21-aede-4b2a-8f79-e7794d5137d4
   <tr>
     <td width="50%" valign="top">
       <h3>把想法变成方向</h3>
-      <p>记下想法，设定目标，准备好后再转成待办。Nova 的建议由你决定是否采纳。</p>
+      <p>记下想法，设定目标，准备好后再转成目标。Nova 的建议由你决定是否采纳。</p>
       <a href="assets/features/ideas-goals-original.png"><img src="assets/features/ideas-goals-original.png" alt="Nova 想法与目标页面中的建议和采纳入口" width="100%"></a>
     </td>
     <td width="50%" valign="top">

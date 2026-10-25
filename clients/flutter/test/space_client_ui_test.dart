@@ -46,13 +46,19 @@ void main() {
     }
   });
 
-  testWidgets('offline shows one quiet notice on chat and tasks, not on 我的', (
+  testWidgets('offline notice appears only on chat and tasks', (
     tester,
   ) async {
     await pumpClient(tester, seededState(online: false));
     expect(find.byType(NovaNotice), findsOneWidget);
     expect(find.textContaining('Host 不在线 · 展示上次缓存'), findsOneWidget);
     expect(find.byType(ListTile), findsNothing);
+    await tester.tap(find.text('任务'));
+    await tester.pump();
+    expect(find.byType(NovaNotice), findsOneWidget);
+    await tester.tap(find.text('时间线'));
+    await tester.pump();
+    expect(find.byType(NovaNotice), findsNothing);
     await tester.tap(find.text('我的'));
     await tester.pump();
     expect(find.byType(NovaNotice), findsNothing);

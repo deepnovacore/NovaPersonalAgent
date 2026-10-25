@@ -40,12 +40,12 @@
 | Endpointing | The cascaded stage deciding when an utterance has ended (semantic turn detector or bounded silence) |
 | Knowledge MCP | Built-in `mcp__nova_knowledge__recall` evidence tool; optional Codex loopback additionally resolves digest-pinned chunks via `get_chunk`, never mutates the corpus |
 | MyContext adapter | An optional loopback-only, read-only evidence provider behind Nova's strict capability handshake; no adapter ships in this repository |
-| Workbench | The desktop main window: an icon rail beside personal-object pages, with Nova present as a collapsible chat pane |
-| Rail | The Workbench's icon navigation column, selecting Todos, Ideas, Goals, Feeds, Task and Profile |
+| Workbench | The desktop main window: the Nova conversation beside a workspace of personal-object pages |
+| Workspace tabs | The tab strip along the top of the Workbench workspace, selecting Timeline, Ideas, Goals, Feeds, Task and Profile |
 | Task | A durable, host-tracked unit of delegated work with a goal and acceptance criteria; distinct from an ad hoc executor delegate |
 | Handback / takeover | Transferring a Task's controller between Nova and the user; takeover lets the user message the executor directly and pauses Nova's automatic corrections, handback returns control to Nova |
 | Acceptance criterion | One statement a Task's goal must satisfy before Nova marks it complete; evidence is recorded per criterion |
-| Candidate | An unconfirmed Todo, Idea, Goal or Profile fact Nova notices in conversation; recorded once the user confirms it, except that an explicitly stated todo is recorded right away and can be undone |
+| Candidate | An unconfirmed Idea, Goal or Profile fact Nova notices in conversation; recorded once the user confirms it |
 | Source | An authorized document, account or feed that personal memory and suggestions may draw on |
 | Connector | An integration (for example Google, macOS Calendar, Apple Mail or Feishu) that exposes a Source through a read scope the user grants |
 

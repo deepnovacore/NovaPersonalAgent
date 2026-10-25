@@ -22,6 +22,7 @@ import {
 } from '../src/main/settings-store.mjs'
 
 const ALL_SECRET_KEYS = Object.freeze([
+  'minicpmRealtimeApiKey', 'personaplexRealtimeApiKey',
   'openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey',
   'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey',
   'composioApiKey',
@@ -36,7 +37,6 @@ const ALL_SECRET_KEYS = Object.freeze([
   'arkApiKey',
   'deepseekApiKey',
   'doubaoBigmodelApiKey',
-  'doubaoAsrApiKey',
 ])
 
 // The store never imports Electron: the keychain arrives as this three-method
@@ -85,6 +85,7 @@ test('the default settings are the documented schema', () => {
     skinId: 'nova', importedSkins: [],
     startupView: 'workbench',
     lastPresentation: 'workbench',
+    workbenchMaximized: true,
     language: 'zh-CN',
     palette: 'ember',
     proactivity: 'balanced',
@@ -101,13 +102,14 @@ test('the default settings are the documented schema', () => {
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
-    pipelineMode: 'cascaded',
+    pipelineMode: 'integrated',
     integratedProvider: 'qwen',
     integratedModel: 'qwen-audio-3.0-realtime-plus',
     integratedVoice: 'longanqian',
     openaiCompatibleBaseUrl:'https://api.openai.com/v1', openaiCompatibleProtocol:'chat-completions',
     compatibleAsrBaseUrl:'https://api.openai.com/v1', compatibleAsrModel:'whisper-1', compatibleAsrOmitResponseFormat:false,
     compatibleTtsBaseUrl:'https://api.openai.com/v1', compatibleTtsModel:'tts-1', compatibleTtsVoice:'alloy', compatibleTtsSendSampleRate:false,
+    minicpmRealtimeUrl: 'ws://127.0.0.1:18580/v1/realtime', personaplexRealtimeUrl: 'ws://127.0.0.1:18581/v1/realtime',
     selfHostedAsrUrl: '', selfHostedLlmBaseUrl: '', selfHostedTtsUrl: '',
     geminiAsrModel: 'gemini-3.5-flash', geminiTtsModel: 'gemini-3.8-flash-tts', geminiTtsVoice: 'Kore',
     cascadedEndpointingProvider: 'auto',
@@ -123,7 +125,6 @@ test('the default settings are the documented schema', () => {
     planReadback: 'summary',
     generatePlan: true,
     profileParticipantMessages: false,
-    plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
@@ -156,7 +157,6 @@ test('version 3 migrates to v4 defaults while preserving existing desktop fields
   assert.equal(migrated.codexApprovalMode, 'ask')
   assert.equal(migrated.clarificationDepth, 'balanced')
   assert.equal(migrated.planReadback, 'summary')
-  assert.equal(migrated.plannerModel, '')
   assert.equal(migrated.progressBubbles, 'milestones')
   assert.equal(migrated.embeddingProvider, 'dashscope')
   assert.equal(migrated.embeddingModel, 'text-embedding-v4')
@@ -171,7 +171,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: 'yolo',
     clarificationDepth: 'thorough',
     planReadback: 'confirm',
-    plannerModel: 'planner-model',
     progressBubbles: 'all',
     embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
@@ -183,7 +182,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: normalized.codexApprovalMode,
     clarificationDepth: normalized.clarificationDepth,
     planReadback: normalized.planReadback,
-    plannerModel: normalized.plannerModel,
     progressBubbles: normalized.progressBubbles,
     embeddingProvider: normalized.embeddingProvider,
     embeddingModel: normalized.embeddingModel,
@@ -193,7 +191,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     codexApprovalMode: 'yolo',
     clarificationDepth: 'thorough',
     planReadback: 'confirm',
-    plannerModel: 'planner-model',
     progressBubbles: 'all',
     embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
@@ -276,6 +273,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     skinId: 'nova', importedSkins: [],
     startupView: 'workbench',
     lastPresentation: 'workbench',
+    workbenchMaximized: true,
     language: 'zh-CN',
     palette: 'graphite',
     proactivity: 'balanced',
@@ -299,6 +297,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     openaiCompatibleBaseUrl:'https://api.openai.com/v1', openaiCompatibleProtocol:'chat-completions',
     compatibleAsrBaseUrl:'https://api.openai.com/v1', compatibleAsrModel:'whisper-1', compatibleAsrOmitResponseFormat:false,
     compatibleTtsBaseUrl:'https://api.openai.com/v1', compatibleTtsModel:'tts-1', compatibleTtsVoice:'alloy', compatibleTtsSendSampleRate:false,
+    minicpmRealtimeUrl: 'ws://127.0.0.1:18580/v1/realtime', personaplexRealtimeUrl: 'ws://127.0.0.1:18581/v1/realtime',
     selfHostedAsrUrl: '', selfHostedLlmBaseUrl: '', selfHostedTtsUrl: '',
     geminiAsrModel: 'gemini-3.5-flash', geminiTtsModel: 'gemini-3.8-flash-tts', geminiTtsVoice: 'Kore',
     cascadedEndpointingProvider: 'auto',
@@ -314,7 +313,6 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     planReadback: 'summary',
     generatePlan: true,
     profileParticipantMessages: false,
-    plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
@@ -400,13 +398,14 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'lastPresentation',
     'localToolApproval',
     'memoryPrerecallEnabled',
+    'minicpmRealtimeUrl',
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
+    'personaplexRealtimeUrl',
     'pipelineMode',
     'planReadback',
-    'plannerModel',
     'proactivity',
     'profileParticipantMessages',
     'progressBubbles',
@@ -419,6 +418,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'voiceprintEnabled', 'voiceprintId', 'voiceprintName', 'voiceprintUploadUrl',
     'wakeWordEnabled',
     'watchModel',
+    'workbenchMaximized',
   ])
 })
 
@@ -542,7 +542,6 @@ test('normalizeSettings keeps only well-formed secret entries', () => {
       codexApiKey: { enc: 'none', data: 'not base64!' },
       arkApiKey: { enc: 'safeStorage', data: 'YXJr' },
       doubaoBigmodelApiKey: { enc: 'none', data: 'ZG91YmFv' },
-      doubaoAsrApiKey: { enc: 'safeStorage', data: 'YXNy' },
       strayKey: { enc: 'none', data: 'aGk=' },
     },
   })
@@ -552,7 +551,6 @@ test('normalizeSettings keeps only well-formed secret entries', () => {
     tavilyApiKey: { enc: 'none', data: 'aGk=' },
     arkApiKey: { enc: 'safeStorage', data: 'YXJr' },
     doubaoBigmodelApiKey: { enc: 'none', data: 'ZG91YmFv' },
-    doubaoAsrApiKey: { enc: 'safeStorage', data: 'YXNy' },
   })
 })
 
@@ -565,7 +563,6 @@ test('normalizeSettings rejects secret entries that are not objects or lack data
       codexApiKey: null,
       arkApiKey: [],
       doubaoBigmodelApiKey: { enc: 'none', data: 'not base64!' },
-      doubaoAsrApiKey: { enc: 'rot13', data: 'YXNy' },
     },
   })
 
@@ -613,13 +610,14 @@ test('publicSettings never carries the secrets object', () => {
     'language',
     'localToolApproval',
     'memoryPrerecallEnabled',
+    'minicpmRealtimeUrl',
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
+    'personaplexRealtimeUrl',
     'pipelineMode',
     'planReadback',
-    'plannerModel',
     'proactivity',
     'profileParticipantMessages',
     'progressBubbles',
@@ -653,6 +651,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   )
 
   assert.deepEqual(secretsPresent(settings), {
+    minicpmRealtimeApiKey:false, personaplexRealtimeApiKey:false,
     openaiCompatibleApiKey:false, compatibleAsrApiKey:false, compatibleTtsApiKey:false,
     selfHostedAsrApiKey: false, selfHostedLlmApiKey: false, selfHostedTtsApiKey: false,
     composioApiKey: false,
@@ -667,10 +666,10 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     arkApiKey: false,
     deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
-    doubaoAsrApiKey: false,
   })
   assert.doesNotMatch(JSON.stringify(secretsPresent(settings)), /sk-dash|sk-codex|sealed/)
   assert.deepEqual(secretsPresent(undefined), {
+    minicpmRealtimeApiKey:false, personaplexRealtimeApiKey:false,
     openaiCompatibleApiKey:false, compatibleAsrApiKey:false, compatibleTtsApiKey:false,
     selfHostedAsrApiKey: false, selfHostedLlmApiKey: false, selfHostedTtsApiKey: false,
     composioApiKey: false,
@@ -685,7 +684,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     arkApiKey: false,
     deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
-    doubaoAsrApiKey: false,
   })
 })
 
@@ -705,7 +703,7 @@ test('all secret fields seal, report presence, round-trip, and clear independent
     { secrets: Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, ''])) },
     codec,
   )
-  assert.deepEqual(cleared.secrets, Object.fromEntries(['openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey', 'composioApiKey', 'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey'].map(key => [key, {enc:'cleared',data:''}])))
+  assert.deepEqual(cleared.secrets, Object.fromEntries(['minicpmRealtimeApiKey', 'personaplexRealtimeApiKey', 'openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey', 'composioApiKey', 'selfHostedAsrApiKey', 'selfHostedLlmApiKey', 'selfHostedTtsApiKey'].map(key => [key, {enc:'cleared',data:''}])))
   assert.deepEqual(secretsPresent(cleared), Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, false])))
 })
 
@@ -1385,3 +1383,11 @@ test('removed direct-phone connection settings are never restored or exposed to 
   for(const field of Object.keys(obsolete))assert.equal(Object.hasOwn(view,field),false);
  }
 });
+test('the workbench fill preference defaults on, is backend-invisible and only accepts booleans', () => {
+  assert.equal(normalizeSettings({}).workbenchMaximized, true)
+  assert.equal(normalizeSettings({workbenchMaximized: false}).workbenchMaximized, false)
+  assert.equal(normalizeSettings({workbenchMaximized: 'no'}, {workbenchMaximized: false}).workbenchMaximized, false)
+  assert.equal(normalizeSettings({workbenchMaximized: 0}).workbenchMaximized, true)
+  assert.equal('workbenchMaximized' in backendSettings({workbenchMaximized: false}), false)
+  assert.equal('workbenchMaximized' in publicSettings({workbenchMaximized: false}), false)
+})

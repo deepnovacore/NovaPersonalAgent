@@ -13,14 +13,14 @@ test('provider identity must be explicitly authorized',()=>{
  assert.doesNotThrow(()=>assertProvider('known',['known']))
 })
 test('count-only report separates DOM cards from source-grounded cards and cannot copy private fields',()=>{
- const report=countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:1,post_sources:2,eligible_candidates:3,model_calls:4,todos:5,ideas:6,goals:1,source_grounded_cards:3,source_grounded_todos:1,source_grounded_ideas:1,source_grounded_goals:1,remaining_queue:7,screenshots:['/tmp/evidence/todos.png'],privateExcerpt:'PRIVATE EXCERPT'})
+ const report=countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:1,post_sources:2,eligible_candidates:3,model_calls:4,ideas:6,goals:1,source_grounded_cards:2,source_grounded_ideas:1,source_grounded_goals:1,remaining_queue:7,screenshots:['/tmp/evidence/ideas.png'],privateExcerpt:'PRIVATE EXCERPT'})
  assert.equal(report.profile_kind,'original');assert.equal(report.native_main,true)
- assert.equal(report.source_to_card.dom_rendered,report.dom_cards.todos+report.dom_cards.ideas+report.dom_cards.goals)
- assert.equal(report.source_to_card.verified_source_grounded,3)
- assert.deepEqual(report.source_to_card.verified_source_grounded_by_tab,{todos:1,ideas:1,goals:1})
+ assert.equal(report.source_to_card.dom_rendered,report.dom_cards.ideas+report.dom_cards.goals)
+ assert.equal(report.source_to_card.verified_source_grounded,2)
+ assert.deepEqual(report.source_to_card.verified_source_grounded_by_tab,{ideas:1,goals:1})
  assert.equal(JSON.stringify(report).includes('PRIVATE EXCERPT'),false)
- assert.throws(()=>countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:0,post_sources:0,eligible_candidates:0,model_calls:0,todos:0,ideas:0,goals:0,source_grounded_cards:1,source_grounded_todos:0,source_grounded_ideas:0,source_grounded_goals:0,remaining_queue:0,screenshots:[]}),/source_card_count_mismatch/)
- assert.equal(countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:0,post_sources:0,eligible_candidates:0,model_calls:0,todos:0,ideas:0,goals:0,source_grounded_cards:0,source_grounded_todos:0,source_grounded_ideas:0,source_grounded_goals:0,remaining_queue:0,screenshots:[]}).source_to_card.verified_source_grounded,0)
+ assert.throws(()=>countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:0,post_sources:0,eligible_candidates:0,model_calls:0,ideas:0,goals:0,source_grounded_cards:1,source_grounded_ideas:0,source_grounded_goals:0,remaining_queue:0,screenshots:[]}),/source_card_count_mismatch/)
+ assert.equal(countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:0,post_sources:0,eligible_candidates:0,model_calls:0,ideas:0,goals:0,source_grounded_cards:0,source_grounded_ideas:0,source_grounded_goals:0,remaining_queue:0,screenshots:[]}).source_to_card.verified_source_grounded,0)
 })
 
 test('harness cannot replace the profile, delete context, or construct a window',async()=>{
@@ -108,7 +108,7 @@ test('stale capture manifests and PNGs cannot satisfy a new acceptance run',asyn
  const {join}=await import('node:path')
  const {assertFreshArtifacts}=await import('../scripts/workbench-native-live-acceptance.mjs')
  const root=mkdtempSync(join(tmpdir(),'native-fresh-test-'))
- try{for(const name of ['capture.json','final-todos.png','initial-profile.png','counts.ndjson','report.json','native.log']){writeFileSync(join(root,name),'stale');assert.throws(()=>assertFreshArtifacts(root),/fresh_output_required/);unlinkSync(join(root,name))}assert.doesNotThrow(()=>assertFreshArtifacts(root))}finally{rmSync(root,{recursive:true,force:true})}
+ try{for(const name of ['capture.json','final-ideas.png','initial-profile.png','counts.ndjson','report.json','native.log']){writeFileSync(join(root,name),'stale');assert.throws(()=>assertFreshArtifacts(root),/fresh_output_required/);unlinkSync(join(root,name))}assert.doesNotThrow(()=>assertFreshArtifacts(root))}finally{rmSync(root,{recursive:true,force:true})}
 })
 test('production main installs partition gate before loading and overrides every wake configuration',async()=>{
  const {readFile}=await import('node:fs/promises')

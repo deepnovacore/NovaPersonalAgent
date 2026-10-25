@@ -1,3 +1,4 @@
+import {NATIVE_VOICE_PROVIDERS, validNativeRealtimeUrl} from '../renderer/native-voice.mjs'
 import {isEndpointSecret, COMPATIBLE_STAGES, COMPATIBLE_FIELDS, validCompatibleUrl} from '../renderer/compatible-providers.mjs'
 import {normalizeSkinSettings} from '../renderer/orb-skins.mjs'
 import {SELF_HOSTED_STAGES, validSelfHostedUrl, endpointOrigin} from '../renderer/voice-preset.mjs'
@@ -15,6 +16,7 @@ export {CODING_BACKENDS} from './coding-settings.mjs'
 export const SETTINGS_VERSION = 4
 
 export const SECRET_KEYS = Object.freeze([
+  'minicpmRealtimeApiKey', 'personaplexRealtimeApiKey',
   'openaiCompatibleApiKey',
   'compatibleAsrApiKey',
   'compatibleTtsApiKey',
@@ -33,13 +35,12 @@ export const SECRET_KEYS = Object.freeze([
   'arkApiKey',
   'deepseekApiKey',
   'doubaoBigmodelApiKey',
-  'doubaoAsrApiKey',
 ])
 
 export const PALETTES = Object.freeze(['ember', 'graphite'])
 export const PROACTIVITY_LEVELS = Object.freeze(['conservative', 'balanced', 'eager'])
 export const PIPELINE_MODES = Object.freeze(['integrated', 'cascaded'])
-export const INTEGRATED_PROVIDERS = Object.freeze(['qwen', 'stepfun', 'openai', 'gemini'])
+export const INTEGRATED_PROVIDERS = Object.freeze(['qwen', 'stepfun', 'openai', 'gemini', 'minicpm-o', 'personaplex'])
 export const CASCADED_ENDPOINTING_PROVIDERS = Object.freeze(['auto'])
 export const CASCADED_ASR_PROVIDERS = Object.freeze(['volcengine','gemini','self-hosted','openai-compatible'])
 export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted', 'openai-compatible'])
@@ -55,10 +56,13 @@ const MAX_CIPHERTEXT_BASE64 = 8192
 
 export const DEFAULT_SETTINGS = Object.freeze({
   ...RUNTIME_DEFAULTS,
+  ...Object.fromEntries(Object.values(NATIVE_VOICE_PROVIDERS).map(profile=>[profile.endpoint,profile.defaultUrl])),
   version: SETTINGS_VERSION,
   language: 'zh-CN',
   startupView: 'workbench',
   lastPresentation: 'workbench',
+  // Written by main when the user maximizes or restores the workbench; true means expanding fills the work area.
+  workbenchMaximized: true,
   palette: 'ember',
   skinId: 'nova',
   importedSkins: Object.freeze([]),
@@ -236,7 +240,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
   const source = isRecord(raw) ? raw : {}
   const fallback = isRecord(base) ? base : DEFAULT_SETTINGS
   const selectedProvider = pick(source.integratedProvider, fallback.integratedProvider, DEFAULT_SETTINGS.integratedProvider, validIntegratedProvider)
-  const selectedDefaults = {openai: ['gpt-realtime-2.1-mini', 'marin'], gemini: ['gemini-3.8-live', 'Kore']}[selectedProvider]
+  const selectedDefaults = {'minicpm-o':['minicpm-o',''], personaplex:['personaplex','NATF2'], openai: ['gpt-realtime-2.1-mini', 'marin'], gemini: ['gemini-3.8-live', 'Kore']}[selectedProvider]
   const sameProvider = selectedProvider === fallback.integratedProvider
   const rawVersion = source.version
   const baseVersion = fallback.version
@@ -250,6 +254,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     language: pick(source.language, fallback.language, DEFAULT_SETTINGS.language, value => ['zh-CN', 'en'].includes(value) ? value : null),
     startupView: pick(source.startupView, fallback.startupView, DEFAULT_SETTINGS.startupView, value => ['orb', 'workbench', 'last'].includes(value) ? value : null),
     lastPresentation: pick(source.lastPresentation, fallback.lastPresentation, DEFAULT_SETTINGS.lastPresentation, value => ['orb', 'workbench'].includes(value) ? value : null),
+    workbenchMaximized: pick(source.workbenchMaximized, fallback.workbenchMaximized, DEFAULT_SETTINGS.workbenchMaximized, value => typeof value === 'boolean' ? value : null),
     palette: pick(source.palette, fallback.palette, DEFAULT_SETTINGS.palette, validPalette),
     codingProgressNarration: pick(source.codingProgressNarration, fallback.codingProgressNarration, DEFAULT_SETTINGS.codingProgressNarration, value => value === 'smart' || value === 'continuous' ? value : null),
     codingBackend: pick(source.codingBackend, fallback.codingBackend, DEFAULT_SETTINGS.codingBackend, value => CODING_BACKENDS.includes(value) ? value : null),
@@ -273,6 +278,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     ),
     startListeningOnLaunch: pick(source.startListeningOnLaunch, fallback.startListeningOnLaunch, DEFAULT_SETTINGS.startListeningOnLaunch, validBoolean),
     pipelineMode: pick(source.pipelineMode, fallback.pipelineMode, DEFAULT_SETTINGS.pipelineMode, validPipelineMode),
+    ...Object.fromEntries(Object.values(NATIVE_VOICE_PROVIDERS).map(({endpoint,defaultUrl})=>[endpoint,pick(source[endpoint],fallback[endpoint],defaultUrl,validNativeRealtimeUrl)])),
     integratedProvider: pick(source.integratedProvider, fallback.integratedProvider, DEFAULT_SETTINGS.integratedProvider, validIntegratedProvider),
     integratedModel: pick(source.integratedModel, sameProvider ? fallback.integratedModel : undefined, selectedDefaults?.[0] ?? DEFAULT_SETTINGS.integratedModel, validModelOrVoice),
     integratedVoice: pick(source.integratedVoice, sameProvider ? fallback.integratedVoice : undefined, selectedDefaults?.[1] ?? DEFAULT_SETTINGS.integratedVoice, validModelOrVoice),
@@ -310,7 +316,6 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     generatePlan: pick(source.generatePlan, fallback.generatePlan, DEFAULT_SETTINGS.generatePlan, validBoolean),
     profileParticipantMessages: pick(source.profileParticipantMessages, fallback.profileParticipantMessages, DEFAULT_SETTINGS.profileParticipantMessages, validBoolean),
     planReadback: pick(acceptsV4Fields ? source.planReadback : undefined, acceptsV4Fields ? fallback.planReadback : undefined, DEFAULT_SETTINGS.planReadback, validPlanReadback),
-    plannerModel: pick(acceptsV4Fields ? source.plannerModel : undefined, acceptsV4Fields ? fallback.plannerModel : undefined, DEFAULT_SETTINGS.plannerModel, validDesktopString),
     progressBubbles: pick(acceptsV4Fields ? source.progressBubbles : undefined, acceptsV4Fields ? fallback.progressBubbles : undefined, DEFAULT_SETTINGS.progressBubbles, validProgressBubbles),
     conversationVisionEnabled: pick(source.conversationVisionEnabled, fallback.conversationVisionEnabled, DEFAULT_SETTINGS.conversationVisionEnabled, validBoolean),
     monitorCameraDeviceId: pick(source.monitorCameraDeviceId, fallback.monitorCameraDeviceId, DEFAULT_SETTINGS.monitorCameraDeviceId, value => typeof value === 'string' && value.length <= 256 && !/[\x00-\x1f]/u.test(value) ? value : null),
@@ -331,7 +336,7 @@ export function startupPresentation(settings, argv = []) {
 }
 
 export function backendSettings(settings) {
-  const {skinId, importedSkins, startupView, lastPresentation, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, ...backend} = normalizeSettings(settings)
+  const {skinId, importedSkins, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -361,6 +366,7 @@ export function publicSettings(settings) {
     autoHideSeconds: normalized.autoHideSeconds,
     pipelineMode: normalized.pipelineMode,
     integratedProvider: normalized.integratedProvider,
+    ...Object.fromEntries(Object.values(NATIVE_VOICE_PROVIDERS).map(({endpoint})=>[endpoint,normalized[endpoint]])),
     integratedModel: normalized.integratedModel,
     integratedVoice: normalized.integratedVoice,
     cascadedEndpointingProvider: normalized.cascadedEndpointingProvider,
@@ -386,7 +392,6 @@ export function publicSettings(settings) {
     planReadback: normalized.planReadback,
     generatePlan: normalized.generatePlan,
     profileParticipantMessages: normalized.profileParticipantMessages,
-    plannerModel: normalized.plannerModel,
     progressBubbles: normalized.progressBubbles,
     conversationVisionEnabled: normalized.conversationVisionEnabled,
     monitorCameraDeviceId: normalized.monitorCameraDeviceId,
@@ -556,6 +561,10 @@ export function applySettingsUpdate(current, patch, codec) {
   for (const {endpoint, secret} of COMPATIBLE_STAGES) {
     if (Object.hasOwn(source, endpoint) && validCompatibleUrl(source[endpoint]) === null) throw Object.assign(new Error('invalid_compatible_url'), {code: 'invalid_settings_commit', problems: ['invalid_compatible_url']})
     if (stored[endpoint] !== next[endpoint]) previousSecrets[secret] = {enc:'cleared', data:''}
+  }
+  for (const {endpoint,secret} of Object.values(NATIVE_VOICE_PROVIDERS)) {
+    if (Object.hasOwn(source,endpoint) && validNativeRealtimeUrl(source[endpoint]) === null) throw Object.assign(new Error('invalid_native_realtime_url'),{code:'invalid_settings_commit',problems:['invalid_native_realtime_url']})
+    if(stored[endpoint] !== next[endpoint]) previousSecrets[secret]={enc:'cleared',data:''}
   }
   // Bind explicit new credentials to the new origin; never retain the old token.
   const {secrets, rejected} = updatedSecrets(previousSecrets, source.secrets, codec)

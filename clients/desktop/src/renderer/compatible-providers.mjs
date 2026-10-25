@@ -7,7 +7,7 @@ export const COMPATIBLE_STAGES = Object.freeze([
 ])
 export const COMPATIBLE_FIELDS = Object.freeze(['openaiCompatibleBaseUrl','openaiCompatibleProtocol','compatibleAsrBaseUrl','compatibleAsrModel','compatibleAsrOmitResponseFormat','compatibleTtsBaseUrl','compatibleTtsModel','compatibleTtsVoice','compatibleTtsSendSampleRate'])
 export function validCompatibleUrl(value) { return value ? validSelfHostedUrl(value, 'llm') : null }
-export function isEndpointSecret(key) { return key.startsWith('selfHosted') || COMPATIBLE_STAGES.some(stage => stage.secret === key) }
+export function isEndpointSecret(key) { return ['minicpmRealtimeApiKey','personaplexRealtimeApiKey'].includes(key) || key.startsWith('selfHosted') || COMPATIBLE_STAGES.some(stage => stage.secret === key) }
 
 // Presets fill documented endpoint parameters; model availability remains account-specific.
 // Sources: https://console.groq.com/docs/speech-to-text,

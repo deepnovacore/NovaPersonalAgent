@@ -6,7 +6,7 @@ import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 export const workbenchHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export const workbenchRefSchema=z.object({entry_id:z.string().min(1).max(600),version:z.string(),quote:z.string().min(1).max(600)}).strict()
 export const workbenchMatterSchema=z.object({
- kind:z.enum(['todo','goal','topic']),title:z.string().trim().min(1).max(160),summary:z.string().trim().min(1).max(400),
+ kind:z.enum(['goal','topic']),title:z.string().trim().min(1).max(160),summary:z.string().trim().min(1).max(400),
  ownership:z.enum(['user','other','uncertain']),assertion:z.enum(['direct','forwarded','inferred']),state:z.enum(['open','completed','cancelled','uncertain']),
  due:z.string().date().nullable(),due_quote:z.string().max(600).nullable(),
  refs:z.array(workbenchRefSchema).min(1).max(8),
@@ -15,14 +15,14 @@ export type WorkbenchMatter=z.infer<typeof workbenchMatterSchema>&{id:string;gro
 export const workbenchEvidenceSchema=z.object({id:z.string(),version:z.string(),kind:z.string(),text:z.string().max(64000),observed_at:z.string(),relation:z.enum(['self','addressed','participant','system']).optional(),author:z.object({key:z.string(),name:z.string().optional(),kind:z.enum(['person','system','unknown']),is_user:z.boolean()}).optional()})
 export const workbenchExtractionSchema=z.object({matters:z.array(workbenchMatterSchema).max(100)}).strict()
 export const workbenchSuggestionSchema=z.object({
- tab:z.enum(['todos','ideas','goals']),title:z.string().trim().min(1).max(80),body:z.string().trim().min(1).max(120),
+ tab:z.enum(['ideas','goals']),title:z.string().trim().min(1).max(80),body:z.string().trim().min(1).max(120),
  why:z.string().max(80).nullable(),next:z.string().max(80).nullable(),matter_ids:z.array(z.string()).min(1).max(8),
 }).strict()
 export const workbenchCompositionSchema=z.object({
  suggestions:z.array(workbenchSuggestionSchema).max(9),
  matches:z.array(z.object({matter_id:z.string(),target_id:z.string().nullable(),same_as:z.string().nullable(),capture:z.enum(['record','suggest','skip'])}).strict()).max(100),
 }).strict()
-export interface WorkbenchExisting {id:string;kind:'todo'|'idea'|'goal';title:string;note:string;status:string;version:number;due?:string|null}
+export interface WorkbenchExisting {id:string;kind:'idea'|'goal';title:string;note:string;status:string;version:number;due?:string|null}
 export type WorkbenchRequest=
  | {phase:'reconcile';matters:readonly WorkbenchMatter[];inputs:readonly TimelineInput[];date:string;timezone:string}
  | {phase:'extract';inputs:readonly TimelineInput[];previous:readonly WorkbenchMatter[];date:string;timezone:string}
@@ -40,8 +40,7 @@ export function automaticWorkbenchMatter(matter:WorkbenchMatter,inputs:readonly 
  const first=inputs.find(input=>input.id===matter.refs[0]!.entry_id)
  if(!first)return false
  if(first.kind==='file'||first.kind==='memory')return true
- if(matter.kind==='goal')return first.relation==='self'&&first.author?.is_user===true
- return first.relation==='self'&&first.author?.is_user===true||first.relation==='addressed'&&first.author?.kind==='person'&&!first.author.is_user
+ return first.relation==='self'&&first.author?.is_user===true
 }
 /** Stable source/day buckets avoid reshuffling every batch when one conversation receives a message. */
 export function workbenchBatches(inputs:readonly TimelineInput[]):{group:string;inputs:TimelineInput[]}[]{

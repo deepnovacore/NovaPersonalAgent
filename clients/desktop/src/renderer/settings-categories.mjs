@@ -5,9 +5,10 @@ import {t} from './locale.mjs'
 // text that additive attributes would disturb.
 export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'general', label: t("通用"), sections: Object.freeze([
-    'assistant-identity-section', 'language-section', 'startup-view-section', 'wake-word-section', 'notifications-section',
+    'language-section', 'startup-view-section', 'wake-word-section', 'notifications-section',
     'intent-section', 'proactivity-section',
   ])}),
+  Object.freeze({id: 'diary', label: t('日记与简报'), sections: Object.freeze(['diary-section'])}),
   Object.freeze({id: 'themes', label: t("主题"), sections: Object.freeze(['visor-section','orb-skin-section'])}),
   Object.freeze({id: 'usage', label: t("用量"), sections: Object.freeze(['frontend-usage-section'])}),
   Object.freeze({id: 'pipeline', label: t("语音管线"), sections: Object.freeze(['pipeline'])}),
@@ -19,7 +20,7 @@ export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'knowledge', label: t("知识库"), sections: Object.freeze(['knowledge-section'])}),
   Object.freeze({id: 'secrets', label: t("API 密钥"), sections: Object.freeze(['chatgpt-settings','secrets'])}),
   Object.freeze({id: 'codex', label: t("编程"), sections: Object.freeze([
-    'local-tool-approval-section', 'codex-approval-section', 'codex-projects',
+    'codex-approval-section', 'codex-projects',
   ])}),
 ])
 

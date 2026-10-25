@@ -5,7 +5,7 @@
 export const RUNTIME_DEFAULTS = Object.freeze({
   proactivity: 'balanced',
   codexHeartbeatSeconds: 30,
-  pipelineMode: 'cascaded',
+  pipelineMode: 'integrated',
   integratedProvider: 'qwen',
   integratedModel: 'qwen-audio-3.0-realtime-plus',
   integratedVoice: 'longanqian',
@@ -44,7 +44,6 @@ export const RUNTIME_DEFAULTS = Object.freeze({
   planReadback: 'summary',
   generatePlan: true,
   profileParticipantMessages: false,
-  plannerModel: '',
   progressBubbles: 'milestones',
   embeddingProvider: 'dashscope',
   embeddingModel: 'text-embedding-v4',

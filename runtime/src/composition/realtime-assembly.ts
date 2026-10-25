@@ -1,5 +1,6 @@
 import {readHostSpaceConfig,loadSpaceHostController} from '../space-host/config.js'
 import type {UsageContext} from '../usage/context.js'
+import {soulRoleContext} from './soul-context.js'
 import {acceptanceReadExistingOnly} from '../desktop/workbench-acceptance.js'
 import {resolveModelApiKey} from '../config/config.js'
 import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
@@ -83,10 +84,10 @@ import type {CodingAgentControllerFactory} from '../executors/coding-executor.js
 export function defaultIntake(
   core: Assembly,
   gateway: ModelGateway,
-  settings: IntakeSettings & {readonly support_model: string; readonly planner_model: string; readonly fast_model: string},
+  settings: IntakeSettings & {readonly support_model: string},
 ): RealtimeAssemblyOptions['intake'] {
   if (executorWithRole([...core.runtime.executors.values()].map(adapter => adapter.manifest), 'coding') === null) return undefined
-  return {models: intakeModels(gateway, settings.support_model, settings.planner_model || settings.fast_model), settings}
+  return {models: intakeModels(gateway, settings.support_model, settings.support_model), settings}
 }
 
 export const REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS = 1_000
@@ -207,7 +208,8 @@ async function responseAdaptationFor(
     `<memory_context>${canonicalJson({mode,trust:'untrusted_external',text:memory}).replace(/</g,'\\u003c')}</memory_context>`,
   ].join('\n') : null
   const explicit=fresh&&snapshot.explicitUserContext?'<user_stated_profile_data>'+canonicalJson(snapshot.explicitUserContext).replace(/</g,'\\u003c')+'</user_stated_profile_data>':null
-  return {revision: snapshot.revision, content: [preferences, understanding,explicit].filter(Boolean).join('\n') || null}
+  const soul = snapshot.soulRole ? soulRoleContext(snapshot.soulRole) : null
+  return {revision: snapshot.revision, content: [preferences, soul, understanding,explicit].filter(Boolean).join('\n') || null}
 }
 
 export interface RealtimeAssemblyOptions {
@@ -691,6 +693,7 @@ export class RealtimeAssembly {
     hostWorkspaceId: string | null,
     requireDelivery: boolean,
   ): Promise<void> {
+    if (this.provider.capabilities?.protocol.conversationItems === false) return
     const activeExecutorContext = renderActiveExecutorContext(
       this.session.snapshot().active_delegates,
       channel => this.service.agentNameForChannel(channel),
@@ -897,8 +900,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   let responseAdaptationRevision = 0
   let responseAdaptationSignature: string | undefined
   const providerSession = new RealtimeProviderSession(provider, {
-    responseAdaptationRequired: () => !options.suppressMemoryAdaptation&&personalMemoryHolder.current?.prepareResponseAdaptation !== undefined,
+    responseAdaptationRequired: () => provider.capabilities?.protocol.conversationItems !== false && !options.suppressMemoryAdaptation&&personalMemoryHolder.current?.prepareResponseAdaptation !== undefined,
     responseAdaptation: async signal => {
+      if (provider.capabilities?.protocol.conversationItems === false) return undefined
       const preferences = options.suppressMemoryAdaptation?undefined:await responseAdaptationFor(personalMemoryHolder.current, options.memoryReadMode, options.memoryConsumerFingerprint, signal)
       const conversationContext=await options.conversationContext?.()
       signal?.throwIfAborted()

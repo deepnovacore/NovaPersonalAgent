@@ -140,13 +140,13 @@ try {
     }
   }
 
-  // Workbench: real clicks through the seven pages.
+  // Workbench: real clicks through the six pages.
   const wb = (await pages()).find(t => t.url.includes('/index.html')) ?? all.find(t => t.url.includes('/index.html'))
   if (wb && !opt.quick) {
     const c = await attach(wb)
-    const count = await waitFor(() => evaluate(c, `document.querySelectorAll('.workspace-tab[data-page]').length`).then(n => n === 7 && n), 30000)
-    step('Workbench shows its seven pages in the topbar', count === 7, `workspace tabs: ${count}`)
-    for (const page of ['timeline', 'todos', 'ideas', 'goals', 'feeds', 'tasks', 'profile']) {
+    const count = await waitFor(() => evaluate(c, `document.querySelectorAll('.workspace-tab[data-page]').length`).then(n => n === 6 && n), 30000)
+    step('Workbench shows its six pages in the topbar', count === 6, `workspace tabs: ${count}`)
+    for (const page of ['timeline', 'ideas', 'goals', 'feeds', 'tasks', 'profile']) {
       await evaluate(c, `document.querySelector('.workspace-tab[data-page="${page}"]')?.click()`)
       await sleep(900)
       const state = await evaluate(c, `({selected: document.querySelector('.workspace-tab[data-page="${page}"]')?.getAttribute('aria-selected'), text: (document.body.innerText || '').trim().length})`)
@@ -164,10 +164,10 @@ try {
     const body = () => evaluate(c, `document.body.innerText`)
     const ready = await waitFor(async () => { const t = await body(); return !t.includes('启动失败') && !t.includes('Backend startup failed') && t.length > 0 && 'ready' }, 90000, 1000)
     step('Backend starts with the real credential (no startup-failure banner)', !!ready, ready ? 'banner gone' : (await body()).slice(0, 160).replace(/\s+/g, ' '))
-    await evaluate(c, `document.querySelector('.workspace-tab[data-page="todos"]')?.click()`)
-    const todosLoaded = await waitFor(async () => !(await body()).includes('正在读取已保存的内容') && 'loaded', 40000, 1000)
-    await shot(c, 'live-todos')
-    step('Todos page finished reading saved content from the backend', !!todosLoaded, todosLoaded ? '' : 'still showing "reading saved content"')
+    await evaluate(c, `document.querySelector('.workspace-tab[data-page="ideas"]')?.click()`)
+    const ideasLoaded = await waitFor(async () => !(await body()).includes('正在读取已保存的内容') && 'loaded', 40000, 1000)
+    await shot(c, 'live-ideas')
+    step('Ideas page finished reading saved content from the backend', !!ideasLoaded, ideasLoaded ? '' : 'still showing "reading saved content"')
     const answerMatches = () => evaluate(c, `[...document.querySelectorAll('.chat-history .message.assistant:not(.message-feed) .md')].filter(node=>node.textContent.trim()===${JSON.stringify(opt.expect.trim())}).length`)
     const before = await answerMatches()
     await evaluate(c, `(() => { const t = document.querySelector('.composer textarea'); t.focus(); t.select() })()`)

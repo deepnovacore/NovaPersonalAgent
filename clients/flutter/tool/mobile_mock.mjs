@@ -6,8 +6,8 @@ const port = Number(process.argv.find(v => v.startsWith('--port='))?.split('=')[
 const date = new Date().toISOString()
 let life=emptyLifeState(),sequence=0
 for(const [kind,title] of [['todo','Prepare demo'],['idea','Explore a weekly reflection'],['goal','Ship the mobile workbench']]) life=applyLifeMutation(life,{op:'create',kind,title},kind,date).state
-const state={type:'personal.state',revision:1,life,feed:[{id:'demo-feed',kind:'notify',title:'Review your demo',why_now:'Synthetic reminder',user_state:'new',lifecycle:'active',delivery:{presented_at:null}}],tasks:[],memory:{entries:[],cursor:null},pending_approvals:[],pending_confirmations:[],conversations:{selected_id:'chat:main',voice_id:null,unread_count:1,items:[{id:'chat:main',kind:'chat',title:'Nova',unread_count:0,generation:0},{id:'chat:proactive',kind:'proactive',title:'Reminders',unread_count:1,generation:0}],messages:[]}}
-const histories=new Map([['chat:main',[]],['chat:proactive',[{id:'feed:demo-feed',conversation_id:'chat:proactive',role:'assistant',text:'Review your demo',created_at:date}]]])
+const state={type:'personal.state',revision:1,life,feed:[{id:'demo-feed',kind:'notify',title:'Review your demo',why_now:'Synthetic reminder',user_state:'new',lifecycle:'active',delivery:{presented_at:null}}],tasks:[],memory:{entries:[],cursor:null},pending_approvals:[],pending_confirmations:[],conversations:{selected_id:'chat:main',voice_id:null,unread_count:1,items:[{id:'chat:main',kind:'chat',title:'Nova',unread_count:1,generation:0}],messages:[]}}
+const histories=new Map([['chat:main',[{id:'feed:demo-feed',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'Review your demo',created_at:date}]]])
 const send = value => server.sendText(JSON.stringify(value))
 const publish=()=>{state.life={...life,todos:life.todos.map(v=>({...v,kind:'todo'})),ideas:life.ideas.map(v=>({...v,kind:'idea'})),goals:life.goals.map(v=>({...v,kind:'goal',progress:{done:0,total:0}}))};state.conversations.messages=histories.get(state.conversations.selected_id)??[];return send(state)}
 const caption=(role,text,conversation_id)=>send({type:'caption',role,text,conversation_id,final:true,sequence:++sequence})
@@ -20,7 +20,7 @@ function personal(command){
   else if(method==='conversations.select'){if(!histories.has(p.id))throw Error('conversation_not_found');state.conversations.selected_id=p.id}
   else if(method==='conversations.voice'){state.conversations.voice_id=p.enabled?p.id:null}
   else if(method==='conversations.read'){const item=state.conversations.items.find(v=>v.id===p.id);if(!item)throw Error('conversation_not_found');item.unread_count=0;state.conversations.unread_count=state.conversations.items.reduce((n,v)=>n+v.unread_count,0)}
-  else if(method==='conversations.open_feed'){state.conversations.selected_id='chat:proactive'}
+  else if(method==='conversations.open_feed'){state.conversations.selected_id='chat:main'}
   else if(method==='feed.action'){const item=state.feed.find(v=>v.id===p.id);if(!item)throw Error('feed_not_found');if(p.action==='presented')item.delivery.presented_at=new Date().toISOString();else item.user_state=p.action==='snooze'?'snoozed':p.action==='dismiss'?'dismissed':'seen'}
   else if(method==='conversations.approve'){state.pending_approvals=state.pending_approvals.filter(v=>v.approval_id!==p.approval_id);const messages=histories.get(p.id);messages?.push({id:randomUUID(),conversation_id:p.id,role:'assistant',text:p.approved?'Task completed · synthetic handoff':'Task declined',created_at:new Date().toISOString()})}
   else if(method!=='presentation.seen'&&method!=='presentation.set')throw Error('unsupported')

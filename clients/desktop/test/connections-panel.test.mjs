@@ -41,11 +41,11 @@ test('successful authorization closes the one-time confirmation and displays the
  assert.ok(all(h.root).some(n=>n.textContent==='已授权当前模型处理'))
  assert.equal(all(h.root).filter(n=>n.tag==='li').length,1)
 })
-test('load fetches state once and renders sources, connectors, brief and discovery from it',async()=>{
+test('load fetches state once and renders sources and connectors; brief and discovery live in the proactivity panel',async()=>{
  const h=harness(snapshot);assert.ok(all(h.root).some(n=>n.textContent==='正在读取连接状态…'))
  await h.panel.load();assert.deepEqual(h.calls,[['state',{}]])
- const titles=all(h.root).filter(n=>n.tag==='h3').map(n=>n.textContent);assert.deepEqual(titles,['本机目录','/Users/me/notes','邮件与日历','每日简报','主动发现'])
- assert.equal(all(h.root).find(n=>n.tag==='select'&&n['aria-label']==='主动发现间隔').value,'30');assert.equal(h.error.textContent,'')
+ const titles=all(h.root).filter(n=>n.tag==='h3').map(n=>n.textContent);assert.deepEqual(titles,['本机目录','/Users/me/notes','邮件与日历'])
+ assert.equal(all(h.root).find(n=>n.tag==='select'),undefined);assert.ok(!all(h.root).some(n=>['保存简报设置','每日简报','主动发现'].includes(n.textContent)));assert.deepEqual(all(h.root).filter(n=>n.role==='tab').map(n=>n.textContent),['本机资料','邮件与日历']);assert.equal(h.error.textContent,'')
 })
 test('mutations go through the bridge and refresh the snapshot; failures surface in the status line',async()=>{
  const h=harness(snapshot);await h.panel.load()
@@ -56,8 +56,6 @@ test('mutations go through the bridge and refresh the snapshot; failures surface
  await h.button('选择并授权目录').listeners.click();await new Promise(r=>setImmediate(r))
  assert.deepEqual(h.chosen,[1]);assert.deepEqual(h.calls.at(-2),['sources.add',{path:'/tmp/docs',consent:true}])
  assert.equal(h.button('确认删除来源数据').parentHidden,undefined);await h.button('删除来源数据').listeners.click();await new Promise(r=>setImmediate(r))
- const select=all(h.root).find(n=>n.tag==='select');select.value='0';select.listeners.change();await new Promise(r=>setImmediate(r))
- assert.deepEqual(h.calls.at(-2),['discovery.configure',{enabled:false}])
  const failing=harness(snapshot,{failState:true});await failing.panel.load();assert.equal(failing.error.textContent,'unavailable');assert.ok(all(failing.root).some(n=>n.textContent==='未能读取连接状态，请重试。'))
 })
 test('the panel never asks for memory, feed or conversation methods',async()=>{
@@ -84,9 +82,9 @@ test('English connections settings use secondary tabs without translating source
  const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en')
  try{
   const h=harness(()=>snapshot({sources:[{path:'/资料/原始内容',state:'connected',scope:'computer',indexed:2,scan_pending:true}]}));await h.panel.load()
-  assert.deepEqual(all(h.root).filter(n=>n.role==='tab').map(n=>n.textContent),['Local files','Mail & calendar','Proactive reminders'])
+  assert.deepEqual(all(h.root).filter(n=>n.role==='tab').map(n=>n.textContent),['Local files','Mail & calendar'])
   assert.equal(all(h.root).filter(n=>n.role==='tabpanel'&&!n.hidden).length,1)
-  for(const tab of ['Mail & calendar','Proactive reminders','Local files']){await h.button(tab).listeners.click();await new Promise(r=>setImmediate(r));assert.equal(all(h.root).find(n=>n.role==='tab'&&n['aria-selected']==='true').textContent,tab)}
+  for(const tab of ['Mail & calendar','Local files']){await h.button(tab).listeners.click();await new Promise(r=>setImmediate(r));assert.equal(all(h.root).find(n=>n.role==='tab'&&n['aria-selected']==='true').textContent,tab)}
   const copy=all(h.root).map(n=>n.textContent).join('\n').replaceAll('/资料/原始内容','');assert.ok(!/[\u4e00-\u9fff]/u.test(copy),copy)
  }finally{setLanguage('zh-CN')}
 })

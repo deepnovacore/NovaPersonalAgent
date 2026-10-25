@@ -2,6 +2,7 @@ import {attachSources,attachSourceTags,disposeSources} from './source-popover.mj
 import {renderSourceStatus} from './source-status.mjs'
 import {t,currentLanguage} from './locale.mjs'
 import {renderCardTags} from './card-tags.mjs'
+import {markOpensConversation} from './new-conversation-mark.mjs'
 const LABEL={overdue:'已过截止',current:'今天到期',soon:'接下来 7 天',later:'之后',waiting:'等待中 · 未设期限',unscheduled:'尚未安排',completed:'已完成'}
 const STATUS={open:'待开始',doing:'进行中',waiting:'等待回复'}
 export function timelineDate(snapshot,now=new Date()){return now.toLocaleDateString('en-CA',{timeZone:snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone})}
@@ -17,10 +18,12 @@ export function timelineGroups(snapshot,now=new Date()){
  }
  return [...grouped].filter(([,items])=>items.length).map(([id,items])=>({id,label:LABEL[id],items:items.sort((a,b)=>(a.date??'').localeCompare(b.date??'')||a.title.localeCompare(b.title))}))
 }
-export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,openArticle,openSettings,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
+export function renderTimeline(parent,{snapshot,el,button,discuss,startConversation,openArticle,openSettings,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
  const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}${snapshot?.timeline?' timeline-briefing':''}`);parent.append(root)
  renderSourceStatus(root,{sources:snapshot?.sources??[],status:snapshot?.profile_preparation?.status,processing:snapshot?.profile_preparation?.processing,el,button,openSettings})
- const groups=snapshot?.timeline?[]:timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),currentDate=timelineDate(snapshot,now)
+ const allGroups=timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),groups=snapshot?.timeline?[]:allGroups
+ // In briefing mode suggestions already appear above as pending cards, so only the user's own todos are listed under the briefing.
+ const todoGroups=snapshot?.timeline?allGroups.map(group=>({...group,items:group.items.filter(item=>!item.suggested)})).filter(group=>group.items.length):[],currentDate=timelineDate(snapshot,now)
  const formatDate=date=>new Date(date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{...(date.slice(0,4)!==currentDate.slice(0,4)?{year:'numeric'}:{}),month:'short',day:'numeric',timeZone:'UTC'})
  if(!snapshot?.life){const status=el('p',t(connected?'正在读取事项…':'连接后可查看安排。'),'hint');status.setAttribute('role','status');root.append(status);return}
  if(!compact){
@@ -88,12 +91,18 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    if(item.sources_available===false&&!item.sources_checking)card.append(el('p',t('原始来源已不可用'),'hint timeline-source-unavailable'))
    else if(item.sources_available!==false)attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
    const actions=el('div',undefined,'timeline-actions');card.append(actions)
-   for(const action of item.sources_available===false||item.historical===true?[]:item.actions??[])button(action.label,()=>discuss([{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],action.kind==='draft'?t('请直接在当前对话中根据引用事项写出草稿，并标明事实缺口。只展示文字，不创建待办或任务，不发送消息或执行操作。'):t('请在当前对话中分析引用事项，说明已知事实、判断和下一步。只讨论，不创建待办或任务，不执行操作。')),actions).className=action===item.actions[0]?'timeline-primary':'soft'
+   for(const action of item.sources_available===false||item.historical===true?[]:item.actions??[]){
+    const reference=[{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],draft=action.kind==='draft'
+    const text=draft?t('请直接在当前对话中根据引用事项写出草稿，并标明事实缺口。只展示文字，不创建待办或任务，不发送消息或执行操作。'):t('请在当前对话中分析引用事项，说明已知事实、判断和下一步。只讨论，不创建待办或任务，不执行操作。')
+    // A draft is work on its own, so it gets its own conversation; discussion stays in the main one.
+    const node=draft&&startConversation?markOpensConversation(button(action.label,()=>startConversation({title:item.title.slice(0,40),text,references:reference}),actions)):button(action.label,()=>discuss(reference,text),actions)
+    node.className=action===item.actions[0]?'timeline-primary':'soft'
+   }
    if(command)button(t('隐藏'),()=>command('timeline.dismiss',{id:item.id}),actions).className='quiet timeline-dismiss'
   }
   if(!attention.cards?.length)section.append(el('p',t(attention.status==='working'?'正在结合近期信息整理…':attention.status==='queued'?'即将整理近期信息…':attention.status==='failed'?(attention.error==='timeline_generation_timeout'?'整理用时较长，尚未完成，可点击刷新重试。':'这次整理未完成，可稍后刷新。'):attention.input_count?'暂时没有足够明确的关注事项。':'已授权来源中暂时没有可整理的近期内容。'),'hint'))
  }
- if(!groups.length&&compact&&!attention){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,empty);root.append(empty)}
+ if(!groups.length&&compact&&!attention){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('有日期的事项会出现在这里。'),'hint'));root.append(empty)}
  let displayGroups=groups,axis
  if(!compact){
   const dates=new Map([[currentDate,{id:'current',date:currentDate,items:[]}]])
@@ -107,7 +116,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
   displayGroups=[...dateGroups,...groups.filter(group=>['waiting','unscheduled','completed'].includes(group.id))]
   axis=el('div',undefined,'timeline-axis');axis.setAttribute('aria-label',t(attention?'近期简报':'待办截止日期'));root.append(axis)
  }
- for(const group of displayGroups){
+ const renderGroup=group=>{
   const section=el('section',undefined,`timeline-group${group.date?' timeline-date-group'+(group.id==='current'?' timeline-current':''):compact?'':' timeline-undated'}`);section.dataset.group=group.id
   let cards=section
   if(group.date){
@@ -119,7 +128,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    if(group.briefs?.length)cards.append(...group.briefs)
    if(!group.items.length&&!group.briefs?.length){
     cards.append(el('p',t(attention?'今天暂无新的事项记录或到期安排':'今天没有到期事项'),'timeline-day-empty'))
-    if(!groups.length&&!attention){cards.append(el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,cards)}
+    if(!groups.length&&!attention){cards.append(el('p',t('有日期的事项会出现在这里。'),'hint'))}
    }
   }else{section.append(el('h3',`${t(group.label)} · ${group.items.length}`,'timeline-group-title'));root.append(section)}
   for(const item of group.items){
@@ -130,7 +139,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    const repeated=group.id==='current'||group.id==='waiting'||group.id==='completed'
    if(!repeated){const meta=el('div',pressure,'timeline-meta');card.append(meta);if(compact&&item.date){const time=el('time',formatDate(item.date));time.dateTime=item.date;meta.append(time)}}
    const dateLabel=item.date?formatDate(item.date):null
-   const title=item.suggested?el('h3',item.title,'timeline-title'):button(item.title,()=>item.status==='done'?openTodos(item.id):discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title';if(item.suggested)card.append(title)
+   const title=item.suggested?el('h3',item.title,'timeline-title'):button(item.title,()=>discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title';if(item.suggested)card.append(title)
    if(item.source_changed)card.append(el('p',t('来源内容已变化，请先核对。'),'timeline-caution'))
    const excerpt=item.note||item.sources?.find(source=>typeof source?.summary==='string'&&source.summary.trim())?.summary
    if(excerpt){const context=el('div',undefined,'timeline-context');context.append(el('span',t(item.note?'当前记录':'来源摘录'),'timeline-context-label'),el('p',excerpt,'timeline-note'));card.append(context)}
@@ -152,11 +161,20 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    }
    const action=item.source_changed?'核对来源':item.status==='waiting'?'起草跟进':item.status==='doing'?'整理下一步':'拆成行动步骤'
    const prompt=item.source_changed?'请针对「{0}」核对已记录的来源内容，说明哪些已知、哪些需要进一步确认，再整理下一步行动。':item.status==='waiting'?'请针对「{0}」起草一条跟进消息，先给我草稿。':item.status==='doing'?'请针对「{0}」结合当前记录和真实截止日期，整理下一步行动和需要确认的问题。':'请针对「{0}」拆成可执行的行动步骤，结合真实截止日期，说明建议顺序。'
-   const primary=item.status==='done'?null:button(t(action),()=>discuss([item.reference],t(prompt,item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
-   button(t('查看事项'),()=>openTodos(item.id),actions).className='ghost'
+   const primary=item.status==='done'?null:startConversation?markOpensConversation(button(t(action),()=>startConversation({title:item.title.slice(0,40),text:t(prompt,item.title),references:[item.reference]}),actions,`timeline-plan:${item.id}`)):button(t(action),()=>discuss([item.reference],t(prompt,item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
    if(!compact&&command&&item.status!=='done'){
     const label=t(item.importance==='high'?'取消重要标记':'标为重要'),star=button(label,()=>command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,importance:item.importance==='high'?'normal':'high'}),card,`life:${item.id}`)
     star.className='timeline-importance';star.textContent=item.importance==='high'?'★':'☆';star.title=label;star.setAttribute('aria-label',label);star.setAttribute('aria-pressed',String(item.importance==='high'))
+   }
+   if(!compact&&command&&item.status!=='cancelled'){
+    const controls=el('div',undefined,'timeline-todo-controls')
+    if(item.status!=='done')button(t('标记完成'),()=>command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,status:'done'}),controls,`life-done:${item.id}`).className='soft'
+    const select=el('select');select.className='timeline-status-select';select.setAttribute('aria-label',t('更改状态'))
+    for(const [value,label] of Object.entries({open:'待开始',doing:'进行中',waiting:'等待回复',done:'已完成',cancelled:'已取消'})){const option=el('option',t(label));option.value=value;select.append(option)}
+    select.value=item.status;select.addEventListener('change',()=>Promise.resolve(command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,status:select.value})).catch(()=>{select.value=item.status}))
+    const due=el('input');due.type='date';due.className='timeline-due-input';due.value=item.date??'';due.setAttribute('aria-label',t('截止日期'))
+    due.addEventListener('change',()=>Promise.resolve(command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,due:due.value||null})).catch(()=>{due.value=item.date??''}))
+    controls.append(select,due);card.append(controls)
    }
    if(!compact){
     const version=t('来自待办 · 版本 {0}',item.version),details=sourceDetails?.popover?sourceDetails:attachSources(card,[t('来自你的待办'),t('尚未关联外部来源'),version],{title:t('事项依据')})
@@ -166,14 +184,19 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    }
   }
  }
+ displayGroups.forEach(renderGroup)
  if(!compact){const unplaced=briefCards.filter(entry=>!entry.item.time?.anchor_date);if(unplaced.length){const section=el('section',undefined,'timeline-unplaced');section.append(el('h3',t('时间待明确'),'timeline-group-title'),el('p',t('以下事项尚无可用于排序的日期。'),'hint'),...unplaced.map(entry=>entry.card));root.append(section)}}
  if(!compact&&(attention?.cards?.length??0)>visibleCount){
   const more=button(t('继续查看进展（还有 {0} 条）',attention.cards.length-visibleCount),()=>{
    expanded.add(pageKey+pages);disposeSources(root)
-   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,openTodos,openArticle,openSettings,command,expanded,compact,connected,now})
+   const holder=el('div');renderTimeline(holder,{snapshot,el,button,discuss,startConversation,openArticle,openSettings,command,expanded,compact,connected,now})
    const replacement=holder.children[0];root.replaceWith(replacement)
    replacement.querySelectorAll('.timeline-attention-card')[visibleCount]?.focus?.({preventScroll:true})
   },root,'timeline:more');more.className='soft timeline-load-more'
+ }
+ if(todoGroups.length){
+  root.append(el('h2',t('我的待办'),'timeline-todos-title'))
+  todoGroups.forEach(renderGroup)
  }
  root.append(el('p',t('这里展示已记录的事项和待确认建议，不代表完整日程。'),'timeline-source-note'))
  for(const node of root.querySelectorAll('button'))if(!connected&&node.className!=='source-info')node.disabled=true

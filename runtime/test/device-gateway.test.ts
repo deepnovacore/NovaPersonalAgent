@@ -102,16 +102,6 @@ test('concurrent grant writes serialize and lifecycle bumps expire grants durabl
   assert.deepEqual(state.authority.grants.map(grant => grant.status), ['expired', 'expired'])
   assert.deepEqual(await gateway.classifyReply(bindings), {late: true})
 })
-test('todo merge persists conflicts and ignores stale caller state', async t => {
-  const {path, gateway} = await fixture(t)
-  const local = {id: 'todo', version: 1, base_version: 0, content: 'first',
-    conflicts: [], tombstones: [], projection_visible: true}
-  await gateway.mergeTodo(local, {version: 2, base_version: 1, content: 'second'})
-  const merged = await gateway.mergeTodo(local, {version: 1, base_version: 0, content: 'offline'})
-  assert.equal(merged.content, 'second')
-  assert.deepEqual(merged.conflicts.map(item => item.content), ['first', 'offline'])
-  assert.deepEqual((await new DeviceLedger(path).snapshot()).todos, [merged])
-})
 test('pending stops recovered from disk revoke before an approval can proceed', async t => {
   const {path, ledger, gateway} = await fixture(t)
   await gateway.createGrant('grant', bindings)

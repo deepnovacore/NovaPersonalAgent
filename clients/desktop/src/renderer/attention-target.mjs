@@ -9,7 +9,6 @@ export function attentionTarget(snapshot) {
   if (decision?.task_id) return {taskId: decision.task_id}
   if (decision) return {conversationId: decision.conversation_id}
   const unread = (snapshot?.conversations?.items ?? []).find(item => item.unread_count > 0)
-  // Proactive reminders are read in the main conversation's transcript.
-  if (unread) return {conversationId: unread.id === 'chat:proactive' ? 'chat:main' : unread.id}
+  if (unread) return {conversationId: unread.id}
   return null
 }

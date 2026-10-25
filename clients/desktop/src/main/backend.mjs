@@ -1,3 +1,4 @@
+import {NATIVE_VOICE_PROVIDERS} from '../renderer/native-voice.mjs'
 import {isEndpointSecret, COMPATIBLE_STAGES} from '../renderer/compatible-providers.mjs'
 import { createServer } from 'node:net'
 import { timingSafeEqual } from 'node:crypto'
@@ -15,6 +16,8 @@ const NEWLINE = 0x0a
 // `.env` (or parent environment) keeps winning. Names match the Settings
 // aliases accepted by the Node runtime configuration contract exactly.
 export const SECRET_ENV_MAP = Object.freeze({
+  minicpmRealtimeApiKey: 'MINICPM_REALTIME_API_KEY',
+  personaplexRealtimeApiKey: 'PERSONAPLEX_REALTIME_API_KEY',
   openaiCompatibleApiKey: 'OPENAI_COMPATIBLE_API_KEY',
   compatibleAsrApiKey: 'COMPATIBLE_ASR_API_KEY',
   compatibleTtsApiKey: 'COMPATIBLE_TTS_API_KEY',
@@ -33,7 +36,6 @@ export const SECRET_ENV_MAP = Object.freeze({
   arkApiKey: 'ARK_API_KEY',
   deepseekApiKey: 'DEEPSEEK_API_KEY',
   doubaoBigmodelApiKey: 'DOUBAO_BIGMODEL_API_KEY',
-  doubaoAsrApiKey: 'DOUBAO_ASR_API_KEY',
 })
 
 // Main-only values and a separate public projection share the same precedence.
@@ -214,7 +216,6 @@ export function backendLaunchSpec({
   }
   for (const [name, value] of [
     ['WATCH_MODEL', settings?.watchModel ?? ''],
-    ['PLANNER_MODEL', settings?.plannerModel ?? SETTINGS_DEFAULTS.plannerModel],
     ['EMBEDDING_MODEL', settings?.embeddingModel
       ?? SETTINGS_DEFAULTS.embeddingModel],
     ['CAPABILITIES_CONFIG', settings?.capabilitiesConfigPath
@@ -297,20 +298,19 @@ export function backendLaunchSpec({
     })
   } else {
     const provider = settings?.integratedProvider ?? SETTINGS_DEFAULTS.integratedProvider
-    const prefix = provider.toUpperCase()
+    const native = NATIVE_VOICE_PROVIDERS[provider]
+    const prefix = native ? 'NATIVE' : provider.toUpperCase()
     const providerDefaults = {openai: ['gpt-realtime-2.1-mini','marin'], gemini: ['gemini-3.8-live','Kore']}[provider]
     Object.assign(env, {
+      ...(native ? {NATIVE_REALTIME_URL:settings?.[native.endpoint] ?? native.defaultUrl,NATIVE_REALTIME_VOICE:provider==='personaplex' ? settings?.integratedVoice ?? native.voice : ''} : {}),
       INTEGRATED_PROVIDER: settings?.integratedProvider
         ?? SETTINGS_DEFAULTS.integratedProvider,
       [`${prefix}_REALTIME_MODEL`]:
         settings?.integratedModel ?? providerDefaults?.[0] ?? SETTINGS_DEFAULTS.integratedModel,
       [`${prefix}_REALTIME_VOICE`]:
-        settings?.integratedVoice ?? providerDefaults?.[1] ?? SETTINGS_DEFAULTS.integratedVoice,
+        native ? (provider==='personaplex' ? settings?.integratedVoice ?? native.voice : '') : settings?.integratedVoice ?? providerDefaults?.[1] ?? SETTINGS_DEFAULTS.integratedVoice,
     })
   }
-  // The inherited fd-3 readiness pipe is gone: stdio stops at stderr and the
-  // backend dials back instead, so a stale parent value must never imply one.
-  delete env.DESKTOP_READY_FD
   // Overrides only: an absent, empty, or whitespace-only decrypted value
   // leaves the key out of `env` entirely, so whatever the launcher's own
   // `.env`/parent env supplied keeps winning. Never a replacement with an
@@ -650,10 +650,7 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
     activeSecretKeys.add(llmProvider === 'openai-compatible' ? 'openaiCompatibleApiKey' : llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
     if (pipelineMode === 'cascaded') {
       activeSecretKeys.add(settings?.cascadedTtsProvider === 'openai-compatible' ? 'compatibleTtsApiKey' : settings?.cascadedTtsProvider === 'self-hosted' ? 'selfHostedTtsApiKey' : (settings?.cascadedTtsProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
-      // Optional override only. When absent, the runtime falls back to the
-      // big-model key; Main does not synthesize a duplicate secret value.
-      activeSecretKeys.add(settings?.cascadedAsrProvider === 'openai-compatible' ? 'compatibleAsrApiKey' : settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoAsrApiKey')
-      if ((settings?.cascadedAsrProvider ?? 'volcengine') === 'volcengine') activeSecretKeys.add('doubaoBigmodelApiKey')
+      activeSecretKeys.add(settings?.cascadedAsrProvider === 'openai-compatible' ? 'compatibleAsrApiKey' : settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
     } else {
       const integrated = settings?.integratedProvider ?? 'qwen'
       activeSecretKeys.add(integrated === 'qwen' ? 'dashscopeApiKey' : `${integrated}ApiKey`)
@@ -691,5 +688,11 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
       if (trimmed) env[envName] = trimmed
     }
   }
+  const native = pipelineMode === 'integrated' ? NATIVE_VOICE_PROVIDERS[settings?.integratedProvider] : undefined
+  delete env.MINICPM_REALTIME_API_KEY; delete env.PERSONAPLEX_REALTIME_API_KEY
+  if(native) {
+    const key=decryptedSecrets?.[native.secret]
+    env.NATIVE_REALTIME_API_KEY=typeof key==='string' && !CONTROL_CHARACTERS.test(key) ? key.trim() : ''
+  } else delete env.NATIVE_REALTIME_API_KEY
   return env
 }

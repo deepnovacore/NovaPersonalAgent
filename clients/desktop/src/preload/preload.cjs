@@ -28,12 +28,18 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     chooseBuildDirectory: () => ipcRenderer.invoke('nova:personal:build-directory'),
     setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
+    localToolApproval: mode => ipcRenderer.invoke('nova:personal:local-tool-approval', mode),
     showPresentationError: message => ipcRenderer.invoke('nova:personal:presentation-error', message),
     setPresentation: (mode,activate=true) => ipcRenderer.invoke('nova:personal:presentation', mode,activate),
     onPresentationRequest: callback => {
       const listener = (_event, mode, attention) => { if (['background','workbench','orb'].includes(mode)) callback(mode, {attention: attention === true}) }
       ipcRenderer.on('nova:personal:presentation-request', listener)
       return () => ipcRenderer.removeListener('nova:personal:presentation-request', listener)
+    },
+    onMaximized: callback => {
+      const listener = (_event, value) => { if (typeof value === 'boolean') callback(value) }
+      ipcRenderer.on('nova:personal:maximized', listener)
+      return () => ipcRenderer.removeListener('nova:personal:maximized', listener)
     },
     onCollapsed: callback => {
       const listener = (_event, value) => { if (typeof value === 'boolean') callback(value) }
@@ -226,6 +232,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
   }),
   settings: Object.freeze({
     voicePreset: (action, settings) => ipcRenderer.invoke('nova:settings:voice-preset', action, settings),
+    nativeVoiceCapabilities: provider => ipcRenderer.invoke('nova:settings:native-voice', provider),
     voiceprint: input => ipcRenderer.invoke('nova:settings:voiceprint', input),
     get: () => ipcRenderer.invoke('nova:settings:get'),
     rescanCodex: () => ipcRenderer.invoke('nova:codex:rescan'),
