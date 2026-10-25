@@ -1230,8 +1230,8 @@ select option{color:var(--ink);background:var(--surface)}
 #diary-section .im-card { margin: 0 0 14px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
 #diary-section .im-card h3 { margin: 0 0 4px; font-size: 14px; font-weight: 620; }
 #diary-section .im-card > p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.6; color: var(--ink-dim); }
-#diary-section .brief-slot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
-#diary-section .brief-toggle { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 13px; cursor: pointer; }
+#diary-section .brief-slot, #proactivity-section .brief-slot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+#diary-section .brief-toggle, #proactivity-section .brief-toggle { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 13px; cursor: pointer; }
 #diary-section .brief-days { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
 #diary-section .day-chip { position: relative; display: inline-flex; margin: 0; }
 #diary-section .day-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }

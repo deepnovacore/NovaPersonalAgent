@@ -65,9 +65,9 @@ export function createProactivityPanel({document, api, moduleStatusNote = () => 
   const fallback = has('news') ? rankFallback() : null
   if (fallback?.keyMissing === true) {
    const news = card(t('资讯相关度'), rankFallbackNote()), enabled = settings.news_rank_fallback !== false
-   const label = el('label'), box = el('input'); box.type = 'checkbox'; box.checked = enabled; box.disabled = !connected; box.setAttribute('aria-label', t('用对话模型判断资讯相关度'))
+   const row = el('div', undefined, 'brief-slot'), label = el('label', undefined, 'brief-toggle'), box = el('input'); box.type = 'checkbox'; box.setAttribute('role', 'switch'); box.checked = enabled; box.disabled = !connected; box.setAttribute('aria-label', t('用对话模型判断资讯相关度'))
    box.addEventListener('change', () => {void command('discovery.configure', {news_rank_fallback: box.checked}).catch(onError)})
-   label.append(box, el('span', t('用对话模型判断资讯相关度'))); news.append(label)
+   label.append(box, el('span', t('用对话模型判断资讯相关度'))); row.append(label); news.append(row)
   }
   if (has('diary')) renderDiary({settings, connected, card, el, command, onError})
   if (has('brief')) renderDailyBrief({settings, connected, card, el, button, command})
