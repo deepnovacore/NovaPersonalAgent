@@ -4,7 +4,7 @@
 .welcome-screen:before{content:"";position:absolute;inset:0 0 auto;height:44px;-webkit-app-region:drag}
 .welcome-loading{text-align:center;max-width:480px}
 .welcome-portrait{position:relative;width:132px;height:132px;margin:0 auto 26px;padding:10px;box-sizing:border-box}
-.welcome-portrait img{width:100%;height:100%;border-radius:30px;object-fit:cover;background:#fff9ed}
+.welcome-portrait img{width:100%;height:100%;border-radius:50%;object-fit:cover;background:#fff9ed}
 .welcome-spinner{position:absolute;inset:0;border:2px solid #e3e2ed;border-top-color:#68649c;border-right-color:#68649c;border-radius:50%;animation:welcome-spin 1.4s linear infinite}
 @keyframes welcome-spin{to{transform:rotate(360deg)}}
 .welcome-screen h1{font-size:28px;letter-spacing:-.7px;margin:0 0 12px;font-weight:650}
