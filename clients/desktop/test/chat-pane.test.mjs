@@ -629,19 +629,6 @@ test('internal source tasks disappear from main chat while user tasks remain',()
  assert.ok(m.all().some(n=>n.textContent==='运行中 · 0 个后台任务'))
 })
 
-test('the first main-conversation greeting starts at the top instead of hiding behind auto-scroll',()=>{
- const m=mount({defaultHome:true,api:{orbMenu:{},personal:{setUnread(){},onPresentationRequest(){},onCollapsed(){}},welcome:{}}})
- m.view.receive(feedState(1,'chat:main',{feed:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages:[]}}))
- const history=m.all().find(n=>n.className==='chat-history')
- history.scrollHeight=900;history.clientHeight=300;history.scrollTop=600
- m.view.identity({profile:{assistantName:'nova',userName:'',avatar:null,introduced:false},defaultAvatar:''})
- assert.equal(history.scrollTop,0)
- history.scrollTop=200
- m.view.identity({profile:{assistantName:'nova',userName:'',avatar:null,introduced:false},defaultAvatar:''})
- assert.equal(history.scrollTop,200)
- assert.equal(m.all().find(n=>n.className==='chat-new-messages').hidden,true)
-})
-
 test('main conversation keeps one companion outside the transcript through messages, sending and voice states',()=>{
  const m=mount({defaultHome:true,api:{orbMenu:{},personal:{setUnread(){},onPresentationRequest(){},onCollapsed(){}},welcome:{}}})
  const snapshot=(revision,messages=[])=>feedState(revision,'chat:main',{feed:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages}})

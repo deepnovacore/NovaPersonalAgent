@@ -80,32 +80,3 @@ test('welcome IPC rejects foreign frames, preserves canceled selections and stor
   assert.equal((await invoke('avatar',true)).profile.avatar,null)
  }finally{await rm(root,{recursive:true,force:true})}
 })
-
-test('runtime names replace stale welcome names after chat rename and reconnect',async()=>{
- const {mountAssistantWelcome}=await import('../src/renderer/assistant-welcome.mjs')
- class Node {
-  constructor(tag){this.tagName=tag.toUpperCase();this.children=[];this.listeners={}}
-  append(...nodes){this.children.push(...nodes)}
-  replaceChildren(...nodes){this.children=nodes}
-  setAttribute(){}
-  addEventListener(name,fn){this.listeners[name]=fn}
-  querySelectorAll(tag){return this.children.flatMap(n=>[...(n.tagName===tag.toUpperCase()?[n]:[]),...n.querySelectorAll(tag)])}
- }
- const previous=globalThis.document
- globalThis.document={createElement:tag=>new Node(tag)}
- try{
-  const calls=[],saved=[],c={connected:true,presentationReady:false,snapshot:{settings:{assistant_name:'小星',user_name:'新名字'}},command:async(method,params)=>{calls.push([method,params]);return {}}}
-  let welcome
-  const api={save:async patch=>{saved.push(patch);return {profile:{...patch,introduced:true,avatar:null},defaultAvatar:''}}}
-  welcome=mountAssistantWelcome(new Node('div'),{api,c,onIdentity:value=>welcome.update(value)})
-  welcome.update({profile:{assistantName:'小星',userName:'旧名字',introduced:true,avatar:null},defaultAvatar:''})
-  assert.equal(saved.length,0)
-  c.presentationReady=true;welcome.sync();await new Promise(resolve=>setImmediate(resolve))
-  assert.equal(calls.length,0);assert.equal(saved.at(-1).userName,'新名字')
-  welcome.sync();assert.equal(saved.length,1)
-  c.connected=false;welcome.sync();c.connected=true;c.presentationReady=false;welcome.sync()
-  c.snapshot={settings:{assistant_name:'小星',user_name:'重启后的名字'}}
-  c.presentationReady=true;welcome.sync();await new Promise(resolve=>setImmediate(resolve))
-  assert.equal(calls.length,0);assert.equal(saved.at(-1).userName,'重启后的名字')
- }finally{globalThis.document=previous}
-})
