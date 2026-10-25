@@ -577,7 +577,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         {},
     language: language,
     onOpen: _workspace,
-    onSettings: _settings,
     generatedProfile: feishu == null
         ? null
         : LocalProfileResults(
@@ -1058,6 +1057,15 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                       letterSpacing: -.5,
                     ),
                   ),
+                  actions: [
+                    if (_tab == 3)
+                      IconButton(
+                        tooltip: _t('设置', 'Settings'),
+                        icon: const Icon(CupertinoIcons.gear_alt, size: 23),
+                        onPressed: _settings,
+                      ),
+                    const SizedBox(width: 10),
+                  ],
                 ),
                 bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
                     ? null

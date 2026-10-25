@@ -46,9 +46,7 @@ void main() {
     }
   });
 
-  testWidgets('offline notice appears only on chat and tasks', (
-    tester,
-  ) async {
+  testWidgets('offline notice appears only on chat and tasks', (tester) async {
     await pumpClient(tester, seededState(online: false));
     expect(find.byType(NovaNotice), findsOneWidget);
     expect(find.textContaining('Host 不在线 · 展示上次缓存'), findsOneWidget);
@@ -111,28 +109,73 @@ void main() {
     expect(tester.widget<IconButton>(send).onPressed, isNull);
   });
 
-  testWidgets('我的 groups Space, Host and authorisation, and switches Space', (
-    tester,
-  ) async {
-    var switched = 0;
-    await pumpClient(tester, seededState(), onSwitchSpace: () => switched++);
-    await tester.tap(find.text('我的'));
-    await tester.pump();
-    for (final header in ['Space', 'Host 连接', '手机采集与授权']) {
-      expect(find.text(header), findsOneWidget);
-    }
-    await tester.tap(find.text('切换或新建 Space'));
-    expect(switched, 1);
-    // SelectableText carries its own Scrollable; scroll the page list.
-    await tester.scrollUntilVisible(
-      find.text('手机工具'),
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.text('手机工具'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('iOS 支持日历读取'), findsOneWidget);
-  });
+  testWidgets(
+    'settings groups Space, Host and authorisation, and switches Space',
+    (tester) async {
+      var switched = 0;
+      await pumpClient(tester, seededState(), onSwitchSpace: () => switched++);
+      await tester.tap(find.text('我的'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pumpAndSettle();
+      for (final header in ['Space', 'Host 连接', '手机采集与授权']) {
+        expect(find.text(header), findsOneWidget);
+      }
+
+      // SelectableText carries its own Scrollable; scroll the page list.
+      await tester.scrollUntilVisible(
+        find.text('手机工具'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('手机工具'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('iOS 支持日历读取'), findsOneWidget);
+      Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('切换或新建 Space'),
+        -500,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('切换或新建 Space'));
+      await tester.pumpAndSettle();
+      expect(switched, 1);
+      expect(find.byTooltip('设置'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'personal overview opens profile and feeds without connection details',
+    (tester) async {
+      final state = seededState();
+      state.snapshot['profile'] = {'about': '我喜欢徒步', 'version': 2};
+      await pumpClient(tester, state);
+      await tester.tap(find.text('我的'));
+      await tester.pumpAndSettle();
+      expect(find.text('我喜欢徒步'), findsOneWidget);
+      expect(find.text('Host 连接'), findsNothing);
+      await tester.tap(find.text('查看与编辑'));
+      await tester.pumpAndSettle();
+      expect(find.text('我喜欢徒步'), findsOneWidget);
+      expect(find.text('编辑个人资料'), findsOneWidget);
+      state.snapshot['profile'] = {'about': 'Host 更新后的介绍', 'version': 3};
+      state.notifyListeners();
+      await tester.pump();
+      expect(find.text('Host 更新后的介绍'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('资讯'));
+      await tester.tap(find.text('资讯'));
+      await tester.pumpAndSettle();
+      expect(find.text('今日简报'), findsOneWidget);
+      expect(find.text('Host 已完成处理'), findsNothing);
+      state.snapshot['feed'] = <Map<String, dynamic>>[];
+      state.notifyListeners();
+      await tester.pump();
+      expect(find.text('暂无资讯'), findsOneWidget);
+    },
+  );
 
   testWidgets('keyboard hides the tab bar like the local app', (tester) async {
     await pumpClient(tester, seededState());

@@ -6,6 +6,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../ui/app.dart' show BottomAppBarTabs;
 import '../ui/components.dart';
 import '../ui/theme.dart';
+import '../ui/my_overview.dart';
 import 'client_controller.dart';
 import 'client_state.dart';
 import 'relay_transport.dart';
@@ -986,7 +987,94 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     ),
   );
 
-  Widget _me(SpaceClientController c) {
+  void _openPersonalPage(String title, Widget Function() content) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AnimatedBuilder(
+          animation: controller!.state,
+          builder: (context, _) => Scaffold(
+            backgroundColor: Nova.ink,
+            appBar: AppBar(title: Text(title), centerTitle: true),
+            body: content(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _profileDetails(SpaceClientState state) {
+    final value = state.snapshot['profile'] as Map? ?? {};
+    final about = value['about'] as String? ?? '';
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      children: [
+        NovaSection(
+          header: '个人介绍',
+          footer: state.hostOnline ? '来自当前 Space' : 'Host 不在线，显示上次同步的资料',
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SelectableText(about.isEmpty ? '还没有个人介绍' : about),
+              ),
+            ),
+            NovaTile(
+              title: '编辑个人资料',
+              trailing: const CupertinoListTileChevron(),
+              onTap: profile,
+            ),
+          ],
+        ),
+        _pending(state),
+      ],
+    );
+  }
+
+  Widget _feeds(SpaceClientState state) {
+    final cards = state
+        .cards('feed')
+        .where((c) => c['dismissed'] != true)
+        .toList();
+    if (cards.isEmpty) return _empty('暂无资讯');
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      children: [
+        NovaSection(
+          children: [for (final card in cards) _card(card, collection: 'feed')],
+        ),
+      ],
+    );
+  }
+
+  Widget _me(SpaceClientController c) => MyOverview(
+    life: c.state.snapshot,
+    draft: const {},
+    onOpen: (page) {
+      if (page == 5) {
+        _openPersonalPage('个人资料', () => _profileDetails(c.state));
+      } else if (page == 1) {
+        _openPersonalPage('资讯', () => _feeds(c.state));
+      } else {
+        final kind = {2: 'todo', 3: 'idea', 4: 'goal'}[page]!;
+        _openPersonalPage(_kindNames[kind]!, () {
+          final rows = c.state.cards('${kind}s');
+          if (rows.isEmpty) return _empty('暂无${_kindNames[kind]}');
+          return ListView(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            children: [
+              _pending(c.state),
+              NovaSection(
+                children: [for (final row in rows) _entity(kind, row)],
+              ),
+            ],
+          );
+        });
+      }
+    },
+  );
+
+  Widget _settings(SpaceClientController c) {
     final state = c.state;
     return ListView(
       padding: const EdgeInsets.only(top: 8, bottom: 24),
@@ -1004,7 +1092,10 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
               title: '切换或新建 Space',
               leading: const NovaIconTile(CupertinoIcons.arrow_swap),
               trailing: const CupertinoListTileChevron(),
-              onTap: widget.onSwitchSpace,
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onSwitchSpace();
+              },
             ),
           ],
         ),
@@ -1048,12 +1139,6 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         NovaSection(
           children: [
             NovaTile(
-              title: '个人资料',
-              leading: const NovaIconTile(CupertinoIcons.person_crop_circle),
-              trailing: const CupertinoListTileChevron(),
-              onTap: profile,
-            ),
-            NovaTile(
               title: '手机工具',
               leading: const NovaIconTile(CupertinoIcons.info),
               trailing: const CupertinoListTileChevron(),
@@ -1092,11 +1177,18 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           ),
         ),
         actions: [
-          IconButton(
-            onPressed: () => c.sync(),
-            icon: const Icon(CupertinoIcons.arrow_clockwise, size: 23),
-            tooltip: '补拉 Host 状态',
-          ),
+          if (tab == 3)
+            IconButton(
+              tooltip: '设置',
+              icon: const Icon(CupertinoIcons.gear_alt, size: 23),
+              onPressed: () => _openPersonalPage('设置', () => _settings(c)),
+            )
+          else
+            IconButton(
+              onPressed: () => c.sync(),
+              icon: const Icon(CupertinoIcons.arrow_clockwise, size: 23),
+              tooltip: '补拉 Host 状态',
+            ),
           const SizedBox(width: 10),
         ],
       ),

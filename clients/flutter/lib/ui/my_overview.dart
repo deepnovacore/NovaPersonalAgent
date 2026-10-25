@@ -8,13 +8,11 @@ class MyOverview extends StatelessWidget {
     required this.life,
     required this.draft,
     required this.onOpen,
-    required this.onSettings,
     this.generatedProfile,
     this.language = 'zh',
   });
   final Map<String, dynamic> life, draft;
   final void Function(int) onOpen;
-  final VoidCallback onSettings;
   final Widget? generatedProfile;
   final String language;
   String t(String zh, String en) => language == 'zh' ? zh : en;
@@ -48,10 +46,9 @@ class MyOverview extends StatelessWidget {
           Container(
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Nova.separator),
+              borderRadius: BorderRadius.circular(16),
             ),
-            padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -75,13 +72,6 @@ class MyOverview extends StatelessWidget {
                           ),
                         ),
                       ),
-                    ),
-                    TextButton(
-                      onPressed: onSettings,
-                      style: TextButton.styleFrom(
-                        foregroundColor: Nova.secondary,
-                      ),
-                      child: Text(t('设置', 'Settings')),
                     ),
                   ],
                 ),
@@ -140,10 +130,9 @@ class MyOverview extends StatelessWidget {
           Container(
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Nova.separator),
+              borderRadius: BorderRadius.circular(16),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
             child: Column(
               children: [
                 _section(
@@ -163,27 +152,26 @@ class MyOverview extends StatelessWidget {
                   CupertinoIcons.lightbulb,
                   Nova.amber,
                 ),
+                const Divider(height: 1),
+                _section(
+                  t('资讯', 'Feeds'),
+                  t('简报与推荐', 'Briefs and recommendations'),
+                  1,
+                  const [],
+                  CupertinoIcons.news,
+                  Nova.mint,
+                ),
+                const Divider(height: 1),
+                _section(
+                  t('全部待办', 'To-dos'),
+                  t('查看全部', 'View all'),
+                  2,
+                  const [],
+                  CupertinoIcons.check_mark_circled,
+                  Nova.secondary,
+                ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              TextButton.icon(
-                onPressed: () => onOpen(2),
-                style: TextButton.styleFrom(foregroundColor: Nova.secondary),
-                icon: const Icon(CupertinoIcons.check_mark_circled, size: 17),
-                label: Text(t('全部待办', 'To-dos')),
-              ),
-              TextButton.icon(
-                onPressed: () => onOpen(1),
-                style: TextButton.styleFrom(foregroundColor: Nova.secondary),
-                icon: const Icon(CupertinoIcons.news, size: 17),
-                label: Text(t('资讯', 'Feeds')),
-              ),
-            ],
           ),
         ],
       ),
