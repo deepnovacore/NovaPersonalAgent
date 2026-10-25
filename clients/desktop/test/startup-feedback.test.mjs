@@ -34,7 +34,7 @@ test('the first paint fence accepts a visible same-stage spinner and requires cr
 test('settings public projection never opens the keychain or capability files', () => {
   const body = source.slice(source.indexOf('function settingsView()'), source.indexOf('async function loadMemoryBoardExport()'))
   const touched = () => {throw Error('keychain/file access')}
-  const context = vm.createContext({capabilityEditorCache:null, runtimeCapabilities:null, settingsWindow:{}, settingsGeneration:1, currentSettings:{},
+  const context = vm.createContext({capabilityEditorCache:null, skillsCache:[], runtimeCapabilities:null, settingsWindow:{}, settingsGeneration:1, currentSettings:{},
     secretCodec:{available:touched}, capabilityDocumentRevision:touched, decryptSecretsForSpawn:touched,
     readCapabilityDocument:touched, resolveSecretConfiguration:()=>({secretsPresent:{},secretSources:{}}),process:{env:{}},developmentEnv:{},
     secretsPresent:()=>({}), publicSettings:()=>({}), codexStatus:{},frontendUsage:{snapshot:()=>({})},VISION_MODELS:[],backendStatus:{state:'stopped'},

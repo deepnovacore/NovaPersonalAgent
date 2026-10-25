@@ -19,6 +19,7 @@ import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {codingBackendStatus} from './coding-settings.mjs'
+import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
 import {FeishuConnector, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
@@ -218,6 +219,8 @@ function endVoiceprintRecording() {
 let launchGeneration = 0
 let runtimeCapabilities = null
 let capabilityEditorCache = null
+// Listed from disk only when the settings panel asks (nova:settings:get); settingsView() itself never reads files.
+let skillsCache = []
 const feishuSetupOwner = createFeishuSetupOwner({Connector: FeishuConnector})
 let backendControl = null
 let settingsApplyStatus = 'idle'
@@ -398,6 +401,7 @@ function settingsView() {
     ...publicSettings(currentSettings),
     codexStatus,
     codingBackends: codingBackendStatus(currentSettings, process.env),
+    skills: skillsCache,
     frontendUsage: frontendUsage.snapshot(),
     visionModels: VISION_MODELS,
     backendStatus: backendStatus.state,
@@ -1913,6 +1917,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     }
     await refreshManagedWorkspaceCapabilities()
     await refreshSettingsCapabilities()
+    ensureBuiltInSkills();skillsCache = listSkills()
     // A cold open cannot be told which category to show by a push: the panel
     // subscribes only after its module evaluates, and this reply is the first
     // thing it is guaranteed to receive. Consumed once so a later plain open

@@ -2,21 +2,17 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {skillEntries,filterSkills,renderSkillsPage} from '../src/renderer/skills-page.mjs'
 
-const status={modules:{search:{enabled:true},camera:{enabled:false},coding:{enabled:true,reason:'x'},knowledge:{enabled:true}},servers:[{name:'notes',status:'ok'},{name:'broken',status:'failed'},{name:'idle',status:'disabled'}]}
+const skills=[{id:'computer-use',name:'Computer Use',description:'真实截图与鼠标键盘操作，在 Build 会话中按需开启'},{id:'notes',name:'',description:'整理笔记'}]
 
-test('system skills lead with Computer Use; MCP servers are personal with their own state',()=>{
- const entries=skillEntries(status)
- assert.deepEqual(entries.filter(e=>e.group==='system').map(e=>[e.id,e.state]),[['computer-use','session'],['search','on'],['camera','off'],['coding','degraded'],['knowledge','on']])
- assert.deepEqual(entries.filter(e=>e.group==='personal').map(e=>[e.name,e.state]),[['notes','on'],['broken','failed'],['idle','off']])
+test('every skills folder becomes an entry; only Computer Use is per-session',()=>{
+ assert.deepEqual(skillEntries(skills).map(e=>[e.id,e.name,e.state]),[['computer-use','Computer Use','session'],['notes','notes','on']])
+ assert.deepEqual(skillEntries(null),[])
 })
-test('without registry status Computer Use is still listed and nothing else is invented',()=>{
- assert.deepEqual(skillEntries(null).map(e=>e.id),['computer-use'])
-})
-test('search matches name or description inside the selected group only',()=>{
- const entries=skillEntries(status)
- assert.deepEqual(filterSkills(entries,'system','截图').map(e=>e.id),['computer-use'])
- assert.deepEqual(filterSkills(entries,'system','NOTES'),[])
- assert.deepEqual(filterSkills(entries,'personal','notes').map(e=>e.name),['notes'])
+test('search matches name or description',()=>{
+ const entries=skillEntries(skills)
+ assert.deepEqual(filterSkills(entries,'截图').map(e=>e.id),['computer-use'])
+ assert.deepEqual(filterSkills(entries,'NOTES').map(e=>e.id),['notes'])
+ assert.deepEqual(filterSkills(entries,'zzz'),[])
 })
 
 class Node{
@@ -34,24 +30,23 @@ function mount(state){
  const el=(tag,text,className)=>Object.assign(new Node(tag,text),className?{className}:{})
  const calls=[],panel=new Node('section')
  const button=(label,action,parent)=>{const b=el('button',label);b.listeners.click=action;parent.append(b);return b}
- renderSkillsPage(panel,{el,button,state,refresh:()=>calls.push('refresh'),manage:()=>calls.push('manage')})
+ renderSkillsPage(panel,{el,button,state,refresh:()=>calls.push('refresh')})
  return {panel,calls,cards:()=>walk(panel).filter(n=>n.className==='skill-card')}
 }
-test('each skill gets its own inline icon and the group tabs and search re-filter without a rerender',()=>{
- const state={status,loading:false,error:'',group:'system',query:''}
+test('cards render per skill, search re-filters without a rerender, and there are no group tabs',()=>{
+ const state={skills,loading:false,error:'',query:''}
  const m=mount(state)
- assert.equal(m.cards().length,5)
- const paths=m.cards().map(card=>card.children[0].children[0]?.children[0]?.attrs.d)
- assert(paths.every(Boolean));assert.equal(new Set(paths).size,5)
- const [systemTab,personalTab]=walk(m.panel).find(n=>n.className==='skills-tabs').children
- personalTab.listeners.click();assert.equal(m.cards().length,3);assert.equal(personalTab.attrs['aria-pressed'],'true');assert.equal(systemTab.attrs['aria-pressed'],'false')
- const search=walk(m.panel).find(n=>n.className==='skills-search');search.value='bro';search.listeners.input();assert.deepEqual(m.cards().map(c=>c.children[1].children[0].textContent),['broken'])
- assert.equal(state.query,'bro')
+ assert.equal(m.cards().length,2)
+ assert.equal(walk(m.panel).some(n=>n.className==='skills-tabs'),false)
+ const search=walk(m.panel).find(n=>n.className==='skills-search');search.value='note';search.listeners.input()
+ assert.deepEqual(m.cards().map(c=>c.children[1].children[0].textContent),['notes'])
+ assert.equal(state.query,'note')
 })
-test('empty and loading states explain themselves and the manage button is wired',()=>{
- const loading=mount({status:null,loading:true,error:'',group:'personal',query:''})
- assert.equal(loading.cards().length,0);assert(walk(loading.panel).some(n=>n.textContent==='正在读取技能…'))
- const failed=mount({status:null,loading:false,error:'暂时无法读取技能，请稍后刷新。',group:'personal',query:''})
- assert(walk(failed.panel).some(n=>n.textContent==='暂时无法读取技能，请稍后刷新。'))
- walk(failed.panel).find(n=>n.textContent==='在设置中管理能力').listeners.click();assert.deepEqual(failed.calls,['manage'])
+test('empty, loading and error states explain themselves and refresh is wired',()=>{
+ const text=m=>walk(m.panel).map(n=>n.textContent)
+ assert(text(mount({skills:[],loading:true,error:'',query:''})).includes('正在读取技能…'))
+ assert(text(mount({skills:null,loading:false,error:'暂时无法读取技能，请稍后刷新。',query:''})).includes('暂时无法读取技能，请稍后刷新。'))
+ const empty=mount({skills:[],loading:false,error:'',query:''})
+ assert(text(empty).includes('还没有技能。把带 SKILL.md 的文件夹放进技能目录，刷新即可。'))
+ walk(empty.panel).find(n=>n.textContent==='刷新').listeners.click();assert.deepEqual(empty.calls,['refresh'])
 })

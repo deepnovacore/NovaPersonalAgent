@@ -43,14 +43,14 @@ import {
 
 createChatGptPanel(document,window.novaPersonalAgentDesktop.chatgpt)
 const api = window.novaPersonalAgentDesktop.settings
-const skillsState={status:null,loading:false,error:'',group:'system',query:''}
+const skillsState={skills:null,loading:false,error:'',query:''}
 const skillElement=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
 function renderSettingsSkills(){
  const panel=document.querySelector('#skills-panel'),search=panel.querySelector('.skills-search'),focused=search===document.activeElement,selection=focused?[search.selectionStart,search.selectionEnd]:null;panel.replaceChildren()
  renderSkillsPage(panel,{el:skillElement,button:(label,action,parent)=>{const node=skillElement('button',label);node.type='button';node.addEventListener('click',()=>void action());parent.append(node);return node},state:skillsState,refresh:async()=>{
   skillsState.loading=true;skillsState.error='';renderSettingsSkills()
-  try{const view=await api.get();skillsState.status=view?.capabilities?.status??null;if(!skillsState.status)skillsState.error='暂时无法读取技能，请稍后刷新。'}catch{skillsState.error='暂时无法读取技能，请稍后刷新。'}finally{skillsState.loading=false;renderSettingsSkills()}
- },manage:()=>applyCategory('capabilities')})
+  try{const view=await api.get();skillsState.skills=Array.isArray(view?.skills)?view.skills:null;if(!skillsState.skills)skillsState.error='暂时无法读取技能，请稍后刷新。'}catch{skillsState.error='暂时无法读取技能，请稍后刷新。'}finally{skillsState.loading=false;renderSettingsSkills()}
+ }})
  if(focused){const next=panel.querySelector('.skills-search');next.focus();if(selection?.every(Number.isInteger))next.setSelectionRange(...selection)}
 }
 const welcomeApi=window.novaPersonalAgentDesktop.welcome
@@ -523,8 +523,8 @@ function render(view, drafts, state) {
   document.getElementById('language').value = view.language ?? 'zh-CN'
   document.getElementById('language-restart-hint').hidden = (view.language ?? 'zh-CN') === currentLanguage()
   currentView = view
-  const skillStatus=view.capabilities?.status??null
-  if(JSON.stringify(skillStatus)!==JSON.stringify(skillsState.status)){skillsState.status=skillStatus;if(activeCategory==='skills')renderSettingsSkills()}
+  const skillList=Array.isArray(view.skills)?view.skills:null
+  if(JSON.stringify(skillList)!==JSON.stringify(skillsState.skills)){skillsState.skills=skillList;if(activeCategory==='skills')renderSettingsSkills()}
   skinPanel.render(view, state)
   renderUsage()
   renderVision(view)
