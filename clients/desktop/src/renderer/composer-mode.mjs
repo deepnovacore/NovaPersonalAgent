@@ -1,10 +1,9 @@
 import {t} from './locale.mjs'
 
-export const COMPOSER_MODES=Object.freeze(['chat','plan','build','delegate'])
-const LABELS={chat:'Chat',plan:'Plan',build:'Build',delegate:'Delegate'}
+export const COMPOSER_MODES=Object.freeze(['chat','build','delegate'])
+const LABELS={chat:'Chat',build:'Build',delegate:'Delegate'}
 const CAPTIONS={
  chat:'直接对话',
- plan:'澄清需求，发布计划后选择执行方式',
  build:'发布计划后在本地项目里 Build',
  delegate:'发布计划后交给执行器',
  locked:'Build 会话进行中',
@@ -12,13 +11,14 @@ const CAPTIONS={
 const MODE_KINDS=new Set(['chat','topic'])
 
 /**
- * Chat and Plan are conversation modes. Build and Delegate are Plan with a chosen way to execute it:
- * they decide the plan card's primary action and never start execution on their own.
+ * Chat is the plain conversation mode. Build and Delegate are the backend's plan mode with a chosen way to
+ * execute the plan: they decide the plan card's primary action and never start execution on their own.
+ * A plan-mode conversation without a chosen execution shows as Chat.
  */
 export function composerMode(item,state){
  if(item?.kind==='build')return 'build'
  if(item?.mode!=='plan')return 'chat'
- return ['build','delegate'].includes(state?.execution)?state.execution:'plan'
+ return ['build','delegate'].includes(state?.execution)?state.execution:'chat'
 }
 export function nextComposerMode(current,step=1){
  const index=COMPOSER_MODES.indexOf(current)

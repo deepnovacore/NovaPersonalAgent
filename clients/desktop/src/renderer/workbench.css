@@ -229,6 +229,11 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .composer-mode[hidden]{display:none}
 .composer-actions .composer-mode-active{height:26px;padding:0 7px;font:500 12px/26px var(--mono);color:var(--ink-dim);white-space:nowrap}
 .composer-mode:not([data-mode="chat"]) .composer-mode-active{color:var(--accent)}
+.composer-mode-active{display:inline-flex;align-items:center;gap:6px}
+.composer-mode-active::before{content:'';width:14px;height:14px;flex:0 0 14px;background:currentColor;-webkit-mask:var(--mode-icon) center/contain no-repeat;mask:var(--mode-icon) center/contain no-repeat}
+.composer-mode[data-mode="chat"] .composer-mode-active{--mode-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5A1.5 1.5 0 0 1 11.5 11H8l-3 2.5V11h-.5A1.5 1.5 0 0 1 3 9.5z'/%3E%3C/svg%3E")}
+.composer-mode[data-mode="build"] .composer-mode-active{--mode-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.5 2.5a3 3 0 0 0-2.8 4L2.8 11.4a1.2 1.2 0 0 0 1.8 1.8L9.5 8.3a3 3 0 0 0 4-2.8l-1.8 1.8-1.7-.4-.4-1.7z'/%3E%3C/svg%3E")}
+.composer-mode[data-mode="delegate"] .composer-mode-active{--mode-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8h8M8 4.5 11.5 8 8 11.5M13 3v10'/%3E%3C/svg%3E")}
 .composer-actions .composer-mode-active:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .composer-actions .composer-mode-active:disabled{cursor:default}
 /* The composer's execution choice promotes one plan action without hiding the other. */
