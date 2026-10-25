@@ -5,22 +5,23 @@ import {createProactivityPanel, clampDailyCap, memoryEmbeddingNote, rankFallback
 import {moduleStatusNote} from '../src/renderer/capabilities-editor.mjs'
 class Node{constructor(tag){this.tag=tag;this.children=[];this.listeners={};this.dataset={};this.className='';this.textContent=''}append(...c){this.children.push(...c)}replaceChildren(...c){this.children=c}setAttribute(k,v){this[k]=v}addEventListener(k,v){this.listeners[k]=v}}
 const all=n=>[n,...n.children.flatMap(all)]
-function harness(settings={},{failState=false,rankFallback}={}){
+function harness(settings={},{failState=false,rankFallback,parts}={}){
  const root=new Node('div'),error=new Node('p'),calls=[]
- const document={querySelector:sel=>sel==='#proactivity-panel'?root:error,createElement:tag=>new Node(tag)}
+ const document={querySelector:sel=>sel==='#proactivity-panel'||sel==='#diary-panel'?root:error,createElement:tag=>new Node(tag)}
  const state={capabilities:{discovery:true},settings:{discovery_enabled:true,discovery_interval_minutes:30,...settings}}
  const api={personalCommand:async(method,params)=>{calls.push([method,params]);if(method==='state')return failState?{error:'unavailable'}:state;return {ok:true}}}
- const panel=createProactivityPanel({document,api,moduleStatusNote,...(rankFallback?{rankFallback}:{})})
+ const panel=createProactivityPanel({document,api,moduleStatusNote,...(rankFallback?{rankFallback}:{}),...(parts?{rootSelector:'#diary-panel',errorSelector:'#diary-error',parts}:{})})
  const tick=()=>new Promise(r=>setImmediate(r))
  return {root,error,calls,panel,tick,state,
   button:label=>all(root).find(n=>n.tag==='button'&&(n.textContent===label||n['aria-label']===label)),
   cap:()=>all(root).find(n=>n.tag==='input'&&n['aria-label']==='每日主动消息上限')}
 }
-test('panel holds discovery, briefing, quiet hours and the daily cap',async()=>{
+test('the general panel holds discovery and the daily cap; diary and briefing live in their own panel',async()=>{
  const h=harness();await h.panel.load()
  const labels=all(h.root).map(n=>n['aria-label']).filter(Boolean)
- for(const label of ['主动发现间隔','早间简报','晚间简报','免打扰开始','免打扰结束','时区','周一','周日','每日主动消息上限'])assert.ok(labels.includes(label),label)
- assert.ok(h.button('保存简报设置'));assert.equal(h.cap().value,'5');assert.equal(h.cap().min,'1');assert.equal(h.cap().max,'10')
+ for(const label of ['主动发现间隔','每日主动消息上限'])assert.ok(labels.includes(label),label)
+ for(const label of ['早间简报','晚间简报','免打扰开始','时区','写每日日记'])assert.equal(labels.includes(label),false,label)
+ assert.equal(h.button('保存简报设置'),undefined);assert.equal(h.cap().value,'5');assert.equal(h.cap().min,'1');assert.equal(h.cap().max,'10')
  assert.ok(all(h.root).some(n=>n.textContent==='agent 主动找你的消息每天最多几条；你自己发起的任务结果不计入。'))
 })
 test('changing the cap sends discovery.configure with proactive_daily_cap and only that field',async()=>{
@@ -44,8 +45,10 @@ test('discovery interval and briefing save still use discovery.configure',async(
  const h=harness();await h.panel.load()
  const select=all(h.root).find(n=>n.tag==='select');select.value='0';select.listeners.change();await h.tick()
  assert.deepEqual(h.calls[1],['discovery.configure',{enabled:false}])
- await h.button('保存简报设置').listeners.click();await h.tick()
- assert.equal(h.calls.filter(c=>c[0]==='discovery.configure').at(-1)[1].briefing_weekdays.length,5)
+ const diary=harness({},{parts:['diary','brief']});await diary.panel.load()
+ await diary.button('保存简报设置').listeners.click();await diary.tick()
+ const saved=diary.calls.filter(c=>c[0]==='discovery.configure').at(-1)[1]
+ assert.equal(saved.briefing_weekdays.length,5);assert.equal('timezone' in saved,false)
 })
 test('controls are disabled before state arrives and a failed read surfaces the error',async()=>{
  const h=harness();assert.equal(h.cap().disabled,true)
@@ -70,16 +73,17 @@ test('the settings page mounts the panel and no longer carries the removed setti
 })
 test('news fallback row shows only without an OpenRouter key and sends news_rank_fallback alone',async()=>{
  const rows=h=>all(h.root).filter(n=>n.tag==='input'&&n['aria-label']==='用对话模型判断资讯相关度')
- const keyed=harness({},{rankFallback:()=>({keyMissing:false,provider:'Qwen'})});await keyed.panel.load();assert.equal(rows(keyed).length,0)
+ const keyed=harness({},{rankFallback:()=>({keyMissing:false})});await keyed.panel.load();assert.equal(rows(keyed).length,0)
  assert.ok(!all(keyed.root).some(n=>String(n.textContent).includes('OpenRouter')))
  const bare=harness({},{});await bare.panel.load();assert.equal(rows(bare).length,0,'no fallback info means no row')
- const h=harness({},{rankFallback:()=>({keyMissing:true,provider:'Qwen'})});await h.panel.load()
- assert.ok(all(h.root).some(n=>n.textContent==='没有 OpenRouter 密钥时，会用你的对话模型（Qwen）判断资讯相关度：你的兴趣、文章标题和摘要会发给它。'))
+ const h=harness({},{rankFallback:()=>({keyMissing:true})});await h.panel.load()
+ assert.ok(all(h.root).some(n=>n.textContent===rankFallbackNote()))
+ assert.ok(!all(h.root).some(n=>/OpenRouter|Qwen|OpenAI/.test(String(n.textContent))),'no vendor names in the note')
  const [box]=rows(h);assert.equal(box.checked,true,'on by default');assert.equal(box.disabled,false)
  box.checked=false;box.listeners.change();await h.tick()
  assert.deepEqual(h.calls[1],['discovery.configure',{news_rank_fallback:false}])
- const off=harness({news_rank_fallback:false},{rankFallback:()=>({keyMissing:true,provider:null})});await off.panel.load()
- assert.equal(rows(off)[0].checked,false);assert.equal(rankFallbackNote(null),'没有 OpenRouter 密钥时，会用你的对话模型判断资讯相关度：你的兴趣、文章标题和摘要会发给它。','unnamed provider stays generic')
+ const off=harness({news_rank_fallback:false},{rankFallback:()=>({keyMissing:true})});await off.panel.load()
+ assert.equal(rows(off)[0].checked,false)
 })
 test('the discovery switch says it also covers goal proposals and goal check-ins',async()=>{
  const h=harness();await h.panel.load()
@@ -87,6 +91,14 @@ test('the discovery switch says it also covers goal proposals and goal check-ins
 })
 
 test('daily diary defaults on and saves its independent switch',async()=>{
- const h=harness();await h.panel.load();const box=all(h.root).find(n=>n['aria-label']==='写每日日记');assert.ok(box);assert.equal(box.checked,true)
+ const h=harness({},{parts:['diary','brief']});await h.panel.load();const box=all(h.root).find(n=>n['aria-label']==='写每日日记');assert.ok(box);assert.equal(box.checked,true)
  box.checked=false;box.listeners.change();await h.tick();assert.deepEqual(h.calls[1],['discovery.configure',{diary_enabled:false}])
+})
+
+test('the diary panel holds the diary switch and the briefing form but no time zone field',async()=>{
+ const h=harness({},{parts:['diary','brief']});await h.panel.load()
+ const labels=all(h.root).map(n=>n['aria-label']).filter(Boolean)
+ for(const label of ['写每日日记','早间简报','早间时间','晚间简报','晚间时间','周一','周日','免打扰开始','免打扰结束'])assert.ok(labels.includes(label),label)
+ for(const label of ['时区','主动发现间隔','每日主动消息上限'])assert.equal(labels.includes(label),false,label)
+ assert.ok(h.button('保存简报设置'))
 })

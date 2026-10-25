@@ -1224,3 +1224,21 @@ select option{color:var(--ink);background:var(--surface)}
 #proactivity-section .cap-stepper { display: flex; align-items: center; gap: 8px; }
 #proactivity-section .cap-stepper input { width: 4.5em; text-align: center; }
 #proactivity-advanced { margin-top: 12px; }
+
+/* 日记与简报: one card per feature, switch rows instead of stacked centred labels. */
+#diary-section .im-card { margin: 0 0 14px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+#diary-section .im-card h3 { margin: 0 0 4px; font-size: 14px; font-weight: 620; }
+#diary-section .im-card > p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.6; color: var(--ink-dim); }
+#diary-section .brief-slot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+#diary-section .brief-toggle { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 13px; cursor: pointer; }
+#diary-section .brief-days { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
+#diary-section .day-chip { position: relative; display: inline-flex; margin: 0; }
+#diary-section .day-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+#diary-section .day-chip span { min-width: 40px; padding: 6px 10px; text-align: center; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--ink-dim); }
+#diary-section .day-chip input:checked + span { border-color: var(--accent); background: var(--accent-wash); color: var(--accent); }
+#diary-section .day-chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+#diary-section .brief-advanced { margin: 0 0 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+#diary-section .brief-advanced summary { cursor: pointer; font-size: 13px; color: var(--ink-dim); }
+#diary-section .brief-quiet { display: flex; align-items: center; gap: 10px; padding: 10px 0 2px; font-size: 13px; }
+#diary-section .im-card button { margin: 4px 0 0; }
+#diary-error { margin: 8px 0 0; color: var(--ink-dim); }
