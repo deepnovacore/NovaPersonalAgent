@@ -17,7 +17,20 @@ export interface CodingTarget extends CodingTargetSelection {
   readonly running?: string
 }
 
+export interface ManagedWorkspace {
+  readonly workspace_id: string
+  readonly name: string
+  readonly is_default: boolean
+  readonly last_used?: number
+}
+export interface ManagedWorkspacePort {
+  list(): Promise<readonly ManagedWorkspace[]>
+  create(name: string): Promise<ManagedWorkspace>
+  resolve(id?: string): Promise<string>
+}
+
 export interface CodingTargetPort {
+  readonly workspaces?: ManagedWorkspacePort
   /** Directory is picker-only display metadata; validate returns a path-free persistent target. */
   list(): Promise<readonly (CodingTarget & {readonly directory?: string; readonly group_workspace_id?: string; readonly group_project?: string; readonly group_directory?: string})[]>
   forWork?(workId: string): Promise<CodingTarget | null>

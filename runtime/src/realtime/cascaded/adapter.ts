@@ -1214,11 +1214,6 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           && ['configuration', 'aborted', 'timeout', 'protocol', 'overflow', 'closed', 'network', 'http'].includes(rawCode)
           ? rawCode : 'unknown'
         this.#record('cascaded.response.failed', {component: ttsFailure ? 'tts' : 'llm', code})
-        await this.#emit(owner, {
-          kind: 'provider_error', session_epoch: owner.epoch,
-          code: ttsFailure ? 'cascaded_tts_receive' : 'cascaded_response_failed',
-          recoverable: true,
-        })
         active.id ??= this.#freshId()
         // Causes the user can act on (account, key, rate limit, connectivity) survive to the conversation.
         const detail = error instanceof Error && 'detail' in error ? error.detail : null
@@ -1226,6 +1221,12 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           : code === 'http' && (detail === 'auth' || detail === 'quota' || detail === 'rate_limited') ? `provider_http_${detail}`
             : code === 'network' || code === 'timeout' ? `provider_${code}` : 'provider_failure'
         await this.#emitTerminal(owner, active, 'failed', reason)
+        // Reconnect advances the epoch; settle the owned response before emitting its recoverable error.
+        await this.#emit(owner, {
+          kind: 'provider_error', session_epoch: owner.epoch,
+          code: ttsFailure ? 'cascaded_tts_receive' : 'cascaded_response_failed',
+          recoverable: true,
+        })
       }
     } finally {
       if (owner.response === active) owner.response = null

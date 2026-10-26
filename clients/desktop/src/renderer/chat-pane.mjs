@@ -101,13 +101,12 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  /** A Build chosen in the composer starts with its first message and has no plan in between. */
  async function sendDraft(){
   if(!pendingBuild())return c.submit()
-  const id=c.selectedId,state=c.state(id),text=(state.draft??'').trim(),project=workspaceBar.value()
+  const id=c.selectedId,state=c.state(id),text=(state.draft??'').trim(),workspace=workspaceBar.value()
   if(!text||!c.connected||beginning||state.submission)return false
-  if(!project)throw Error(t('请先选择工作区'))
   const submitted=state.draft
   beginning=true;c.changed?.()
   // Clear only what was sent: text typed or a mode picked while the host starts the Build stays.
-  try{await c.command('build.begin',{text,project});if(state.draft===submitted)state.draft='';if(state.execution==='build')delete state.execution;return true}
+  try{await c.command('build.begin',{text,...workspace});if(state.draft===submitted)state.draft='';if(state.execution==='build')delete state.execution;return true}
   finally{beginning=false;c.changed?.()}
  }
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3

@@ -67,8 +67,9 @@ test('local Build controls stay hidden when the host reports that the platform i
  globalThis.document={createElement:name=>new Element(name),createTextNode:text=>new Element('#text',text)}
  try{
   const item={id:'chat:plan',kind:'chat',mode:'plan',plan:{id:'plan-1',version:1}},commands=[]
-  const c={connected:true,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method)=>{
+  const local={};const c={state:()=>local,connected:true,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method)=>{
    commands.push(method)
+   if(method==='workspaces.list')return [{workspace_id:'managed-default',name:'default',is_default:true}];
    if(method==='plans.get')return {id:'plan-1',version:1,title:'Plan',content:'Full plan',next_offset:null}
    if(method==='conversations.targets')return {local_build_supported:false,targets:[],executors:['codex']}
    throw Error('unexpected command: '+method)
@@ -81,7 +82,7 @@ test('local Build controls stay hidden when the host reports that the platform i
   const planCard=agent.element.children.find(child=>child.name==='section'&&child.children.some(node=>node.name==='h3'&&node.textContent==='计划 · Plan · v1'))
   assert.ok(planCard)
   const runner=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='执行器')
-  const picker=planCard.children.find(child=>child.name==='button'&&child.textContent==='选择本地目录…')
+  const picker=planCard.children.find(child=>child.attributes?.role==='group')
   const actions=planCard.children.find(child=>child.name==='div'&&child.children.some(node=>node.name==='button'&&node.textContent.startsWith('交给')))
   assert.deepEqual(runner.children.map(option=>option.value),['codex'],'no built-in Build where the platform cannot run it')
   assert.equal(picker.hidden,true)
@@ -104,8 +105,9 @@ test('published Plan starts the built-in Build or hands the plan to a chosen exe
  globalThis.document={createElement:name=>new Element(name),createTextNode:text=>new Element('#text',text)}
  try{
   const item={id:'chat:plan',kind:'chat',mode:'plan',plan:{id:'plan-1',version:1}},commands=[],project='C:\\Projects\\中文 项目'
-  const c={connected:true,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method,params)=>{
+  const local={};const c={state:()=>local,connected:true,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method,params)=>{
    commands.push([method,params])
+   if(method==='workspaces.list')return [{workspace_id:'managed-default',name:'default',is_default:true}];
    if(method==='plans.get')return {id:'plan-1',version:1,title:'Plan',content:'Full plan',next_offset:null}
    if(method==='conversations.targets')return {local_build_supported:true,targets:[],executors:['codex']}
    return {}
@@ -115,23 +117,21 @@ test('published Plan starts the built-in Build or hands the plan to a chosen exe
   for(let tries=0;tries<50&&!commands.some(([method])=>method==='conversations.targets');tries++)await new Promise(resolve=>setTimeout(resolve,0))
   await new Promise(resolve=>setTimeout(resolve,0))
   const planCard=agent.element.children.find(child=>child.name==='section'&&child.children.some(node=>node.name==='h3'&&node.textContent==='计划 · Plan · v1'))
-  const picker=planCard.children.find(child=>child.name==='button'&&child.textContent==='选择本地目录…')
+  const picker=planCard.children.find(child=>child.attributes?.role==='group')
   const directories=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='工作区')
   const runner=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='执行器')
   const actions=planCard.children.find(child=>child.name==='div'&&child.children.some(node=>node.textContent==='开始 Build'))
   const start=actions.children.find(node=>node.textContent==='开始 Build')
   assert.deepEqual(runner.children.map(option=>option.value),['','codex'],'built-in Build first, then the executors')
   assert.equal(picker.hidden,false)
-  assert.equal(start.disabled,true,'a workspace is required')
-  await picker.listeners.click()
-  assert.equal(directories.value,project)
+  assert.equal(start.disabled,false,'the managed default workspace is selected')
   assert.equal(start.disabled,false)
   await start.listeners.click()
   runner.value='codex';runner.listeners.change()
   assert.equal(start.textContent,'交给 codex');assert.equal(picker.hidden,true,'executors only use listed workspaces')
   await start.listeners.click()
-  assert.deepEqual(commands.filter(([method])=>['build.start','plans.delegate'].includes(method)).map(([method,params])=>[method,params.executor,params.project]),[
-   ['build.start',undefined,project],['plans.delegate','codex',undefined],
+  assert.deepEqual(commands.filter(([method])=>['build.start','plans.delegate'].includes(method)).map(([method,params])=>[method,params.executor,params.workspace_id??params.project]),[
+   ['build.start',undefined,'managed-default'],['plans.delegate','codex',undefined],
   ])
  }finally{globalThis.document=previousDocument}
 })
@@ -147,14 +147,14 @@ test('Build status bar shows state, the workspace folder name with the full path
  }
  const project='/Volumes/External/nova-builds/build-cu-example/demo'
  const item={id:'build',kind:'build',build:{status:'paused',project,reason:'restart_requires_resume'}}
- const c={connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})}
+ const local={};const c={state:()=>local,connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})}
  const parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}})
  agent.update()
  const walk=node=>[node,...node.children.flatMap(walk)]
  const status=walk(agent.element).find(node=>node.attributes.role==='status')
  assert.equal(status.textContent,'Build · 已暂停');assert.equal(status.attributes['data-state'],'paused')
  const info=walk(agent.element).find(node=>node.children.includes(status)),[, path, reason]=info.children
- assert.equal(path.textContent,'demo');assert.equal(path.title,project)
+ assert.equal(path.textContent,'demo');assert.equal(path.title,'demo')
  assert.equal(reason.textContent,'重启后等待恢复');assert.equal(reason.hidden,false)
 })
 
@@ -168,7 +168,7 @@ test('a paused Build explains an approval denial in words instead of the raw cod
   focus(){}
  }
  const walk=node=>[node,...node.children.flatMap(walk)]
- const bar=reason=>{const item={id:'build',kind:'build',build:{status:'paused',project:'/x/demo',reason}},c={connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})},parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}});agent.update();const status=walk(agent.element).find(node=>node.attributes.role==='status');return walk(agent.element).find(node=>node.children.includes(status)).children[2]}
+ const bar=reason=>{const item={id:'build',kind:'build',build:{status:'paused',project:'/x/demo',reason}},local={},c={state:()=>local,connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})},parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}});agent.update();const status=walk(agent.element).find(node=>node.attributes.role==='status');return walk(agent.element).find(node=>node.children.includes(status)).children[2]}
  assert.equal(bar('approval_denied').textContent,'你拒绝了一次操作，补充新的要求后继续')
  const unknown=bar('some_internal_code');assert.equal(unknown.textContent,'');assert.equal(unknown.hidden,true,'unknown codes are never shown raw')
 })
@@ -187,8 +187,9 @@ test('plan card workspaces follow the runner: Build and Codex differ, other exec
  globalThis.document={createElement:name=>new Element(name),createTextNode:text=>new Element('#text',text)}
  try{
   const item={id:'chat:plan',kind:'chat',mode:'plan',plan:{id:'plan-1',version:1}},commands=[]
-  const c={connected:true,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method,params)=>{
+  const local={};const c={state:()=>local,connected:true,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method,params)=>{
    commands.push([method,params])
+   if(method==='workspaces.list')return [{workspace_id:'managed-default',name:'default',is_default:true}];
    if(method==='plans.get')return {id:'plan-1',version:1,title:'Plan',content:'Full plan',next_offset:null}
    if(method==='conversations.targets')return {local_build_supported:true,targets:[{project:'demo',directory:'/registered/demo'}],executors:['codex','pi']}
    return {}
@@ -202,7 +203,7 @@ test('plan card workspaces follow the runner: Build and Codex differ, other exec
   const directories=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='工作区')
   const actions=planCard.children.find(child=>child.name==='div'&&child.children.some(node=>node.name==='button'&&node.textContent==='开始 Build'))
   const start=()=>actions.children.find(node=>node.name==='button'&&['开始 Build','交给 codex','交给 pi'].includes(node.textContent))
-  assert.ok(directories.children.some(option=>option.value==='/default/ws'),'built-in Build may use the default workspace')
+  assert.ok(planCard.children.some(node=>node.attributes?.role==='group'&&!node.hidden),'built-in Build offers managed workspaces');assert.equal(directories.hidden,true)
   runner.value='codex';runner.listeners.change()
   assert.deepEqual(directories.children.map(option=>option.value),['','/registered/demo'],'Codex only offers registered directories')
   directories.value='/registered/demo';directories.listeners.change();await start().listeners.click()
