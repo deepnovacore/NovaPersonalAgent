@@ -121,7 +121,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   if(['ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
   if(selected==='timeline')return JSON.stringify([selected,s?.life,s?.timeline,s?.settings?.timezone,s?.derived_understanding,s?.profile_preparation?.status,s?.sources,c.connected,timelineDate(c.snapshot)])
   if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.life,s?.profile_preparation,c.connected])
-  if(selected==='tasks')return JSON.stringify([selected,taskTab,s?.schedules,s?.capabilities?.schedules,durableTasks(),tasks(),results(),c.connected])
+  if(selected==='tasks')return JSON.stringify([selected,taskTab,s?.conversations,c.selectedId,c.voiceId,s?.pending_approvals,s?.pending_confirmations,(s?.conversations?.items??[]).map(item=>Boolean(c.state(item.id).submission)),s?.schedules,s?.capabilities?.schedules,durableTasks(),tasks(),results(),c.connected])
   return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.derived_understanding,s?.news,s?.capabilities,c.connected])
  }
  function renderPanel(){

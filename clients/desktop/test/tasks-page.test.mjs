@@ -14,3 +14,16 @@ test('source maintenance is excluded without exposing its owned executor work',(
  assert.equal(isSourceProcessingTask({goal:'Use source__process in my project'}),false)
  assert.equal(activeTaskCount({tasks:[internal,{phase:'running',work_ids:['w2']}]},{tasks:[{work_id:'w1',phase:'working'},{work_id:'w2',phase:'working'},{work_id:'w3',phase:'working'}]}),2)
 })
+
+import {renderConversationTasks} from '../src/renderer/tasks-page.mjs'
+test('conversation tasks group by recent update, exclude home/schedules, and preserve ownership badges',()=>{
+ const el=(tag,text='',className='')=>({tag,textContent:text,className,children:[],dataset:{},attrs:{},append(...xs){this.children.push(...xs)},setAttribute(k,v){this.attrs[k]=v}})
+ const panel=el('main'),selected=[],created=[],now=Date.parse('2026-10-26T12:00:00Z'),states={recent:{submission:true},old:{}}
+ const c={connected:true,selectedId:'recent',voiceId:'old',create:()=>created.push(1),select:id=>selected.push(id),state:id=>states[id]??{},snapshot:{pending_approvals:[{conversation_id:'recent'}],conversations:{items:[{id:'old',title:'Old',updated_at:'2025-01-01'},{id:'chat:main'},{id:'s',kind:'schedule'},{id:'recent',kind:'build',title:'Recent',updated_at:'2026-10-26'}],messages:[{conversation_id:'recent',text:'Last message'}]}}}
+ const button=(text,click,parent)=>{const n=el('button',text);n.click=click;parent.append(n);return n}
+ renderConversationTasks(panel,{c,el,button,now})
+ assert.deepEqual(panel.children.filter(n=>n.tag==='h3').map(n=>n.textContent),['近 7 天','更早'])
+ const rows=panel.children.filter(n=>n.className==='conversation-task');assert.deepEqual(rows.map(n=>n.dataset.conversationId),['recent','old'])
+ assert.equal(rows[0].attrs['aria-current'],'true');assert.ok(rows[0].children.some(n=>n.textContent==='待你处理'));assert.ok(rows[0].children.some(n=>n.textContent==='发送中'));assert.ok(rows[1].children.some(n=>n.textContent==='语音中'))
+ rows[1].click();panel.children[0].click();assert.deepEqual(selected,['old']);assert.equal(created.length,1)
+})
