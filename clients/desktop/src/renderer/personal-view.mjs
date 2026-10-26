@@ -16,6 +16,7 @@ import {renderTasksPage,activeTaskCount} from './tasks-page.mjs'
 import {renderSourceSuggestions} from './workbench-suggestions.mjs'
 import {disposeSources} from './source-popover.mjs'
 import {attentionTarget} from './attention-target.mjs'
+import {mountExecutorFloat} from './executor-float.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 const PAGE_TITLE=Object.fromEntries(WORKSPACE_PAGES.map(item=>[item.id,item.label===item.title?item.label:`${item.label} · ${item.title}`]))
 /** The workbench keeps Nova on the left and switches contextual pages on the right. */
@@ -87,6 +88,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const panel=el('div',undefined,'workbench-page');panel.id='workbench-panel';panel.setAttribute('role','tabpanel');panel.tabIndex=0;workspace.append(panel)
  const chat=mountChatPane(novaColumn,{c,el,button,run,api,chips,openTask,openSchedule:id=>{selected='tasks';taskTab='schedules';scheduleLocal.selected=id;scheduleLocal.detail=null;renderPanel();void c.command('schedules.get',{id}).then(value=>{if(scheduleLocal.selected===id){scheduleLocal.detail=value;scheduleLocal.history=null;renderPanel()}}).catch(error=>{scheduleLocal.error=error.message;renderPanel()})},speakingLevel,onHome:showHome})
  chat.setOpen(true)
+ const executorFloat=mountExecutorFloat(root,{el,button,openTask,taskFor:work=>c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work))?.id??null})
  async function showHome(){if(c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main'))await c.home();chat.reveal()}
  async function discuss(references,text){await showHome();if(text){if(!c.submitText(text,'chat:main',references))throw Error(t('主对话暂时无法发送，原有草稿已保留，请稍后重试。'));chat.reveal()}else await chat.focusReference(references)}
  async function startConversation(request){await c.startConversationWithReference(request);chat.reveal()}
@@ -193,7 +195,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  }
  async function focusAttention(){const target=attentionTarget(c.snapshot);if(!target)return;if(target.taskId){await openTask(target.taskId,true);return}if(target.conversationId!==c.selectedId)await c.select(target.conversationId);chat.reveal()}
  async function collapse(value){await c.setPresentation(value?'orb':'workbench');if(!value)await showHome()}
- function receive(frame){chat.receive(frame);c.receive(frame);computerUse?.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
+ function receive(frame){chat.receive(frame);executorFloat.receive(frame);c.receive(frame);computerUse?.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.((mode,options)=>run(async()=>{await c.setPresentation(mode);if(options?.attention&&mode==='workbench')await focusAttention()}));
  api.personal.onCollapsed?.(value=>c.collapse(value));api.personal.onMaximized?.(value=>{document.body.dataset.maximized=value?'1':'0'});const dateClock=setInterval(()=>{if(c.presentationMode==='workbench')update()},60000);dateClock.unref?.();update();renderPanel();return {controller:c,receive,identity:value=>chat.identity(value),refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }

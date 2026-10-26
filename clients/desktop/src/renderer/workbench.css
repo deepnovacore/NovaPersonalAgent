@@ -779,3 +779,10 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .soul-error{color:var(--danger,#c0392b);font-size:13px}
 .workbench-plan .workbench-runner-note{margin:4px 0 8px;font-size:12px}
 .workbench-plan select{max-width:100%;margin:0 0 4px}
+.executor-float{position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:20;display:flex;flex-direction:column;gap:6px;width:min(300px,calc(100vw - 24px));max-height:60vh;overflow:auto;padding:8px;border:1px solid var(--line);border-radius:14px;background:var(--surface-raised);box-shadow:0 10px 30px color-mix(in srgb,var(--ink) 14%,transparent)}
+.executor-float[hidden]{display:none}
+.executor-float[data-expanded="false"]{width:auto}
+.executor-float-pill{justify-content:flex-start;font-size:13px}
+.executor-float-task{display:flex;flex-direction:column;gap:4px;padding:8px;border-radius:10px;background:var(--surface-inset)}
+.executor-float-task small{color:var(--ink-dim)}
+.executor-float-output{margin:0;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono)}
