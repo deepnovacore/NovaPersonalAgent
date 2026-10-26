@@ -59,9 +59,9 @@ function inline(text,ctx,depth=0){
    }
    buffer+=ch;i++;continue
   }
-  if((text.startsWith('http://',i)||text.startsWith('https://',i))&&!/[\p{L}\p{N}_]$/u.test(text.slice(Math.max(0,i-2),i))){
+  if((text.startsWith('http://',i)||text.startsWith('https://',i))&&!/[A-Za-z0-9_]$/.test(text.slice(Math.max(0,i-1),i))){
    let end=i,balance=0
-   while(end<text.length&&!/[\s<>"']/.test(text[end])){if(text[end]==='(')balance++;else if(text[end]===')')balance--;end++}
+   while(end<text.length&&!/[\s<>"'，。、；：！？（）「」『』《》【】“”‘’]/u.test(text[end])){if(text[end]==='(')balance++;else if(text[end]===')')balance--;end++}
    const scanned=end
    while(end>i&&(/[.,;:!?]/.test(text[end-1])||(text[end-1]===')'&&balance<0))){if(text[end-1]===')')balance++;end--}
    const raw=text.slice(i,end),url=safeLinkUrl(raw)

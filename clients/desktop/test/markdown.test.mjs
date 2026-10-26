@@ -97,10 +97,11 @@ test('task lists expose state and keep malformed markers literal',()=>{
  assert.equal(items[3].text,'[x]');assert.equal(items[4].text,'[y] no')
 })
 test('bare URLs use safe opener buttons, retain balanced parentheses and respect word boundaries',async()=>{
- const opened=[],root=render('https://e.com/a., http://e.com/b! (https://e.com/wiki_(x)). 文https://e.com/no 𐐀https://e.com/no _https://e.com/no https:// [ok](https://e.com/ok)',url=>opened.push(url))
+ const opened=[],root=render('https://e.com/a., http://e.com/b! (https://e.com/wiki_(x)). abchttps://e.com/no _https://e.com/no https:// [ok](https://e.com/ok)',url=>opened.push(url))
  const buttons=all(root).filter(n=>n.tag==='button')
  assert.deepEqual(buttons.map(n=>n.text),['https://e.com/a','http://e.com/b','https://e.com/wiki_(x)','ok'])
  await buttons[0].listeners.click();assert.deepEqual(opened,['https://e.com/a'])
+ assert.deepEqual(all(render('参考https://e.com/zh',()=>{})).filter(n=>n.tag==='button').map(n=>n.dataset.url),['https://e.com/zh'],'a URL may directly follow a Chinese character')
  const text='https://e.com/path. https:// javascript:alert(1)';assert.equal(render(text).children[0].text,text)
 })
 test('nested lists use indentation stack with tabs, return to parents and cap at four levels',()=>{
@@ -135,4 +136,14 @@ test('table delimiter cells need only one hyphen, as in GFM, and escaped pipes s
  assert.equal(cells.length,2);assert.equal(cells[0].text,'1 | x')
  assert.deepEqual(all(root).filter(n=>n.tag==='th').map(n=>n.dataset.align),['left','right'])
  assert.equal(render('| a | b |\n| -- x |').children[0].tag,'p','a malformed delimiter row is not a table')
+})
+
+test('a bare URL ends at full-width punctuation so Chinese sentences do not leak into the link',()=>{
+ const urls=text=>all(render(text,()=>{})).filter(n=>n.tag==='button').map(n=>n.dataset.url)
+ assert.deepEqual(urls('详见 https://x.io/y。然后继续'),['https://x.io/y'])
+ assert.deepEqual(urls('（https://x.io/y）'),['https://x.io/y'])
+ assert.deepEqual(urls('参考https://x.io/a/b，以及 https://x.io/c；还有「https://x.io/d」'),['https://x.io/a/b','https://x.io/c','https://x.io/d'])
+ assert.deepEqual(urls('见 https://zh.wikipedia.org/wiki/A_(b). 好'),['https://zh.wikipedia.org/wiki/A_(b)'])
+ const root=render('详见 https://x.io/y。然后继续',()=>{})
+ assert.equal(all(root).filter(n=>n.text!==undefined&&n.tag==='#text').map(n=>n.text).join(''),'详见 。然后继续','the punctuation stays as text after the link')
 })
