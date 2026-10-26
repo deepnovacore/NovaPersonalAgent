@@ -70,3 +70,26 @@ function renderWork(parent,work,{index,state,taskAction,results,chips,button,ask
  for(const text of lines){const p=document.createElement('p');p.textContent=text;details.append(p)}
  row.append(details)
 }
+
+/** Tasks are conversations; the host remains the sole selected/voice owner. */
+export function renderConversationTasks(panel,{c,el,button,now=Date.now()}){
+ const create=button(t('创建任务'),()=>c.create(),panel);create.disabled=!c.connected
+ const items=(c.snapshot?.conversations?.items??[]).filter(item=>item.id!=='chat:main'&&item.kind!=='schedule').sort((a,b)=>String(b.updated_at??b.created_at).localeCompare(String(a.updated_at??a.created_at)))
+ const waiting=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
+ for(const [recent,label]of [[true,'近 7 天'],[false,'更早']]){
+  const group=items.filter(item=>(now-Date.parse(item.updated_at??item.created_at)<7*86400000)===recent)
+  if(!group.length)continue
+  panel.append(el('h3',t(label)))
+  for(const item of group){
+   const messages=(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===item.id),last=messages.at(-1)
+   const pending=waiting.some(row=>row.conversation_id===item.id)||item.build?.status==='awaiting_approval'||item.build?.status==='paused'
+   const status=pending?'待你处理':item.build?.status==='failed'||last?.generation_status==='failed'?'失败':c.state(item.id).submission||['running','idle'].includes(item.build?.status)||last?.generation_status==='pending'?'进行中':'已完成'
+   const row=button(item.title??t('对话'),()=>c.select(item.id),panel);row.className='conversation-task';row.dataset.conversationId=item.id;row.setAttribute('aria-current',String(item.id===c.selectedId));row.disabled=!c.connected
+   row.append(el('span',(last?.text??'').slice(0,160),'conversation-task-summary'),el('span',t(status),'conversation-badge'))
+   if(item.unread_count)row.append(el('span',String(item.unread_count),'unread-badge'))
+   if(item.id===c.voiceId)row.append(el('span',t('语音中'),'conversation-badge'))
+   if(c.state(item.id).submission)row.append(el('span',t('发送中'),'conversation-badge'))
+  }
+ }
+ if(!items.length)panel.append(el('p',t('暂无任务'),'empty-state'))
+}
