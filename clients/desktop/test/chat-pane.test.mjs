@@ -672,3 +672,16 @@ test('the first message in Build starts a direct Build in the chosen workspace i
  m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await sending;await tick()
  assert.equal(c.draft,'');assert.equal(c.state('chat:main').execution,undefined)
 })
+
+test('a direct Build keeps text typed while the host starts it, and locks the draft until then',async()=>{
+ const m=mount({defaultHome:true}),c=m.view.controller
+ m.view.receive(feedState(1,'chat:main',{feed:[],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ c.state('chat:main').execution='build';c.state('chat:main').workspace='/work/demo';c.draft='先做第一件事';m.view.refresh()
+ const draft=m.all().find(n=>n.tag==='textarea'&&n.attrs['aria-label']===t('消息草稿'))
+ const sending=m.all().find(n=>n.className==='composer-submit').listeners.click();await tick()
+ assert.equal(draft.disabled,true,'the draft is locked while build.begin is pending')
+ c.state('chat:main').draft='先做第一件事 补充';c.state('chat:main').execution='plan'
+ const request=m.sent.findLast(f=>f.method==='build.begin')
+ m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await sending;await tick()
+ assert.equal(c.draft,'先做第一件事 补充','newer text is not discarded');assert.equal(c.state('chat:main').execution,'plan','a mode chosen meanwhile is not discarded')
+})

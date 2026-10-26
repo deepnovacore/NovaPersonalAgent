@@ -35,5 +35,7 @@ export function mountExecutorFloat(parent,{el,button,openTask,taskFor}){
   if(!tasks.length)expanded=false
   render()
  }
- return {element:root,receive}
+ /** A new connection may be a restarted backend whose revisions start over. */
+ function reset(){tasks=[];revision=-1;expanded=false;render()}
+ return {element:root,receive,reset}
 }
