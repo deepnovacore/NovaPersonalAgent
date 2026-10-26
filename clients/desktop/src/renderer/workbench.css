@@ -777,3 +777,5 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .soul-placeholder{color:var(--ink-dim)}
 .workbench .soul-role{white-space:pre-wrap;overflow-wrap:anywhere}
 .workbench .soul-error{color:var(--danger,#c0392b);font-size:13px}
+.workbench-plan .workbench-runner-note{margin:4px 0 8px;font-size:12px}
+.workbench-plan select{max-width:100%;margin:0 0 4px}
