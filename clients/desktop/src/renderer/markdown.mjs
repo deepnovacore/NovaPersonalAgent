@@ -104,7 +104,7 @@ export function renderMarkdown(text,{document=globalThis.document,openLink}={}){
   if(heading){flush();root.append(el(`h${Math.min(heading[1].length,6)}`,undefined,inline(heading[2],ctx)));continue}
   if(RULE.test(line)){flush();root.append(el('hr'));continue}
   const headers=i+1<lines.length&&tableCells(line),dividers=headers&&tableCells(lines[i+1])
-  if(headers&&headers.length>0&&headers.length<=12&&dividers?.length===headers.length&&dividers.every(cell=>/^:?-{3,}:?$/.test(cell))){
+  if(headers&&headers.length>0&&headers.length<=12&&dividers?.length===headers.length&&dividers.every(cell=>/^:?-+:?$/.test(cell))){
    flush();const align=dividers.map(cell=>cell.startsWith(':')?(cell.endsWith(':')?'center':'left'):(cell.endsWith(':')?'right':null))
    const row=(cells,tag)=>el('tr',undefined,headers.map((_,col)=>{const cell=el(tag,undefined,inline(cells[col]??'',ctx));if(align[col])cell.dataset.align=align[col];return cell}))
    const body=el('tbody');root.append(el('table',undefined,[el('thead',undefined,[row(headers,'th')]),body]));i++
