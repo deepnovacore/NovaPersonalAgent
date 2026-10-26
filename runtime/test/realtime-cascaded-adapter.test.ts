@@ -3005,3 +3005,43 @@ test('streaming speech reaches TTS before completion and cleans split markup wit
   assert.equal(events.find(event => event.kind === 'response_transcript_final')?.text, prefix + formatted)
   await adapter.close()
 })
+
+test('text-only previews stream without duplicate authority and retract before tools', async () => {
+  for (const ending of ['same','suffix','split','mismatch','tool','failure','split-failure'] as const) {
+    const llm=new FakeLlm([{kind:'response_started',response_id:'r'},
+      {kind:'text_preview',text:'hel'},{kind:'text_preview',text:'lo'},
+      ...(ending==='tool'?[{kind:'tool_call' as const,item_id:'c',call_id:'c',name:'lookup',arguments:{}}]
+        :ending==='failure'?[{kind:'response_failed' as const,response_id:'r',code:'network'}]
+        :ending==='split-failure'?[{kind:'text_delta' as const,text:'hel'},{kind:'response_failed' as const,response_id:'r',code:'network'}]
+        :ending==='split'?[{kind:'text_delta' as const,text:'hel'},{kind:'text_delta' as const,text:'lo!'}]
+        :[{kind:'text_delta' as const,text:ending==='mismatch'?'correct':ending==='suffix'?'hello!':'hello'}]),
+      {kind:'response_completed',response_id:'r'}])
+    const signal=new AbortController().signal,adapter=new CascadedRealtimeAdapter({textOnly:true,llm})
+    try{
+      await adapter.connect({tools:[{type:'function',function:{name:'lookup',parameters:{type:'object',properties:{}}}}],signal})
+      const collecting=collectThroughTerminal(adapter,signal);await adapter.submitText('test',signal)
+      const events=await settleWithin('preview response',collecting)
+      assert.equal(llm.calls[0]?.previewText,true)
+      assert.deepEqual(events.filter(e=>e.kind==='response_transcript_delta').map(e=>e.text),['hel','lo',...(['suffix','split'].includes(ending)?['!']:[])])
+      assert.deepEqual(events.filter(e=>e.kind==='response_transcript_final').map(e=>e.text),[ending==='tool'||ending==='failure'?'':ending==='split-failure'?'hel':ending==='mismatch'?'correct':['suffix','split'].includes(ending)?'hello!':'hello'])
+      assert.equal(events.some(e=>e.kind==='provider_error'&&e.code==='cascaded_mixed_text_tool'),false)
+      if(ending==='tool')assert.equal(events.some(e=>e.kind==='tool_call_ready'),true)
+    }finally{await adapter.close()}
+  }
+})
+
+test('voice ignores speculative text and only speaks authoritative text', async () => {
+  const llm=new FakeLlm([{kind:'response_started',response_id:'r'},{kind:'text_preview',text:'uncommitted'},
+    {kind:'text_delta',text:'hello'},{kind:'response_completed',response_id:'r'}])
+  const tts=new FakeTtsSession(new Uint8Array([1,2]))
+  const adapter=new CascadedRealtimeAdapter({endpointing:new ScriptedEndpointing(),asr:new FakeAsrClient(),llm,tts:new FakeTtsClient(tts)})
+  const signal=new AbortController().signal
+  try{
+    await adapter.connect({tools:[],signal});const collecting=collectThroughTerminal(adapter,signal);await adapter.submitText('test',signal)
+    const events=await settleWithin('voice preview ignored',collecting)
+    assert.notEqual(llm.calls[0]?.previewText,true)
+    assert.deepEqual(tts.texts,['hello'])
+    assert.deepEqual(events.filter(e=>e.kind==='response_transcript_delta').map(e=>e.text),['hello'])
+    assert.equal(events.some(e=>e.kind==='provider_error'),false)
+  }finally{await adapter.close()}
+})
