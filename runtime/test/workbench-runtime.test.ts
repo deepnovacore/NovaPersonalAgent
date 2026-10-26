@@ -17,6 +17,7 @@ import {createChatCompletionsLlmFactory} from '../src/realtime/cascaded/chat-com
 import {PLAN_LLM_TRANSPORT} from '../src/realtime/cascaded/llm-stream-limits.js'
 import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
 import type {ComputerObservation,ToolImage} from '../src/personal-agent/computer-use/contract.js'
+import {workbenchInstructions} from '../src/personal-agent/workbench-instructions.js'
 import {settingsSchema} from '../src/config/config.js'
 
 function observation(image:ToolImage):ComputerObservation{return {id:'test-observation',captured_at:image.captured_at,image,space:{logical_width:image.width,logical_height:image.height,scale:1},target:null,focus:null,foreground:true,ax:{status:image.native_ui?'truncated':'unavailable',...(image.native_ui?{summary:image.native_ui}:{}),...(image.native_editor?{editor:image.native_editor}:{})}}}
@@ -867,6 +868,7 @@ test('direct Build admits one concurrent request without a plan and retains proj
   assert.equal(buildView(f.host,id).plan_id,undefined)
   assert.deepEqual(JSON.parse(f.script.requests[0]!.workspaceContext!),{project:f.root})
   assert.equal((await f.raw('build.begin',{text:'duplicate',project:f.root})).error,'build_stop_required')
+  assert.equal((await f.raw('conversations.voice',{id,enabled:true})).error,'build_stop_required')
   await f.command('build.stop',{id})
  }finally{await f.close()}
 })
@@ -933,4 +935,12 @@ for(const mode of ['plan','build'] as const)test(`${mode} text-voice-text preser
   }
   assert.equal((await f.host.workbench.checkpoint(id,0)).voice_message_ids?.length,4)
  }finally{await f.close()}
+})
+
+
+test('direct Build instructions skip planning but retain approval and completion boundaries',()=>{
+ const direct=workbenchInstructions('build','en',false)
+ assert.match(direct,/Do not first produce a plan/);assert.match(direct,/missing information blocks/);assert.match(direct,/Approval is enforced by the host/);assert.match(direct,/finish_build/)
+ assert.doesNotMatch(direct,/executing the user-confirmed plan/)
+ assert.match(workbenchInstructions('build','en',true),/executing the user-confirmed plan/)
 })
