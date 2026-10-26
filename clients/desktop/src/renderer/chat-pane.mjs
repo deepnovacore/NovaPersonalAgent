@@ -34,6 +34,22 @@ export function homeTranscript(conversations){
  const rows=[...(conversations?.messages??[]).filter(message=>message.conversation_id==='chat:main'),...(conversations?.home_messages??[])];
  return [...new Map(rows.map(message=>[message.id,message])).values()].sort((a,b)=>(a.created_at??'').localeCompare(b.created_at??''))
 }
+/**
+ * Live captions are not persisted, so they carry the local time they were first seen. They belong right after the
+ * last persisted message that existed then; appending them last would pin a stale caption below newer messages.
+ * A caption whose text already arrived as a persisted reply is redundant.
+ */
+export function orderTranscript(persisted,live){
+ const placed=new Map(),tail=[]
+ for(const frame of live){
+  if(typeof frame.seen_at!=='number'){tail.push(frame);continue}
+  const text=frame.text?.trim()
+  if(text&&persisted.some(message=>message.role==='assistant'&&message.text?.trim()===text&&Date.parse(message.created_at)>=frame.seen_at))continue
+  const index=persisted.findLastIndex(message=>Date.parse(message.created_at)<=frame.seen_at)
+  placed.set(index,[...(placed.get(index)??[]),frame])
+ }
+ return [...(placed.get(-1)??[]),...persisted.flatMap((message,index)=>[message,...(placed.get(index)??[])]),...tail]
+}
 function messageVisible(history,id){
  if(!history.getBoundingClientRect)return true
  const node=[...history.children].find(node=>node.dataset.messageId===id)
@@ -213,7 +229,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(c.selectedId==='chat:main'&&c.snapshot?.conversations?.home_truncated)history.append(el('p',t('部分提醒历史已收起，可从会话列表查看原对话。'),'hint'))
   if(!persisted.length&&!live.length)history.append(c.selectedId==='chat:main'?intro:emptyConversation)
   let day=null
-  for(const message of [...persisted,...live]){
+  for(const message of orderTranscript(persisted,live)){
    if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
    history.append(renderMessage(message))
    if(isBuild&&message.role==='user')history.append(...buildLog.forMessage(message.id))
@@ -273,7 +289,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   targetMenu.receive(frame)
   if(frame.type==='caption'&&typeof frame.text==='string'&&frame.conversation_id&&frame.turn_id&&(frame.role!=='user'||frame.conversation_id===c.voiceId)){
    const key=`${frame.conversation_id}:${frame.turn_id}`
-   if(frame.text)liveCaptions.set(key,frame)
+   if(frame.text)liveCaptions.set(key,{...frame,seen_at:liveCaptions.get(key)?.seen_at??Date.now()})
    while(liveCaptions.size>128)liveCaptions.delete(liveCaptions.keys().next().value)
   }
   if(frame.type==='personal.state'){

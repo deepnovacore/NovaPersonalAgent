@@ -652,3 +652,25 @@ test('a goal check-in card in the main chat puts the goal into the composer and 
  void m.all().find(n=>n.tag==='button'&&n.textContent==='不再提醒').listeners.click();await tick()
  assert.deepEqual(m.sent.filter(f=>f.method==='feed.action'&&f.params.action!=='presented').map(f=>f.params),[{id:'ck',action:'goal_checkin_mute',goal_id:'g'}])
 })
+
+test('a live caption stays where it arrived instead of sinking below newer persisted messages',async()=>{
+ const {orderTranscript}=await import('../src/renderer/chat-pane.mjs')
+ const at=ms=>new Date(Date.UTC(2026,9,26,8,0,0)+ms).toISOString()
+ const persisted=[
+  {id:'u1',role:'user',text:'打开飞书',created_at:at(0)},
+  {id:'a1',role:'assistant',text:'需要你授权',created_at:at(3000)},
+  {id:'u2',role:'user',text:'允许',created_at:at(6000)},
+ ]
+ const handoff={conversation_id:'c',turn_id:'t-handoff',role:'assistant',text:'好的，我现在把任务交给 Codex 执行。',seen_at:Date.UTC(2026,9,26,8,0,0)+1000}
+ assert.deepEqual(orderTranscript(persisted,[handoff]).map(m=>m.id??m.turn_id),['u1','t-handoff','a1','u2'])
+ const current={conversation_id:'c',turn_id:'t-now',role:'assistant',text:'处理中…',seen_at:Date.UTC(2026,9,26,8,0,0)+7000}
+ assert.deepEqual(orderTranscript(persisted,[current]).map(m=>m.id??m.turn_id),['u1','a1','u2','t-now'])
+})
+
+test('a live caption is dropped once the persisted reply carries the same text',async()=>{
+ const {orderTranscript}=await import('../src/renderer/chat-pane.mjs')
+ const base=Date.UTC(2026,9,26,8,0,0)
+ const persisted=[{id:'u1',role:'user',text:'x',created_at:new Date(base).toISOString()},{id:'a1',role:'assistant',text:'好的，我现在把任务交给 Codex 执行。',created_at:new Date(base+2000).toISOString()}]
+ const caption={conversation_id:'c',turn_id:'t1',role:'assistant',text:'好的，我现在把任务交给 Codex 执行。',seen_at:base+1000}
+ assert.deepEqual(orderTranscript(persisted,[caption]).map(m=>m.id??m.turn_id),['u1','a1'])
+})
