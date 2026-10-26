@@ -881,3 +881,43 @@ test('tool screenshot validation rejects malformed metadata and payloads', {time
     assert.throws(()=>validateToolImage({...image,...change} as typeof image),/invalid tool image/)
   }
 })
+
+test('tool-enabled text previews are opt-in and preserve authoritative text and tool history', async () => {
+  for (const previewText of [false, true]) for (const tool of [false, true]) {
+    const call={index:0,id:'call-preview',function:{name:'lookup',arguments:'{}'}}
+    const wire=[{id:'preview-response',choices:[{delta:{content:'hello '}}]},
+      {choices:[{delta:{content:'world'}}]},
+      {choices:[{delta:tool?{tool_calls:[call]}:{},finish_reason:tool?'tool_calls':'stop'}]}]
+    const llm=createQwenCascadedLlmFactory({baseUrl:'https://example.test',apiKey:'test',model:'test',instructions:'test',
+      fetchImpl:()=>Promise.resolve(new Response(wire.map(event=>'data: '+JSON.stringify(event)+'\n\n').join(''),{headers:{'content-type':'text/event-stream'}}))}).open()
+    const request={previewText,inputs:[{kind:'user_text' as const,text:'hello'}],tools:[{name:'lookup',parameters:{type:'object' as const}}],signal:new AbortController().signal}
+    try {
+      const events=await collect(llm.stream(request))
+      assert.deepEqual(events,[{kind:'response_started',response_id:'preview-response'},
+        ...(previewText?[{kind:'text_preview',text:'hello '},{kind:'text_preview',text:'world'}]:[]),
+        ...(tool?[{kind:'tool_call',item_id:'call-preview',call_id:'call-preview',name:'lookup',arguments:{}}]:[{kind:'text_delta',text:'hello world'}]),
+        {kind:'response_completed',response_id:'preview-response'}])
+      const checkpoint=llm.checkpoint!() as {pending:unknown;history:unknown[]}
+      if(tool){assert.match(JSON.stringify(checkpoint.pending),/call-preview/u);assert.doesNotMatch(JSON.stringify(checkpoint.pending),/hello world/u)}
+      else assert.match(JSON.stringify(checkpoint.history),/hello world/u)
+    } finally {await llm.close()}
+  }
+})
+
+test('opted-in preview arrives before the provider sends its finish chunk', async () => {
+  let push!:ReadableStreamDefaultController<Uint8Array>
+  const body=new ReadableStream<Uint8Array>({start(controller){push=controller}})
+  const llm=createQwenCascadedLlmFactory({baseUrl:'https://example.test',apiKey:'test',model:'test',instructions:'test',
+    fetchImpl:()=>Promise.resolve(new Response(body,{headers:{'content-type':'text/event-stream'}}))}).open()
+  const send=(event:unknown)=>push.enqueue(new TextEncoder().encode('data: '+JSON.stringify(event)+'\n\n'))
+  try{
+    const stream=llm.stream({previewText:true,inputs:[{kind:'user_text',text:'test'}],tools:[{name:'lookup',parameters:{type:'object'}}],signal:new AbortController().signal})[Symbol.asyncIterator]()
+    send({id:'r',choices:[{delta:{content:'early'}}]})
+    assert.deepEqual((await settlesWithin('response starts before finish',stream.next())).value,{kind:'response_started',response_id:'r'})
+    assert.deepEqual((await settlesWithin('preview before finish',stream.next())).value,{kind:'text_preview',text:'early'})
+    send({choices:[{delta:{},finish_reason:'stop'}]});push.close()
+    assert.deepEqual((await stream.next()).value,{kind:'text_delta',text:'early'})
+    assert.deepEqual((await stream.next()).value,{kind:'response_completed',response_id:'r'})
+    await stream.next()
+  }finally{await llm.close()}
+})

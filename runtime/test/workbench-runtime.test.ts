@@ -944,3 +944,26 @@ test('direct Build instructions skip planning but retain approval and completion
  assert.doesNotMatch(direct,/executing the user-confirmed plan/)
  assert.match(workbenchInstructions('build','en',true),/executing the user-confirmed plan/)
 })
+
+test('Plan and Build previews grow, retract at tool calls and persist only authoritative text', async () => {
+ for(const mode of ['plan','build'] as const){
+  const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
+  const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
+   assert.equal(request.previewText,true)
+   for await(const event of base.stream(request)){yield event;if(event.kind==='response_started'){yield {kind:'text_preview' as const,text:round===0?'discard':'final '};yield {kind:'text_preview' as const,text:round===0?' me':'answer'}}}
+   round++
+  }}}}
+  const f=await fixture(()=>({}),'ask',factory)
+  try{
+   let id:string
+   if(mode==='build')id=await f.build()
+   else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
+   await f.host.waitConversation(id)
+   const captions=f.frames.filter(x=>x.type==='caption')
+   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['',true],['final ',false],['final answer',false],['final answer',false]])
+   assert.equal(captions[0]!.turn_id,captions[2]!.turn_id);assert.notEqual(captions[2]!.turn_id,captions[3]!.turn_id)
+   const message=f.host.conversationSnapshot().messages.at(-1)!
+   assert.equal(message.text,'final answer');assert.equal(message.turn_id,captions.at(-1)!.turn_id)
+  }finally{await f.close()}
+ }
+})

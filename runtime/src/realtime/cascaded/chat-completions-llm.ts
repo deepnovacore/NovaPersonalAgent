@@ -96,7 +96,7 @@ class Session implements CascadedLlmSession {
     if(history!==undefined)this.#seed(history)
     if (!Number.isFinite(this.#idleTimeoutMs) || this.#idleTimeoutMs <= 0 || !Number.isFinite(this.#closeTimeoutMs) || this.#closeTimeoutMs <= 0) throw fail('configuration')
   }
-  async *stream(input: {readonly language?: PromptLanguage; readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
+  async *stream(input: {readonly previewText?: boolean; readonly language?: PromptLanguage; readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
     if (this.#closed) throw fail('closed'); if (input.signal.aborted) throw fail('aborted')
     this.#started = true
     const current = wireMessages(input.inputs), unresolved = this.#unresolved
@@ -159,9 +159,9 @@ class Session implements CascadedLlmSession {
           if (!object(choice) || !object(choice.delta)) throw protocol('choice_delta')
           const content = choice.delta.content, calls = choice.delta.tool_calls
           if (content !== undefined && content !== null && typeof content !== 'string') throw protocol('content_shape'); if (calls !== undefined && !Array.isArray(calls)) throw protocol('tool_calls_shape')
-          if (!started && ((input.tools.length === 0 && typeof content === 'string' && content !== '') || (choice.finish_reason !== undefined && choice.finish_reason !== null))) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
+          if (!started && (((input.tools.length === 0 || input.previewText === true) && typeof content === 'string' && content !== '') || (choice.finish_reason !== undefined && choice.finish_reason !== null))) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
           if (typeof content === 'string' && content !== '') sawText = true
-          if (typeof content === 'string' && content !== '') { text += content; if (input.tools.length === 0) yield {kind: 'text_delta', text: content} }
+          if (typeof content === 'string' && content !== '') { text += content; if (input.tools.length === 0) yield {kind: 'text_delta', text: content}; else if (input.previewText === true) yield {kind: 'text_preview', text: content} }
           for (const call of calls ?? []) {if(object(call)&&typeof call.index==='number'&&Number.isSafeInteger(call.index))toolIndexes.add(call.index);this.#fragment(fragments,call)}
           if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
             if (typeof choice.finish_reason !== 'string' || responseId === null) throw fail('protocol')
