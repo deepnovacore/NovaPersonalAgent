@@ -660,3 +660,15 @@ test('a pending executor approval shows allow and deny buttons above the compose
  m.all().find(n=>n.tag==='button'&&n.textContent==='允许').listeners.click();await tick()
  const sent=m.sent.findLast(f=>f.method==='conversations.approve');assert.deepEqual(sent.params,{id:'chat:main',approval_id:'a1',approved:true})
 })
+
+test('the first message in Build starts a direct Build in the chosen workspace instead of a chat turn',async()=>{
+ const m=mount({defaultHome:true}),c=m.view.controller
+ m.view.receive(feedState(1,'chat:main',{feed:[],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ c.state('chat:main').execution='build';c.state('chat:main').workspace='/work/demo';c.draft='写一个俄罗斯方块';m.view.refresh()
+ const bar=m.all().find(n=>n.className==='workspace-bar');assert.equal(bar.hidden,false)
+ const send=m.all().find(n=>n.className==='composer-submit');const sending=send.listeners.click();await tick()
+ const request=m.sent.findLast(f=>f.method==='build.begin');assert.deepEqual(request.params,{text:'写一个俄罗斯方块',project:'/work/demo'})
+ assert.equal(m.sent.some(f=>f.type==='input.text'),false,'no chat submission')
+ m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await sending;await tick()
+ assert.equal(c.draft,'');assert.equal(c.state('chat:main').execution,undefined)
+})

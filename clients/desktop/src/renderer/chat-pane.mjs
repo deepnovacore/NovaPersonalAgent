@@ -8,6 +8,7 @@ import {mountExecutionCard} from './execution-card.mjs'
 import {mountCodingTargetMenu} from './coding-target-menu.mjs'
 import {mountWorkbenchAgent} from './workbench-agent.mjs'
 import {mountApprovalDock} from './approval-dock.mjs'
+import {mountWorkspaceBar} from './workspace-bar.mjs'
 import {mountComposerMode,composerMode as currentComposerMode} from './composer-mode.mjs'
 import {mountComposerApproval} from './composer-approval.mjs'
 import {createBuildCallLog} from './build-call-log.mjs'
@@ -93,10 +94,23 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
  const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api})
  const approvalDock=mountApprovalDock(pane,{c,el,button,run})
+ const pendingBuild=()=>{const item=c.selectedConversation;return Boolean(item)&&item.kind!=='build'&&currentComposerMode(item,c.state(item.id))==='build'}
+ const workspaceBar=mountWorkspaceBar(pane,{c,el,button,run,api:api?.personal,visible:pendingBuild})
+ let beginning=false
+ /** A Build chosen in the composer starts with its first message and has no plan in between. */
+ async function sendDraft(){
+  if(!pendingBuild())return c.submit()
+  const id=c.selectedId,state=c.state(id),text=(state.draft??'').trim(),project=workspaceBar.value()
+  if(!text||!c.connected||beginning||state.submission)return false
+  if(!project)throw Error(t('请先选择工作区'))
+  beginning=true
+  try{await c.command('build.begin',{text,project});state.draft='';delete state.execution;return true}
+  finally{beginning=false;c.changed?.()}
+ }
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3
  draft.addEventListener('input',()=>{c.draft=draft.value;if(!draft.value.trim())c.state().source_todo=null;renderSource();syncActions()})
  draft.addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(()=>c.submit())}
+  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(sendDraft)}
   // Shift+Tab cycles the mode only from the draft; elsewhere it keeps reverse focus navigation.
   else if(e.key==='Tab'&&e.shiftKey&&!e.isComposing&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&composerMode.cycle())e.preventDefault()
  })
@@ -107,7 +121,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const recordingHere=()=>Boolean(c.dictationId)&&c.dictationConversationId===c.selectedId
  dictate.addEventListener('click',()=>run(()=>recordingHere()?c.finish():c.dictate()))
  const voice=el('button',undefined,'composer-voice');voice.type='button';voice.addEventListener('click',()=>run(()=>c.isVoiceConversation?c.stopVoice():c.voice()));inputActions.append(voice)
- const submit=el('button',undefined,'composer-submit');submit.type='button';submit.append(glyph(GLYPH.send));submit.setAttribute('aria-label',t('发送消息'));submit.title=t('发送消息');submit.addEventListener('click',()=>run(()=>c.submit()));inputActions.append(submit)
+ const submit=el('button',undefined,'composer-submit');submit.type='button';submit.append(glyph(GLYPH.send));submit.setAttribute('aria-label',t('发送消息'));submit.title=t('发送消息');submit.addEventListener('click',()=>run(sendDraft));inputActions.append(submit)
  /** The round action is the send arrow once there is a draft, otherwise continuous voice (its stop cross while voice runs). */
  let voiceGlyph=null
  function syncActions(){
@@ -252,7 +266,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  }
  function update(){
   buildLog.update()
-  workbenchAgent.update();composerMode.update();composerApproval.update();approvalDock.update()
+  workbenchAgent.update();composerMode.update();composerApproval.update();approvalDock.update();workspaceBar.update()
   syncCompanion()
   renderSource()
   if(draft.value!==c.draft)draft.value=c.draft
