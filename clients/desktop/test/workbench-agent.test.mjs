@@ -136,7 +136,7 @@ test('published Plan starts the built-in Build or hands the plan to a chosen exe
  }finally{globalThis.document=previousDocument}
 })
 
-test('Build status bar keeps state, project path and restart reason as separate lines',()=>{
+test('Build status bar shows state, the workspace folder name with the full path on hover, and a readable reason',()=>{
  class Element{
   constructor(name,text){this.name=name;this.textContent=text??'';this.children=[];this.listeners={};this.hidden=false;this.disabled=false;this.value='';this.attributes={}}
   append(...children){this.children.push(...children)}
@@ -154,8 +154,23 @@ test('Build status bar keeps state, project path and restart reason as separate 
  const status=walk(agent.element).find(node=>node.attributes.role==='status')
  assert.equal(status.textContent,'Build · 已暂停');assert.equal(status.attributes['data-state'],'paused')
  const info=walk(agent.element).find(node=>node.children.includes(status)),[, path, reason]=info.children
- assert.equal(path.textContent,project);assert.equal(path.title,project)
+ assert.equal(path.textContent,'demo');assert.equal(path.title,project)
  assert.equal(reason.textContent,'重启后等待恢复');assert.equal(reason.hidden,false)
+})
+
+test('a paused Build explains an approval denial in words instead of the raw code',()=>{
+ class Element{
+  constructor(name,text){this.name=name;this.textContent=text??'';this.children=[];this.listeners={};this.hidden=false;this.disabled=false;this.value='';this.attributes={}}
+  append(...children){this.children.push(...children)}
+  replaceChildren(...children){this.children=[...children]}
+  setAttribute(name,value){this.attributes[name]=value}
+  addEventListener(name,callback){this.listeners[name]=callback}
+  focus(){}
+ }
+ const walk=node=>[node,...node.children.flatMap(walk)]
+ const bar=reason=>{const item={id:'build',kind:'build',build:{status:'paused',project:'/x/demo',reason}},c={connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})},parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}});agent.update();const status=walk(agent.element).find(node=>node.attributes.role==='status');return walk(agent.element).find(node=>node.children.includes(status)).children[2]}
+ assert.equal(bar('approval_denied').textContent,'你拒绝了一次操作，补充新的要求后继续')
+ const unknown=bar('some_internal_code');assert.equal(unknown.textContent,'');assert.equal(unknown.hidden,true,'unknown codes are never shown raw')
 })
 
 test('plan card workspaces follow the runner: Build and Codex differ, other executors take no workspace',async()=>{

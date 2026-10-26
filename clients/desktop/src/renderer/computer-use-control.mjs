@@ -8,13 +8,18 @@ const ITEMS={
  vision_model:{text:'当前模型无视觉，Build 桌面操作不可用，请换视觉模型。'},
 }
 
-/** The Build-session switch. The runtime decides; this view only asks and shows exactly what is missing. */
-export function mountComputerUseControl(bar,root,{c,el,run,api}){
- const toggle=el('button',undefined,'computer-use-toggle');toggle.type='button';toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked','false')
- const knob=el('span',undefined,'computer-use-knob'),label=el('span','Computer Use'),badge=el('span','','computer-use-badge')
- knob.setAttribute('aria-hidden','true');toggle.append(knob,label,badge);bar.append(toggle)
- const panel=el('section',undefined,'computer-use-preflight');panel.hidden=true;panel.setAttribute('role','status');root.append(panel)
+/**
+ * The Build-session switch, kept in the composer's action row. The runtime decides; this view only asks and shows
+ * exactly what is missing. A new Build session starts with it on: the first time one is shown the switch asks the
+ * runtime once, and when a precondition is missing it stays off without interrupting. Switching it off is final.
+ */
+export function mountComputerUseControl(actions,panelHost,{c,el,run,api,autoEnable=true}){
+ const toggle=el('button',undefined,'computer-use-toggle');toggle.type='button';toggle.hidden=true;toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked','false')
+ const label=el('span','Computer Use'),badge=el('span','','computer-use-badge')
+ toggle.append(label,badge);actions.append(toggle)
+ const panel=el('section',undefined,'computer-use-preflight');panel.hidden=true;panel.setAttribute('role','status');panelHost.append(panel)
  let result=null,resultFor='',busy=false
+ const attempted=new Set()
  const state=()=>c.selectedConversation?.build?.computer_use??null
  function renderPanel(){
   const missing=result&&resultFor===c.selectedId?result.missing:[]
@@ -32,20 +37,21 @@ export function mountComputerUseControl(bar,root,{c,el,run,api}){
   close.addEventListener('click',()=>void request(true))
   panel.replaceChildren(title,list,close)
  }
- async function request(enabled){
+ async function request(enabled,{silent=false}={}){
   const id=c.selectedId;if(!id||busy)return
   busy=true;update()
   try{
    const permissions=enabled?(await api.welcome?.get?.().catch(()=>null))?.permissions:undefined
    const params={conversation_id:id,enabled,...(permissions?{permissions:{screen:String(permissions.screen),accessibility:String(permissions.accessibility)}}:{})}
    const response=await c.command('build.computer_use',params)
-   if(c.selectedId===id){result=response;resultFor=id}
+   if(c.selectedId===id&&!(silent&&response?.ok===false)){result=response;resultFor=id}
   }finally{busy=false;update()}
  }
  toggle.addEventListener('click',()=>run(()=>request(!state()?.enabled)))
  function update(){
   const item=c.selectedConversation,build=item?.kind==='build'?item.build:null,current=state()
   toggle.hidden=!build||build.status==='finished'
+  if(autoEnable&&build&&!toggle.hidden&&current===null&&c.connected&&!busy&&c.selectedId===item.id&&!attempted.has(item.id)){attempted.add(item.id);void request(true,{silent:true}).catch(()=>{})}
   const on=current?.enabled===true
   toggle.setAttribute('aria-checked',String(on));toggle.setAttribute('data-on',String(on))
   toggle.disabled=busy||!c.connected

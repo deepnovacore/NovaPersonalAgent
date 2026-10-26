@@ -45,3 +45,16 @@ test('choosing a folder stores it per conversation, and cancelling keeps the pre
  all(cancelled.root).find(n=>n.name==='button'&&n.className.includes('workspace-folder')).listeners.click();await flush()
  assert.equal(cancelled.bar.value(),'/Users/me/.nova/workspace/default')
 })
+
+test('a default workspace that is not known at mount time is picked up once the host has it',async()=>{
+ const states=new Map(),answers=[null,null,'/Users/me/.nova/workspace/default']
+ const c={connected:true,selectedId:'chat:main',state:id=>{if(!states.has(id))states.set(id,{});return states.get(id)},changed(){}}
+ const api={defaultWorkspace:async()=>answers.length?answers.shift():'/Users/me/.nova/workspace/default',chooseBuildDirectory:async()=>null}
+ const parent=el('div'),bar=mountWorkspaceBar(parent,{c,el,button,run:callback=>callback(),api,visible:()=>true})
+ await flush();bar.update();assert.equal(bar.value(),null,'the host had no workspace at mount')
+ assert.ok(all(parent.children[0]).some(n=>n.textContent==='选择工作区'))
+ bar.update();await flush();bar.update();await flush()
+ assert.equal(bar.value(),'/Users/me/.nova/workspace/default')
+ assert.ok(all(parent.children[0]).some(n=>n.textContent==='默认工作区'))
+ const calls=answers.length;bar.update();bar.update();await flush();assert.equal(answers.length,calls,'it stops asking once it has the answer')
+})

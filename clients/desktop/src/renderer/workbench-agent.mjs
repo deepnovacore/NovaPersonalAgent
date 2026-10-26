@@ -1,14 +1,20 @@
 import {t} from './locale.mjs'
 import {renderMarkdown} from './markdown.mjs'
-import {mountComputerUseControl} from './computer-use-control.mjs'
 import {iconNode,withIcon} from './icons.mjs'
+
+const folderName=path=>String(path??'').split(/[\\/]+/).filter(Boolean).at(-1)??''
+/** Why a Build is paused, in words the user can act on. Unknown codes stay hidden rather than leaking a raw identifier. */
+const BUILD_REASONS=Object.freeze({
+ model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',
+ restart_requires_resume:'重启后等待恢复',approval_denied:'你拒绝了一次操作，补充新的要求后继续',
+ cleanup_unknown:'上一步的清理结果不确定，请核实后继续',outcome_unknown:'上一步的结果不确定，请核实后继续',new_user_input_received:'收到新消息，已暂停当前步骤',
+})
 
 /** Bounded snapshots carry only status. Full plans and logs are fetched in small pages. */
 export function mountWorkbenchAgent(parent,{c,el,run,api}){
  const root=el('section',undefined,'workbench-agent'),bar=el('div',undefined,'workbench-mode-bar');parent.append(root);root.append(bar)
  const info=el('div',undefined,'workbench-build-info'),status=el('span','','workbench-build-status'),project=el('span','','workbench-build-project'),reason=el('span','','workbench-build-reason'),buildActions=el('div',undefined,'workbench-build-actions')
  status.setAttribute('role','status');info.append(status,project,reason);bar.append(info,buildActions)
- const computerUse=mountComputerUseControl(buildActions,root,{c,el,run,api})
  const stop=el('button',t('停止')),resume=el('button','Resume'),details=el('button',t('执行记录'));for(const [button,icon] of [[stop,'stop'],[resume,'play'],[details,'list']]){button.type='button';withIcon(button,icon);buildActions.append(button)}
  stop.addEventListener('click',()=>run(()=>c.command('build.stop',{id:c.selectedId})));resume.addEventListener('click',()=>run(()=>c.command('build.resume',{id:c.selectedId})))
  const log=el('pre',undefined,'workbench-tool-log');log.hidden=true;root.append(log)
@@ -42,7 +48,8 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  const runner=el('select');runner.setAttribute('aria-label',t('执行器'));const runnerNote=el('p','','hint workbench-runner-note')
  const directories=el('select');directories.setAttribute('aria-label',t('工作区'));directories.append(Object.assign(el('option',t('选择工作区')),{value:''}))
  const pick=el('button',t('选择本地目录…'));pick.type='button';pick.hidden=true
- planCard.append(planTitle,body,edit,runner,runnerNote,directories,pick,actions);for(const button of [editButton,save,start]){button.type='button';actions.append(button)}save.hidden=true;start.className='soft'
+ const runnerLabel=el('small',t('执行器'),'workbench-field-label'),directoryLabel=el('small',t('工作区'),'workbench-field-label')
+ planCard.append(planTitle,body,edit,runnerLabel,runner,runnerNote,directoryLabel,directories,pick,actions);for(const button of [editButton,save,start]){button.type='button';actions.append(button)}save.hidden=true;start.className='soft'
  const retry=el('button',t('重试'));retry.type='button';retry.hidden=true;planCard.append(retry)
  let planKey='',failedKey='',plan=null,loading=false,sequence=0,lastSelected=null,busy=false,localBuildSupported=false,preselected='',defaultPath=null,registered=[]
  const picked=[]
@@ -84,14 +91,13 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  }))
  start.addEventListener('click',()=>run(async()=>{const ref=reference(),executor=runner.value;if(!ref||busy||(!executor&&!directories.value))return;busy=true;update();try{if(executor)await c.command('plans.delegate',{...ref,executor,...(executor==='codex'&&directories.value?{project:directories.value}:{})});else await c.command('build.start',{...ref,project:directories.value})}finally{busy=false;update()}}))
  function update(){
-  computerUse.update()
   const item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status)
   root.hidden=!item
   status.textContent=build?t('Build · {0}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status)):''
   status.setAttribute('data-state',build?.status??'')
   // The path is one ellipsized line; the full value stays reachable on hover.
-  project.textContent=build?.project??'';project.title=build?.project??''
-  reason.textContent=build?.reason&&build.reason!=='stopped'?t(({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',restart_requires_resume:'重启后等待恢复'})[build.reason]??build.reason):'';reason.hidden=!reason.textContent
+  project.textContent=folderName(build?.project);project.title=build?.project??'';project.hidden=!project.textContent
+  reason.textContent=build?.reason&&build.reason!=='stopped'&&BUILD_REASONS[build.reason]?t(BUILD_REASONS[build.reason]):'';reason.hidden=!reason.textContent
   stop.hidden=!build||!active;resume.hidden=!build||active||['completed','finished'].includes(build.status);details.hidden=!build
   always.disabled=!c.connected||loadedApproval!==build?.approval?.id;approval.hidden=!build?.approval;deny.disabled=!c.connected;approve.disabled=!c.connected||loadedApproval!==build?.approval?.id
   if(build?.approval&&loadedApproval!==build.approval.id){if(loadingApproval!==build.approval.id)preview.textContent=build.approval.name+'\n'+build.approval.preview;void loadApproval(build.approval,item.id).catch(error=>{c.error=error.message;c.changed()})}
@@ -101,7 +107,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   if(lastSelected!==c.selectedId){lastSelected=c.selectedId;log.hidden=true;sequence++;loading=false;planKey='';failedKey='';plan=null;retry.hidden=true;body.replaceChildren()}
   if(hasPlan)void load().catch(error=>{c.error=error.message;c.changed()})
   const delegating=Boolean(runner.value)
-  runner.disabled=busy;pick.hidden=delegating||!localBuildSupported;directories.hidden=delegating&&runner.value!=='codex';directories.disabled=busy;pick.disabled=busy
+  runner.disabled=busy;pick.hidden=delegating||!localBuildSupported;directories.hidden=delegating&&runner.value!=='codex';directoryLabel.hidden=directories.hidden;directories.disabled=busy;pick.disabled=busy
   start.textContent=delegating?t('交给 {0}',runner.value):t('开始 Build')
   runnerNote.textContent=delegating?t('异步执行：{0} 在后台完成，进度在悬浮窗查看，对话可以继续。',runner.value):t('同步执行：在选定工作区读写文件、运行命令，完成前这段对话保持占用。')
   start.disabled=busy||!plan||!c.connected||JSON.stringify(reference())!==planKey||(!delegating&&(!localBuildSupported||!directories.value))
