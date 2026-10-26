@@ -45,3 +45,12 @@ test('a stale or invalid snapshot is ignored',()=>{
  const f=fixture();f.float.receive(frame([task('a')],5));f.float.receive(frame([],4));assert.equal(f.root.hidden,false)
  f.float.receive({type:'executor.tasks',revision:6,tasks:'nope'});assert.equal(f.root.hidden,false)
 })
+
+test('after a backend restart the float accepts snapshots that restart at a low revision',()=>{
+ const f=fixture()
+ f.float.receive(frame([task('a')],100));assert.equal(f.root.hidden,false)
+ f.float.reset();assert.equal(f.root.hidden,true,'a new connection starts from nothing')
+ f.float.receive(frame([task('b','started',{title:'重启后的任务'})],0));assert.equal(f.root.hidden,false)
+ all(f.root).find(n=>n.className==='executor-float-pill').listeners.click()
+ assert.ok(all(f.root).some(n=>n.textContent==='重启后的任务'))
+})

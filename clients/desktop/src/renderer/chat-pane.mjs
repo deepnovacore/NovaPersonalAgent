@@ -103,8 +103,10 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const id=c.selectedId,state=c.state(id),text=(state.draft??'').trim(),project=workspaceBar.value()
   if(!text||!c.connected||beginning||state.submission)return false
   if(!project)throw Error(t('请先选择工作区'))
-  beginning=true
-  try{await c.command('build.begin',{text,project});state.draft='';delete state.execution;return true}
+  const submitted=state.draft
+  beginning=true;c.changed?.()
+  // Clear only what was sent: text typed or a mode picked while the host starts the Build stays.
+  try{await c.command('build.begin',{text,project});if(state.draft===submitted)state.draft='';if(state.execution==='build')delete state.execution;return true}
   finally{beginning=false;c.changed?.()}
  }
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3
@@ -271,7 +273,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   renderSource()
   if(draft.value!==c.draft)draft.value=c.draft
   const localDictation=c.dictationConversationId===c.selectedId&&Boolean(c.dictationId)
-  draft.disabled=!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isBuildFinished(c.selectedId)||(c.buildWaitingApproval&&c.selectedConversation?.id===c.selectedId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')
+  draft.disabled=beginning||!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isBuildFinished(c.selectedId)||(c.buildWaitingApproval&&c.selectedConversation?.id===c.selectedId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')
   submit.disabled=draft.disabled
   dictate.disabled=!c.presentationReady||!c.connected||!c.selectedId||Boolean(c.voiceId)||(c.mode!=='text'&&c.dictationConversationId!==c.selectedId)||c.mode==='transcribing'||!c.capabilities.includes('dictation')
   voice.disabled=!c.presentationReady||!c.connected||!c.selectedId||(Boolean(c.voiceId)&&!c.isVoiceConversation)||(c.mode!=='text'&&!c.isVoiceConversation)

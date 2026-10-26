@@ -131,7 +131,7 @@ test('published Plan starts the built-in Build or hands the plan to a chosen exe
   assert.equal(start.textContent,'交给 codex');assert.equal(picker.hidden,true,'executors only use listed workspaces')
   await start.listeners.click()
   assert.deepEqual(commands.filter(([method])=>['build.start','plans.delegate'].includes(method)).map(([method,params])=>[method,params.executor,params.project]),[
-   ['build.start',undefined,project],['plans.delegate','codex',project],
+   ['build.start',undefined,project],['plans.delegate','codex',undefined],
   ])
  }finally{globalThis.document=previousDocument}
 })
@@ -156,4 +156,44 @@ test('Build status bar keeps state, project path and restart reason as separate 
  const info=walk(agent.element).find(node=>node.children.includes(status)),[, path, reason]=info.children
  assert.equal(path.textContent,project);assert.equal(path.title,project)
  assert.equal(reason.textContent,'重启后等待恢复');assert.equal(reason.hidden,false)
+})
+
+test('plan card workspaces follow the runner: Build and Codex differ, other executors take no workspace',async()=>{
+ class Element{
+  constructor(name,text){this.name=name;this.textContent=text??'';this.children=[];this.listeners={};this.hidden=false;this.disabled=false;this.value='';this.attributes={}}
+  append(...children){this.children.push(...children)}
+  replaceChildren(...children){this.children=[...children]}
+  setAttribute(name,value){this.attributes[name]=value}
+  addEventListener(name,callback){this.listeners[name]=callback}
+  focus(){}
+  get options(){return this.children}
+ }
+ const previousDocument=globalThis.document
+ globalThis.document={createElement:name=>new Element(name),createTextNode:text=>new Element('#text',text)}
+ try{
+  const item={id:'chat:plan',kind:'chat',mode:'plan',plan:{id:'plan-1',version:1}},commands=[]
+  const c={connected:true,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method,params)=>{
+   commands.push([method,params])
+   if(method==='plans.get')return {id:'plan-1',version:1,title:'Plan',content:'Full plan',next_offset:null}
+   if(method==='conversations.targets')return {local_build_supported:true,targets:[{project:'demo',directory:'/registered/demo'}],executors:['codex','pi']}
+   return {}
+  }}
+  const parent=new Element('main'),el=(name,text)=>new Element(name,text),agent=mountWorkbenchAgent(parent,{c,el,run:callback=>callback(),api:{personal:{chooseBuildDirectory:async()=>'/anywhere',defaultWorkspace:async()=>'/default/ws'}}})
+  agent.update()
+  for(let tries=0;tries<50&&!commands.some(([method])=>method==='conversations.targets');tries++)await new Promise(resolve=>setTimeout(resolve,0))
+  await new Promise(resolve=>setTimeout(resolve,0))
+  const planCard=agent.element.children.find(child=>child.name==='section'&&child.children.some(node=>node.name==='h3'))
+  const runner=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='执行器')
+  const directories=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='工作区')
+  const actions=planCard.children.find(child=>child.name==='div'&&child.children.some(node=>node.name==='button'&&node.textContent==='开始 Build'))
+  const start=()=>actions.children.find(node=>node.name==='button'&&['开始 Build','交给 codex','交给 pi'].includes(node.textContent))
+  assert.ok(directories.children.some(option=>option.value==='/default/ws'),'built-in Build may use the default workspace')
+  runner.value='codex';runner.listeners.change()
+  assert.deepEqual(directories.children.map(option=>option.value),['','/registered/demo'],'Codex only offers registered directories')
+  directories.value='/registered/demo';directories.listeners.change();await start().listeners.click()
+  runner.value='pi';runner.listeners.change()
+  assert.equal(directories.hidden,true,'a non-Codex executor takes no workspace')
+  await start().listeners.click()
+  assert.deepEqual(commands.filter(([method])=>method==='plans.delegate').map(([,params])=>[params.executor,params.project]),[['codex','/registered/demo'],['pi',undefined]])
+ }finally{globalThis.document=previousDocument}
 })
