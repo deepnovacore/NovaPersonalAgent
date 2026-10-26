@@ -11,6 +11,7 @@ import {mountApprovalDock} from './approval-dock.mjs'
 import {mountWorkspaceBar} from './workspace-bar.mjs'
 import {mountComposerMode,composerMode as currentComposerMode} from './composer-mode.mjs'
 import {mountComposerApproval} from './composer-approval.mjs'
+import {mountComputerUseControl} from './computer-use-control.mjs'
 import {createBuildCallLog} from './build-call-log.mjs'
 import {createOrbVisualSafe} from './orb-visual.mjs'
 import {ORB_STATE_NAMES} from './state.mjs'
@@ -96,6 +97,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const approvalDock=mountApprovalDock(pane,{c,el,button,run})
  const pendingBuild=()=>{const item=c.selectedConversation;return Boolean(item)&&item.kind!=='build'&&currentComposerMode(item,c.state(item.id))==='build'}
  const workspaceBar=mountWorkspaceBar(pane,{c,el,button,run,api:api?.personal,visible:pendingBuild})
+ const computerPanel=el('div',undefined,'computer-use-host');pane.append(computerPanel)
  let beginning=false
  /** A Build chosen in the composer starts with its first message and has no plan in between. */
  async function sendDraft(){
@@ -116,7 +118,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   // Shift+Tab cycles the mode only from the draft; elsewhere it keeps reverse focus navigation.
   else if(e.key==='Tab'&&e.shiftKey&&!e.isComposing&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&composerMode.cycle())e.preventDefault()
  })
- const inputActions=el('div',undefined,'composer-actions');const composerMode=mountComposerMode(inputActions,{c,el,run});const composerApproval=mountComposerApproval(inputActions,{c,el,run,api:api?.personal,visible:()=>{const item=c.selectedConversation;return Boolean(item)&&currentComposerMode(item,c.state(item.id))!=='chat'}});const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
+ const inputActions=el('div',undefined,'composer-actions');const composerMode=mountComposerMode(inputActions,{c,el,run});const composerApproval=mountComposerApproval(inputActions,{c,el,run,api:api?.personal,visible:()=>{const item=c.selectedConversation;return Boolean(item)&&currentComposerMode(item,c.state(item.id))!=='chat'}})
+ const computerUse=mountComputerUseControl(inputActions,computerPanel,{c,el,run,api});const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
  const hint=el('p','','hint composer-hint');inputActions.append(hint)
  inputActions.addEventListener('keydown',event=>{if(!event.defaultPrevented&&event.key==='Tab'&&event.shiftKey&&!event.isComposing&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&composerMode.cycle())event.preventDefault()})
  const dictate=el('button',undefined,'composer-dictate');dictate.type='button';dictate.append(glyph(GLYPH.mic));inputActions.append(dictate)
@@ -268,7 +271,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  }
  function update(){
   buildLog.update()
-  workbenchAgent.update();composerMode.update();composerApproval.update();approvalDock.update();workspaceBar.update()
+  workbenchAgent.update();composerMode.update();composerApproval.update();approvalDock.update();workspaceBar.update();computerUse.update()
   syncCompanion()
   renderSource()
   if(draft.value!==c.draft)draft.value=c.draft

@@ -1905,4 +1905,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "执行器进展": "Executor progress",
   "{0} · {1} 个任务": "{0} · {1} tasks",
   "查看详情": "View details",
+  "你拒绝了一次操作，补充新的要求后继续": "You declined an action. Add what you want instead and continue.",
+  "上一步的清理结果不确定，请核实后继续": "The cleanup result of the last step is uncertain. Verify it, then continue.",
+  "上一步的结果不确定，请核实后继续": "The result of the last step is uncertain. Verify it, then continue.",
+  "收到新消息，已暂停当前步骤": "A new message arrived, so the current step was paused.",
 })
