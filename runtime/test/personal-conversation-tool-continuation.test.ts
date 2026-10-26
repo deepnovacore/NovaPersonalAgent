@@ -69,7 +69,13 @@ test('a cascaded HTTP 401 rejects the pending text turn before reconnect without
     await host.open()
     const conversation = createConversation('chat', 'Tool continuation')
     const llm: CascadedLlmSession = {
-      async *stream() { requests++; await Promise.resolve(); yield* []; throw new ChatCompletionsLlmFailure('http',401,'auth') },
+      async *stream() {
+        requests++; await Promise.resolve()
+        if(requests===1)throw new ChatCompletionsLlmFailure('http',401,'auth')
+        yield {kind:'response_started',response_id:'retry'}
+        yield {kind:'text_delta',text:'Recovered'}
+        yield {kind:'response_completed',response_id:'retry'}
+      },
       restoreHistory: () => Promise.resolve(), abandonPendingResponse: () => Promise.resolve(), close: () => Promise.resolve(),
     }
     const factory = conversationRuntimeFactory({host, clock: new VirtualClock(), memory: () => undefined,
@@ -84,6 +90,11 @@ test('a cascaded HTTP 401 rejects the pending text turn before reconnect without
     try {
       await assert.rejects(runtime.runTurn('hello', AbortSignal.timeout(1000)), error=>error instanceof Error && 'reason' in error && error.reason==='provider_http_auth')
       assert.equal(requests,1)
+      for(let i=0;i<20&&!telemetry.some(event=>event.kind==='provider.error');i++)await new Promise<void>(resolve=>setImmediate(resolve))
+      assert.ok(telemetry.some(event=>event.kind==='provider.error'),'the real service handled the recoverable provider error')
+      await new Promise<void>(resolve=>setImmediate(resolve))
+      assert.equal((await runtime.runTurn('retry',AbortSignal.timeout(1000))).assistant,'Recovered')
+      assert.equal(requests,2)
     } finally { await runtime.close() }
   } finally { await host.close(); await rm(dir, {recursive: true, force: true}) }
 })
