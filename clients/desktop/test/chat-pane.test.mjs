@@ -685,3 +685,13 @@ test('a direct Build keeps text typed while the host starts it, and locks the dr
  m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await sending;await tick()
  assert.equal(c.draft,'先做第一件事 补充','newer text is not discarded');assert.equal(c.state('chat:main').execution,'plan','a mode chosen meanwhile is not discarded')
 })
+
+test('an empty final caption retracts the live caption of that turn so a discarded preview leaves no ghost bubble',async()=>{
+ const m=mount({defaultHome:true})
+ m.view.receive(feedState(1,'chat:main',{feed:[],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[{id:'u1',conversation_id:'chat:main',role:'user',text:'你好',created_at:new Date(Date.now()-5000).toISOString()}],home_messages:[]}}))
+ const caption=(text,final=false)=>({type:'caption',role:'assistant',text,full_text:text,conversation_id:'chat:main',turn_id:'t1',final})
+ m.view.receive(caption('我先帮你看一下'));await tick()
+ assert.ok(m.all().some(n=>n.textContent==='我先帮你看一下'||n.text==='我先帮你看一下'))
+ m.view.receive(caption('',true));await tick()
+ assert.equal(m.all().some(n=>n.textContent==='我先帮你看一下'||n.text==='我先帮你看一下'),false,'the retracted preview is gone')
+})
