@@ -26,7 +26,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
  if(build&&(!conversation.build||!['darwin','win32'].includes(process.platform)))throw Error('local_build_unavailable')
  const state=await store.checkpoint(conversation.id,conversation.generation)
- const confirmedPlan=build&&conversation.build?.plan_id&&conversation.build.plan_version?await store.plan(conversation.build!.plan_id,conversation.build!.plan_version):undefined
+ const confirmedPlan=build&&conversation.build?.plan_id&&conversation.build.plan_version?await store.plan(conversation.build.plan_id,conversation.build.plan_version):undefined
  const workspaceContext=build?JSON.stringify({...(confirmedPlan?{confirmed_plan:{id:confirmedPlan.id,version:confirmedPlan.version,title:confirmedPlan.title,content:confirmedPlan.content}}:{}),project:conversation.build!.project}):null
  let session:CascadedLlmSession|undefined,bridgeRuntime:ConversationRuntime|undefined
  let closed=false,controller:AbortController|undefined,active:Promise<{assistant:string;turn_id?:string}>|undefined,version=state.run_version
