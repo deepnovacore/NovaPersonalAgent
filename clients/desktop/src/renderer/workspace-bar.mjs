@@ -9,7 +9,7 @@ export function workspaceLabel(path,defaultPath){
 /** A managed workspace ID is the default; arbitrary folders remain an explicit advanced choice. */
 export function mountWorkspaceBar(parent,{c,el,button,run,api,visible,onChange=()=>{},state=()=>c.state(c.selectedId)}){
  const root=el('div',undefined,'workspace-bar');root.hidden=true;root.setAttribute('role','group');root.setAttribute('aria-label',t('工作区'));parent.append(root)
- const select=el('select');select.setAttribute('aria-label',t('工作区'));root.append(select)
+ const select=el('select',undefined,'workspace-folder');select.setAttribute('aria-label',t('工作区'));root.append(select)
  const name=el('input');name.maxLength=80;name.setAttribute('aria-label',t('工作区名称'));name.hidden=true;root.append(name)
  const create=button(t('创建工作区'),()=>run(async()=>{
   if(creating)return

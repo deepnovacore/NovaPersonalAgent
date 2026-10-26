@@ -35,7 +35,7 @@ export function renderConversationTasks(panel,{c,el,button,openTask,now=Date.now
    if(item.unread_count)row.append(el('span',String(item.unread_count),'unread-badge'))
    if(item.id===c.voiceId)row.append(el('span',t('语音中'),'conversation-badge'))
    if(c.state(item.id).submission)row.append(el('span',t('发送中'),'conversation-badge'))
-   if(item.id===c.selectedId&&openTask){if(records.length){const detail=el('details'),summary=el('summary',t('委托任务记录'));detail.append(summary);for(const task of records)button(task.goal,()=>openTask(task.id),detail);panel.append(detail)}}
+   if(item.id===c.selectedId&&openTask){if(records.length){const detail=el('details'),summary=el('summary',t('委托任务记录'));detail.open=c.state(item.id).taskRecordsOpen===true;detail.addEventListener('toggle',()=>{c.state(item.id).taskRecordsOpen=detail.open});detail.append(summary);for(const task of records)button(task.goal,()=>openTask(task.id),detail);panel.append(detail)}}
   }
  }
  if(!items.length)panel.append(el('p',t('暂无任务'),'empty-state'))
