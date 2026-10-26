@@ -656,3 +656,10 @@ test('two selected Todos do not assign either as the automatic task source',asyn
   const duplicate=await host.command({type:'personal.command',request_id:'duplicate',method:'conversations.discuss',params:{text:'Compare',references:[references[0],references[0]]}}) as {ok:boolean;error?:string};assert.equal(duplicate.ok,false);assert.match(duplicate.error??'',/duplicate_reference/)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('task list metadata includes a bounded latest excerpt and failed state for unselected conversations',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-task-list-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState();state.user_scope='test'
+ const item=createConversation('topic','Task',null,'task');item.messages.push({id:'failed',conversation_id:item.id,role:'user',text:'x'.repeat(500),created_at:new Date().toISOString(),generation_status:'failed'});state.conversations.items.push(item);await store.write(state)
+ const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{await host.open();const snapshot=host.conversationSnapshot(),task=snapshot.items.find(value=>value.id==='task')!;assert.equal(snapshot.selected_id,'chat:main');assert.equal(task.last_message,'x'.repeat(160));assert.equal(task.generation_status,'failed');assert.equal(snapshot.messages.some(message=>message.id==='failed'),false)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
