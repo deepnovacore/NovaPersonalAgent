@@ -15,7 +15,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  const root=el('section',undefined,'workbench-agent'),bar=el('div',undefined,'workbench-mode-bar');parent.append(root);root.append(bar)
  const info=el('div',undefined,'workbench-build-info'),status=el('span','','workbench-build-status'),project=el('span','','workbench-build-project'),reason=el('span','','workbench-build-reason'),buildActions=el('div',undefined,'workbench-build-actions')
  status.setAttribute('role','status');info.append(status,project,reason);bar.append(info,buildActions)
- const stop=el('button',t('停止')),resume=el('button','Resume'),details=el('button',t('执行记录'));for(const [button,icon] of [[stop,'stop'],[resume,'play'],[details,'list']]){button.type='button';withIcon(button,icon);buildActions.append(button)}
+ const stop=el('button',t('停止')),resume=el('button',t('继续')),details=el('button',t('执行记录'));for(const [button,icon] of [[stop,'stop'],[resume,'play'],[details,'list']]){button.type='button';withIcon(button,icon);buildActions.append(button)}
  stop.addEventListener('click',()=>run(()=>c.command('build.stop',{id:c.selectedId})));resume.addEventListener('click',()=>run(()=>c.command('build.resume',{id:c.selectedId})))
  const log=el('pre',undefined,'workbench-tool-log');log.hidden=true;root.append(log)
  details.addEventListener('click',()=>run(async()=>{

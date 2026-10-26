@@ -79,8 +79,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const pane=el('aside',undefined,'chat-pane');pane.id='chat-pane';pane.setAttribute('aria-label',t('Nova 对话'));columns.append(pane)
  const head=el('header',undefined,'chat-head');pane.append(head)
  const homeButton=button('✦ Nova',onHome,head);homeButton.className='chat-brand';homeButton.title=t('返回主对话')
- const switcher=el('details',undefined,'conversation-switcher');const summary=el('summary');summary.setAttribute('aria-label',t('切换会话'));const summaryTitle=el('span',t('对话'),'switcher-title');const unreadBadge=el('span','','unread-badge');unreadBadge.hidden=true;summary.append(summaryTitle,unreadBadge);switcher.append(summary)
- const conversationList=el('nav');conversationList.setAttribute('aria-label',t('会话列表'));switcher.append(conversationList);head.append(switcher)
+ const summaryTitle=el('span',t('对话'),'conversation-title');head.append(summaryTitle)
  const voiceLine=el('div',undefined,'chat-voice');const voiceStatus=el('span','','conversation-voice-status');voiceLine.append(voiceStatus);const resumeVoice=button(t('恢复语音'),()=>c.resumeVoice(),voiceLine);resumeVoice.hidden=true;const endVoice=button(t('结束语音'),()=>c.stopVoice(),voiceLine);endVoice.hidden=true;pane.append(voiceLine)
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
  const emptyConversation=el('div',undefined,'chat-intro');emptyConversation.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
@@ -179,39 +178,12 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const read=()=>markVisibleRead({c,document,history,readMessages,chatOpen:open})
  history.addEventListener('scroll',()=>{if(history.scrollHeight-history.scrollTop-history.clientHeight<24)newMessages.hidden=true;deliverPresented();read()});const visible=()=>{deliverPresented();read()};document.addEventListener('visibilitychange',visible);window.addEventListener('focus',visible)
 
- let renderedNavigation='',renderedMessages='',renderedConversation=null
+ let renderedMessages='',renderedConversation=null
  const buildLog=createBuildCallLog({c,el,changed:()=>renderHistory()})
  function renderConversations(){
   const items=c.snapshot?.conversations?.items??[]
-  const waiting=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
-  const navKey=JSON.stringify([c.connected,c.selectedId,c.voiceId,items,waiting,items.map(item=>Boolean(c.state(item.id).submission))])
-  if(navKey!==renderedNavigation){
-   renderedNavigation=navKey;conversationList.replaceChildren()
-   const groups=new Map(),labels=new Map()
-   for(const item of items){const title=conversationTitle(item);if(!groups.has(title))groups.set(title,[]);groups.get(title).push(item);labels.set(item.id,title)}
-   for(const [title,group]of groups){
-    if(group.length<2)continue
-    const times=group.map(item=>new Date(item.created_at).toLocaleString(currentLanguage(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}))
-    for(const [index,item]of group.entries()){
-     const label=t('{0} · {1}',title,times[index])
-     labels.set(item.id,times.indexOf(times[index])===times.lastIndexOf(times[index])?label:t('{0} ({1})',label,index+1))
-    }
-   }
-   for(const item of items){
-    const label=labels.get(item.id),b=button(label,()=>{switcher.open=false;return c.select(item.id)},conversationList)
-    b.className='conversation-item';b.setAttribute('aria-current',String(item.id===c.selectedId));b.disabled=!c.connected
-    if(waiting.some(row=>row.conversation_id===item.id))b.append(el('span','待确认','conversation-badge'))
-    if(item.unread_count)b.append(el('span',String(item.unread_count),'unread-badge'))
-    if(item.id===c.voiceId){b.append(el('span','语音中','conversation-badge'));b.setAttribute('aria-label',t('{0}，语音中',label))}
-    else if(c.state(item.id).submission)b.append(el('span','发送中','conversation-badge'))
-   }
-   const create=button(t('新对话'),()=>{switcher.open=false;return c.create()},conversationList);create.className='conversation-item conversation-new';create.disabled=!c.connected
-   if(!items.length)conversationList.append(el('p',c.connected?'正在加载会话…':'尚未连接','hint'))
-  }
   const active=items.find(item=>item.id===c.selectedId)
-  summaryTitle.textContent=conversationTitle(active);pane.dataset.main=String(c.selectedId==='chat:main');homeButton.title=c.selectedId==='chat:main'?t('主对话'):t('返回主对话')
-  const unread=items.reduce((sum,item)=>sum+(item.unread_count??0),0)
-  unreadBadge.hidden=!unread;unreadBadge.textContent=unread?String(unread):''
+  summaryTitle.textContent=conversationTitle(active);pane.dataset.main=String(c.selectedId==='chat:main');homeButton.hidden=c.selectedId==='chat:main';homeButton.title=t('返回主对话')
   const voiceConversation=items.find(item=>item.id===c.voiceId)
   voiceStatus.textContent=c.voiceId?`语音：${conversationTitle(voiceConversation)??'另一会话'}${c.voiceCapabilities?.model.nativeFullDuplex?' · 原生双工对话（无工具调用、无历史恢复）':''}`:''
   resumeVoice.hidden=!c.voiceId||c.mode!=='text';resumeVoice.disabled=!c.connected||!c.presentationReady;

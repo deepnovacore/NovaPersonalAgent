@@ -12,7 +12,7 @@ import {mountWindowChrome} from './window-chrome.mjs'
 import {mountChatPane} from './chat-pane.mjs'
 import {renderMemorySection} from './memory-page.mjs'
 import {mountTaskDetail} from './task-detail.mjs'
-import {renderTasksPage,activeTaskCount} from './tasks-page.mjs'
+import {renderConversationTasks,activeTaskCount} from './tasks-page.mjs'
 import {renderSourceSuggestions} from './workbench-suggestions.mjs'
 import {disposeSources} from './source-popover.mjs'
 import {attentionTarget} from './attention-target.mjs'
@@ -151,14 +151,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   }else if(selected==='tasks'){
    if(caps.schedules){const tabs=el('div',undefined,'schedule-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('任务类型'));for(const [key,label]of [['tasks','任务'],['schedules','定时任务']]){const tab=button(t(label),()=>{taskTab=key;renderPanel()},tabs);tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(taskTab===key))}panel.append(tabs)}
    if(caps.schedules&&taskTab==='schedules')scheduleView=renderScheduledTasksPage(panel,{snapshot:s,command:(...args)=>c.command(...args),openTask,openResult:async run_id=>{await c.command('schedules.open_result',{run_id});chat.reveal()},local:scheduleLocal,connected:c.connected,rerender:renderPanel})
-   else renderTasksPage(panel,{tasks,durableTasks,openTask,taskAction,results,card,chips,button,local:taskLocal,rerender:renderPanel,askProgress:async task=>{
-    const result=await c.command('conversations.open_work',{work_id:task.work_id}),id=result?.selected_id
-    if(typeof id!=='string'||!id||!Array.isArray(result?.items)||!result.items.some(item=>item?.id===id))throw Error(t('原任务对话未确认，请刷新后重试。'))
-    const target=c.state(id),prompt=t('请告诉我「{0}」（任务 {1}）的最新进展。',task.title,task.work_id)
-    const draft=target.draft.endsWith(prompt)?target.draft:[target.draft,prompt].filter(Boolean).join('\n')
-    if(draft.length>4000)throw Error(t('追加后草稿超过 4000 字符，原有草稿已保留，请先缩短内容。'))
-    target.draft=draft;chat.reveal()
-   }})
+   else renderConversationTasks(panel,{c,el,button})
   }else if(selected==='profile'){
    renderProfile(panel,{soul:{view:s?.soul,openSettings},products:s?.derived_understanding,state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
