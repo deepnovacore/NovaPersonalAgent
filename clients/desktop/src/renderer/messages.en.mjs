@@ -1,4 +1,5 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "委托任务记录": "Delegated task records",
   "创建任务": "Create task",
   "近 7 天": "Last 7 days",
   "更早": "Earlier",

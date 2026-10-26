@@ -21,7 +21,7 @@ const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!=
 const PAGE_TITLE=Object.fromEntries(WORKSPACE_PAGES.map(item=>[item.id,item.label===item.title?item.label:`${item.label} · ${item.title}`]))
 /** The workbench keeps Nova on the left and switches contextual pages on the right. */
 export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,applyPresentation,speakingLevel}) {
- const timelineExpanded=new Set(),lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map(),scheduleLocal={}
+ const timelineExpanded=new Set(),lifeLocal={},newsLocal={},preferencesLocal={},scheduleLocal={}
  let taskTab='tasks',scheduleView=null
  let unreadProjection=null,waitingKey=null
  const root=el('main',undefined,'workbench personal-workspace');root.id='personal-workspace';document.body.prepend(root)
@@ -113,7 +113,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const expandedBodies=new Set()
  const bodyMeasures=new WeakMap(),bodyObserver=globalThis.ResizeObserver?new ResizeObserver(entries=>{for(const entry of entries)bodyMeasures.get(entry.target)?.()}):null
  const clampable=(node,id,title)=>{node.type='button';node.dataset.cardBodyId=id;const sync=()=>{const open=expandedBodies.has(id);node.dataset.expanded=String(open);node.setAttribute('aria-expanded',String(open));node.setAttribute('aria-label',`${open?'收起':'展开'}正文：${title}`)};const measure=()=>{if(node.isConnected===false||!node.clientHeight)return;node.disabled=!expandedBodies.has(id)&&node.scrollHeight<=node.clientHeight};sync();node.addEventListener('click',()=>{if(globalThis.getSelection?.()?.toString())return;expandedBodies.has(id)?expandedBodies.delete(id):expandedBodies.add(id);sync();measure()});bodyMeasures.set(node,measure);bodyObserver?.observe(node);globalThis.requestAnimationFrame?.(measure)}
- const card=(title,summary)=>{const a=el('article',undefined,'card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
+
  const continueChat=text=>chat.focusDraft(`关于「${text}」：`)
  let renderedPageKey=null,sourceDetailsOpen=false
  const pageKey=()=>{
@@ -131,7 +131,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
   const sourceDetails=panel.querySelector('details.source-status');if(sourceDetails)sourceDetailsOpen=sourceDetails.open
-  for(const details of panel.querySelectorAll('details')){const local=taskLocal.get(details.dataset.workId);if(local)local.expanded=details.open}
+
   bodyObserver?.disconnect();disposeSources(panel);scheduleView?.dispose();scheduleView=null;panel.replaceChildren();tabs.select(selected);pageTitle.textContent=t(PAGE_TITLE[selected]??selected)
   const s=c.snapshot;const caps=s?.capabilities??{}
   const candidateKind=({ideas:'idea',goals:'goal',profile:'profile'})[selected]
@@ -151,7 +151,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   }else if(selected==='tasks'){
    if(caps.schedules){const tabs=el('div',undefined,'schedule-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('任务类型'));for(const [key,label]of [['tasks','任务'],['schedules','定时任务']]){const tab=button(t(label),()=>{taskTab=key;renderPanel()},tabs);tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(taskTab===key))}panel.append(tabs)}
    if(caps.schedules&&taskTab==='schedules')scheduleView=renderScheduledTasksPage(panel,{snapshot:s,command:(...args)=>c.command(...args),openTask,openResult:async run_id=>{await c.command('schedules.open_result',{run_id});chat.reveal()},local:scheduleLocal,connected:c.connected,rerender:renderPanel})
-   else renderConversationTasks(panel,{c,el,button})
+   else renderConversationTasks(panel,{c,el,button,openTask})
   }else if(selected==='profile'){
    renderProfile(panel,{soul:{view:s?.soul,openSettings},products:s?.derived_understanding,state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)

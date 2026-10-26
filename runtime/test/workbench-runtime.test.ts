@@ -967,3 +967,29 @@ test('Plan and Build previews grow, retract at tool calls and persist only autho
   }finally{await f.close()}
  }
 })
+
+test('managed workspace commands validate names, hide paths and resolve Build defaults and IDs', {skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'})),resolved:(string|undefined)[]=[],created:string[]=[]
+ const workspace={workspace_id:'w-default',name:'default',is_default:true}
+ f.host.setCodingTargets({list:()=>Promise.resolve([]),validate:()=>Promise.reject(Error('unused')),resolve:()=>Promise.reject(Error('unused')),workspaces:{list:()=>Promise.resolve([workspace]),create:name=>{created.push(name);return Promise.resolve({...workspace,workspace_id:'w-new',name,is_default:false})},resolve:id=>{resolved.push(id);if(id&&id!=='w-default')return Promise.reject(Error('unknown_workspace'));return Promise.resolve(f.root)}}})
+ try{
+  assert.deepEqual(await f.command('workspaces.list'),[workspace])
+  assert.equal((await f.raw('workspaces.list',{},false)).error,'local_workbench_required')
+  for(const name of ['', '../escape','a/b','x'.repeat(81),'bad\nname'])assert.equal((await f.raw('workspaces.create',{name})).ok,false)
+  assert.equal((await f.command('workspaces.create',{name:'Notes'}) as {workspace_id:string}).workspace_id,'w-new');assert.deepEqual(created,['Notes'])
+  assert.equal((await f.raw('build.begin',{text:'work',workspace_id:'w-default',project:f.root})).error,'workspace_project_conflict')
+  assert.equal((await f.raw('build.begin',{text:'work',workspace_id:'missing'})).error,'unknown_workspace')
+  await f.command('build.begin',{text:'work'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id)
+  assert.equal(buildView(f.host,f.host.conversationSnapshot().selected_id).project,f.root);assert.equal(resolved.at(-1),undefined)
+ }finally{await f.close()}
+})
+
+test('published Build accepts managed workspace ID and rejects mixed directory authority', {skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'})),resolved:string[]=[]
+ f.host.setCodingTargets({list:()=>Promise.resolve([]),validate:()=>Promise.reject(Error('unused')),resolve:()=>Promise.reject(Error('unused')),workspaces:{list:()=>Promise.resolve([]),create:()=>Promise.reject(Error('unused')),resolve:id=>{resolved.push(id!);return Promise.resolve(f.root)}}})
+ try{
+  const plan=await f.plan(),ref={id:'chat:main',plan_id:plan.id,version:plan.version}
+  assert.equal((await f.raw('build.start',{...ref,workspace_id:'w',project:f.root})).error,'workspace_project_conflict')
+  await f.command('build.start',{...ref,workspace_id:'w'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id);assert.deepEqual(resolved,['w'])
+ }finally{await f.close()}
+})
