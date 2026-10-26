@@ -879,7 +879,7 @@ test('direct Build restores checkpoint and resumes without a confirmed plan',{sk
   await f.host.close()
   const reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
   try{
-   await reopened.open();reopened.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host:reopened,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'}),()=>{})
+   await reopened.open();reopened.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host:reopened,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'}),()=>{ /* no renderer */ })
    for(const [method,params] of [['presentation.set',{mode:'workbench'}],['build.resume',{id}]] as const){const result=await reopened.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean;error?:string};assert.equal(result.ok,true,result.error)}
    await reopened.waitConversation(id)
    assert.ok(f.script.restores.length>0);assert.equal(buildView(reopened,id).plan_id,undefined)
@@ -901,5 +901,36 @@ test('Plan delegate selects explicit codex project and rejects busy or invalid d
   try{assert.equal((await f.raw('plans.delegate',params)).error,'project_busy')}finally{release()}
   await f.command('plans.delegate',params)
   assert.equal(validated,1);assert.deepEqual(f.host.conversationSnapshot().items[0]!.coding_target,target);assert.equal(f.invocations.length,1)
+ }finally{await f.close()}
+})
+
+for(const mode of ['plan','build'] as const)test(`${mode} text-voice-text preserves transcripts and imports each voice message once`,{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'text reply'}))
+ let emitVoice:(frame:Record<string,unknown>)=>void=()=>{throw Error('voice not started')}
+ try{
+  if(mode==='plan')await f.plan();else await f.command('build.begin',{text:'direct work',project:f.root})
+  const id=f.host.conversationSnapshot().selected_id;await f.host.waitConversation(id)
+  f.host.setConversationRuntime((conversation,emit,runtimeMode,lifetime)=>{
+   if(runtimeMode==='voice'){emitVoice=emit;return Promise.resolve({runTurn:()=>Promise.resolve({assistant:'voice'}),parkVoice:()=>Promise.resolve(),close:()=>Promise.resolve()})}
+   return createWorkbenchRuntime({conversation,host:f.host,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'})
+  },()=>{ /* no renderer */ })
+  await f.host.submitConversationText(id,'text before voice',undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
+  for(let round=0;round<2;round++){
+   await f.command('conversations.voice',{id,enabled:true})
+   assert.equal(f.host.conversationSnapshot().voice_id,id)
+   const item=f.host.conversationSnapshot().items.find(item=>item.id===id)!
+   assert.equal(mode==='plan'?item.mode:item.kind,mode)
+   emitVoice({type:'caption',role:'user',text:'spoken clarification '+round,turn_id:'voice-user-'+round,final:true})
+   emitVoice({type:'conversation.delivered',role:'assistant',text:'spoken answer '+round,turn_id:'voice-assistant-'+round,delivery:'completed',final:true})
+   await until(()=>f.host.conversationSnapshot().messages,messages=>messages.some(message=>message.text==='spoken answer '+round))
+   await f.command('conversations.voice',{id,enabled:false})
+   await f.host.submitConversationText(id,'continue '+round,undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
+   const inputs=f.script.requests.at(-1)!.inputs
+   assert.ok(inputs.some(input=>input.kind==='host_context'&&input.content.includes('spoken clarification '+round)))
+   assert.ok(inputs.some(input=>input.kind==='host_context'&&input.content.includes('spoken answer '+round)))
+   await f.host.submitConversationText(id,'next '+round,undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
+   assert.ok(!f.script.requests.at(-1)!.inputs.some(input=>input.kind==='host_context'&&input.content.includes('spoken clarification')))
+  }
+  assert.equal((await f.host.workbench.checkpoint(id,0)).voice_message_ids?.length,4)
  }finally{await f.close()}
 })
