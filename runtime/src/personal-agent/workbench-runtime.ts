@@ -18,7 +18,7 @@ const publishArguments=z.object({title:z.string().min(1).max(120),content:z.stri
 const publishTool:CascadedLlmTool={name:'publish_plan',description:'Publish the complete detailed plan for the user to review and choose local Build or executor Build. This does not authorize or start execution. Call again to publish an amended version.',parameters:{type:'object',properties:{title:{type:'string',minLength:1,maxLength:120},content:{type:'string',minLength:1,maxLength:131072}},required:['title','content'],additionalProperties:false}}
 const finishArguments=z.object({summary:z.string().min(1).max(12000)}).strict()
 const finishTool:CascadedLlmTool={name:'finish_build',description:'End this Build conversation after the confirmed work and verification are complete. Provide the final user-facing summary. This permanently locks the conversation; use only when no further Build interaction is needed.',parameters:{type:'object',properties:{summary:{type:'string',minLength:1,maxLength:12000}},required:['summary'],additionalProperties:false}}
-const RESUME_CHECK='Resume the confirmed plan. Inspect actual state before continuing any cancelled, timed-out or unknown operation. Never replay a completed call.'
+const RESUME_CHECK='Resume the Build goal. Inspect actual state before continuing any cancelled, timed-out or unknown operation. Never replay a completed call.'
 export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never'|(()=>'ask'|'never');shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'observe'|'action'|'close'>;onDiagnostic?:(message:string)=>void}):Promise<ConversationRuntime>{
  const {conversation,host}=options,build=conversation.kind==='build',store=host.workbench
  const approvalMode=():'ask'|'never'=>typeof options.approval==='function'?options.approval():options.approval
@@ -26,8 +26,8 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
  if(build&&(!conversation.build||!['darwin','win32'].includes(process.platform)))throw Error('local_build_unavailable')
  const state=await store.checkpoint(conversation.id,conversation.generation)
- const confirmedPlan=build?await store.plan(conversation.build!.plan_id,conversation.build!.plan_version):undefined
- const workspaceContext=confirmedPlan?JSON.stringify({confirmed_plan:{id:confirmedPlan.id,version:confirmedPlan.version,title:confirmedPlan.title,content:confirmedPlan.content},project:conversation.build!.project}):null
+ const confirmedPlan=build&&conversation.build?.plan_id&&conversation.build.plan_version?await store.plan(conversation.build!.plan_id,conversation.build!.plan_version):undefined
+ const workspaceContext=build?JSON.stringify({...(confirmedPlan?{confirmed_plan:{id:confirmedPlan.id,version:confirmedPlan.version,title:confirmedPlan.title,content:confirmedPlan.content}}:{}),project:conversation.build!.project}):null
  let session:CascadedLlmSession|undefined,bridgeRuntime:ConversationRuntime|undefined
  let closed=false,controller:AbortController|undefined,active:Promise<{assistant:string;turn_id?:string}>|undefined,version=state.run_version
  let computer:Pick<ComputerSession,'observe'|'action'|'close'>|undefined
@@ -82,8 +82,11 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
     if(build){const key=projectResourceKey(conversation.build!.project);if(taskResourcesBusy([key]))throw Error('project_busy');release=await acquireTaskResources([key],signal)}
     if(!state.model&&!state.inputs.length){
      if(build)state.inputs.push({kind:'host_context',content:workspaceContext!})
-     else for(const message of conversation.messages.filter(message=>message.generation_status!=='pending').slice(-32))state.inputs.push({kind:'host_context',content:JSON.stringify({previous_message:{role:message.role,text:message.text}})})
+     else for(const message of conversation.messages.filter(message=>message.generation_status!=='pending'&&message.input_mode!=='voice').slice(-32))state.inputs.push({kind:'host_context',content:JSON.stringify({previous_message:{role:message.role,text:message.text}})})
     }
+    const voiceMessages=conversation.messages.filter(message=>message.input_mode==='voice')
+    for(const message of voiceMessages)if(!state.voice_message_ids?.includes(message.id))state.inputs.push({kind:'host_context',content:JSON.stringify({previous_message:{role:message.role,text:message.text},source:'voice',trust:'untrusted_external'})})
+    state.voice_message_ids=voiceMessages.map(message=>message.id)
     if(!context?.resume){state.last_user=text;state.inputs.push({kind:'user_text',text})}
     else if(!state.inputs.length&&!state.pending_calls.length)state.inputs.push({kind:'user_text',text:RESUME_CHECK})
     if(context?.resume&&state.reason==='approval_denied')return {assistant:'上次操作已拒绝，请补充新的要求后继续。'}
