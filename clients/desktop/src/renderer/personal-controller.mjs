@@ -21,6 +21,17 @@ function conversationSnapshot(value){
   for(const item of value.items){if(!item||typeof item.id!=='string'||!item.id||ids.has(item.id))return false;ids.add(item.id)}
   return ids.has(value.selected_id)
 }
+/** Host refusals a user can act on; anything else keeps the host's own text. */
+const HOST_REFUSALS=Object.freeze({
+ build_stop_required:'请先停止正在进行的 Build，再进行这个操作。',
+ voice_context_unavailable:'当前语音模型无法带入这段对话的上下文，请先在文字模式继续。',
+ project_busy:'这个工作区正被另一项任务占用，请稍后再试或换一个工作区。',
+ conversation_busy:'这段对话正在处理上一件事，请稍后再试。',
+ local_build_unavailable:'当前平台暂不支持本地 Build。',
+ project_directory_required:'请先选择工作区。',
+ executor_unavailable:'这个执行器当前不可用。',
+ unknown_project:'这个工作区不在执行器已登记的列表里，请从列表中选择。',
+})
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{}}) {
     this.confirmBuildSwitch=confirmBuildSwitch
@@ -162,7 +173,7 @@ export class PersonalController {
       // Opening task progress returns its owner for draft preparation. Selection remains owned by
       // the revisioned state broadcast; an old or malformed receipt cannot replace that snapshot.
       if(entry&&entry.method!=='conversations.open_work'&&frame.ok&&conversationSnapshot(frame.data)&&this.snapshot)this.snapshot={...this.snapshot,conversations:frame.data}
-      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(Object.assign(new Error(frame.error||'操作失败'),{input_status:frame.input_status}));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
+      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(Object.assign(new Error(HOST_REFUSALS[frame.error]??(frame.error||'操作失败')),{input_status:frame.input_status}));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
     }
     if(frame.type==='input.transcription'&&frame.id===this.dictationId&&(!frame.conversation_id||frame.conversation_id===this.dictationConversationId)){
       const state=this.state(this.dictationConversationId)
