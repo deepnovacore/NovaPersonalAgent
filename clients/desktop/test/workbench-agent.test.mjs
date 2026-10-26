@@ -36,13 +36,14 @@ test('starting a conversation from a card never stops a running Build without co
  assert.deepEqual(sent.map(frame=>frame.method),['build.stop','conversations.start']);assert.deepEqual(sent[1].params,request)
 })
 
-test('switching from running Build to voice stops first and routes microphone ownership to Chat',async()=>{
+test('switching from running Build to voice stops first and keeps voice in the same Build conversation',async()=>{
  const {c,sent}=fixture(async()=>true)
  // Stop just before capture: this test checks routing without claiming microphone hardware coverage.
  c.start=async()=>{throw Error('capture fixture')}
  await assert.rejects(c.voice(),/capture fixture/)
- assert.equal(sent[0].method,'build.stop');assert.equal(c.selectedId,'chat:main')
- assert.ok(sent.filter(frame=>frame.method==='conversations.voice').every(frame=>frame.params.id==='chat:main'))
+ assert.equal(sent[0].method,'build.stop');assert.equal(c.selectedId,'build')
+ assert.ok(sent.filter(frame=>frame.method==='conversations.voice').every(frame=>frame.params.id==='build'))
+ assert.equal(sent.some(frame=>frame.method==='conversations.select'),false,'no detour through the main chat')
 })
 
 test('local approval setting defaults to ask and is independent of executor approval',()=>{

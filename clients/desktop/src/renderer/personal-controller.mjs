@@ -221,8 +221,6 @@ export class PersonalController {
   async startCapture(options){this.capturePending=true;try{await this.start(options)}finally{this.capturePending=false}}
   async voice({wake=true}={}){
     if(this.activeBuild&&!await this.guardBuildSwitch())return
-    if(this.selectedConversation?.kind==='build')await this.select('chat:main')
-    if(this.selectedConversation?.mode==='plan')await this.command('conversations.mode',{id:this.selectedId,mode:'chat'})
     const id=this.selectedId
     if(!this.presentationReady||this.presentationMode==='background')throw new Error('请先切换到工作台或悬浮球')
     if(!id||!this.connected)throw new Error('尚未选择会话')
