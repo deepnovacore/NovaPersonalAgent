@@ -1,3 +1,4 @@
+import {mountWorkspaceBar} from './workspace-bar.mjs'
 import {t} from './locale.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {iconNode,withIcon} from './icons.mjs'
@@ -47,20 +48,18 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  // One runner choice: the built-in Build (synchronous) or a local executor (asynchronous). The workspace follows the runner.
  const runner=el('select');runner.setAttribute('aria-label',t('执行器'));const runnerNote=el('p','','hint workbench-runner-note')
  const directories=el('select');directories.setAttribute('aria-label',t('工作区'));directories.append(Object.assign(el('option',t('选择工作区')),{value:''}))
- const pick=el('button',t('选择本地目录…'));pick.type='button';pick.hidden=true
+ const workspace=mountWorkspaceBar(planCard,{c,el,button:(label,click,parent)=>{const node=el('button',label);node.type='button';node.addEventListener('click',click);parent.append(node);return node},run,api:api?.personal,visible:()=>!runner.value&&localBuildSupported,onChange:()=>update()})
  const runnerLabel=el('small',t('执行器'),'workbench-field-label'),directoryLabel=el('small',t('工作区'),'workbench-field-label')
- planCard.append(planTitle,body,edit,runnerLabel,runner,runnerNote,directoryLabel,directories,pick,actions);for(const button of [editButton,save,start]){button.type='button';actions.append(button)}save.hidden=true;start.className='soft'
+ planCard.append(planTitle,body,edit,runnerLabel,runner,runnerNote,directoryLabel,directories,workspace.element,actions);for(const button of [editButton,save,start]){button.type='button';actions.append(button)}save.hidden=true;start.className='soft'
  const retry=el('button',t('重试'));retry.type='button';retry.hidden=true;planCard.append(retry)
- let planKey='',failedKey='',plan=null,loading=false,sequence=0,lastSelected=null,busy=false,localBuildSupported=false,preselected='',defaultPath=null,registered=[]
- const picked=[]
+ let planKey='',failedKey='',plan=null,loading=false,sequence=0,lastSelected=null,busy=false,localBuildSupported=false,preselected='',registered=[]
  /** The workspace list follows the runner: Build takes any folder, Codex only the directories the host registered, other executors none. */
  function fillDirectories(){
   const executor=runner.value,previous=directories.value,options=[{value:'',label:t('选择工作区')}],add=(value,label)=>{if(value&&!options.some(option=>option.value===value))options.push({value,label})}
-  const listed=()=>{for(const target of registered)add(target.directory,target.project+' · '+target.directory)}
-  if(!executor){add(defaultPath,t('默认工作区'));listed();for(const path of picked)add(path,path)}
-  else if(executor==='codex')listed()
+  const listed=()=>{for(const target of registered)add(target.directory,target.project)}
+  if(executor==='codex')listed()
   directories.replaceChildren(...options.map(option=>Object.assign(el('option',option.label),{value:option.value})))
-  directories.value=options.some(option=>option.value===previous)?previous:!executor&&defaultPath?defaultPath:''
+  directories.value=options.some(option=>option.value===previous)?previous:''
  }
  retry.addEventListener('click',()=>{failedKey='';retry.hidden=true;update()})
  const reference=()=>{const item=c.selectedConversation;return item?.plan?{id:item.id,plan_id:item.plan.id,version:item.plan.version}:null}
@@ -72,8 +71,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
    plan={...page,content};planKey=key;body.replaceChildren(renderMarkdown(content));planTitle.textContent=t('计划 · {0} · v{1}',plan.title,plan.version);edit.value=content;edit.hidden=true;body.hidden=false;save.hidden=true
    const targets=await c.command('conversations.targets',{});if(token!==sequence)return
    localBuildSupported=targets.local_build_supported===true
-   const fallback=await api?.personal?.defaultWorkspace?.().catch?.(()=>null);if(token!==sequence)return
-   defaultPath=typeof fallback==='string'&&fallback?fallback:null;registered=(targets.targets??[]).filter(target=>target.directory)
+   registered=(targets.targets??[]).filter(target=>target.directory)
    const previous=runner.value;runner.replaceChildren();if(localBuildSupported)runner.append(Object.assign(el('option',t('Nova 内置 · Build')),{value:''}));for(const name of targets.executors??[])runner.append(Object.assign(el('option',name),{value:name}))
    runner.value=[...runner.options].some(option=>option.value===previous)?previous:runner.options[0]?.value??''
    // The composer's Delegate mode pre-selects the first executor, once per plan.
@@ -82,22 +80,21 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   }catch(error){if(token===sequence){failedKey=key;retry.hidden=false}throw error}
   finally{if(token===sequence){loading=false;update()}}
  }
- pick.addEventListener('click',()=>run(async()=>{const path=await api.personal.chooseBuildDirectory();if(path){if(!picked.includes(path))picked.push(path);fillDirectories();directories.value=path;update()}}))
  directories.addEventListener('change',update);runner.addEventListener('change',()=>{fillDirectories();update()})
  editButton.addEventListener('click',()=>{edit.hidden=!edit.hidden;body.hidden=!edit.hidden;save.hidden=edit.hidden;if(!edit.hidden)edit.focus()})
  save.addEventListener('click',()=>run(async()=>{
   const ref=reference();if(!ref||!edit.value.trim())return;busy=true;update()
   try{const text=edit.value;for(let offset=0;offset<text.length;offset+=2000)await c.command('plans.edit',{id:ref.id,plan_id:ref.plan_id,expected_version:ref.version,offset,text:text.slice(offset,offset+2000),final:offset+2000>=text.length})}finally{busy=false;update()}
  }))
- start.addEventListener('click',()=>run(async()=>{const ref=reference(),executor=runner.value;if(!ref||busy||(!executor&&!directories.value))return;busy=true;update();try{if(executor)await c.command('plans.delegate',{...ref,executor,...(executor==='codex'&&directories.value?{project:directories.value}:{})});else await c.command('build.start',{...ref,project:directories.value})}finally{busy=false;update()}}))
+ start.addEventListener('click',()=>run(async()=>{const ref=reference(),executor=runner.value;if(!ref||busy)return;busy=true;update();try{if(executor)await c.command('plans.delegate',{...ref,executor,...(executor==='codex'&&directories.value?{project:directories.value}:{})});else await c.command('build.start',{...ref,...workspace.value()})}finally{busy=false;update()}}))
  function update(){
   const item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status)
   root.hidden=!item
   status.textContent=build?t('Build · {0}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status)):''
   status.setAttribute('data-state',build?.status??'')
   // The path is one ellipsized line; the full value stays reachable on hover.
-  project.textContent=folderName(build?.project);project.title=build?.project??'';project.hidden=!project.textContent
-  reason.textContent=build?.reason&&build.reason!=='stopped'&&BUILD_REASONS[build.reason]?t(BUILD_REASONS[build.reason]):'';reason.hidden=!reason.textContent
+  project.textContent=folderName(build?.project);project.title=folderName(build?.project);project.hidden=!project.textContent
+  reason.textContent=build?.reason&&build.reason!=='stopped'&&BUILD_REASONS[build.reason]?t(BUILD_REASONS[build.reason]):'';reason.hidden=!reason.textContent;reason.title=reason.textContent
   stop.hidden=!build||!active;resume.hidden=!build||active||['completed','finished'].includes(build.status);details.hidden=!build
   always.disabled=!c.connected||loadedApproval!==build?.approval?.id;approval.hidden=!build?.approval;deny.disabled=!c.connected;approve.disabled=!c.connected||loadedApproval!==build?.approval?.id
   if(build?.approval&&loadedApproval!==build.approval.id){if(loadingApproval!==build.approval.id)preview.textContent=build.approval.name+'\n'+build.approval.preview;void loadApproval(build.approval,item.id).catch(error=>{c.error=error.message;c.changed()})}
@@ -107,10 +104,10 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   if(lastSelected!==c.selectedId){lastSelected=c.selectedId;log.hidden=true;sequence++;loading=false;planKey='';failedKey='';plan=null;retry.hidden=true;body.replaceChildren()}
   if(hasPlan)void load().catch(error=>{c.error=error.message;c.changed()})
   const delegating=Boolean(runner.value)
-  runner.disabled=busy;pick.hidden=delegating||!localBuildSupported;directories.hidden=delegating&&runner.value!=='codex';directoryLabel.hidden=directories.hidden;directories.disabled=busy;pick.disabled=busy
+  runner.disabled=busy;directories.hidden=runner.value!=='codex';directoryLabel.hidden=directories.hidden;directories.disabled=busy;workspace.update()
   start.textContent=delegating?t('交给 {0}',runner.value):t('开始 Build')
   runnerNote.textContent=delegating?t('异步执行：{0} 在后台完成，进度在悬浮窗查看，对话可以继续。',runner.value):t('同步执行：在选定工作区读写文件、运行命令，完成前这段对话保持占用。')
-  start.disabled=busy||!plan||!c.connected||JSON.stringify(reference())!==planKey||(!delegating&&(!localBuildSupported||!directories.value))
+  start.disabled=busy||!plan||!c.connected||JSON.stringify(reference())!==planKey||(!delegating&&!localBuildSupported)
   save.disabled=busy;editButton.disabled=busy||!plan
   planCard.setAttribute('data-execution',delegating?'delegate':'build')
  }

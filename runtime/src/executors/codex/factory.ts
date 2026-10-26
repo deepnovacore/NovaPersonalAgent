@@ -378,12 +378,13 @@ async function createProjectResource(
     })
     const derivedName = basename(hostWorkspacePath(options.config.workspace)) || 'workspace'
     const displayName = [...derivedName].slice(0, MAX_PROJECT_WORKSPACE_NAME).join('')
-    await store.ensureImported(displayName, options.config.workspace)
+    const defaultWorkspace = await store.ensureImported(displayName, options.config.workspace)
     const confirmation = new ProjectConfirmationController({
       clock: options.clock,
       idFactory: options.idFactory,
     })
     const adapter = new ProjectCodexAdapter({
+      defaultWorkspaceId: defaultWorkspace.workspace_id,
       ...(options.managedMcp?{managedMcp:options.managedMcp}:{}),
       store,
       ...(options.config.localCodexHome === undefined ? {} : {localCodexHome: options.config.localCodexHome}),
