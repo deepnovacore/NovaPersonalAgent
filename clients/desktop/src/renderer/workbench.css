@@ -672,7 +672,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-mode-bar>select{width:auto;flex:0 0 auto}
 .workbench-mode-bar{flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:12px}
 .workbench-build-info{display:flex;align-items:center;flex-wrap:nowrap;gap:4px 10px;flex:1 1 0;min-width:0}
-.workbench-build-status{display:inline-flex;align-items:center;gap:7px;font-weight:600;color:var(--ink)}
+.workbench-build-status{white-space:nowrap;flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-weight:600;color:var(--ink)}
 .workbench-build-status::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--ink-faint)}
 .workbench-build-status[data-state="running"]::before,.workbench-build-status[data-state="completed"]::before{background:var(--ok,#2f9e6b)}
 .workbench-build-status[data-state="paused"]::before,.workbench-build-status[data-state="awaiting_approval"]::before{background:var(--warn)}
@@ -680,7 +680,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-build-project{display:inline-block;max-width:60%;padding:1px 10px;border-radius:999px;background:var(--surface-inset);color:var(--ink-dim);font-size:12px;line-height:1.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .workbench-build-reason{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--warn);font-size:12px;line-height:1.5}
 .workbench-build-project[hidden],.workbench-build-reason[hidden]{display:none}
-.workbench-build-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;flex-wrap:wrap}
+.workbench-build-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;flex-wrap:nowrap}
 .workbench-plan,.workbench-local-approval{margin-top:10px;padding:10px;border:1px solid var(--line,#555);border-radius:8px}
 .workspace-bar{display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:6px 10px;border-radius:12px;background:var(--surface-inset);color:var(--ink-dim);font-size:13px}
 .workspace-bar[hidden]{display:none}

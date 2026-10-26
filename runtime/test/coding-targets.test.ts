@@ -188,3 +188,20 @@ test('picker directory metadata comes from the registered workspace and never en
     assert.deepEqual(Object.keys(controller.target!).sort(), ['executor', 'project', 'session_id', 'title', 'workspace_id'])
   } finally {await value.adapter.close(); await rm(value.root, {recursive: true, force: true})}
 })
+
+test('managed workspace catalogue is path-free, default-first and creates distinct bounded directories',async()=>{
+ const value=await fixture()
+ try{
+  const port=value.adapter.targetPort.workspaces!
+  const initial=await port.list();assert.equal(initial[0]?.is_default,true)
+  const first=await port.create('Build notes'),second=await port.create('Build notes')
+  assert.notEqual(first.workspace_id,second.workspace_id);assert.notEqual(first.name,second.name)
+  const listed=await port.list();assert.equal(listed[0]?.is_default,true)
+  assert.ok(listed.every(item=>Object.keys(item).every(key=>['workspace_id','name','is_default','last_used'].includes(key))))
+  const record=(await value.store.listWorkspaces()).find(item=>item.workspace_id===first.workspace_id)!
+  assert.equal(record.origin,'managed');assert.equal(await port.resolve(first.workspace_id),record.canonical_path)
+  assert.equal(await port.resolve(),await port.resolve(initial[0].workspace_id))
+  await assert.rejects(port.resolve('../escape'),/unknown_workspace/)
+  await assert.rejects(port.create('../escape'))
+ }finally{await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
+})

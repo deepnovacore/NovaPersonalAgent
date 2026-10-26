@@ -19,6 +19,7 @@ export function mountWorkspaceBar(parent,{c,el,button,run,api,visible,onChange=(
  const value=()=>state().workspace??{workspace_id:items.find(item=>item.is_default)?.workspace_id??'default'}
  select.addEventListener('change',()=>run(async()=>{
   const choice=select.value,owner=state()
+  if(choice==='selected-folder')return
   if(choice==='new'){name.hidden=create.hidden=false;name.focus?.();return}
   if(choice==='folder'){const path=await api?.chooseBuildDirectory?.();if(path)owner.workspace={project:path}}
   else owner.workspace={workspace_id:choice}

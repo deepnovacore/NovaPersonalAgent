@@ -53,7 +53,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  planCard.append(planTitle,body,edit,runnerLabel,runner,runnerNote,directoryLabel,directories,workspace.element,actions);for(const button of [editButton,save,start]){button.type='button';actions.append(button)}save.hidden=true;start.className='soft'
  const retry=el('button',t('重试'));retry.type='button';retry.hidden=true;planCard.append(retry)
  let planKey='',failedKey='',plan=null,loading=false,sequence=0,lastSelected=null,busy=false,localBuildSupported=false,preselected='',registered=[]
- /** The workspace list follows the runner: Build takes any folder, Codex only the directories the host registered, other executors none. */
+ /** The workspace list follows the runner: Build has its own managed picker; Codex uses registered directories, other executors none. */
  function fillDirectories(){
   const executor=runner.value,previous=directories.value,options=[{value:'',label:t('选择工作区')}],add=(value,label)=>{if(value&&!options.some(option=>option.value===value))options.push({value,label})}
   const listed=()=>{for(const target of registered)add(target.directory,target.project)}

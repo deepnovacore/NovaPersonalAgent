@@ -376,6 +376,7 @@ function ids(...values: readonly string[]): () => string {
 async function collectThroughTerminal(
   adapter: CascadedRealtimeAdapter,
   signal = new AbortController().signal,
+  throughRecovery = false,
 ): Promise<RealtimeProviderEvent[]> {
   const seen: RealtimeProviderEvent[] = []
   for await (const raw of adapter.events(signal)) {
@@ -383,7 +384,7 @@ async function collectThroughTerminal(
     assert.doesNotMatch(JSON.stringify(event), /provider-secret/u)
     seen.push(event)
     if (event.kind === 'user_transcript_final') await adapter.ensureResponse(signal, event.item_id)
-    if (event.kind === 'response_terminal') return seen
+    if (throughRecovery ? event.kind === 'provider_error' : event.kind === 'response_terminal') return seen
   }
   throw new Error('Volcengine event stream ended before a terminal')
 }
@@ -467,7 +468,7 @@ const directOptions = (): {
 })
 
 function terminalStatus(events: readonly RealtimeProviderEvent[]): string | null {
-  const last = events.at(-1)
+  const last = events.findLast(event=>event.kind==='response_terminal')
   return last?.kind === 'response_terminal' ? last.status : null
 }
 
@@ -1347,7 +1348,7 @@ test('a common LLM failure uses a provider-neutral stable owner code', async () 
   await adapter.connect({tools: [], signal: new AbortController().signal})
   const item = hostItem('common-failure')
   await adapter.injectHostItem(item, directOptions())
-  const collecting = collectThroughTerminal(adapter)
+  const collecting = collectThroughTerminal(adapter,undefined,true)
   await adapter.createResponse({kind: 'host_fact', item, task_summary: null, origin_spoken: false},
     new AbortController().signal)
   const events = await collecting
@@ -1355,6 +1356,7 @@ test('a common LLM failure uses a provider-neutral stable owner code', async () 
   assert.equal(events.some(event => event.kind === 'provider_error'
     && event.code === 'cascaded_response_failed' && event.recoverable), true)
   assert.equal(terminalStatus(events), 'failed')
+  assert.ok(events.findIndex(event=>event.kind==='response_terminal')<events.findIndex(event=>event.kind==='provider_error'))
   await adapter.close()
 })
 
@@ -1708,7 +1710,7 @@ test('TTS retries once before audio with every prior chunk, and never retries af
   await afterAdapter.connect({tools: [], signal: new AbortController().signal})
   const afterItem = hostItem('after')
   await afterAdapter.injectHostItem(afterItem, directOptions())
-  const afterCollect = collectThroughTerminal(afterAdapter)
+  const afterCollect = collectThroughTerminal(afterAdapter,undefined,true)
   await afterAdapter.createResponse({kind: 'host_fact', item: afterItem,
     task_summary: null, origin_spoken: false}, new AbortController().signal)
   const afterEvents = await settleWithin('TTS after-audio failure', afterCollect)
@@ -1747,7 +1749,7 @@ test('TTS never opens a third session after the one permitted retry also fails',
   await adapter.connect({tools: [], signal: new AbortController().signal})
   const item = hostItem('retry-once')
   await adapter.injectHostItem(item, directOptions())
-  const collecting = collectThroughTerminal(adapter)
+  const collecting = collectThroughTerminal(adapter,undefined,true)
   await adapter.createResponse({kind: 'host_fact', item, task_summary: null, origin_spoken: false},
     new AbortController().signal)
   const events = await settleWithin('single TTS retry', collecting)

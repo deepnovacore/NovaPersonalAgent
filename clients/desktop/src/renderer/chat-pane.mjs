@@ -74,7 +74,7 @@ function glyph(path){const svg=document.createElementNS(SVG_NS,'svg');svg.setAtt
 
 export const conversationTitle=item=>item?.id==='chat:main'?t('主对话'):item?.title??t('对话')
 
-/** The persistent Nova pane: conversation switcher, transcript, three-state composer. */
+/** The persistent Nova pane: read-only title, transcript, three-state composer. */
 export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSchedule,onOpenChange=()=>{},onHome=()=>{},speakingLevel=null}){
  const pane=el('aside',undefined,'chat-pane');pane.id='chat-pane';pane.setAttribute('aria-label',t('Nova 对话'));columns.append(pane)
  const head=el('header',undefined,'chat-head');pane.append(head)
