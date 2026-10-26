@@ -642,3 +642,21 @@ test('a live caption is dropped once the persisted reply carries the same text',
  const caption={conversation_id:'c',turn_id:'t1',role:'assistant',text:'好的，我现在把任务交给 Codex 执行。',seen_at:base+1000}
  assert.deepEqual(orderTranscript(persisted,[caption]).map(m=>m.id??m.turn_id),['u1','a1'])
 })
+
+test('a streamed assistant caption renders as it arrives instead of waiting for the next state frame',async()=>{
+ const m=mount({defaultHome:true})
+ m.view.receive(feedState(1,'chat:main',{feed:[],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[{id:'u1',conversation_id:'chat:main',role:'user',text:'你好',created_at:new Date(Date.now()-5000).toISOString()}],home_messages:[]}}))
+ const caption=text=>({type:'caption',role:'assistant',text,full_text:text,conversation_id:'chat:main',turn_id:'t1',final:false})
+ m.view.receive(caption('正在'));await tick()
+ assert.ok(m.all().some(n=>n.textContent==='正在'||n.text==='正在'),'first delta is on screen')
+ m.view.receive(caption('正在说话'));await tick()
+ assert.ok(m.all().some(n=>n.textContent==='正在说话'||n.text==='正在说话'),'the cumulative text replaces the earlier delta')
+})
+
+test('a pending executor approval shows allow and deny buttons above the composer and decides through conversations.approve',async()=>{
+ const m=mount({defaultHome:true})
+ m.view.receive(feedState(1,'chat:main',{feed:[],pending_approvals:[{approval_id:'a1',conversation_id:'chat:main',summary:'Codex 请求执行一条工作区命令。',queued:false}],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ const dock=m.all().find(n=>n.className==='approval-dock');assert.ok(dock&&!dock.hidden)
+ m.all().find(n=>n.tag==='button'&&n.textContent==='允许').listeners.click();await tick()
+ const sent=m.sent.findLast(f=>f.method==='conversations.approve');assert.deepEqual(sent.params,{id:'chat:main',approval_id:'a1',approved:true})
+})
