@@ -79,16 +79,17 @@ test('local Build controls stay hidden when the host reports that the platform i
   await new Promise(resolve=>setTimeout(resolve,0))
   const planCard=agent.element.children.find(child=>child.name==='section'&&child.children.some(node=>node.name==='h3'&&node.textContent==='计划 · Plan · v1'))
   assert.ok(planCard)
-  const directory=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='项目目录')
+  const runner=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='执行器')
   const picker=planCard.children.find(child=>child.name==='button'&&child.textContent==='选择本地目录…')
-  const actions=planCard.children.find(child=>child.name==='div'&&child.children.some(node=>node.textContent==='在当前项目 Build'))
-  const local=actions.children.find(node=>node.textContent==='在当前项目 Build')
-  const delegate=actions.children.find(node=>node.textContent==='交给执行器 Build')
-  assert.equal(directory.hidden,true);assert.equal(picker.hidden,true);assert.equal(local.hidden,true);assert.equal(delegate.hidden,false)
+  const actions=planCard.children.find(child=>child.name==='div'&&child.children.some(node=>node.name==='button'&&node.textContent.startsWith('交给')))
+  assert.deepEqual(runner.children.map(option=>option.value),['codex'],'no built-in Build where the platform cannot run it')
+  assert.equal(picker.hidden,true)
+  assert.ok(actions.children.some(node=>node.textContent==='交给 codex'))
+  assert.equal(actions.children.some(node=>node.textContent==='开始 Build'),false)
  }finally{globalThis.document=previousDocument}
 })
 
-test('published Plan enables local Build after the personal directory picker returns a path',async()=>{
+test('published Plan starts the built-in Build or hands the plan to a chosen executor, in the chosen workspace',async()=>{
  class Element{
   constructor(name,text){this.name=name;this.textContent=text??'';this.children=[];this.listeners={};this.hidden=false;this.disabled=false;this.value='';this.attributes={}}
   append(...children){this.children.push(...children);if(this.name==='select'&&!this.value){const option=this.children.find(child=>child.name==='option'&&child.value);if(option)this.value=option.value}}
@@ -114,20 +115,22 @@ test('published Plan enables local Build after the personal directory picker ret
   await new Promise(resolve=>setTimeout(resolve,0))
   const planCard=agent.element.children.find(child=>child.name==='section'&&child.children.some(node=>node.name==='h3'&&node.textContent==='计划 · Plan · v1'))
   const picker=planCard.children.find(child=>child.name==='button'&&child.textContent==='选择本地目录…')
-  const directories=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='项目目录')
-  const actions=planCard.children.find(child=>child.name==='div'&&child.children.some(node=>node.textContent==='在当前项目 Build'))
-  const local=actions.children.find(node=>node.textContent==='在当前项目 Build')
-  const delegate=actions.children.find(node=>node.textContent==='交给执行器 Build')
+  const directories=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='工作区')
+  const runner=planCard.children.find(child=>child.name==='select'&&child.attributes['aria-label']==='执行器')
+  const actions=planCard.children.find(child=>child.name==='div'&&child.children.some(node=>node.textContent==='开始 Build'))
+  const start=actions.children.find(node=>node.textContent==='开始 Build')
+  assert.deepEqual(runner.children.map(option=>option.value),['','codex'],'built-in Build first, then the executors')
   assert.equal(picker.hidden,false)
-  assert.equal(local.disabled,true)
+  assert.equal(start.disabled,true,'a workspace is required')
   await picker.listeners.click()
   assert.equal(directories.value,project)
-  assert.equal(local.disabled,false)
-  assert.equal(delegate.disabled,false)
-  await local.listeners.click()
-  await delegate.listeners.click()
-  assert.deepEqual(commands.filter(([method])=>['build.start','plans.delegate'].includes(method)).map(([method,params])=>[method,params.project??params.executor]),[
-   ['build.start',project],['plans.delegate','codex'],
+  assert.equal(start.disabled,false)
+  await start.listeners.click()
+  runner.value='codex';runner.listeners.change()
+  assert.equal(start.textContent,'交给 codex');assert.equal(picker.hidden,true,'executors only use listed workspaces')
+  await start.listeners.click()
+  assert.deepEqual(commands.filter(([method])=>['build.start','plans.delegate'].includes(method)).map(([method,params])=>[method,params.executor,params.project]),[
+   ['build.start',undefined,project],['plans.delegate','codex',project],
   ])
  }finally{globalThis.document=previousDocument}
 })
