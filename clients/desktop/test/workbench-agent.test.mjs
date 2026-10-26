@@ -136,7 +136,7 @@ test('published Plan starts the built-in Build or hands the plan to a chosen exe
  }finally{globalThis.document=previousDocument}
 })
 
-test('Build status bar shows state, the workspace folder name with the full path on hover, and a readable reason',()=>{
+test('Build status bar shows state, the workspace folder name without exposing the absolute path, and a readable reason',()=>{
  class Element{
   constructor(name,text){this.name=name;this.textContent=text??'';this.children=[];this.listeners={};this.hidden=false;this.disabled=false;this.value='';this.attributes={}}
   append(...children){this.children.push(...children)}
