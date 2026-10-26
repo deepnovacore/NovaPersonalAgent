@@ -218,7 +218,7 @@ export class PersonalAgentHost {
     async #workbenchCommand(method:string,p:Record<string,unknown>):Promise<unknown>{
         this.#refreshLocalProcessFences();
         if(method==='workspaces.list'){z.object({}).strict().parse(p);if(!this.#codingTargets?.workspaces)throw Error('workspaces_unavailable');return this.#codingTargets.workspaces.list()}
-        if(method==='workspaces.create'){const q=z.object({name:z.string().trim().min(1).max(80).regex(/^[\p{L}\p{N} _().-]+$/u)}).strict().parse(p);if(!this.#codingTargets?.workspaces)throw Error('workspaces_unavailable');return this.#codingTargets.workspaces.create(q.name)}
+        if(method==='workspaces.create'){const q=z.object({name:z.string().trim().min(1).max(80).regex(/^[\p{L}\p{N} _().-]+$/u).refine(name=>name!=='.'&&name!=='..')}).strict().parse(p);if(!this.#codingTargets?.workspaces)throw Error('workspaces_unavailable');return this.#codingTargets.workspaces.create(q.name)}
         if(method==='plans.get'){const q=z.object({plan_id:z.string(),version:z.number().int().positive(),offset:z.number().int().nonnegative().default(0)}).strict().parse(p),plan=await this.workbench.plan(q.plan_id,q.version);return {...plan,content:plan.content.slice(q.offset,q.offset+6000),next_offset:q.offset+6000<plan.content.length?q.offset+6000:null}}
         if(method==='plans.edit'){
             const q=z.object({id:z.string(),plan_id:z.string(),expected_version:z.number().int().positive(),offset:z.number().int().nonnegative(),text:z.string().max(4000),final:z.boolean()}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);

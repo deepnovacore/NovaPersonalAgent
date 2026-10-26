@@ -975,7 +975,7 @@ test('managed workspace commands validate names, hide paths and resolve Build de
  try{
   assert.deepEqual(await f.command('workspaces.list'),[workspace])
   assert.equal((await f.raw('workspaces.list',{},false)).error,'local_workbench_required')
-  for(const name of ['', '../escape','a/b','x'.repeat(81),'bad\nname'])assert.equal((await f.raw('workspaces.create',{name})).ok,false)
+  for(const name of ['', '.', '..', '../escape','a/b','x'.repeat(81),'bad\nname'])assert.equal((await f.raw('workspaces.create',{name})).ok,false)
   assert.equal((await f.command('workspaces.create',{name:'Notes'}) as {workspace_id:string}).workspace_id,'w-new');assert.deepEqual(created,['Notes'])
   assert.equal((await f.raw('build.begin',{text:'work',workspace_id:'w-default',project:f.root})).error,'workspace_project_conflict')
   assert.equal((await f.raw('build.begin',{text:'work',workspace_id:'missing'})).error,'unknown_workspace')

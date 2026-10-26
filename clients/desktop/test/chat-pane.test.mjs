@@ -35,13 +35,14 @@ test('the left pane has no conversation switcher; Tasks owns select and create',
  const m=mount(),items=[{id:'chat:main',kind:'chat',title:'Home'},{id:'c',kind:'chat',title:'Custom {1}',updated_at:new Date().toISOString()}]
  m.view.receive(feedState(1,'c',{feed:[],conversations:{selected_id:'c',voice_id:null,items,messages:[]}}))
  assert.equal(m.all().some(n=>n.className==='conversation-switcher'||n.attrs['aria-label']==='切换会话'),false)
- assert.equal(m.all().find(n=>n.className==='conversation-title').textContent,'Custom {1}')
+ assert.equal(m.all().find(n=>n.className==='conversation-title').textContent,'Custom {1}');assert.equal(m.all().find(n=>n.className==='chat-brand').hidden,false)
  selectPage(m,'任务')
  const row=m.all().find(n=>n.className==='conversation-task');assert.equal(row.attrs['aria-current'],'true')
  row.listeners.click();let request=m.sent.at(-1);assert.equal(request.method,'conversations.select');assert.deepEqual(request.params,{id:'c'})
  m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick()
  m.all().find(n=>n.textContent==='创建任务').listeners.click();request=m.sent.at(-1);assert.equal(request.method,'conversations.create')
  m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick()
+ m.view.receive(feedState(2,'chat:main',{feed:[]}));assert.equal(m.all().find(n=>n.className==='chat-brand').hidden,true)
 })
 test('new conversation and target menu controls explicitly translate dynamic UI without translating custom titles',async()=>{
  const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en')

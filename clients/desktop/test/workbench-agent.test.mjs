@@ -213,3 +213,11 @@ test('plan card workspaces follow the runner: Build and Codex differ, other exec
   assert.deepEqual(commands.filter(([method])=>method==='plans.delegate').map(([,params])=>[params.executor,params.project]),[['codex','/registered/demo'],['pi',undefined]])
  }finally{globalThis.document=previousDocument}
 })
+
+test('Build status styles reserve a single row and ellipsize the readable reason',async()=>{
+ const {readFile}=await import('node:fs/promises')
+ const css=await readFile(new URL('../src/renderer/workbench.css',import.meta.url),'utf8')
+ for(const selector of ['workbench-mode-bar','workbench-build-info','workbench-build-actions'])assert.match(css,new RegExp('\\.'+selector+'\\{[^}]*flex-wrap:nowrap'))
+ assert.match(css,/\.workbench-build-reason\{[^}]*text-overflow:ellipsis;white-space:nowrap/)
+ const source=await readFile(new URL('../src/renderer/workbench-agent.mjs',import.meta.url),'utf8');assert.ok(source.includes("resume=el('button',t('继续'))"));assert.ok(!source.includes("resume=el('button','Resume')"))
+})
