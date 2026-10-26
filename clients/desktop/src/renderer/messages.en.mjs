@@ -1902,4 +1902,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "先澄清需求并制定计划，再选择 Build 或执行器": "Clarify the request and make a plan, then choose Build or an executor",
   "直接在工作区里动手：读取、编辑、运行命令，同步完成": "Work directly in the workspace: read, edit and run commands, synchronously",
   "制定计划后交给本机执行器异步完成": "Make a plan, then hand it to a local executor to finish asynchronously",
+  "执行器进展": "Executor progress",
+  "{0} · {1} 个任务": "{0} · {1} tasks",
+  "查看详情": "View details",
 })
