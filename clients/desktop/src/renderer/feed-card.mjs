@@ -9,6 +9,13 @@ export const FEED_LIFECYCLE_LABEL={active:'',resolved:'已有结果',invalidated
 export function feedActionLabel(item){return item.kind==='task_result'?'查看任务结果':item.task_ref?'查看任务进展':item.kind==='question'?'回复这个问题':item.kind==='change'?'查看变化':'讨论这个建议'}
 export const GOAL_CADENCE_LABEL={daily:'每天陪你练一点',progress:'有新进展时再问问你',off:'不主动提醒'}
 export const isDismissed=item=>item.user_state==='dismissed'||item.user_state==='dismiss'
+/** The chat shows a feed item as a plain message; actions live in the goal, idea and news tabs. */
+export function feedPlainText(item,message){
+ if(item.goal_checkin)return item.goal_checkin.items.map(line=>line.text).join('\n\n')
+ const goal=item.goal_proposal
+ if(goal)return [t('目标：{0}',goal.title),goal.success_criteria&&t('怎样算达成：{0}',goal.success_criteria),t('建议节奏：{0}',t(GOAL_CADENCE_LABEL[goal.cadence]??goal.cadence))].filter(Boolean).join('\n\n')
+ return item.prepared?.text?.trim()||item.why_now?.trim()||message.text
+}
 /** Sends the presented receipt once per item; a failure clears the marker so the next visibility check retries. */
 export function sendPresented(item,{presented,command}){
  if(!presented||!item||item.delivery?.presented_at||presented.has(item.id))return false
