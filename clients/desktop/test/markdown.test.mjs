@@ -74,7 +74,7 @@ test('tables interrupt paragraphs, align cells and normalize escaped and missing
  assert.equal(rows[0].children[0].children[0].tag,'strong')
  assert.deepEqual(rows[1].children.map(n=>n.text),['short','','',''])
  assert.equal(render('a | b\n--- | ---\nx | y').children[0].tag,'table')
- for(const text of ['a | b','a | b\n--- |','a | b\n-- | ---'])assert.equal(render(text).children[0].text,text)
+ for(const text of ['a | b','a | b\n--- |','a | b\n-- | x'])assert.equal(render(text).children[0].text,text)
  const many=render('a | b\n--- | ---\n'+Array(202).fill('x | y').join('\n'))
  assert.equal(render('a | b\n--- | ---\n'+Array(200).fill('x | y').join('\n')+'\n# extra | row\n--- | ---').children[1].text,'# extra | row\n--- | ---')
  assert.equal(many.children[0].children[1].children.length,200);assert.equal(many.children[1].text,'x | y\nx | y')
@@ -124,4 +124,15 @@ test('large pipe and tilde inputs stay bounded without dropping unmatched charac
   const start=process.cpuUsage(),root=render(text);assert.ok(cpuMs(start)<500)
   if(!text.includes('open'))assert.equal(root.children[0].text,text)
  }
+})
+
+test('table delimiter cells need only one hyphen, as in GFM, and escaped pipes stay inside a cell',()=>{
+ for(const delimiter of ['|:--|--:|','| - | - |','|:-:|-|']){
+  const root=render('| a | b |\n'+delimiter+'\n| 1 \\| x | 2 |')
+  assert.equal(root.children[0].tag,'table',delimiter)
+ }
+ const root=render('| a | b |\n|:--|--:|\n| 1 \\| x | 2 |'),cells=all(root).filter(n=>n.tag==='td')
+ assert.equal(cells.length,2);assert.equal(cells[0].text,'1 | x')
+ assert.deepEqual(all(root).filter(n=>n.tag==='th').map(n=>n.dataset.align),['left','right'])
+ assert.equal(render('| a | b |\n| -- x |').children[0].tag,'p','a malformed delimiter row is not a table')
 })
