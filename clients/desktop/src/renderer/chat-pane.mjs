@@ -1,8 +1,8 @@
-import {TASK_PHASE_LABEL,taskNextStep,isSourceProcessingTask,taskNotificationText} from './tasks-page.mjs'
+import {taskNotificationText} from './tasks-page.mjs'
 import {mountIdleAvatar} from './idle-avatar.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {disposeSources} from './source-popover.mjs'
-import {renderFeedCard,sendPresented} from './feed-card.mjs'
+import {feedPlainText,sendPresented} from './feed-card.mjs'
 import {currentLanguage,t} from './locale.mjs'
 import {mountExecutionCard} from './execution-card.mjs'
 import {mountCodingTargetMenu} from './coding-target-menu.mjs'
@@ -84,12 +84,11 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const companion=el('div',undefined,'chat-companion'),companionImage=el('img');companion.hidden=true;companionImage.alt='';companion.append(companionImage);head.append(companion)
  const companionAnimation=mountIdleAvatar(companionImage,{movieUrl:new URL('./assets/nova-idle.mp4',import.meta.url).href})
  let identityView=null
- function identity(value){identityView=value;feedNodes.clear();homeButton.replaceChildren(el('span',value.profile.assistantName));companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true)}
+ function identity(value){identityView=value;homeButton.replaceChildren(el('span',value.profile.assistantName));companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true)}
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
  const stage=el('div',undefined,'voice-stage');stage.hidden=true
  const stageCanvas=el('canvas',undefined,'voice-stage-orb');stageCanvas.setAttribute('aria-hidden','true')
  const stageLabel=el('p','','voice-stage-label');stageLabel.setAttribute('role','status');stage.append(stageCanvas,stageLabel);pane.append(stage)
- const taskCards=el('section',undefined,'conversation-task-cards');taskCards.setAttribute('aria-label',t('此对话的任务'));pane.append(taskCards);const cardNodes=new Map()
  const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
  const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api})
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3
@@ -159,7 +158,6 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const read=()=>markVisibleRead({c,document,history,readMessages,chatOpen:open})
  history.addEventListener('scroll',()=>{if(history.scrollHeight-history.scrollTop-history.clientHeight<24)newMessages.hidden=true;deliverPresented();read()});const visible=()=>{deliverPresented();read()};document.addEventListener('visibilitychange',visible);window.addEventListener('focus',visible)
 
- const feedNodes=new Map()
  let renderedNavigation='',renderedMessages='',renderedConversation=null
  const buildLog=createBuildCallLog({c,el,changed:()=>renderHistory()})
  function renderConversations(){
@@ -202,7 +200,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  function renderMessage(message){
   const feedId=typeof message.id==='string'&&message.id.startsWith('feed:')?message.id.slice(5):null
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
-  if(feed){const {delivery,...content}=feed,memory=c.snapshot?.memory?.entries?.filter(entry=>feed.memory_refs?.some(ref=>ref.entry_id===entry.id)),key=JSON.stringify([message,content,memory,feed.goal_checkin?c.snapshot?.life?.goals?.map(goal=>[goal.id,goal.version,goal.cadence]):null,c.connected,Boolean(feed.expires_at&&Date.parse(feed.expires_at)<=Date.now()),Boolean(feed.snooze_until&&Date.parse(feed.snooze_until)>Date.now())]),cached=feedNodes.get(message.id);if(cached?.key===key)return cached.node;const holder=el('article',undefined,'message assistant message-feed');holder.dataset.messageId=message.id;holder.append(el('small',identityView?.profile.assistantName??'Nova','message-role'));renderFeedCard(holder,feed,{el,button,chips,command:(m,p)=>c.command(m,p),openFeed:(id,label)=>run(async()=>{const feed=c.snapshot?.feed?.find(item=>item.id===id);if(feed?.task_ref){const work=feed.task_ref.work_id,task=c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work)||work.startsWith('verified:'+task.id+':'));if(!task)throw Error(t('任务记录暂不可用，请在任务页核对。'));await openTask?.(task.id);return}await onHome();await focusReference([{kind:'feed',id,updated_at:feed.updated_at}])}),visible:false,presented,memory:c.snapshot?.memory?.entries,connected:c.connected,currentItem:()=>c.snapshot?.feed?.find(item=>item.id===feed.id),goals:c.snapshot?.life?.goals,reference:references=>run(()=>focusReference(references)),body:text=>renderMarkdown(text,{openLink})});feedNodes.set(message.id,{key,node:holder});return holder}
+  if(feed){const node=el('article',undefined,'message assistant message-feed');node.dataset.messageId=message.id;node.append(el('small',identityView?.profile.assistantName??'Nova','message-role'),renderMarkdown(feedPlainText(feed,message),{openLink}));return node}
   const node=el('article',undefined,`message ${message.role==='user'?'user':'assistant'}`);node.dataset.messageId=message.id;node.append(el('small',message.role==='user'?'你':identityView?.profile.assistantName??'Nova','message-role'))
   if(message.role==='user')node.append(el('p',message.text));else {node.append(renderMarkdown(taskNotificationText(message),{openLink}));if(message.full_text_ref&&c.selectedConversation?.kind==='build'){
    const full=el('details',undefined,'build-full-reply'),summary=el('summary',t('展开完整回复')),content=el('div',undefined,'build-full-reply-content');full.append(summary,content)
@@ -236,7 +234,6 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   }
   if(isBuild)history.append(...buildLog.remaining(new Set(persisted.map(message=>message.id))))
   for(const node of previousNodes)if(!history.contains(node))disposeSources(node)
-  for(const [id,{node}]of feedNodes)if(!history.contains(node))feedNodes.delete(id)
   if(focused&&history.contains(focused))focused.focus()
   renderedMessages=key;renderedConversation=c.selectedId
   const position=changedConversation?positions.get(c.selectedId):null
@@ -256,9 +253,6 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   workbenchAgent.update();composerMode.update();composerApproval.update()
   syncCompanion()
   renderSource()
-  const tasks=(c.snapshot?.tasks??[]).filter(t=>!isSourceProcessingTask(t)&&(c.selectedId==='chat:main'||t.conversation_id===c.selectedId))
-  for(const [id,node]of cardNodes)if(!tasks.some(t=>t.id===id)){node.remove?.();cardNodes.delete(id)}
-  for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}const criteria=task.acceptance??[];node.title=[task.goal,...(criteria.length?[t('验收条件'),...criteria.map(item=>'• '+item)]:[])].join('\n');node.dataset.phase=task.phase;node.textContent=`${task.goal.length>60?task.goal.slice(0,59)+'…':task.goal} · ${t(TASK_PHASE_LABEL[task.phase]??task.phase)} · ${taskNextStep(task)}${criteria.length?' · '+t('验收 {0} 条',criteria.length):''}`}
   if(draft.value!==c.draft)draft.value=c.draft
   const localDictation=c.dictationConversationId===c.selectedId&&Boolean(c.dictationId)
   draft.disabled=!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isBuildFinished(c.selectedId)||(c.buildWaitingApproval&&c.selectedConversation?.id===c.selectedId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')
