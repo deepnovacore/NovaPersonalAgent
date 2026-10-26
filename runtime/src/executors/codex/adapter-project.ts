@@ -328,6 +328,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
 
   readonly targetPort: CodingTargetPort = {
     workspaces: {
+      // The host-approved default is imported; other imported executor projects are not Nova workspaces.
       list: async () => (await this.#store.listWorkspaces())
         .filter(item => item.origin === 'managed' || item.workspace_id === this.#defaultWorkspaceId)
         .sort((a,b) => Number(b.workspace_id === this.#defaultWorkspaceId)-Number(a.workspace_id === this.#defaultWorkspaceId) || b.last_used_at-a.last_used_at)

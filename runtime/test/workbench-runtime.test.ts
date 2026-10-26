@@ -993,3 +993,9 @@ test('published Build accepts managed workspace ID and rejects mixed directory a
   await f.command('build.start',{...ref,workspace_id:'w'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id);assert.deepEqual(resolved,['w'])
  }finally{await f.close()}
 })
+
+test('direct Build resolves a selected managed ID before canonical resource checks', {skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'})),resolved:string[]=[]
+ f.host.setCodingTargets({list:()=>Promise.resolve([]),validate:()=>Promise.reject(Error('unused')),resolve:()=>Promise.reject(Error('unused')),workspaces:{list:()=>Promise.resolve([]),create:()=>Promise.reject(Error('unused')),resolve:id=>{resolved.push(id!);return Promise.resolve(f.root)}}})
+ try{await f.command('build.begin',{text:'work',workspace_id:'selected'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id);assert.deepEqual(resolved,['selected']);assert.equal(buildView(f.host,f.host.conversationSnapshot().selected_id).project,f.root)}finally{await f.close()}
+})
