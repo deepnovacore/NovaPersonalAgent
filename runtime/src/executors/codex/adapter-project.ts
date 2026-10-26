@@ -135,6 +135,7 @@ export interface ProjectCodexAdapterOptions {
   readonly managedMcp?:ManagedCodexMcp
   readonly localCodexHome?: string
 
+  readonly defaultWorkspaceId?: string
   readonly store: ProjectStore
   readonly confirmation: ProjectConfirmationController
   readonly transportFactory: ProjectTransportFactory
@@ -224,7 +225,9 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   #closed = false
   #closePromise: Promise<void> | null = null
 
+  readonly #defaultWorkspaceId: string | undefined
   constructor(options: ProjectCodexAdapterOptions) {
+    this.#defaultWorkspaceId = options.defaultWorkspaceId
     this.manifest = options.codexApproval === undefined
       ? CODEX_PROJECT_MANIFEST
       : CODEX_PROJECT_APPROVAL_MANIFEST
@@ -324,6 +327,22 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   }
 
   readonly targetPort: CodingTargetPort = {
+    workspaces: {
+      list: async () => (await this.#store.listWorkspaces())
+        .filter(item => item.origin === 'managed' || item.workspace_id === this.#defaultWorkspaceId)
+        .sort((a,b) => Number(b.workspace_id === this.#defaultWorkspaceId)-Number(a.workspace_id === this.#defaultWorkspaceId) || b.last_used_at-a.last_used_at)
+        .map(item => ({workspace_id:item.workspace_id,name:item.display_name,is_default:item.workspace_id===this.#defaultWorkspaceId,last_used:item.last_used_at})),
+      create: async name => {
+        const item = await this.#store.createManaged(name,{uniqueName:true})
+        return {workspace_id:item.workspace_id,name:item.display_name,is_default:false,last_used:item.last_used_at}
+      },
+      resolve: async id => {
+        const selected=!id||id==='default'?this.#defaultWorkspaceId:id
+        const item=(await this.#store.listWorkspaces()).find(item=>item.workspace_id===selected)
+        if(!item || (item.origin!=='managed' && selected!==this.#defaultWorkspaceId))throw Error('unknown_workspace')
+        return hostWorkspacePath(await this.#store.revalidateWorkspace(item.workspace_id))
+      },
+    },
     list: () => this.#listCodingTargets(),
     forWork: async workId => {
       const binding = this.#taskWorkspaces.get(workId)

@@ -1,4 +1,13 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "创建任务": "Create task",
+  "近 7 天": "Last 7 days",
+  "更早": "Earlier",
+  "待你处理": "Needs your attention",
+  "新建工作区…": "New workspace…",
+  "其它文件夹…（高级）": "Other folder… (advanced)",
+  "创建工作区": "Create workspace",
+  "工作区名称": "Workspace name",
+
   "每日日记": "Daily diary",
   "根据昨天经授权的记忆写日记，只供你浏览，不作为模型记忆。": "Write a diary from yesterday’s authorized memories, for your reading only.",
   "写每日日记": "Write a daily diary",
