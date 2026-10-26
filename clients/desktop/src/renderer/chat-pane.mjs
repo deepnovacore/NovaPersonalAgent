@@ -7,6 +7,7 @@ import {currentLanguage,t} from './locale.mjs'
 import {mountExecutionCard} from './execution-card.mjs'
 import {mountCodingTargetMenu} from './coding-target-menu.mjs'
 import {mountWorkbenchAgent} from './workbench-agent.mjs'
+import {mountApprovalDock} from './approval-dock.mjs'
 import {mountComposerMode,composerMode as currentComposerMode} from './composer-mode.mjs'
 import {mountComposerApproval} from './composer-approval.mjs'
 import {createBuildCallLog} from './build-call-log.mjs'
@@ -91,6 +92,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const stageLabel=el('p','','voice-stage-label');stageLabel.setAttribute('role','status');stage.append(stageCanvas,stageLabel);pane.append(stage)
  const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
  const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api})
+ const approvalDock=mountApprovalDock(pane,{c,el,button,run})
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3
  draft.addEventListener('input',()=>{c.draft=draft.value;if(!draft.value.trim())c.state().source_todo=null;renderSource();syncActions()})
  draft.addEventListener('keydown',e=>{
@@ -250,7 +252,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  }
  function update(){
   buildLog.update()
-  workbenchAgent.update();composerMode.update();composerApproval.update()
+  workbenchAgent.update();composerMode.update();composerApproval.update();approvalDock.update()
   syncCompanion()
   renderSource()
   if(draft.value!==c.draft)draft.value=c.draft

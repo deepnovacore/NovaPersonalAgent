@@ -681,6 +681,11 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-build-project{direction:rtl;text-align:left;font:11px/1.5 var(--mono)}
 .workbench-build-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;flex-wrap:wrap}
 .workbench-plan,.workbench-local-approval{margin-top:10px;padding:10px;border:1px solid var(--line,#555);border-radius:8px}
+.approval-dock{margin:0 0 8px;display:flex;flex-direction:column;gap:6px}
+.approval-dock[hidden]{display:none}
+.approval-dock-card{padding:10px 12px;border:1px solid var(--line,#555);border-left:3px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent-wash) 60%,var(--surface-raised))}
+.approval-dock-summary{margin:0 0 8px;font-size:13px;line-height:1.5}
+.approval-dock-actions{display:flex;align-items:center;gap:8px}
 .workbench-plan h3,.workbench-local-approval h3{font-size:13px;margin:0 0 8px}
 /* A pending decision is the user's to make, not a fault: accent edge like the Computer Use preflight, one primary action. */
 .workbench-local-approval{padding:12px 14px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent-wash) 60%,var(--surface-raised))}
