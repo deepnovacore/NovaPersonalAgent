@@ -16,6 +16,7 @@ export interface WorkbenchCall {id:string;name:string;arguments:Record<string,Js
 export interface WorkbenchCheckpoint {
  version:1;conversation_id:string;generation:number;run_version:number;status:BuildStatus;reason:string|null;model:JsonValue|null;
  inputs:CascadedLlmInput[];pending_calls:WorkbenchCall[];calls:WorkbenchCall[];last_user:string;assistant:string;updated_at:string
+ voice_message_ids?:string[]
  model_failure?:{code:string;detail?:string;tool_call_count?:number}
 }
 const callSchema=z.object({id:z.string().min(1),name:z.string().min(1),arguments:z.record(z.string(),jsonValueSchema),state:z.enum(['prepared','awaiting_approval','running','completed']),result:jsonValueSchema.optional(),message_id:z.string().optional(),created_at:z.string().optional(),approval_id:z.string().optional(),started_at:z.string().optional(),finished_at:z.string().optional(),process:z.object({platform:z.enum(['darwin','win32']),pid:z.number().int().positive()}).strict().optional()}).strict()
@@ -117,7 +118,7 @@ export class WorkbenchStore {
  async checkpoint(id:string,generation:number):Promise<WorkbenchCheckpoint>{
   const value=await this.#images(await this.#readCheckpoint(id,generation),id,generation,true)
   if(value===null)return emptyWorkbenchCheckpoint(id,generation)
-  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),last_user:z.string(),assistant:z.string(),updated_at:z.string(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
+  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),last_user:z.string(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
   const calls=new Map(checked.calls.map(call=>[call.id,call]));if(calls.size!==checked.calls.length)throw Error('duplicate_tool_call')
   checked.pending_calls=checked.pending_calls.map(call=>{const prior=calls.get(call.id);if(prior?.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');return prior})
   return checked as WorkbenchCheckpoint

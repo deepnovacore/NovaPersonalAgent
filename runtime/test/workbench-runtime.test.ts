@@ -851,3 +851,55 @@ test('finished Build remains locked after restart',{skip:!supported},async()=>{
   }finally{await reopened.close()}
  }finally{await f.close()}
 })
+
+
+test('direct Build admits one concurrent request without a plan and retains project context',{skip:!supported},async()=>{
+ const f=await fixture(async request=>{await new Promise<void>(resolve=>request.signal.addEventListener('abort',()=>resolve(),{once:true}));return {text:'stopped'}})
+ try{
+  assert.equal((await f.raw('build.begin',{text:'work',project:join(f.root,'missing')})).ok,false)
+  const release=await acquireTaskResources([projectResourceKey(f.root)],new AbortController().signal)
+  try{assert.equal((await f.raw('build.begin',{text:'work',project:f.root})).error,'project_busy')}finally{release()}
+  const results=await Promise.all([f.raw('build.begin',{text:'implement directly',project:f.root}),f.raw('build.begin',{text:'duplicate',project:f.root})])
+  assert.equal(results.filter(result=>result.ok).length,1)
+  assert.equal(results.find(result=>!result.ok)?.error,'build_stop_required')
+  const id=f.host.conversationSnapshot().selected_id
+  await until(()=>f.script.requests.length,count=>count>0)
+  assert.equal(buildView(f.host,id).plan_id,undefined)
+  assert.deepEqual(JSON.parse(f.script.requests[0]!.workspaceContext!),{project:f.root})
+  assert.equal((await f.raw('build.begin',{text:'duplicate',project:f.root})).error,'build_stop_required')
+  await f.command('build.stop',{id})
+ }finally{await f.close()}
+})
+
+test('direct Build restores checkpoint and resumes without a confirmed plan',{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'verified'}))
+ try{
+  await f.command('build.begin',{text:'implement directly',project:f.root,title:'Direct'})
+  const id=f.host.conversationSnapshot().selected_id;await f.host.waitConversation(id)
+  await f.host.close()
+  const reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+  try{
+   await reopened.open();reopened.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host:reopened,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'}),()=>{})
+   for(const [method,params] of [['presentation.set',{mode:'workbench'}],['build.resume',{id}]] as const){const result=await reopened.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean;error?:string};assert.equal(result.ok,true,result.error)}
+   await reopened.waitConversation(id)
+   assert.ok(f.script.restores.length>0);assert.equal(buildView(reopened,id).plan_id,undefined)
+  }finally{await reopened.close()}
+ }finally{await f.close()}
+})
+
+
+test('Plan delegate selects explicit codex project and rejects busy or invalid directories',async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  const plan=await f.plan(),params={id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex',project:f.root}
+  const target={workspace_id:'selected-workspace',session_id:null,project:'selected',title:'selected',executor:'codex' as const}
+  let running:string|undefined,validated=0
+  f.host.setCodingTargets({list:()=>Promise.resolve([{...target,directory:f.root,...(running?{running}:{})}]),validate:selection=>{validated++;assert.deepEqual(selection,{workspace_id:target.workspace_id,session_id:null});return Promise.resolve(target)},resolve:()=>{throw Error('unused')}})
+  assert.equal((await f.raw('plans.delegate',{...params,project:'relative'})).error,'invalid_project_directory')
+  running='active';assert.equal((await f.raw('plans.delegate',params)).error,'project_busy');running=undefined
+  const release=await acquireTaskResources([projectResourceKey(f.root)],new AbortController().signal)
+  try{assert.equal((await f.raw('plans.delegate',params)).error,'project_busy')}finally{release()}
+  await f.command('plans.delegate',params)
+  assert.equal(validated,1);assert.deepEqual(f.host.conversationSnapshot().items[0]!.coding_target,target);assert.equal(f.invocations.length,1)
+ }finally{await f.close()}
+})
