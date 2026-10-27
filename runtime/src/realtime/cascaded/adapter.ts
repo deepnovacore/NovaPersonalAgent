@@ -168,7 +168,13 @@ interface EpochOwner {
   revoked: boolean
 }
 
-class MixedResponseFailure extends Error {}
+class MixedResponseFailure extends Error {
+  constructor(message = 'LLM mixed text and tool output') {
+    super(message)
+    this.name = 'MixedResponseFailure'
+    ;(this as {code?: string}).code = 'protocol'
+  }
+}
 class TtsResponseFailure extends Error {}
 
 const TTS_BOUNDARIES = new Set([...`，。！？；：,.!?;:\n`])
@@ -1029,6 +1035,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     let llmResponseId: string | null = null
     let llmFailureCode: string | null = null
     let textSeen = false
+    let captionSent = false
     let preview = '', previewLength = 0
     let toolSeen = false
     let pendingTool: Extract<CascadedLlmEvent, {kind: 'tool_call'}> | null = null
@@ -1099,6 +1106,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           previewLength += [...event.text].length
           if (previewLength > MAX_REALTIME_TEXT) throw new Error('LLM preview text overflow')
           preview += event.text
+          captionSent = true
           await this.#emit(owner, {kind:'response_transcript_delta',session_epoch:owner.epoch,response_id:active.id,text:event.text,full_text:preview})
         } else if (event.kind === 'text_delta') {
           if (toolSeen) throw new MixedResponseFailure()
@@ -1127,19 +1135,31 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           }
           const fullText = transcript.join('')
           const delta = preview ? fullText.startsWith(preview) ? fullText.slice(Math.max(preview.length, fullText.length - event.text.length)) : '' : event.text
-          if (delta) await this.#emit(owner, {
-            kind: 'response_transcript_delta', session_epoch: owner.epoch,
-            response_id: active.id, text: delta, ...(this.#textOnly ? {full_text:fullText} : {}),
-          })
+          if (delta) {
+            captionSent = true
+            await this.#emit(owner, {
+              kind: 'response_transcript_delta', session_epoch: owner.epoch,
+              response_id: active.id, text: delta, ...(this.#textOnly ? {full_text:fullText} : {}),
+            })
+          }
           if (active.tts !== null) for (const chunk of chunker.push(speech.push(event.text))) {
             await this.#sendTtsText(owner, active.tts, chunk)
           }
         } else if (event.kind === 'tool_call') {
-          if (textSeen || toolSeen) throw new MixedResponseFailure()
+          if (toolSeen) throw new MixedResponseFailure()
           if (llmResponseId === null) throw new Error('LLM tool before identity')
-          if (preview) {
+          // Some providers narrate before calling a tool in the same response. The narration is
+          // display-only; withdraw it (and its queued speech) so the turn can continue with the tool
+          // instead of failing the whole response.
+          if (textSeen || preview || captionSent) {
+            await this.#cancelTts(owner, active)
             await this.#emit(owner, {kind:'response_transcript_final',session_epoch:owner.epoch,response_id:active.id,text:''})
+            textSeen = false
+            captionSent = false
             preview = ''
+            previewLength = 0
+            transcript.length = 0
+            transcriptLength = 0
           }
           toolSeen = true
           pendingTool = event
@@ -1188,8 +1208,11 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       }
       throw new Error('LLM stream ended without terminal')
     } catch (error) {
-      if (preview && active.id !== null && this.#isCurrent(owner) && owner.response === active && !signal.aborted) {
-        await this.#emit(owner, {kind:'response_transcript_final',session_epoch:owner.epoch,response_id:active.id,text:transcript.join('')})
+      // A failed or cancelled turn must not leave its display-only text on screen. Withdraw with an
+      // empty final even when the abort signal is already set; nothing is persisted for this turn.
+      if (captionSent && active.id !== null && this.#isCurrent(owner) && owner.response === active) {
+        captionSent = false
+        await this.#emit(owner, {kind:'response_transcript_final',session_epoch:owner.epoch,response_id:active.id,text:''})
       }
       if (owner.pendingToolCallId !== null) {
         continuationResetFailed = !(await this.#abandonPendingToolCall(owner))
@@ -1200,12 +1223,14 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           await this.#emitTerminal(owner, active, 'cancelled', 'cancelled')
         }
       } else if (error instanceof MixedResponseFailure) {
+        // Text after a tool is still malformed: report it before the terminal frame so consumers
+        // see the reason, then fail the round without exposing the tool.
         await this.#cancelTts(owner, active)
         await this.#emit(owner, {
           kind: 'provider_error', session_epoch: owner.epoch,
           code: 'cascaded_mixed_text_tool', recoverable: false,
         })
-        if (active.id !== null) await this.#emitTerminal(owner, active, 'failed', 'mixed_output')
+        if (active.id !== null && !active.terminal) await this.#emitTerminal(owner, active, 'failed', 'mixed_output')
       } else {
         await this.#cancelTts(owner, active)
         const ttsFailure = error instanceof TtsResponseFailure
