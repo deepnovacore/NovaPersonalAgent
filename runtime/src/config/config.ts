@@ -609,18 +609,46 @@ function providerForFastModel(model: string): string | null {
  * provider; a custom fast model keeps its own name on the provider that owns the credential.
  * The configured generic model connection always wins over provider profiles.
  */
+function selectedTextProvider(settings: Settings): string {
+  // A local/compatible gateway is authoritative even if its model happens to share a public name.
+  if (settings.cascade_llm_provider === 'self-hosted' || settings.cascade_llm_provider === 'openai-compatible') {
+    return settings.cascade_llm_provider
+  }
+  const paired = providerForFastModel(settings.fast_model)
+  if (paired !== null) return paired
+  return settings.pipeline_mode === 'integrated' ? settings.integrated_provider : settings.cascade_llm_provider
+}
+
+/**
+ * Extraction must reach the same provider that answers text. A local gateway is never replaced by
+ * a cloud provider with a matching model name; a missing local key stays local (self-hosted may be
+ * keyless) instead of silently sending content elsewhere.
+ */
 export function resolveMemoryExtractionConnection(settings: Settings): MemoryExtractionConnection {
   const genericKey = stripLikePython(settings.model_api_key ?? '')
   if (genericKey !== '') return {baseUrl: secureEndpoint(settings.model_base_url, 'https', 'MODEL_BASE_URL'), apiKey: genericKey, model: settings.fast_model, missing: null}
-  const paired = providerForFastModel(settings.fast_model)
-  if (paired !== null) {
-    const candidate = extractionCandidate(settings, paired)
-    if (candidate !== null && candidate.apiKey !== '') return {...candidate, missing: null}
+  const selected = selectedTextProvider(settings)
+  const primary = extractionCandidate(settings, selected)
+  const primaryBase = primary?.baseUrl ?? ''
+  if (primary !== null && primaryBase !== '' && (primary.apiKey !== '' || selected === 'self-hosted')) {
+    return {...primary, model: settings.fast_model, missing: null}
+  }
+  if (selected === 'self-hosted' || selected === 'openai-compatible') {
+    const missing = primaryBase === '' ? 'SELF_HOSTED_LLM_BASE_URL'
+      : selected === 'openai-compatible' && (primary?.apiKey ?? '') === '' ? 'OPENAI_COMPATIBLE_API_KEY'
+        : null
+    return {
+      baseUrl: primaryBase === '' ? settings.model_base_url : primaryBase,
+      apiKey: primary?.apiKey ?? '',
+      model: settings.fast_model,
+      missing,
+    }
   }
   for (const provider of [settings.cascade_llm_provider, settings.integrated_provider]) {
+    if (provider === selected) continue
     const candidate = extractionCandidate(settings, provider)
-    if (candidate !== null && candidate.apiKey !== '') {
-      return {...candidate, model: paired === null ? settings.fast_model : candidate.model, missing: null}
+    if (candidate !== null && candidate.baseUrl !== '' && candidate.apiKey !== '') {
+      return {...candidate, missing: null}
     }
   }
   const fallbackKey = resolveModelApiKey(settings) ?? ''
@@ -646,7 +674,7 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
   // instead of blocking the voice pipeline or silently failing every extraction request.
   if (!resolveEmbeddingConnection(settings).apiKey) return null
   const extraction = resolveMemoryExtractionConnection(settings)
-  if (extraction.apiKey === '') return null
+  if (extraction.missing !== null) return null
   return Object.freeze({
     connection: 'local',
     provider: settings.memory_provider ?? 'voicemem',
@@ -663,15 +691,20 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
 
 /** Module status in the shape of `modules.search`; local memory is off without both credentials. */
 export function memoryStatus(settings: Settings): {enabled: boolean; reason: string | null; fallback: null} {
-  const connection = resolveMemoryConnection(settings)
-  if (connection === 'disabled') return {enabled: false, reason: 'disabled', fallback: null}
-  if (connection === 'local' && !resolveEmbeddingConnection(settings).apiKey) return {enabled: false,
-    reason: `missing_environment:${settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY'}`, fallback: null}
-  if (connection === 'local') {
-    const extraction = resolveMemoryExtractionConnection(settings)
-    if (extraction.missing !== null) return {enabled: false, reason: `missing_environment:${extraction.missing}`, fallback: null}
+  try {
+    const connection = resolveMemoryConnection(settings)
+    if (connection === 'disabled') return {enabled: false, reason: 'disabled', fallback: null}
+    if (connection === 'local' && !resolveEmbeddingConnection(settings).apiKey) return {enabled: false,
+      reason: `missing_environment:${settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY'}`, fallback: null}
+    if (connection === 'local') {
+      const extraction = resolveMemoryExtractionConnection(settings)
+      if (extraction.missing !== null) return {enabled: false, reason: `missing_environment:${extraction.missing}`, fallback: null}
+    }
+    return {enabled: true, reason: null, fallback: null}
+  } catch {
+    // Memory is optional: an invalid endpoint must not make the whole composition (and Settings) fail.
+    return {enabled: false, reason: 'invalid_configuration', fallback: null}
   }
-  return {enabled: true, reason: null, fallback: null}
 }
 
 function resolveMemoryConnection(settings: Settings): z.infer<typeof memoryConnectionSchema> {
