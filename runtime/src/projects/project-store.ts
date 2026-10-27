@@ -715,9 +715,7 @@ export class ProjectStore {
     try {
       return await this.#files.transaction(async state => {
         const binding = await validateRegisteredWorkspace(hostWorkspacePath(workspace))
-        const existing = [...state.workspaces.values()].find(
-          record => record.canonical_path === binding.canonical,
-        )
+        const existing = await this.#findWorkspaceByIdentity(state.workspaces, binding.identity)
         if (existing !== undefined) {
           const approved = existing.origin === 'managed'
             ? await this.#files.validateManagedWorkspaceBinding(existing.canonical_path)
@@ -756,9 +754,7 @@ export class ProjectStore {
         const binding = await validateRegisteredWorkspace(hostWorkspacePath(workspace))
         requireWorkspaceCapacity(state)
         requireUniqueWorkspaceName(state, name.normalized)
-        if ([...state.workspaces.values()].some(
-          record => record.canonical_path === binding.canonical,
-        )) {
+        if (await this.#findWorkspaceByIdentity(state.workspaces, binding.identity) !== undefined) {
           throw new ProjectStateError('workspace_path_conflict')
         }
         const record = this.#newWorkspace(state, name, binding.canonical, 'registered')
@@ -1549,6 +1545,29 @@ export class ProjectStore {
       throw new ProjectStateError('workspace_boundary_changed')
     }
     this.#workspaceIdentities.set(workspaceId, identity)
+  }
+
+  /** Match a directory by device/inode so case aliases cannot register the same project twice. */
+  async #findWorkspaceByIdentity(
+    workspaces: ReadonlyMap<string, WorkspaceRecord>,
+    identity: FileIdentity,
+  ): Promise<WorkspaceRecord | undefined> {
+    for (const record of workspaces.values()) {
+      let pinned = this.#workspaceIdentities.get(record.workspace_id)
+      if (pinned === undefined) {
+        try {
+          const binding = record.origin === 'managed'
+            ? await this.#files.validateManagedWorkspaceBinding(record.canonical_path)
+            : await validateRegisteredWorkspace(record.canonical_path)
+          pinned = binding.identity
+          this.#pinWorkspaceIdentity(record.workspace_id, pinned)
+        } catch {
+          continue
+        }
+      }
+      if (sameFileIdentity(pinned, identity)) return record
+    }
+    return undefined
   }
 
   #advanceWorkspaceIdentity(

@@ -843,6 +843,37 @@ test('an uncertain run releases its physical resources after confirmed transport
   }
 })
 
+test('an uncertain ACP run releases its project after the transport confirms shutdown', async () => {
+  const value = await fixture({defaultBackend: () => ({backend_id: 'opencode', backend_profile_id: 'opencode:fixture'})})
+  try {
+    value.factory.nextOutcome = {classification: 'uncertain', code: 'transport_lost', turnStartWritten: true, completion: null}
+    assert.equal((await run(value, 'interrupted ACP review')).outcome, 'unknown')
+    assert.equal(value.factory.transports[0]?.closeCalls, 1)
+    value.factory.nextOutcome = COMPLETE
+    assert.equal((await settleWithin('ACP retry after confirmed shutdown', run(value, 'retry ACP', {session: 'new'}))).outcome, 'ok')
+  } finally {
+    await value.adapter.close().catch(() => undefined)
+    await rm(value.root, {recursive: true, force: true})
+  }
+})
+
+test('an ACP cleanup that still cannot close keeps its project quarantined', async () => {
+  const value = await fixture({defaultBackend: () => ({backend_id: 'opencode', backend_profile_id: 'opencode:fixture'})})
+  try {
+    value.factory.closeFailures = 2
+    value.factory.nextOutcome = {classification: 'uncertain', code: 'transport_lost', turnStartWritten: true, completion: null}
+    assert.equal((await run(value, 'lost ACP transport')).outcome, 'unknown')
+    const blocked = await settleWithin('ACP cleanup retry', run(value, 'blocked ACP retry'))
+    assert.equal(blocked.outcome, 'failed')
+    value.factory.closeFailures = 0
+    value.factory.nextOutcome = COMPLETE
+    assert.equal((await settleWithin('ACP cleanup recovered', run(value, 'safe ACP retry'))).outcome, 'ok')
+  } finally {
+    await value.adapter.close().catch(() => undefined)
+    await rm(value.root, {recursive: true, force: true})
+  }
+})
+
 test('transport close rejection cannot downgrade a completed side effect into a retryable failure', async () => {
   const value = await fixture()
   try {
