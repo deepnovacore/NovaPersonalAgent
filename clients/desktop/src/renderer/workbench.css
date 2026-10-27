@@ -686,7 +686,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workspace-bar{display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:6px 10px;border-radius:12px;background:var(--surface-inset);color:var(--ink-dim);font-size:13px}
 .workspace-bar[hidden]{display:none}
 .workspace-bar .workspace-folder{border-color:transparent;background:transparent;color:var(--ink);padding:2px 6px}
-.workspace-bar .workspace-host{margin-left:auto}
+.workspace-bar .workspace-host{margin-left:auto;flex-shrink:0;white-space:nowrap}
 .approval-dock{margin:0 0 8px;display:flex;flex-direction:column;gap:6px}
 .approval-dock[hidden]{display:none}
 .approval-dock-card{padding:10px 12px;border:1px solid var(--line,#555);border-left:3px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent-wash) 60%,var(--surface-raised))}
@@ -832,3 +832,5 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-plan-preview .workbench-plan h3{font-size:16px;line-height:1.5}
 .workbench-plan-preview .workbench-plan-body{max-height:none;overflow:visible;line-height:1.7;margin:16px 0 24px}
 .workbench-plan-preview .workbench-plan textarea{min-height:40vh;font-size:13px}
+
+.workbench-page:has(>.workbench-plan-preview){overflow-anchor:none}

@@ -89,7 +89,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const planPreview=el('section',undefined,'workbench-plan-preview');planPreview.tabIndex=-1;planPreview.setAttribute('aria-label',t('计划预览'))
  const planHead=el('header',undefined,'workbench-plan-preview-head');planPreview.append(planHead);planHead.append(el('h2',t('计划预览')))
  const returnTasks=button('← '+t('返回任务列表'),()=>{previewPlan=false;taskTab='tasks';renderPanel()},planHead)
- function openPlan(focus=true){selected='tasks';previewPlan=true;closeTask({restoreFocus:false});if(focus)planPreview.focus()}
+ function openPlan(focus=true){selected='tasks';previewPlan=true;closeTask({restoreFocus:false});panel.scrollTop=0;if(focus)planPreview.focus({preventScroll:true})}
  const chat=mountChatPane(novaColumn,{c,el,button,run,api,chips,openTask,openSchedule:id=>{previewPlan=false;selected='tasks';taskTab='schedules';scheduleLocal.selected=id;scheduleLocal.detail=null;renderPanel();void c.command('schedules.get',{id}).then(value=>{if(scheduleLocal.selected===id){scheduleLocal.detail=value;scheduleLocal.history=null;renderPanel()}}).catch(error=>{scheduleLocal.error=error.message;renderPanel()})},speakingLevel,onHome:showHome,planHost:planPreview,onPreviewPlan:()=>openPlan()})
  chat.setOpen(true)
  const executorFloat=mountExecutorFloat(root,{el,button,openTask,taskFor:work=>c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work))?.id??null})

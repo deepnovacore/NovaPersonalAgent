@@ -542,7 +542,8 @@ test('published plans preview on the right without taking back a tab the user se
  assert.ok(right.contains(card));assert.equal(left.contains(card),false);assert.equal(preview.hidden,false)
  const editor=card.children.find(n=>n.tag==='textarea');editor.value='unsaved plan draft'
  selectPage(m,'时间线');m.view.receive(state(2));assert.equal(right.contains(card),false)
- await preview.listeners.click();assert.ok(right.contains(card));assert.equal(editor.value,'unsaved plan draft')
+ const panel=m.all().find(n=>n.className==='workbench-page');panel.scrollTop=420
+ await preview.listeners.click();assert.ok(right.contains(card));assert.equal(editor.value,'unsaved plan draft');assert.equal(panel.scrollTop,0)
  await m.all().find(n=>n.textContent==='← 返回任务列表').listeners.click();assert.equal(right.contains(card),false)
  m.view.receive(state(3));assert.equal(right.contains(card),false)
  await preview.listeners.click();m.view.receive(feedState(4,'chat:main',{feed:[]}));assert.equal(right.contains(card),false);assert.equal(preview.hidden,true)
