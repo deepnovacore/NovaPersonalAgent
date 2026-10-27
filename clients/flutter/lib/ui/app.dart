@@ -39,6 +39,7 @@ import 'package:nova_audio/nova_audio.dart';
 import 'devices_page.dart';
 import 'workbench_page.dart';
 import 'components.dart';
+import 'pet_avatar.dart';
 import 'theme.dart';
 import 'local_workspace.dart';
 import '../agent/local_agent.dart';
@@ -119,6 +120,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   bool _phoneVoiceWasActive = false, _phoneVoiceWasConnecting = false;
   String? _phoneVoiceStartError, _reportedCleanupError;
   final localConversation = GlobalKey<LocalChatPanelState>();
+  PetAvatarStore? _petAvatarStore;
   int _tab = 0;
   AgentCoreHost? agentCore;
   FeishuHost? feishu;
@@ -438,6 +440,16 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   }
 
   String _t(String zh, String en) => language == 'zh' ? zh : en;
+
+  /// Created on first use so the settings sheet and the chat avatar share one
+  /// store without blocking startup.
+  PetAvatarStore get petAvatarStore {
+    final existing = _petAvatarStore;
+    if (existing != null) return existing;
+    final store = PetAvatarStore();
+    unawaited(store.load());
+    return _petAvatarStore = store;
+  }
 
   Future<void> _newChat() async {
     final host = agentCore;
@@ -775,6 +787,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   _t('设备', 'Devices'),
                   CupertinoIcons.desktopcomputer,
                 ),
+                (
+                  'pet_avatar',
+                  _t('宠物头像', 'Pet avatar'),
+                  CupertinoIcons.person_crop_circle,
+                ),
               ]),
               _settingGroup(context, _t('更多', 'More'), [
                 ('feishu', _t('飞书', 'Feishu'), CupertinoIcons.link),
@@ -865,6 +882,12 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         }
       case 'devices':
         await _devices();
+      case 'pet_avatar':
+        await showPetAvatarSettings(
+          context,
+          petAvatarStore,
+          language: language,
+        );
       case 'voice':
         await _voiceSettings();
       case 'language':
@@ -988,6 +1011,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     lifeHost.dispose();
     feishu?.dispose();
     localSchedules?.dispose();
+    _petAvatarStore?.dispose();
     if (widget.agentCore == null) agentCore?.dispose();
     emptyStore.dispose();
     if (widget.audio == null) unawaited(audio.disconnect());
@@ -1127,6 +1151,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                               host: host,
                               activeConversationId: taskChatId,
                               language: language,
+                              schedules: localSchedules,
                               onNew: _newChat,
                               onOpen: (id) => setState(() {
                                 taskChatId = id;
@@ -1175,6 +1200,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                   (_tab == 0 || (_tab == 1 && _taskOpen)) &&
                                   !fullCall,
                               header: _taskContext(host),
+                              petAvatarStore: petAvatarStore,
+                              keyboardVisible:
+                                  MediaQuery.viewInsetsOf(context).bottom > 0,
                               host: host,
                               conversationId: chatId!,
                               language: language,

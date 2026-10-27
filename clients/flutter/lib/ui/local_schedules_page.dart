@@ -5,9 +5,17 @@ import 'components.dart';
 import 'scheduled_tasks_page.dart' show scheduleRuleText;
 import 'theme.dart';
 
+/// Standalone phone-schedule screen. Set [embedded] when the Tasks tab renders
+/// it in place: the host supplies the title and page chrome, so this page keeps
+/// only its list and the create action.
 class LocalSchedulesPage extends StatefulWidget {
-  const LocalSchedulesPage({super.key, required this.runner});
+  const LocalSchedulesPage({
+    super.key,
+    required this.runner,
+    this.embedded = false,
+  });
   final ScheduledAgentRunner runner;
+  final bool embedded;
   @override
   State<LocalSchedulesPage> createState() => _LocalSchedulesPageState();
 }
@@ -206,153 +214,155 @@ class _LocalSchedulesPageState extends State<LocalSchedulesPage> {
       final items = widget.runner.repository.items;
       final runs = widget.runner.repository.runs.reversed.toList();
       final approval = widget.runner.pendingApproval;
-      return NovaPage(
-        title: '手机定时任务',
-        actions: [
-          IconButton(
-            tooltip: '新建定时任务',
-            onPressed: busy ? null : () => _run(_create),
-            icon: const Icon(CupertinoIcons.add),
-          ),
-        ],
-        body: ListView(
-          padding: const EdgeInsets.only(top: 8, bottom: 32),
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: Text(
-                '任务由这台手机负责执行。完成记录表示 Agent 已返回结果，实际效果仍需你核对。',
-                style: TextStyle(
-                  color: Nova.secondary,
-                  fontSize: 13,
-                  height: 1.5,
-                ),
+      final create = IconButton(
+        tooltip: '新建定时任务',
+        onPressed: busy ? null : () => _run(_create),
+        icon: const Icon(CupertinoIcons.add),
+      );
+      final list = ListView(
+        padding: const EdgeInsets.only(top: 8, bottom: 32),
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Text(
+              '任务由这台手机负责执行。完成记录表示 Agent 已返回结果，实际效果仍需你核对。',
+              style: TextStyle(
+                color: Nova.secondary,
+                fontSize: 13,
+                height: 1.5,
               ),
             ),
-            if (approval != null)
-              NovaCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const NovaStatusChip('等待确认', tone: NovaTone.warning),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            approval.tool,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      approval.arguments.toString(),
-                      style: const TextStyle(
-                        color: Nova.secondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                    Wrap(
-                      children: [
-                        TextButton(
-                          onPressed: () => widget.runner.approve(false),
-                          child: const Text('拒绝'),
-                        ),
-                        FilledButton(
-                          onPressed: () => widget.runner.approve(true),
-                          child: const Text('允许这一步'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            if (items.isEmpty)
-              const EmptyNote(
-                '还没有定时任务。点右上角的 + 新建一个。',
-                icon: CupertinoIcons.clock,
-              )
-            else
-              NovaSection(
-                header: '规则',
-                surface: Nova.sheetCell,
+          ),
+          if (approval != null)
+            NovaCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final item in items)
-                    NovaSwitchRow(
-                      title: item['title'],
-                      subtitle: [
-                        scheduleRuleText(
-                          Map<String, dynamic>.from(item['rule']),
-                          'zh-CN',
+                  Row(
+                    children: [
+                      const NovaStatusChip('等待确认', tone: NovaTone.warning),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          approval.tool,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
-                        if ((item['missed_count'] ?? 0) > 0)
-                          '错过 ${item['missed_count']} 次',
-                      ].join(' · '),
-                      value: item['enabled'] == true,
-                      onChanged: busy
-                          ? null
-                          : (v) => _run(
-                              () => widget.runner.repository.setEnabled(
-                                item['id'],
-                                item['revision'],
-                                v,
-                              ),
-                            ),
-                    ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    approval.arguments.toString(),
+                    style: const TextStyle(color: Nova.secondary, fontSize: 13),
+                  ),
+                  Wrap(
+                    children: [
+                      TextButton(
+                        onPressed: () => widget.runner.approve(false),
+                        child: const Text('拒绝'),
+                      ),
+                      FilledButton(
+                        onPressed: () => widget.runner.approve(true),
+                        child: const Text('允许这一步'),
+                      ),
+                    ],
+                  ),
                 ],
               ),
-            if (runs.isNotEmpty)
-              NovaSection(
-                header: '运行记录',
-                surface: Nova.sheetCell,
-                children: [
-                  for (final run in runs)
-                    NovaTile(
-                      surface: Nova.sheetCell,
-                      title: run['definition']['title'],
-                      subtitle: Text(
-                        relativeTime('${run['slot']['scheduled_at']}', 'zh'),
+            ),
+          if (items.isEmpty)
+            const EmptyNote('还没有定时任务。点右上角的 + 新建一个。', icon: CupertinoIcons.clock)
+          else
+            NovaSection(
+              header: '规则',
+              surface: Nova.sheetCell,
+              children: [
+                for (final item in items)
+                  NovaSwitchRow(
+                    title: item['title'],
+                    subtitle: [
+                      scheduleRuleText(
+                        Map<String, dynamic>.from(item['rule']),
+                        'zh-CN',
                       ),
-                      onTap: () => _run(() => _result(run)),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          NovaStatusChip(
-                            _runStatus(run['status']),
-                            tone: _runTone(run['status']),
+                      if ((item['missed_count'] ?? 0) > 0)
+                        '错过 ${item['missed_count']} 次',
+                    ].join(' · '),
+                    value: item['enabled'] == true,
+                    onChanged: busy
+                        ? null
+                        : (v) => _run(
+                            () => widget.runner.repository.setEnabled(
+                              item['id'],
+                              item['revision'],
+                              v,
+                            ),
                           ),
-                          if (![
-                            'completed',
-                            'cancelled',
-                          ].contains(run['status']))
-                            TextButton(
-                              onPressed: busy
-                                  ? null
-                                  : () => _run(
-                                      () => widget.runner.cancel(
-                                        run['run_id'],
-                                        run['control_revision'],
-                                      ),
+                  ),
+              ],
+            ),
+          if (runs.isNotEmpty)
+            NovaSection(
+              header: '运行记录',
+              surface: Nova.sheetCell,
+              children: [
+                for (final run in runs)
+                  NovaTile(
+                    surface: Nova.sheetCell,
+                    title: run['definition']['title'],
+                    subtitle: Text(
+                      relativeTime('${run['slot']['scheduled_at']}', 'zh'),
+                    ),
+                    onTap: () => _run(() => _result(run)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        NovaStatusChip(
+                          _runStatus(run['status']),
+                          tone: _runTone(run['status']),
+                        ),
+                        if (!['completed', 'cancelled'].contains(run['status']))
+                          TextButton(
+                            onPressed: busy
+                                ? null
+                                : () => _run(
+                                    () => widget.runner.cancel(
+                                      run['run_id'],
+                                      run['control_revision'],
                                     ),
-                              child: const Text('取消'),
-                            ),
-                        ],
-                      ),
+                                  ),
+                            child: const Text('取消'),
+                          ),
+                      ],
                     ),
-                ],
-              ),
-            if (error != null) NovaNotice(error!),
-            if (widget.runner.wakeError != null)
-              NovaNotice(widget.runner.wakeError!, tone: NovaTone.warning),
-            if (busy)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: LinearProgressIndicator(),
-              ),
-          ],
-        ),
+                  ),
+              ],
+            ),
+          if (error != null) NovaNotice(error!),
+          if (widget.runner.wakeError != null)
+            NovaNotice(widget.runner.wakeError!, tone: NovaTone.warning),
+          if (busy)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: LinearProgressIndicator(),
+            ),
+        ],
+      );
+      if (!widget.embedded) {
+        return NovaPage(title: '手机定时任务', actions: [create], body: list);
+      }
+      // The Tasks tab supplies the page chrome; keep the list and its action.
+      return Column(
+        children: [
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+              child: create,
+            ),
+          ),
+          Expanded(child: list),
+        ],
       );
     },
   );
