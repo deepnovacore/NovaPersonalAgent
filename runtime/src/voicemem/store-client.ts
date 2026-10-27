@@ -20,6 +20,7 @@ export interface PersonalMemoryStoreClientOptions {
   readonly userId: string
   readonly embedding: PersonalMemoryEmbeddingConfig
   /** Enables local extraction in the Worker. Omit for read-only personal recall. */
+  readonly extraction?: {readonly baseUrl: string; readonly apiKey: string}
   readonly extractionModel?: string
   /** Only workers implementing durable source tombstones may enable this capability. */
   readonly supportsForget?: boolean
@@ -166,6 +167,7 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
       path: options.path,
       userId: options.userId,
       embedding: {...options.embedding},
+      ...(options.extraction === undefined ? {} : {extraction: {...options.extraction}}),
       ...(options.extractionModel === undefined ? {} : {extractionModel: options.extractionModel}),
     }}
     this.#workerFactory = options.workerFactory ?? ((url, configured) => new Worker(url, configured))
@@ -415,6 +417,7 @@ function validateOptions(options: PersonalMemoryStoreClientOptions): void {
     || !isRecord(options.embedding) || !nonempty(options.embedding.baseUrl, 2_048)
     || !nonempty(options.embedding.apiKey, 4_096) || !nonempty(options.embedding.model, 256)
     || (options.embedding.dimensions !== undefined && (!positiveInteger(options.embedding.dimensions) || options.embedding.dimensions > 4_096))
+    || (options.extraction !== undefined && (!isRecord(options.extraction) || !nonempty(options.extraction.baseUrl, 2048) || typeof options.extraction.apiKey !== 'string' || options.extraction.apiKey.length > 4096))
     || (options.extractionModel !== undefined && !nonempty(options.extractionModel, 256))) {
     throw new Error('Invalid personal memory store options')
   }

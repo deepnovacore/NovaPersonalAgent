@@ -21,7 +21,7 @@ test('knowledge disabled allocates nothing', async () => {
 test('prepared knowledge contributes unified recall instead of a separate frontend storage tool and closes with assembly', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-assembly-'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: true}}}, {})
-  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', knowledge_path: join(directory, 'private', 'knowledge.sqlite')})
+  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', embedding_api_key: 'embedding-key', knowledge_path: join(directory, 'private', 'knowledge.sqlite')})
   try {
     const knowledge = await prepareKnowledge(settings, capabilities)
     assert.ok(knowledge)
@@ -47,7 +47,7 @@ test('prepared knowledge contributes unified recall instead of a separate fronte
 test('Codex knowledge projection contains both resolvers and keeps token out of persisted config', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-codex-'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {knowledge: {enabled: true, exposeToCodex: true}}}, {})
-  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', knowledge_path: join(directory, 'private', 'knowledge.sqlite')})
+  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', embedding_api_key: 'embedding-key', knowledge_path: join(directory, 'private', 'knowledge.sqlite')})
   try {
     const knowledge = await prepareKnowledge(settings, capabilities)
     assert.ok(knowledge)
@@ -67,7 +67,7 @@ test('Codex knowledge projection contains both resolvers and keeps token out of 
 test('knowledge close failure does not skip camera cleanup', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-cleanup-'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: true}}}, {})
-  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', knowledge_path: join(directory, 'private', 'knowledge.sqlite')})
+  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', embedding_api_key: 'embedding-key', knowledge_path: join(directory, 'private', 'knowledge.sqlite')})
   const knowledge = await prepareKnowledge(settings, capabilities)
   assert.ok(knowledge)
   let stopped = false

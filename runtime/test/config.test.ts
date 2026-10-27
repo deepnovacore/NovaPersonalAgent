@@ -5,6 +5,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   DASHSCOPE_COMPATIBLE_BASE_URL,
+  DEEPSEEK_BASE_URL,
+  resolveEmbeddingConnection,
   ConfigurationError,
   loadSettings,
   requireCascadedCredentials,
@@ -28,7 +30,7 @@ test('local memory retains DashScope credentials with a non-Qwen conversation mo
 
 test('DashScope key also configures support models only on the DashScope endpoint', () => {
   const env = {DASHSCOPE_API_KEY: 'dashscope-test-key'}
-  assert.equal(resolveModelApiKey(loadSettings(env)), env.DASHSCOPE_API_KEY)
+  assert.equal(resolveModelApiKey(loadSettings(env)), null)
   assert.equal(resolveModelApiKey(loadSettings({...env, MODEL_BASE_URL: DASHSCOPE_COMPATIBLE_BASE_URL})), env.DASHSCOPE_API_KEY)
   assert.equal(resolveModelApiKey(loadSettings({...env, MODEL_BASE_URL: 'https://example.com/v1'})), null)
   assert.equal(resolveModelApiKey(loadSettings({...env, MODEL_API_KEY: 'custom-test-key'})), 'custom-test-key')
@@ -117,8 +119,9 @@ test('personal memory selects the v0.3 ledger by default and maps its host-owned
   )
   assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'disabled'})), null)
   assert.deepEqual(requirePersonalMemory(loadSettings({
-    MODEL_BASE_URL: 'https://embedding.example/v1/',
-    MODEL_API_KEY: 'embedding-key',
+    EMBEDDING_BASE_URL: 'https://embedding.example/v1/',
+    EMBEDDING_API_KEY: 'embedding-key',
+    DEEPSEEK_API_KEY: 'text-key',
     EMBEDDING_MODEL: 'embedding-model',
     MEMORY_CONNECTION: 'local',
     MEMORY_PATH: '/state/personal.sqlite',
@@ -128,7 +131,8 @@ test('personal memory selects the v0.3 ledger by default and maps its host-owned
     provider: 'voicemem',
     path: '/state/personal.sqlite',
     userId: 'owner-1',
-    extractionModel: 'qwen3-vl-plus',
+    extractionModel: 'deepseek-flash',
+    extraction: {baseUrl: DEEPSEEK_BASE_URL, apiKey: 'text-key'},
     embedding: {
       baseUrl: 'https://embedding.example/v1',
       apiKey: 'embedding-key',
@@ -271,18 +275,18 @@ test('StepFun support models default to Step 3.7 Flash while memory extraction s
   const step = loadSettings(base)
   assert.deepEqual([step.support_model, step.compressor_model, step.watch_model],
     ['step-3.7-flash', 'step-3.7-flash', 'step-3.7-flash'])
-  // Extraction is sent through the DashScope embedding connection, so its model must stay there.
-  assert.equal(step.fast_model, 'qwen3-vl-plus')
+  // Extraction is independent of the DashScope embedding connection.
+  assert.equal(step.fast_model, 'deepseek-flash')
   const memory = requirePersonalMemory(step)
-  assert.equal(memory?.connection === 'local' && memory.extractionModel, 'qwen3-vl-plus')
+  assert.equal(memory?.connection === 'local' && memory.extractionModel, 'deepseek-flash')
   assert.equal(memory?.connection === 'local' && memory.embedding.baseUrl, 'https://dashscope.aliyuncs.com/compatible-mode/v1')
   const explicit = loadSettings({...base, SUPPORT_MODEL: 'qwen-plus',
     WATCH_MODEL: ''})
   assert.equal(explicit.support_model, 'qwen-plus', 'an explicit model is never rewritten')
   assert.equal(explicit.watch_model, 'step-3.7-flash', 'empty watch would fall back to a DashScope model')
   const gateway = loadSettings({...base, MODEL_API_KEY: 'gateway-secret'})
-  assert.equal(gateway.support_model, 'qwen-plus', 'a custom gateway keeps the generic defaults')
-  assert.equal(loadSettings({DASHSCOPE_API_KEY: 'qwen-secret'}).support_model, 'qwen-plus')
+  assert.equal(gateway.support_model, 'deepseek-flash', 'a custom gateway keeps the generic defaults')
+  assert.equal(loadSettings({DASHSCOPE_API_KEY: 'qwen-secret'}).support_model, 'deepseek-flash')
 })
 
 test('Codex direct argv prefix is parsed only as a bounded JSON string array', () => {
@@ -760,7 +764,7 @@ test('memory connection separates local provider selection from remote engine ow
     connection: 'remote', url: remote.MEMORY_URL, token: 'owner-token',
   })
   const local = {MEMORY_CONNECTION:'local',
-    MODEL_API_KEY:'test', MODEL_BASE_URL:'https://example.com/v1'}
+    EMBEDDING_API_KEY:'test', EMBEDDING_BASE_URL:'https://example.com/v1'}
   assert.deepEqual(requirePersonalMemory(loadSettings(local)),
     requirePersonalMemory(loadSettings({...local, MEMORY_PROVIDER:'voicemem'})))
   assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION:'disabled'})), null)
@@ -771,7 +775,7 @@ test('memory connection separates local provider selection from remote engine ow
 })
 
 test('default memory config resolves the v0.3 ledger without opt-in and allows explicit disable', () => {
-  const config = requirePersonalMemory(loadSettings({MODEL_API_KEY: 'test'}))
+  const config = requirePersonalMemory(loadSettings({DASHSCOPE_API_KEY: 'test'}))
   assert.ok(config?.connection === 'local')
   assert.equal(config.provider, 'voicemem')
   assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'disabled'})), null)
@@ -849,3 +853,21 @@ test('daily memory consolidation uses a validated configurable hour and timezone
   assert.equal(loadSettings({PROMPT_LANGUAGE:'zh-CN',NEWS_LANGUAGE:'en'}).news_language,'en')
   assert.equal(loadSettings({}).news_language,'en')
  })
+
+
+test('DeepSeek defaults keep Qwen embedding credentials and endpoints isolated', () => {
+  const settings = loadSettings({DEEPSEEK_API_KEY: 'text-only', DASHSCOPE_API_KEY: 'embedding-only'})
+  assert.equal(settings.model_base_url, DEEPSEEK_BASE_URL)
+  for (const model of [settings.fast_model, settings.support_model, settings.compressor_model]) assert.equal(model, 'deepseek-flash')
+  assert.equal(resolveModelApiKey(settings), 'text-only')
+  assert.deepEqual(resolveEmbeddingConnection(settings), {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'embedding-only'})
+  const memory = requirePersonalMemory(settings)
+  assert.ok(memory?.connection === 'local')
+  assert.deepEqual(memory.extraction, {baseUrl: DEEPSEEK_BASE_URL, apiKey: 'text-only'})
+  assert.equal(memory.embedding.apiKey, 'embedding-only')
+  assert.equal(memory.embedding.model, 'text-embedding-v4')
+  assert.equal(resolveModelApiKey(loadSettings({DASHSCOPE_API_KEY: 'embedding-only'})), null)
+  assert.equal(requirePersonalMemory(loadSettings({DEEPSEEK_API_KEY: 'text-only'})), null)
+  assert.equal(resolveEmbeddingConnection(loadSettings({DASHSCOPE_API_KEY: 'secret', EMBEDDING_BASE_URL: 'https://custom.invalid/v1'})).apiKey, '')
+  assert.equal(resolveModelApiKey(loadSettings({DEEPSEEK_API_KEY: 'secret', MODEL_BASE_URL: 'https://custom.invalid/v1'})), null)
+})

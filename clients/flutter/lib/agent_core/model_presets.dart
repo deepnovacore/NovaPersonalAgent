@@ -83,7 +83,7 @@ const modelPresets = <ModelPreset>[
     id: 'deepseek',
     name: 'DeepSeek',
     endpoint: 'https://api.deepseek.com',
-    recommendedModels: ['deepseek-chat', 'deepseek-reasoner'],
+    recommendedModels: ['deepseek-flash'],
     keyUrl: 'https://platform.deepseek.com/api_keys',
   ),
   ModelPreset(

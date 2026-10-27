@@ -113,7 +113,7 @@ test('knowledge without its embedding credential is reported off instead of fail
   const cascaded = loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'd', DOUBAO_BIGMODEL_API_KEY: 'v'})
   assert.equal(missingKnowledgeCredential(cascaded), 'DASHSCOPE_API_KEY')
   assert.equal(missingKnowledgeCredential(loadSettings({DASHSCOPE_API_KEY: 'k'})), null)
-  assert.equal(missingKnowledgeCredential(loadSettings({MODEL_BASE_URL: 'https://models.example/v1'})), 'MODEL_API_KEY')
+  assert.equal(missingKnowledgeCredential(loadSettings({EMBEDDING_BASE_URL: 'https://models.example/v1'})), 'EMBEDDING_API_KEY')
   assert.deepEqual(withoutUncredentialedModules(registry, cascaded).modules.knowledge, {enabled: false, exposeToCodex: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})
   assert.equal(withoutUncredentialedModules(registry, loadSettings({DASHSCOPE_API_KEY: 'k'})), registry)
 })
