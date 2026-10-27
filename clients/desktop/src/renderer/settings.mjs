@@ -12,6 +12,7 @@ import {createImPanel} from './im-panel.mjs'
 import {createConnectionsPanel} from './connections-panel.mjs'
 import {createProactivityPanel, memoryEmbeddingNote} from './proactivity-panel.mjs'
 import {t, currentLanguage} from './locale.mjs'
+import {readDisplayPreferences, subscribeDisplayPreferences, writeDisplayPreferences} from './view-preferences.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
 import {createHubPanel} from './hub-panel.mjs'
@@ -193,6 +194,21 @@ const cascadedTtsProvider = document.querySelector('#cascadedTtsProvider')
 const cascadedTtsVoicePreset = document.querySelector('#cascadedTtsVoicePreset')
 const cascadedTtsVoiceCustom = document.querySelector('#cascadedTtsVoiceCustom')
 const clarificationDepth = document.querySelector('#clarificationDepth')
+const displaySteps = document.querySelector('#display-steps')
+const displayCollapse = document.querySelector('#display-collapse')
+const buildReasoningInput = document.querySelector('#buildReasoning')
+
+// Display preferences are per-machine UI state, not host settings: they take
+// effect at once and never join the save payload. The settings window is the
+// writer; an open workbench follows the storage event or the same-window event.
+function renderDisplayPreferences(preferences) {
+  displaySteps.value = preferences.steps
+  displayCollapse.value = preferences.collapse
+}
+renderDisplayPreferences(readDisplayPreferences())
+subscribeDisplayPreferences(renderDisplayPreferences)
+displaySteps.addEventListener('change', () => writeDisplayPreferences({steps: displaySteps.value}))
+displayCollapse.addEventListener('change', () => writeDisplayPreferences({collapse: displayCollapse.value}))
 
 const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelector(`#category-${category.id}`))
 let activeCategory = SETTINGS_CATEGORIES[0].id
@@ -547,6 +563,7 @@ function render(view, drafts, state) {
     input.checked = input.value === view.codexApprovalMode
   }
   generatePlanInput.checked = view.generatePlan !== false
+  buildReasoningInput.checked = view.buildReasoning === true
   profileParticipantMessagesInput.checked = view.profileParticipantMessages === true
   for (const input of planReadbackInputs) input.checked = input.value === view.planReadback
   for (const input of progressBubblesInputs) input.checked = input.value === view.progressBubbles
@@ -730,6 +747,7 @@ for (const input of codexApprovalModeInputs) {
   bindStage(input, 'change', () => ({codexApprovalMode: input.value}))
 }
 bindStage(generatePlanInput, 'change', () => ({generatePlan: generatePlanInput.checked}))
+bindStage(buildReasoningInput, 'change', () => ({buildReasoning: buildReasoningInput.checked}))
 bindStage(profileParticipantMessagesInput, 'change', () => ({profileParticipantMessages: profileParticipantMessagesInput.checked}))
 for (const input of planReadbackInputs) bindStage(input, 'change', () => ({planReadback: input.value}))
 for (const input of progressBubblesInputs) {

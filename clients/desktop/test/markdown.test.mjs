@@ -147,3 +147,19 @@ test('a bare URL ends at full-width punctuation so Chinese sentences do not leak
  const root=render('详见 https://x.io/y。然后继续',()=>{})
  assert.equal(all(root).filter(n=>n.text!==undefined&&n.tag==='#text').map(n=>n.text).join(''),'详见 。然后继续','the punctuation stays as text after the link')
 })
+
+test('bare URLs end before Han, Hiragana and Katakana text instead of swallowing it',()=>{
+ const opened=[]
+ for(const [text,url,tail] of [
+  ['打开https://example.com/a然后继续','https://example.com/a','然后继续'],
+  ['見てhttps://example.com/bください','https://example.com/b','ください'],
+  ['ミテhttps://example.com/cミテ','https://example.com/c','ミテ'],
+ ]){
+  const root=render(text,value=>opened.push(value))
+  const button=all(root).find(node=>node.tag==='button')
+  assert.equal(button.dataset.url,url,text)
+  assert.equal(button.textContent,url)
+  assert.ok(root.text.includes(tail),`${text} keeps ${tail} outside the link: ${root.text}`)
+ }
+ assert.deepEqual(opened,[])
+})

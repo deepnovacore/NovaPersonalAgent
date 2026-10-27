@@ -61,7 +61,8 @@ function inline(text,ctx,depth=0){
   }
   if((text.startsWith('http://',i)||text.startsWith('https://',i))&&!/[A-Za-z0-9_]$/.test(text.slice(Math.max(0,i-1),i))){
    let end=i,balance=0
-   while(end<text.length&&!/[\s<>"'，。、；：！？（）「」『』《》【】“”‘’]/u.test(text[end])){if(text[end]==='(')balance++;else if(text[end]===')')balance--;end++}
+   // CJK scripts end a bare URL too: `打开https://example.com/a然后继续` must not swallow 然后继续.
+   while(end<text.length&&!/[\s<>"'，。、；：！？（）「」『』《》【】“”‘’]|\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}/u.test(text[end])){if(text[end]==='(')balance++;else if(text[end]===')')balance--;end++}
    const scanned=end
    while(end>i&&(/[.,;:!?]/.test(text[end-1])||(text[end-1]===')'&&balance<0))){if(text[end-1]===')')balance++;end--}
    const raw=text.slice(i,end),url=safeLinkUrl(raw)

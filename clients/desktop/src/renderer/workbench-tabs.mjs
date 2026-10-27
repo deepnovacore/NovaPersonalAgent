@@ -33,5 +33,7 @@ export function mountWorkspaceTabs(root,{document=globalThis.document,onSelect})
  root.append(nav)
  function select(id){const changed=active!==id;active=id;for(const [key,b]of buttons){const current=key===id;b.setAttribute('aria-current',String(current));b.setAttribute('aria-selected',String(current));b.tabIndex=current?0:-1}if(changed)buttons.get(id)?.scrollIntoView?.({block:'nearest',inline:'nearest'})}
  function badge(id,count){const node=badges.get(id);if(!node)return;node.hidden=!count;node.textContent=count?String(count):''}
- return {select,badge,get active(){return active},element:nav}
+ /** A pending indicator belongs to the tab itself (for example an unpublished plan preview waiting on Tasks). */
+ function pending(id,value){const node=buttons.get(id);if(!node)return;if(value)node.dataset.plan='true';else delete node.dataset.plan}
+ return {select,badge,pending,get active(){return active},element:nav}
 }

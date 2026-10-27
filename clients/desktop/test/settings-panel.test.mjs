@@ -3,7 +3,7 @@ import * as compatibleProviders from '../src/renderer/compatible-providers.mjs'
 import * as voicePreset from '../src/renderer/voice-preset.mjs'
 import {onButton} from '../src/renderer/button-action.mjs'
 import {createStartupNotice, startupMessage} from '../src/renderer/startup-notice.mjs'
-import {t, localizeDocument, currentLanguage} from '../src/renderer/locale.mjs'
+import {t, setLanguage, localizeDocument, currentLanguage} from '../src/renderer/locale.mjs'
 import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
 import assert from 'node:assert/strict'
@@ -16,6 +16,7 @@ import {createSecretRevisions} from '../src/renderer/secret-revisions.mjs'
 import * as voiceChoice from '../src/renderer/voice-choice.mjs'
 import {moduleStatusNote} from '../src/renderer/capabilities-editor.mjs'
 import {memoryEmbeddingNote} from '../src/renderer/proactivity-panel.mjs'
+import * as viewPreferences from '../src/renderer/view-preferences.mjs'
 const { createSettingsController, mergePatch, settingsButtonState } = settingsController
 
 const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
@@ -63,7 +64,7 @@ function publicView(overrides = {}) {
 
 // Execute the panel's actual event handlers and render path, replacing only
 // DOM surfaces and unrelated child panels; controller and value helpers are real.
-async function mountSettingsPanel(initialView, apiOverrides = {}) {
+async function mountSettingsPanel(initialView, apiOverrides = {}, sandbox = {}) {
   const nodes = new Map()
   function node(selector) {
     if (!nodes.has(selector)) nodes.set(selector, {
@@ -79,7 +80,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    NATIVE_VOICE_PROVIDERS, onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage, moduleStatusNote,
+    ...sandbox, NATIVE_VOICE_PROVIDERS, onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, ...viewPreferences, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage, moduleStatusNote,
     createSkinPanel: () => ({render() {}, destroy() {}}),
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
@@ -746,6 +747,131 @@ test('plan generation checkbox renders the persisted value and saves explicit fa
   assert.equal(panel.node('#generatePlan').checked, false)
   panel.push(publicView({generatePlan: true}))
   assert.equal(panel.node('#generatePlan').checked, true)
+})
+
+test('the display section offers step density, collapse timing and the Build reasoning switch', () => {
+  const section = html.match(/<section[^>]*id="display-section"[^>]*>([\s\S]*?)<\/section>/)?.[1]
+  assert.ok(section, 'display section exists')
+  assert.match(section, /<h2>显示<\/h2>/)
+  for (const [id, values] of [
+    ['display-steps', ['compact', 'standard', 'detailed']],
+    ['display-collapse', ['after_reply', 'manual']],
+  ]) {
+    assert.match(section, new RegExp(`<select id="${id}">`))
+    for (const value of values) assert.match(section, new RegExp(`<option value="${value}"`))
+  }
+  assert.match(section, /<option value="standard" selected>标准<\/option>/)
+  assert.match(section, /<option value="after_reply" selected>回答结束后<\/option>/)
+  assert.match(section, /<input type="checkbox" role="switch" id="buildReasoning" aria-describedby="build-reasoning-hint">/)
+  assert.match(section, /模型思考（Build）/)
+  assert.match(section, /可能增加等待时间和模型用量/)
+  const general = settingsCategories.SETTINGS_CATEGORIES.find(category => category.id === 'general')
+  assert.equal(general.sections.at(-1), 'display-section', 'appended to the general category')
+  assert.ok(general.sections.includes('language-section'), 'existing sections stay')
+  for (const category of settingsCategories.SETTINGS_CATEGORIES.filter(category => category.id !== 'general')) {
+    assert.equal(category.sections.includes('display-section'), false)
+  }
+})
+
+test('display preferences stay local, write immediately and never enter the settings payload', async () => {
+  const entries = new Map()
+  const localStorage = {
+    getItem(key) { return entries.has(key) ? entries.get(key) : null },
+    setItem(key, value) { entries.set(key, String(value)) },
+  }
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', {value: localStorage, configurable: true, writable: true})
+  const patches = []
+  try {
+  const panel = await mountSettingsPanel(publicView({buildReasoning: false}), {
+    set: async ({settingsPatch}) => {
+      patches.push(settingsPatch)
+      return publicView({...settingsPatch, settingsApplyStatus: 'applied'})
+    },
+  })
+  assert.equal(panel.node('#display-steps').value, 'standard')
+  assert.equal(panel.node('#display-collapse').value, 'after_reply')
+  assert.equal(panel.node('#buildReasoning').checked, false)
+
+  panel.node('#display-steps').value = 'detailed'
+  panel.node('#display-steps').listeners.change()
+  assert.deepEqual(JSON.parse(entries.get('nova.workbench.display')), {steps: 'detailed', collapse: 'after_reply'})
+  assert.equal(panel.node('#settings-save').disabled, true, 'a display preference is not a settings draft')
+
+  panel.node('#display-collapse').value = 'manual'
+  panel.node('#display-collapse').listeners.change()
+  assert.deepEqual(JSON.parse(entries.get('nova.workbench.display')), {steps: 'detailed', collapse: 'manual'})
+  assert.equal(panel.node('#settings-save').disabled, true)
+
+  panel.node('#buildReasoning').checked = true
+  panel.node('#buildReasoning').listeners.change()
+  assert.equal(panel.node('#settings-save').disabled, false, 'the reasoning switch is a saved setting')
+  panel.click('#settings-save')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(patches.length, 1)
+  assert.equal(patches[0].buildReasoning, true)
+  assert.deepEqual(Object.keys(patches[0]), ['buildReasoning'], 'display preferences never join the save payload')
+
+  panel.push(publicView({buildReasoning: true}))
+  assert.equal(panel.node('#buildReasoning').checked, true)
+  panel.push(publicView({buildReasoning: false}))
+  assert.equal(panel.node('#buildReasoning').checked, false)
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous)
+    else delete globalThis.localStorage
+  }
+})
+
+test('every page loads the shared controls stylesheet before its own stylesheet', async () => {
+  const controlsCss = await readFile(new URL('../src/renderer/controls.css', import.meta.url), 'utf8')
+  assert.match(controlsCss, /--control-height:\s*36px/)
+  assert.match(controlsCss, /--control-radius:\s*10px/)
+  assert.match(controlsCss, /border-radius:\s*var\(--control-radius\)/)
+  assert.match(controlsCss, /data:image\/svg\+xml/)
+  assert.match(controlsCss, /select:hover:not\(:disabled\)/)
+  assert.match(controlsCss, /select:focus-visible/)
+  assert.match(controlsCss, /select:disabled/)
+  assert.match(controlsCss, /select option/)
+  assert.match(controlsCss, /@media \(forced-colors: active\)/)
+  assert.match(controlsCss, /@media \(prefers-color-scheme: dark\)/)
+  for (const [page, pageCss] of [
+    ['index.html', 'index.css'],
+    ['settings.html', 'settings.css'],
+    ['setup.html', 'setup.css'],
+  ]) {
+    const source = await readFile(new URL(`../src/renderer/${page}`, import.meta.url), 'utf8')
+    const controls = source.indexOf('<link rel="stylesheet" href="./controls.css">')
+    const own = source.indexOf(`<link rel="stylesheet" href="./${pageCss}">`)
+    assert.ok(controls >= 0, `${page} loads controls.css`)
+    assert.ok(own > controls, `${page} loads controls.css before ${pageCss}`)
+  }
+  // The duplicate late select geometry in settings.css is gone; the shared file owns it.
+  assert.doesNotMatch(css, /^select\{/m)
+  assert.doesNotMatch(css, /select option\{/m)
+})
+
+test('the settings rail, section cards and preference rows follow one pattern', () => {
+  assert.match(css, /\.settings-nav \.nav-item \{[^}]*height:\s*40px[^}]*border-radius:\s*10px/)
+  assert.match(css, /\.settings-nav \.nav-item\[aria-current="true"\] \{[^}]*background:\s*var\(--nav-active\)/)
+  assert.match(css, /\.setting-section,[\s\S]*?border:\s*1px solid var\(--line\)/)
+  assert.match(css, /\.setting-section > h2 \{[^}]*font-size:\s*14px[^}]*font-weight:\s*600/)
+  assert.match(css, /\.field \{[^}]*display:\s*grid[^}]*grid-template-areas/s)
+  assert.match(css, /\.field-stacked/)
+  assert.match(css, /\.field > small,[\s\S]*?grid-area:\s*hint/)
+  assert.match(css, /\.toggle-row \{[^}]*justify-content:\s*space-between/)
+  assert.match(css, /\.toggle-copy/)
+  assert.match(css, /@container \(max-width: 760px\)/)
+})
+
+test('the display section translations cover every visible string', async context => {
+  const section = html.match(/<section[^>]*id="display-section"[^>]*>([\s\S]*?)<\/section>/)?.[1]
+  assert.ok(section)
+  setLanguage('en'); context.after(() => setLanguage('zh-CN'))
+  const texts = [...section.matchAll(/>([^<>]+)</g)].map(match => match[1].trim())
+  const attributes = [...section.matchAll(/(?:title|aria-label)="([^"]+)"/g)].map(match => match[1])
+  for (const source of [...texts, ...attributes].filter(value => /\p{Script=Han}/u.test(value))) {
+    assert.doesNotMatch(t(source), /\p{Script=Han}/u, source)
+  }
 })
 
 test('automatic discovery hides manual Codex and Projects configuration', () => {
