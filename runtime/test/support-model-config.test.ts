@@ -12,7 +12,7 @@ test('removed SURROGATE_MODEL cannot override the support model or its default',
  const explicit=loadSettings({SUPPORT_MODEL:'new-model',SURROGATE_MODEL:'old-model'})
  assert.equal(explicit.support_model,'new-model')
  const legacy=loadSettings({SURROGATE_MODEL:'old-model'})
- assert.equal(legacy.support_model,'qwen-plus')
+ assert.equal(legacy.support_model,'deepseek-flash')
 })
 test('a leftover SURROGATE_MODEL produces one rename warning, even when empty',()=>{
  for(const value of ['old-model',''])

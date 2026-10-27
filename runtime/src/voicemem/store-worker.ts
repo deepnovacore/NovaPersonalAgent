@@ -47,6 +47,7 @@ interface WorkerData {
   readonly path: string
   readonly userId: string
   readonly embedding: PersonalMemoryEmbeddingConfig
+  readonly extraction?: {readonly baseUrl: string; readonly apiKey: string}
   readonly extractionModel?: string
 }
 
@@ -117,7 +118,7 @@ function open(): VoiceMemOpenResult {
       path,
       userId: data.userId,
       model: data.extractionModel === undefined ? inertTextModel : new OpenAITextModel({
-        baseUrl:data.embedding.baseUrl,apiKey:data.embedding.apiKey,model:data.extractionModel,
+        baseUrl:(data.extraction??data.embedding).baseUrl,apiKey:(data.extraction??data.embedding).apiKey,model:data.extractionModel,
       }),
       embeddings: new OpenAIEmbeddingModel({
         baseUrl: data.embedding.baseUrl,
@@ -300,15 +301,17 @@ const inertTextModel: TextModel = {
 }
 
 function parseWorkerData(value: unknown): WorkerData {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['path', 'userId', 'embedding', 'extractionModel']) || !nonempty(value.path, 4_096) || !nonempty(value.userId, 256)
+  if (!isRecord(value) || !hasOnlyKeys(value, ['path', 'userId', 'embedding', 'extractionModel', 'extraction']) || !nonempty(value.path, 4_096) || !nonempty(value.userId, 256)
     || !isRecord(value.embedding) || !nonempty(value.embedding.baseUrl, 2_048)
     || !nonempty(value.embedding.apiKey, 4_096) || !nonempty(value.embedding.model, 256)
     || !hasOnlyKeys(value.embedding, ['baseUrl', 'apiKey', 'model', 'dimensions'])
     || (value.embedding.dimensions !== undefined && (!positiveInteger(value.embedding.dimensions) || value.embedding.dimensions > 4_096))
+    || (value.extraction !== undefined && (!isRecord(value.extraction) || !hasOnlyKeys(value.extraction, ['baseUrl', 'apiKey']) || !nonempty(value.extraction.baseUrl, 2048) || typeof value.extraction.apiKey !== 'string' || value.extraction.apiKey.length > 4096))
     || (value.extractionModel !== undefined && !nonempty(value.extractionModel,256))) {
     throw new Error('invalid personal memory worker data')
   }
   return {
+    ...(value.extraction === undefined ? {} : {extraction: {baseUrl: value.extraction.baseUrl as string, apiKey: value.extraction.apiKey as string}}),
     path: value.path,
     userId: value.userId,
     embedding: {

@@ -1,7 +1,7 @@
 import type {UsageContext} from '../usage/context.js'
 import {soulRoleContext} from './soul-context.js'
 import {acceptanceReadExistingOnly} from '../desktop/workbench-acceptance.js'
-import {resolveModelApiKey} from '../config/config.js'
+import {resolveModelApiKey, resolveEmbeddingConnection} from '../config/config.js'
 import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import {admitIntakeTask} from '../personal-agent/intake-task.js'
@@ -75,7 +75,7 @@ import type {CoordinatorDecision} from '../executors/coding-executor.js'
 const USER_AWAITED_TOOL = {kind: 'realtime_tool', priority: USER_PRIORITY, routing_class: 'user_awaited', origin: null, selected_suggestion: null} as const
 import {intakeModels, type IntakeModels} from '../executors/coding/intake-model.js'
 import type {IntakeAdmission, IntakeOptions, IntakeSettings, IntakeSession} from '../executors/coding/intake.js'
-import {OpenAIModelGateway,type OpenAIGatewayOptions,type ModelGateway} from '../model/model-gateway.js'
+import {unconfiguredModelGateway,OpenAIModelGateway,type OpenAIGatewayOptions,type ModelGateway} from '../model/model-gateway.js'
 import {RealClock} from '../core/clock.js'
 import type {PersonalMemoryResource} from '../memory/personal-memory.js'
 
@@ -1449,17 +1449,18 @@ export function composeRealtime(
   options: Omit<RealtimeAssemblyOptions, 'core' | 'provider' | 'idFactory'> & {readonly settings: AssemblyOptions['settings']; readonly idFactory: () => string},
   providerTuning: Required<Pick<RealtimeAssemblyOptions, 'controlledPreemptiveAlertReconnect' | 'preemptiveAlertHistoryRecovery' | 'preemptiveAlertHistoryPairs'>>,
 ): RealtimeAssembly {
-  const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
+  const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;extraction?:{baseUrl:string;apiKey:string};embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
   let sharedClient: MemoryLedgerClient | undefined
   const getClient = () => sharedClient ??= new MemoryLedgerClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
-  const memoryGateway=local?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,clock:new RealClock()}):core.gateway
+  const extraction=local?.extraction??{baseUrl:options.settings.model_base_url,apiKey:resolveModelApiKey(options.settings)??''}
+  const memoryGateway=local?(extraction.apiKey.trim()?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),...extraction,clock:new RealClock()}):unconfiguredModelGateway):core.gateway
   const useLocalLedger=local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
   const createPersonalMemory = useLocalLedger ? () => {
     const memory = new SubstrateMemoryResource({client:getClient(),userId:local?.userId??options.settings.memory_user_id,
-      ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?options.settings.model_base_url:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
-      sourceProcessingLlm:{baseUrl:local?.embedding.baseUrl??options.settings.model_base_url,apiKey:local?.embedding.apiKey??resolveModelApiKey(options.settings)??''},
-      extractionFingerprint:embeddingHash('sha256').update((local?.embedding.baseUrl??options.settings.model_base_url)+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
+      ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?resolveEmbeddingConnection(options.settings).baseUrl:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
+      sourceProcessingLlm:extraction,
+      extractionFingerprint:embeddingHash('sha256').update(extraction.baseUrl+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
       personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,profileParticipantMessages:options.settings.profile_participant_messages,
       conversationProviders: [...new Set([...(['text','voice'] as const).map(mode=>configuredMemoryConsumer(options.settings,mode)).filter((value): value is string=>value!==undefined),configuredTaskVerifierConsumer(options.settings)])],
       conversationRecipients:Object.fromEntries((['text','voice'] as const).flatMap(mode=>{const recipient=configuredMemoryRecipient(options.settings,mode);return recipient?[[recipient.consumer,recipient.provider]]:[]})),

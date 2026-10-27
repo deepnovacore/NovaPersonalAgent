@@ -57,10 +57,7 @@ export const RUNTIME_DEFAULTS = Object.freeze({
 // clear it.
 export const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 
-// Old quick-start profiles stored the cascaded default without its credential.
-export function selectedTextLlmProvider(settings, secretsPresent = {}) {
-  const provider = settings?.cascadedLlmProvider ?? RUNTIME_DEFAULTS.cascadedLlmProvider
-  const configured = provider === 'self-hosted' ? Boolean(settings?.selfHostedLlmBaseUrl)
-    : secretsPresent[provider === 'openai-compatible' ? 'openaiCompatibleApiKey' : provider === 'qwen' ? 'dashscopeApiKey' : `${provider}ApiKey`] === true
-  return settings?.pipelineMode === 'integrated' && !configured ? 'qwen' : provider
+// Missing credentials must not silently select a different paid provider.
+export function selectedTextLlmProvider(settings, _secretsPresent = {}) {
+  return settings?.cascadedLlmProvider ?? RUNTIME_DEFAULTS.cascadedLlmProvider
 }

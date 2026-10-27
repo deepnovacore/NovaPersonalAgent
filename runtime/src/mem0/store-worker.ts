@@ -7,7 +7,7 @@ import {Memory} from 'mem0ai/oss'
 import {PrivateDatabaseError, preparePrivateDatabasePath, secureSidecar} from '../storage/private-database.js'
 import type {PersonalMemoryEmbeddingConfig, VoiceMemRecallHit, VoiceMemRecallResult} from '../voicemem/store-client.js'
 
-interface Data {path: string; userId: string; embedding: PersonalMemoryEmbeddingConfig; extractionModel?: string}
+interface Data {path: string; userId: string; embedding: PersonalMemoryEmbeddingConfig; extractionModel?: string; extraction?: {baseUrl: string; apiKey: string}}
 interface Source {id: string; payload: string; state: 'pending' | 'learned' | 'forgotten'; recorded_at: string; cleaned: number}
 type Request = Record<string, unknown> & {kind: 'request'; request_id: number; operation: 'open' | 'recall' | 'remember' | 'forget' | 'inspect' | 'close'}
 class StoreError extends Error {constructor(readonly code: string) {super(code)}}
@@ -115,7 +115,7 @@ function open() {
       disableHistory: true,
       embedder: {provider: 'openai', config: {baseURL: data.embedding.baseUrl, apiKey: data.embedding.apiKey,
         model: data.embedding.model, ...(data.embedding.dimensions === undefined ? {} : {embeddingDims: data.embedding.dimensions})}},
-      llm: {provider: 'openai', config: {baseURL: data.embedding.baseUrl, apiKey: data.embedding.apiKey,
+      llm: {provider: 'openai', config: {baseURL: (data.extraction??data.embedding).baseUrl, apiKey: (data.extraction??data.embedding).apiKey,
         model: data.extractionModel ?? 'unused', timeout: 30_000}},
       vectorStore: {provider: 'memory', config: {dbPath: join(data.path, 'vectors.db'), collectionName: 'nova_personal',
         ...(data.embedding.dimensions === undefined ? {} : {dimension: data.embedding.dimensions})}},
@@ -252,12 +252,13 @@ async function deleteDerived(opened: Memory, id: string) {
 }
 
 function parseData(value: unknown): Data {
-  if (!record(value) || !keys(value, ['path', 'userId', 'embedding', 'extractionModel'])
+  if (!record(value) || !keys(value, ['path', 'userId', 'embedding', 'extractionModel', 'extraction'])
     || !text(value.path, 4096) || !isAbsolute(value.path) || resolve(value.path) !== value.path
     || !text(value.userId, 256) || value.userId === '*' || /\s/u.test(value.userId)
     || !record(value.embedding) || !keys(value.embedding, ['baseUrl', 'apiKey', 'model', 'dimensions'])
     || !text(value.embedding.baseUrl, 2048) || !text(value.embedding.apiKey, 4096) || !text(value.embedding.model, 256)
     || (value.embedding.dimensions !== undefined && (!positive(value.embedding.dimensions) || value.embedding.dimensions > 4096))
+    || (value.extraction !== undefined && (!record(value.extraction) || !keys(value.extraction, ['baseUrl', 'apiKey']) || !text(value.extraction.baseUrl, 2048) || !boundedText(value.extraction.apiKey, 4096)))
     || (value.extractionModel !== undefined && !text(value.extractionModel, 256))) throw new Error('invalid mem0 Worker data')
   return value as unknown as Data
 }

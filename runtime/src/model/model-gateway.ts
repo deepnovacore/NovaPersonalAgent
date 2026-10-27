@@ -266,7 +266,7 @@ export class OpenAIModelGateway implements ModelGateway {
     this.#metrics = options.metrics ?? new LoggingMetrics()
     this.#fetch = options.fetch ?? globalThis.fetch
     // The official DashScope endpoint has a known protocol, even when selected through MODEL_BASE_URL.
-    this.#thinkingControl = options.thinkingControl ?? (new URL(this.#endpoint).hostname==='dashscope.aliyuncs.com'?'qwen':undefined)
+    this.#thinkingControl = options.thinkingControl ?? (new URL(this.#endpoint).hostname==='dashscope.aliyuncs.com'?'qwen':new URL(this.#endpoint).hostname==='api.deepseek.com'?'deepseek':undefined)
     this.#requestTimeout = options.requestTimeout ?? 120
     this.#streamIdleTimeout = options.streamIdleTimeout ?? 600
     if (!Number.isFinite(this.#streamIdleTimeout) || this.#streamIdleTimeout <= 0) {

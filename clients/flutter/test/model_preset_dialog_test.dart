@@ -88,7 +88,7 @@ void main() {
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(models.last?['endpoint'], 'https://api.deepseek.com');
-    expect(models.last?['model'], 'deepseek-chat');
+    expect(models.last?['model'], 'deepseek-flash');
     expect(models.last?['key'], 'sk-2');
   });
 
