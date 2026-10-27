@@ -920,3 +920,29 @@ test('memory status names a missing extraction credential instead of reporting e
   const noEmbedding = loadSettings({DEEPSEEK_API_KEY: 'text'})
   assert.deepEqual(memoryStatus(noEmbedding), {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY', fallback: null})
 })
+
+test('memory extraction stays on a selected keyless local gateway', () => {
+  const settings = loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'self-hosted',
+    CASCADE_LLM_MODEL: 'local-model', SELF_HOSTED_LLM_BASE_URL: 'http://127.0.0.1:11434/v1',
+    MEMORY_CONNECTION: 'local', EMBEDDING_API_KEY: 'embed', EMBEDDING_BASE_URL: 'https://e.example/v1',
+    DASHSCOPE_API_KEY: 'dash'})
+  const extraction = resolveMemoryExtractionConnection(settings)
+  assert.equal(extraction.baseUrl, 'http://127.0.0.1:11434/v1')
+  assert.equal(extraction.apiKey, '')
+  assert.equal(extraction.model, 'local-model')
+  assert.equal(extraction.missing, null)
+  assert.equal(memoryStatus(settings).enabled, true)
+  assert.ok(requirePersonalMemory(settings)?.connection === 'local')
+  const explicit = loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'self-hosted',
+    CASCADE_LLM_MODEL: 'local-model', FAST_MODEL: 'qwen-flash',
+    SELF_HOSTED_LLM_BASE_URL: 'https://gw.example/v1', SELF_HOSTED_LLM_API_KEY: 'gateway'})
+  assert.equal(resolveMemoryExtractionConnection(explicit).model, 'qwen-flash')
+  assert.equal(resolveMemoryExtractionConnection(explicit).baseUrl, 'https://gw.example/v1')
+})
+
+test('memory status reports an invalid endpoint instead of throwing during composition', () => {
+  const settings = loadSettings({MEMORY_CONNECTION: 'local', EMBEDDING_API_KEY: 'embed',
+    EMBEDDING_BASE_URL: 'https://e.example/v1', MODEL_API_KEY: 'gateway',
+    MODEL_BASE_URL: 'http://127.0.0.1:11434/v1'})
+  assert.deepEqual(memoryStatus(settings), {enabled: false, reason: 'invalid_configuration', fallback: null})
+})
