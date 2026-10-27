@@ -508,3 +508,14 @@ test('an empty final caption retracts the live caption of that turn so a discard
  m.view.receive(caption('',true));await tick()
  assert.equal(m.all().some(n=>n.textContent==='我先帮你看一下'||n.text==='我先帮你看一下'),false,'the retracted preview is gone')
 })
+
+
+test('a long live reply keeps its opening while the separate subtitle remains short',async()=>{
+ const m=mount({defaultHome:true})
+ m.view.receive(feedState(1,'chat:main',{feed:[],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ const full='开头不能消失：'+'正文'.repeat(100)
+ m.view.receive({type:'caption',role:'assistant',text:full.slice(-160),full_text:full,conversation_id:'chat:main',turn_id:'t-long',final:false});await tick()
+ assert.ok(m.all().some(n=>n.textContent===full||n.text===full))
+ m.view.receive({type:'caption',role:'assistant',text:'',full_text:'',conversation_id:'chat:main',turn_id:'t-long',final:true});await tick()
+ assert.equal(m.all().some(n=>n.textContent===full||n.text===full),false)
+})

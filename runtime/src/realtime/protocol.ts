@@ -386,7 +386,7 @@ export const responseAudioDeltaSchema = sessionEvent(z.literal('response_audio_d
 })
 export const responseTranscriptDeltaSchema = sessionEvent(
   z.literal('response_transcript_delta'),
-  responseTextShape,
+  {...responseTextShape, full_text: boundedText().optional()},
 )
 export const MAX_REALTIME_FINAL_TRANSCRIPT_BYTES = 65536
 export const responseTranscriptFinalSchema = sessionEvent(

@@ -1099,7 +1099,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           previewLength += [...event.text].length
           if (previewLength > MAX_REALTIME_TEXT) throw new Error('LLM preview text overflow')
           preview += event.text
-          await this.#emit(owner, {kind:'response_transcript_delta',session_epoch:owner.epoch,response_id:active.id,text:event.text})
+          await this.#emit(owner, {kind:'response_transcript_delta',session_epoch:owner.epoch,response_id:active.id,text:event.text,full_text:preview})
         } else if (event.kind === 'text_delta') {
           if (toolSeen) throw new MixedResponseFailure()
           if (llmResponseId === null) throw new Error('LLM text before identity')
@@ -1129,7 +1129,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           const delta = preview ? fullText.startsWith(preview) ? fullText.slice(Math.max(preview.length, fullText.length - event.text.length)) : '' : event.text
           if (delta) await this.#emit(owner, {
             kind: 'response_transcript_delta', session_epoch: owner.epoch,
-            response_id: active.id, text: delta,
+            response_id: active.id, text: delta, ...(this.#textOnly ? {full_text:fullText} : {}),
           })
           if (active.tts !== null) for (const chunk of chunker.push(speech.push(event.text))) {
             await this.#sendTtsText(owner, active.tts, chunk)

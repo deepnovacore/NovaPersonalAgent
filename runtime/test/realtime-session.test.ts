@@ -1189,3 +1189,22 @@ test('only a host-bound scheduled activation admits tools without a user turn',a
   assert.equal(await session.accept(call),false,'late tools are still rejected')
  }
 })
+
+
+test('full text previews reach authorized captions without expanding voice subtitles', async () => {
+  const {session} = makeSession()
+  await session.connect({tools:[]})
+  await session.deliverHostItem({kind:'final',host_item_id:'h',event_id:'e',content:'ready',call_id:null})
+  await session.accept({kind:'response_started',session_epoch:1,response_id:'r'})
+  const full = '开头'+'😀'.repeat(200)
+  const event = realtimeProviderEventSchema.parse({kind:'response_transcript_delta',session_epoch:1,response_id:'r',text:full,full_text:full})
+  assert.equal(event.kind,'response_transcript_delta')
+  if(event.kind!=='response_transcript_delta')throw Error('wrong event')
+  const frame = session.captionFor(event)
+  assert.equal(frame?.full_text,full)
+  assert.equal([...frame.text].length,160)
+  assert.equal(session.captionFor({...event,session_epoch:2}),null)
+  assert.equal(session.captionFor({...event,response_id:'unowned'}),null)
+  assert.equal(realtimeProviderEventSchema.safeParse({...event,full_text:'x'.repeat(4001)}).success,false)
+  assert.equal(session.captionFor({kind:'response_transcript_final',session_epoch:1,response_id:'r',text:''})?.full_text,'')
+})

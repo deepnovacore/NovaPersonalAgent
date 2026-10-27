@@ -3047,3 +3047,20 @@ test('voice ignores speculative text and only speaks authoritative text', async 
     assert.equal(events.some(e=>e.kind==='provider_error'),false)
   }finally{await adapter.close()}
 })
+
+
+test('text-only long previews retain their opening through authoritative suffixes', async () => {
+  const opening = '开头不能消失：' + '内容😀'.repeat(70)
+  const llm = new FakeLlm([{kind:'response_started',response_id:'r'},
+    {kind:'text_preview',text:opening},{kind:'text_preview',text:'第二段'},
+    {kind:'text_delta',text:opening+'第二段！'},{kind:'response_completed',response_id:'r'}])
+  const signal = new AbortController().signal, adapter = new CascadedRealtimeAdapter({textOnly:true,llm})
+  try {
+    await adapter.connect({tools:[],signal})
+    const collecting = collectThroughTerminal(adapter,signal)
+    await adapter.submitText('test',signal)
+    const events = await settleWithin('long preview',collecting)
+    assert.deepEqual(events.filter(e=>e.kind==='response_transcript_delta').map(e=>'full_text' in e?e.full_text:undefined),
+      [opening,opening+'第二段',opening+'第二段！'])
+  } finally { await adapter.close() }
+})

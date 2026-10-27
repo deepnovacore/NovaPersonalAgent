@@ -149,7 +149,8 @@ function evidenceOccurs(evidence: string, project: string, utterances: readonly 
 }
 
 // ponytail: recognize explicit directive clauses only; uncertain paraphrases retain confirmation.
-const directiveText = (text: string): string => text.replace(/"[^"]*"|“[^”]*”|‘[^’]*’|「[^」]*」|`[^`]*`|(?<![\p{L}\p{N}])'[^']*'(?![\p{L}\p{N}])/gu, '')
+const quotedText = /"[^"]*"|“[^”]*”|‘[^’]*’|「[^」]*」|`[^`]*`|(?<![\p{L}\p{N}])'[^']*'(?![\p{L}\p{N}])/gu
+const directiveText = (text: string): string => text.replace(quotedText, '')
 const directStartRequested = (text: string): boolean => {
   const plain = directiveText(text)
   if (/[?？]|先(?:问|确认)|不允许|不准|禁止|\b(?:before|forbidden|not allowed)\b/iu.test(plain)) return false
@@ -166,7 +167,9 @@ const latestSessionDirective = (texts: readonly string[]): string => {
 }
 const continuationIntent = (texts: readonly string[]): 'none' | 'new' | 'latest' | 'unclear' => {
   const plain = latestSessionDirective(texts)
-  if (/(?:不要|别|不再|不是|不)(?:再)?继续|(?:新开|重新开|另开).{0,6}会话|新会话|\b(?:new|fresh) (?:session|thread)\b|\b(?:do not|don't) (?:continue|resume)\b/iu.test(plain)) return 'new'
+  const newSession = [...plain.matchAll(/(?:新开|重新开|另开).{0,6}会话|新会话|\b(?:new|fresh) (?:session|thread)\b/giu)]
+    .some(match => !/(?:不要|别|不允许|不准|禁止|无需|不用)(?:再)?\s*$|\b(?:no|not|never|don't|do not)(?:\s+(?:open|start|create))?\s*$/iu.test(plain.slice(0, match.index)))
+  if (newSession || /(?:不要|别|不再|不是|不)(?:再)?继续|\b(?:do not|don't) (?:continue|resume)\b/iu.test(plain)) return 'new'
   if (/继续|接着|先(?:问|确认)|不确定|\b(?:continue|resume)\b/iu.test(plain)) {
     return !/[?？]|之前|先(?:问|确认)|不允许|不确定|是否/iu.test(plain)
       && /(?:^|[，,。.!！;；\n])\s*(?:请|现在|那就)?(?:在(?:当前项目|当前工作区|本项目|这个项目)(?:里|中)?\s*)?(?:(?:继续|接着)(?=[^，,。.!！;；\n]*(?:任务|会话|工作区|项目|session\b|thread\b))|(?:continue|resume)\b)/iu.test(plain) ? 'latest' : 'unclear'
@@ -615,7 +618,9 @@ export class IntakeController {
   #namedSessionEvidence(project: string, title: string | null | undefined, current: IntakeSession): boolean {
     if (!title) return false
     const roster = this.#options.roster()
-    const evidence = [current.opening, ...current.turns.map(turn => turn.answer)].map(directiveText)
+    // Preserve an exact named title as data, without treating other quoted text as an instruction.
+    const evidence = [current.opening, ...current.turns.map(turn => turn.answer)]
+      .map(text => directiveText(text.replace(quotedText, quote => quote.slice(1, -1) === title ? title : quote)))
     const namedProject = evidence.some(text => text.includes(project))
     if (!namedProject && roster.filter(entry => entry.sessions?.includes(title)).length !== 1) return false
     const text = latestSessionDirective(evidence), index = text.indexOf(title)
@@ -625,6 +630,8 @@ export class IntakeController {
     const before = text.slice(0, index).trimEnd(), after = text.slice(index + title.length).trimStart()
     return /(?:继续|接着|\bcontinue|\bresume)\s*$/iu.test(before)
       || (/(?:在|用|使用|切换到|\bin(?: the)?)\s*$/iu.test(before) && /^(?:(?:这个)?会话|session\b)/iu.test(after))
+      || (/(?:会话|session|thread)(?:名称|名)?\s*(?:是|为|[:：])\s*$/iu.test(before)
+        && /^(?:[，,。.!！;；\n]\s*)?(?:请|现在|那就)?(?:在|用|使用)(?:这(?:一)?个|该|上述|指定的)会话(?:里|中)?(?:继续|接着)/u.test(after))
   }
 
   async #plan(snapshot: IntakeSession): Promise<void> {
