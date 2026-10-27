@@ -9,7 +9,7 @@ import {createGeminiAsrFactory,createGeminiTtsFactory} from '../realtime/cascade
 import type {GeminiSpeechConfig} from '../config/cascaded-realtime-config.js'
 import {createOpenAIWireProfile} from '../realtime/openai-wire-profile.js'
 import {GeminiLiveAdapter} from '../realtime/gemini.js'
-import {OPENAI_BASE_URL,GEMINI_BASE_URL} from '../config/config.js'
+import {OPENAI_BASE_URL,GEMINI_BASE_URL,isProviderDefaultCompressor} from '../config/config.js'
 import type {CommittedConversationPair} from '../realtime/history.js'
 import {transcribeDraft} from '../realtime/cascaded/transcribe.js'
 import type {PromptLanguage} from '../realtime/prompt-language.js'
@@ -435,7 +435,7 @@ function supportComposition(
   Object.assign(settings, {
     watch_model: watchModel,
     support_model: model,
-    compressor_model: options.settings.compressor_model === 'deepseek-flash'
+    compressor_model: isProviderDefaultCompressor(options.settings.compressor_model)
       ? model : options.settings.compressor_model,
   })
   Object.freeze(settings)
