@@ -7,7 +7,7 @@ const folderName=path=>String(path??'').split(/[\\/]+/).filter(Boolean).at(-1)??
 /** Why a Build is paused, in words the user can act on. Unknown codes stay hidden rather than leaking a raw identifier. */
 const BUILD_REASONS=Object.freeze({
  model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',
- restart_requires_resume:'重启后等待恢复',approval_denied:'你拒绝了一次操作，补充新的要求后继续',
+ restart_requires_resume:'已暂停，点击继续恢复任务',approval_denied:'你拒绝了一次操作，补充新的要求后继续',
  cleanup_unknown:'上一步的清理结果不确定，请核实后继续',outcome_unknown:'上一步的结果不确定，请核实后继续',new_user_input_received:'收到新消息，已暂停当前步骤',
 })
 

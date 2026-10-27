@@ -16,6 +16,7 @@ test('source maintenance is excluded without exposing its owned executor work',(
 })
 
 import {renderConversationTasks} from '../src/renderer/tasks-page.mjs'
+const descendants=node=>node.children.flatMap(child=>[child,...descendants(child)])
 test('conversation tasks group by recent update, exclude home/schedules, and preserve ownership badges',()=>{
  const el=(tag,text='',className='')=>({tag,textContent:text,className,children:[],dataset:{},attrs:{},append(...xs){this.children.push(...xs)},setAttribute(k,v){this.attrs[k]=v}})
  const panel=el('main'),selected=[],created=[],now=Date.parse('2026-10-26T12:00:00Z'),states={recent:{submission:true},old:{}}
@@ -24,7 +25,7 @@ test('conversation tasks group by recent update, exclude home/schedules, and pre
  renderConversationTasks(panel,{c,el,button,now})
  assert.deepEqual(panel.children.filter(n=>n.tag==='h3').map(n=>n.textContent),['近 7 天','更早'])
  const rows=panel.children.filter(n=>n.className==='conversation-task');assert.deepEqual(rows.map(n=>n.dataset.conversationId),['recent','old'])
- assert.equal(rows[0].attrs['aria-current'],'true');assert.ok(rows[0].children.some(n=>n.textContent==='待你处理'));assert.ok(rows[0].children.some(n=>n.textContent==='发送中'));assert.ok(rows[1].children.some(n=>n.textContent==='语音中'))
+ assert.equal(rows[0].attrs['aria-current'],'true');assert.ok(descendants(rows[0]).some(n=>n.textContent==='待你处理'));assert.ok(descendants(rows[0]).some(n=>n.textContent==='发送中'));assert.ok(descendants(rows[1]).some(n=>n.textContent==='语音中'))
  rows[1].click();panel.children[0].click();assert.deepEqual(selected,['old']);assert.equal(created.length,1)
 })
 
@@ -35,5 +36,15 @@ test('delegated records live under the selected conversation and open its existi
  renderConversationTasks(panel,{c,el,button,openTask:id=>opened.push(id)})
  const detail=panel.children.find(n=>n.tag==='details');assert.equal(detail.children.length,2);assert.equal(detail.children[1].textContent,'Owned record');detail.children[1].click();assert.deepEqual(opened,['ta'])
  detail.open=true;detail.listeners.toggle();assert.equal(local.taskRecordsOpen,true)
- const row=panel.children.find(n=>n.className==='conversation-task');assert.ok(row.children.some(n=>n.textContent==='待你处理'));assert.ok(row.children.some(n=>n.textContent==='Durable summary'))
+ const row=panel.children.find(n=>n.className==='conversation-task');assert.ok(descendants(row).some(n=>n.textContent==='待你处理'));assert.ok(descendants(row).some(n=>n.textContent==='Durable summary'))
+})
+
+
+test('a Build with an uncertain outcome remains actionable instead of appearing completed',()=>{
+ const el=(tag,text='',className='')=>({tag,textContent:text,className,children:[],dataset:{},append(...xs){this.children.push(...xs)},setAttribute(){}})
+ const panel=el('main'),c={connected:true,state:()=>({}),snapshot:{conversations:{items:[{id:'uncertain',kind:'build',title:'Check result',updated_at:'2026-10-27',build:{status:'outcome_unknown'}}],messages:[]}}}
+ renderConversationTasks(panel,{c,el,button:(text,_click,parent)=>{const node=el('button',text);parent.append(node);return node}})
+ const row=panel.children.find(node=>node.dataset.conversationId==='uncertain')
+ assert.ok(descendants(row).some(node=>node.textContent==='待你处理'))
+ assert.equal(descendants(row).some(node=>node.textContent==='已完成'),false)
 })

@@ -53,10 +53,11 @@ export function createBuildCallLog({c,el,changed}){
  function update(){
   const next=selection()
   if(next!==selected){selected=next;version++;loading=null;items=[];nodes.clear();groups.clear();shots.clear();loadedRevision=-1;failedRevision=-1;error=''}
-  if(c.connected&&!connected)failedRevision=-1
-  connected=c.connected
+  const ready=c.connected&&c.presentationReady!==false
+  if(ready&&!connected)failedRevision=-1
+  connected=ready
   const item=current(),revision=item?.build?.log_revision
-  if(item&&c.connected&&Number.isSafeInteger(revision)&&revision!==loadedRevision&&revision!==failedRevision&&!loading)void load(revision)
+  if(item&&ready&&Number.isSafeInteger(revision)&&revision!==loadedRevision&&revision!==failedRevision&&!loading)void load(revision)
   const active=item&&c.connected&&['running','awaiting_approval'].includes(item.build?.status)
   if(active&&!timer){timer=setInterval(()=>{for(const item of items)if(item?.state==='running'){const node=nodes.get(item.sequence);if(node)elapsed(item,node.time)}},1000);timer.unref?.()}
   else if(!active&&timer){clearInterval(timer);timer=null}

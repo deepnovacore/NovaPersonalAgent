@@ -100,3 +100,14 @@ for(const scenario of ['foreground_change','window_change','geometry_change','di
   else{await assert.rejects(connect,new RegExp(scenario==='declined'?'declined':scenario==='revoked'?'superseded':'screen_changed'));assert.equal(connects,0)}
  })
 }
+
+
+test('default primary display binds its actual identity before consent and rejects replacement',async()=>{
+ let display='7',connects=0
+ const backend={pid:1,releaseInput:()=>Promise.resolve(),close:()=>Promise.resolve(true),windowTarget:()=>Promise.resolve({target:'one',width:200,height:300}),listDisplays:()=>Promise.resolve([{id:display}]),connect:()=>{connects++;return Promise.resolve()},device:{interfaceType:'computer',size:()=>Promise.resolve({width:200,height:300}),screenshotBase64:()=>Promise.resolve(''),actionSpace:()=>[]}}
+ const config={displayId:'primary',lockRoot:'/unused',maxSteps:10,budgetMs:1000}
+ const connect=(approve:()=>Promise<boolean>)=>connectComputerDevice(backend,config,{signal:new AbortController().signal,progress:()=>{ /* no progress UI */ },foreground:()=>Promise.resolve({target:'one',width:200,height:300}),approve})
+ await connect(()=>Promise.resolve(true));assert.equal(connects,1)
+ await assert.rejects(connect(()=>{display='8';return Promise.resolve(true)}),/screen_changed/)
+ assert.equal(connects,1)
+})

@@ -1,6 +1,6 @@
 import type {ComputerSession} from '../personal-agent/computer-use/session.js'
 import type {ComputerObservation} from '../personal-agent/computer-use/contract.js'
-import type {ComputerConfig} from './computer-config.js'
+import type {ComputerDeviceConfig} from './computer-config.js'
 import type {startComputerBackend} from './computer-backend.js'
 /** Local desktop binding. No accessibility/UI control tree, only display and foreground-window metadata. */
 import type {AbstractInterface} from '@midscene/core/device'
@@ -149,6 +149,7 @@ export async function macForeground(signal: AbortSignal): Promise<Omit<ComputerT
 }
 
 export function validComputerDisplayId(value: string, platform: NodeJS.Platform = process.platform): boolean {
+  if(value==='primary')return true
   return platform === 'win32' ? /^\\\\\.\\DISPLAY[1-9]\d{0,2}$/u.test(value) : /^\d{1,10}$/u.test(value)
 }
 // Win32 identity and physical geometry only; no UIA tree or control semantics.
@@ -190,7 +191,7 @@ export async function computerForeground(signal: AbortSignal): Promise<Omit<Comp
 }
 
 /** Both planners share connection consent and target checks; callers retain their resource lease. */
-export async function connectComputerDevice(backend: Awaited<ReturnType<typeof startComputerBackend>>, config: ComputerConfig,
+export async function connectComputerDevice(backend: Awaited<ReturnType<typeof startComputerBackend>>, config: ComputerDeviceConfig,
   options: Omit<ComputerGuardOptions, 'displayId' | 'maxSteps' | 'budgetMs'> & {
     foreground?: typeof computerForeground; beforeConnect?: () => void
   }) {
@@ -198,8 +199,8 @@ export async function connectComputerDevice(backend: Awaited<ReturnType<typeof s
     options.signal.throwIfAborted()
     if (config.macWindow) return {displayId: config.displayId, ...await backend.windowTarget()}
     const displays = await backend.listDisplays()
-    if (displays.length !== 1 || displays[0]?.id !== config.displayId) throw Error('screen_changed')
-    return {displayId: config.displayId, ...await (options.foreground ?? computerForeground)(options.signal)}
+    if (displays.length !== 1 || (config.displayId!=='primary'&&displays[0]?.id !== config.displayId)) throw Error('screen_changed')
+    return {displayId: displays[0]!.id, ...await (options.foreground ?? computerForeground)(options.signal)}
   }
   const baseline = await target()
   if (!await guiApproval(options.approve('Connect', config.macWindow
@@ -207,14 +208,14 @@ export async function connectComputerDevice(backend: Awaited<ReturnType<typeof s
     : {displayId: config.displayId, mode:'activated', healthCheck: 'moves and restores pointer'}), options.signal)) throw Error('declined')
   const approved = await target()
   // Whole-screen consent binds the display; the first screenshot binds the input target.
-  if (approved.width !== baseline.width || approved.height !== baseline.height
+  if (approved.displayId !== baseline.displayId || approved.width !== baseline.width || approved.height !== baseline.height
     || (config.macWindow && approved.target !== baseline.target)) throw Error('screen_changed')
   options.signal.throwIfAborted()
   options.beforeConnect?.()
   await backend.connect()
   const size = await backend.device.size()
   if (size.width !== baseline.width || size.height !== baseline.height) throw Error('screen_changed')
-  return guardComputerDevice(backend.device, target, {...options, displayId: config.displayId,
+  return guardComputerDevice(backend.device, target, {...options, displayId: baseline.displayId,
     maxSteps: config.maxSteps, budgetMs: config.budgetMs})
 }
 

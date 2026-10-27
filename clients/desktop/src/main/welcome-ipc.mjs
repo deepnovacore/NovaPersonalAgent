@@ -2,7 +2,7 @@ import {readFile,stat} from 'node:fs/promises'
 import {createWelcomeStore,validateWelcomePatch} from './welcome-store.mjs'
 import {readDesktopPermissions,requestDesktopPermission} from './desktop-permissions.mjs'
 /** Only the two application-owned main frames can read or edit this local profile. */
-export function installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,windows,environment,backendReady}){
+export function installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,screen,windows,environment,backendReady}){
  const store=createWelcomeStore(app.getPath('userData')+'/welcome-profile.json')
  let defaultImage
  const avatar=()=>defaultImage??=readFile(new URL('./nova-avatar.png',import.meta.url)).then(bytes=>'data:image/png;base64,'+bytes.toString('base64'))
@@ -11,7 +11,7 @@ export function installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferen
   if(!window||event.senderFrame!==event.sender.mainFrame)throw Error('welcome_access_denied')
   return window
  }
- const permissions=()=>readDesktopPermissions({platform:process.platform,systemPreferences,environment:environment(),backendReady:backendReady()})
+ const permissions=()=>({...readDesktopPermissions({platform:process.platform,systemPreferences,environment:environment(),backendReady:backendReady()}),...(screen?{displayCount:screen.getAllDisplays().length}:{})})
  const view=async()=>({profile:await store.get(),defaultAvatar:await avatar(),permissions:permissions()})
  const publish=async()=>{const value=await view();for(const w of windows())if(w&&!w.isDestroyed())w.webContents.send('nova:welcome:changed',value);return value}
  ipcMain.handle('nova:welcome:get',event=>{authorize(event);return view()})

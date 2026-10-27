@@ -78,7 +78,7 @@ export const conversationTitle=item=>item?.id==='chat:main'?t('主对话'):item?
 export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSchedule,onOpenChange=()=>{},onHome=()=>{},speakingLevel=null}){
  const pane=el('aside',undefined,'chat-pane');pane.id='chat-pane';pane.setAttribute('aria-label',t('Nova 对话'));columns.append(pane)
  const head=el('header',undefined,'chat-head');pane.append(head)
- const homeButton=button('✦ Nova',onHome,head);homeButton.className='chat-brand';homeButton.title=t('返回主对话')
+ const homeButton=button('← '+t('返回主对话'),onHome,head);homeButton.className='chat-home';homeButton.title=t('返回主对话')
  const summaryTitle=el('span',t('对话'),'conversation-title');head.append(summaryTitle)
  const voiceLine=el('div',undefined,'chat-voice');const voiceStatus=el('span','','conversation-voice-status');voiceLine.append(voiceStatus);const resumeVoice=button(t('恢复语音'),()=>c.resumeVoice(),voiceLine);resumeVoice.hidden=true;const endVoice=button(t('结束语音'),()=>c.stopVoice(),voiceLine);endVoice.hidden=true;pane.append(voiceLine)
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
@@ -86,7 +86,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const companion=el('div',undefined,'chat-companion'),companionImage=el('img');companion.hidden=true;companionImage.alt='';companion.append(companionImage);head.append(companion)
  const companionAnimation=mountIdleAvatar(companionImage,{movieUrl:new URL('./assets/nova-idle.mp4',import.meta.url).href})
  let identityView=null
- function identity(value){identityView=value;homeButton.replaceChildren(el('span',value.profile.assistantName));companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true)}
+ function identity(value){identityView=value;companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true)}
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
  const stage=el('div',undefined,'voice-stage');stage.hidden=true
  const stageCanvas=el('canvas',undefined,'voice-stage-orb');stageCanvas.setAttribute('aria-hidden','true')
@@ -182,7 +182,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  function renderConversations(){
   const items=c.snapshot?.conversations?.items??[]
   const active=items.find(item=>item.id===c.selectedId)
-  summaryTitle.textContent=conversationTitle(active);pane.dataset.main=String(c.selectedId==='chat:main');homeButton.hidden=c.selectedId==='chat:main';homeButton.title=t('返回主对话')
+  summaryTitle.textContent=conversationTitle(active);pane.dataset.main=String(c.selectedId==='chat:main');homeButton.hidden=c.selectedId==='chat:main';homeButton.title=t('返回主对话');homeButton.textContent='← '+t('返回主对话');homeButton.disabled=!c.connected||c.presentationReady===false
   const voiceConversation=items.find(item=>item.id===c.voiceId)
   voiceStatus.textContent=c.voiceId?`语音：${conversationTitle(voiceConversation)??'另一会话'}${c.voiceCapabilities?.model.nativeFullDuplex?' · 原生双工对话（无工具调用、无历史恢复）':''}`:''
   resumeVoice.hidden=!c.voiceId||c.mode!=='text';resumeVoice.disabled=!c.connected||!c.presentationReady;

@@ -8,7 +8,7 @@ import {randomUUID} from 'node:crypto'
 import {mkdir} from 'node:fs/promises'
 import {constrainBase64ImageToMaxSize,imageInfoOfBase64} from '@midscene/shared/img'
 import {setTimeout as delay} from 'node:timers/promises'
-import {loadComputerConfig,type ComputerConfig} from '../../executors/computer-config.js'
+import {loadComputerDeviceConfig,type ComputerDeviceConfig} from '../../executors/computer-config.js'
 import {startComputerBackend} from '../../executors/computer-backend.js'
 import {computerForeground,connectComputerDevice} from '../../executors/computer-device.js'
 import {acquireDeviceLock,recordDeviceProcess,releaseDeviceLock,quarantineDeviceLock,type DeviceLock} from '../../executors/device-lock.js'
@@ -19,7 +19,7 @@ export interface ComputerSessionOptions {
  signal:AbortSignal
  approve:(name:string,params:unknown)=>Promise<boolean>
  acting:(name:ComputerToolName,point?:{x:number;y:number})=>void
- config?:ComputerConfig
+ config?:ComputerDeviceConfig
  backend?:typeof startComputerBackend
  foreground?:typeof computerForeground
  targetWindow?:{pid:number;windowId:number}
@@ -32,7 +32,7 @@ export interface ComputerSessionOptions {
  nativeRequest?:(input:Record<string,unknown>,signal:AbortSignal)=>Promise<Record<string,unknown>>
 }
 export class ComputerSession {
- readonly config:ComputerConfig
+ readonly config:ComputerDeviceConfig
  private backend:Awaited<ReturnType<typeof startComputerBackend>>|undefined
  private guarded:Awaited<ReturnType<typeof connectComputerDevice>>|undefined
  private lock:DeviceLock|undefined
@@ -46,7 +46,7 @@ export class ComputerSession {
  private unknown=false
  private closing:Promise<void>|undefined
  constructor(private readonly options:ComputerSessionOptions){
-  const {macWindow:_window,macApplication:_application,...config}=options.config??loadComputerConfig(process.env)
+  const {macWindow:_window,macApplication:_application,...config}=options.config??loadComputerDeviceConfig(process.env)
   this.config={...config,...(options.targetWindow?{macWindow:options.targetWindow}:{})}
   options.signal=AbortSignal.any([options.signal,AbortSignal.timeout(config.budgetMs)])
  }

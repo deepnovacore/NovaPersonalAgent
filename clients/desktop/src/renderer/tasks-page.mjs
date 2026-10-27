@@ -18,7 +18,7 @@ export const activeTaskCount=(durable,work)=>{
 }
 /** Tasks are conversations; the host remains the sole selected/voice owner. */
 export function renderConversationTasks(panel,{c,el,button,openTask,now=Date.now()}){
- const create=button(t('创建任务'),()=>c.create(),panel);create.disabled=!c.connected
+ const create=button(t('创建任务'),()=>c.create(),panel);create.className='page-add';create.disabled=!c.connected
  const items=(c.snapshot?.conversations?.items??[]).filter(item=>item.id!=='chat:main'&&item.kind!=='schedule').sort((a,b)=>String(b.updated_at??b.created_at).localeCompare(String(a.updated_at??a.created_at)))
  const waiting=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
  for(const [recent,label]of [[true,'近 7 天'],[false,'更早']]){
@@ -28,13 +28,16 @@ export function renderConversationTasks(panel,{c,el,button,openTask,now=Date.now
   for(const item of group){
    const messages=(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===item.id),last=messages.at(-1)
    const records=(c.snapshot?.tasks??[]).filter(task=>task.conversation_id===item.id&&!isSourceProcessingTask(task))
-   const pending=records.some(task=>task.phase==='waiting')||waiting.some(row=>row.conversation_id===item.id)||item.build?.status==='awaiting_approval'||item.build?.status==='paused'
+   const pending=records.some(task=>task.phase==='waiting')||waiting.some(row=>row.conversation_id===item.id)||item.build?.status==='awaiting_approval'||item.build?.status==='paused'||item.build?.status==='outcome_unknown'
    const status=pending?'待你处理':records.some(task=>task.phase==='failed')||item.build?.status==='failed'||(item.generation_status??last?.generation_status)==='failed'?'失败':records.some(task=>['queued','running','verifying'].includes(task.phase))||c.state(item.id).submission||['running','idle'].includes(item.build?.status)||(item.generation_status??last?.generation_status)==='pending'?'进行中':'已完成'
-   const row=button(item.title??t('对话'),()=>c.select(item.id),panel);row.className='conversation-task';row.dataset.conversationId=item.id;row.setAttribute('aria-current',String(item.id===c.selectedId));row.disabled=!c.connected
-   row.append(el('span',(item.last_message??last?.text??'').slice(0,160),'conversation-task-summary'),el('span',t(status),'conversation-badge'))
-   if(item.unread_count)row.append(el('span',String(item.unread_count),'unread-badge'))
-   if(item.id===c.voiceId)row.append(el('span',t('语音中'),'conversation-badge'))
-   if(c.state(item.id).submission)row.append(el('span',t('发送中'),'conversation-badge'))
+   const row=button('',()=>c.select(item.id),panel);row.className='conversation-task';row.dataset.state=({'待你处理':'waiting','失败':'failed','进行中':'running','已完成':'completed'})[status];row.dataset.conversationId=item.id;row.setAttribute('aria-current',String(item.id===c.selectedId));row.disabled=!c.connected
+   const title=el('span',item.title??t('对话'),'conversation-task-title'),meta=el('span',undefined,'conversation-task-meta')
+   const summary=el('span',(item.last_message??last?.text??'').slice(0,160),'conversation-task-summary');summary.hidden=!summary.textContent
+   meta.append(el('span',t(status),'conversation-task-status'))
+   if(item.unread_count)meta.append(el('span',String(item.unread_count),'unread-badge'))
+   if(item.id===c.voiceId)meta.append(el('span',t('语音中'),'conversation-badge'))
+   if(c.state(item.id).submission)meta.append(el('span',t('发送中'),'conversation-badge'))
+   row.append(title,meta,summary)
    if(item.id===c.selectedId&&openTask){if(records.length){const detail=el('details'),summary=el('summary',t('委托任务记录'));detail.open=c.state(item.id).taskRecordsOpen===true;detail.addEventListener('toggle',()=>{c.state(item.id).taskRecordsOpen=detail.open});detail.append(summary);for(const task of records)button(task.goal,()=>openTask(task.id),detail);panel.append(detail)}}
   }
  }

@@ -155,7 +155,7 @@ test('Build status bar shows state, the workspace folder name without exposing t
  assert.equal(status.textContent,'Build · 已暂停');assert.equal(status.attributes['data-state'],'paused')
  const info=walk(agent.element).find(node=>node.children.includes(status)),[, path, reason]=info.children
  assert.equal(path.textContent,'demo');assert.equal(path.title,'demo')
- assert.equal(reason.textContent,'重启后等待恢复');assert.equal(reason.hidden,false)
+ assert.equal(reason.textContent,'已暂停，点击继续恢复任务');assert.equal(reason.hidden,false)
 })
 
 test('a paused Build explains an approval denial in words instead of the raw code',()=>{

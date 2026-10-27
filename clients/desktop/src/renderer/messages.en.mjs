@@ -1,4 +1,10 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "用于查看电脑画面。使用电脑操作时，截图会发送给所用的视觉模型。": "For seeing your desktop. Screenshots are sent to the vision model in use.",
+  "系统权限已就绪。在 Build 中打开 Computer Use 即可使用，执行前仍会请求批准。": "System permissions are ready. Enable Computer Use in Build; actions still require approval.",
+  "授权后可在 Build 中使用电脑操作；默认使用主屏幕和当前对话模型。": "After granting permissions, use Computer Use in Build with the primary display and current conversation model.",
+  "Build 的电脑操作默认使用主屏幕和当前对话模型，无需另配 GUI 模型或密钥。当前对话模型需支持视觉，系统权限和操作审批仍然有效。": "Build uses the primary display and current conversation model, with no separate GUI model or key. The model must support vision; permissions and action approvals still apply.",
+  "整屏模式目前仅支持一个显示器。仅在需要指定屏幕或调整执行限制时覆盖启动配置；修改后重启 Nova。": "Whole-screen control currently supports one display. Override launch settings only to select a display or adjust limits, then restart Nova.",
+
   "委托任务记录": "Delegated task records",
   "创建任务": "Create task",
   "近 7 天": "Last 7 days",
@@ -46,7 +52,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "模型回复超出流容量限制": "Model response exceeded stream capacity",
   "模型连接中断": "Model connection interrupted",
   "已达到本次工具调用上限": "Tool call limit reached",
-  "重启后等待恢复": "Awaiting Resume after restart",
+  "已暂停，点击继续恢复任务": "Paused. Select Resume to continue.",
   "已锁定": "Locked",
   "输入": "Input",
   "输出": "Output",
@@ -1747,7 +1753,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "Nova 正在操作电脑": "Nova is using your computer",
   "停止 Build 并收回电脑控制": "Stop the Build and take back control of the computer",
   "当前系统不支持 Computer Use，仅支持 macOS 和 Windows。": "Computer Use is not supported on this system. It requires macOS or Windows.",
-  "尚未配置电脑操作模型和目标显示器。": "The computer-control model and target display are not configured.",
+  "电脑操作的高级配置无效，请检查后重试。": "Advanced computer-control settings are invalid. Check them and try again.",
   "Nova 需要“屏幕录制”权限才能看到屏幕。": "Nova needs Screen Recording permission to see the screen.",
   "打开系统设置": "Open System Settings",
   "Nova 需要“辅助功能”权限才能点击和输入。": "Nova needs Accessibility permission to click and type.",
@@ -1919,4 +1925,9 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "上一步的清理结果不确定，请核实后继续": "The cleanup result of the last step is uncertain. Verify it, then continue.",
   "上一步的结果不确定，请核实后继续": "The result of the last step is uncertain. Verify it, then continue.",
   "收到新消息，已暂停当前步骤": "A new message arrived, so the current step was paused.",
+  "当前模型不支持图片，切换到视觉模型后即可使用电脑操作。": "The current model does not support images. Switch to a vision model to use computer control.",
+  "电脑操作暂时仅支持单屏，调整为单屏后可重新检查。": "Computer control currently supports one display. Switch to a single display, then check again.",
+  "电脑操作暂不可用": "Computer control is temporarily unavailable",
+  "仍可正常对话和使用其他 Build 工具。": "You can still chat and use other Build tools.",
+  "需要视觉模型": "Vision model needed",
 })

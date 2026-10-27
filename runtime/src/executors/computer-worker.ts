@@ -20,7 +20,7 @@ if (macWindow && (process.platform !== 'darwin' || !process.argv[5])) throw Erro
 const native = macWindow ? new MacNativeReader(process.argv[5]!, 'macos_gui') : undefined
 let binding: string | undefined
 let editorPoint: [number,number] | undefined
-const device = macWindow ? undefined : new ComputerDevice({displayId, inputStrategy: 'sequential', ...(process.platform === 'darwin' ? {keyboardDriver: 'libnut' as const} : {})})
+const device = macWindow ? undefined : new ComputerDevice({...(displayId==='primary'?{}:{displayId}), inputStrategy: 'sequential', ...(process.platform === 'darwin' ? {keyboardDriver: 'libnut' as const} : {})})
 // Public MouseAction avoids SDK Tap's automatic focus-follow-up click.
 interface Mouse {setMousePosition(point: {x: number; y: number}): Promise<void>; currentMousePosition(): Promise<{x: number; y: number}>; pressButton(button: number): Promise<void>; releaseButton(button: number): Promise<void>}
 const mouse = macWindow ? undefined : new (createRequire(import.meta.url)('@computer-use/libnut') as {DefaultMouseAction: new () => Mouse}).DefaultMouseAction()

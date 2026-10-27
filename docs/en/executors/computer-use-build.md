@@ -4,7 +4,9 @@ Computer Use is opt-in for each local Build conversation on macOS and Windows. P
 
 ## Setup and model capability
 
-The current implementation shares the computer executor configuration: `COMPUTER_DISPLAY_ID`, `EXECUTOR_BASE_URL`, `EXECUTOR_MODEL`, `EXECUTOR_MODEL_FAMILY`, and `EXECUTOR_API_KEY`. Limits use `EXECUTOR_MAX_STEPS`, `EXECUTOR_TIMEOUT_SECONDS`, `EXECUTOR_SETTLE_MS`, and `COMPUTER_CLICK_HOLD_MS`. Keep credentials in local configuration. Build uses its own selected vision model to plan desktop actions; it does not invoke a second GUI planner. The shared configuration loader still validates executor-model settings.
+Build reuses the current conversation vision model and credentials, and defaults to the primary display. No separate `EXECUTOR_BASE_URL`, `EXECUTOR_MODEL`, `EXECUTOR_MODEL_FAMILY`, or `EXECUTOR_API_KEY` is required. `COMPUTER_DISPLAY_ID` is an optional override. Limits remain configurable with `EXECUTOR_MAX_STEPS`, `EXECUTOR_TIMEOUT_SECONDS`, `EXECUTOR_SETTLE_MS`, and `COMPUTER_CLICK_HOLD_MS`. The standalone computer executor still uses its own GUI model configuration.
+
+If the model cannot process images or multiple displays are connected, a quiet warning explains the limitation. Computer control stays unavailable; chat and other Build tools remain available.
 
 macOS requires Screen Recording and Accessibility permissions. Windows requires the packaged process guardian. Whole-screen control requires one configured display. Platform, configuration, permission **and vision-model** preflight failures all block enabling.
 

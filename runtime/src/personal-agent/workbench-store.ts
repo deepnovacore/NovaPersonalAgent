@@ -115,6 +115,10 @@ export class WorkbenchStore {
   const path=this.#file('build',id+':'+generation)
   return this.#io(path+':images',()=>this.#read(path))
  }
+ async checkpointStatus(id:string,generation:number):Promise<{status:BuildStatus;reason:string|null}|null>{
+  const value=await this.#readCheckpoint(id,generation)
+  return value===null?null:z.object({conversation_id:z.literal(id),generation:z.literal(generation),status:buildStatusSchema,reason:z.string().nullable()}).parse(value)
+ }
  async checkpoint(id:string,generation:number):Promise<WorkbenchCheckpoint>{
   const value=await this.#images(await this.#readCheckpoint(id,generation),id,generation,true)
   if(value===null)return emptyWorkbenchCheckpoint(id,generation)
