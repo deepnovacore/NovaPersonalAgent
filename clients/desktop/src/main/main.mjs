@@ -1607,6 +1607,10 @@ async function startSelectedCamera(camera, smokeChannel) {
     })
   }
   for (const window of windowsPresentation?.windows ?? [mainWindow]) bindPresentationClose(window)
+  ipcMain.handle('nova:personal:default-workspace',event=>{
+    if(event.sender!==mainWindow.webContents)throw new Error('workspace request rejected')
+    return desktopConfig?.workspace??null
+  })
   const orbWindow = createOrbWindowController({
     getBounds: () => personalCollapsed ? mainWindow.getBounds() : initialOrbBounds,
     setBounds: bounds => { if (personalCollapsed) mainWindow.setBounds(bounds) },

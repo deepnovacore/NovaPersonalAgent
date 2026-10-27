@@ -12,6 +12,7 @@ import {conversationRuntimeFactory} from '../src/personal-agent/conversation-run
 import {createConversation} from '../src/personal-agent/conversations.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import type {CascadedLlmSession} from '../src/realtime/cascaded/llm.js'
+import {ChatCompletionsLlmFailure} from '../src/realtime/cascaded/chat-completions-llm.js'
 import type {JsonValue} from '../src/core/events.js'
 
 test('text chat continues after a task control tool and records its admission', async () => {
@@ -55,6 +56,45 @@ test('text chat continues after a task control tool and records its admission', 
       assert.equal(requests, 2)
       assert.ok(telemetry.some(event => event.kind === 'tool.admission'), 'conversation graphs must retain service diagnostics')
       assert.ok(telemetry.every(event => event.payload.conversation_id === conversation.id), 'provider and service events identify their owning conversation')
+    } finally { await runtime.close() }
+  } finally { await host.close(); await rm(dir, {recursive: true, force: true}) }
+})
+
+test('a cascaded HTTP 401 rejects the pending text turn before reconnect without waiting for the deadline', async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-tool-continuation-'))
+  const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'test', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
+  const telemetry: {kind: string; payload: Readonly<Record<string, JsonValue>>}[] = []
+  let requests = 0
+  try {
+    await host.open()
+    const conversation = createConversation('chat', 'Tool continuation')
+    const llm: CascadedLlmSession = {
+      async *stream() {
+        requests++; await Promise.resolve()
+        if(requests===1)throw new ChatCompletionsLlmFailure('http',401,'auth')
+        yield {kind:'response_started',response_id:'retry'}
+        yield {kind:'text_delta',text:'Recovered'}
+        yield {kind:'response_completed',response_id:'retry'}
+      },
+      restoreHistory: () => Promise.resolve(), abandonPendingResponse: () => Promise.resolve(), close: () => Promise.resolve(),
+    }
+    const factory = conversationRuntimeFactory({host, clock: new VirtualClock(), memory: () => undefined,
+      settings: settingsSchema.parse({executors: [], camera_module_enabled: false, cascade_llm_provider: 'qwen', dashscope_api_key: 'test'}),
+      searchTransport: {search: () => Promise.reject(Error('unexpected search'))},
+      gateway: {complete: () => Promise.reject(Error('unexpected model')), async *stream() { await Promise.resolve(); throw Error('unexpected stream') }},
+      telemetry: {record: (kind, payload) => { telemetry.push({kind, payload}) }, close: () => undefined},
+      onDiagnostic: () => undefined,
+      createTextProvider: options => buildCascadedTextProvider(options, {...cascadedProviderRegistries, llm: {...cascadedProviderRegistries.llm, qwen: () => ({open: () => llm})}}),
+    })
+    const runtime = await factory(conversation, () => undefined)
+    try {
+      await assert.rejects(runtime.runTurn('hello', AbortSignal.timeout(1000)), error=>error instanceof Error && 'reason' in error && error.reason==='provider_http_auth')
+      assert.equal(requests,1)
+      for(let i=0;i<20&&!telemetry.some(event=>event.kind==='provider.error');i++)await new Promise<void>(resolve=>setImmediate(resolve))
+      assert.ok(telemetry.some(event=>event.kind==='provider.error'),'the real service handled the recoverable provider error')
+      await new Promise<void>(resolve=>setImmediate(resolve))
+      assert.equal((await runtime.runTurn('retry',AbortSignal.timeout(1000))).assistant,'Recovered')
+      assert.equal(requests,2)
     } finally { await runtime.close() }
   } finally { await host.close(); await rm(dir, {recursive: true, force: true}) }
 })

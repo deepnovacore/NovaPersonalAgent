@@ -789,8 +789,8 @@ export class ProjectStore {
     })
   }
 
-  async createManaged(displayName: string): Promise<WorkspaceRecord> {
-    const name = normalizeProjectWorkspaceName(displayName)
+  async createManaged(displayName: string, options: {uniqueName?: boolean} = {}): Promise<WorkspaceRecord> {
+    let name = normalizeProjectWorkspaceName(displayName)
     const rollback: {created: {
       readonly path: string
       readonly identity: FileIdentity | null
@@ -801,6 +801,7 @@ export class ProjectStore {
         const managed = await this.#files.validateManagedRoot()
         const managedHandle = this.#files.requireManagedRootHandle()
         requireWorkspaceCapacity(state)
+        if (options.uniqueName) name = normalizeProjectWorkspaceName(uniqueWorkspaceName(state, name.display))
         requireUniqueWorkspaceName(state, name.normalized)
         const workspaceId = this.#newUniqueId(state)
         const candidate = join(managed, `${slugPrefix(name.display)}-${[...workspaceId].slice(-12).join('')}`)

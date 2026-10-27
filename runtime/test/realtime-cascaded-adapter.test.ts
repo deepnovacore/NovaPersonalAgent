@@ -376,6 +376,7 @@ function ids(...values: readonly string[]): () => string {
 async function collectThroughTerminal(
   adapter: CascadedRealtimeAdapter,
   signal = new AbortController().signal,
+  throughRecovery = false,
 ): Promise<RealtimeProviderEvent[]> {
   const seen: RealtimeProviderEvent[] = []
   for await (const raw of adapter.events(signal)) {
@@ -383,7 +384,7 @@ async function collectThroughTerminal(
     assert.doesNotMatch(JSON.stringify(event), /provider-secret/u)
     seen.push(event)
     if (event.kind === 'user_transcript_final') await adapter.ensureResponse(signal, event.item_id)
-    if (event.kind === 'response_terminal') return seen
+    if (throughRecovery ? event.kind === 'provider_error' : event.kind === 'response_terminal') return seen
   }
   throw new Error('Volcengine event stream ended before a terminal')
 }
@@ -467,7 +468,7 @@ const directOptions = (): {
 })
 
 function terminalStatus(events: readonly RealtimeProviderEvent[]): string | null {
-  const last = events.at(-1)
+  const last = events.findLast(event=>event.kind==='response_terminal')
   return last?.kind === 'response_terminal' ? last.status : null
 }
 
@@ -1347,7 +1348,7 @@ test('a common LLM failure uses a provider-neutral stable owner code', async () 
   await adapter.connect({tools: [], signal: new AbortController().signal})
   const item = hostItem('common-failure')
   await adapter.injectHostItem(item, directOptions())
-  const collecting = collectThroughTerminal(adapter)
+  const collecting = collectThroughTerminal(adapter,undefined,true)
   await adapter.createResponse({kind: 'host_fact', item, task_summary: null, origin_spoken: false},
     new AbortController().signal)
   const events = await collecting
@@ -1355,6 +1356,7 @@ test('a common LLM failure uses a provider-neutral stable owner code', async () 
   assert.equal(events.some(event => event.kind === 'provider_error'
     && event.code === 'cascaded_response_failed' && event.recoverable), true)
   assert.equal(terminalStatus(events), 'failed')
+  assert.ok(events.findIndex(event=>event.kind==='response_terminal')<events.findIndex(event=>event.kind==='provider_error'))
   await adapter.close()
 })
 
@@ -1708,7 +1710,7 @@ test('TTS retries once before audio with every prior chunk, and never retries af
   await afterAdapter.connect({tools: [], signal: new AbortController().signal})
   const afterItem = hostItem('after')
   await afterAdapter.injectHostItem(afterItem, directOptions())
-  const afterCollect = collectThroughTerminal(afterAdapter)
+  const afterCollect = collectThroughTerminal(afterAdapter,undefined,true)
   await afterAdapter.createResponse({kind: 'host_fact', item: afterItem,
     task_summary: null, origin_spoken: false}, new AbortController().signal)
   const afterEvents = await settleWithin('TTS after-audio failure', afterCollect)
@@ -1747,7 +1749,7 @@ test('TTS never opens a third session after the one permitted retry also fails',
   await adapter.connect({tools: [], signal: new AbortController().signal})
   const item = hostItem('retry-once')
   await adapter.injectHostItem(item, directOptions())
-  const collecting = collectThroughTerminal(adapter)
+  const collecting = collectThroughTerminal(adapter,undefined,true)
   await adapter.createResponse({kind: 'host_fact', item, task_summary: null, origin_spoken: false},
     new AbortController().signal)
   const events = await settleWithin('single TTS retry', collecting)
@@ -3004,4 +3006,61 @@ test('streaming speech reaches TTS before completion and cleans split markup wit
   assert.equal(tts.texts.join(''), '先别重置。保留记录，见原文。')
   assert.equal(events.find(event => event.kind === 'response_transcript_final')?.text, prefix + formatted)
   await adapter.close()
+})
+
+test('text-only previews stream without duplicate authority and retract before tools', async () => {
+  for (const ending of ['same','suffix','split','mismatch','tool','failure','split-failure'] as const) {
+    const llm=new FakeLlm([{kind:'response_started',response_id:'r'},
+      {kind:'text_preview',text:'hel'},{kind:'text_preview',text:'lo'},
+      ...(ending==='tool'?[{kind:'tool_call' as const,item_id:'c',call_id:'c',name:'lookup',arguments:{}}]
+        :ending==='failure'?[{kind:'response_failed' as const,response_id:'r',code:'network'}]
+        :ending==='split-failure'?[{kind:'text_delta' as const,text:'hel'},{kind:'response_failed' as const,response_id:'r',code:'network'}]
+        :ending==='split'?[{kind:'text_delta' as const,text:'hel'},{kind:'text_delta' as const,text:'lo!'}]
+        :[{kind:'text_delta' as const,text:ending==='mismatch'?'correct':ending==='suffix'?'hello!':'hello'}]),
+      {kind:'response_completed',response_id:'r'}])
+    const signal=new AbortController().signal,adapter=new CascadedRealtimeAdapter({textOnly:true,llm})
+    try{
+      await adapter.connect({tools:[{type:'function',function:{name:'lookup',parameters:{type:'object',properties:{}}}}],signal})
+      const collecting=collectThroughTerminal(adapter,signal);await adapter.submitText('test',signal)
+      const events=await settleWithin('preview response',collecting)
+      assert.equal(llm.calls[0]?.previewText,true)
+      assert.deepEqual(events.filter(e=>e.kind==='response_transcript_delta').map(e=>e.text),['hel','lo',...(['suffix','split'].includes(ending)?['!']:[])])
+      assert.deepEqual(events.filter(e=>e.kind==='response_transcript_final').map(e=>e.text),[ending==='tool'||ending==='failure'?'':ending==='split-failure'?'hel':ending==='mismatch'?'correct':['suffix','split'].includes(ending)?'hello!':'hello'])
+      assert.equal(events.some(e=>e.kind==='provider_error'&&e.code==='cascaded_mixed_text_tool'),false)
+      if(ending==='tool')assert.equal(events.some(e=>e.kind==='tool_call_ready'),true)
+    }finally{await adapter.close()}
+  }
+})
+
+test('voice ignores speculative text and only speaks authoritative text', async () => {
+  const llm=new FakeLlm([{kind:'response_started',response_id:'r'},{kind:'text_preview',text:'uncommitted'},
+    {kind:'text_delta',text:'hello'},{kind:'response_completed',response_id:'r'}])
+  const tts=new FakeTtsSession(new Uint8Array([1,2]))
+  const adapter=new CascadedRealtimeAdapter({endpointing:new ScriptedEndpointing(),asr:new FakeAsrClient(),llm,tts:new FakeTtsClient(tts)})
+  const signal=new AbortController().signal
+  try{
+    await adapter.connect({tools:[],signal});const collecting=collectThroughTerminal(adapter,signal);await adapter.submitText('test',signal)
+    const events=await settleWithin('voice preview ignored',collecting)
+    assert.notEqual(llm.calls[0]?.previewText,true)
+    assert.deepEqual(tts.texts,['hello'])
+    assert.deepEqual(events.filter(e=>e.kind==='response_transcript_delta').map(e=>e.text),['hello'])
+    assert.equal(events.some(e=>e.kind==='provider_error'),false)
+  }finally{await adapter.close()}
+})
+
+
+test('text-only long previews retain their opening through authoritative suffixes', async () => {
+  const opening = '开头不能消失：' + '内容😀'.repeat(70)
+  const llm = new FakeLlm([{kind:'response_started',response_id:'r'},
+    {kind:'text_preview',text:opening},{kind:'text_preview',text:'第二段'},
+    {kind:'text_delta',text:opening+'第二段！'},{kind:'response_completed',response_id:'r'}])
+  const signal = new AbortController().signal, adapter = new CascadedRealtimeAdapter({textOnly:true,llm})
+  try {
+    await adapter.connect({tools:[],signal})
+    const collecting = collectThroughTerminal(adapter,signal)
+    await adapter.submitText('test',signal)
+    const events = await settleWithin('long preview',collecting)
+    assert.deepEqual(events.filter(e=>e.kind==='response_transcript_delta').map(e=>'full_text' in e?e.full_text:undefined),
+      [opening,opening+'第二段',opening+'第二段！'])
+  } finally { await adapter.close() }
 })
