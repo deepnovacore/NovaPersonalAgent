@@ -1069,21 +1069,24 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           },
                         )
                       : null,
-                  title: Text(
-                    _tab == 0
-                        ? 'Nova'
-                        : [
+                  title: _tab == 0
+                      ? PetAvatarTitle(
+                          store: petAvatarStore,
+                          language: language,
+                        )
+                      : Text(
+                          [
                             '',
                             _t('任务', 'Tasks'),
                             _t('时间线', 'Timeline'),
                             _t('我的', 'Me'),
                           ][_tab],
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -.5,
-                    ),
-                  ),
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -.5,
+                          ),
+                        ),
                 ),
                 bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
                     ? null
@@ -1200,9 +1203,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                   (_tab == 0 || (_tab == 1 && _taskOpen)) &&
                                   !fullCall,
                               header: _taskContext(host),
-                              petAvatarStore: petAvatarStore,
-                              keyboardVisible:
-                                  MediaQuery.viewInsetsOf(context).bottom > 0,
                               host: host,
                               conversationId: chatId!,
                               language: language,

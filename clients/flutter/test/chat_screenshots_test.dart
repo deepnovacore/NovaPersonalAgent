@@ -17,12 +17,13 @@ import 'local_life_test.dart' show MemoryLifePersistence;
 import 'support/fake_audio.dart';
 
 void main() {
-  /// Decodes the approved pet avatar at the sizes used by the chat before any
-  /// golden capture, so the screenshots do not depend on async image timing.
+  /// Decodes the approved pet avatar at the sizes used by the title bar and
+  /// settings sheet before any golden capture, so the screenshots do not
+  /// depend on async image timing.
   Future<void> precachePetAvatar(WidgetTester tester) async {
     final context = tester.element(find.byType(NovaApp));
     await tester.runAsync(() async {
-      for (final width in [64, 96]) {
+      for (final width in [30, 96]) {
         await precacheImage(
           ResizeImage.resizeIfNeeded(
             width,

@@ -17,7 +17,6 @@ import '../agent_core/model_presets.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../ui/chatgpt_settings.dart';
 import '../agent_core/tool_registry.dart';
-import '../ui/pet_avatar.dart';
 import 'dart:convert';
 
 /// Also used by native task settings: one Dart source, projected to the host.
@@ -431,18 +430,10 @@ class LocalChatPanel extends StatefulWidget {
     this.onVoiceText,
     this.externalTaskBusy = false,
     this.onCancelExternalTask,
-    this.petAvatarStore,
-    this.keyboardVisible = false,
     this.header,
   });
   final Widget? header;
   final AgentCoreHost host;
-  final PetAvatarStore? petAvatarStore;
-
-  /// Reported by the enclosing app shell: Scaffold removes the bottom view
-  /// inset from this body's MediaQuery, so the panel cannot observe the
-  /// keyboard itself.
-  final bool keyboardVisible;
   final AudioOwner? audioOwner;
   final AudioPort? dictationAudio;
   final Future<bool> Function()? requestMicrophone;
@@ -781,44 +772,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     }
   }
 
-  /// Centered pet avatar at the top of the chat. It is a tappable shortcut to
-  /// the avatar settings sheet and keeps the composer layout untouched.
-  Widget _petAvatar({required bool empty}) {
-    final store = widget.petAvatarStore!;
-    return Padding(
-      padding: EdgeInsets.only(top: empty ? 12 : 4, bottom: empty ? 4 : 0),
-      child: Center(
-        child: Semantics(
-          button: true,
-          label: t('宠物头像', 'Pet avatar'),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () =>
-                showPetAvatarSettings(context, store, language: widget.language),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                PetAvatar(store: store, size: empty ? 96 : 64),
-                if (!empty)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: Text(
-                      'Nova',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Nova.secondary,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _message(Map message) {
     if (message['role'] == 'tool') {
       String status = '';
@@ -947,9 +900,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       return LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxHeight < 260;
-          // The keyboard squeezes the chat; the avatar would crowd the
-          // composer, so it stays hidden until the keyboard closes.
-          final keyboardOpen = widget.keyboardVisible;
           return Column(
             children: [
               ?widget.header,
@@ -997,8 +947,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                     ),
                   ],
                 ),
-              if (widget.petAvatarStore != null && !compact && !keyboardOpen)
-                _petAvatar(empty: messages.isEmpty && !host.busy),
               ...[
                 Expanded(
                   child: messages.isEmpty && !host.busy
