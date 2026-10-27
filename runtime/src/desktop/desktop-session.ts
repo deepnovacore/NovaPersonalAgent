@@ -2205,7 +2205,10 @@ function desktopEntryFailureCode(error: unknown): string {
     const value = error as {readonly name?: unknown; readonly code?: unknown; readonly message?: unknown}
     if (value.message === 'personal_store_locked') return 'personal_store_locked'
     if (['EACCES', 'EPERM', 'EROFS'].includes(String(value.code))) return 'filesystem_permissions'
-    if (['state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'personal_store_capacity', 'state_corrupt', 'state_version_unsupported'].includes(String(value.code))) return String(value.code)
+    if (['state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'personal_store_capacity'].includes(String(value.code))) return String(value.code)
+    // state_corrupt/state_version_unsupported are shared with ProjectStateError; only the personal
+    // store owns the reset-state guidance.
+    if (value.name === 'PersonalStoreError' && ['state_corrupt', 'state_version_unsupported'].includes(String(value.code))) return String(value.code)
     if (value.code === 'frontbrain_tool_budget_exceeded') return 'configuration_required'
     if (value.code === 'credential_missing') return 'authentication_failed'
     if (new Set([

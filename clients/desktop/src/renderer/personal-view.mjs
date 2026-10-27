@@ -180,8 +180,8 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   inspector?.setVisible(c.presentationMode==='workbench')
   for(const node of [taskNotice,orbNotice]){const text=t(c.taskNotice);if(node.textContent!==text)node.textContent=text;node.hidden=!text}
   const aggregate=summarizeTasks(c.snapshot?.tasks??[],[...viewedResults]),decision=(c.snapshot?.pending_approvals??[]).find(item=>item.task_id);orbTask.dataset.taskId=decision?.task_id??aggregate.task_id??'';orbTask.hidden=!orbTask.dataset.taskId;orbTask.disabled=!c.connected;orbTask.textContent=t('任务：{0} 进行中 · {1} 待处理 · {2} 新结果',aggregate.active,Math.max(aggregate.decisions,decision?1:0),aggregate.results)
-  const stateNoticeValue=c.snapshot?.state_notice
-  if(stateNoticeValue&&c.presentationMode==='workbench'){stateNotice.textContent=t('状态文件无法读取（{0}），已从空状态启动。原文件：{1}；备份：{2}。可运行 novapersonal reset-state 清理。',stateNoticeValue.code,stateNoticeValue.original_path,stateNoticeValue.backup_path);stateNotice.hidden=false}
+  const stateNoticeValue=c.snapshot?.conversations?.state_notice
+  if(stateNoticeValue&&c.presentationMode==='workbench'){stateNotice.textContent=t('状态文件无法读取（{0}），已从空状态启动。原文件：{1}；已保留备份：{2}。',stateNoticeValue.code,stateNoticeValue.original_path,stateNoticeValue.backup_path);stateNotice.hidden=false}
   else stateNotice.hidden=true
   error.textContent=c.error;error.hidden=!c.error||c.presentationMode!=='workbench';orbError.textContent=c.error;orbError.hidden=!c.error||c.presentationMode!=='orb'
   syncOrbVoice()

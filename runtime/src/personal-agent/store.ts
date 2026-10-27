@@ -95,6 +95,12 @@ function parseStoredState(value:unknown):PersonalState {
 function parseStateText(text:string):PersonalState {
     let value:unknown;
     try{value=JSON.parse(text)}catch{throw new PersonalStoreError('state_corrupt')}
+    // Check the version before the strict schema: a newer file may contain keys this build does not
+    // know yet, and it must fail closed as "unsupported" instead of being quarantined as corrupt.
+    if(value!==null&&typeof value==='object'&&!Array.isArray(value)){
+        const version=(value as {schema_version?:unknown}).schema_version
+        if(typeof version==='number'&&Number.isInteger(version)&&version>STATE_SCHEMA_VERSION)throw new PersonalStoreError('state_version_unsupported')
+    }
     try{return parseStoredState(value)}catch(error){
         if(error instanceof PersonalStoreError)throw error;
         throw new PersonalStoreError('state_corrupt');
@@ -137,9 +143,9 @@ export class PersonalStore {
         const to = `${this.path}.${code}-${stamp}`;
         await renamePersonalStoreFile(this.path, to);
         const backup = this.path + '.before-schedules.json';
-        await renamePersonalStoreFile(backup, `${backup}.${code}-${stamp}`).catch((error: NodeJS.ErrnoException) => {
-            if (error.code !== 'ENOENT') throw error;
-        });
+        // The primary file is already safe. A backup that cannot be moved must not turn a
+        // recoverable corrupt state into a failed startup.
+        await renamePersonalStoreFile(backup, `${backup}.${code}-${stamp}`).catch(() => { /* leave the backup in place */ });
         return {from: this.path, to};
     }
     async write(state: PersonalState): Promise<void> {
