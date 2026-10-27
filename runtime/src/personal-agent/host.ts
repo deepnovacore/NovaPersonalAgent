@@ -209,7 +209,7 @@ export class PersonalAgentHost {
         if(this.#state.conversations.voice_id!==id)return;
         this.#voiceTransition=true;
         try{
-            try{if(this.#conversationPool?.hasVoice(id))await this.#conversationPool.stopVoice(id)}catch{/* the caller clears the runtime next */}
+            try{if(this.#conversationPool?.hasVoice(id))await this.#conversationPool.stopVoice(id)}catch{try{await this.#conversationPool?.clear(id)}catch{/* ownership still clears below */}}
             await this.#serial(async()=>{const next=structuredClone(this.#state);if(next.conversations.voice_id===id){next.conversations.voice_id=null;await this.#commit(next)}});
         }finally{this.#voiceTransition=false}
     }
@@ -338,9 +338,10 @@ export class PersonalAgentHost {
     async #beginBuild(item:Conversation,text:string):Promise<unknown>{
         if(this.activeLocalBuild())throw Error('build_stop_required');
         const voiceOwner=this.#state.conversations.voice_id;
-        if(voiceOwner!==null)await this.#endVoice(voiceOwner);
         let previousSelection=this.#state.conversations.selected_id;
         await this.#serial(async()=>{if(this.activeLocalBuild())throw Error('build_stop_required');if(taskResourcesBusy([projectResourceKey(item.build!.project)]))throw Error('project_busy');const next=structuredClone(this.#state);previousSelection=next.conversations.selected_id;if(next.conversations.items.filter(item=>item.kind!=='schedule').length>=128)throw Error('conversation_limit');next.conversations.items.push(item);next.conversations.selected_id=item.id;this.#admittingBuilds.add(item.id);try{await this.#commit(next)}catch(error){this.#admittingBuilds.delete(item.id);throw error}});
+        // Admission may fail (busy project/limit/commit); only then hand voice back.
+        if(voiceOwner!==null)await this.#endVoice(voiceOwner);
         this.#localBuildAuthority.add(item.id);
         try{await this.submitConversationText(item.id,text,undefined,undefined,{local_desktop:true})}
         catch(error){
@@ -938,6 +939,9 @@ export class PersonalAgentHost {
 
         if(method==='conversations.voice'){
             const q=z.object({id:z.string(),enabled:z.boolean()}).strict().parse(p);const item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');
+            // Starting voice clears the conversation runtime; on the active Build that would abort
+            // its in-flight run. Voice on other conversations stays available during a Build.
+            if(q.enabled&&item.kind==='build'&&this.activeLocalBuild()?.id===item.id)throw Error('conversation_busy');
             const c=this.#state.conversations;if(q.enabled){if(c.voice_id&&c.voice_id!==q.id)throw Error('voice_active');if(c.voice_id===q.id)return this.conversationSnapshot();if(!this.#conversationPool)throw Error('voice_unavailable');this.#voiceTransition=true;try{await this.#supersedeAnnouncements();if(this.#conversationPool.hasVoice('chat:main'))await this.#conversationPool.stopVoice('chat:main');await this.#conversationPool.startVoice(item)}finally{this.#voiceTransition=false}}else{if(c.voice_id!==q.id)throw Error('voice_not_owned');await this.#conversationPool?.stopVoice(q.id)}await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.voice_id=q.enabled?q.id:null;await this.#commit(next)});return this.conversationSnapshot()}
         if(method==='conversations.clear'){const q=z.object({id:z.string(),expected_generation:z.number().int().optional()}).strict().parse(p);const item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');if(q.expected_generation!==undefined&&item.generation!==q.expected_generation)throw Error('generation_conflict');if(this.#state.conversations.voice_id===q.id)throw Error('voice_active');this.#localBuildAuthority.delete(q.id);this.#clearingConversations.add(q.id);try{await this.#conversationPool?.clear(q.id);await this.#serial(async()=>{const next=structuredClone(this.#state);const target=next.conversations.items.find(item=>item.id===q.id)!;target.messages=[];target.read_through_id=null;target.generation++;target.prepared=null;delete target.scheduled_result_focus;delete target.plan;if(target.kind==='build'){target.kind='chat';target.mode='chat';delete target.build}await this.#commit(next)});}finally{this.#clearingConversations.delete(q.id)}return this.conversationSnapshot()}
         if(method==='conversations.open_feed'){const feed=this.#state.feed.find(f=>f.id===p.feed_id);const item=feed?this.#state.conversations.items.find(c=>c.feed_ids.includes(feed.id)||c.kind==='topic'&&c.subject_key===feed.subject_key):undefined;if(item&&JSON.stringify(item.prepared)!==JSON.stringify(feed?.prepared)){if(this.#state.conversations.voice_id===item.id)throw Error('voice_active');await this.#conversationPool?.clear(item.id)}}
@@ -1932,7 +1936,10 @@ export class PersonalAgentHost {
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
         if(context?.client_id!=='desktop:local'&&typeof command.params.id==='string'&&this.#state.conversations.items.some(item=>item.id===command.params.id&&item.kind==='build'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
         const localCommand=command.method.startsWith('workspaces.')||command.method.startsWith('build.')||command.method.startsWith('plans.')||command.method==='conversations.mode'||command.method==='settings.local_tool_approval';
-        if(localCommand&&(context?.client_id!=='desktop:local'||this.#presentationMode!=='workbench'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
+        // Stop must stay reachable from the computer-use overlay in orb/background; every other local
+        // command still requires a visible workbench so approvals have a place to land.
+        const presentationFree=command.method==='build.stop';
+        if(localCommand&&(context?.client_id!=='desktop:local'||(!presentationFree&&this.#presentationMode!=='workbench')))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
         if(this.activeLocalBuild()&&(command.method==='build.start'||command.method==='build.begin'||(command.method==='conversations.clear'&&command.params.id===this.activeLocalBuild()!.id)))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
         // Recovery owns task execution only: presentation, state and non-task commands keep working, and a handback made now is woken when recovery ends.
         if(this.#recovering&&(command.method.startsWith('tasks.')||command.method==='conversations.approve')&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};

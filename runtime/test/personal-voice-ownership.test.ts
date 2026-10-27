@@ -31,6 +31,14 @@ test('starting a local Build ends voice ownership instead of leaving a ghost own
     assert.equal(result.ok, true, result.error)
     assert.equal(f.host.conversationSnapshot().voice_id, null)
     await assert.rejects(f.host.sendConversationAudio('chat:main', new Uint8Array([1, 2])), /voice_not_owned/u)
+    const buildId = f.host.conversationSnapshot().selected_id
+    // Voice on the active Build would clear its runtime; it must be refused rather than abort the run.
+    assert.equal((await f.command('conversations.voice', {id: buildId, enabled: true})).error, 'conversation_busy')
+    // Another conversation keeps voice available while the Build runs.
+    assert.equal((await f.command('conversations.voice', {id: 'chat:main', enabled: true})).ok, true)
+    // The emergency Stop must still work from the floating orb, where the overlay is visible.
+    assert.equal((await f.command('presentation.set', {mode: 'orb'})).ok, true)
+    assert.equal((await f.command('build.stop', {id: buildId})).ok, true)
   } finally {
     await f.close()
   }
