@@ -176,7 +176,6 @@ class Session implements CascadedLlmSession {
     let outputText = ''
     let responseId: string | null = null
     let terminal = false
-    let textSeen = false
     const pendingTools:Extract<CascadedLlmEvent,{kind:'tool_call'}>[]=[]
     try {
       for await (const event of this.#gateway.stream({
@@ -196,11 +195,10 @@ class Session implements CascadedLlmSession {
         } else if (event.kind === 'text_delta') {
           if (responseId === null) throw fail('protocol')
           if (pendingTools.length && !this.#stateless&&!this.#portable) throw fail('protocol')
-          textSeen = true
           outputText += event.text
           yield event
         } else if (event.kind === 'tool_call') {
-          if(responseId===null||(textSeen&&!this.#stateless&&!this.#portable)||pendingTools.length>=this.#toolCallLimit||pendingTools.some(call=>call.call_id===event.call_id))throw fail('protocol')
+          if(responseId===null||pendingTools.length>=this.#toolCallLimit||pendingTools.some(call=>call.call_id===event.call_id))throw fail('protocol')
           pendingTools.push(structuredClone(event))
         } else if (event.kind === 'response_completed') {
           if (responseId === null || event.response_id !== responseId) throw fail('protocol')
