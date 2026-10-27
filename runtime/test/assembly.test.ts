@@ -170,7 +170,7 @@ test('model credential validation wins when both production credentials are abse
       settings: settings({model_api_key: null, tavily_api_key: null}),
     }),
     (error: unknown) => error instanceof AssemblyError
-      && error.message === '缺少 DASHSCOPE_API_KEY 或 MODEL_API_KEY',
+      && error.message === '缺少 DEEPSEEK_API_KEY 或 MODEL_API_KEY（Qwen 使用 DASHSCOPE_API_KEY）',
   )
 })
 
@@ -498,7 +498,7 @@ test('assembly gates local Guard before armed and emits bounded camera admission
 test('assembly telemetry does not call a non-progress class a host suppression', async () => {
   const telemetry: {readonly kind: string; readonly payload: unknown}[] = []
   const gateway = new ScriptedGateway([], {
-    'qwen-plus': '{"speak":true,"suggestion_id":null,"progress_class":"routine_delta","reason":"private summary echo"}',
+    'deepseek-flash': '{"speak":true,"suggestion_id":null,"progress_class":"routine_delta","reason":"private summary echo"}',
   })
   const assembly = buildAssembly({
     settings: settings({proactivity_preset: 'eager'}),

@@ -69,10 +69,10 @@ function evaluateConfigFixture(fixture: ConfigCase): unknown {
 }
 
 function loadPythonOwnedFixtureSettings(environment: NodeJS.ProcessEnv): Settings {
-  // Pin the retired Python default; Nova now uses Plus for progress/coordinator reliability.
-  environment = {...environment, SUPPORT_MODEL: environment.SURROGATE_MODEL ?? 'qwen-flash'}
+  // Pin the retired Python defaults; product defaults are tested separately.
+  environment = {MODEL_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', FAST_MODEL: 'qwen3-vl-plus', ...environment, SUPPORT_MODEL: environment.SURROGATE_MODEL ?? 'qwen-flash'}
   const legacyProvider = stripLikePython(environment.REALTIME_PROVIDER ?? '')
-  if (legacyProvider !== 'volcengine') return loadSettings(environment)
+  if (legacyProvider !== 'volcengine') return {...loadSettings(environment), compressor_model: 'qwen-flash'}
 
   // The shared fixture still describes the Python reference runtime's retired
   // selector. Adapt that input at the Node test boundary while preserving the
@@ -88,6 +88,7 @@ function loadPythonOwnedFixtureSettings(environment: NodeJS.ProcessEnv): Setting
 
   return Object.freeze({
     ...settings,
+    compressor_model: 'qwen-flash',
     dashscope_api_key: fixtureOptional(environment.DASHSCOPE_API_KEY, settings.dashscope_api_key),
     qwen_realtime_url: fixtureString(
       environment.QWEN_REALTIME_URL,
@@ -236,6 +237,6 @@ function secretPresent(value: string | null): boolean {
   return value !== null && stripLikePython(value) !== ''
 }
 
- test('Node defaults to Plus for progress and coordinator assessment', () => {
-  assert.equal(loadSettings({}).support_model, 'qwen-plus')
+ test('Node defaults to DeepSeek Flash for progress and coordinator assessment', () => {
+  assert.equal(loadSettings({}).support_model, 'deepseek-flash')
 })

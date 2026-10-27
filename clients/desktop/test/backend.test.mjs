@@ -558,11 +558,11 @@ test('launch spec falls back per-field for a partially-populated settings object
   assert.equal(spec.env.DOUBAO_TTS_VOICE, undefined)
 })
 
-test('integrated quick start supplies Qwen text settings without unused speech keys', () => {
+test('missing DeepSeek key does not silently select Qwen text or unused speech keys', () => {
   const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152', parentEnv: {},
     settings: {pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek'}, decryptedSecrets: {dashscopeApiKey: 'dash-key'}})
-  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'qwen')
-  assert.equal(spec.env.CASCADE_LLM_MODEL, 'qwen-plus')
+  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'deepseek')
+  assert.equal(spec.env.CASCADE_LLM_MODEL, 'deepseek-flash')
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'dash-key')
   assert.equal('DOUBAO_BIGMODEL_API_KEY' in spec.env, false)
 })

@@ -3446,7 +3446,7 @@ test('service close failure still stops core and preserves the first actual fail
 test('knowledge forced close fits the outer core shutdown budget without requiring another stop', async t => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-realtime-close-'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: true}}}, {})
-  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', knowledge_path: join(directory, 'knowledge.sqlite')})
+  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', embedding_api_key: 'embedding-key', knowledge_path: join(directory, 'knowledge.sqlite')})
   const knowledge = await prepareKnowledge(settings, capabilities)
   assert.ok(knowledge)
   const frame = new RecordingFrameSource()
@@ -3655,7 +3655,7 @@ test('personal host shares opened memory, persists configuration and closes with
 test('knowledge-only composition opens canonical originals without enabling personal capture', async () => {
   const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-knowledge-only-'))
   const capabilities=parseCapabilityRegistry({version:1,modules:{search:{enabled:false},coding:{enabled:false},knowledge:{enabled:true}}},{})
-  const settings=settingsSchema.parse({executors:[],model_api_key:'test-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
+  const settings=settingsSchema.parse({executors:[],model_api_key:'test-key',embedding_api_key:'embedding-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
   const knowledge=await prepareKnowledge(settings,capabilities)
   assert.ok(knowledge)
   const core=buildAssembly({settings,capabilities,knowledge,frameSource:new RecordingFrameSource(),gateway:new NeverCalledGateway()})
@@ -5247,7 +5247,7 @@ test('core gateway preserves compressor choices and falls back for provider defa
         },
         endpoint: 'https://generic.example/v9/chat/completions',
         authorization: 'Bearer generic-safe-key',
-        models: {watch: 'watch-original', surrogate: 'surrogate-original', compressor: 'qwen-flash'},
+        models: {watch: 'watch-original', surrogate: 'surrogate-original', compressor: 'deepseek-flash'},
       },
       {
         name: 'Python-whitespace Ark fallback',
@@ -5269,7 +5269,7 @@ test('core gateway preserves compressor choices and falls back for provider defa
         },
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         authorization: 'Bearer dash-support-key',
-        models: {watch: 'watch-original', surrogate: 'qwen3-max', compressor: 'qwen-flash'},
+        models: {watch: 'watch-original', surrogate: 'qwen3-max', compressor: 'qwen3-max'},
       },
     ] as const
     for (const scenario of cases) {

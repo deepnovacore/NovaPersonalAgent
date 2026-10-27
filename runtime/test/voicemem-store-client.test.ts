@@ -536,3 +536,18 @@ test('a stalled worker request rejects at its deadline and terminates its owner'
   assert.equal(worker.referenced, false)
   await store.close()
 })
+
+
+test('VoiceMem uses separate extraction and embedding transports', {timeout: 10000}, async t => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-voicemem-split-'))
+  const embedding = await loopbackProvider(), extraction = await loopbackProvider()
+  const store = new PersonalMemoryStoreClient({path: join(directory, 'memory.sqlite'), userId: 'host-user',
+    embedding: {baseUrl: embedding.baseUrl, apiKey: 'embedding-key', model: 'embed-test', dimensions: 2},
+    extraction: {baseUrl: extraction.baseUrl, apiKey: 'text-key'}, extractionModel: 'deepseek-flash'})
+  t.after(async () => {await store.close(); await embedding.close(); await extraction.close(); await rm(directory, {recursive: true, force: true})})
+  await store.open()
+  await store.remember!({sourceId: 'separate', sessionId: 's', sequence: 1, text: 'separate', occurredAt: null})
+  await eventually(async () => (await store.recall('separate')).hits.length > 0)
+  assert.equal(extraction.calls.get('separate'), 1)
+  assert.equal(embedding.calls.size, 0)
+})
