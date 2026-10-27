@@ -88,6 +88,10 @@ export type PersonalMemoryStoreClientErrorCode = PersonalMemoryStoreErrorCode
   | 'WORKER_ERROR'
   | 'WORKER_EXITED'
   | 'WORKER_PROTOCOL_FAILURE'
+  /** The per-request deadline expired; the worker may still answer later and stays open. */
+  | 'WORKER_TIMEOUT'
+  /** A crashed worker is inside its restart backoff. */
+  | 'WORKER_UNAVAILABLE'
 
 export class PersonalMemoryStoreClientError extends PersonalMemoryError {
   constructor(readonly code: PersonalMemoryStoreClientErrorCode) {
@@ -159,6 +163,9 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
   #failure: Extract<PersonalMemoryStoreClientErrorCode, `WORKER_${string}`> | undefined
   #expectedExit = false
   #closing: Promise<void> | undefined
+  #opening: Promise<void> | undefined
+  #spawnFailures = 0
+  #nextSpawnAt = 0
   #adaptation: PersonalMemoryResponseAdaptation = freezeAdaptation({revision: 0, replyPreferences: []})
 
   constructor(options: PersonalMemoryStoreClientOptions) {
@@ -208,8 +215,22 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
 
   async open(): Promise<void> {
     if (this.#closed || this.#failed) throw new PersonalMemoryStoreClientError('CLIENT_CLOSED')
+    if (this.#opening !== undefined) {
+      try { await this.#opening; return } catch { /* a failed open is retried below */ }
+    }
+    if (Date.now() < this.#nextSpawnAt) throw new PersonalMemoryStoreClientError('WORKER_UNAVAILABLE')
     try { this.#ensureWorker() } catch { throw this.#protocolFailure() }
-    await this.#request<unknown>('open', {})
+    const opening = this.#request<unknown>('open', {}).then(() => undefined)
+    this.#opening = opening
+    try {
+      await opening
+      this.#spawnFailures = 0
+      this.#nextSpawnAt = 0
+    } catch (error) {
+      this.#opened = false
+      if (this.#opening === opening) this.#opening = undefined
+      throw error
+    }
   }
 
   recall(
@@ -316,12 +337,20 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
   #send<Result>(operation: string, payload: Record<string, unknown>): {readonly requestId: number; readonly promise: Promise<Result>} {
     const requestId = this.#nextRequestId++
     const promise = new Promise<Result>((resolve, reject) => {
-      const timer = setTimeout(() => this.#fail('WORKER_ERROR'), REQUEST_TIMEOUT_MS)
-      this.#pending.set(requestId, {
+      const pending: Pending<unknown> = {
         mutation: ['remember','forget','correct','forgetEntry','forgetSource','observeSource'].includes(operation),
         resolve: result => { clearTimeout(timer); resolve(result as Result) },
         reject: error => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))) },
-      })
+      }
+      // A single slow request must not poison the whole client: reject only that request and let a
+      // late response be discarded. The worker keeps its state and the next admission can proceed.
+      const timer = setTimeout(() => {
+        if (this.#pending.get(requestId) !== pending) return
+        this.#pending.delete(requestId)
+        this.#dropped.add(requestId)
+        pending.reject(new PersonalMemoryStoreClientError(pending.mutation ? 'MUTATION_OUTCOME_UNKNOWN' : 'WORKER_TIMEOUT'))
+      }, REQUEST_TIMEOUT_MS)
+      this.#pending.set(requestId, pending)
       try {
         this.#worker!.postMessage({...payload, kind: 'request', request_id: requestId, operation})
       } catch {
@@ -372,20 +401,33 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
     if (this.#failed || this.#expectedExit) return
     this.#failed = true
     this.#failure = code
+    this.#opening = undefined
     this.#rejectPending(code)
     void this.#worker?.terminate().catch(() => undefined)
     this.#worker?.unref?.()
+  }
+
+  /** A dead worker is recoverable: reject in-flight work, back off and respawn on the next open. */
+  #recoverWorker(code: 'WORKER_ERROR' | 'WORKER_EXITED'): void {
+    if (this.#failed || this.#expectedExit || this.#closed) return
+    const worker = this.#worker
+    this.#worker = undefined
+    this.#opened = false
+    this.#opening = undefined
+    this.#spawnFailures += 1
+    this.#nextSpawnAt = Date.now() + Math.min(5_000, 250 * (2 ** Math.min(this.#spawnFailures - 1, 4)))
+    this.#rejectPending(code)
+    void worker?.terminate().catch(() => undefined)
+    worker?.unref?.()
   }
 
   #ensureWorker(): void {
     if (this.#worker !== undefined) return
     const worker = this.#workerFactory(new URL('./store-worker.js', import.meta.url), this.#workerOptions)
     this.#worker = worker
-    worker.on('message', message => this.#handleMessage(message))
-    worker.on('error', () => this.#fail('WORKER_ERROR'))
-    worker.on('exit', () => {
-      if (!this.#expectedExit) this.#fail('WORKER_EXITED')
-    })
+    worker.on('message', message => { if (this.#worker === worker) this.#handleMessage(message) })
+    worker.on('error', () => { if (this.#worker === worker) this.#recoverWorker('WORKER_ERROR') })
+    worker.on('exit', () => { if (this.#worker === worker) this.#recoverWorker('WORKER_EXITED') })
   }
 
   #protocolFailure(): PersonalMemoryStoreClientError {

@@ -24,12 +24,18 @@ export type MemoryLedgerClientErrorCode =
   | 'WORKER_ERROR'
   | 'WORKER_EXITED'
   | 'WORKER_PROTOCOL_FAILURE'
+  /** A stuck in-flight read was abandoned and the worker was replaced. */
+  | 'WORKER_RECYCLED'
+  /** The caller's signal aborted this request. */
+  | 'REQUEST_ABORTED'
 
 const clientErrorMessages: Readonly<Record<MemoryLedgerClientErrorCode, string>> = {
   CLIENT_CLOSED: 'memory ledger store client is closed',
   WORKER_ERROR: 'memory ledger worker failed',
   WORKER_EXITED: 'memory ledger worker exited',
   WORKER_PROTOCOL_FAILURE: 'memory ledger worker protocol failure',
+  WORKER_RECYCLED: 'memory ledger worker was replaced after a stuck request',
+  REQUEST_ABORTED: 'memory ledger request was aborted',
   STORE_ALREADY_OPEN: 'memory ledger store is already open',
   STORE_CLOSED: 'memory ledger store is closed',
   STORE_IDEMPOTENCY_CONFLICT: 'memory ledger observation replay conflict',
@@ -109,6 +115,9 @@ interface QueuedRequest {
   readonly message: Readonly<Record<string, unknown>>
 }
 
+/** A synchronous worker op cannot be cancelled; after this grace the worker is replaced instead. */
+const STUCK_GRACE_MS = 30_000
+
 export class MemoryLedgerClient {
   readonly #workerFactory: (url: URL, options: WorkerOptions) => MemoryLedgerWorker
   readonly #workerUrl = new URL('./store-worker.js', import.meta.url)
@@ -120,6 +129,9 @@ export class MemoryLedgerClient {
   readonly #pending = new Map<number, PendingRequest>()
   readonly #queue: QueuedRequest[] = []
   #inService: number | null = null
+  readonly #dropped = new Set<number>()
+  #abandonedInService: number | null = null
+  #recycleTimer: ReturnType<typeof setTimeout> | null = null
   #nextRequestId = 1
   #failed = false
   #closed = false
@@ -137,14 +149,18 @@ export class MemoryLedgerClient {
     this.#worker = this.#spawnWorker()
   }
 
-  memory(operation: MemoryOperation, input: unknown, options: {readonly priority?: MemoryRequestPriority} = {}): Promise<unknown> {
+  memory(operation: MemoryOperation, input: unknown, options: {readonly priority?: MemoryRequestPriority; readonly signal?: AbortSignal} = {}): Promise<unknown> {
     const priority = options.priority ?? (backgroundContext.getStore() ? 'background' : 'normal')
-    return this.#request('memory', {memoryOperation: operation, input}, value => value, priorityRank[priority])
+    return this.#request('memory', {memoryOperation: operation, input}, value => value, priorityRank[priority], options.signal)
   }
 
   async open(): Promise<void> {
     if (this.#closed || this.#failed) throw new MemoryLedgerClientError('CLIENT_CLOSED')
-    this.#opening ??= this.#request('open', {}, nullResult)
+    this.#opening ??= this.#request('open', {}, nullResult).catch((error: unknown) => {
+      // A transient open failure must not memoize a dead client; the next admission retries.
+      this.#opening = null
+      throw error
+    })
     await this.#opening
   }
 
@@ -158,6 +174,12 @@ export class MemoryLedgerClient {
 
   async #closeFresh(): Promise<void> {
     this.#closed = true
+    if (this.#recycleTimer !== null) {
+      clearTimeout(this.#recycleTimer)
+      this.#recycleTimer = null
+    }
+    this.#abandonedInService = null
+    this.#dropped.clear()
     if (!this.#failed) {
       // Drain queued work and its lock cleanup before termination; worker errors/exits reject this RPC.
       await this.#requestWhileClosing('close', {}, nullResult).catch(() => undefined)
@@ -176,11 +198,12 @@ export class MemoryLedgerClient {
     payload: Readonly<Record<string, unknown>>,
     validateResult: RpcResultValidator<Result>,
     rank: number = priorityRank.normal,
+    signal?: AbortSignal,
   ): Promise<Result> {
     if (this.#closed || this.#failed) {
       return Promise.reject(new MemoryLedgerClientError('CLIENT_CLOSED'))
     }
-    return this.#send(operation, payload, validateResult, rank)
+    return this.#send(operation, payload, validateResult, rank, signal)
   }
 
   #requestWhileClosing<Result>(
@@ -198,6 +221,7 @@ export class MemoryLedgerClient {
     payload: Readonly<Record<string, unknown>>,
     validateResult: RpcResultValidator<Result>,
     rank: number,
+    signal?: AbortSignal,
   ): Promise<Result> {
     const requestId = this.#nextRequestId
     this.#nextRequestId += 1
@@ -207,8 +231,52 @@ export class MemoryLedgerClient {
       // Stable: equal ranks keep arrival order.
       const at = this.#queue.findIndex(queued => queued.rank > rank)
       this.#queue.splice(at < 0 ? this.#queue.length : at, 0, {requestId, rank, message})
+      const onAbort = () => {
+        if (!this.#pending.has(requestId)) return
+        this.#pending.delete(requestId)
+        reject(new MemoryLedgerClientError('REQUEST_ABORTED'))
+        const queuedIndex = this.#queue.findIndex(queued => queued.requestId === requestId)
+        if (queuedIndex >= 0) {
+          this.#queue.splice(queuedIndex, 1)
+          return
+        }
+        // The worker is synchronous: mark the response as dropped and replace the worker if it
+        // still has not answered after the grace period, so the next read is not stuck behind it.
+        if (this.#inService === requestId) {
+          this.#dropped.add(requestId)
+          this.#abandonedInService = requestId
+          this.#armRecycleTimer()
+        }
+      }
+      signal?.addEventListener('abort', onAbort, {once: true})
+      if (signal?.aborted === true) onAbort()
       this.#dispatch()
     })
+  }
+
+  #armRecycleTimer(): void {
+    if (this.#recycleTimer !== null) return
+    this.#recycleTimer = setTimeout(() => {
+      this.#recycleTimer = null
+      if (this.#abandonedInService === null || this.#closed) return
+      this.#recycleWorker('WORKER_RECYCLED')
+    }, STUCK_GRACE_MS)
+    this.#recycleTimer.unref?.()
+  }
+
+  /** Replace a worker stuck on a synchronous op; the next `open()` re-establishes the store. */
+  #recycleWorker(code: 'WORKER_ERROR' | 'WORKER_EXITED' | 'WORKER_RECYCLED'): void {
+    if (this.#closed || this.#expectedExit) return
+    const previous = this.#worker
+    this.#abandonedInService = null
+    if (this.#recycleTimer !== null) {
+      clearTimeout(this.#recycleTimer)
+      this.#recycleTimer = null
+    }
+    this.#worker = this.#spawnWorker()
+    this.#opening = null
+    this.#rejectAll(new MemoryLedgerClientError(code))
+    void previous.terminate().catch(() => undefined)
   }
 
   #dispatch(): void {
@@ -237,6 +305,13 @@ export class MemoryLedgerClient {
     const response = parseWorkerResponse(message)
     if (response === undefined) {
       this.#fail('WORKER_PROTOCOL_FAILURE')
+      return
+    }
+    if (this.#dropped.delete(response.request_id)) {
+      // An abandoned read finished late; free its service slot without delivering a result.
+      if (this.#inService === response.request_id) this.#inService = null
+      if (this.#abandonedInService === response.request_id) this.#abandonedInService = null
+      this.#dispatch()
       return
     }
     const pending = this.#pending.get(response.request_id)
@@ -284,8 +359,12 @@ export class MemoryLedgerClient {
     worker: MemoryLedgerWorker,
     code: 'WORKER_ERROR' | 'WORKER_EXITED',
   ): void {
-    if (worker !== this.#worker || this.#failed || this.#expectedExit) return
-    this.#fail(code)
+    if (worker !== this.#worker || this.#expectedExit) return
+    if (this.#closed) {
+      this.#rejectAll(new MemoryLedgerClientError(code))
+      return
+    }
+    this.#recycleWorker(code)
   }
 }
 
