@@ -12,6 +12,21 @@ import 'package:nova_mobile/ui/theme.dart';
 import 'package:nova_mobile/ui/timeline_page.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
+/// Scrolls to [text] and settles the layout afterwards.
+///
+/// `scrollUntilVisible` calls `ensureVisible` without pumping one more frame,
+/// which can leave a taller P3 list one frame behind the scroll offset.
+Future<void> scrollToText(WidgetTester tester, String text) async {
+  final scrollable = find.byType(Scrollable).first;
+  for (var i = 0; i < 40 && find.text(text).evaluate().isEmpty; i++) {
+    await tester.drag(scrollable, const Offset(0, -200));
+    await tester.pump();
+  }
+  expect(find.text(text), findsOneWidget);
+  await tester.ensureVisible(find.text(text));
+  await tester.pump();
+}
+
 class _ReadyHost extends FeishuHost {
   _ReadyHost(SourceStore sources) : super(sources: sources) {
     sources.addListener(notifyListeners);
@@ -121,6 +136,7 @@ class _Fixture {
         child: TimelinePage(
           store: life,
           language: language,
+          now: now,
           sourceTimeline: LocalProfileResults(
             host: host,
             authority: authority,
@@ -194,6 +210,17 @@ void main() {
         await f.open();
         await tester.pumpWidget(f.app(scale: 2));
         await tester.pumpAndSettle();
+        expect(find.text('10月18日 · 星期日'), findsOneWidget);
+        expect(find.text('今天暂无安排'), findsOneWidget);
+        final briefLabel = find.byKey(
+          const ValueKey('timeline-morning-brief-label'),
+        );
+        expect(briefLabel, findsOneWidget);
+        expect(find.text('晨间简报'), findsOneWidget);
+        expect(
+          tester.getTopLeft(briefLabel).dy,
+          lessThan(tester.getTopLeft(find.byType(LocalProfileResults)).dy),
+        );
         expect(find.text('更新依据 · 2026年10月17日 15:00'), findsOneWidget);
         expect(find.text('更新依据 · 2026年10月16日 10:00'), findsOneWidget);
         final cards = tester
@@ -220,12 +247,7 @@ void main() {
         expect(evidence, ['原始依据 0', '原始依据 2']);
         await tester.tap(find.text('关闭'));
         await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(
-          find.text('独立的待办安排'),
-          200,
-          scrollable: find.byType(Scrollable).first,
-        );
-        expect(find.text('独立的待办安排'), findsOneWidget);
+        await scrollToText(tester, '独立的待办安排');
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         f.dispose();
@@ -240,6 +262,9 @@ void main() {
       await f.open(publish: false);
       f.disk.pending = Completer<String?>();
       await tester.pumpWidget(f.app());
+      expect(find.text('10月18日 · 星期日'), findsOneWidget);
+      expect(find.text('晨间简报'), findsOneWidget);
+      expect(find.text('今天暂无安排'), findsOneWidget);
       expect(find.text('正在加载近况…'), findsOneWidget);
       expect(find.text('还没有近况'), findsNothing);
       f.disk.pending!.completeError(StateError('locked'));
@@ -267,6 +292,10 @@ void main() {
         await f.open(publish: false);
         f.disk.pending = Completer<String?>();
         await tester.pumpWidget(f.app(scale: 2, language: 'en'));
+        expect(find.text('Today'), findsOneWidget);
+        expect(find.text('Oct 18 · Sunday'), findsOneWidget);
+        expect(find.text('Morning brief'), findsOneWidget);
+        expect(find.text('No plans today'), findsOneWidget);
         expect(find.text('Loading updates…'), findsOneWidget);
         f.disk.pending!.completeError(StateError('unavailable'));
         await tester.pumpAndSettle();
@@ -296,6 +325,9 @@ void main() {
       await f.open();
       await tester.pumpWidget(f.app(language: 'en'));
       await tester.pumpAndSettle();
+      expect(find.text('Today'), findsOneWidget);
+      expect(find.text('Oct 18 · Sunday'), findsOneWidget);
+      expect(find.text('Morning brief'), findsOneWidget);
       expect(find.text('Based on messages · 2026-10-17 15:00'), findsOneWidget);
       expect(find.text('View 2 source messages ›'), findsOneWidget);
       await tester.tap(find.text('View 2 source messages ›'));

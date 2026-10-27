@@ -16,6 +16,8 @@
 	<string>Nova reads and changes reminders for tasks you explicitly approve.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Nova uses your microphone after you start voice or dictation.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Nova uses the photo you choose as your pet avatar. The image stays on this device.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

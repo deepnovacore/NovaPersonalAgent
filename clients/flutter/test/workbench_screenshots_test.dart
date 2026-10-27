@@ -12,11 +12,32 @@ import 'package:nova_mobile/personal/life_host.dart';
 import 'package:nova_mobile/personal/local_life.dart';
 import 'package:nova_mobile/services/preferences.dart';
 import 'package:nova_mobile/ui/app.dart';
+import 'package:nova_mobile/ui/pet_avatar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 import 'support/fake_audio.dart';
 
 void main() {
+
+/// Decodes the approved pet avatar at the sizes used by the chat before any
+/// golden capture, so the screenshots do not depend on async image timing.
+Future<void> precachePetAvatar(WidgetTester tester) async {
+  final context = tester.element(find.byType(NovaApp));
+  await tester.runAsync(() async {
+    for (final width in [64, 96]) {
+      await precacheImage(
+        ResizeImage.resizeIfNeeded(
+          width,
+          null,
+          const AssetImage(petAvatarAsset),
+        ),
+        context,
+      );
+    }
+  });
+  await tester.pumpAndSettle();
+}
+
   setUpAll(() async {
     final config = File('.dart_tool/package_config.json');
     final packages =
@@ -248,6 +269,7 @@ void main() {
       },
     });
     await tester.pump(const Duration(milliseconds: 100));
+    await precachePetAvatar(tester);
     for (final page in ['Nova', 'Feeds', 'Todos', 'Ideas', 'Goals']) {
       if (page != 'Nova') {
         await openLibrary(tester, page);
