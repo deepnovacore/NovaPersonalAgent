@@ -177,7 +177,7 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .chat-pane{display:flex;flex-direction:column;min-height:0;min-width:0;border-left:1px solid var(--line);background:var(--surface-raised)}
 .chat-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);min-height:49px}
 .chat-home{flex-shrink:0;white-space:nowrap}
-.conversation-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conversation-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conversation-switcher{position:relative;flex:1;min-width:0}
 .conversation-switcher>summary{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:var(--radius-sm);color:var(--ink);font-size:13px;border:1px solid transparent}
 .conversation-switcher>summary::before{display:none}
@@ -823,3 +823,12 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .conversation-task-summary{grid-column:1/-1;min-width:0;font-size:12px;line-height:1.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-dim)}
 .conversation-task-summary[hidden]{display:none}
 @container(max-width:380px){.workbench-page>button.conversation-task{grid-template-columns:minmax(0,1fr);padding:12px}.conversation-task-meta{grid-row:3;padding-top:0}}
+
+.chat-preview-plan{flex-shrink:0;font-size:12px;padding:5px 9px}
+.workbench-plan-preview{width:100%;max-width:760px;margin:0 auto}
+.workbench-plan-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.workbench-plan-preview-head h2{margin:0;font-size:16px}
+.workbench-plan-preview .workbench-plan{margin:0;padding:20px;background:var(--surface);border-radius:var(--radius)}
+.workbench-plan-preview .workbench-plan h3{font-size:16px;line-height:1.5}
+.workbench-plan-preview .workbench-plan-body{max-height:none;overflow:visible;line-height:1.7;margin:16px 0 24px}
+.workbench-plan-preview .workbench-plan textarea{min-height:40vh;font-size:13px}

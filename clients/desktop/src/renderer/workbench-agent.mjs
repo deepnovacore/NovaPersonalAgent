@@ -12,7 +12,7 @@ const BUILD_REASONS=Object.freeze({
 })
 
 /** Bounded snapshots carry only status. Full plans and logs are fetched in small pages. */
-export function mountWorkbenchAgent(parent,{c,el,run,api}){
+export function mountWorkbenchAgent(parent,{c,el,run,api,planHost}){
  const root=el('section',undefined,'workbench-agent'),bar=el('div',undefined,'workbench-mode-bar');parent.append(root);root.append(bar)
  const info=el('div',undefined,'workbench-build-info'),status=el('span','','workbench-build-status'),project=el('span','','workbench-build-project'),reason=el('span','','workbench-build-reason'),buildActions=el('div',undefined,'workbench-build-actions')
  status.setAttribute('role','status');info.append(status,project,reason);bar.append(info,buildActions)
@@ -42,7 +42,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   } finally {if(loadingApproval===pending.id)loadingApproval=null;approve.disabled=loadedApproval!==c.selectedConversation?.build?.approval?.id||!c.connected}
  }
  for(const [button,value] of [[approve,true],[always,true],[deny,false]])button.addEventListener('click',()=>run(async()=>{const pending=c.selectedConversation?.build?.approval;if(pending)await c.command('build.approve',{id:c.selectedId,approval_id:pending.id,approved:value,...(button===always?{always:true}:{})})}))
- const planCard=el('section',undefined,'workbench-plan');planCard.hidden=true;root.append(planCard)
+ const planCard=el('section',undefined,'workbench-plan');planCard.hidden=true;(planHost??root).append(planCard)
  const planTitle=el('h3'),body=el('div',undefined,'workbench-plan-body'),edit=el('textarea');edit.hidden=true;edit.setAttribute('aria-label',t('计划内容'));edit.maxLength=131072
  const actions=el('div',undefined,'workbench-plan-actions'),editButton=el('button',t('修改计划')),save=el('button',t('保存计划')),start=el('button',t('开始 Build'))
  // One runner choice: the built-in Build (synchronous) or a local executor (asynchronous). The workspace follows the runner.
@@ -88,7 +88,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
  }))
  start.addEventListener('click',()=>run(async()=>{const ref=reference(),executor=runner.value;if(!ref||busy)return;busy=true;update();try{if(executor)await c.command('plans.delegate',{...ref,executor,...(executor==='codex'&&directories.value?{project:directories.value}:{})});else await c.command('build.start',{...ref,...workspace.value()})}finally{busy=false;update()}}))
  function update(){
-  const item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status)
+  const ready=c.connected&&c.presentationReady!==false,item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status)
   root.hidden=!item
   status.textContent=build?t('Build · {0}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status)):''
   status.setAttribute('data-state',build?.status??'')
@@ -96,19 +96,20 @@ export function mountWorkbenchAgent(parent,{c,el,run,api}){
   project.textContent=folderName(build?.project);project.title=folderName(build?.project);project.hidden=!project.textContent
   reason.textContent=build?.reason&&build.reason!=='stopped'&&BUILD_REASONS[build.reason]?t(BUILD_REASONS[build.reason]):'';reason.hidden=!reason.textContent;reason.title=reason.textContent
   stop.hidden=!build||!active;resume.hidden=!build||active||['completed','finished'].includes(build.status);details.hidden=!build
-  always.disabled=!c.connected||loadedApproval!==build?.approval?.id;approval.hidden=!build?.approval;deny.disabled=!c.connected;approve.disabled=!c.connected||loadedApproval!==build?.approval?.id
-  if(build?.approval&&loadedApproval!==build.approval.id){if(loadingApproval!==build.approval.id)preview.textContent=build.approval.name+'\n'+build.approval.preview;void loadApproval(build.approval,item.id).catch(error=>{c.error=error.message;c.changed()})}
+  stop.disabled=resume.disabled=details.disabled=!ready
+  always.disabled=!ready||loadedApproval!==build?.approval?.id;approval.hidden=!build?.approval;deny.disabled=!ready;approve.disabled=!ready||loadedApproval!==build?.approval?.id
+  if(ready&&build?.approval&&loadedApproval!==build.approval.id){if(loadingApproval!==build.approval.id)preview.textContent=build.approval.name+'\n'+build.approval.preview;void loadApproval(build.approval,item.id).catch(error=>{c.error=error.message;c.changed()})}
   const hasPlan=item?.mode==='plan'&&item.plan;planCard.hidden=!hasPlan
   // The mode lives in the composer; this strip appears only for a Build session or a published plan.
-  bar.hidden=!build;if(!build&&!hasPlan&&!root.hidden)root.hidden=true
+  bar.hidden=!build;if(!build&&(planHost||!hasPlan))root.hidden=true
   if(lastSelected!==c.selectedId){lastSelected=c.selectedId;log.hidden=true;sequence++;loading=false;planKey='';failedKey='';plan=null;retry.hidden=true;body.replaceChildren()}
-  if(hasPlan)void load().catch(error=>{c.error=error.message;c.changed()})
+  if(ready&&hasPlan)void load().catch(error=>{c.error=error.message;c.changed()})
   const delegating=Boolean(runner.value)
-  runner.disabled=busy;directories.hidden=runner.value!=='codex';directoryLabel.hidden=directories.hidden;directories.disabled=busy;workspace.update()
+  runner.disabled=busy||!ready;directories.hidden=runner.value!=='codex';directoryLabel.hidden=directories.hidden;directories.disabled=busy||!ready;workspace.update()
   start.textContent=delegating?t('交给 {0}',runner.value):t('开始 Build')
   runnerNote.textContent=delegating?t('异步执行：{0} 在后台完成，进度在悬浮窗查看，对话可以继续。',runner.value):t('同步执行：在选定工作区读写文件、运行命令，完成前这段对话保持占用。')
-  start.disabled=busy||!plan||!c.connected||JSON.stringify(reference())!==planKey||(!delegating&&!localBuildSupported)
-  save.disabled=busy;editButton.disabled=busy||!plan
+  start.disabled=busy||!plan||!ready||JSON.stringify(reference())!==planKey||(!delegating&&!localBuildSupported)
+  save.disabled=busy||!ready;editButton.disabled=busy||!plan;retry.disabled=!ready
   planCard.setAttribute('data-execution',delegating?'delegate':'build')
  }
  return {update,element:root}

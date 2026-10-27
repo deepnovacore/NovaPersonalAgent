@@ -75,11 +75,12 @@ function glyph(path){const svg=document.createElementNS(SVG_NS,'svg');svg.setAtt
 export const conversationTitle=item=>item?.id==='chat:main'?t('主对话'):item?.title??t('对话')
 
 /** The persistent Nova pane: read-only title, transcript, three-state composer. */
-export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSchedule,onOpenChange=()=>{},onHome=()=>{},speakingLevel=null}){
+export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSchedule,onOpenChange=()=>{},onHome=()=>{},onPreviewPlan=()=>{},planHost,speakingLevel=null}){
  const pane=el('aside',undefined,'chat-pane');pane.id='chat-pane';pane.setAttribute('aria-label',t('Nova 对话'));columns.append(pane)
  const head=el('header',undefined,'chat-head');pane.append(head)
  const homeButton=button('← '+t('返回主对话'),onHome,head);homeButton.className='chat-home';homeButton.title=t('返回主对话')
  const summaryTitle=el('span',t('对话'),'conversation-title');head.append(summaryTitle)
+ const previewPlan=button(t('查看计划'),onPreviewPlan,head);previewPlan.className='chat-preview-plan';previewPlan.hidden=true;previewPlan.setAttribute('aria-controls','workbench-panel')
  const voiceLine=el('div',undefined,'chat-voice');const voiceStatus=el('span','','conversation-voice-status');voiceLine.append(voiceStatus);const resumeVoice=button(t('恢复语音'),()=>c.resumeVoice(),voiceLine);resumeVoice.hidden=true;const endVoice=button(t('结束语音'),()=>c.stopVoice(),voiceLine);endVoice.hidden=true;pane.append(voiceLine)
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
  const emptyConversation=el('div',undefined,'chat-intro');emptyConversation.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
@@ -92,7 +93,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const stageCanvas=el('canvas',undefined,'voice-stage-orb');stageCanvas.setAttribute('aria-hidden','true')
  const stageLabel=el('p','','voice-stage-label');stageLabel.setAttribute('role','status');stage.append(stageCanvas,stageLabel);pane.append(stage)
  const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
- const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api})
+ const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api,planHost})
  const approvalDock=mountApprovalDock(pane,{c,el,button,run})
  const pendingBuild=()=>{const item=c.selectedConversation;return Boolean(item)&&item.kind!=='build'&&currentComposerMode(item,c.state(item.id))==='build'}
  const workspaceBar=mountWorkspaceBar(pane,{c,el,button,run,api:api?.personal,visible:pendingBuild})
@@ -183,6 +184,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const items=c.snapshot?.conversations?.items??[]
   const active=items.find(item=>item.id===c.selectedId)
   summaryTitle.textContent=conversationTitle(active);pane.dataset.main=String(c.selectedId==='chat:main');homeButton.hidden=c.selectedId==='chat:main';homeButton.title=t('返回主对话');homeButton.textContent='← '+t('返回主对话');homeButton.disabled=!c.connected||c.presentationReady===false
+  previewPlan.hidden=active?.mode!=='plan'||!active.plan
   const voiceConversation=items.find(item=>item.id===c.voiceId)
   voiceStatus.textContent=c.voiceId?`语音：${conversationTitle(voiceConversation)??'另一会话'}${c.voiceCapabilities?.model.nativeFullDuplex?' · 原生双工对话（无工具调用、无历史恢复）':''}`:''
   resumeVoice.hidden=!c.voiceId||c.mode!=='text';resumeVoice.disabled=!c.connected||!c.presentationReady;

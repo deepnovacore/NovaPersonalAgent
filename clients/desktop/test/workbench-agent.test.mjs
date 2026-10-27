@@ -105,7 +105,7 @@ test('published Plan starts the built-in Build or hands the plan to a chosen exe
  globalThis.document={createElement:name=>new Element(name),createTextNode:text=>new Element('#text',text)}
  try{
   const item={id:'chat:plan',kind:'chat',mode:'plan',plan:{id:'plan-1',version:1}},commands=[],project='C:\\Projects\\中文 项目'
-  const local={};const c={state:()=>local,connected:true,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method,params)=>{
+  const local={};const c={state:()=>local,connected:true,presentationReady:false,isVoiceConversation:false,selectedId:item.id,selectedConversation:item,command:async(method,params)=>{
    commands.push([method,params])
    if(method==='workspaces.list')return [{workspace_id:'managed-default',name:'default',is_default:true}];
    if(method==='plans.get')return {id:'plan-1',version:1,title:'Plan',content:'Full plan',next_offset:null}
@@ -113,7 +113,8 @@ test('published Plan starts the built-in Build or hands the plan to a chosen exe
    return {}
   }}
   const parent=new Element('main'),el=(name,text)=>new Element(name,text),agent=mountWorkbenchAgent(parent,{c,el,run:callback=>callback(),api:{personal:{chooseBuildDirectory:async()=>project}}})
-  agent.update()
+  agent.update();await new Promise(resolve=>setTimeout(resolve,0));assert.deepEqual(commands,[],'Plan waits for presentation recovery')
+  c.presentationReady=true;agent.update()
   for(let tries=0;tries<50&&!commands.some(([method])=>method==='conversations.targets');tries++)await new Promise(resolve=>setTimeout(resolve,0))
   await new Promise(resolve=>setTimeout(resolve,0))
   const planCard=agent.element.children.find(child=>child.name==='section'&&child.children.some(node=>node.name==='h3'&&node.textContent==='计划 · Plan · v1'))
