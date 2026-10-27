@@ -5325,7 +5325,7 @@ test('core gateway preserves compressor choices and falls back for provider defa
 
 test('cascaded rejects the final tool budget after evaluating the provider view once', () => {
   const configured = loadSettings({MEMORY_CONNECTION: 'disabled',
-    PIPELINE_MODE: 'cascaded',
+    PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'qwen',
     DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
   })
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
