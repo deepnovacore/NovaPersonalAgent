@@ -435,7 +435,7 @@ function supportComposition(
   Object.assign(settings, {
     watch_model: watchModel,
     support_model: model,
-    compressor_model: provider !== 'qwen' && options.settings.compressor_model === 'qwen-flash'
+    compressor_model: options.settings.compressor_model === 'deepseek-flash'
       ? model : options.settings.compressor_model,
   })
   Object.freeze(settings)

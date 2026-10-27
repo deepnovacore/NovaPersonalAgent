@@ -250,3 +250,19 @@ test('maximal inspection page fits the desktop JSON byte limit even with escaped
   assert.ok(Buffer.byteLength(JSON.stringify({type: 'memory.board', request_id: 'x'.repeat(256), personal: page,
     channels: [], diagnostics: {version: 1, records: []}})) < MAX_BOARD_MESSAGE_BYTES)
 })
+
+
+test('mem0 routes extraction to its own connection while keeping embeddings separate', {timeout: 20000}, async t => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-mem0-split-'))
+  const embedding = await provider(), extraction = await provider()
+  const store = createMem0PersonalMemory({path: join(directory, 'memory.sqlite'), userId: 'host-user',
+    embedding: {baseUrl: embedding.baseUrl, apiKey: 'embedding-key', model: 'embedding', dimensions: 2},
+    extraction: {baseUrl: extraction.baseUrl, apiKey: 'text-key'}, extractionModel: 'deepseek-flash'})
+  t.after(async () => {await store.close(); await embedding.close(); await extraction.close(); await rm(directory, {recursive: true, force: true})})
+  await store.open()
+  await store.remember!(turn('separate', 'likes apples'))
+  await eventually(async () => (await store.inspect!({})).entries.some(entry => entry.state === 'learned'))
+  assert.ok(extraction.calls.length > 0)
+  assert.equal(embedding.calls.length, 0, 'text extraction must never reach the embedding endpoint')
+  assert.equal((await store.recall('likes apples')).hits.length, 1)
+})

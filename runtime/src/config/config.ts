@@ -26,22 +26,23 @@ const searchProviderSchema = z.enum(['mcp', 'tavily'])
 const volcFloatSchema = z.custom<number>(value => typeof value === 'number')
 export const DASHSCOPE_COMPATIBLE_BASE_URL =
   'https://dashscope.aliyuncs.com/compatible-mode/v1'
+export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 export const STEPFUN_COMPATIBLE_BASE_URL = 'https://api.stepfun.com/v1'
 export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
 const STEPFUN_SUPPORT_MODEL = 'step-3.7-flash'
 
 export const settingsSchema = z.object({
-  model_base_url: z.url().default(DASHSCOPE_COMPATIBLE_BASE_URL),
+  model_base_url: z.url().default(DEEPSEEK_BASE_URL),
   model_api_key: z.string().nullable().default(null),
   openrouter_api_key: z.string().nullable().default(null),
   tavily_api_key: z.string().nullable().default(null),
-  fast_model: z.string().default('qwen3-vl-plus'),
+  fast_model: z.string().default('deepseek-flash'),
   watch_model: z.string().nullable().default(null),
   conversation_vision_enabled: z.boolean().default(false),
   monitor_camera_device_id: z.string().max(256).refine(value => !/[\x00-\x1f]/u.test(value)).default(''),
-  support_model: z.string().default('qwen-plus'),
-  compressor_model: z.string().default('qwen-flash'),
+  support_model: z.string().default('deepseek-flash'),
+  compressor_model: z.string().default('deepseek-flash'),
   language: promptLanguageSchema.default('zh-CN'),
   news_language: promptLanguageSchema.default('en'),
   pipeline_mode: pipelineModeSchema.default('integrated'),
@@ -151,6 +152,8 @@ export const settingsSchema = z.object({
   knowledge_path: z.string().default('~/.nova-audio-agent/knowledge.sqlite'),
   embedding_provider: embeddingProviderSchema.default('dashscope'),
   embedding_model: z.string().default('text-embedding-v4'),
+  embedding_base_url: z.url().default(DASHSCOPE_COMPATIBLE_BASE_URL),
+  embedding_api_key: z.string().nullable().default(null),
   blackboard_path: z.string().min(1).default('~/.nova-audio-agent/blackboard.sqlite'),
   blackboard_owner_id: z.string().min(1).max(512).default('local'),
   memory_prerecall_enabled: z.boolean().default(false),
@@ -230,6 +233,7 @@ interface LocalPersonalMemoryConfig {
   readonly connection: 'local'
   readonly provider: 'voicemem' | 'mem0'
   readonly extractionModel: string
+  readonly extraction: {readonly baseUrl: string; readonly apiKey: string}
   readonly path: string
   readonly userId: string
   readonly embedding: {
@@ -297,9 +301,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ? null
     : configuredExecutor
   const executors = parseExecutors(environment.EXECUTORS, configuredExecutor ?? '')
-  // StepFun support chat defaults to its own model. fast_model keeps its DashScope default
-  // because local memory extraction reaches it through the DashScope embedding connection;
-  // an empty watch model would fall back to it, so empty counts as unset there.
+  // Explicit realtime providers may select their own support model; memory extraction is independent.
   const stepfunSupport = !textConversations && integratedProvider === 'stepfun'
     && (optionalSecret(environment.MODEL_API_KEY) ?? '').trim() === ''
   const supportDefault = (value: string | undefined): string | undefined =>
@@ -339,6 +341,9 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     gemini_realtime_url: optionalString(environment.GEMINI_REALTIME_URL),
     gemini_realtime_model: optionalString(environment.GEMINI_REALTIME_MODEL),
     gemini_realtime_voice: optionalString(environment.GEMINI_REALTIME_VOICE),
+    deepseek_api_key: optionalSecret(environment.DEEPSEEK_API_KEY),
+    embedding_base_url: optionalString(environment.EMBEDDING_BASE_URL),
+    embedding_api_key: optionalSecret(environment.EMBEDDING_API_KEY),
     model_base_url: optionalString(environment.MODEL_BASE_URL),
     model_api_key: optionalSecret(environment.MODEL_API_KEY),
     openrouter_api_key: optionalSecret(environment.OPENROUTER_API_KEY),
@@ -514,16 +519,16 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
     token: requiredCredential(settings.memory_token, 'MEMORY_TOKEN'),
   })
   // Local memory is optional: without an embedding credential it stays off instead of blocking the voice pipeline.
-  if (stripLikePython(resolveModelApiKey(settings) ?? '') === '') return null
+  if (!resolveEmbeddingConnection(settings).apiKey) return null
   return Object.freeze({
     connection: 'local',
     provider: settings.memory_provider ?? 'voicemem',
     path: requiredSetting(settings.memory_path, 'MEMORY_PATH'),
     userId: requiredSetting(settings.memory_user_id, 'MEMORY_USER_ID'),
     extractionModel: requiredSetting(settings.fast_model, 'FAST_MODEL'),
+    extraction: {baseUrl: secureEndpoint(settings.model_base_url, 'https', 'MODEL_BASE_URL'), apiKey: resolveModelApiKey(settings) ?? ''},
     embedding: Object.freeze({
-      baseUrl: secureEndpoint(settings.model_base_url, 'https', 'MODEL_BASE_URL'),
-      apiKey: requiredCredential(resolveModelApiKey(settings), 'DASHSCOPE_API_KEY 或 MODEL_API_KEY'),
+      ...resolveEmbeddingConnection(settings),
       model: requiredSetting(settings.embedding_model, 'EMBEDDING_MODEL'),
     }),
   })
@@ -533,8 +538,8 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
 export function memoryStatus(settings: Settings): {enabled: boolean; reason: string | null; fallback: null} {
   const connection = resolveMemoryConnection(settings)
   if (connection === 'disabled') return {enabled: false, reason: 'disabled', fallback: null}
-  if (connection === 'local' && stripLikePython(resolveModelApiKey(settings) ?? '') === '') return {enabled: false,
-    reason: `missing_environment:${settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'MODEL_API_KEY'}`, fallback: null}
+  if (connection === 'local' && !resolveEmbeddingConnection(settings).apiKey) return {enabled: false,
+    reason: `missing_environment:${settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY'}`, fallback: null}
   return {enabled: true, reason: null, fallback: null}
 }
 
@@ -617,12 +622,20 @@ export function requireIntegratedRealtime(settings: Settings): QwenRealtimeConfi
 
 export function resolveModelApiKey(settings: Settings): string | null {
   return stripLikePython(settings.model_api_key ?? '')
-    || (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.dashscope_api_key : null)
+    || (settings.model_base_url === DEEPSEEK_BASE_URL ? settings.deepseek_api_key
+      : settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.dashscope_api_key : null)
+}
+
+export function resolveEmbeddingConnection(settings: Settings): {readonly baseUrl: string; readonly apiKey: string} {
+  return {baseUrl: secureEndpoint(settings.embedding_base_url, 'https', 'EMBEDDING_BASE_URL'),
+    apiKey: stripLikePython(settings.embedding_api_key ?? '')
+      || (settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? stripLikePython(settings.dashscope_api_key ?? '') : '')}
 }
 
 /** Preset monitor models keep their credential on their own provider endpoint. */
 export function resolveWatchModelConnection(settings: Settings): {readonly baseUrl: string; readonly apiKey: string} | null {
   const model = stripLikePython(settings.watch_model ?? '')
+  if (supportsVision('deepseek', model)) return {baseUrl: DEEPSEEK_BASE_URL, apiKey: requiredCredential(settings.deepseek_api_key ?? (settings.model_base_url === DEEPSEEK_BASE_URL ? settings.model_api_key : null), 'DEEPSEEK_API_KEY')}
   if (supportsVision('stepfun', model)) return {
     baseUrl: STEPFUN_COMPATIBLE_BASE_URL,
     apiKey: requiredCredential(settings.stepfun_api_key, 'STEPFUN_API_KEY'),
@@ -647,14 +660,15 @@ export function missingWatchModelCredential(settings: Settings): string | null {
       ?? (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null) ?? '') === ''
       ? 'DASHSCOPE_API_KEY' : null
   }
+  if (supportsVision('deepseek', model)) return stripLikePython(settings.deepseek_api_key ?? (settings.model_base_url === DEEPSEEK_BASE_URL ? settings.model_api_key : null) ?? '') === '' ? 'DEEPSEEK_API_KEY' : null
   if (supportsVision('ark', model)) return stripLikePython(settings.ark_api_key ?? '') === '' ? 'ARK_API_KEY' : null
   return null
 }
 
-/** Knowledge embeds through the generic model gateway, so it needs that gateway's key. */
+/** Embedding credentials are independent of text and vision models. */
 export function missingKnowledgeCredential(settings: Settings): string | null {
-  if (resolveModelApiKey(settings)) return null
-  return settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'MODEL_API_KEY'
+  if (resolveEmbeddingConnection(settings).apiKey) return null
+  return settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY'
 }
 
 /** Camera watch and knowledge are optional: without their credential they are reported off rather than failing startup. */

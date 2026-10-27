@@ -1,7 +1,7 @@
 import type {UsageReporter} from '../realtime/usage.js'
 import {homedir} from 'node:os'
 import {resolve} from 'node:path'
-import {resolveModelApiKey, type Settings} from '../config/config.js'
+import {resolveEmbeddingConnection, type Settings} from '../config/config.js'
 import type {CapabilityRegistry, McpServerConfig} from '../config/capability-registry.js'
 import {DashScopeEmbeddingProvider} from './embeddings.js'
 import {KnowledgeStoreClient} from './store-client.js'
@@ -23,8 +23,7 @@ export async function prepareKnowledge(
 ): Promise<PreparedKnowledge | undefined> {
   if (!capabilities.modules.knowledge.enabled) return undefined
   signal?.throwIfAborted()
-  const embedding = new DashScopeEmbeddingProvider({...(onUsage?{onUsage}:{}),baseUrl: settings.model_base_url,
-    apiKey: resolveModelApiKey(settings) ?? '', model: settings.embedding_model})
+  const embedding = new DashScopeEmbeddingProvider({...(onUsage?{onUsage}:{}),...resolveEmbeddingConnection(settings), model: settings.embedding_model})
   const configured = settings.knowledge_path
   const path = resolve(configured.startsWith('~/') ? resolve(homedir(), configured.slice(2)) : configured)
   // Whole-computer sources share this store with manually added knowledge.
