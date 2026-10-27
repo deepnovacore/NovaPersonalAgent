@@ -785,7 +785,16 @@ export class PersonalAgentHost {
         const item=this.#state.conversations.items.find(item=>item.id===id);
         if(item?.kind!=='build')return this.#submitConversationText(id,text,requestId,sourceTodo,context);
         if(item.build?.status==='finished')throw Error('build_finished');
-        if(!context.local_desktop||!this.localBuildAuthorized(id))throw Error('local_build_not_authorized');
+        if(!context.local_desktop)throw Error('local_build_not_authorized');
+        if(!this.localBuildAuthorized(id)){
+            // The grant lives in memory (restart clears it, Stop removes it). An explicit local
+            // workbench submission to the selected completed/stopped Build is a new deliberate round,
+            // so it may re-grant; other paused reasons still require Resume reconciliation first.
+            const regrant=this.#presentationMode==='workbench'&&this.#state.conversations.selected_id===id
+                &&(item.build?.status==='completed'||(item.build?.status==='paused'&&item.build?.reason==='stopped'));
+            if(!regrant)throw Error('local_build_not_authorized');
+            this.#localBuildAuthority.add(id);
+        }
         if(item.build?.status==='awaiting_approval')throw Error('conversation_busy');
         const activeBuild=this.activeLocalBuild();if(activeBuild&&activeBuild.id!==id)throw Error('conversation_busy');
         // A deliberate new text submission can continue a paused or completed Build after

@@ -1030,6 +1030,43 @@ test('direct Build resolves a selected managed ID before canonical resource chec
 })
 
 
+test('a stopped completed Build accepts a new instruction without Resume',{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).status,'completed')
+  await f.command('build.stop',{id})
+  await f.host.submitConversationText(id,'Stop 后的新要求',undefined,undefined,{local_desktop:true})
+  await f.host.waitConversation(id)
+  assert.ok(f.host.conversationSnapshot().messages.some(message=>message.text==='Stop 后的新要求'))
+  assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'done')
+ }finally{await f.close()}
+})
+
+test('a completed Build accepts a new instruction after a restart',{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ const id=await f.build();await f.host.waitConversation(id)
+ assert.equal(buildView(f.host,id).status,'completed')
+ await f.host.close()
+ const host=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[],readonlyNames:[],origin:()=>Promise.resolve('memory:test-user'),invoke:()=>Promise.resolve(null)}
+ const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
+ const frames:Record<string,unknown>[]=[]
+ host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host,factory:f.script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=> 'never'}),frame=>frames.push(frame))
+ try{
+  await host.open();host.setWorkbenchExecutors(['codex'])
+  const shown=await host.command({type:'personal.command',request_id:'restart-workbench',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'}) as {ok:boolean}
+  assert.equal(shown.ok,true)
+  assert.equal(host.conversationSnapshot().selected_id,id)
+  await host.submitConversationText(id,'继续补充新的要求',undefined,undefined,{local_desktop:true})
+  await host.waitConversation(id)
+  const failed=await host.workbench.checkpoint(id,0)
+  assert.equal(buildView(host,id).status,'completed',JSON.stringify({reason:failed.reason,model_failure:failed.model_failure,frames:frames.filter(frame=>frame.type==='conversation.error')}))
+  assert.ok(host.conversationSnapshot().messages.some(message=>message.text==='继续补充新的要求'))
+  assert.equal(host.conversationSnapshot().messages.at(-1)!.text,'done')
+ }finally{await host.close();await f.close()}
+})
+
 for(const [status,reason] of [['paused','approval_denied'],['completed',null],['failed','model_timeout'],['outcome_unknown','cleanup_unknown'],['idle',null]] as const)test(`restart preserves the durable ${status} Build state`,{skip:!supported},async()=>{
  const f=await fixture(()=>({text:'done'}))
  try{
