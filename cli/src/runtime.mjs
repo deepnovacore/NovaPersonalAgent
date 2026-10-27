@@ -546,7 +546,8 @@ export async function resetPersonalState({
   const blackboard = resolve(configured.startsWith('~/') ? join(home, configured.slice(2)) : configured)
   const statePath = blackboard + '.personal.json'
   const stamp = now().toISOString().replace(/[:.]/gu, '-')
-  const moved = []
+  // Validate every target before moving anything so a bad backup cannot leave a half reset.
+  const targets = []
   for (const [from, suffix] of [[statePath, ''], [statePath + '.before-schedules.json', '-before-schedules']]) {
     let info
     try {
@@ -556,9 +557,17 @@ export async function resetPersonalState({
       throw error
     }
     if (info.isSymbolicLink() || !info.isFile()) throw new Error(`refusing to move non-regular file: ${from}`)
-    const to = `${from}.reset-${stamp}${suffix}`
-    await renameFile(from, to)
-    moved.push(Object.freeze({from, to}))
+    targets.push({from, to: `${from}.reset-${stamp}${suffix}`})
+  }
+  const moved = []
+  for (const target of targets) {
+    try {
+      await renameFile(target.from, target.to)
+      moved.push(Object.freeze(target))
+    } catch (error) {
+      // The state file is moved first and is the one the app needs; report what succeeded.
+      if (target.from === statePath) throw error
+    }
   }
   return Object.freeze({statePath, moved: Object.freeze(moved)})
 }
