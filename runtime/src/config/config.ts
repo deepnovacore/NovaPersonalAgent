@@ -61,10 +61,15 @@ export function defaultCascadedLlmModel(provider: string): string {
         : provider === 'deepseek' ? 'deepseek-flash' : 'doubao-seed-2-0-pro-260215'
 }
 
+/** Compressor defaults that mean "follow the selected text model" in a cascaded assembly. */
+export function isProviderDefaultCompressor(model: string): boolean {
+  return model === 'deepseek-flash' || model === 'qwen-flash' || model === 'step-3.7-flash'
+    || model === 'gpt-6-luna' || model === 'gemini-3.5-flash-lite' || model === 'doubao-seed-2-0-pro-260215'
+}
+
 function auxiliaryModelProfile(
   provider: string | undefined,
   cascadeModel: string | null,
-  environment: NodeJS.ProcessEnv,
 ): AuxiliaryModelProfile | undefined {
   if (provider === undefined) return undefined
   if (provider === 'self-hosted' || provider === 'openai-compatible') {
@@ -73,7 +78,8 @@ function auxiliaryModelProfile(
     }
   }
   if (provider === 'ark') {
-    const model = optionalString(environment.VOLCENGINE_ARK_SUPPORT_MODEL) ?? 'doubao-seed-2-0-pro-260215'
+    // The schema default pairs the Ark endpoint; an explicit SUPPORT_MODEL still wins.
+    const model = 'doubao-seed-2-0-pro-260215'
     return {support: model, fast: model, compressor: model, watch: model}
   }
   if (provider === 'minicpm-o' || provider === 'personaplex') return undefined
@@ -361,7 +367,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ?? (effectiveTextProvider === undefined || effectiveTextProvider === 'self-hosted' || effectiveTextProvider === 'openai-compatible'
       ? null : defaultCascadedLlmModel(effectiveTextProvider))
   const genericModelKey = (optionalSecret(environment.MODEL_API_KEY) ?? '').trim() !== ''
-  const auxiliary = genericModelKey ? undefined : auxiliaryModelProfile(effectiveTextProvider, cascadeModel, environment)
+  const auxiliary = genericModelKey ? undefined : auxiliaryModelProfile(effectiveTextProvider, cascadeModel)
   const auxiliaryDefault = (value: string | undefined, key: keyof AuxiliaryModelProfile): string | undefined =>
     value ?? auxiliary?.[key]
   const candidate = {
