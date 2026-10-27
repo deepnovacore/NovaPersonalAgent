@@ -50,16 +50,17 @@ export function mountWorkspaceBar(parent,{c,el,button,run,api,visible,onChange=(
   creatingBusy=true;syncCreateRow();c.error=''
   try{
    const result=await c.command('workspaces.create',{name:name.value.trim()})
-   items=await c.command('workspaces.list',{})
    state().workspace={workspace_id:result.workspace_id}
    name.value='';creating=false;hint.hidden=true
    onChange()
+   // The workspace exists even if the follow-up list read fails; never leave the create row open for retry.
+   try{items=await c.command('workspaces.list',{})}catch(error){loaded=false;c.error=workspaceErrorText(error)}
   }catch(error){c.error=workspaceErrorText(error);c.changed?.()}
   finally{creatingBusy=false;update()}
  }
  select.addEventListener('change',()=>run(async()=>{
   const choice=select.value,owner=state()
-  if(choice==='selected-folder'){if(!creating)update();return}
+  if(choice==='selected-folder'){if(creating){creating=false;name.value='';hint.hidden=true;update()}return}
   if(choice==='new'){openCreate();return}
   creating=false;name.value='';hint.hidden=true
   if(choice==='folder'){const path=await api?.chooseBuildDirectory?.();if(path)owner.workspace={project:path}}

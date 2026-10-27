@@ -28,3 +28,18 @@ test('English workspace navigation uses the same language for labels and accessi
   assert(buttons.every(b=>!/[\u4e00-\u9fff]/u.test(b.attrs['aria-label'])))
  }finally{setLanguage('zh-CN')}
 })
+test('a pending plan renders a visible badge and an accessible tab name',()=>{
+ const root=new Node('body'),tabs=mountWorkspaceTabs(root,{document:dom,onSelect:()=>{}})
+ const tasks=all(root).find(n=>n.dataset.page==='tasks')
+ const badge=tasks.children.find(n=>n.className==='workspace-tab-plan-badge')
+ assert.ok(badge,'the plan badge element exists')
+ assert.equal(badge.hidden,true)
+ tabs.pending('tasks',true)
+ assert.equal(tasks.dataset.plan,'true')
+ assert.equal(badge.hidden,false)
+ assert.match(tasks.attrs['aria-label'],/有新计划/)
+ tabs.pending('tasks',false)
+ assert.equal(tasks.dataset.plan,undefined)
+ assert.equal(badge.hidden,true)
+ assert.doesNotMatch(tasks.attrs['aria-label'],/有新计划/)
+})

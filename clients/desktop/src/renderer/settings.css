@@ -1228,10 +1228,10 @@ footer {
  * workbench and the first-run window share the same geometry. */
 .field {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   grid-template-areas:
-    "label control"
-    "hint control";
+    "label control action"
+    "hint control action";
   align-items: center;
   column-gap: 18px;
   row-gap: 2px;
@@ -1239,6 +1239,14 @@ footer {
   margin: 0;
   padding: 12px 0;
   border-bottom: 0.5px solid var(--line);
+}
+
+/* Inline action beside a control (刷新设备 / 配置… / 获取可用模型). */
+.field > button {
+  grid-area: action;
+  justify-self: start;
+  align-self: center;
+  white-space: nowrap;
 }
 
 .field:last-child {

@@ -20,12 +20,13 @@ export function workspaceTabForKey(active,key){
 export function mountWorkspaceTabs(root,{document=globalThis.document,onSelect}){
  const nav=document.createElement('nav');nav.className='workspace-topbar';nav.setAttribute('aria-label',t('工作区'))
  const list=document.createElement('div');list.className='workspace-tabs';list.setAttribute('role','tablist');list.setAttribute('aria-label',t('工作区'));list.setAttribute('aria-orientation','horizontal');nav.append(list)
- const buttons=new Map(),badges=new Map();let active=null
+ const buttons=new Map(),badges=new Map(),planBadges=new Map();let active=null
  for(const item of WORKSPACE_PAGES){
   const b=document.createElement('button');b.type='button';b.className='workspace-tab';b.title=item.label===item.title?t(item.label):`${t(item.label)} · ${t(item.title)}`;b.setAttribute('aria-label',b.title);b.setAttribute('role','tab');b.setAttribute('aria-controls','workbench-panel');b.id=`workspace-tab-${item.id}`;b.dataset.page=item.id
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',item.icon);svg.append(path);b.append(svg)
   const label=document.createElement('span');label.className='workspace-tab-label';label.textContent=t(item.label);b.append(label)
   const badge=document.createElement('span');badge.className='workspace-tab-badge';badge.hidden=true;b.append(badge);badges.set(item.id,badge)
+  const plan=document.createElement('span');plan.className='workspace-tab-plan-badge';plan.hidden=true;plan.setAttribute('aria-hidden','true');b.append(plan);planBadges.set(item.id,plan)
   list.append(b);buttons.set(item.id,b)
   b.addEventListener('click',()=>onSelect(item.id))
   b.addEventListener('keydown',event=>{const next=workspaceTabForKey(item.id,event.key);if(!next)return;event.preventDefault();onSelect(next);buttons.get(next)?.focus?.()})
@@ -34,6 +35,6 @@ export function mountWorkspaceTabs(root,{document=globalThis.document,onSelect})
  function select(id){const changed=active!==id;active=id;for(const [key,b]of buttons){const current=key===id;b.setAttribute('aria-current',String(current));b.setAttribute('aria-selected',String(current));b.tabIndex=current?0:-1}if(changed)buttons.get(id)?.scrollIntoView?.({block:'nearest',inline:'nearest'})}
  function badge(id,count){const node=badges.get(id);if(!node)return;node.hidden=!count;node.textContent=count?String(count):''}
  /** A pending indicator belongs to the tab itself (for example an unpublished plan preview waiting on Tasks). */
- function pending(id,value){const node=buttons.get(id);if(!node)return;if(value)node.dataset.plan='true';else delete node.dataset.plan}
+ function pending(id,value){const node=buttons.get(id),mark=planBadges.get(id);if(!node)return;const base=node.getAttribute?.('aria-label')??node.title??'';if(value){node.dataset.plan='true';node.setAttribute('aria-label',`${base} · ${t('有新计划')}`)}else{delete node.dataset.plan;node.setAttribute('aria-label',base)}if(mark)mark.hidden=!value}
  return {select,badge,pending,get active(){return active},element:nav}
 }

@@ -25,7 +25,7 @@ function server(steps,{generation=0,pageSize=20}={}){
  return (method,params)=>{
   if(params.view==='image')return {media_type:'image/png',data_base64:'QUJD'}
   const all=params.view==='calls'?steps.filter(step=>step.kind==='tool'):steps
-  return {items:all.slice(params.offset,params.offset+pageSize),total:all.length,next_offset:params.offset+pageSize<all.length?params.offset+pageSize:null,generation}
+  return {items:all.slice(params.offset,params.offset+pageSize),total:all.length,next_offset:params.offset+pageSize<all.length?params.offset+pageSize:null,generation,first_id:all[0]?.id??null}
  }
 }
 function makeDisplay(initial={}){
@@ -76,10 +76,11 @@ test('compact hides thinking rows, standard truncates the preview, detailed open
  const steps=[thought('t1',long,1),tool(0,{created_at:at(2)})]
  const m=setup({steps,status:'paused',prefs:{steps:'compact'}})
  m.log.update();await tick()
- assert.equal(m.rows()[0].hidden,true,'compact hides thinking rows entirely')
- assert.equal(m.rows()[1].hidden,false)
- assert.equal(m.header().children[1].textContent,'工作步骤 · 2','the header still counts every step')
+ assert.equal(m.rows().length,1,'a thought-only row is omitted in compact mode')
+ assert.equal(m.rows()[0].hidden,false)
+ assert.equal(m.header().children[1].textContent,'工作步骤 · 1','the count matches visible rows')
  m.display.set({steps:'standard'});await tick()
+ assert.equal(m.rows().length,2)
  const thinking=m.rows()[0]
  assert.equal(thinking.hidden,false)
  const summary=thinking.children[0],body=thinking.children[1]
@@ -166,7 +167,8 @@ test('display preference changes re-render rows without refetching the log',asyn
  const requests=m.requests.length,renders=m.renders
  m.display.set({steps:'compact'})
  await tick()
- assert.equal(m.rows()[0].hidden,true)
+ assert.equal(m.rows().length,1,'compact omits the thinking row')
+ assert.equal(m.rows()[0].hidden,false)
  assert.equal(m.requests.length,requests,'preference changes never refetch')
  assert.ok(m.renders>renders)
 })
@@ -272,11 +274,11 @@ test('unlinked steps are grouped after the transcript instead of being dropped',
  assert.equal(orphans[0].children[0].children[1].textContent,'工作步骤 · 1')
 })
 
-test('the retained step timeline is bounded for long builds',async()=>{
+test('long builds retain every step so new calls cannot freeze the log',async()=>{
  const steps=Array.from({length:530},(_,index)=>tool(index,{created_at:at(index)}))
  const m=setup({steps,status:'paused'})
  m.log.update();await tick()
- assert.equal(m.rows().length,512)
+ assert.equal(m.rows().length,530)
 })
 
 test('computer actions keep reading as human action summaries',()=>{
@@ -295,4 +297,33 @@ test('workbench CSS keeps the avatar gutter and a bounded compact step flow',asy
  assert.match(css,/\.build-step-summary\{[^}]*min-height:26px/u)
  assert.match(css,/@media\(prefers-reduced-motion:reduce\)\{[^}]*build-steps-chevron/u)
  assert.match(css,/@media\(forced-colors:active\)\{[^}]*build-steps/u)
+})
+
+test('a transient first-page read failure keeps the steps view and retries it',async()=>{
+ const steps=[thought('t1','先看目录',1),tool(0,{created_at:at(2)})]
+ let fail=true
+ const m=setup({steps,status:'running',command:(method,params)=>{
+  if(fail&&params.view==='steps'){fail=false;throw Error('network')}
+  return server(steps)(method,params)
+ }})
+ m.log.update();await tick()
+ assert.equal(m.requests.some(request=>request.params.view==='calls'),false,'a transient read must not downgrade to calls')
+ m.conversation.build.log_revision=2
+ m.log.update();await tick()
+ assert.ok(m.requests.filter(request=>request.params.view==='steps').length>=2)
+ assert.equal(m.rows().length,2)
+})
+
+test('an evicted host prefix restarts the timeline instead of keeping stale rows',async()=>{
+ let steps=[thought('t0','旧思考',1),tool(0,{created_at:at(2)}),tool(1,{created_at:at(3)})]
+ const m=setup({steps,status:'running',command:(method,params)=>server(steps)(method,params)})
+ m.log.update();await tick()
+ assert.equal(m.rows().length,3)
+ // The host evicts the oldest thought and appends a new tool; every index shifts.
+ steps=[tool(0,{created_at:at(2)}),tool(1,{created_at:at(3)}),tool(2,{created_at:at(4)})]
+ m.conversation.build.log_revision=2
+ m.log.update();await tick()
+ assert.equal(m.rows().length,3)
+ assert.equal(m.requests.filter(request=>request.params.view==='steps'&&request.params.offset===0).length,2,'the shifted prefix is reloaded from zero')
+ assert.deepEqual(m.rows().map(node=>node.dataset.stepKind),['tool','tool','tool'])
 })
