@@ -289,3 +289,14 @@ test('an existing document repository gains an empty SOUL projection without los
  assert.deepEqual(reopened.open([]).revisions,[first,next]);assert.ok(existsSync(join(root,'SOUL.md')))
  assert.match(readFileSync(document(root),'utf8'),/Prefer detailed replies/)
 })
+
+test('the fingerprinted snapshot cache notices an in-place edit of the same byte length',t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root);repo.open([first])
+ assert.equal(repo.read().edits.length,0)
+ const path=document(root),before=readFileSync(path,'utf8'),offset=before.lastIndexOf('Prefer concise replies')
+ assert.ok(offset>=0)
+ writeFileSync(path,before.slice(0,offset)+'Prefur concise replies'+before.slice(offset+'Prefer concise replies'.length))
+ const changed=repo.read()
+ assert.equal(changed.edits.length,1)
+ assert.equal(changed.edits[0]!.content.text,'Prefur concise replies')
+})

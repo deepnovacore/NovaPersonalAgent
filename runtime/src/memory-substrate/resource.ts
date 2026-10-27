@@ -252,7 +252,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const workEpoch=this.#memoryWorkEpoch
     // The Worker reconciles Markdown and filters current evidence + the actual recipient grant in one transaction.
     // A cached extraction snapshot is never authority to send content to a conversational model.
-    const rows=z.array(EntryRevisionSchema).parse(await this.options.client.memory('conversation_snapshot',{entry_prefix:this.prefix,consumer},{priority:'interactive'}))
+    const rows=z.array(EntryRevisionSchema).parse(await this.options.client.memory('conversation_snapshot',{entry_prefix:this.prefix,consumer},{priority:'interactive',...(signal===undefined?{}:{signal})}))
     signal?.throwIfAborted();this.#ready()
     if(workEpoch!==this.#memoryWorkEpoch)return {revision:++this.#preparedRevision,replyPreferences:[],memoryContext:{text:'',voice:''}}
     const summary=rows.find(row=>row.entry_id===this.prefix+'summary:daily')??null,now=new Date()

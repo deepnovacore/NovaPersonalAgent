@@ -63,6 +63,7 @@ export class MarkdownRepository {
  readonly root:string
  private baseline:Record<string,string>|undefined
  private cached:{fingerprint:string;snapshot:MarkdownSnapshot}|undefined
+ private readonly fingerprintCache=new Map<string,{signature:string;digest:string}>()
  private initialized=false
  private readonly lockWaitMs:number
  constructor(root:string,options:{lockWaitMs?:number}={}){this.root=resolve(root);this.lockWaitMs=options.lockWaitMs??0}
@@ -168,7 +169,21 @@ export class MarkdownRepository {
   */
  private fingerprint():string|null {
   try{
-   const hash=createHash('sha256'),add=(relative:string)=>{hash.update(relative+'\0');hash.update(hasPath(join(this.root,relative))?this.readFile(relative):'\u0000absent');hash.update('\0')}
+   const hash=createHash('sha256')
+   const add=(relative:string)=>{
+    const path=join(this.root,relative),stat=lstatSync(path,{throwIfNoEntry:false,bigint:true})
+    hash.update(relative+'\0')
+    if(stat===undefined){hash.update('\u0000absent');hash.update('\0');return}
+    if(stat.isSymbolicLink())throw failure('UNSAFE_PATH')
+    // Reuse the content digest while the inode metadata is unchanged: a read then costs one stat
+    // per document instead of decoding the whole corpus on every ledger RPC.
+    const signature=`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`
+    const cached=this.fingerprintCache.get(relative)
+    let digest:string
+    if(cached?.signature===signature)digest=cached.digest
+    else{digest=createHash('sha256').update(this.readFile(relative)).digest('hex');this.fingerprintCache.set(relative,{signature,digest})}
+    hash.update(digest);hash.update('\0')
+   }
    add(MARKER)
    for(const name of ['USER.md','MEMORY.md','SOUL.md'])add(name)
    for(const folder of ['entries','goals','todos','ideas','memory','entities']){
