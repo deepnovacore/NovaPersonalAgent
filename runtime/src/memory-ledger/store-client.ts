@@ -117,6 +117,7 @@ interface QueuedRequest {
 
 /** A synchronous worker op cannot be cancelled; after this grace the worker is replaced instead. */
 const STUCK_GRACE_MS = 30_000
+const CLOSE_TIMEOUT_MS = 5_000
 
 export class MemoryLedgerClient {
   readonly #workerFactory: (url: URL, options: WorkerOptions) => MemoryLedgerWorker
@@ -132,6 +133,8 @@ export class MemoryLedgerClient {
   readonly #dropped = new Set<number>()
   #abandonedInService: number | null = null
   #recycleTimer: ReturnType<typeof setTimeout> | null = null
+  #reopenTimer: ReturnType<typeof setTimeout> | null = null
+  #recycleFailures = 0
   #nextRequestId = 1
   #failed = false
   #closed = false
@@ -178,12 +181,21 @@ export class MemoryLedgerClient {
       clearTimeout(this.#recycleTimer)
       this.#recycleTimer = null
     }
-    this.#abandonedInService = null
-    this.#dropped.clear()
-    if (!this.#failed) {
-      // Drain queued work and its lock cleanup before termination; worker errors/exits reject this RPC.
-      await this.#requestWhileClosing('close', {}, nullResult).catch(() => undefined)
+    if (this.#reopenTimer !== null) {
+      clearTimeout(this.#reopenTimer)
+      this.#reopenTimer = null
     }
+    // An abandoned in-service op will never free its slot; do not wait for a close RPC behind it.
+    const abandonedInService = this.#inService !== null && this.#dropped.has(this.#inService)
+    this.#abandonedInService = null
+    if (!this.#failed && !abandonedInService) {
+      // Drain queued work and its lock cleanup before termination; bound a stuck worker.
+      await Promise.race([
+        this.#requestWhileClosing('close', {}, nullResult).catch(() => undefined),
+        new Promise<void>(resolve => { const timer = setTimeout(resolve, CLOSE_TIMEOUT_MS); timer.unref?.() }),
+      ])
+    }
+    this.#dropped.clear()
     this.#expectedExit = true
     try {
       await this.#worker.terminate()
@@ -226,7 +238,8 @@ export class MemoryLedgerClient {
     const requestId = this.#nextRequestId
     this.#nextRequestId += 1
     const message = {kind: 'request', request_id: requestId, operation, ...payload} as const
-    return new Promise<Result>((resolve, reject) => {
+    let detach = (): void => { /* nothing to detach without a caller signal */ }
+    const promise = new Promise<Result>((resolve, reject) => {
       this.#pending.set(requestId, {resolve: value => resolve(value as Result), reject, validateResult})
       // Stable: equal ranks keep arrival order.
       const at = this.#queue.findIndex(queued => queued.rank > rank)
@@ -249,9 +262,11 @@ export class MemoryLedgerClient {
         }
       }
       signal?.addEventListener('abort', onAbort, {once: true})
+      detach = () => signal?.removeEventListener('abort', onAbort)
       if (signal?.aborted === true) onAbort()
       this.#dispatch()
     })
+    return signal === undefined ? promise : promise.finally(detach)
   }
 
   #armRecycleTimer(): void {
@@ -273,10 +288,26 @@ export class MemoryLedgerClient {
       clearTimeout(this.#recycleTimer)
       this.#recycleTimer = null
     }
-    this.#worker = this.#spawnWorker()
+    try {
+      this.#worker = this.#spawnWorker()
+    } catch {
+      this.#fail('WORKER_ERROR')
+      return
+    }
     this.#opening = null
+    this.#dropped.clear()
     this.#rejectAll(new MemoryLedgerClientError(code))
     void previous.terminate().catch(() => undefined)
+    // The resource is opened once at assembly, so a replaced worker must reopen itself; otherwise
+    // every later read would stay STORE_CLOSED for the rest of the process.
+    if (this.#reopenTimer === null) {
+      this.#reopenTimer = setTimeout(() => {
+        this.#reopenTimer = null
+        if (this.#closed || this.#failed) return
+        void this.open().catch(() => { /* the next caller retries open */ })
+      }, 250)
+      this.#reopenTimer.unref?.()
+    }
   }
 
   #dispatch(): void {
@@ -307,6 +338,7 @@ export class MemoryLedgerClient {
       this.#fail('WORKER_PROTOCOL_FAILURE')
       return
     }
+    this.#recycleFailures = 0
     if (this.#dropped.delete(response.request_id)) {
       // An abandoned read finished late; free its service slot without delivering a result.
       if (this.#inService === response.request_id) this.#inService = null
@@ -359,11 +391,17 @@ export class MemoryLedgerClient {
     worker: MemoryLedgerWorker,
     code: 'WORKER_ERROR' | 'WORKER_EXITED',
   ): void {
-    if (worker !== this.#worker || this.#expectedExit) return
+    if (worker !== this.#worker || this.#failed || this.#expectedExit) return
     if (this.#closed) {
       this.#rejectAll(new MemoryLedgerClientError(code))
       return
     }
+    // Bound a crash loop (bad module, thread exhaustion) instead of respawning forever.
+    if (this.#recycleFailures >= 3) {
+      this.#fail('WORKER_ERROR')
+      return
+    }
+    this.#recycleFailures += 1
     this.#recycleWorker(code)
   }
 }

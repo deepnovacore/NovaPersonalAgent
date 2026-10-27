@@ -294,3 +294,34 @@ test('forget physically erases learned facts and source text from every sqlite f
   await store.close()
   assert.equal(await contains('likes apples'), false)
 })
+
+test('a forget interrupted before derived cleanup is finished after restart', {timeout: 25000}, async t => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-mem0-interrupted-'))
+  const endpoint = await provider()
+  const path = join(directory, 'personal.sqlite')
+  const options = {path, userId: 'host-user',
+    embedding: {baseUrl: endpoint.baseUrl, apiKey: 'test-key', model: 'embedding', dimensions: 2}, extractionModel: 'extract'}
+  let store = createMem0PersonalMemory(options)
+  t.after(async () => {await store.close(); await endpoint.close(); await rm(directory, {recursive: true, force: true})})
+  await store.open()
+  await store.remember!(turn('apples', 'likes apples'))
+  await eventually(async () => (await store.recall('apples', {scope: 'any'})).hits.length > 0)
+  await store.forget!('apples')
+  // Terminate before the drain can confirm derived-vector cleanup; the durable intent must survive.
+  await store.close()
+  store = createMem0PersonalMemory(options)
+  await store.open()
+  const base = userDirectory(path)
+  const files = ['ledger.db', 'vectors.db', 'vectors_entities.db'].flatMap(name => [join(base, name), join(base, name + '-wal')])
+  const contains = async (needle: string) => {
+    for (const file of files) {
+      const bytes = await readFile(file).catch(() => Buffer.alloc(0))
+      if (bytes.includes(Buffer.from(needle))) return true
+    }
+    return false
+  }
+  for (let attempt = 0; attempt < 150 && await contains('likes apples'); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  assert.equal(await contains('likes apples'), false, 'restart completes the interrupted physical deletion')
+})
