@@ -19,6 +19,7 @@ import {
 } from 'node:fs/promises'
 import { constants as fsConstants } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { homedir } from 'node:os'
 
 import {
   desktopSettingsPath,
@@ -528,4 +529,36 @@ export async function inspectDoctor({
       ...(home === undefined ? {} : {home}),
     }),
   })
+}
+
+/**
+ * Move an unreadable personal state (and its schedule backup) aside. This is the recovery path
+ * offered when the desktop cannot start because the state file is corrupt, oversized or newer
+ * than this build. The original bytes are preserved under a timestamped name.
+ */
+export async function resetPersonalState({
+  environment = process.env,
+  home = homedir(),
+  renameFile = rename,
+  now = () => new Date(),
+} = {}) {
+  const configured = environment.BLACKBOARD_PATH?.trim() || '~/.nova-audio-agent/blackboard.sqlite'
+  const blackboard = resolve(configured.startsWith('~/') ? join(home, configured.slice(2)) : configured)
+  const statePath = blackboard + '.personal.json'
+  const stamp = now().toISOString().replace(/[:.]/gu, '-')
+  const moved = []
+  for (const [from, suffix] of [[statePath, ''], [statePath + '.before-schedules.json', '-before-schedules']]) {
+    let info
+    try {
+      info = await lstat(from)
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue
+      throw error
+    }
+    if (info.isSymbolicLink() || !info.isFile()) throw new Error(`refusing to move non-regular file: ${from}`)
+    const to = `${from}.reset-${stamp}${suffix}`
+    await renameFile(from, to)
+    moved.push(Object.freeze({from, to}))
+  }
+  return Object.freeze({statePath, moved: Object.freeze(moved)})
 }

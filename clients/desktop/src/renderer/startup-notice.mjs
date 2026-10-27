@@ -11,6 +11,8 @@ export function startupMessage(value) {
   if (value.code === 'credential_access_failed') return t('凭据访问未完成。请检查系统授权弹窗或更新凭据，再在设置中重试。')
   if (value.code === 'workspace_not_found' || value.code === 'workspace_invalid') return t('工作区不存在或不是目录。请在设置中选择有效工作区。')
   if (value.code === 'state_permissions') return t('无法写入状态目录。请检查目录权限后在设置中重试。')
+  if (value.code === 'personal_store_capacity' || value.code === 'state_corrupt') return t('状态文件无法读取或超过大小上限。请备份后运行 novapersonal reset-state。')
+  if (value.code === 'state_version_unsupported') return t('状态文件由更新版本的 Nova 写入。请升级 Nova，或备份后运行 novapersonal reset-state。')
   if (['state_busy', 'state_lock_failed', 'personal_store_locked'].includes(value.code)) return t('Nova 已在另一个窗口运行。请关闭它后重试。')
   if (value.code === 'settings_recovery_failed') return t('设置恢复未完成。请在设置中恢复上次可用配置。')
   return t('后台启动失败，请打开设置检查配置后重试。')

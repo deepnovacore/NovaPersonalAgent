@@ -66,7 +66,7 @@ import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
 import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, goalProgressSchema, type GoalProgress, type DiscussionReference, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
-import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
+import { PersonalStore, PersonalStoreError, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
 import {ScheduleService} from './scheduled-tasks.js';
@@ -203,7 +203,16 @@ export class PersonalAgentHost {
     }
     #refreshLocalProcessFences():void{for(const [key,owners] of this.#localProcessFences)if(owners.every(localShellProcessGone)){releaseQuarantinedTaskResources([key]);this.#localProcessFences.delete(key)}}
     activeLocalBuild():Conversation|undefined{return this.#state.conversations.items.find(item=>item.kind==='build'&&item.build&&item.build.status!=='finished'&&(this.#admittingBuilds.has(item.id)||['running','awaiting_approval'].includes(item.build.status)))}
-    localBuildAuthorized(id:string):boolean{return this.#localBuildAuthority.has(id)&&this.#presentationMode==='workbench'&&this.#state.conversations.selected_id===id&&this.#state.conversations.items.find(item=>item.id===id)?.build?.status!=='finished'}
+    localBuildAuthorized(id:string):boolean{return this.#localBuildAuthority.has(id)&&this.#state.conversations.items.find(item=>item.id===id)?.build?.status!=='finished'}
+    /** Hand voice ownership back before a runtime is cleared or the session changes identity. */
+    async #endVoice(id:string):Promise<void>{
+        if(this.#state.conversations.voice_id!==id)return;
+        this.#voiceTransition=true;
+        try{
+            try{if(this.#conversationPool?.hasVoice(id))await this.#conversationPool.stopVoice(id)}catch{/* the caller clears the runtime next */}
+            await this.#serial(async()=>{const next=structuredClone(this.#state);if(next.conversations.voice_id===id){next.conversations.voice_id=null;await this.#commit(next)}});
+        }finally{this.#voiceTransition=false}
+    }
     async stopLocalBuild(id:string):Promise<void>{this.#localBuildAuthority.delete(id);await this.#conversationPool?.stopBuild(id);await this.#conversationRuns.get(id);const item=this.#state.conversations.items.find(item=>item.id===id);if(item?.build&&['running','awaiting_approval'].includes(item.build.status))await this.updateLocalBuild(id,item.generation,{status:'paused',reason:'stopped',approval:null})}
     async stopLocalBuilds():Promise<void>{for(const item of this.#state.conversations.items.filter(item=>item.kind==='build'))await this.stopLocalBuild(item.id)}
     updateLocalBuild(id:string,generation:number,view:Pick<NonNullable<Conversation['build']>,'status'|'reason'|'approval'>):Promise<void>{return this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation||!item.build)return;item.build={...item.build,...view,log_revision:(item.build.log_revision??0)+1};await this.#commit(next)})}
@@ -327,6 +336,9 @@ export class PersonalAgentHost {
         return canonicalProject(await this.#codingTargets.workspaces.resolve(q.workspace_id));
     }
     async #beginBuild(item:Conversation,text:string):Promise<unknown>{
+        if(this.activeLocalBuild())throw Error('build_stop_required');
+        const voiceOwner=this.#state.conversations.voice_id;
+        if(voiceOwner!==null)await this.#endVoice(voiceOwner);
         let previousSelection=this.#state.conversations.selected_id;
         await this.#serial(async()=>{if(this.activeLocalBuild())throw Error('build_stop_required');if(taskResourcesBusy([projectResourceKey(item.build!.project)]))throw Error('project_busy');const next=structuredClone(this.#state);previousSelection=next.conversations.selected_id;if(next.conversations.items.filter(item=>item.kind!=='schedule').length>=128)throw Error('conversation_limit');next.conversations.items.push(item);next.conversations.selected_id=item.id;this.#admittingBuilds.add(item.id);try{await this.#commit(next)}catch(error){this.#admittingBuilds.delete(item.id);throw error}});
         this.#localBuildAuthority.add(item.id);
@@ -353,6 +365,7 @@ export class PersonalAgentHost {
         let effect:string|undefined,task=previous,invoked=false,definitelyRefused=false;
         const chat=()=>this.#serial(async()=>{const next=structuredClone(this.#state),current=next.conversations.items.find(item=>item.id===source.id);if(current?.generation!==source.generation||current.plan?.version!==plan.version)throw Error('plan_version_conflict');current.mode='chat';await this.#commit(next)});
         const restorePlan=()=>this.#serial(async()=>{const next=structuredClone(this.#state),current=next.conversations.items.find(item=>item.id===source.id);if(current?.generation!==source.generation||current.plan?.id!==plan.id||current.plan.version!==plan.version)throw Error('plan_version_conflict');current.mode='plan';await this.#commit(next)});
+        await this.#endVoice(source.id);
         await pool.clear(source.id);
         try{
             // Prepare the existing dispatch implementation without changing the visible Plan until validation succeeds.
@@ -687,7 +700,6 @@ export class PersonalAgentHost {
     disconnectPresentation():Promise<void>{const run=this.#commands.then(()=>this.#setPresentation('background'));this.#commands=run.catch(()=>{/* transport shutdown preserves background safety */});return run;}
     subscribePresentation(listener:(mode:PresentationMode,seen?:PresentedDecision)=>void|Promise<void>):()=>void{this.#presentationListeners.add(listener);return()=>this.#presentationListeners.delete(listener)}
     async #setPresentation(mode:PresentationMode,seen?:PresentedDecision):Promise<void>{
-        if(!seen&&mode!=='workbench')await this.stopLocalBuilds();
         if(seen&&this.#presentationMode==='background')throw Error('presentation_hidden');
         const changed=this.#presentationMode!==mode||this.#presentationNeedsRetry;
         if(!seen){this.#presentationMode=mode;this.#noteActive()}
@@ -757,7 +769,7 @@ export class PersonalAgentHost {
     conversationSnapshot(maxHomeBytes=256*1024){
         const c=this.#state.conversations,selected=c.items.find(item=>item.id===c.selected_id),home=c.items.find(item=>item.id==='chat:main')?.messages??[];
         const receipts=this.#state.feed.filter(feed=>feed.task_ref&&!home.some(message=>message.id==='feed:'+feed.id||message.turn_id==='task:'+feed.task_ref!.work_id)).map(feed=>({id:'feed:'+feed.id,conversation_id:c.work_owners[feed.task_ref!.work_id]??'chat:main',role:'assistant' as const,text:feed.title,created_at:feed.updated_at}));
-        const result={selected_id:c.selected_id,voice_id:c.voice_id,...(c.voice_id&&this.#conversationPool?.capabilities(c.voice_id)?{voice_capabilities:this.#conversationPool.capabilities(c.voice_id)}:{}),unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.filter(item=>item.kind!=='schedule').map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,last_message:item.messages.at(-1)?.text.slice(0,160)??'',generation_status:item.messages.findLast(message=>message.role==='user')?.generation_status,mode:item.mode??'chat',plan:item.plan,build:item.build?{...item.build,computer_use:this.computerUseState(item.id)}:undefined,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(selected?.messages??[]),home_messages:[] as typeof home,home_truncated:false};
+        const result={selected_id:c.selected_id,voice_id:c.voice_id,...(this.#stateNotice?{state_notice:{...this.#stateNotice}}:{}),...(c.voice_id&&this.#conversationPool?.capabilities(c.voice_id)?{voice_capabilities:this.#conversationPool.capabilities(c.voice_id)}:{}),unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.filter(item=>item.kind!=='schedule').map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,last_message:item.messages.at(-1)?.text.slice(0,160)??'',generation_status:item.messages.findLast(message=>message.role==='user')?.generation_status,mode:item.mode??'chat',plan:item.plan,build:item.build?{...item.build,computer_use:this.computerUseState(item.id)}:undefined,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(selected?.messages??[]),home_messages:[] as typeof home,home_truncated:false};
         // Schedule cleanup can remove a conversation while its work-owner mapping remains.
         const visibleIds=new Set(c.items.filter(item=>item.kind!=='schedule').map(item=>item.id));
         const selectedIds=new Set(result.messages.map(message=>message.id)),candidates=[...home,...receipts].filter(message=>visibleIds.has(message.conversation_id)&&!selectedIds.has(message.id)).sort((a,b)=>a.created_at.localeCompare(b.created_at));
@@ -771,10 +783,10 @@ export class PersonalAgentHost {
     async submitConversationText(id:string,text:string,requestId?:string,sourceTodo?:{id:string;version:number},context:ConversationTurnContext={}):Promise<void>{
         const item=this.#state.conversations.items.find(item=>item.id===id);
         if(item?.kind!=='build')return this.#submitConversationText(id,text,requestId,sourceTodo,context);
-        if(!context.local_desktop||this.#presentationMode!=='workbench'||this.#state.conversations.selected_id!==id)throw Error('local_build_not_authorized');
+        if(item.build?.status==='finished')throw Error('build_finished');
+        if(!context.local_desktop||!this.localBuildAuthorized(id))throw Error('local_build_not_authorized');
         if(item.build?.status==='awaiting_approval')throw Error('conversation_busy');
         const activeBuild=this.activeLocalBuild();if(activeBuild&&activeBuild.id!==id)throw Error('conversation_busy');
-        if(item.build?.status==='finished')throw Error('build_finished');
         // A deliberate new text submission can continue a paused or completed Build after
         // switching presentation modes; returning to the workbench alone grants nothing.
         this.#admittingBuilds.add(id);this.#localBuildAuthority.add(id);
@@ -791,9 +803,9 @@ export class PersonalAgentHost {
         if(!conversation)throw Error('conversation_not_found');
         if(conversation.kind==='schedule')throw Error('hidden_conversation');
         if(conversation.kind==='build'){
-            if(!context.local_desktop||this.#presentationMode!=='workbench'||this.#state.conversations.selected_id!==id)throw Error('local_build_not_authorized');
-            if(!this.localBuildAuthorized(id))throw Error('local_build_not_authorized');
             if(conversation.build?.status==='finished')throw Error('build_finished');
+            if(!context.local_desktop)throw Error('local_build_not_authorized');
+            if(!this.localBuildAuthorized(id))throw Error('local_build_not_authorized');
         }
         if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');
         if(this.#clearingConversations.has(id))throw Error('conversation_clearing');
@@ -947,6 +959,7 @@ export class PersonalAgentHost {
     #release: (() => Promise<void>) | undefined;
     readonly #store: PersonalStore;
     #state: PersonalState = initialState();
+    #stateNotice: {code:'state_corrupt'|'personal_store_capacity';original_path:string;backup_path:string}|null=null;
     #includeExpired=false;
     #soul: {role:string;version:number;updated_at:string|null;reply_style:string|null}|null=null;
     #diaryBefore:string|undefined;
@@ -1055,7 +1068,17 @@ export class PersonalAgentHost {
         assertPersistedAcceptanceGrant(this.options.memory()?.processingGrant?.(true,1,0),this.options.path);
         this.#release = await acquirePersonalLock(this.options.path);
         try {
-            this.#state = await this.#store.read();
+            try {
+                this.#state = await this.#store.read();
+            } catch (error) {
+                // A state file that cannot be read must not turn into an endless reconnect loop.
+                // Keep the bytes under a timestamped name, start empty and tell the user both paths.
+                if (!(error instanceof PersonalStoreError) || (error.code !== 'state_corrupt' && error.code !== 'personal_store_capacity')) throw error;
+                const moved = await this.#store.quarantine(error.code);
+                this.#state = initialState();
+                this.#stateNotice = {code: error.code, original_path: moved.from, backup_path: moved.to};
+                this.options.onDiagnostic?.(`state_recovered_${error.code}`);
+            }
             this.#state.conversations.voice_id=null;
             if (this.#state.user_scope !== null && this.#state.user_scope !== this.options.userScope) throw Error('scope_mismatch');
             this.#state.user_scope = this.options.userScope;
@@ -1910,7 +1933,7 @@ export class PersonalAgentHost {
         if(context?.client_id!=='desktop:local'&&typeof command.params.id==='string'&&this.#state.conversations.items.some(item=>item.id===command.params.id&&item.kind==='build'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
         const localCommand=command.method.startsWith('workspaces.')||command.method.startsWith('build.')||command.method.startsWith('plans.')||command.method==='conversations.mode'||command.method==='settings.local_tool_approval';
         if(localCommand&&(context?.client_id!=='desktop:local'||this.#presentationMode!=='workbench'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
-        if(this.activeLocalBuild()&&(['conversations.create','conversations.select','conversations.open_work','conversations.open_feed','conversations.discuss','conversations.start','conversations.clear','conversations.voice','build.start','build.begin'].includes(command.method))&&!(command.method==='conversations.select'&&command.params.id===this.activeLocalBuild()!.id))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
+        if(this.activeLocalBuild()&&(command.method==='build.start'||command.method==='build.begin'||(command.method==='conversations.clear'&&command.params.id===this.activeLocalBuild()!.id)))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
         // Recovery owns task execution only: presentation, state and non-task commands keep working, and a handback made now is woken when recovery ends.
         if(this.#recovering&&(command.method.startsWith('tasks.')||command.method==='conversations.approve')&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
         const scheduleCommand=command.method.startsWith('schedules.'),taskCommand=command.method.startsWith('tasks.'),scoped=localCommand||scheduleCommand||taskCommand||command.method==='presentation.set'||command.method==='conversations.approve'||command.method==='conversations.confirm'||command.method==='conversations.start';

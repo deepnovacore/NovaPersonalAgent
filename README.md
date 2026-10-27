@@ -185,7 +185,7 @@ novapersonal doctor
 v0.4 introduces the Nova Personal Agent package names. Published v0.3.x versions retain the old package names and `novaaudio` command. The new package keeps that command alias and reuses existing data and settings. When migrating an existing global install, first run `npm uninstall --global nova-audio-agent nova-audio-agent-server` to avoid command-link collisions; this leaves user data intact.
 
 
-Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-personal-agent@0.4.0`. Upgrades keep your settings and data; back up your Nova data before downgrading.
+Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-personal-agent@0.4.0`. Upgrades keep your settings and data. State files are versioned, so an older build may refuse a newer file; run `novapersonal reset-state` (after backing up) before downgrading.
 
 Headless Ubuntu 22.04+ x64:
 
