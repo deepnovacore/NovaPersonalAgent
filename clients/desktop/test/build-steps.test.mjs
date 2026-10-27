@@ -25,7 +25,7 @@ function server(steps,{generation=0,pageSize=20}={}){
  return (method,params)=>{
   if(params.view==='image')return {media_type:'image/png',data_base64:'QUJD'}
   const all=params.view==='calls'?steps.filter(step=>step.kind==='tool'):steps
-  return {items:all.slice(params.offset,params.offset+pageSize),total:all.length,next_offset:params.offset+pageSize<all.length?params.offset+pageSize:null,generation,first_id:all[0]?.id??null}
+  return {items:all.slice(params.offset,params.offset+pageSize),total:all.length,next_offset:params.offset+pageSize<all.length?params.offset+pageSize:null,generation,first_id:all[0]?.id??null,thoughts_first_id:all.find(step=>step.kind==='thinking')?.id??null}
  }
 }
 function makeDisplay(initial={}){
@@ -326,4 +326,19 @@ test('an evicted host prefix restarts the timeline instead of keeping stale rows
  assert.equal(m.rows().length,3)
  assert.equal(m.requests.filter(request=>request.params.view==='steps'&&request.params.offset===0).length,2,'the shifted prefix is reloaded from zero')
  assert.deepEqual(m.rows().map(node=>node.dataset.stepKind),['tool','tool','tool'])
+})
+
+test('thought eviction after a retained leading tool reloads from zero',async()=>{
+ let steps=[tool(0,{created_at:at(1)}),thought('t1','旧思考',2),thought('t2','中间思考',3)]
+ const m=setup({steps,status:'running',command:(method,params)=>server(steps)(method,params)})
+ m.log.update();await tick()
+ assert.equal(m.rows().length,3)
+ // The retained leading tool keeps first_id stable; only thoughts_first_id reveals the shift.
+ steps=[tool(0,{created_at:at(1)}),thought('t2','中间思考',3),thought('t3','新思考',4)]
+ m.conversation.build.log_revision=2
+ m.log.update();await tick()
+ assert.equal(m.requests.filter(request=>request.params.view==='steps'&&request.params.offset===0).length,2,'the mid-list eviction is reloaded from zero')
+ assert.deepEqual(m.rows().map(node=>node.dataset.stepKind),['tool','thinking','thinking'])
+ assert.equal(m.rows()[1].children[0].children[3].textContent,'中间思考')
+ assert.equal(m.rows()[2].children[0].children[3].textContent,'新思考')
 })

@@ -71,7 +71,7 @@ export function createBuildSteps({c,el,changed,display}){
  const readPreferences=display?.read??readDisplayPreferences
  const subscribe=display?.subscribe??subscribeDisplayPreferences
  let prefs=readPreferences()
- let selected='',version=0,items=[],loadedFirstId=null,loading=null,loadedRevision=-1,failedRevision=-1,error='',timer=null,connected=false,mode='steps'
+ let selected='',version=0,items=[],loadedFirstId=null,loadedThoughtsFirstId=null,loading=null,loadedRevision=-1,failedRevision=-1,error='',timer=null,connected=false,mode='steps'
  const nodes=new Map(),groups=new Map(),shots=new Map()
  const notice=el('div',undefined,'build-log-notice'),retry=el('button',t('重试')),errorText=el('span')
  retry.type='button';withIcon(retry,'refresh');{const alert=iconNode('alert');if(alert)notice.append(alert)};notice.append(errorText,retry)
@@ -144,17 +144,20 @@ export function createBuildSteps({c,el,changed,display}){
     if(page.generation!==generation||!Array.isArray(page.items)||!Number.isSafeInteger(page.total))throw Error(t('工具日志暂不可用。'))
     // The host evicts the oldest thought after 64 rounds, shifting merged indexes.
     // Restart once so the display never keeps an evicted prefix or skips a tool.
-    if(loadedFirstId!==null&&typeof page.first_id==='string'&&page.first_id!==loadedFirstId){
+    const firstShifted=loadedFirstId!==null&&typeof page.first_id==='string'&&page.first_id!==loadedFirstId
+    const thoughtShifted=loadedThoughtsFirstId!==null&&typeof page.thoughts_first_id==='string'&&page.thoughts_first_id!==loadedThoughtsFirstId
+    if(firstShifted||thoughtShifted){
      if(restarted)throw Error(t('工具日志暂不可用。'))
-     restarted=true;items=[];offset=0;loadedFirstId=null;continue
+     restarted=true;items=[];offset=0;loadedFirstId=null;loadedThoughtsFirstId=null;continue
     }
     if(page.total<offset){
      if(restarted)throw Error(t('工具日志暂不可用。'))
-     restarted=true;items=[];offset=0;loadedFirstId=null;continue
+     restarted=true;items=[];offset=0;loadedFirstId=null;loadedThoughtsFirstId=null;continue
     }
     items.length=offset
     for(const step of page.items)items.push(step)
     if(loadedFirstId===null&&typeof page.first_id==='string')loadedFirstId=page.first_id
+    if(loadedThoughtsFirstId===null&&typeof page.thoughts_first_id==='string')loadedThoughtsFirstId=page.thoughts_first_id
     if(page.next_offset!==null&&(!Number.isSafeInteger(page.next_offset)||page.next_offset<=offset))throw Error(t('工具日志暂不可用。'))
     offset=page.next_offset
     changed()
@@ -165,7 +168,7 @@ export function createBuildSteps({c,el,changed,display}){
  }
  function update(){
   const next=selection()
-  if(next!==selected){selected=next;version++;loading=null;items=[];loadedFirstId=null;mode='steps';nodes.clear();groups.clear();shots.clear();loadedRevision=-1;failedRevision=-1;error=''}
+  if(next!==selected){selected=next;version++;loading=null;items=[];loadedFirstId=null;loadedThoughtsFirstId=null;mode='steps';nodes.clear();groups.clear();shots.clear();loadedRevision=-1;failedRevision=-1;error=''}
   const ready=c.connected&&c.presentationReady!==false
   if(ready&&!connected)failedRevision=-1
   connected=ready

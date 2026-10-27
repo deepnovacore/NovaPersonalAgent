@@ -99,7 +99,8 @@ void main() {
     expect(store.hasCustom, isTrue);
     expect(store.error, isNull);
     final path = store.customPath!;
-    expect(path, endsWith(petAvatarFileName));
+    expect(path, startsWith('${support.path}/$petAvatarFilePrefix'));
+    expect(path, endsWith('.png'));
     expect(File(path).existsSync(), isTrue);
     expect(await _pngSize(await File(path).readAsBytes()), (512, 256));
     final preferences = await SharedPreferences.getInstance();
@@ -119,6 +120,39 @@ void main() {
     ));
   });
 
+  test('replacing a photo installs a new versioned file and deletes the old one', () async {
+    var image = await _png(120, 60);
+    final store = storeWith(pickImage: () async => image);
+    await store.load();
+    expect(await store.pickCustomImage(), isTrue);
+    final first = store.customPath!;
+    image = await _png(80, 80);
+    expect(await store.pickCustomImage(), isTrue);
+    final second = store.customPath!;
+    expect(second, isNot(first));
+    expect(File(first).existsSync(), isFalse);
+    expect(File(second).existsSync(), isTrue);
+    expect(await _pngSize(await File(second).readAsBytes()), (80, 80));
+  });
+
+  test('a failed replacement keeps the previous file and path', () async {
+    var directory = support;
+    final store = PetAvatarStore(
+      supportDirectory: () async => directory,
+      pickImage: () async => _png(64, 64),
+    );
+    await store.load();
+    expect(await store.pickCustomImage(), isTrue);
+    final previous = store.customPath!;
+    // Force the next write to fail before it can touch the old file.
+    final blocker = File('${support.path}/blocker')..writeAsStringSync('x');
+    directory = Directory('${blocker.path}/nested');
+    expect(await store.pickCustomImage(), isFalse);
+    expect(store.error, 'image_failed');
+    expect(store.customPath, previous);
+    expect(File(previous).existsSync(), isTrue);
+  });
+
   test('rejects gallery images larger than 8 MB', () async {
     final store = storeWith(
       pickImage: () async => Uint8List(petAvatarMaxInputBytes + 1),
@@ -127,7 +161,13 @@ void main() {
     expect(await store.pickCustomImage(), isFalse);
     expect(store.error, 'image_too_large');
     expect(store.hasCustom, isFalse);
-    expect(File('${support.path}/$petAvatarFileName').existsSync(), isFalse);
+    expect(
+      support
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.split('/').last.startsWith(petAvatarFilePrefix)),
+      isEmpty,
+    );
   });
 
   test('cancelling the picker keeps the current avatar', () async {
@@ -164,7 +204,7 @@ void main() {
   });
 
   test('loads a stored custom path from preferences', () async {
-    final file = File('${support.path}/$petAvatarFileName')
+    final file = File('${support.path}/${petAvatarFilePrefix}seed.png')
       ..writeAsBytesSync(await _png(64, 64));
     SharedPreferences.setMockInitialValues({
       petAvatarPreferenceKey: jsonEncode({'mode': 'custom', 'path': file.path}),
@@ -256,7 +296,7 @@ void main() {
   testWidgets('PetAvatar falls back to the default asset for a corrupt file', (
     tester,
   ) async {
-    final corrupt = File('${support.path}/$petAvatarFileName')
+    final corrupt = File('${support.path}/${petAvatarFilePrefix}corrupt.png')
       ..writeAsBytesSync([1, 2, 3, 4]);
     SharedPreferences.setMockInitialValues({
       petAvatarPreferenceKey: jsonEncode({
@@ -289,7 +329,7 @@ void main() {
     SharedPreferences.setMockInitialValues({
       petAvatarPreferenceKey: jsonEncode({
         'mode': 'custom',
-        'path': '${support.path}/missing-$petAvatarFileName',
+        'path': '${support.path}/missing-${petAvatarFilePrefix}old.png',
       }),
     });
     final store = storeWith();
