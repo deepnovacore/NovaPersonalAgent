@@ -102,6 +102,34 @@ test('an aborted queued read never reaches the worker',async()=>{
  await fake.release();await closing
 })
 
+test('a temporary auto-reopen failure is retried with bounded backoff',async()=>{
+ const workers:{messages:unknown[];respond:(id:number,code?:string)=>void;emitExit:()=>void;listeners:Map<string,(value:never)=>void>}[]=[]
+ const make=()=>{
+  const listeners=new Map<string,(value:never)=>void>(),messages:unknown[]=[]
+  const worker:MemoryLedgerWorker={postMessage(value){messages.push(value)},on(event:string,listener:(value:never)=>void){listeners.set(event,listener);return worker},terminate:()=>Promise.resolve(0)}
+  const entry={messages,listeners,respond:(id:number,code?:string)=>{listeners.get('message')!((code===undefined?{kind:'response',request_id:id,ok:true,result:null}:{kind:'response',request_id:id,ok:false,error_code:code}) as never)},emitExit:()=>listeners.get('exit')!(1 as never)}
+  workers.push(entry);return worker
+ }
+ const client=new MemoryLedgerClient(':memory:',{workerFactory:make})
+ const id=(index:number)=>Number((workers[index]!.messages[0] as {request_id:number}).request_id)
+ const opening=client.open()
+ workers[0]!.respond(id(0))
+ await opening
+ workers[0]!.emitExit()
+ await new Promise(resolve=>setTimeout(resolve,300))
+ assert.equal(workers.length,2,'recycle spawns a replacement immediately')
+ workers[1]!.respond(Number((workers[1]!.messages[0] as {request_id:number}).request_id),'STORE_READ_FAILED')
+ await new Promise(resolve=>setTimeout(resolve,700))
+ workers[1]!.respond(Number((workers[1]!.messages[1] as {request_id:number}).request_id))
+ await new Promise(resolve=>setTimeout(resolve,20))
+ const list=client.memory('list',{})
+ workers[1]!.respond(Number((workers[1]!.messages[2] as {request_id:number}).request_id))
+ assert.equal(await list,null)
+ const closing=client.close()
+ workers[1]!.respond(Number((workers[1]!.messages[3] as {request_id:number}).request_id))
+ await closing
+})
+
 test('an abandoned in-service read is dropped and its stuck worker replaced',async t=>{
  t.mock.timers.enable({apis:['setTimeout']})
  const workers:ReturnType<typeof heldWorker>[]=[]
