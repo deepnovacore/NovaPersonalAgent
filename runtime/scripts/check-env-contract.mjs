@@ -22,7 +22,7 @@ const coreNames = new Set([
 // Keep executable examples separate from human-readable fallback descriptions.
 const exampleValues = {
   MODEL_BASE_URL: 'https://api.deepseek.com',
-  WATCH_MODEL: 'deepseek-flash', CASCADE_LLM_MODEL: 'deepseek-flash', MEMORY_PROVIDER: 'voicemem',
+  WATCH_MODEL: 'deepseek-flash', CASCADE_LLM_MODEL: 'deepseek-flash', FAST_MODEL: 'deepseek-flash', SUPPORT_MODEL: 'deepseek-flash', MEMORY_PROVIDER: 'voicemem',
   SUGGESTION_COOLDOWN: '60', FRESH_WINDOW: '30',
   QWEN_REALTIME_URL: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
   VOLCENGINE_ARK_BASE_URL: 'https://ark.cn-beijing.volces.com/api/v3',
