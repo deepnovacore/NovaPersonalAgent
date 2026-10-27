@@ -57,7 +57,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "只影响工作台本地 Build；读取直接执行。保存并重启后生效。": "Only affects local workbench Build. Reads run directly. Save and restart to apply.",
   "选择本地 Build 项目目录": "Choose a local Build project folder",
   "Build 正在执行": "Build is running",
-  "停止并保存进度后再切换，返回时点击 Resume 继续。": "Stop and save progress before switching. Click Resume when you return.",
+  "停止并保存进度后再切换，返回时点击“继续”。": "Stop and save progress before switching. Click Resume when you return.",
   "继续执行": "Keep running",
   "停止并切换": "Stop and switch",
   "对话模式": "Conversation mode",

@@ -276,7 +276,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(frame.type==='caption'&&typeof frame.text==='string'&&frame.conversation_id&&frame.turn_id&&(frame.role!=='user'||frame.conversation_id===c.voiceId)){
    const key=`${frame.conversation_id}:${frame.turn_id}`
    // An empty final caption retracts a preview the runtime discarded (for example narration before a tool call).
-   if(frame.text)liveCaptions.set(key,{...frame,seen_at:liveCaptions.get(key)?.seen_at??Date.now()})
+   const text=typeof frame.full_text==='string'?frame.full_text:frame.text
+   if(text)liveCaptions.set(key,{...frame,text,seen_at:liveCaptions.get(key)?.seen_at??Date.now()})
    else if(frame.final===true)liveCaptions.delete(key)
    while(liveCaptions.size>128)liveCaptions.delete(liveCaptions.keys().next().value)
   }
