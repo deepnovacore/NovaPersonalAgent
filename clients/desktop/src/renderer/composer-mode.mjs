@@ -1,24 +1,25 @@
 import {t} from './locale.mjs'
 
-export const COMPOSER_MODES=Object.freeze(['chat','build','delegate'])
-const LABELS={chat:'Chat',build:'Build',delegate:'Delegate'}
+export const COMPOSER_MODES=Object.freeze(['chat','plan','build','delegate'])
+const LABELS={chat:'Chat',plan:'Plan',build:'Build',delegate:'Delegate'}
 const CAPTIONS={
  chat:'直接对话',
- build:'发布计划后在本地项目里 Build',
- delegate:'发布计划后交给执行器',
+ plan:'先澄清需求并制定计划，再选择 Build 或执行器',
+ build:'直接在工作区里动手：读取、编辑、运行命令，同步完成',
+ delegate:'制定计划后交给本机执行器异步完成',
  locked:'Build 会话进行中',
 }
 const MODE_KINDS=new Set(['chat','topic'])
 
 /**
- * Chat is the plain conversation mode. Build and Delegate are the backend's plan mode with a chosen way to
- * execute the plan: they decide the plan card's primary action and never start execution on their own.
- * A plan-mode conversation without a chosen execution shows as Chat.
+ * Chat is the plain conversation mode. Plan is the backend's plan mode: it clarifies and publishes a plan, and the plan
+ * card then offers Build or an executor. Delegate is Plan with the executor pre-selected. Build is direct: a chat
+ * conversation that has chosen Build starts a Build session with its first message, with no plan in between.
  */
 export function composerMode(item,state){
  if(item?.kind==='build')return 'build'
- if(item?.mode!=='plan')return 'chat'
- return ['build','delegate'].includes(state?.execution)?state.execution:'chat'
+ if(item?.mode==='plan')return state?.execution==='delegate'?'delegate':'plan'
+ return state?.execution==='build'?'build':'chat'
 }
 export function nextComposerMode(current,step=1){
  const index=COMPOSER_MODES.indexOf(current)
@@ -41,7 +42,7 @@ export function mountComposerMode(parent,{c,el,run}){
  const available=()=>{const current=item();return Boolean(current)&&MODE_KINDS.has(current.kind)&&c.connected&&!c.isVoiceConversation&&!busy}
  async function select(mode){
   const current=item();if(!current||!available()||!COMPOSER_MODES.includes(mode))return
-  const id=current.id,state=c.state(id),wanted=mode==='chat'?'chat':'plan'
+  const id=current.id,state=c.state(id),wanted=mode==='plan'||mode==='delegate'?'plan':'chat'
   busy=true;update()
   try{
    if((current.mode??'chat')!==wanted)await c.command('conversations.mode',{id,mode:wanted})

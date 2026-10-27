@@ -217,6 +217,8 @@ export class PersonalAgentHost {
     })}
     async #workbenchCommand(method:string,p:Record<string,unknown>):Promise<unknown>{
         this.#refreshLocalProcessFences();
+        if(method==='workspaces.list'){z.object({}).strict().parse(p);if(!this.#codingTargets?.workspaces)throw Error('workspaces_unavailable');return this.#codingTargets.workspaces.list()}
+        if(method==='workspaces.create'){const q=z.object({name:z.string().trim().min(1).max(80).regex(/^[\p{L}\p{N} _().-]+$/u).refine(name=>name!=='.'&&name!=='..')}).strict().parse(p);if(!this.#codingTargets?.workspaces)throw Error('workspaces_unavailable');return this.#codingTargets.workspaces.create(q.name)}
         if(method==='plans.get'){const q=z.object({plan_id:z.string(),version:z.number().int().positive(),offset:z.number().int().nonnegative().default(0)}).strict().parse(p),plan=await this.workbench.plan(q.plan_id,q.version);return {...plan,content:plan.content.slice(q.offset,q.offset+6000),next_offset:q.offset+6000<plan.content.length?q.offset+6000:null}}
         if(method==='plans.edit'){
             const q=z.object({id:z.string(),plan_id:z.string(),expected_version:z.number().int().positive(),offset:z.number().int().nonnegative(),text:z.string().max(4000),final:z.boolean()}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);
@@ -271,7 +273,15 @@ export class PersonalAgentHost {
             const q=z.object({id:z.string()}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item?.build||this.#state.conversations.selected_id!==q.id)throw Error('build_not_selected');if(item.build.status==='finished')throw Error('build_finished');if(this.activeLocalBuild())throw Error('conversation_busy');
             this.#localBuildAuthority.add(q.id);try{await this.submitConversationText(q.id,'Resume',undefined,undefined,{resume:true,local_desktop:true})}catch(error){this.#localBuildAuthority.delete(q.id);throw error}return {accepted:true};
         }
-        const q=z.object({id:z.string(),plan_id:z.string(),version:z.number().int().positive(),project:z.string().optional(),executor:z.string().max(128).optional()}).strict().parse(p),source=this.#state.conversations.items.find(item=>item.id===q.id);
+        if(method==='build.begin'){
+            const q=z.object({text:z.string().trim().min(1).max(16000),project:z.string().min(1).optional(),workspace_id:z.string().min(1).optional(),title:z.string().min(1).max(120).optional()}).strict().parse(p);
+            if(!['darwin','win32'].includes(process.platform))throw Error('local_build_unavailable');
+            if(this.activeLocalBuild())throw Error('build_stop_required');
+            const project=await this.#buildProject(q),item=createConversation('build',q.title??q.text.slice(0,120));
+            item.build={project,source_conversation_id:this.#state.conversations.selected_id,status:'idle',reason:null,approval:null,log_revision:0};
+            return this.#beginBuild(item,q.text);
+        }
+        const q=z.object({id:z.string(),plan_id:z.string(),version:z.number().int().positive(),project:z.string().min(1).optional(),workspace_id:z.string().min(1).optional(),executor:z.string().max(128).optional()}).strict().parse(p),source=this.#state.conversations.items.find(item=>item.id===q.id);
         if(!source||source.plan?.id!==q.plan_id||source.plan.version!==q.version)throw Error('plan_version_conflict');
         const priorTask=this.tasks.list().findLast(task=>task.conversation_id===source.id&&(task.conversation_generation??0)===source.generation&&task.approved_plan?.id===q.plan_id&&task.approved_plan.version===q.version);
         if(method==='plans.delegate'&&priorTask&&source.mode!=='plan'){
@@ -280,20 +290,46 @@ export class PersonalAgentHost {
         }
         if(source.mode!=='plan')throw Error('plan_version_conflict');
         const plan=await this.workbench.plan(q.plan_id,q.version);if(plan.conversation_id!==source.id||plan.generation!==source.generation)throw Error('plan_session_stale');
+        if(q.project&&q.workspace_id)throw Error('workspace_project_conflict');
         if(method==='plans.delegate'){
+            if(q.workspace_id)throw Error('workspace_unavailable_for_executor');
             if(!q.executor)throw Error('executor_required');if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');
             if(!this.#workbenchExecutors.includes(q.executor))throw Error('executor_unavailable');
-            return this.#delegatePlan(source,plan,q.executor,priorTask);
+            let target=source.coding_target;
+            if(q.project!==undefined){
+                if(q.executor!=='codex')throw Error('executor_unavailable');
+                const project=await canonicalProject(q.project);
+                if(taskResourcesBusy([projectResourceKey(project)]))throw Error('project_busy');
+                if(!this.#codingTargets)throw Error('coding_unavailable');
+                const candidates=await this.#codingTargets.list();
+                let selected:typeof candidates[number]|undefined;
+                for(const candidate of candidates)if(candidate.directory&&await canonicalProject(candidate.directory)===project){selected=candidate;break}
+                if(!selected)throw Error('unknown_project');
+                if(selected.running)throw Error('project_busy');
+                if(this.#conversationPool.canChangeTarget(source.id)===false)throw Error('conversation_busy');
+                target=await this.#codingTargets.validate({workspace_id:selected.workspace_id,session_id:null});
+                if(!await this.rememberCodingTarget(source.id,source.generation,target,()=>this.#conversationPool?.canChangeTarget(source.id)!==false))throw Error('conversation_busy');
+            }
+            return this.#delegatePlan({...source,coding_target:target},plan,q.executor,priorTask);
         }
         if(method!=='build.start')throw Error('unsupported');if(!['darwin','win32'].includes(process.platform))throw Error('local_build_unavailable');
         const existing=this.#state.conversations.items.find(item=>item.kind==='build'&&item.build?.plan_id===plan.id&&item.build.plan_version===plan.version);
         if(existing){await this.#conversationCommand('conversations.select',{id:existing.id});return this.conversationSnapshot()}
-        if(this.activeLocalBuild())throw Error('build_stop_required');if(!q.project)throw Error('project_directory_required');const project=await canonicalProject(q.project);if(taskResourcesBusy([projectResourceKey(project)]))throw Error('project_busy');
+        if(this.activeLocalBuild())throw Error('build_stop_required');const project=await this.#buildProject(q);if(taskResourcesBusy([projectResourceKey(project)]))throw Error('project_busy');
         const item=createConversation('build',plan.title.slice(0,120));item.build={project,plan_id:plan.id,plan_version:plan.version,source_conversation_id:source.id,status:'idle',reason:null,approval:null,log_revision:0};
+        return this.#beginBuild(item,'执行已确认的完整计划。');
+    }
+    async #buildProject(q:{project?:string|undefined;workspace_id?:string|undefined}):Promise<string>{
+        if(q.project&&q.workspace_id)throw Error('workspace_project_conflict');
+        if(q.project)return canonicalProject(q.project);
+        if(!this.#codingTargets?.workspaces)throw Error('workspaces_unavailable');
+        return canonicalProject(await this.#codingTargets.workspaces.resolve(q.workspace_id));
+    }
+    async #beginBuild(item:Conversation,text:string):Promise<unknown>{
         let previousSelection=this.#state.conversations.selected_id;
-        await this.#serial(async()=>{const next=structuredClone(this.#state);previousSelection=next.conversations.selected_id;if(next.conversations.items.filter(item=>item.kind!=='schedule').length>=128)throw Error('conversation_limit');next.conversations.items.push(item);next.conversations.selected_id=item.id;await this.#commit(next)});
+        await this.#serial(async()=>{if(this.activeLocalBuild())throw Error('build_stop_required');if(taskResourcesBusy([projectResourceKey(item.build!.project)]))throw Error('project_busy');const next=structuredClone(this.#state);previousSelection=next.conversations.selected_id;if(next.conversations.items.filter(item=>item.kind!=='schedule').length>=128)throw Error('conversation_limit');next.conversations.items.push(item);next.conversations.selected_id=item.id;this.#admittingBuilds.add(item.id);try{await this.#commit(next)}catch(error){this.#admittingBuilds.delete(item.id);throw error}});
         this.#localBuildAuthority.add(item.id);
-        try{await this.submitConversationText(item.id,'执行已确认的完整计划。',undefined,undefined,{local_desktop:true})}
+        try{await this.submitConversationText(item.id,text,undefined,undefined,{local_desktop:true})}
         catch(error){
             this.#localBuildAuthority.delete(item.id);
             const checkpoint=await this.workbench.checkpoint(item.id,item.generation);
@@ -306,6 +342,7 @@ export class PersonalAgentHost {
             });
             throw error;
         }
+        finally{if(!this.#conversationRuns.has(item.id))this.#admittingBuilds.delete(item.id)}
         return this.conversationSnapshot();
     }
     async #delegatePlan(source:Conversation,plan:WorkbenchPlan,executor:string,previous?:TaskRecord):Promise<unknown>{
@@ -712,14 +749,14 @@ export class PersonalAgentHost {
             const turn=typeof frame.turn_id==='string'?frame.turn_id:randomUUID();const previous=item.messages.find(message=>message.turn_id===turn);
             const delivery=frame.delivery==='generated'||frame.delivery==='interrupted'?frame.delivery:'completed';
             if(previous){if(frame.type!=='conversation.delivered'&&!(frame.type==='conversation.completed'&&turn.startsWith('task:')))return;previous.delivery=delivery;previous.text=String(frame.text).slice(0,16000)}
-            else item.messages.push({id:randomUUID(),conversation_id:item.id,role:frame.role==='user'?'user':'assistant',text:String(frame.text).slice(0,16000),created_at:this.#now().toISOString(),turn_id:turn,delivery});
+            else item.messages.push({id:randomUUID(),conversation_id:item.id,role:frame.role==='user'?'user':'assistant',text:String(frame.text).slice(0,16000),created_at:this.#now().toISOString(),turn_id:turn,delivery,...(voice?{input_mode:'voice' as const}:{})});
             item.messages=item.messages.slice(-512);await this.#commit(next);
         });
     }
     conversationSnapshot(maxHomeBytes=256*1024){
         const c=this.#state.conversations,selected=c.items.find(item=>item.id===c.selected_id),home=c.items.find(item=>item.id==='chat:main')?.messages??[];
         const receipts=this.#state.feed.filter(feed=>feed.task_ref&&!home.some(message=>message.id==='feed:'+feed.id||message.turn_id==='task:'+feed.task_ref!.work_id)).map(feed=>({id:'feed:'+feed.id,conversation_id:c.work_owners[feed.task_ref!.work_id]??'chat:main',role:'assistant' as const,text:feed.title,created_at:feed.updated_at}));
-        const result={selected_id:c.selected_id,voice_id:c.voice_id,...(c.voice_id&&this.#conversationPool?.capabilities(c.voice_id)?{voice_capabilities:this.#conversationPool.capabilities(c.voice_id)}:{}),unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.filter(item=>item.kind!=='schedule').map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,mode:item.mode??'chat',plan:item.plan,build:item.build?{...item.build,computer_use:this.computerUseState(item.id)}:undefined,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(selected?.messages??[]),home_messages:[] as typeof home,home_truncated:false};
+        const result={selected_id:c.selected_id,voice_id:c.voice_id,...(c.voice_id&&this.#conversationPool?.capabilities(c.voice_id)?{voice_capabilities:this.#conversationPool.capabilities(c.voice_id)}:{}),unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.filter(item=>item.kind!=='schedule').map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,last_message:item.messages.at(-1)?.text.slice(0,160)??'',generation_status:item.messages.findLast(message=>message.role==='user')?.generation_status,mode:item.mode??'chat',plan:item.plan,build:item.build?{...item.build,computer_use:this.computerUseState(item.id)}:undefined,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(selected?.messages??[]),home_messages:[] as typeof home,home_truncated:false};
         // Schedule cleanup can remove a conversation while its work-owner mapping remains.
         const visibleIds=new Set(c.items.filter(item=>item.kind!=='schedule').map(item=>item.id));
         const selectedIds=new Set(result.messages.map(message=>message.id)),candidates=[...home,...receipts].filter(message=>visibleIds.has(message.conversation_id)&&!selectedIds.has(message.id)).sort((a,b)=>a.created_at.localeCompare(b.created_at));
@@ -887,12 +924,7 @@ export class PersonalAgentHost {
         }
 
         if(method==='conversations.voice'){
-            const q=z.object({id:z.string(),enabled:z.boolean()}).strict().parse(p);let item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');
-            if(q.enabled&&item.kind==='build'){q.id='chat:main';await this.#conversationCommand('conversations.select',{id:q.id});item=this.#state.conversations.items.find(item=>item.id===q.id)!}
-            if(q.enabled&&item.mode==='plan'){
-                if(this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
-                await this.#conversationPool?.clear(q.id);await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.items.find(item=>item.id===q.id)!.mode='chat';await this.#commit(next)});item={...item,mode:'chat'};
-            }
+            const q=z.object({id:z.string(),enabled:z.boolean()}).strict().parse(p);const item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');
             const c=this.#state.conversations;if(q.enabled){if(c.voice_id&&c.voice_id!==q.id)throw Error('voice_active');if(c.voice_id===q.id)return this.conversationSnapshot();if(!this.#conversationPool)throw Error('voice_unavailable');this.#voiceTransition=true;try{await this.#supersedeAnnouncements();if(this.#conversationPool.hasVoice('chat:main'))await this.#conversationPool.stopVoice('chat:main');await this.#conversationPool.startVoice(item)}finally{this.#voiceTransition=false}}else{if(c.voice_id!==q.id)throw Error('voice_not_owned');await this.#conversationPool?.stopVoice(q.id)}await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.voice_id=q.enabled?q.id:null;await this.#commit(next)});return this.conversationSnapshot()}
         if(method==='conversations.clear'){const q=z.object({id:z.string(),expected_generation:z.number().int().optional()}).strict().parse(p);const item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');if(q.expected_generation!==undefined&&item.generation!==q.expected_generation)throw Error('generation_conflict');if(this.#state.conversations.voice_id===q.id)throw Error('voice_active');this.#localBuildAuthority.delete(q.id);this.#clearingConversations.add(q.id);try{await this.#conversationPool?.clear(q.id);await this.#serial(async()=>{const next=structuredClone(this.#state);const target=next.conversations.items.find(item=>item.id===q.id)!;target.messages=[];target.read_through_id=null;target.generation++;target.prepared=null;delete target.scheduled_result_focus;delete target.plan;if(target.kind==='build'){target.kind='chat';target.mode='chat';delete target.build}await this.#commit(next)});}finally{this.#clearingConversations.delete(q.id)}return this.conversationSnapshot()}
         if(method==='conversations.open_feed'){const feed=this.#state.feed.find(f=>f.id===p.feed_id);const item=feed?this.#state.conversations.items.find(c=>c.feed_ids.includes(feed.id)||c.kind==='topic'&&c.subject_key===feed.subject_key):undefined;if(item&&JSON.stringify(item.prepared)!==JSON.stringify(feed?.prepared)){if(this.#state.conversations.voice_id===item.id)throw Error('voice_active');await this.#conversationPool?.clear(item.id)}}
@@ -1861,9 +1893,9 @@ export class PersonalAgentHost {
         return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context));if(parsed.method==='tasks.input'){this.#taskInputRuns.add(run);void run.finally(()=>{this.#taskInputRuns.delete(run);this.#pendingCommands--}).catch(()=>{ /* caller receives rejection */ });return run} this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
         if(context?.client_id!=='desktop:local'&&typeof command.params.id==='string'&&this.#state.conversations.items.some(item=>item.id===command.params.id&&item.kind==='build'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
-        const localCommand=command.method.startsWith('build.')||command.method.startsWith('plans.')||command.method==='conversations.mode'||command.method==='settings.local_tool_approval';
+        const localCommand=command.method.startsWith('workspaces.')||command.method.startsWith('build.')||command.method.startsWith('plans.')||command.method==='conversations.mode'||command.method==='settings.local_tool_approval';
         if(localCommand&&(context?.client_id!=='desktop:local'||this.#presentationMode!=='workbench'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};
-        if(this.activeLocalBuild()&&(['conversations.create','conversations.select','conversations.open_work','conversations.open_feed','conversations.discuss','conversations.start','conversations.clear','conversations.voice','build.start'].includes(command.method))&&!(command.method==='conversations.select'&&command.params.id===this.activeLocalBuild()!.id))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
+        if(this.activeLocalBuild()&&(['conversations.create','conversations.select','conversations.open_work','conversations.open_feed','conversations.discuss','conversations.start','conversations.clear','conversations.voice','build.start','build.begin'].includes(command.method))&&!(command.method==='conversations.select'&&command.params.id===this.activeLocalBuild()!.id))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
         // Recovery owns task execution only: presentation, state and non-task commands keep working, and a handback made now is woken when recovery ends.
         if(this.#recovering&&(command.method.startsWith('tasks.')||command.method==='conversations.approve')&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
         const scheduleCommand=command.method.startsWith('schedules.'),taskCommand=command.method.startsWith('tasks.'),scoped=localCommand||scheduleCommand||taskCommand||command.method==='presentation.set'||command.method==='conversations.approve'||command.method==='conversations.confirm'||command.method==='conversations.start';

@@ -16,57 +16,27 @@ export const activeTaskCount=(durable,work)=>{
  const records=durable?.tasks??[],owned=new Set(records.flatMap(task=>task.work_ids??[]))
  return records.filter(task=>!isSourceProcessingTask(task)&&DURABLE_ACTIVE.includes(task.phase)).length+(work?.tasks??[]).filter(item=>!owned.has(item.work_id)&&WORK_ACTIVE.includes(item.phase)).length
 }
-/**
- * Two levels: a delegated task is the user's intent; each executor work under it is one run.
- * Work without a delegated task is listed on its own so executor-only runs stay controllable.
- */
-export function renderTasksPage(panel,{tasks,durableTasks,openTask,taskAction,results,card,chips,button,askProgress,local,rerender}){
- const state=tasks(),works=state?.tasks??[],records=durableTasks?.().tasks??[],retained=new Set(works.map(work=>work.work_id))
- for(const id of local.keys())if(!retained.has(id))local.delete(id)
- if(state?.error){const notice=card('任务列表暂时不可用',state.error);notice.classList.add('warn');notice.setAttribute('role','alert')}
- const owned=new Set(records.flatMap(task=>task.work_ids??[]))
- const unowned=works.filter(work=>!owned.has(work.work_id))
- const visible=records.filter(task=>!isSourceProcessingTask(task))
- if(!visible.length&&!unowned.length){const empty=document.createElement('section');empty.className='empty-state';for(const [tag,text]of [['h3','暂无任务'],['p','开始对话后可在这里查看任务进展。']]){const node=document.createElement(tag);node.textContent=text;empty.append(node)}panel.append(empty)}
- for(const task of visible){
-  const a=card(task.goal,task.waiting_reason?taskWaitingLabel(task.waiting_reason):task.summary);a.dataset.phase=task.phase;a.dataset.taskId=task.id
-  chips(a,[TASK_PHASE_LABEL[task.phase]||task.phase,taskNextStep(task)])
-  button(t('查看任务与结果'),()=>openTask(task.id),a)
-  const runs=works.filter(work=>(task.work_ids??[]).includes(work.work_id))
-  if(runs.length){const list=document.createElement('div');list.className='task-runs';list.setAttribute('aria-label',t('本任务的执行记录'));a.append(list);runs.forEach((work,index)=>renderWork(list,work,{index,state,taskAction,results,chips,button,askProgress:null,local,rerender}))}
+/** Tasks are conversations; the host remains the sole selected/voice owner. */
+export function renderConversationTasks(panel,{c,el,button,openTask,now=Date.now()}){
+ const create=button(t('创建任务'),()=>c.create(),panel);create.disabled=!c.connected
+ const items=(c.snapshot?.conversations?.items??[]).filter(item=>item.id!=='chat:main'&&item.kind!=='schedule').sort((a,b)=>String(b.updated_at??b.created_at).localeCompare(String(a.updated_at??a.created_at)))
+ const waiting=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
+ for(const [recent,label]of [[true,'近 7 天'],[false,'更早']]){
+  const group=items.filter(item=>(now-Date.parse(item.updated_at??item.created_at)<7*86400000)===recent)
+  if(!group.length)continue
+  panel.append(el('h3',t(label)))
+  for(const item of group){
+   const messages=(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===item.id),last=messages.at(-1)
+   const records=(c.snapshot?.tasks??[]).filter(task=>task.conversation_id===item.id&&!isSourceProcessingTask(task))
+   const pending=records.some(task=>task.phase==='waiting')||waiting.some(row=>row.conversation_id===item.id)||item.build?.status==='awaiting_approval'||item.build?.status==='paused'
+   const status=pending?'待你处理':records.some(task=>task.phase==='failed')||item.build?.status==='failed'||(item.generation_status??last?.generation_status)==='failed'?'失败':records.some(task=>['queued','running','verifying'].includes(task.phase))||c.state(item.id).submission||['running','idle'].includes(item.build?.status)||(item.generation_status??last?.generation_status)==='pending'?'进行中':'已完成'
+   const row=button(item.title??t('对话'),()=>c.select(item.id),panel);row.className='conversation-task';row.dataset.conversationId=item.id;row.setAttribute('aria-current',String(item.id===c.selectedId));row.disabled=!c.connected
+   row.append(el('span',(item.last_message??last?.text??'').slice(0,160),'conversation-task-summary'),el('span',t(status),'conversation-badge'))
+   if(item.unread_count)row.append(el('span',String(item.unread_count),'unread-badge'))
+   if(item.id===c.voiceId)row.append(el('span',t('语音中'),'conversation-badge'))
+   if(c.state(item.id).submission)row.append(el('span',t('发送中'),'conversation-badge'))
+   if(item.id===c.selectedId&&openTask){if(records.length){const detail=el('details'),summary=el('summary',t('委托任务记录'));detail.open=c.state(item.id).taskRecordsOpen===true;detail.addEventListener('toggle',()=>{c.state(item.id).taskRecordsOpen=detail.open});detail.append(summary);for(const task of records)button(task.goal,()=>openTask(task.id),detail);panel.append(detail)}}
+  }
  }
- for(const work of unowned){
-  const a=card(work.title,work.summary);a.dataset.phase=work.phase
-  renderWork(a,work,{state,taskAction,results,chips,button,askProgress,local,rerender,standalone:true})
- }
-}
-function renderWork(parent,work,{index,state,taskAction,results,chips,button,askProgress,local,rerender,standalone}){
- if(!local.has(work.work_id))local.set(work.work_id,{expanded:false,error:'',asking:false})
- const view=local.get(work.work_id)
- const row=standalone?parent:document.createElement('section')
- if(!standalone){row.className='task-run';row.dataset.phase=work.phase;const title=document.createElement('h4');title.textContent=t('第 {0} 次执行',index+1);row.append(title);parent.append(row)}
- chips(row,[work.project,TASK_PHASE_LABEL[work.phase]||work.phase,work.executor])
- const actions=document.createElement('div');actions.className='card-actions';row.append(actions)
- if(askProgress){
-  const ask=button(view.asking?t('正在打开对话…'):'询问任务进展',async()=>{
-   if(view.asking)return
-   view.asking=true;view.error='';rerender()
-   try{await askProgress(work)}catch(error){view.error=error.message==='conversation_not_found'?t('原任务对话已不存在，无法询问进展。'):error.message}
-   finally{view.asking=false;rerender()}
-  },actions);ask.disabled=!state.connected||view.asking
- }
- const open=button(work.opening?'正在打开…':'打开项目',()=>taskAction(work.work_id,'open'),actions);open.disabled=!state.connected||work.opening
- if(WORK_ACTIVE.includes(work.phase)){const cancel=button(work.cancelling?'正在停止…':standalone?'停止任务':t('停止本次执行'),()=>taskAction(work.work_id,'cancel'),actions);cancel.disabled=!state.connected||work.cancelling}
- if(view.error||work.error){const notice=document.createElement('p');notice.textContent=view.error||work.error;notice.setAttribute('role','alert');row.append(notice)}
- const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent=t('查看结果');summary.setAttribute('data-task-result',work.work_id);details.append(summary);details.dataset.workId=work.work_id;details.open=view.expanded
- details.addEventListener('toggle',()=>{if(details.isConnected!==false)view.expanded=details.open})
- const result=results().find(result=>result.delegateId===work.work_id)
- const lines=result?[
-  t(TASK_PHASE_LABEL[result.outcome==='ok'?'completed':result.outcome]),result.summary,
-  t('变更文件：{0}',result.changedFiles??t('未知')),
-  t('耗时：{0} 秒',(result.endedAt-result.startedAt).toFixed(1)),
-  ...(result.diagnostic?[`${result.executor} ${result.diagnostic.method} (${result.diagnostic.server_code})`,result.diagnostic.message]:[]),
- ]:[t('暂无结果')]
- for(const text of lines){const p=document.createElement('p');p.textContent=text;details.append(p)}
- row.append(details)
+ if(!items.length)panel.append(el('p',t('暂无任务'),'empty-state'))
 }

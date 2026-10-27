@@ -425,7 +425,7 @@ export async function fixture(options: {
     now: () => 100,
     live: true,
   })
-  await store.ensureImported('alpha', hostWorkspaceForTest(await realpath(workspace)))
+  const defaultWorkspace = await store.ensureImported('alpha', hostWorkspaceForTest(await realpath(workspace)))
   if (options.preexistingSession === true) {
     const existingWorkspace = await store.resolveWorkspace('alpha')
     await store.persistentHome(existingWorkspace.workspace_id)
@@ -440,6 +440,7 @@ export async function fixture(options: {
   })
   const factory = new RecordingProjectTransportFactory()
   const adapter = new ProjectCodexAdapter({
+    defaultWorkspaceId: defaultWorkspace.workspace_id,
     ...(options.managedMcp?{managedMcp:options.managedMcp}:{}),
     ...(options.defaultBackend === undefined ? {} : {defaultBackend: options.defaultBackend}),
     ...(options.localCodexHome ? {localCodexHome: options.localCodexHome} : {}),

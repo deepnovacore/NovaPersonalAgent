@@ -1843,3 +1843,37 @@ test('别的 before a session title is not a continuation negation', async () =>
   exact.intake.open(request, '继续 Named task 会话。', 'u1', 'e'); await exact.intake.settled()
   assert.equal(exact.dispatched.length, 1)
 })
+
+
+for (const answer of [
+  '项目是 Project，会话是“Named task”。请在这一个会话继续修复按钮。',
+  '项目是 Project，会话是 Named task。请在这个会话继续修复按钮。',
+  '继续“Named task”会话，修复按钮。',
+  '项目是 Project，会话是“Named task”。请在这一个会话继续修复按钮。不要新开会话。',
+  '在 "Named task" 会话里修复按钮。',
+]) test(`named session clarification accepts an explicit title: ${answer}`, async () => {
+  const h = harness({roster:()=>[{name:'Project',last_used_at:1,last_session_title:'Named task',running:[],sessions:['Named task']}],
+    models:{assess:input=>Promise.resolve(assessment(input,{session:{mode:'named',title:'Named task'}}))}})
+  h.intake.open(request,'继续之前的会话修复按钮','u1','e')
+  await h.intake.settled()
+  assert.equal(h.dispatched.length,0)
+  h.intake.open(request,answer,'u2','e')
+  await h.intake.settled()
+  assert.equal(h.decisions.at(-1)?.session_title,'Named task')
+  assert.equal(h.dispatched.length,1)
+})
+
+for (const answer of [
+  '不要继续“Named task”会话。',
+  '是否继续“Named task”会话？',
+  '把标题改为“Named task”。',
+  '项目是 Project，会话是“Named task”。不要在这个会话继续。',
+  '项目是 Project，会话是“Named task”。请先确认是否在这个会话继续。',
+  '项目是 Project，会话是“Named task”。新开一个会话。',
+]) test(`quoted session names preserve refusal and ambiguity: ${answer}`, async () => {
+  const h = harness({roster:()=>[{name:'Project',last_used_at:1,last_session_title:'Named task',running:[],sessions:['Named task']}],
+    models:{assess:input=>Promise.resolve(assessment(input,{session:{mode:'named',title:'Named task'}}))}})
+  h.intake.open(request,answer,'u1','e')
+  await h.intake.settled()
+  assert.equal(h.dispatched.length,0)
+})

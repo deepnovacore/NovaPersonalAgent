@@ -1828,7 +1828,7 @@ export class RealtimeSession {
       case 'response_transcript_delta': {
         if (!this.#captionAuthorized(event.response_id)) return null
         this.#state.trackAssistantCaption(event.response_id)
-        return {...this.#state.appendCaption({role: 'assistant', text: event.text, final: false}), message_id: `assistant:${this.sessionEpoch}:${event.response_id}`,
+        return {...this.#state.appendCaption({role: 'assistant', text: event.text, final: false}), ...(event.full_text === undefined ? {} : {full_text:event.full_text}), message_id: `assistant:${this.sessionEpoch}:${event.response_id}`,
           ...this.#captionSource(event.response_id)}
       }
       case 'response_transcript_final': {

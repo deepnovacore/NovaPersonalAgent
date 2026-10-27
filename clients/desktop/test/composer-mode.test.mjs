@@ -23,34 +23,36 @@ function fixture(item){
  return {c,commands,control,root,button}
 }
 
-test('modes cycle Chat, Build, Delegate in both directions',()=>{
- assert.deepEqual(COMPOSER_MODES,['chat','build','delegate'])
- assert.equal(nextComposerMode('chat'),'build');assert.equal(nextComposerMode('delegate'),'chat')
- assert.equal(nextComposerMode('chat',-1),'delegate');assert.equal(nextComposerMode('unknown'),'build')
- assert.equal(composerMode({kind:'chat'}),'chat');assert.equal(composerMode({kind:'chat',mode:'plan'},{}),'chat','plan without an execution choice shows as Chat')
+test('modes cycle Chat, Plan, Build, Delegate in both directions',()=>{
+ assert.deepEqual(COMPOSER_MODES,['chat','plan','build','delegate'])
+ assert.equal(nextComposerMode('chat'),'plan');assert.equal(nextComposerMode('delegate'),'chat')
+ assert.equal(nextComposerMode('chat',-1),'delegate');assert.equal(nextComposerMode('unknown'),'plan')
+ assert.equal(composerMode({kind:'chat'}),'chat');assert.equal(composerMode({kind:'chat',mode:'plan'},{}),'plan')
  assert.equal(composerMode({kind:'chat',mode:'plan'},{execution:'delegate'}),'delegate')
- assert.equal(composerMode({kind:'chat'},{execution:'build'}),'chat','a stale execution choice never outlives Plan')
+ assert.equal(composerMode({kind:'chat',mode:'plan'},{execution:'build'}),'plan','a plan never starts Build by itself')
+ assert.equal(composerMode({kind:'chat'},{execution:'build'}),'build','Build chosen before the first message')
+ assert.equal(composerMode({kind:'chat'},{execution:'delegate'}),'chat','a stale Delegate choice never outlives Plan')
  assert.equal(composerMode({kind:'build'}),'build')
 })
 
 test('Shift+Tab steps through every mode with one host command per conversation-mode change',async()=>{
  const item={id:'chat:main',kind:'chat'},{c,commands,control,root}=fixture(item)
  const seen=[]
- for(let i=0;i<3;i++){assert.equal(control.cycle(),true);await flush();seen.push(root.attributes['data-mode'])}
- assert.deepEqual(seen,['build','delegate','chat'])
- assert.deepEqual(commands,[['conversations.mode',{id:'chat:main',mode:'plan'}],['conversations.mode',{id:'chat:main',mode:'chat'}]])
+ for(let i=0;i<4;i++){assert.equal(control.cycle(),true);await flush();seen.push(root.attributes['data-mode'])}
+ assert.deepEqual(seen,['plan','build','delegate','chat'])
+ assert.deepEqual(commands,[['conversations.mode',{id:'chat:main',mode:'plan'}],['conversations.mode',{id:'chat:main',mode:'chat'}],['conversations.mode',{id:'chat:main',mode:'plan'}],['conversations.mode',{id:'chat:main',mode:'chat'}]])
  assert.equal(c.state('chat:main').execution,undefined)
 })
 
-test('Build and Delegate set the plan execution choice without starting anything',async()=>{
+test('Delegate keeps the plan execution choice while Build waits for its first message',async()=>{
  const item={id:'chat:main',kind:'chat'},{c,commands,control,button,root}=fixture(item)
  await control.select('delegate');await flush()
  assert.equal(item.mode,'plan');assert.equal(c.state('chat:main').execution,'delegate');assert.equal(root.attributes['data-mode'],'delegate')
  await control.select('build');await flush()
- assert.equal(c.state('chat:main').execution,'build');assert.equal(commands.length,1,'already in Plan')
+ assert.equal(item.mode,'chat','Build is a direct session, not a plan');assert.equal(c.state('chat:main').execution,'build');assert.equal(root.attributes['data-mode'],'build')
  assert.ok(commands.every(([method])=>method==='conversations.mode'))
  assert.equal(button.textContent,'Build');assert.equal(root.children.length,1)
- button.listeners.click();await flush();assert.equal(button.textContent,'Delegate')
+ await control.select('plan');await flush();assert.equal(c.state('chat:main').execution,undefined);assert.equal(button.textContent,'Plan')
 })
 
 test('arrow keys cycle the active mode and Shift+Tab is left alone when switching is unavailable',async()=>{
@@ -83,7 +85,7 @@ test('Shift+Tab on the mode button cycles without moving focus, but modified Tab
 test('switching keeps the focused mode button enabled while the host command is pending',async()=>{
  const {c,button,control}=fixture({id:'chat:main',kind:'chat'})
  let release;c.command=()=>new Promise(resolve=>{release=resolve})
- const pending=control.select('build')
+ const pending=control.select('plan')
  assert.equal(button.disabled,false);assert.equal(button.attributes['aria-busy'],'true')
  release();await pending;assert.equal(button.attributes['aria-busy'],'false')
 })

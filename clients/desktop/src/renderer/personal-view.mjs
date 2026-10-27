@@ -12,15 +12,16 @@ import {mountWindowChrome} from './window-chrome.mjs'
 import {mountChatPane} from './chat-pane.mjs'
 import {renderMemorySection} from './memory-page.mjs'
 import {mountTaskDetail} from './task-detail.mjs'
-import {renderTasksPage,activeTaskCount} from './tasks-page.mjs'
+import {renderConversationTasks,activeTaskCount} from './tasks-page.mjs'
 import {renderSourceSuggestions} from './workbench-suggestions.mjs'
 import {disposeSources} from './source-popover.mjs'
 import {attentionTarget} from './attention-target.mjs'
+import {mountExecutorFloat} from './executor-float.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 const PAGE_TITLE=Object.fromEntries(WORKSPACE_PAGES.map(item=>[item.id,item.label===item.title?item.label:`${item.label} · ${item.title}`]))
 /** The workbench keeps Nova on the left and switches contextual pages on the right. */
 export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,applyPresentation,speakingLevel}) {
- const timelineExpanded=new Set(),lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map(),scheduleLocal={}
+ const timelineExpanded=new Set(),lifeLocal={},newsLocal={},preferencesLocal={},scheduleLocal={}
  let taskTab='tasks',scheduleView=null
  let unreadProjection=null,waitingKey=null
  const root=el('main',undefined,'workbench personal-workspace');root.id='personal-workspace';document.body.prepend(root)
@@ -51,7 +52,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const chips=(parent,values)=>{const row=el('div',undefined,'chips');for(const value of values.filter(Boolean))row.append(el('span',value));parent.append(row)}
  let computerUse=null
  const c=new PersonalController({send,start,stop,applyPresentation,changed:update,confirmBuildSwitch:()=>new Promise(resolve=>{
-  const modal=el('dialog',undefined,'build-switch-dialog');modal.append(el('h2',t('Build 正在执行')),el('p',t('停止并保存进度后再切换，返回时点击 Resume 继续。')))
+  const modal=el('dialog',undefined,'build-switch-dialog');modal.append(el('h2',t('Build 正在执行')),el('p',t('停止并保存进度后再切换，返回时点击“继续”。')))
   const stay=el('button',t('继续执行'),'soft'),leave=el('button',t('停止并切换')),actions=el('div',undefined,'build-switch-actions');stay.type=leave.type='button';actions.append(stay,leave);modal.append(actions)
   const done=value=>{modal.close();modal.remove();resolve(value)};stay.addEventListener('click',()=>done(false));leave.addEventListener('click',()=>done(true));modal.addEventListener('cancel',event=>{event.preventDefault();done(false)});root.append(modal);modal.showModal();stay.focus()
  })})
@@ -87,6 +88,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const panel=el('div',undefined,'workbench-page');panel.id='workbench-panel';panel.setAttribute('role','tabpanel');panel.tabIndex=0;workspace.append(panel)
  const chat=mountChatPane(novaColumn,{c,el,button,run,api,chips,openTask,openSchedule:id=>{selected='tasks';taskTab='schedules';scheduleLocal.selected=id;scheduleLocal.detail=null;renderPanel();void c.command('schedules.get',{id}).then(value=>{if(scheduleLocal.selected===id){scheduleLocal.detail=value;scheduleLocal.history=null;renderPanel()}}).catch(error=>{scheduleLocal.error=error.message;renderPanel()})},speakingLevel,onHome:showHome})
  chat.setOpen(true)
+ const executorFloat=mountExecutorFloat(root,{el,button,openTask,taskFor:work=>c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work))?.id??null})
  async function showHome(){if(c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main'))await c.home();chat.reveal()}
  async function discuss(references,text){await showHome();if(text){if(!c.submitText(text,'chat:main',references))throw Error(t('主对话暂时无法发送，原有草稿已保留，请稍后重试。'));chat.reveal()}else await chat.focusReference(references)}
  async function startConversation(request){await c.startConversationWithReference(request);chat.reveal()}
@@ -111,7 +113,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const expandedBodies=new Set()
  const bodyMeasures=new WeakMap(),bodyObserver=globalThis.ResizeObserver?new ResizeObserver(entries=>{for(const entry of entries)bodyMeasures.get(entry.target)?.()}):null
  const clampable=(node,id,title)=>{node.type='button';node.dataset.cardBodyId=id;const sync=()=>{const open=expandedBodies.has(id);node.dataset.expanded=String(open);node.setAttribute('aria-expanded',String(open));node.setAttribute('aria-label',`${open?'收起':'展开'}正文：${title}`)};const measure=()=>{if(node.isConnected===false||!node.clientHeight)return;node.disabled=!expandedBodies.has(id)&&node.scrollHeight<=node.clientHeight};sync();node.addEventListener('click',()=>{if(globalThis.getSelection?.()?.toString())return;expandedBodies.has(id)?expandedBodies.delete(id):expandedBodies.add(id);sync();measure()});bodyMeasures.set(node,measure);bodyObserver?.observe(node);globalThis.requestAnimationFrame?.(measure)}
- const card=(title,summary)=>{const a=el('article',undefined,'card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
+
  const continueChat=text=>chat.focusDraft(`关于「${text}」：`)
  let renderedPageKey=null,sourceDetailsOpen=false
  const pageKey=()=>{
@@ -119,7 +121,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   if(['ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
   if(selected==='timeline')return JSON.stringify([selected,s?.life,s?.timeline,s?.settings?.timezone,s?.derived_understanding,s?.profile_preparation?.status,s?.sources,c.connected,timelineDate(c.snapshot)])
   if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.life,s?.profile_preparation,c.connected])
-  if(selected==='tasks')return JSON.stringify([selected,taskTab,s?.schedules,s?.capabilities?.schedules,durableTasks(),tasks(),results(),c.connected])
+  if(selected==='tasks')return JSON.stringify([selected,taskTab,s?.conversations,c.selectedId,c.voiceId,s?.pending_approvals,s?.pending_confirmations,(s?.conversations?.items??[]).map(item=>Boolean(c.state(item.id).submission)),s?.schedules,s?.capabilities?.schedules,durableTasks(),tasks(),results(),c.connected])
   return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.derived_understanding,s?.news,s?.capabilities,c.connected])
  }
  function renderPanel(){
@@ -129,7 +131,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
   const sourceDetails=panel.querySelector('details.source-status');if(sourceDetails)sourceDetailsOpen=sourceDetails.open
-  for(const details of panel.querySelectorAll('details')){const local=taskLocal.get(details.dataset.workId);if(local)local.expanded=details.open}
+
   bodyObserver?.disconnect();disposeSources(panel);scheduleView?.dispose();scheduleView=null;panel.replaceChildren();tabs.select(selected);pageTitle.textContent=t(PAGE_TITLE[selected]??selected)
   const s=c.snapshot;const caps=s?.capabilities??{}
   const candidateKind=({ideas:'idea',goals:'goal',profile:'profile'})[selected]
@@ -149,14 +151,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   }else if(selected==='tasks'){
    if(caps.schedules){const tabs=el('div',undefined,'schedule-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('任务类型'));for(const [key,label]of [['tasks','任务'],['schedules','定时任务']]){const tab=button(t(label),()=>{taskTab=key;renderPanel()},tabs);tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(taskTab===key))}panel.append(tabs)}
    if(caps.schedules&&taskTab==='schedules')scheduleView=renderScheduledTasksPage(panel,{snapshot:s,command:(...args)=>c.command(...args),openTask,openResult:async run_id=>{await c.command('schedules.open_result',{run_id});chat.reveal()},local:scheduleLocal,connected:c.connected,rerender:renderPanel})
-   else renderTasksPage(panel,{tasks,durableTasks,openTask,taskAction,results,card,chips,button,local:taskLocal,rerender:renderPanel,askProgress:async task=>{
-    const result=await c.command('conversations.open_work',{work_id:task.work_id}),id=result?.selected_id
-    if(typeof id!=='string'||!id||!Array.isArray(result?.items)||!result.items.some(item=>item?.id===id))throw Error(t('原任务对话未确认，请刷新后重试。'))
-    const target=c.state(id),prompt=t('请告诉我「{0}」（任务 {1}）的最新进展。',task.title,task.work_id)
-    const draft=target.draft.endsWith(prompt)?target.draft:[target.draft,prompt].filter(Boolean).join('\n')
-    if(draft.length>4000)throw Error(t('追加后草稿超过 4000 字符，原有草稿已保留，请先缩短内容。'))
-    target.draft=draft;chat.reveal()
-   }})
+   else renderConversationTasks(panel,{c,el,button,openTask})
   }else if(selected==='profile'){
    renderProfile(panel,{soul:{view:s?.soul,openSettings},products:s?.derived_understanding,state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
@@ -193,7 +188,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  }
  async function focusAttention(){const target=attentionTarget(c.snapshot);if(!target)return;if(target.taskId){await openTask(target.taskId,true);return}if(target.conversationId!==c.selectedId)await c.select(target.conversationId);chat.reveal()}
  async function collapse(value){await c.setPresentation(value?'orb':'workbench');if(!value)await showHome()}
- function receive(frame){chat.receive(frame);c.receive(frame);computerUse?.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
+ function receive(frame){chat.receive(frame);if(frame.type==='client.ready')executorFloat.reset();executorFloat.receive(frame);c.receive(frame);computerUse?.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.((mode,options)=>run(async()=>{await c.setPresentation(mode);if(options?.attention&&mode==='workbench')await focusAttention()}));
  api.personal.onCollapsed?.(value=>c.collapse(value));api.personal.onMaximized?.(value=>{document.body.dataset.maximized=value?'1':'0'});const dateClock=setInterval(()=>{if(c.presentationMode==='workbench')update()},60000);dateClock.unref?.();update();renderPanel();return {controller:c,receive,identity:value=>chat.identity(value),refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }

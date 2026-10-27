@@ -110,6 +110,13 @@ test('preload exposes the local Build directory chooser through the personal bri
   assert.deepEqual(invokes, [{channel: 'nova:personal:build-directory', payload: undefined}])
 })
 
+test('preload exposes the default workspace through the personal bridge', async () => {
+  const {exposed, invokes} = await loadPreload()
+
+  await exposed.personal.defaultWorkspace()
+  assert.deepEqual(invokes, [{channel: 'nova:personal:default-workspace', payload: undefined}])
+})
+
 test('preload exposes first-run setup as a fixed set of channels', async () => {
   const { exposed, ipcRenderer, invokes, sends } = await loadPreload()
 

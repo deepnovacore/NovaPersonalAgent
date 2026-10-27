@@ -65,6 +65,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:personal:build-directory',
     'nova:personal:collapsed',
     'nova:personal:connector-authorization',
+    'nova:personal:default-workspace',
     'nova:personal:directory',
     'nova:personal:feishu-verification',
     'nova:personal:local-tool-approval',

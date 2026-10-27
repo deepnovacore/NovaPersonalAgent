@@ -305,3 +305,12 @@ test('reconnect restores voice capabilities from the host snapshot',async()=>{
  assert.equal(h.c.voiceCapabilities,caps)
  h.c.disconnect();assert.equal(h.c.voiceCapabilities,null)
 })
+
+test('known host refusals reach the user as readable Chinese instead of raw codes',async()=>{
+ const {c,sent}=harness({autoVoice:false})
+ const fail=async(error,method='build.begin')=>{const pending=c.command(method,{});c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:false,error});return pending.then(()=>null,reason=>reason.message)}
+ assert.match(await fail('build_stop_required'),/先停止/)
+ assert.match(await fail('voice_context_unavailable'),/上下文/)
+ assert.match(await fail('project_busy'),/占用/)
+ assert.equal(await fail('some_unmapped_code'),'some_unmapped_code')
+})

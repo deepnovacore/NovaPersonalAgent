@@ -82,11 +82,11 @@ test('indicator hides when Computer Use is switched off and Stop from the bar st
  assert.deepEqual(commands,[['build.stop',{id:'b'}]])
 })
 
-function controlFixture(item,{response,permissions={screen:'granted',accessibility:'denied'}}={}){
+function controlFixture(item,{response,permissions={screen:'granted',accessibility:'denied'},autoEnable=false}={}){
  const commands=[],opened=[]
  const c={connected:true,selectedId:item.id,selectedConversation:item,command:async(method,params)=>{commands.push([method,params]);return response}}
  const api={welcome:{get:async()=>({permissions}),permission:async kind=>opened.push(kind)},orbMenu:{openSettings:category=>opened.push('settings:'+category)}}
- const bar=el('div'),root=el('section'),control=mountComputerUseControl(bar,root,{c,el,run:callback=>callback(),api})
+ const bar=el('div'),root=el('section'),control=mountComputerUseControl(bar,root,{c,el,run:callback=>callback(),api,autoEnable})
  return {c,commands,opened,bar,root,control,toggle:bar.children[0],panel:root.children[0]}
 }
 
@@ -95,7 +95,7 @@ test('Computer Use switch appears only in Build sessions and reflects the stored
  const finished=controlFixture({id:'b',kind:'build',build:{status:'finished'}});finished.control.update();assert.equal(finished.toggle.hidden,true)
  const on=controlFixture({id:'b',kind:'build',build:{status:'paused',computer_use:{enabled:true,direct:false}}});on.control.update()
  assert.equal(on.toggle.hidden,false);assert.equal(on.toggle.attributes['aria-checked'],'true')
- assert.equal(on.toggle.children[2].textContent,'不可用：需要视觉模型');assert.equal(on.toggle.children[2].hidden,false)
+ assert.equal(on.toggle.children[1].textContent,'不可用：需要视觉模型');assert.equal(on.toggle.children[1].hidden,false)
  on.c.connected=false;on.control.update();assert.equal(on.toggle.disabled,true)
 })
 
@@ -120,6 +120,21 @@ test('turning Computer Use off sends no permissions and a vision-less model is e
  const limited=controlFixture({id:'b',kind:'build',build:{status:'paused'}},{response:{ok:false,state:{enabled:false,direct:false},missing:['vision_model']}})
  limited.control.update();limited.toggle.listeners.click();await flush()
  assert.equal(limited.panel.attributes['data-tone'],'blocked');assert.ok(texts(limited.panel).includes('当前模型无视觉，Build 桌面操作不可用，请换视觉模型。'))
+})
+
+test('a new Build session turns Computer Use on by itself once, stays quiet when a precondition is missing, and respects an explicit off',async()=>{
+ const item={id:'b',kind:'build',build:{status:'paused'}}
+ const ok=controlFixture(item,{autoEnable:true,response:{ok:true,state:{enabled:true,direct:true},missing:[]}})
+ ok.control.update();ok.control.update();await flush()
+ assert.deepEqual(ok.commands,[['build.computer_use',{conversation_id:'b',enabled:true,permissions:{screen:'granted',accessibility:'denied'}}]],'asked exactly once')
+ const blocked=controlFixture({id:'b2',kind:'build',build:{status:'paused'}},{autoEnable:true,response:{ok:false,state:{enabled:false,direct:false},missing:['screen_permission']}})
+ blocked.control.update();await flush();blocked.control.update();await flush()
+ assert.equal(blocked.commands.length,1);assert.equal(blocked.panel.hidden,true,'a failed automatic attempt does not interrupt with the preflight panel')
+ blocked.toggle.listeners.click();await flush()
+ assert.equal(blocked.panel.hidden,false,'a manual attempt still explains what is missing')
+ const off=controlFixture({id:'b3',kind:'build',build:{status:'paused',computer_use:{enabled:false,direct:false}}},{autoEnable:true})
+ off.control.update();await flush();assert.deepEqual(off.commands,[],'an explicit off is never switched back on')
+ const chat=controlFixture({id:'chat:main',kind:'chat'},{autoEnable:true});chat.control.update();await flush();assert.deepEqual(chat.commands,[])
 })
 
 test('overlay pages and new workbench strings are translated',async context=>{

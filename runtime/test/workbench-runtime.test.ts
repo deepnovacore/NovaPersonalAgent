@@ -17,6 +17,7 @@ import {createChatCompletionsLlmFactory} from '../src/realtime/cascaded/chat-com
 import {PLAN_LLM_TRANSPORT} from '../src/realtime/cascaded/llm-stream-limits.js'
 import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
 import type {ComputerObservation,ToolImage} from '../src/personal-agent/computer-use/contract.js'
+import {workbenchInstructions} from '../src/personal-agent/workbench-instructions.js'
 import {settingsSchema} from '../src/config/config.js'
 
 function observation(image:ToolImage):ComputerObservation{return {id:'test-observation',captured_at:image.captured_at,image,space:{logical_width:image.width,logical_height:image.height,scale:1},target:null,focus:null,foreground:true,ax:{status:image.native_ui?'truncated':'unavailable',...(image.native_ui?{summary:image.native_ui}:{}),...(image.native_editor?{editor:image.native_editor}:{})}}}
@@ -850,4 +851,151 @@ test('finished Build remains locked after restart',{skip:!supported},async()=>{
    assert.equal(resumed.ok,false);assert.equal(resumed.error,'build_finished')
   }finally{await reopened.close()}
  }finally{await f.close()}
+})
+
+
+test('direct Build admits one concurrent request without a plan and retains project context',{skip:!supported},async()=>{
+ const f=await fixture(async request=>{await new Promise<void>(resolve=>request.signal.addEventListener('abort',()=>resolve(),{once:true}));return {text:'stopped'}})
+ try{
+  assert.equal((await f.raw('build.begin',{text:'work',project:join(f.root,'missing')})).ok,false)
+  const release=await acquireTaskResources([projectResourceKey(f.root)],new AbortController().signal)
+  try{assert.equal((await f.raw('build.begin',{text:'work',project:f.root})).error,'project_busy')}finally{release()}
+  const results=await Promise.all([f.raw('build.begin',{text:'implement directly',project:f.root}),f.raw('build.begin',{text:'duplicate',project:f.root})])
+  assert.equal(results.filter(result=>result.ok).length,1)
+  assert.equal(results.find(result=>!result.ok)?.error,'build_stop_required')
+  const id=f.host.conversationSnapshot().selected_id
+  await until(()=>f.script.requests.length,count=>count>0)
+  assert.equal(buildView(f.host,id).plan_id,undefined)
+  assert.deepEqual(JSON.parse(f.script.requests[0]!.workspaceContext!),{project:f.root})
+  assert.equal((await f.raw('build.begin',{text:'duplicate',project:f.root})).error,'build_stop_required')
+  assert.equal((await f.raw('conversations.voice',{id,enabled:true})).error,'build_stop_required')
+  await f.command('build.stop',{id})
+ }finally{await f.close()}
+})
+
+test('direct Build restores checkpoint and resumes without a confirmed plan',{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'verified'}))
+ try{
+  await f.command('build.begin',{text:'implement directly',project:f.root,title:'Direct'})
+  const id=f.host.conversationSnapshot().selected_id;await f.host.waitConversation(id)
+  await f.host.close()
+  const reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+  try{
+   await reopened.open();reopened.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host:reopened,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'}),()=>{ /* no renderer */ })
+   for(const [method,params] of [['presentation.set',{mode:'workbench'}],['build.resume',{id}]] as const){const result=await reopened.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean;error?:string};assert.equal(result.ok,true,result.error)}
+   await reopened.waitConversation(id)
+   assert.ok(f.script.restores.length>0);assert.equal(buildView(reopened,id).plan_id,undefined)
+  }finally{await reopened.close()}
+ }finally{await f.close()}
+})
+
+
+test('Plan delegate selects explicit codex project and rejects busy or invalid directories',async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  const plan=await f.plan(),params={id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex',project:f.root}
+  const target={workspace_id:'selected-workspace',session_id:null,project:'selected',title:'selected',executor:'codex' as const}
+  let running:string|undefined,validated=0
+  f.host.setCodingTargets({list:()=>Promise.resolve([{...target,directory:f.root,...(running?{running}:{})}]),validate:selection=>{validated++;assert.deepEqual(selection,{workspace_id:target.workspace_id,session_id:null});return Promise.resolve(target)},resolve:()=>{throw Error('unused')}})
+  assert.equal((await f.raw('plans.delegate',{...params,project:'relative'})).error,'invalid_project_directory')
+  running='active';assert.equal((await f.raw('plans.delegate',params)).error,'project_busy');running=undefined
+  const release=await acquireTaskResources([projectResourceKey(f.root)],new AbortController().signal)
+  try{assert.equal((await f.raw('plans.delegate',params)).error,'project_busy')}finally{release()}
+  await f.command('plans.delegate',params)
+  assert.equal(validated,1);assert.deepEqual(f.host.conversationSnapshot().items[0]!.coding_target,target);assert.equal(f.invocations.length,1)
+ }finally{await f.close()}
+})
+
+for(const mode of ['plan','build'] as const)test(`${mode} text-voice-text preserves transcripts and imports each voice message once`,{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'text reply'}))
+ let emitVoice:(frame:Record<string,unknown>)=>void=()=>{throw Error('voice not started')}
+ try{
+  if(mode==='plan')await f.plan();else await f.command('build.begin',{text:'direct work',project:f.root})
+  const id=f.host.conversationSnapshot().selected_id;await f.host.waitConversation(id)
+  f.host.setConversationRuntime((conversation,emit,runtimeMode,lifetime)=>{
+   if(runtimeMode==='voice'){emitVoice=emit;return Promise.resolve({runTurn:()=>Promise.resolve({assistant:'voice'}),parkVoice:()=>Promise.resolve(),close:()=>Promise.resolve()})}
+   return createWorkbenchRuntime({conversation,host:f.host,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'})
+  },()=>{ /* no renderer */ })
+  await f.host.submitConversationText(id,'text before voice',undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
+  for(let round=0;round<2;round++){
+   await f.command('conversations.voice',{id,enabled:true})
+   assert.equal(f.host.conversationSnapshot().voice_id,id)
+   const item=f.host.conversationSnapshot().items.find(item=>item.id===id)!
+   assert.equal(mode==='plan'?item.mode:item.kind,mode)
+   emitVoice({type:'caption',role:'user',text:'spoken clarification '+round,turn_id:'voice-user-'+round,final:true})
+   emitVoice({type:'conversation.delivered',role:'assistant',text:'spoken answer '+round,turn_id:'voice-assistant-'+round,delivery:'completed',final:true})
+   await until(()=>f.host.conversationSnapshot().messages,messages=>messages.some(message=>message.text==='spoken answer '+round))
+   await f.command('conversations.voice',{id,enabled:false})
+   await f.host.submitConversationText(id,'continue '+round,undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
+   const inputs=f.script.requests.at(-1)!.inputs
+   assert.ok(inputs.some(input=>input.kind==='host_context'&&input.content.includes('spoken clarification '+round)))
+   assert.ok(inputs.some(input=>input.kind==='host_context'&&input.content.includes('spoken answer '+round)))
+   await f.host.submitConversationText(id,'next '+round,undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
+   assert.ok(!f.script.requests.at(-1)!.inputs.some(input=>input.kind==='host_context'&&input.content.includes('spoken clarification')))
+  }
+  assert.equal((await f.host.workbench.checkpoint(id,0)).voice_message_ids?.length,4)
+ }finally{await f.close()}
+})
+
+
+test('direct Build instructions skip planning but retain approval and completion boundaries',()=>{
+ const direct=workbenchInstructions('build','en',false)
+ assert.match(direct,/Do not first produce a plan/);assert.match(direct,/missing information blocks/);assert.match(direct,/Approval is enforced by the host/);assert.match(direct,/finish_build/)
+ assert.doesNotMatch(direct,/executing the user-confirmed plan/)
+ assert.match(workbenchInstructions('build','en',true),/executing the user-confirmed plan/)
+})
+
+test('Plan and Build previews grow, retract at tool calls and persist only authoritative text', async () => {
+ for(const mode of ['plan','build'] as const){
+  const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
+  const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
+   assert.equal(request.previewText,true)
+   for await(const event of base.stream(request)){yield event;if(event.kind==='response_started'){yield {kind:'text_preview' as const,text:round===0?'discard':'final '};yield {kind:'text_preview' as const,text:round===0?' me':'answer'}}}
+   round++
+  }}}}
+  const f=await fixture(()=>({}),'ask',factory)
+  try{
+   let id:string
+   if(mode==='build')id=await f.build()
+   else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
+   await f.host.waitConversation(id)
+   const captions=f.frames.filter(x=>x.type==='caption')
+   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['',true],['final ',false],['final answer',false],['final answer',false]])
+   assert.equal(captions[0]!.turn_id,captions[2]!.turn_id);assert.notEqual(captions[2]!.turn_id,captions[3]!.turn_id)
+   const message=f.host.conversationSnapshot().messages.at(-1)!
+   assert.equal(message.text,'final answer');assert.equal(message.turn_id,captions.at(-1)!.turn_id)
+  }finally{await f.close()}
+ }
+})
+
+test('managed workspace commands validate names, hide paths and resolve Build defaults and IDs', {skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'})),resolved:(string|undefined)[]=[],created:string[]=[]
+ const workspace={workspace_id:'w-default',name:'default',is_default:true}
+ f.host.setCodingTargets({list:()=>Promise.resolve([]),validate:()=>Promise.reject(Error('unused')),resolve:()=>Promise.reject(Error('unused')),workspaces:{list:()=>Promise.resolve([workspace]),create:name=>{created.push(name);return Promise.resolve({...workspace,workspace_id:'w-new',name,is_default:false})},resolve:id=>{resolved.push(id);if(id&&id!=='w-default')return Promise.reject(Error('unknown_workspace'));return Promise.resolve(f.root)}}})
+ try{
+  assert.deepEqual(await f.command('workspaces.list'),[workspace])
+  assert.equal((await f.raw('workspaces.list',{},false)).error,'local_workbench_required')
+  for(const name of ['', '.', '..', '../escape','a/b','x'.repeat(81),'bad\nname'])assert.equal((await f.raw('workspaces.create',{name})).ok,false)
+  assert.equal((await f.command('workspaces.create',{name:'Notes'}) as {workspace_id:string}).workspace_id,'w-new');assert.deepEqual(created,['Notes'])
+  assert.equal((await f.raw('build.begin',{text:'work',workspace_id:'w-default',project:f.root})).error,'workspace_project_conflict')
+  assert.equal((await f.raw('build.begin',{text:'work',workspace_id:'missing'})).error,'unknown_workspace')
+  await f.command('build.begin',{text:'work'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id)
+  assert.equal(buildView(f.host,f.host.conversationSnapshot().selected_id).project,f.root);assert.equal(resolved.at(-1),undefined)
+ }finally{await f.close()}
+})
+
+test('published Build accepts managed workspace ID and rejects mixed directory authority', {skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'})),resolved:string[]=[]
+ f.host.setCodingTargets({list:()=>Promise.resolve([]),validate:()=>Promise.reject(Error('unused')),resolve:()=>Promise.reject(Error('unused')),workspaces:{list:()=>Promise.resolve([]),create:()=>Promise.reject(Error('unused')),resolve:id=>{resolved.push(id!);return Promise.resolve(f.root)}}})
+ try{
+  const plan=await f.plan(),ref={id:'chat:main',plan_id:plan.id,version:plan.version}
+  assert.equal((await f.raw('build.start',{...ref,workspace_id:'w',project:f.root})).error,'workspace_project_conflict')
+  await f.command('build.start',{...ref,workspace_id:'w'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id);assert.deepEqual(resolved,['w'])
+ }finally{await f.close()}
+})
+
+test('direct Build resolves a selected managed ID before canonical resource checks', {skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'})),resolved:string[]=[]
+ f.host.setCodingTargets({list:()=>Promise.resolve([]),validate:()=>Promise.reject(Error('unused')),resolve:()=>Promise.reject(Error('unused')),workspaces:{list:()=>Promise.resolve([]),create:()=>Promise.reject(Error('unused')),resolve:id=>{resolved.push(id!);return Promise.resolve(f.root)}}})
+ try{await f.command('build.begin',{text:'work',workspace_id:'selected'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id);assert.deepEqual(resolved,['selected']);assert.equal(buildView(f.host,f.host.conversationSnapshot().selected_id).project,f.root)}finally{await f.close()}
 })

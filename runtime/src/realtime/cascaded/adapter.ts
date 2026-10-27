@@ -1029,6 +1029,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     let llmResponseId: string | null = null
     let llmFailureCode: string | null = null
     let textSeen = false
+    let preview = '', previewLength = 0
     let toolSeen = false
     let pendingTool: Extract<CascadedLlmEvent, {kind: 'tool_call'}> | null = null
     const transcript: string[] = []
@@ -1074,6 +1075,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       this.#warmStandbyTts(owner)
       for await (const event of owner.llm.stream({
         language,
+        previewText: this.#textOnly,
         inputs: visualInputs.map(item => structuredClone(item)),
         tools: allowTools ? owner.tools.map(tool => structuredClone(tool)) : [],
         workspaceContext: allowTools ? owner.workspaceContext?.item.content ?? null : null,
@@ -1091,6 +1093,13 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           if (llmResponseId !== null) throw new Error('duplicate LLM response identity')
           llmResponseId = event.response_id
           this.#record('cascaded.llm.started', {epoch: owner.epoch, response_id: active.id})
+        } else if (event.kind === 'text_preview') {
+          if (!this.#textOnly) continue
+          if (llmResponseId === null || textSeen || toolSeen) throw new Error('LLM preview out of order')
+          previewLength += [...event.text].length
+          if (previewLength > MAX_REALTIME_TEXT) throw new Error('LLM preview text overflow')
+          preview += event.text
+          await this.#emit(owner, {kind:'response_transcript_delta',session_epoch:owner.epoch,response_id:active.id,text:event.text,full_text:preview})
         } else if (event.kind === 'text_delta') {
           if (toolSeen) throw new MixedResponseFailure()
           if (llmResponseId === null) throw new Error('LLM text before identity')
@@ -1116,9 +1125,11 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           if (transcriptLength === [...event.text].length) {
             this.#record('cascaded.llm.first_text', {epoch: owner.epoch, response_id: active.id})
           }
-          await this.#emit(owner, {
+          const fullText = transcript.join('')
+          const delta = preview ? fullText.startsWith(preview) ? fullText.slice(Math.max(preview.length, fullText.length - event.text.length)) : '' : event.text
+          if (delta) await this.#emit(owner, {
             kind: 'response_transcript_delta', session_epoch: owner.epoch,
-            response_id: active.id, text: event.text,
+            response_id: active.id, text: delta, ...(this.#textOnly ? {full_text:fullText} : {}),
           })
           if (active.tts !== null) for (const chunk of chunker.push(speech.push(event.text))) {
             await this.#sendTtsText(owner, active.tts, chunk)
@@ -1126,6 +1137,10 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         } else if (event.kind === 'tool_call') {
           if (textSeen || toolSeen) throw new MixedResponseFailure()
           if (llmResponseId === null) throw new Error('LLM tool before identity')
+          if (preview) {
+            await this.#emit(owner, {kind:'response_transcript_final',session_epoch:owner.epoch,response_id:active.id,text:''})
+            preview = ''
+          }
           toolSeen = true
           pendingTool = event
           owner.pendingToolCallId = event.call_id
@@ -1173,6 +1188,9 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       }
       throw new Error('LLM stream ended without terminal')
     } catch (error) {
+      if (preview && active.id !== null && this.#isCurrent(owner) && owner.response === active && !signal.aborted) {
+        await this.#emit(owner, {kind:'response_transcript_final',session_epoch:owner.epoch,response_id:active.id,text:transcript.join('')})
+      }
       if (owner.pendingToolCallId !== null) {
         continuationResetFailed = !(await this.#abandonPendingToolCall(owner))
       }
@@ -1196,11 +1214,6 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           && ['configuration', 'aborted', 'timeout', 'protocol', 'overflow', 'closed', 'network', 'http'].includes(rawCode)
           ? rawCode : 'unknown'
         this.#record('cascaded.response.failed', {component: ttsFailure ? 'tts' : 'llm', code})
-        await this.#emit(owner, {
-          kind: 'provider_error', session_epoch: owner.epoch,
-          code: ttsFailure ? 'cascaded_tts_receive' : 'cascaded_response_failed',
-          recoverable: true,
-        })
         active.id ??= this.#freshId()
         // Causes the user can act on (account, key, rate limit, connectivity) survive to the conversation.
         const detail = error instanceof Error && 'detail' in error ? error.detail : null
@@ -1208,6 +1221,12 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           : code === 'http' && (detail === 'auth' || detail === 'quota' || detail === 'rate_limited') ? `provider_http_${detail}`
             : code === 'network' || code === 'timeout' ? `provider_${code}` : 'provider_failure'
         await this.#emitTerminal(owner, active, 'failed', reason)
+        // Reconnect advances the epoch; settle the owned response before emitting its recoverable error.
+        await this.#emit(owner, {
+          kind: 'provider_error', session_epoch: owner.epoch,
+          code: ttsFailure ? 'cascaded_tts_receive' : 'cascaded_response_failed',
+          recoverable: true,
+        })
       }
     } finally {
       if (owner.response === active) owner.response = null
