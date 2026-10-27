@@ -5,8 +5,13 @@ import {statSync} from 'node:fs'
  * the same device/inode, while a replaced directory gets a distinct key and therefore a new lock.
  */
 export function projectResourceKey(path:string):string{
-  try{const info=statSync(path,{bigint:true});return `project:${info.dev}:${info.ino}`}
-  catch{return 'project:'+(process.platform==='win32'?path.toLowerCase():path)}
+  try{
+    const info=statSync(path,{bigint:true})
+    // Some Windows/network filesystems report a zero inode; falling back to the path avoids
+    // collapsing every unrelated project into one `project:0:0` lock.
+    if(info.dev!==0n||info.ino!==0n)return `project:${info.dev}:${info.ino}`
+  }catch{ /* a deleted/replaced path falls back to its spelling below */ }
+  return 'project:'+(process.platform==='win32'?path.toLowerCase():path)
 }
 const held=new Set<string>()
 const uncertain=new Set<string>()

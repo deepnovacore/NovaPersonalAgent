@@ -108,6 +108,8 @@ export interface ProjectTransportBinding extends ProjectBackendBinding {
 /** One running work per workspace (spec 08 Concurrency); `work` is mutable only for its title. */
 interface RunSlot {
   work: RunningWork
+  /** Keys acquired for this run; release must use exactly these, never a recomputed key. */
+  readonly resourceKeys: readonly string[]
   readonly controller: AbortController
   live: CodexLiveAdapter | null
   task: Promise<ExecutorHandoff> | null
@@ -177,7 +179,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   readonly #liveState: CodexAdapterSharedState = createCodexAdapterSharedState()
   readonly #status = new CodexLiveAdapter(NULL_TRANSPORT, undefined, {sharedState: this.#liveState})
   readonly #confirmedBindings = new WeakMap<object, ConfirmedDelegateBinding>()
-  readonly #retainedTransportCleanups = new Map<CodexAppServerTransport, {slot: RunSlot; keys: readonly string[]; codex: boolean}>()
+  readonly #retainedTransportCleanups = new Map<CodexAppServerTransport, {slot: RunSlot; keys: readonly string[]}>()
   readonly #resourceKeys:readonly string[]|null
   readonly #slotWaiters=new Set<()=>void>()
   taskResource():string|null{return this.#resourceKeys?.length===1?this.#resourceKeys[0]!:null}
@@ -719,6 +721,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     else context.signal.addEventListener('abort', onAbort, {once: true})
     const slot: RunSlot = {
       work: {work_id: context.delegate.delegate_id, project: workspace.display_name, title},
+      resourceKeys,
       controller,
       live: null,
       task: null,
@@ -1189,7 +1192,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       } catch {
         // Completion evidence is already terminal. Retain cleanup ownership and fence the next
         // process until the transport's retryable close path succeeds.
-        this.#retainedTransportCleanups.set(transport, {slot, codex, keys: [...(this.#resourceKeys ?? []), projectResourceKey(workspace.canonical_path)]})
+        this.#retainedTransportCleanups.set(transport, {slot, keys: slot.resourceKeys})
       }
       if (resumed === null) {
         if (reportedThreadId !== null && !bindingMismatch) {
