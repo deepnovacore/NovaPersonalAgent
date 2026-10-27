@@ -58,7 +58,7 @@ test('integrated voice keeps the explicitly selected text LLM and ledger path', 
 
 for(const language of ['en','zh-CN'] as const)test(`scheduled text factory uses a read-only serial worker instruction (${language})`,async()=>{
  let instruction=''
- const options={settings:loadSettings({DASHSCOPE_API_KEY:'test',PROMPT_LANGUAGE:language},true),clock:new VirtualClock(),idFactory:()=>crypto.randomUUID(),scheduledTask:true}
+ const options={settings:loadSettings({DASHSCOPE_API_KEY:'test',CASCADE_LLM_PROVIDER:'qwen',PROMPT_LANGUAGE:language},true),clock:new VirtualClock(),idFactory:()=>crypto.randomUUID(),scheduledTask:true}
  const provider=buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:input=>{instruction=input.instructions;return {open:()=>({async *stream(){await Promise.resolve()},abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()})}}}})
  try{assert.match(instruction,language==='en'?/exactly one tool call/u:/每轮最多调用一个工具/u);assert.match(instruction,language==='en'?/untrusted/u:/不可信/u);assert.match(instruction,language==='en'?/background/u:/后台/u)}finally{await provider.close()}
 })
