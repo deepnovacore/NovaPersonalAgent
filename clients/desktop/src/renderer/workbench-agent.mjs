@@ -88,7 +88,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api,planHost}){
  }))
  start.addEventListener('click',()=>run(async()=>{const ref=reference(),executor=runner.value;if(!ref||busy)return;busy=true;update();try{if(executor)await c.command('plans.delegate',{...ref,executor,...(executor==='codex'&&directories.value?{project:directories.value}:{})});else await c.command('build.start',{...ref,...workspace.value()})}finally{busy=false;update()}}))
  function update(){
-  const ready=c.connected&&c.presentationReady!==false,item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status)
+  const ready=c.connected&&c.presentationReady!==false,item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status),voiceActive=Boolean(c.voiceId&&c.voiceId===c.selectedId)
   root.hidden=!item
   status.textContent=build?t('Build · {0}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status)):''
   status.setAttribute('data-state',build?.status??'')
@@ -108,7 +108,8 @@ export function mountWorkbenchAgent(parent,{c,el,run,api,planHost}){
   runner.disabled=busy||!ready;directories.hidden=runner.value!=='codex';directoryLabel.hidden=directories.hidden;directories.disabled=busy||!ready;workspace.update()
   start.textContent=delegating?t('交给 {0}',runner.value):t('开始 Build')
   runnerNote.textContent=delegating?t('异步执行：{0} 在后台完成，进度在悬浮窗查看，对话可以继续。',runner.value):t('同步执行：在选定工作区读写文件、运行命令，完成前这段对话保持占用。')
-  start.disabled=busy||!plan||!ready||JSON.stringify(reference())!==planKey||(!delegating&&!localBuildSupported)
+  start.disabled=busy||!plan||!ready||JSON.stringify(reference())!==planKey||(!delegating&&!localBuildSupported)||voiceActive
+  start.title=voiceActive?t('请先结束语音'):''
   save.disabled=busy||!ready;editButton.disabled=busy||!plan;retry.disabled=!ready
   planCard.setAttribute('data-execution',delegating?'delegate':'build')
  }
