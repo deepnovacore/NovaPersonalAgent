@@ -29,6 +29,7 @@ const rows: readonly Row[] = [
   ['NATIVE_REALTIME_API_KEY', 'host_private', true, false, null, 'Dedicated native serving credential.', '原生语音服务独立凭据。'],
   ['NATIVE_REALTIME_VOICE', 'host_private', false, false, '', 'PersonaPlex server voice name.', 'PersonaPlex 服务音色名。'],
   ['NOVA_LOCAL_TOOL_APPROVAL', 'core', false, true, 'ask', 'Local Build file writes, edits and shell approval: ask or never; independent of executor approval.', '本地 Build 写入、编辑和命令审批：ask 或 never；独立于执行器审批。'],
+  ['NOVA_BUILD_REASONING', 'host_private', false, false, '0', 'Private host switch enabling provider reasoning capture for Build and Plan; thoughts stay in the local workbench checkpoint.', '宿主私有开关：为 Build 与 Plan 开启模型思考捕获；思考仅保存在本机工作台检查点。'],
   ['COMPATIBLE_ASR_OMIT_RESPONSE_FORMAT', 'core', false, true, 'false', 'Omit response_format for ASR services returning JSON without this field.', '为不支持 response_format 参数的 ASR 服务省略该字段。'],
   ["OPENAI_COMPATIBLE_BASE_URL", "core", false, true, "https://api.openai.com/v1", "OpenAI-compatible LLM API base URL.", "通用 OpenAI LLM API 基础地址。"],
   ["OPENAI_COMPATIBLE_API_KEY", "core", true, true, null, "Dedicated OpenAI-compatible LLM credential.", "通用 OpenAI LLM 专用密钥。"],

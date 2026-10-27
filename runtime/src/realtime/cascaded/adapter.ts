@@ -1100,6 +1100,9 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           if (previewLength > MAX_REALTIME_TEXT) throw new Error('LLM preview text overflow')
           preview += event.text
           await this.#emit(owner, {kind:'response_transcript_delta',session_epoch:owner.epoch,response_id:active.id,text:event.text,full_text:preview})
+        } else if (event.kind === 'reasoning_delta') {
+          // Thinking tokens are display-only for the workbench; realtime speech never consumes them.
+          continue
         } else if (event.kind === 'text_delta') {
           if (toolSeen) throw new MixedResponseFailure()
           if (llmResponseId === null) throw new Error('LLM text before identity')
