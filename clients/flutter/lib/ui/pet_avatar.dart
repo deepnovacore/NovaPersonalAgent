@@ -339,6 +339,56 @@ class PetAvatar extends StatelessWidget {
   );
 }
 
+/// The app-bar identity: the pet avatar and the assistant name on one row.
+/// Tapping it opens the same avatar settings as the Settings entry.
+class PetAvatarTitle extends StatelessWidget {
+  const PetAvatarTitle({
+    super.key,
+    required this.store,
+    this.language = 'zh',
+    this.title = 'Nova',
+  });
+
+  final PetAvatarStore store;
+  final String language;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = language == 'zh' ? 'Nova · 宠物头像' : 'Nova · Pet avatar';
+    return Semantics(
+      button: true,
+      label: label,
+      child: Tooltip(
+        message: language == 'zh' ? '宠物头像' : 'Pet avatar',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () =>
+              showPetAvatarSettings(context, store, language: language),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                PetAvatar(store: store, size: 30),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Opens the pet avatar settings sheet.
 Future<void> showPetAvatarSettings(
   BuildContext context,

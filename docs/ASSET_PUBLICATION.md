@@ -52,17 +52,17 @@ For the requested v1.0.0dev integration push, the following widget-test screensh
 
 ## UI polish screenshots (2026-10-27, pending owner review)
 
-The UI review polish adds the approved Nova avatar to the mobile chat, a pet-avatar settings sheet and a "Pet avatar" settings row. The following widget-test goldens were regenerated from the same synthetic fixtures with the documented `flutter test --update-goldens` mechanism. They now contain the approved character media recorded above (no new character, outfit, animation or derivative) plus generic controls and synthetic copy, with no organization data. These exact versions are **pending the project owner's screenshot review** before any push that includes them; the previously reviewed versions remain listed above for history.
+The UI review polish merges the approved Nova avatar with the "Nova" app-bar title, removes the separate body avatar, and adds a pet-avatar settings sheet plus a "Pet avatar" settings row. The following widget-test goldens were regenerated from the same synthetic fixtures with the documented `flutter test --update-goldens` mechanism. They now contain the approved character media recorded above (no new character, outfit, animation or derivative) plus generic controls and synthetic copy, with no organization data. These exact versions are **pending the project owner's screenshot review** before any push that includes them; the previously reviewed versions remain listed above for history.
 
 | File | SHA-256 |
 | --- | --- |
-| `clients/flutter/test/goldens/chat-conversation.png` | `f7f2f448e4a972e7f2c3ae1dd0a0295c9ac3f20ffb8d72bbab1f535d46cd0739` |
-| `clients/flutter/test/goldens/chat-home-empty.png` | `72f4fe225b30c902e41c5ee7ec79306d192646db16de2a672dee6ff8a1efb7db` |
+| `clients/flutter/test/goldens/chat-conversation.png` | `9071d3de054667d870eb27c41bd6abf1e31d9f0df25a5ea570e9cf74d47899df` |
+| `clients/flutter/test/goldens/chat-home-empty.png` | `12b07d016419c2101023c99674a358353ea70cba2f8538a54d6ab99b57f85388` |
 | `clients/flutter/test/goldens/chat-settings.png` | `2613180a6a7c6c07891102ed44a3109e0fb94f64f0e0fd3a834f0d3ac2ffef5d` |
-| `clients/flutter/test/goldens/chat-task-draft.png` | `932e218553628c54bf79ef4f83d9ce3a6d14bfafdbb077da4575cb824079b4d6` |
+| `clients/flutter/test/goldens/chat-task-draft.png` | `4d348ce713b62157f61272c67a65263c31252b5e875d8fdee4bcb01a88271f45` |
 | `clients/flutter/test/goldens/chat-tasks.png` | `5aee5f3acbe7d9790a7377d53fa4fd7c5074e6de626d6eb880cc5e89a4215060` |
-| `clients/flutter/test/goldens/workbench-nova.png` | `72f4fe225b30c902e41c5ee7ec79306d192646db16de2a672dee6ff8a1efb7db` |
+| `clients/flutter/test/goldens/workbench-nova.png` | `12b07d016419c2101023c99674a358353ea70cba2f8538a54d6ab99b57f85388` |
 
 `chat-tasks.png` also reflects the Tasks-tab restyle (Tasks/Schedules segmented control, Today/Earlier sections and session-duration labels) added in the same polish pass; the fixture text is still synthetic and no character or organization data was added.
 
-`chat-home-empty.png` and `workbench-nova.png` share a hash because both capture the same empty Nova chat screen. The pet avatar photo library permission string in `clients/flutter/ios/Runner/Info.plist` is generic; user-chosen photos stay in the app-support directory and are never bundled or synced.
+`chat-home-empty.png` and `workbench-nova.png` share a hash because both capture the same empty Nova chat screen. `chat-task-draft.png` matches the 2026-10-19 approved version again: the task chat has no pet avatar in its app bar, and the old body avatar is gone. The pet avatar photo library permission string in `clients/flutter/ios/Runner/Info.plist` is generic; user-chosen photos stay in the app-support directory and are never bundled or synced.

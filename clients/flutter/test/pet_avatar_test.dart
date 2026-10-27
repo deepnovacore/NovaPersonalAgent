@@ -7,14 +7,8 @@ import 'dart:ui' as ui;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nova_mobile/agent_core/agent_core_host.dart';
-import 'package:nova_mobile/agent_core/model_settings.dart';
-import 'package:nova_mobile/conversation/local_chat_panel.dart';
-import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'package:nova_mobile/ui/pet_avatar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'agent_core_test.dart' show MemoryPersistence;
 
 const _approvedSha256 =
     '77fce72aae44c5da545f146c5a1162a05ccf13ed606f0c248e417400354fd1cf';
@@ -310,153 +304,54 @@ void main() {
     expect((image.image as ResizeImage).imageProvider, isA<AssetImage>());
   });
 
-  Future<(PetAvatarStore, AgentCoreHost, String)> chatFixture(
+  Future<PetAvatarStore> titleFixture(
     WidgetTester tester, {
-    bool withMessages = true,
-    bool keyboardVisible = false,
-    PetAvatarStore? petAvatarStore,
+    String language = 'en',
   }) async {
     SharedPreferences.setMockInitialValues({});
-    final conversation = ConversationStore(MemoryPersistence());
-    await conversation.open();
-    final id = await conversation.create();
-    if (withMessages) {
-      await conversation.append(id, {'role': 'user', 'content': 'Hello Nova'});
-      await conversation.append(id, {
-        'role': 'assistant',
-        'content': 'Hello! How can I help?',
-      });
-    }
-    final host = AgentCoreHost(store: conversation, settings: ModelSettings());
-    final store = petAvatarStore ?? storeWith();
+    final store = storeWith();
     await store.load();
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: LocalChatPanel(
-            host: host,
-            conversationId: id,
-            language: 'en',
-            petAvatarStore: store,
-            keyboardVisible: keyboardVisible,
+          appBar: AppBar(
+            centerTitle: true,
+            title: PetAvatarTitle(store: store, language: language),
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
-    return (store, host, id);
+    return store;
   }
 
-  testWidgets('chat shows a centered 64px avatar with a Nova caption', (
+  testWidgets('app-bar title merges a 30px pet avatar with the Nova name', (
     tester,
   ) async {
-    final (_, host, _) = await chatFixture(tester);
+    await titleFixture(tester);
     expect(find.byType(PetAvatar), findsOneWidget);
-    expect(tester.widget<PetAvatar>(find.byType(PetAvatar)).size, 64);
+    expect(tester.widget<PetAvatar>(find.byType(PetAvatar)).size, 30);
     expect(find.text('Nova'), findsOneWidget);
-    expect(tester.getCenter(find.byType(PetAvatar)).dx, closeTo(400, 1));
-    host.dispose();
+    final avatar = tester.getRect(find.byType(PetAvatar));
+    final title = tester.getRect(find.text('Nova'));
+    expect(avatar.center.dy, closeTo(title.center.dy, 1));
+    expect(avatar.right, lessThan(title.left));
   });
 
-  testWidgets('empty chat shows the larger 96px avatar without a caption', (
+  testWidgets('tapping the merged title opens the pet avatar settings sheet', (
     tester,
   ) async {
-    final (_, host, _) = await chatFixture(tester, withMessages: false);
-    expect(find.byType(PetAvatar), findsOneWidget);
-    expect(tester.widget<PetAvatar>(find.byType(PetAvatar)).size, 96);
-    expect(find.text('Nova'), findsNothing);
-    expect(find.text('Start here.'), findsOneWidget);
-    expect(tester.getCenter(find.byType(PetAvatar)).dx, closeTo(400, 1));
-    host.dispose();
-  });
-
-  testWidgets('chat hides the avatar while the keyboard is open', (
-    tester,
-  ) async {
-    final (_, host, _) = await chatFixture(tester, keyboardVisible: true);
-    expect(find.byType(PetAvatar), findsNothing);
-    expect(find.text('Nova'), findsNothing);
-    host.dispose();
-  });
-
-  testWidgets('chat hides the avatar in a compact layout', (tester) async {
-    final conversation = ConversationStore(MemoryPersistence());
-    await conversation.open();
-    final id = await conversation.create();
-    final host = AgentCoreHost(store: conversation, settings: ModelSettings());
-    final store = storeWith();
-    await store.load();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            height: 240,
-            child: LocalChatPanel(
-              host: host,
-              conversationId: id,
-              language: 'en',
-              petAvatarStore: store,
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byType(PetAvatar), findsNothing);
-    host.dispose();
-  });
-
-  testWidgets('chat hides the avatar when no store is passed', (tester) async {
-    final conversation = ConversationStore(MemoryPersistence());
-    await conversation.open();
-    final id = await conversation.create();
-    final host = AgentCoreHost(store: conversation, settings: ModelSettings());
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: LocalChatPanel(host: host, conversationId: id, language: 'en'),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byType(PetAvatar), findsNothing);
-    host.dispose();
-  });
-
-  testWidgets('tapping the chat avatar opens the Chinese settings sheet', (
-    tester,
-  ) async {
-    final conversation = ConversationStore(MemoryPersistence());
-    await conversation.open();
-    final id = await conversation.create();
-    await conversation.append(id, {'role': 'user', 'content': 'Hi'});
-    final host = AgentCoreHost(store: conversation, settings: ModelSettings());
-    final store = storeWith();
-    await store.load();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: LocalChatPanel(
-            host: host,
-            conversationId: id,
-            language: 'zh',
-            petAvatarStore: store,
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(PetAvatar));
+    await titleFixture(tester, language: 'zh');
+    await tester.tap(find.text('Nova'));
     await tester.pumpAndSettle();
     expect(find.text('宠物头像'), findsOneWidget);
     expect(find.text('从相册选择'), findsOneWidget);
     expect(find.text('恢复默认'), findsOneWidget);
     expect(find.text('仅保存在本机'), findsOneWidget);
-    // The sheet previews the same avatar store rendered in the chat.
+    // The sheet previews the same avatar store rendered in the title bar.
     expect(find.byType(PetAvatar), findsNWidgets(2));
     await tester.tap(find.text('完成'));
     await tester.pumpAndSettle();
-    expect(find.text('宠物头像'), findsNothing);
-    host.dispose();
+    expect(find.text('从相册选择'), findsNothing);
   });
 }
