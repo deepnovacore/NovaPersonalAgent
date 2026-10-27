@@ -1183,9 +1183,9 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       slot.live = null
       try {
         await active.close()
-        // An unknown task result still needs reconciliation, but a verified stopped Codex tree
-        // no longer owns the physical project/computer resources.
-        if (codex) slot.processStopped = true
+        // Every transport's close waits for the process tree to disappear (or throws). A verified
+        // stop therefore releases the physical project/computer resources for both Codex and ACP.
+        slot.processStopped = true
       } catch {
         // Completion evidence is already terminal. Retain cleanup ownership and fence the next
         // process until the transport's retryable close path succeeds.
@@ -1295,12 +1295,12 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     for (const [transport, cleanup] of [...this.#retainedTransportCleanups]) {
       try {
         await transport.close('shutdown')
-        if (cleanup.codex) {
-          cleanup.slot.processStopped = true
-          if (cleanup.slot.resourcesQuarantined) {
-            cleanup.slot.resourcesQuarantined = false
-            releaseQuarantinedTaskResources(cleanup.keys)
-          }
+        // close() proved the process tree is gone; release whatever this cleanup owns, regardless
+        // of which backend produced the transport.
+        cleanup.slot.processStopped = true
+        if (cleanup.slot.resourcesQuarantined) {
+          cleanup.slot.resourcesQuarantined = false
+          releaseQuarantinedTaskResources(cleanup.keys)
         }
         this.#retainedTransportCleanups.delete(transport)
       } catch (error) {
