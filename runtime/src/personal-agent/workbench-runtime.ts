@@ -9,6 +9,7 @@ import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources} from '..
 import {localShellProcessGone,type LocalShellOptions} from './local-shell.js'
 import type {JsonValue} from '../core/events.js'
 import type {WorkbenchCall} from './workbench-store.js'
+import {MAX_WORKBENCH_THOUGHTS,MAX_WORKBENCH_THOUGHT_CODEPOINTS} from './workbench-store.js'
 import type {ComputerSession,ComputerSessionOptions} from './computer-use/session.js'
 import {computerTools} from './computer-use/tools.js'
 import {computerUseSkill} from './computer-use/skill.js'
@@ -19,8 +20,9 @@ const publishTool:CascadedLlmTool={name:'publish_plan',description:'Publish the 
 const finishArguments=z.object({summary:z.string().min(1).max(12000)}).strict()
 const finishTool:CascadedLlmTool={name:'finish_build',description:'End this Build conversation after the confirmed work and verification are complete. Provide the final user-facing summary. This permanently locks the conversation; use only when no further Build interaction is needed.',parameters:{type:'object',properties:{summary:{type:'string',minLength:1,maxLength:12000}},required:['summary'],additionalProperties:false}}
 const RESUME_CHECK='Resume the Build goal. Inspect actual state before continuing any cancelled, timed-out or unknown operation. Never replay a completed call.'
-export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never'|(()=>'ask'|'never');shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'observe'|'action'|'close'>;onDiagnostic?:(message:string)=>void}):Promise<ConversationRuntime>{
+export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never'|(()=>'ask'|'never');shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'observe'|'action'|'close'>;onDiagnostic?:(message:string)=>void;reasoning?:boolean}):Promise<ConversationRuntime>{
  const {conversation,host}=options,build=conversation.kind==='build',store=host.workbench
+ const reasoningMode:'enabled'|'disabled'=options.reasoning===true?'enabled':'disabled'
  const approvalMode=():'ask'|'never'=>typeof options.approval==='function'?options.approval():options.approval
  const turnToolLimit=build?128:24
  const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
@@ -256,8 +258,24 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
      if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
      const enabled=computerState(),tools=[...baseTools,...(enabled.enabled?computerTools(enabled.direct):[])]
      const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[],turn=randomUUID();let assistant='',preview='',completed=false
+     // One bounded thought per model round; display-only, never model input or history.
+     let thinkingChunks:string[]=[],thinkingCodepoints=0
+     const addThinking=(text:string):void=>{
+      const left=MAX_WORKBENCH_THOUGHT_CODEPOINTS-thinkingCodepoints
+      if(left<=0||text==='')return
+      const points=[...text]
+      thinkingChunks.push(points.length<=left?text:points.slice(0,left).join(''));thinkingCodepoints+=Math.min(points.length,left)
+     }
+     const recordThinking=():void=>{
+      if(!thinkingChunks.length)return
+      const text=thinkingChunks.join('');thinkingChunks=[];thinkingCodepoints=0
+      const thoughts=state.thoughts??[]
+      thoughts.push({id:randomUUID(),text,created_at:new Date().toISOString(),...(context?.user_message_id?{message_id:context.user_message_id}:{})})
+      state.thoughts=thoughts.slice(-MAX_WORKBENCH_THOUGHTS)
+     }
      try{
-      for await(const event of llm.stream({language:options.language,previewText:true,inputs,tools,workspaceContext:enabled.enabled?[workspaceContext,computerUseSkill(enabled.direct)].filter(Boolean).join('\n'):workspaceContext,signal})){
+      for await(const event of llm.stream({language:options.language,previewText:true,reasoning:reasoningMode,inputs,tools,workspaceContext:enabled.enabled?[workspaceContext,computerUseSkill(enabled.direct)].filter(Boolean).join('\n'):workspaceContext,signal})){
+       if(event.kind==='reasoning_delta'){addThinking(event.text);signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale');continue}
        signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale')
        if(event.kind==='text_preview'||event.kind==='text_delta'){
         if(event.kind==='text_preview')preview=(preview+event.text).slice(-4001)
@@ -275,13 +293,14 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
        }
       }
       if(!completed)throw Error('model_response_incomplete')
+      recordThinking()
       if(!llm.checkpoint)throw Error('model_checkpoint_unsupported')
       state.model=llm.checkpoint();state.inputs=[]
       if(!calls.length&&assistant.length>16000)await store.saveReply(conversation.id,conversation.generation,turn,assistant)
       state.assistant=assistant.slice(0,16000)
       for(const call of calls){const prior=state.calls.find(item=>item.id===call.id);if(prior){if(prior.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');state.pending_calls.push(prior)}else {state.calls.push(call);state.pending_calls.push(call)}}
       await save()
-     }catch(error){if(preview&&!signal.aborted&&version===runVersion)options.emit({type:'caption',role:'assistant',text:assistant.slice(-4000),full_text:assistant.slice(-4000),turn_id:turn,final:!assistant});state.model=before;await session?.close();session=undefined;if(error instanceof Error&&'code' in error&&typeof error.code==='string'){const detail='detail' in error&&typeof error.detail==='string'&&/^[a-z_]{1,64}$/u.test(error.detail)?'_'+error.detail:'';throw Error('model_'+error.code+detail,{cause:error})}throw error}
+     }catch(error){recordThinking();if(preview&&!signal.aborted&&version===runVersion)options.emit({type:'caption',role:'assistant',text:assistant.slice(-4000),full_text:assistant.slice(-4000),turn_id:turn,final:!assistant});state.model=before;await session?.close();session=undefined;if(error instanceof Error&&'code' in error&&typeof error.code==='string'){const detail='detail' in error&&typeof error.detail==='string'&&/^[a-z_]{1,64}$/u.test(error.detail)?'_'+error.detail:'';throw Error('model_'+error.code+detail,{cause:error})}throw error}
      if(!calls.length){state.status='completed';state.reason=null;await save();return {assistant,turn_id:turn}}
     }
    }catch(error){

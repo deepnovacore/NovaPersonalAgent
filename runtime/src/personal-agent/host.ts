@@ -263,9 +263,10 @@ export class PersonalAgentHost {
         if(method==='build.stop'){const q=z.object({id:z.string()}).strict().parse(p);await this.stopLocalBuild(q.id);return this.conversationSnapshot()}
         if(method==='build.approve'){const q=z.object({id:z.string(),approval_id:z.string(),approved:z.boolean(),always:z.boolean().optional()}).strict().parse(p);if(!this.localBuildAuthorized(q.id))throw Error('local_build_not_authorized');await this.#conversationPool?.localApproval(q.id,q.approval_id,q.approved,q.always);return {accepted:true}}
         if(method==='build.details'){
-            const q=z.object({id:z.string(),call_id:z.string().optional(),message_id:z.string().max(128).optional(),view:z.enum(['calls','reply','image']).optional(),image_ref:z.string().min(1).optional(),offset:z.number().int().nonnegative().default(0)}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);if(item?.kind!=='build')throw Error('build_not_found');
+            const q=z.object({id:z.string(),call_id:z.string().optional(),message_id:z.string().max(128).optional(),view:z.enum(['calls','reply','image','steps']).optional(),image_ref:z.string().min(1).optional(),offset:z.number().int().nonnegative().default(0)}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);if(item?.kind!=='build')throw Error('build_not_found');
             if(q.view==='image'){if(!q.image_ref)throw Error('workbench_image_not_found');return this.workbench.thumbnail(q.id,item.generation,q.image_ref)}
             if(q.view==='calls')return this.workbench.calls(q.id,item.generation,q.offset);
+            if(q.view==='steps')return this.workbench.steps(q.id,item.generation,q.offset);
             if(q.view==='reply'){if(!q.message_id)throw Error('workbench_reply_not_found');return this.workbench.reply(q.id,item.generation,q.message_id,q.offset)}
             if(q.call_id){const state=await this.workbench.checkpoint(q.id,item.generation),call=state.calls.find(call=>call.id===q.call_id);if(!call)throw Error('tool_call_not_found');const text=JSON.stringify({name:call.name,arguments:call.arguments},null,2);return {text:text.slice(q.offset,q.offset+6000),next_offset:q.offset+6000<text.length?q.offset+6000:null}}
             return this.workbench.detail(q.id,item.generation,q.offset)
@@ -2176,7 +2177,8 @@ export class PersonalAgentHost {
         result = { type: 'personal.result', request_id: command.request_id, ok: true, ...(data === undefined ? {} : { data }) };
     }
     catch (e) {
-        result = { type: 'personal.result', request_id: command.request_id, ok: false, error: e instanceof Error ? e.message : 'unavailable',...(command.method==='tasks.input'?{input_status:inputStatus,input_task_id:command.params.task_id}:{}) };
+        // Parameter schemas are an internal contract: never leak Zod issue JSON to the renderer.
+        result = { type: 'personal.result', request_id: command.request_id, ok: false, error: e instanceof z.ZodError ? 'invalid_params' : e instanceof Error ? e.message : 'unavailable',...(command.method==='tasks.input'?{input_status:inputStatus,input_task_id:command.params.task_id}:{}) };
     } if(taskRead)return result;
     if((command.method==='presentation.set'||command.method==='identity.configure')&&(result as {ok:boolean}).ok===false)return result;
     await this.#serial(async () => { const next = structuredClone(this.#state); const receipt={...result as Record<string,unknown>}; if(Object.hasOwn(receipt,'data')&&command.method!=='memory.purge'&&!scoped){delete receipt.data;receipt.reload_required=true;} next.receipts[receiptId] = { payload, result:receipt }; const keys = Object.keys(next.receipts); for (const key of keys.slice(0, Math.max(0, keys.length - 256)))
