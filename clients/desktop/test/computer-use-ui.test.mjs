@@ -95,7 +95,7 @@ test('Computer Use switch appears only in Build sessions and reflects the stored
  const finished=controlFixture({id:'b',kind:'build',build:{status:'finished'}});finished.control.update();assert.equal(finished.toggle.hidden,true)
  const on=controlFixture({id:'b',kind:'build',build:{status:'paused',computer_use:{enabled:true,direct:false}}});on.control.update()
  assert.equal(on.toggle.hidden,false);assert.equal(on.toggle.attributes['aria-checked'],'true')
- assert.equal(on.toggle.children[1].textContent,'不可用：需要视觉模型');assert.equal(on.toggle.children[1].hidden,false)
+ assert.equal(on.toggle.children[1].textContent,'需要视觉模型');assert.equal(on.toggle.children[1].hidden,false)
  on.c.connected=false;on.control.update();assert.equal(on.toggle.disabled,true)
 })
 
@@ -104,12 +104,12 @@ test('turning Computer Use on sends the permission readout and lists each missin
  const {commands,opened,toggle,panel,control}=controlFixture(item,{response:{ok:false,state:{enabled:false,direct:false},missing:['accessibility_permission','configuration']}})
  control.update();toggle.listeners.click();await flush()
  assert.deepEqual(commands,[['build.computer_use',{conversation_id:'b',enabled:true,permissions:{screen:'granted',accessibility:'denied'}}]])
- assert.equal(panel.hidden,false);assert.equal(panel.attributes['data-tone'],'blocked')
+ assert.equal(panel.hidden,false);assert.equal(panel.attributes['data-tone'],'warning')
  const rows=panel.children[1].children
  assert.deepEqual(rows.map(row=>row.attributes['data-item']),['accessibility_permission','configuration'])
  rows[0].children[1].listeners.click();rows[1].children[1].listeners.click();await flush()
  assert.deepEqual(opened,['accessibility','settings:connections'])
- assert.ok(texts(panel).includes('还不能打开 Computer Use'))
+ assert.ok(texts(panel).includes('电脑操作暂不可用'))
 })
 
 test('turning Computer Use off sends no permissions and a vision-less model is explicitly blocked',async()=>{
@@ -119,7 +119,7 @@ test('turning Computer Use off sends no permissions and a vision-less model is e
  assert.deepEqual(off.commands,[['build.computer_use',{conversation_id:'b',enabled:false}]]);assert.equal(off.panel.hidden,true)
  const limited=controlFixture({id:'b',kind:'build',build:{status:'paused'}},{response:{ok:false,state:{enabled:false,direct:false},missing:['vision_model']}})
  limited.control.update();limited.toggle.listeners.click();await flush()
- assert.equal(limited.panel.attributes['data-tone'],'blocked');assert.ok(texts(limited.panel).includes('当前模型无视觉，Build 桌面操作不可用，请换视觉模型。'))
+ assert.equal(limited.panel.attributes['data-tone'],'warning');assert.ok(texts(limited.panel).includes('当前模型不支持图片，切换到视觉模型后即可使用电脑操作。'))
 })
 
 test('a new Build session turns Computer Use on by itself once, stays quiet when a precondition is missing, and respects an explicit off',async()=>{
@@ -144,7 +144,7 @@ test('overlay pages and new workbench strings are translated',async context=>{
   const sources=[...html.matchAll(/>([^<>]+)</g)].map(m=>m[1].trim()).concat([...html.matchAll(/(?:title|aria-label)="([^"]+)"/g)].map(m=>m[1]))
   for(const source of sources.filter(s=>/\p{Script=Han}/u.test(s)))assert.doesNotMatch(t(source),/\p{Script=Han}/u,source)
  }
- for(const source of ['等待你在工作台批准下一步','正在停止…','停止失败，请在工作台点击停止','还不能打开 Computer Use','当前模型无视觉，Build 桌面操作不可用，请换视觉模型。','不可用：需要视觉模型','操作后的屏幕','截图暂不可用。','尚未配置电脑操作模型和目标显示器。'])
+ for(const source of ['等待你在工作台批准下一步','正在停止…','停止失败，请在工作台点击停止','电脑操作暂不可用','当前模型不支持图片，切换到视觉模型后即可使用电脑操作。','需要视觉模型','操作后的屏幕','截图暂不可用。','电脑操作的高级配置无效，请检查后重试。','电脑操作暂时仅支持单屏，调整为单屏后可重新检查。','仍可正常对话和使用其他 Build 工具。'])
   assert.doesNotMatch(t(source),/\p{Script=Han}/u,source)
 })
 
@@ -158,4 +158,20 @@ test('active desktop tools, prompts and docs contain no nested desktop delegatio
   }
  }
  for(const root of ['runtime/src','clients/desktop/src','docs'])await inspect(root)
+})
+
+
+test('automatic Computer Use preflight waits for presentation recovery',async()=>{
+ const item={id:'b',kind:'build',build:{status:'paused'}},f=controlFixture(item,{autoEnable:true,response:{ok:true,state:{enabled:true,direct:true},missing:[]}})
+ f.c.presentationReady=false;f.control.update();await flush();assert.equal(f.commands.length,0)
+ f.c.presentationReady=true;f.control.update();await flush();assert.equal(f.commands.length,1);assert.equal(f.panel.hidden,true)
+})
+
+for(const missing of ['vision_model','display_count'])test(`automatic ${missing} preflight is a non-modal warning`,async()=>{
+ const {commands,panel,control}=controlFixture({id:'warning',kind:'build',build:{status:'paused'}},{autoEnable:true,permissions:{screen:'granted',accessibility:'granted',displayCount:2},response:{ok:false,state:{enabled:false,direct:false},missing:[missing]}})
+ control.update();await flush()
+ assert.equal(commands[0][1].permissions.displayCount,2)
+ assert.equal(panel.hidden,false);assert.equal(panel.attributes.role,'status');assert.equal(panel.attributes['data-tone'],'warning')
+ assert.ok(texts(panel).includes('仍可正常对话和使用其他 Build 工具。'))
+ assert.ok(texts(panel).some(value=>value.includes(missing==='vision_model'?'视觉模型':'单屏')))
 })

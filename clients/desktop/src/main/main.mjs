@@ -2178,7 +2178,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     }
     return applyDesktopSettings(payload, restart)
   })
-  installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
+  installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,screen,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
   ipcMain.handle('nova:bootstrap', event => {
     // The renderer binds its backend-exit listener only after this reply lands, so a push
     // sent before then has nobody to reach. Riding the verdict on the very payload the

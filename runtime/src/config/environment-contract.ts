@@ -190,7 +190,7 @@ const rows: readonly Row[] = [
   ['EXECUTOR_MAX_STEPS', 'executors', false, true, null, 'Action limit override (1-100); unset keeps each executor default (30).', '动作上限覆盖值（1-100）；未设置时各执行器使用自身默认值（30）。'],
   ['EXECUTOR_TIMEOUT_SECONDS', 'executors', false, true, null, 'Task deadline override (1-1800 seconds); unset keeps each executor default (600).', '任务时限覆盖值（1-1800 秒）；未设置时各执行器使用自身默认值（600）。'],
   ['EXECUTOR_SETTLE_MS', 'executors', false, true, null, 'Settling wait override (0-30000 milliseconds); unset keeps each executor default (browser 1000, computer and mobile 4000).', '画面稳定等待覆盖值（0-30000 毫秒）；未设置时各执行器使用自身默认值（浏览器 1000，电脑和手机 4000）。'],
-  ['COMPUTER_DISPLAY_ID', 'computer', false, true, null, 'Exact local display ID (Mac index or Windows DISPLAY name); display mode requires one display. Background Safari uses 0.', '明确的本机显示器 ID（Mac 索引或 Windows DISPLAY 名）；全屏模式仅支持单显示器，后台 Safari 模式使用 0。'],
+  ['COMPUTER_DISPLAY_ID', 'computer', false, true, 'primary', 'Optional local display ID; defaults to the primary display. Whole-screen control requires one display.', '可选的本机显示器 ID，默认主屏幕；全屏模式仅支持单显示器。'],
   ['COMPUTER_MAC_WINDOW_PID', 'computer', false, true, null, 'Opt-in background Safari process ID; requires COMPUTER_MAC_WINDOW_ID and macOS 14+.', '后台 Safari 进程 ID；须同时配置窗口 ID，要求 macOS 14+。'],
   ['COMPUTER_MAC_WINDOW_ID', 'computer', false, true, null, 'Exact Safari native window ID; must remain the Safari key window. No foreground fallback.', 'Safari 原生窗口 ID；须保持为 Safari 键窗口，不自动切换前台。'],
   ['COMPUTER_CLICK_HOLD_MS', 'computer', false, true, '100', 'Mouse click hold duration (10-1000 milliseconds).', '鼠标点击按住时长（10-1000 毫秒）。'],

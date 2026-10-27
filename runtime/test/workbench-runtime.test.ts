@@ -999,3 +999,28 @@ test('direct Build resolves a selected managed ID before canonical resource chec
  f.host.setCodingTargets({list:()=>Promise.resolve([]),validate:()=>Promise.reject(Error('unused')),resolve:()=>Promise.reject(Error('unused')),workspaces:{list:()=>Promise.resolve([]),create:()=>Promise.reject(Error('unused')),resolve:id=>{resolved.push(id!);return Promise.resolve(f.root)}}})
  try{await f.command('build.begin',{text:'work',workspace_id:'selected'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id);assert.deepEqual(resolved,['selected']);assert.equal(buildView(f.host,f.host.conversationSnapshot().selected_id).project,f.root)}finally{await f.close()}
 })
+
+
+for(const [status,reason] of [['paused','approval_denied'],['completed',null],['failed','model_timeout'],['outcome_unknown','cleanup_unknown'],['idle',null]] as const)test(`restart preserves the durable ${status} Build state`,{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  await f.host.updateLocalBuild(id,0,{status,reason,approval:null});await f.host.close()
+  const reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+  try{await reopened.open();assert.equal(buildView(reopened,id).status,status);assert.equal(buildView(reopened,id).reason,reason);assert.equal(reopened.localBuildAuthorized(id),false)}finally{await reopened.close()}
+ }finally{await f.close()}
+})
+
+test('restart repairs a previously overwritten pause reason from its durable checkpoint',{skip:!supported},async()=>{
+ const f=await fixture(()=>({call:{name:'file_write',arguments:{path:'denied.txt',content:'do not write'}}}))
+ try{
+  const id=await f.build(),pending=await until(()=>buildView(f.host,id).approval,value=>!!value)
+  await f.command('build.approve',{id,approval_id:pending!.id,approved:false});await f.host.waitConversation(id)
+  assert.equal((await f.host.workbench.checkpoint(id,0)).reason,'approval_denied')
+  await f.host.updateLocalBuild(id,0,{status:'paused',reason:'restart_requires_resume',approval:null});await f.host.close()
+  const reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+  try{await reopened.open();assert.equal(buildView(reopened,id).reason,'approval_denied');assert.equal(buildView(reopened,id).status,'paused');assert.equal(reopened.localBuildAuthorized(id),false)}finally{await reopened.close()}
+  assert.equal(f.script.requests.length,1)
+  await assert.rejects(readFile(join(f.root,'denied.txt')), {code:'ENOENT'})
+ }finally{await f.close()}
+})

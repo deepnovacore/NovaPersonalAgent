@@ -20,9 +20,10 @@ const env = {COMPUTER_DISPLAY_ID: '1', EXECUTOR_BASE_URL: 'http://127.0.0.1:8000
 const user = {instruction: 'tap center', originalUserText: 'tap center', origin_ref: 'conversation:1',
   sessionEpoch: 1, acceptedUserInputRevision: 1, stillWanted: () => true}
 
-test('computer configuration requires an explicit display and a verified model family', () => {
+test('computer configuration defaults to the primary display and still validates executor models', () => {
   assert.equal(loadComputerConfig(env).displayId, '1')
-  for (const invalid of [{COMPUTER_DISPLAY_ID: ''}, {EXECUTOR_MODEL_FAMILY: 'unverified'},
+  assert.equal(loadComputerConfig({...env,COMPUTER_DISPLAY_ID:''}).displayId,'primary')
+  for (const invalid of [{COMPUTER_DISPLAY_ID: 'invalid'}, {EXECUTOR_MODEL_FAMILY: 'unverified'},
     {EXECUTOR_BASE_URL: 'http://remote.example'}, {EXECUTOR_MAX_STEPS: 'NaN'}, {COMPUTER_CLICK_HOLD_MS: '0'}, {COMPUTER_CLICK_HOLD_MS: '1001'}]) assert.throws(() => loadComputerConfig({...env, ...invalid}))
 })
 

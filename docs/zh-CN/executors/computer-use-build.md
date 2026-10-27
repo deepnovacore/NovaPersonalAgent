@@ -4,7 +4,9 @@ Computer Use 需要在 macOS 或 Windows 的本地 Build 会话中逐个开启�
 
 ## 配置与模型能力
 
-当前实现复用电脑执行器配置：`COMPUTER_DISPLAY_ID`、`EXECUTOR_BASE_URL`、`EXECUTOR_MODEL`、`EXECUTOR_MODEL_FAMILY`、`EXECUTOR_API_KEY`。限制项为 `EXECUTOR_MAX_STEPS`、`EXECUTOR_TIMEOUT_SECONDS`、`EXECUTOR_SETTLE_MS`、`COMPUTER_CLICK_HOLD_MS`。凭据只放本地配置。Build 使用自己选定的视觉模型规划桌面动作，不再调用第二个 GUI 规划器；共享配置加载器目前仍会校验执行器模型配置。
+Build 默认复用当前对话的视觉模型和凭据，屏幕默认选择主屏幕，无需另配 `EXECUTOR_BASE_URL`、`EXECUTOR_MODEL`、`EXECUTOR_MODEL_FAMILY` 或 `EXECUTOR_API_KEY`。`COMPUTER_DISPLAY_ID` 仅作可选覆盖。执行限制仍可通过 `EXECUTOR_MAX_STEPS`、`EXECUTOR_TIMEOUT_SECONDS`、`EXECUTOR_SETTLE_MS`、`COMPUTER_CLICK_HOLD_MS` 调整。独立的 computer 执行器仍使用自己的 GUI 模型配置。
+
+当模型不支持视觉或连接了多个屏幕时，界面会温和提示原因；电脑操作暂不可用，但对话和其他 Build 工具不受影响。
 
 macOS 需要屏幕录制和辅助功能权限；Windows 需要打包的进程守护组件。全屏控制要求仅有一个已配置显示器。平台、配置、权限和**视觉模型能力**中的任何预检失败都会阻止开启。
 

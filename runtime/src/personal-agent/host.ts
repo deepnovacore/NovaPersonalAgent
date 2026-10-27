@@ -1,7 +1,7 @@
 import {COMPUTER_VISION_REQUIRED_MESSAGE} from './computer-use/contract.js'
 import type {DiaryEntry} from '../memory-substrate/diary.js'
 import {computerUseCommandSchema,type ComputerUseState,type ComputerUseCommandResult,type ComputerPreflightItem} from './computer-use/contract.js'
-import {loadComputerConfig} from '../executors/computer-config.js'
+import {loadComputerDeviceConfig} from '../executors/computer-config.js'
 import {supportsVision} from '../model/vision-capability.js'
 import {ReadingCopies} from './reading-copies.js'
 import {createPreferredNameSync} from './preferred-name-sync.js'
@@ -245,12 +245,13 @@ export class PersonalAgentHost {
             const direct=!!this.#workbenchModel&&supportsVision(this.#workbenchModel.provider,this.#workbenchModel.model);
             if(q.enabled){
                 if(!['darwin','win32'].includes(process.platform))missing.push('platform');
-                try{loadComputerConfig(process.env)}catch{missing.push('configuration')}
+                try{loadComputerDeviceConfig(process.env)}catch{missing.push('configuration')}
                 if(process.platform==='darwin'){
                     if(q.permissions?.screen!=='granted')missing.push('screen_permission');
                     if(q.permissions?.accessibility!=='granted')missing.push('accessibility_permission');
                 }
                 if(!direct)missing.push('vision_model');
+                if(q.permissions?.displayCount!==undefined&&q.permissions.displayCount!==1)missing.push('display_count');
             }
             if(missing.length)return {ok:false,state:this.computerUseState(item.id),missing,...(missing.includes('vision_model')?{code:'vision_model_required' as const,message:COMPUTER_VISION_REQUIRED_MESSAGE}:{})} satisfies ComputerUseCommandResult;
             const state:ComputerUseState=q.enabled?{enabled:true,direct,enabled_at:this.#now().toISOString()}:{enabled:false,direct:false};
@@ -1060,7 +1061,21 @@ export class PersonalAgentHost {
             this.#state.user_scope = this.options.userScope;
             this.#loaded = true;
             await this.notifications.open();
-            let recovered=false;for(const conversation of this.#state.conversations.items){if(conversation.build&&conversation.build.status!=='finished'){conversation.build.status='paused';conversation.build.reason='restart_requires_resume';conversation.build.approval=null;recovered=true;}for(const message of conversation.messages)if(message.generation_status==='pending'){message.generation_status='interrupted';recovered=true;}}
+            let recovered=false;
+            for(const conversation of this.#state.conversations.items){
+                const build=conversation.build;
+                // Older clients replaced settled Build states with a generic restart pause.
+                if(build?.status==='paused'&&build.reason==='restart_requires_resume'){
+                    const saved=await this.workbench.checkpointStatus(conversation.id,conversation.generation).catch(()=>null);
+                    if(saved&&!['idle','running','awaiting_approval'].includes(saved.status)&&(build.status!==saved.status||build.reason!==saved.reason)){
+                        build.status=saved.status;build.reason=saved.reason;build.approval=null;recovered=true;
+                    }
+                }
+                if(build&&['running','awaiting_approval'].includes(build.status)){
+                    build.status='paused';build.reason='restart_requires_resume';build.approval=null;recovered=true;
+                }
+                for(const message of conversation.messages)if(message.generation_status==='pending'){message.generation_status='interrupted';recovered=true;}
+            }
             if(recovered){this.#state.revision++;await this.#store.write(this.#state);}
 
             this.#abort = new AbortController();

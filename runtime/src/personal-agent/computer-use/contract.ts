@@ -40,9 +40,9 @@ export type ComputerUseState = z.infer<typeof computerUseStateSchema>
 
 /** IPC `build.computer_use` params. Desktop attaches its permission readout (desktop-permissions.mjs). */
 export const computerUseCommandSchema = z.object({conversation_id:z.string().min(1),enabled:z.boolean(),
- permissions:z.object({screen:z.string(),accessibility:z.string()}).strict().optional()}).strict()
-/** Preflight items. Any of platform/configuration/permissions blocks enabling; vision_model also blocks enabling. */
-export const COMPUTER_PREFLIGHT_ITEMS = ['platform','configuration','screen_permission','accessibility_permission','vision_model'] as const
+ permissions:z.object({screen:z.string(),accessibility:z.string(),displayCount:z.number().int().nonnegative().optional()}).strict().optional()}).strict()
+/** Preflight items. Missing prerequisites keep desktop tools off; other Build tools remain available. */
+export const COMPUTER_PREFLIGHT_ITEMS = ['platform','configuration','screen_permission','accessibility_permission','vision_model','display_count'] as const
 export type ComputerPreflightItem = typeof COMPUTER_PREFLIGHT_ITEMS[number]
 export interface ComputerUseCommandResult {readonly ok:boolean;readonly state:ComputerUseState;readonly missing:readonly ComputerPreflightItem[];readonly code?:'vision_model_required';readonly message?:string}
 
@@ -83,4 +83,4 @@ export interface ComputerObservation {
 export const COMPUTER_TYPE_MODES = ['append','replace'] as const
 export type ComputerTypeMode = typeof COMPUTER_TYPE_MODES[number]
 
-export const COMPUTER_VISION_REQUIRED_MESSAGE='当前模型无视觉，Build 桌面操作不可用，请换视觉模型。'
+export const COMPUTER_VISION_REQUIRED_MESSAGE='当前模型不支持图片，切换到视觉模型后即可使用电脑操作。'

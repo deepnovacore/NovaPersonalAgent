@@ -65,3 +65,16 @@ test('retry after a later page fails starts at the first missing call',async()=>
  const notice=log.remaining(new Set(['user']))[0];notice.children[1].listeners.click();await tick()
  assert.deepEqual(offsets,[0,1,1]);assert.equal(log.forMessage('user').length,1);assert.equal(log.forMessage('user')[0].children[0].children[1].children.length,2)
 })
+
+
+test('Build log waits for presentation recovery and loads unchanged history once ready',async()=>{
+ let attempts=0
+ const c={selectedId:'build',presentationReady:false,selectedConversation:{id:'build',kind:'build',generation:0,build:{log_revision:1,status:'paused'}},connected:true,command:async()=>{attempts++;if(!c.presentationReady)throw Error('正在恢复显示模式，请稍候');return {generation:0,items:[call(0)],total:1,next_offset:null}}}
+ const log=createBuildCallLog({c,el,changed:()=>{}})
+ log.update();await tick()
+ assert.equal(log.remaining(new Set()).length,0,'the startup handshake is not a tool-log failure')
+ assert.equal(attempts,0)
+ c.presentationReady=true;log.update();await tick()
+ assert.equal(log.forMessage('user').length,1)
+ assert.equal(attempts,1)
+})

@@ -35,7 +35,10 @@ test('computer switch requires local selected Build and fails closed without per
  const delegated=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted'}})
  assert.equal(delegated.data.ok,false);assert.equal(delegated.data.state.enabled,false);assert.equal(delegated.data.state.direct,false);assert.deepEqual(delegated.data.missing,['vision_model'])
  conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],cascade_llm_provider:'qwen',cascade_llm_model:'qwen3-vl-plus',dashscope_api_key:'test'})})
- const direct=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted'}})
+ for(const key of ['COMPUTER_DISPLAY_ID','EXECUTOR_BASE_URL','EXECUTOR_MODEL','EXECUTOR_MODEL_FAMILY','EXECUTOR_API_KEY'])delete process.env[key]
+ const multi=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted',displayCount:2}})
+ assert.equal(multi.ok,true);assert.equal(multi.data.ok,false);assert.deepEqual(multi.data.missing,['display_count']);assert.equal(multi.data.state.enabled,false)
+ const direct=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted',displayCount:1}})
  assert.equal(direct.data.state.direct,true);assert.deepEqual(direct.data.missing,[])
  const badge=()=>host.conversationSnapshot().items.find(value=>value.id===item.id)!.build!.computer_use
  assert.equal(badge().direct,true)
@@ -61,7 +64,7 @@ test('computer switch requires local selected Build and fails closed without per
  conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],cascade_llm_provider:'self-hosted',cascade_llm_model:null})})
  assert.equal(host.computerUseState(item.id).direct,false)
 
- Object.defineProperty(process,'platform',{value:'linux'});process.env.EXECUTOR_BASE_URL='invalid'
+ Object.defineProperty(process,'platform',{value:'linux'});process.env.COMPUTER_DISPLAY_ID='invalid'
  const unsupported=await command('build.computer_use',{conversation_id:item.id,enabled:true})
  assert.deepEqual(unsupported.data.missing,['platform','configuration','vision_model']);assert.equal(unsupported.data.ok,false)
 })
