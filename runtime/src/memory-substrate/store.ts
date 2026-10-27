@@ -170,7 +170,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         const rows=db.prepare(`SELECT r.payload_json FROM memory_revisions r JOIN (
           SELECT entry_id,MAX(revision) revision FROM memory_revisions
           WHERE entry_id>=? AND entry_id<? GROUP BY entry_id) latest USING(entry_id,revision)
-          ORDER BY r.entry_id`).all(q.entry_prefix,q.entry_prefix+'\uffff')
+          ORDER BY r.entry_id`).all(q.entry_prefix,q.entry_prefix+'\u{10ffff}')
         result=rows.map(row=>EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))))
           .filter(row=>row.entry_id.startsWith(q.entry_prefix)&&row.op!=='tombstone'&&!fileDerivedInference(db,row)&&(row.valid_until===null||Date.parse(row.valid_until)>now)&&row.evidence_refs.every(ref=>effectiveEvidence(db,ref,{purpose:'conversation',provider:q.consumer})!==null))
         break

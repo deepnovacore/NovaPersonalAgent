@@ -130,6 +130,8 @@ interface Pending<Result> {
 
 const CLOSE_GRACE_MS = 250
 const REQUEST_TIMEOUT_MS = 5_000
+/** Cold SDK/SQLite work can legitimately exceed one request slot. */
+const OPEN_TIMEOUT_MS = 30_000
 const MAX_QUERY_CHARS = 4_000
 const MAX_LIMIT = 5
 const MAX_REPLY_PREFERENCES = 8
@@ -166,6 +168,7 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
   #opening: Promise<void> | undefined
   #spawnFailures = 0
   #nextSpawnAt = 0
+  #reopenTimer: ReturnType<typeof setTimeout> | undefined
   #adaptation: PersonalMemoryResponseAdaptation = freezeAdaptation({revision: 0, replyPreferences: []})
 
   constructor(options: PersonalMemoryStoreClientOptions) {
@@ -220,7 +223,7 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
     }
     if (Date.now() < this.#nextSpawnAt) throw new PersonalMemoryStoreClientError('WORKER_UNAVAILABLE')
     try { this.#ensureWorker() } catch { throw this.#protocolFailure() }
-    const opening = this.#request<unknown>('open', {}).then(() => undefined)
+    const opening = this.#request<unknown>('open', {}, undefined, OPEN_TIMEOUT_MS).then(() => undefined)
     this.#opening = opening
     try {
       await opening
@@ -299,6 +302,10 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
   }
 
   async #closeFresh(): Promise<void> {
+    if (this.#reopenTimer !== undefined) {
+      clearTimeout(this.#reopenTimer)
+      this.#reopenTimer = undefined
+    }
     const worker = this.#worker
     if (worker === undefined) return
     this.#expectedExit = true
@@ -317,9 +324,9 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
     this.#dropped.clear()
   }
 
-  #request<Result>(operation: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<Result> {
+  #request<Result>(operation: string, payload: Record<string, unknown>, signal?: AbortSignal, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Result> {
     if (this.#closed || this.#failed) return Promise.reject(new PersonalMemoryStoreClientError('CLIENT_CLOSED'))
-    const sent = this.#send<Result>(operation, payload)
+    const sent = this.#send<Result>(operation, payload, timeoutMs)
     if (signal === undefined) return sent.promise
     const onAbort = () => {
       const pending = this.#pending.get(sent.requestId)
@@ -334,7 +341,7 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
     return sent.promise.finally(() => signal.removeEventListener('abort', onAbort))
   }
 
-  #send<Result>(operation: string, payload: Record<string, unknown>): {readonly requestId: number; readonly promise: Promise<Result>} {
+  #send<Result>(operation: string, payload: Record<string, unknown>, timeoutMs = REQUEST_TIMEOUT_MS): {readonly requestId: number; readonly promise: Promise<Result>} {
     const requestId = this.#nextRequestId++
     const promise = new Promise<Result>((resolve, reject) => {
       const pending: Pending<unknown> = {
@@ -349,7 +356,7 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
         this.#pending.delete(requestId)
         this.#dropped.add(requestId)
         pending.reject(new PersonalMemoryStoreClientError(pending.mutation ? 'MUTATION_OUTCOME_UNKNOWN' : 'WORKER_TIMEOUT'))
-      }, REQUEST_TIMEOUT_MS)
+      }, timeoutMs)
       this.#pending.set(requestId, pending)
       try {
         this.#worker!.postMessage({...payload, kind: 'request', request_id: requestId, operation})
@@ -419,6 +426,17 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
     this.#rejectPending(code)
     void worker?.terminate().catch(() => undefined)
     worker?.unref?.()
+    // The resource is opened once at assembly; reopen after the backoff so the next turn can keep
+    // learning instead of waiting for a new conversation.
+    if (this.#reopenTimer === undefined) {
+      const delay = Math.max(0, this.#nextSpawnAt - Date.now())
+      this.#reopenTimer = setTimeout(() => {
+        this.#reopenTimer = undefined
+        if (this.#closed || this.#failed) return
+        void this.open().catch(() => { /* the next open retries */ })
+      }, delay)
+      this.#reopenTimer.unref?.()
+    }
   }
 
   #ensureWorker(): void {

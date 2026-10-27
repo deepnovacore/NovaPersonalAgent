@@ -59,10 +59,12 @@ async function execute(request: Request): Promise<unknown> {
   if (request.operation === 'remember') return remember(request)
   if (request.operation === 'forget') {
     if (!text(request.sourceId, 256)) throw new StoreError('STORE_INVALID_INPUT')
+    // The durable intent is written first: a crash before the tombstone leaves a harmless flag,
+    // while a crash after it must never lose the physical-cleanup obligation.
+    markCompactionPending()
     // Tombstone unknown ids too, so delayed admission cannot resurrect an explicitly deleted source.
     ledger.prepare(`INSERT INTO sources (id,payload,state,recorded_at,cleaned) VALUES (?, '', 'forgotten', ?, 0)
       ON CONFLICT(id) DO UPDATE SET payload='', state='forgotten', cleaned=0`).run(request.sourceId, new Date().toISOString())
-    markCompactionPending()
     failed.delete(request.sourceId)
     return {state: 'forgotten', source_id: request.sourceId}
   }
@@ -149,8 +151,8 @@ function open() {
     ledger.prepare('INSERT OR IGNORE INTO owner (user_id) VALUES (?)').run(data.userId)
     secureSidecar(join(data.path, 'ledger.db'), '-wal')
     secureSidecar(join(data.path, 'ledger.db'), '-shm')
-    // Finish a deletion interrupted by a crash before opening the SDK (which holds those files).
-    if (pendingCompaction()) try { compactStore() } catch { /* keep the durable intent for the next open */ }
+    // Compaction runs from the drain (after derived vectors are deleted), never on the open path:
+    // a synchronous VACUUM here can exceed the client's request deadline and leave it unopened.
     sdk = new Memory({
       disableHistory: true,
       embedder: {provider: 'openai', config: {baseURL: data.embedding.baseUrl, apiKey: data.embedding.apiKey,
