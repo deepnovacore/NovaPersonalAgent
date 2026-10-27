@@ -21,8 +21,8 @@ const coreNames = new Set([
 
 // Keep executable examples separate from human-readable fallback descriptions.
 const exampleValues = {
-  MODEL_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  WATCH_MODEL: 'qwen3-vl-plus', CASCADE_LLM_MODEL: 'qwen-plus', MEMORY_PROVIDER: 'voicemem',
+  MODEL_BASE_URL: 'https://api.deepseek.com',
+  WATCH_MODEL: 'deepseek-flash', CASCADE_LLM_MODEL: 'deepseek-flash', MEMORY_PROVIDER: 'voicemem',
   SUGGESTION_COOLDOWN: '60', FRESH_WINDOW: '30',
   QWEN_REALTIME_URL: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
   VOLCENGINE_ARK_BASE_URL: 'https://ark.cn-beijing.volces.com/api/v3',
@@ -57,7 +57,7 @@ const envSections = [
   ['Personal memory — PROVIDER is local-only; URL and TOKEN are remote-only',
     'MEMORY_PRERECALL_ENABLED MEMORY_CONSOLIDATION_ENABLED MEMORY_CONSOLIDATION_HOUR MEMORY_CONSOLIDATION_TIMEZONE MEMORY_LEDGER_PATH MEMORY_CONNECTION MEMORY_PROVIDER MEMORY_PATH MEMORY_USER_ID MEMORY_URL MEMORY_TOKEN'],
   ['Knowledge, embeddings and conversation recovery',
-    'KNOWLEDGE_PATH EMBEDDING_PROVIDER EMBEDDING_MODEL BLACKBOARD_PATH BLACKBOARD_OWNER_ID'],
+    'KNOWLEDGE_PATH EMBEDDING_PROVIDER EMBEDDING_MODEL EMBEDDING_BASE_URL EMBEDDING_API_KEY BLACKBOARD_PATH BLACKBOARD_OWNER_ID'],
   ['Advanced: support models and provider endpoints',
     'MODEL_BASE_URL FAST_MODEL SUPPORT_MODEL QWEN_REALTIME_URL STEPFUN_REALTIME_URL OPENAI_REALTIME_URL GEMINI_REALTIME_URL VOLCENGINE_ARK_BASE_URL DOUBAO_ASR_ENDPOINT DOUBAO_ASR_RESOURCE_ID DOUBAO_TTS_ENDPOINT DOUBAO_TTS_RESOURCE_ID'],
   ['Advanced: audio timing and endpoint detection',

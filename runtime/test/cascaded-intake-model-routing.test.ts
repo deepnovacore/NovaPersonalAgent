@@ -120,10 +120,10 @@ test('host and desktop text/voice children keep resolved support models paired a
           await models.plan({}, new AbortController().signal)
           assert.equal(await models.targets.resolveWork('stop task',[{work_id:'running-work',project:'project',title:'task'}],new AbortController().signal),'running-work')
           assert.deepEqual(records, [
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.generic ? 'deepseek-flash' : scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.generic ? 'deepseek-flash' : scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.generic ? 'deepseek-flash' : scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.generic ? 'deepseek-flash' : scenario.model},
           ], scenario.provider)
         }
         await checkRequests()
@@ -157,7 +157,7 @@ test('host and desktop text/voice children keep resolved support models paired a
         await realtime.stop()
         realtime = undefined
       }
-      assert.equal(configured.support_model, 'qwen-plus', 'source settings remain unchanged')
+      assert.equal(configured.support_model, 'deepseek-flash', 'source settings remain unchanged')
     } finally {
       globalThis.fetch = previous
       await realtime?.stop()

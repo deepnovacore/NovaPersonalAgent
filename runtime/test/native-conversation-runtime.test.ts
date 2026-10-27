@@ -87,7 +87,7 @@ for(const mode of ['chat','plan','build'] as const)test(`${mode} voice factory i
   if(mode==='plan')conversation.plan={id:'plan',version:3,title:'Current plan'}
   if(mode==='build')conversation.build={project:dir,status:'paused',approval:null,reason:null,log_revision:0,source_conversation_id:'chat:main'}
   conversation.messages=Array.from({length:20},(_,index)=>({id:'m'+index,conversation_id:conversation.id,role:index%2?'assistant' as const:'user' as const,text:'message '+index+'\n'.repeat(1000),created_at:new Date().toISOString()}))
-  const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))}})
+  const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test',deepseek_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))}})
   const runtime=await factory(conversation,()=>{ /* no renderer */ },'voice')
   try{
    const item=injected.find(item=>item.kind==='dialogue_context'&&(JSON.parse(item.content) as {purpose?:string}).purpose==='conversation_handoff')!
