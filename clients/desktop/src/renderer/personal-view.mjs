@@ -195,8 +195,8 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const unreadDot=document.querySelector('#unread-indicator');if(unreadDot)unreadDot.hidden=!unreadTotal
   if(!initialHome&&c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main')){initialHome=true;void run(()=>c.home())}
   const item=c.selectedConversation,planRef=item?.mode==='plan'&&item.plan?JSON.stringify([item.id,item.plan.id,item.plan.version]):''
-  // Never steal the panel: a newly published plan only auto-opens on the Tasks tab without an inspector.
-  if(planRef!==lastPlanRef){lastPlanRef=planRef;if(planRef){if(selected==='tasks'&&!inspector)openPlan(false);else planPending=true}else{previewPlan=false;planPending=false}}
+  // Never steal the panel: auto-open only the Tasks list, never the schedule sub-tab or a detail view.
+  if(planRef!==lastPlanRef){lastPlanRef=planRef;if(planRef){if(selected==='tasks'&&!inspector&&taskTab==='tasks'&&!previewPlan)openPlan(false);else planPending=true}else{previewPlan=false;planPending=false}}
   tabs.pending('tasks',planPending)
   returnTasks.disabled=!c.connected
   syncLayout();chat.update();computerUse?.update()

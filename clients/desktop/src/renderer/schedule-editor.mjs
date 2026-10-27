@@ -1,5 +1,7 @@
 import {t,currentLanguage} from './locale.mjs'
-export const scheduleError=error=>t(({stale_schedule:'规则已更新，请载入最新版本后再保存。',schedule_in_past:'请选择未来的执行时间。',invalid_params:'请检查时间、时区和任务内容。',schedule_running:'上次任务尚未结束，请先查看执行进展。',context_authorization_changed:'相关资料已变化，请重新运行后查看结果。'})[error?.message]??error?.message??String(error))
+/** Controllers decorate failures with refusal_text but keep the host code on the error. */
+const errorCode=error=>error?.refusal_code??error?.message
+export const scheduleError=error=>{const code=errorCode(error);return t(({stale_schedule:'规则已更新，请载入最新版本后再保存。',schedule_in_past:'请选择未来的执行时间。',invalid_params:'请检查时间、时区和任务内容。',schedule_running:'上次任务尚未结束，请先查看执行进展。',context_authorization_changed:'相关资料已变化，请重新运行后查看结果。'})[code]??code??String(error))}
 const contextDefault={todos:true,goals:true,tasks:true,memory:false,knowledge:false,search:false}
 export class ScheduleDraft{
  constructor(value,command){this.value=structuredClone(value??{});this.value={title:'',goal:'',acceptance:[],rule:{kind:'daily',time:'09:00',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone},context:contextDefault,...this.value};this.command=command;this.next=null;this.sequence=0;this.pending=null;this.busy=false;this.conflict=false;this.error='';this.onChange=()=>{}}
@@ -16,7 +18,7 @@ export class ScheduleDraft{
   }
   this.busy=true;this.error='';this.onChange()
   try{const result=await this.command(this.pending.method,this.pending.params,{request_id:this.pending.request_id});this.pending=null;return result}
-  catch(error){this.error=scheduleError(error);if(['stale_schedule','invalid_params','schedule_in_past','context_not_authorized'].includes(error.message)){this.pending=null;this.conflict=error.message==='stale_schedule'}else{this.error=t('尚未确认保存结果，草稿已保留。重试会核对同一请求。');await this.command('schedules.list',{}).catch(()=>{})}throw error}
+  catch(error){this.error=scheduleError(error);const code=errorCode(error);if(['stale_schedule','invalid_params','schedule_in_past','context_not_authorized'].includes(code)){this.pending=null;this.conflict=code==='stale_schedule'}else{this.error=t('尚未确认保存结果，草稿已保留。重试会核对同一请求。');await this.command('schedules.list',{}).catch(()=>{})}throw error}
   finally{this.busy=false;this.onChange()}
  }
 }

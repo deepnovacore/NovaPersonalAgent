@@ -662,6 +662,8 @@ test('Build with attached references asks before dropping them and only continue
  const begin=m.sent.find(f=>f.type==='personal.command'&&f.method==='build.begin')
  assert.ok(begin,'continuing starts the new Build task')
  assert.equal(begin.params.text,'build this')
+ assert.equal(c.state().references.length,1,'a pending host call keeps the chips until it succeeds')
+ m.view.receive({type:'personal.result',request_id:begin.request_id,ok:true,data:{}});await tick()
  assert.equal(c.state().references.length,0);assert.equal(c.state().source_todo,null)
 })
 

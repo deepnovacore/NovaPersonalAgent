@@ -10,6 +10,7 @@ import {COMPOSER_MODE_CAPTIONS} from '../src/renderer/composer-mode.mjs'
 import {TASK_PHASE_LABEL,WAITING_LABEL} from '../src/renderer/tasks-page.mjs'
 import {BUILD_REASONS,BUILD_STATUS_LABELS} from '../src/renderer/workbench-agent.mjs'
 import {TIMELINE_LABELS,TIMELINE_STATUS_LABELS} from '../src/renderer/timeline-view.mjs'
+import {BUILD_STEP_COMPUTER_LABELS,BUILD_STEP_STATUS_LABELS} from '../src/renderer/build-steps.mjs'
 
 const RENDERER=new URL('../src/renderer/',import.meta.url)
 const HAN=/\p{Script=Han}/u
@@ -38,6 +39,7 @@ async function rendererMessages(){
 const dynamicTables={
  HOST_REFUSALS,COMPOSER_APPROVAL_CAPTIONS,COMPOSER_MODE_CAPTIONS,TASK_PHASE_LABEL,WAITING_LABEL,
  BUILD_REASONS,BUILD_STATUS_LABELS,TIMELINE_LABELS,TIMELINE_STATUS_LABELS,
+ BUILD_STEP_STATUS_LABELS,BUILD_STEP_COMPUTER_LABELS,
 }
 
 test('every source-language key used by t() in renderer modules has an English translation',async context=>{

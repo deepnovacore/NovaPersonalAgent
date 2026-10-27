@@ -122,11 +122,10 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(!text||!c.connected||beginning||state.submission)return false
   // The host's build.begin schema carries no references/source_todo: warn, and only drop them on consent.
   if((state.references?.length||state.source_todo)&&!await confirmBuildNewTask())return false
-  if(state.references?.length||state.source_todo){state.references=[];state.source_todo=null;renderSource()}
   const submitted=state.draft
   beginning=true;c.changed?.()
-  // Clear only what was sent: text typed or a mode picked while the host starts the Build stays.
-  try{await c.command('build.begin',{text,...workspace});if(state.draft===submitted)state.draft='';if(state.execution==='build')delete state.execution;return true}
+  // Clear only what was sent and only after the host accepted the Build, so a refusal keeps the chips.
+  try{await c.command('build.begin',{text,...workspace});if(state.draft===submitted)state.draft='';if(state.execution==='build')delete state.execution;state.references=[];state.source_todo=null;renderSource();return true}
   finally{beginning=false;c.changed?.()}
  }
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3
@@ -213,8 +212,10 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const openLink=api?.personal?.openArticle?(url=>api.personal.openArticle(url)):undefined
  /** Assistant-only avatar; the image is decorative, so the name stays in the role label. */
  function avatarNode(){
+  const src=identityView?.profile?.avatar??identityView?.defaultAvatar
+  if(!src)return null
   const wrap=el('span',undefined,'message-avatar'),image=el('img')
-  image.alt='';image.setAttribute('aria-hidden','true');image.src=identityView?.profile?.avatar??identityView?.defaultAvatar??''
+  image.alt='';image.setAttribute('aria-hidden','true');image.src=src
   wrap.append(image);return wrap
  }
  function renderMessage(message,{first=false,continuation=false}={}){
@@ -222,7 +223,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const feedId=!user&&typeof message.id==='string'&&message.id.startsWith('feed:')?message.id.slice(5):null
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
   const node=el('article',undefined,`message ${user?'user':'assistant'}${feed?' message-feed':''}${continuation?' message-continuation':''}`);node.dataset.messageId=message.id
-  if(!user&&first)node.append(avatarNode())
+  if(!user&&first){const avatar=avatarNode();if(avatar)node.append(avatar)}
   const body=el('div',undefined,'message-body')
   body.append(el('small',user?identityView?.profile?.userName?.trim()||t('你'):identityView?.profile.assistantName??'Nova','message-role'))
   node.append(body)
@@ -260,7 +261,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(!transcriptPresent)history.append(c.selectedId==='chat:main'?intro:emptyConversation)
   let day=null,previousAssistant=false
   for(const message of orderTranscript(persisted,live)){
-   if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
+   if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;previousAssistant=false;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
    const user=message.role==='user',continuation=!user&&previousAssistant
    history.append(renderMessage(message,{first:!user&&!previousAssistant,continuation}))
    previousAssistant=!user

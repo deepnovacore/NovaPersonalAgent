@@ -173,7 +173,7 @@ export function mountTaskDetail(root, { command, onClose, onViewed = () => { }, 
       await refresh()
     }
     catch (e) {
-      error.textContent = taskErrorText(e.message)
+      error.textContent = taskErrorText(e.refusal_code ?? e.message)
       await refresh().catch(() => { })
     }
     finally {
@@ -191,9 +191,9 @@ export function mountTaskDetail(root, { command, onClose, onViewed = () => { }, 
   const markDone = button('已核对：已执行', () => act('tasks.reconcile', { ...fence(), resolution: 'done' })), markNotRun = button('已核对：未执行', () => act('tasks.reconcile', { ...fence(), resolution: 'not_run' }))
   const closeTodo = button('标记 Todo 完成', () => act('tasks.complete_todo', { ...fence(), todo_version: detail.capabilities?.todo?.version }))
   markDone.title = markNotRun.title = t('Nova 无法确认上一步是否已执行；请在项目中核对后选择')
-  const more = button('加载更多活动', () => refresh().catch(e => { error.textContent = taskErrorText(e.message); }), activityMore)
+  const more = button('加载更多活动', () => refresh().catch(e => { error.textContent = taskErrorText(e.refusal_code ?? e.message); }), activityMore)
   more.hidden = true
-  const reconcile = button('刷新发送状态', () => refresh().catch(e => { error.textContent = taskErrorText(e.message); }))
+  const reconcile = button('刷新发送状态', () => refresh().catch(e => { error.textContent = taskErrorText(e.refusal_code ?? e.message); }))
   const submit = button('发送给执行器', async () => {
     if (draft.disabled || !draft.value.trim())
       return
@@ -214,7 +214,7 @@ export function mountTaskDetail(root, { command, onClose, onViewed = () => { }, 
         error.textContent = t('发送状态待确认，草稿已保留。')
     }
     catch (e) {
-      error.textContent = taskErrorText(e.message)
+      error.textContent = taskErrorText(e.refusal_code ?? e.message)
       if (e.input_status === 'failed')
         delete state.pending
     }
@@ -387,14 +387,14 @@ export function mountTaskDetail(root, { command, onClose, onViewed = () => { }, 
       visible = value
       if (value) {
         onViewed(detail?.id, cursor, detail?.phase)
-        void refresh().catch(e => { error.textContent = taskErrorText(e.message); })
+        void refresh().catch(e => { error.textContent = taskErrorText(e.refusal_code ?? e.message); })
       }
     }, focus() { back.focus(); }, receive: frame => {
       if (frame.type === 'personal.state' && detail && visible) {
         const latest = frame.tasks?.find(t => t.id === detail.id)
         if (latest)
           update({ ...detail, ...latest })
-        void refresh().catch(e => { error.textContent = taskErrorText(e.message); })
+        void refresh().catch(e => { error.textContent = taskErrorText(e.refusal_code ?? e.message); })
       }
     }, dispose() { save(); disposed = true; root.removeEventListener?.('keydown', escape); }, focusApproval() { (approvals.querySelector?.('button') ?? back).focus(); }
   }

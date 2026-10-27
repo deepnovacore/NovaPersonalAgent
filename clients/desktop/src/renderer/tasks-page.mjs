@@ -31,10 +31,13 @@ export function renderConversationTasks(panel,{c,el,button,openTask,now=Date.now
    const generation=item.generation_status??last?.generation_status
    const pending=records.some(task=>task.phase==='waiting')||waiting.some(row=>row.conversation_id===item.id)||BUILD_WAITING.includes(item.build?.status)
    const failed=item.build?.status==='failed'||generation==='failed'
-   const cancelled=records.some(task=>task.phase==='cancelled')
+   // Only the newest durable record may label the conversation stopped; an older
+   // cancelled task must not hide current work or a later completed result.
+   const latestRecord=[...records].sort((a,b)=>String(b.updated_at??b.created_at??'').localeCompare(String(a.updated_at??a.created_at??'')))[0]
+   const cancelled=latestRecord?.phase==='cancelled'
    const active=records.some(task=>DURABLE_ACTIVE.includes(task.phase))||c.state(item.id).submission||['running','idle'].includes(item.build?.status)||generation==='pending'
-   // A waiting phase outranks a stale failure; a cancelled durable task is 已停止, not the old catch-all 已完成.
-   const status=pending?'待你处理':failed?'失败':cancelled?'已停止':active?'进行中':'已完成'
+   // A waiting phase outranks a stale failure; active work outranks a historical stop.
+   const status=pending?'待你处理':failed?'失败':active?'进行中':cancelled?'已停止':'已完成'
    const row=button('',()=>c.select(item.id),panel);row.className='conversation-task';row.dataset.state=({'待你处理':'waiting','失败':'failed','已停止':'cancelled','进行中':'running','已完成':'completed'})[status];row.dataset.conversationId=item.id;row.setAttribute('aria-current',String(item.id===c.selectedId));row.disabled=!c.connected
    const title=el('span',item.title??t('对话'),'conversation-task-title'),meta=el('span',undefined,'conversation-task-meta')
    const summary=el('span',(item.last_message??last?.text??'').slice(0,160),'conversation-task-summary');summary.hidden=!summary.textContent

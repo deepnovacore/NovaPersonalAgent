@@ -81,6 +81,7 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .workbench .workspace-tab:hover{background:var(--surface-inset)}
 .workbench .workspace-tab[aria-selected="true"]{background:var(--accent-wash);color:var(--accent);font-weight:600}
 .workspace-tab-badge,.unread-badge{font:600 10px/1 var(--mono);min-width:16px;height:16px;padding:0 4px;display:inline-grid;place-items:center;border-radius:8px;background:var(--accent);color:var(--accent-ink)}
+.workspace-tab-plan-badge{flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
 .nova-column{display:flex;flex-direction:column;min-width:0;min-height:0;background:linear-gradient(160deg,var(--surface-raised) 25%,color-mix(in srgb,var(--timeline-cool) 40%,var(--surface)) 72%,color-mix(in srgb,var(--timeline-warm) 35%,var(--surface)));overflow:hidden}
 .workbench .workspace-utility{display:flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--ink-dim);padding:5px 7px;white-space:nowrap}
 

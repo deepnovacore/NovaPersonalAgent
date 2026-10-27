@@ -5,7 +5,7 @@ export async function scheduleMutation(local,command,operation,params){
  local.requests??=new Map();const key=JSON.stringify([operation,params.id??params.run_id]);let pending=local.requests.get(key)
  if(!pending){pending={request_id:crypto.randomUUID(),params:structuredClone(params)};local.requests.set(key,pending)}
  try{const result=await command('schedules.'+operation,pending.params,{request_id:pending.request_id});local.requests.delete(key);return result}
- catch(error){if(['stale_schedule','invalid_params','schedule_running','context_authorization_changed','version_conflict'].includes(error.message))local.requests.delete(key);throw error}
+ catch(error){const code=error?.refusal_code??error?.message;if(['stale_schedule','invalid_params','schedule_running','context_authorization_changed','version_conflict'].includes(code))local.requests.delete(key);throw error}
 }
 const el=(tag,text,cls)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=t(text);if(cls)node.className=cls;return node}
 const when=(instant,timezone)=>instant?new Date(instant).toLocaleString(currentLanguage(),{timeZone:timezone,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):t('暂无安排')

@@ -69,4 +69,13 @@ test('cancelled delegated tasks read 已停止 and a waiting phase outranks a st
  assert.deepEqual(status({tasks:[],build:{status:'paused'}}),{text:'待你处理',state:'waiting'})
  assert.deepEqual(status({tasks:[{conversation_id:'c',phase:'completed'}],generation_status:'completed'}),{text:'已完成',state:'completed'})
  assert.deepEqual(status({tasks:[{conversation_id:'c',phase:'failed'}]}),{text:'已完成',state:'completed'},'the dead durable failed check is gone')
+ // A historical stop must not hide current work or a later completed result.
+ assert.deepEqual(status({tasks:[
+  {conversation_id:'c',phase:'cancelled',updated_at:'2026-10-26T00:00:00Z'},
+  {conversation_id:'c',phase:'running',updated_at:'2026-10-27T00:00:00Z'},
+ ]}),{text:'进行中',state:'running'})
+ assert.deepEqual(status({tasks:[
+  {conversation_id:'c',phase:'cancelled',updated_at:'2026-10-26T00:00:00Z'},
+  {conversation_id:'c',phase:'completed',updated_at:'2026-10-27T00:00:00Z'},
+ ]}),{text:'已完成',state:'completed'})
 })

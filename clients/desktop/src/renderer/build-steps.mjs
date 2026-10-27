@@ -2,13 +2,14 @@ import {t} from './locale.mjs'
 import {iconNode,withIcon} from './icons.mjs'
 import {readDisplayPreferences,subscribeDisplayPreferences} from './view-preferences.mjs'
 
-const labels={prepared:'等待执行',awaiting_approval:'待确认',running:'执行中',completed:'已完成',failed:'失败',denied:'已拒绝',refused:'已拒绝',timed_out:'已超时',cancelled:'已取消',cancelled_before_execution:'未执行',outcome_unknown:'结果不确定'}
+const labels={prepared:'等待执行',awaiting_approval:'待确认',running:'执行中',completed:'已完成',failed:'失败',denied:'已拒绝',refused:'已拒绝',timed_out:'已超时',cancelled:'已取消',cancelled_before_execution:'未执行',cancelled_after_finish:'未执行',outcome_unknown:'结果不确定'}
+/** Exported for the source-coverage test; every code must translate. */
+export const BUILD_STEP_STATUS_LABELS=labels
+export const BUILD_STEP_COMPUTER_LABELS={computer_screenshot:'截图',computer_click:'点击',computer_type:'输入',computer_scroll:'滚动',computer_key:'快捷键'}
 const failed=new Set(['failed','timed_out','outcome_unknown','refused','denied'])
-const COMPUTER_LABELS={computer_screenshot:'截图',computer_click:'点击',computer_type:'输入',computer_scroll:'滚动',computer_key:'快捷键'}
+const COMPUTER_LABELS=BUILD_STEP_COMPUTER_LABELS
 const SHOT_CACHE=12
 const ACTIVE_STATUSES=new Set(['running','awaiting_approval'])
-/** Hard cap for the retained display timeline; older steps stay on the host. */
-export const MAX_BUILD_STEPS=512
 const MAX_THINKING_CHARS=200
 const THINKING_ICON_PATH='M8.5 4.5a4 4 0 0 1 3.7 5.5 3.2 3.2 0 0 1 .8 6.2V19h-3v-1.5H9V19H6v-2.8a3.2 3.2 0 0 1 .8-6.2 4 4 0 0 1 1.7-5.5zM6.5 22h7'
 const SVG_NS='http://www.w3.org/2000/svg'
@@ -70,7 +71,7 @@ export function createBuildSteps({c,el,changed,display}){
  const readPreferences=display?.read??readDisplayPreferences
  const subscribe=display?.subscribe??subscribeDisplayPreferences
  let prefs=readPreferences()
- let selected='',version=0,items=[],loading=null,loadedRevision=-1,failedRevision=-1,error='',timer=null,connected=false,mode='steps'
+ let selected='',version=0,items=[],loadedFirstId=null,loading=null,loadedRevision=-1,failedRevision=-1,error='',timer=null,connected=false,mode='steps'
  const nodes=new Map(),groups=new Map(),shots=new Map()
  const notice=el('div',undefined,'build-log-notice'),retry=el('button',t('重试')),errorText=el('span')
  retry.type='button';withIcon(retry,'refresh');{const alert=iconNode('alert');if(alert)notice.append(alert)};notice.append(errorText,retry)
@@ -120,8 +121,10 @@ export function createBuildSteps({c,el,changed,display}){
     ?{kind:'thinking',id:String(item.id??''),text:String(item.text??''),created_at:item.created_at??'',message_id:item.message_id??null}
     :{kind:'tool',...item})}
   }catch(cause){
-   // A pre-steps host rejects the unknown view; retry the durable call journal instead.
-   if(items.length)throw cause
+   // A pre-steps host rejects the unknown view with invalid_params; transient
+   // read failures stay on the steps view and are retried from the same offset.
+   const code=cause?.refusal_code??cause?.message
+   if(items.length||!['invalid_params','unknown_view','unsupported_view'].includes(code))throw cause
    mode='calls'
    const page=await c.command('build.details',{id,view:'calls',offset})
    return {...page,items:(page?.items??[]).map(item=>({kind:'tool',...item}))}
@@ -139,16 +142,19 @@ export function createBuildSteps({c,el,changed,display}){
     const page=await fetchPage(id,offset)
     if(loading!==token||selection()!==selected||c.selectedId!==id)return
     if(page.generation!==generation||!Array.isArray(page.items)||!Number.isSafeInteger(page.total))throw Error(t('工具日志暂不可用。'))
-    if(page.total<offset||page.total<items.length){
+    // The host evicts the oldest thought after 64 rounds, shifting merged indexes.
+    // Restart once so the display never keeps an evicted prefix or skips a tool.
+    if(loadedFirstId!==null&&typeof page.first_id==='string'&&page.first_id!==loadedFirstId){
      if(restarted)throw Error(t('工具日志暂不可用。'))
-     restarted=true;items=[];offset=0;continue
+     restarted=true;items=[];offset=0;loadedFirstId=null;continue
+    }
+    if(page.total<offset){
+     if(restarted)throw Error(t('工具日志暂不可用。'))
+     restarted=true;items=[];offset=0;loadedFirstId=null;continue
     }
     items.length=offset
-    for(const step of page.items){
-     if(items.length>=MAX_BUILD_STEPS)break
-     items.push(step)
-    }
-    if(items.length>=MAX_BUILD_STEPS)break
+    for(const step of page.items)items.push(step)
+    if(loadedFirstId===null&&typeof page.first_id==='string')loadedFirstId=page.first_id
     if(page.next_offset!==null&&(!Number.isSafeInteger(page.next_offset)||page.next_offset<=offset))throw Error(t('工具日志暂不可用。'))
     offset=page.next_offset
     changed()
@@ -159,7 +165,7 @@ export function createBuildSteps({c,el,changed,display}){
  }
  function update(){
   const next=selection()
-  if(next!==selected){selected=next;version++;loading=null;items=[];mode='steps';nodes.clear();groups.clear();shots.clear();loadedRevision=-1;failedRevision=-1;error=''}
+  if(next!==selected){selected=next;version++;loading=null;items=[];loadedFirstId=null;mode='steps';nodes.clear();groups.clear();shots.clear();loadedRevision=-1;failedRevision=-1;error=''}
   const ready=c.connected&&c.presentationReady!==false
   if(ready&&!connected)failedRevision=-1
   connected=ready
@@ -263,7 +269,10 @@ export function createBuildSteps({c,el,changed,display}){
   node.header.setAttribute('aria-expanded',String(node.open))
   node.header.dataset.open=String(node.open)
  }
+ function visibleSteps(steps){return prefs.steps==='compact'?steps.filter(step=>step?.kind!=='thinking'):steps}
  function group(key,steps){
+  const shown=visibleSteps(steps)
+  if(!shown.length){groups.delete(key);return null}
   let node=groups.get(key)
   if(!node){
    const element=el('article',undefined,'message tool-message-group build-steps')
@@ -272,12 +281,12 @@ export function createBuildSteps({c,el,changed,display}){
    header.append(dot,label,duration,chevron)
    const rows=el('div',undefined,'build-steps-rows')
    element.append(header,rows)
-   node={element,header,dot,label,duration,chevron,rows,items:steps,open:false,active:null,userToggled:false}
+   node={element,header,dot,label,duration,chevron,rows,items:shown,open:false,active:null,userToggled:false}
    node.open=Boolean(activeStatus())
    header.addEventListener('click',()=>{node.open=!node.open;node.userToggled=true;applyOpen(node)})
    groups.set(key,node)
   }
-  node.items=steps
+  node.items=shown
   const active=Boolean(activeStatus())
   if(node.active!==active){
    node.active=active
@@ -287,17 +296,17 @@ export function createBuildSteps({c,el,changed,display}){
   const item=current()
   node.element.dataset.buildStatus=item?.build?.status??''
   node.dot.dataset.status=item?.build?.status??''
-  node.label.textContent=t('工作步骤 · {0}',steps.length)
-  const duration=groupDuration(steps)
+  node.label.textContent=t('工作步骤 · {0}',shown.length)
+  const duration=groupDuration(shown)
   node.duration.textContent=duration;node.duration.hidden=!duration
-  node.rows.replaceChildren(...steps.map(step=>step?.kind==='thinking'?thinkingRow(step):toolRow(step)))
+  node.rows.replaceChildren(...shown.map(step=>step?.kind==='thinking'?thinkingRow(step):toolRow(step)))
   applyOpen(node)
   return node.element
  }
  return {update,
   get key(){return JSON.stringify([selected,mode,items,error,prefs.steps,prefs.collapse])},
-  forMessage:id=>{const matching=items.filter(step=>step?.message_id===id);return matching.length?[group('message:'+id,matching)]:[]},
-  remaining:ids=>{const orphan=items.filter(step=>step&&!ids.has(step.message_id??'')),buckets=new Map();for(const step of orphan){const key=step.message_id??'unlinked';if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(step)}const rows=[...buckets].map(([key,groupItems])=>group('orphan:'+key,groupItems));if(error){errorText.textContent=t('工具日志暂不可用。')+' '+error;rows.push(notice)}return rows},
+  forMessage:id=>{const matching=items.filter(step=>step?.message_id===id);const element=matching.length?group('message:'+id,matching):null;return element?[element]:[]},
+  remaining:ids=>{const orphan=items.filter(step=>step&&!ids.has(step.message_id??'')),buckets=new Map();for(const step of orphan){const key=step.message_id??'unlinked';if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(step)}const rows=[...buckets].map(([key,groupItems])=>group('orphan:'+key,groupItems)).filter(Boolean);if(error){errorText.textContent=t('工具日志暂不可用。')+' '+error;rows.push(notice)}return rows},
   destroy:()=>{unsubscribe?.();if(timer)clearInterval(timer);timer=null;nodes.clear();groups.clear();shots.clear()},
  }
 }
