@@ -533,3 +533,17 @@ test('task conversation has a visible home action that survives assistant identi
  m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick()
  assert.equal(home.hidden,true);assert.equal(m.all().find(node=>node.className==='conversation-title').textContent,'主对话')
 })
+
+
+test('published plans preview on the right without taking back a tab the user selected',async()=>{
+ const m=mount(),state=revision=>feedState(revision,'c',{feed:[],conversations:{selected_id:'c',items:[{id:'c',title:'Task',mode:'plan',plan:{id:'p',version:1}}],messages:[]}})
+ m.view.receive(state(1))
+ const right=m.all().find(n=>n.className==='workspace'),left=m.all().find(n=>n.className==='nova-column'),card=m.all().find(n=>n.className==='workbench-plan'),preview=m.all().find(n=>n.className==='chat-preview-plan')
+ assert.ok(right.contains(card));assert.equal(left.contains(card),false);assert.equal(preview.hidden,false)
+ const editor=card.children.find(n=>n.tag==='textarea');editor.value='unsaved plan draft'
+ selectPage(m,'时间线');m.view.receive(state(2));assert.equal(right.contains(card),false)
+ await preview.listeners.click();assert.ok(right.contains(card));assert.equal(editor.value,'unsaved plan draft')
+ await m.all().find(n=>n.textContent==='← 返回任务列表').listeners.click();assert.equal(right.contains(card),false)
+ m.view.receive(state(3));assert.equal(right.contains(card),false)
+ await preview.listeners.click();m.view.receive(feedState(4,'chat:main',{feed:[]}));assert.equal(right.contains(card),false);assert.equal(preview.hidden,true)
+})

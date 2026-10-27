@@ -28,16 +28,17 @@ export function mountWorkspaceBar(parent,{c,el,button,run,api,visible,onChange=(
   update();onChange();c.changed?.()
  }))
  function update(){
+  const ready=c.connected&&c.presentationReady!==false
   root.hidden=!visible()
   if(!root.hidden&&(!wasVisible||lastOwner!==c.selectedId))loaded=false
   wasVisible=!root.hidden;lastOwner=c.selectedId
-  if(!root.hidden&&c.connected&&!loaded&&!loading){loading=true;void c.command('workspaces.list',{}).then(result=>{items=result;loaded=true;update()}).catch(error=>{c.error=error.message;c.changed?.()}).finally(()=>{loading=false})}
+  if(!root.hidden&&ready&&!loaded&&!loading){loading=true;void c.command('workspaces.list',{}).then(result=>{items=result;loaded=true;update()}).catch(error=>{c.error=error.message;c.changed?.()}).finally(()=>{loading=false})}
   const chosen=value(),options=items.map(item=>({value:item.workspace_id,label:item.is_default?t('默认工作区'):item.name}))
   if(!options.length)options.push({value:'default',label:t('默认工作区')})
   if(chosen.project)options.push({value:'selected-folder',label:workspaceLabel(chosen.project)})
   options.push({value:'new',label:t('新建工作区…')},{value:'folder',label:t('其它文件夹…（高级）')})
   select.replaceChildren(...options.map(item=>Object.assign(el('option',item.label),{value:item.value})))
-  select.value=chosen.project?'selected-folder':chosen.workspace_id;select.disabled=!c.connected||creating;create.disabled=!c.connected||creating;select.title=chosen.project?workspaceLabel(chosen.project):''
+  select.value=chosen.project?'selected-folder':chosen.workspace_id;select.disabled=!ready||creating;create.disabled=!ready||creating;select.title=chosen.project?workspaceLabel(chosen.project):''
  }
  return {element:root,update,value}
 }
