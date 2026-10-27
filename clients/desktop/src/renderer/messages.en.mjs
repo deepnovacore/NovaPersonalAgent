@@ -710,7 +710,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "无法写入状态目录。请检查目录权限后在设置中重试。": "The state directory is not writable. Check directory permissions, then retry in Settings.",
   "状态文件无法读取或超过大小上限。请备份后运行 novapersonal reset-state。": "The state file cannot be read or exceeds its size limit. Back it up, then run novapersonal reset-state.",
   "状态文件由更新版本的 Nova 写入。请升级 Nova，或备份后运行 novapersonal reset-state。": "The state file was written by a newer Nova version. Upgrade Nova, or back it up and run novapersonal reset-state.",
-  "状态文件无法读取（{0}），已从空状态启动。原文件：{1}；备份：{2}。可运行 novapersonal reset-state 清理。": "The state file could not be read ({0}); Nova started from empty state. Original: {1}; backup: {2}. Run novapersonal reset-state to clean up.",
+  "状态文件无法读取（{0}），已从空状态启动。原文件：{1}；已保留备份：{2}。": "The state file could not be read ({0}); Nova started from empty state. Original: {1}; preserved backup: {2}.",
   "Nova 已在另一个窗口运行。请关闭它后重试。": "Nova is already running in another window. Close it and try again.",
   "设置恢复未完成。请在设置中恢复上次可用配置。": "Settings recovery did not complete. Restore the previous configuration in Settings.",
   "后台启动失败，请打开设置检查配置后重试。": "Backend startup failed. Check the configuration in Settings, then retry.",

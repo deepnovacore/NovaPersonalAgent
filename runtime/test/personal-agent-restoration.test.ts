@@ -270,6 +270,9 @@ test('the personal store reports capacity, corruption and version with stable co
   await assert.rejects(store.read(),(error:unknown)=>error instanceof PersonalStoreError&&error.code==='state_corrupt')
   await writeFile(path,JSON.stringify({...initialState(),schema_version:99}),{mode:0o600})
   await assert.rejects(store.read(),(error:unknown)=>error instanceof PersonalStoreError&&error.code==='state_version_unsupported')
+  // A newer build may add keys this schema does not know; it must still be unsupported, not corrupt.
+  await writeFile(path,JSON.stringify({...initialState(),schema_version:2,goal_future:{}}),{mode:0o600})
+  await assert.rejects(store.read(),(error:unknown)=>error instanceof PersonalStoreError&&error.code==='state_version_unsupported')
   const legacy:Record<string,unknown>={...initialState()};delete legacy.schema_version
   await writeFile(path,JSON.stringify(legacy),{mode:0o600})
   assert.equal((await store.read()).schema_version,1)
