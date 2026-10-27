@@ -299,15 +299,19 @@ export class MemoryLedgerClient {
     this.#rejectAll(new MemoryLedgerClientError(code))
     void previous.terminate().catch(() => undefined)
     // The resource is opened once at assembly, so a replaced worker must reopen itself; otherwise
-    // every later read would stay STORE_CLOSED for the rest of the process.
-    if (this.#reopenTimer === null) {
-      this.#reopenTimer = setTimeout(() => {
-        this.#reopenTimer = null
-        if (this.#closed || this.#failed) return
-        void this.open().catch(() => { /* the next caller retries open */ })
-      }, 250)
-      this.#reopenTimer.unref?.()
-    }
+    // every later read would stay STORE_CLOSED for the rest of the process. A transient lock/sync
+    // failure is retried with bounded backoff instead of waiting for a caller that never opens.
+    this.#scheduleReopen(250)
+  }
+
+  #scheduleReopen(delayMs: number): void {
+    if (this.#closed || this.#failed || this.#reopenTimer !== null) return
+    this.#reopenTimer = setTimeout(() => {
+      this.#reopenTimer = null
+      if (this.#closed || this.#failed) return
+      this.open().catch(() => this.#scheduleReopen(Math.min(5_000, delayMs * 2)))
+    }, delayMs)
+    this.#reopenTimer.unref?.()
   }
 
   #dispatch(): void {
