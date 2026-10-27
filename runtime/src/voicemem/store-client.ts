@@ -354,8 +354,11 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
       const timer = setTimeout(() => {
         if (this.#pending.get(requestId) !== pending) return
         this.#pending.delete(requestId)
-        this.#dropped.add(requestId)
         pending.reject(new PersonalMemoryStoreClientError(pending.mutation ? 'MUTATION_OUTCOME_UNKNOWN' : 'WORKER_TIMEOUT'))
+        // An open response is the worker's state; dropping it leaves the two sides permanently
+        // different. Replace the worker instead so the next open starts from a clean process.
+        if (operation === 'open') this.#recoverWorker('WORKER_ERROR')
+        else this.#dropped.add(requestId)
       }, timeoutMs)
       this.#pending.set(requestId, pending)
       try {

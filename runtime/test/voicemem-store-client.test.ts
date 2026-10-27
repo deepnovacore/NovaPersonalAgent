@@ -573,6 +573,37 @@ test('a crashed worker is respawned after a bounded backoff', async t => {
 })
 
 
+test('a timed-out first open replaces the worker so a retry can succeed', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date']})
+  const workers: FakeWorker[] = []
+  const store = new PersonalMemoryStoreClient({
+    path: '/private/tmp/nova-personal-test/personal.sqlite',
+    userId: 'host-user',
+    embedding: {baseUrl: 'https://example.invalid/v1', apiKey: 'test-key', model: 'embed-test', dimensions: 2},
+    extractionModel: 'extract-test',
+    workerFactory: () => {
+      const worker = new FakeWorker()
+      workers.push(worker)
+      return worker
+    },
+  })
+  const timedOut = store.open()
+  t.mock.timers.tick(30_000)
+  await assert.rejects(timedOut, {code: 'WORKER_TIMEOUT'})
+  assert.equal(workers[0]!.terminated, 1, 'a timed-out open must not leave a half-opened worker')
+  t.mock.timers.setTime(Date.now() + 1_000)
+  const retry = store.open()
+  assert.ok(workers.length >= 2)
+  const worker = workers.at(-1)!
+  worker.respond(requestId(worker, 0), {response_adaptation: responseAdaptation()})
+  await retry
+  assert.equal(worker.messages.length >= 1, true)
+  t.mock.timers.reset()
+  const closing = store.close()
+  worker.respond(requestId(worker, 1), null)
+  await closing
+})
+
 test('VoiceMem uses separate extraction and embedding transports', {timeout: 10000}, async t => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-voicemem-split-'))
   const embedding = await loopbackProvider(), extraction = await loopbackProvider()
