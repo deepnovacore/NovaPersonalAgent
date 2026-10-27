@@ -4790,6 +4790,7 @@ test('cascaded defaults resolve endpointing, ASR, Qwen LLM, and TTS in order', (
   buildCascadedRealtimeAssembly({
     settings: loadSettings({MEMORY_CONNECTION: 'disabled',
       PIPELINE_MODE: 'cascaded',
+      CASCADE_LLM_PROVIDER: 'qwen',
       DASHSCOPE_API_KEY: 'dash-secret',
       DOUBAO_BIGMODEL_API_KEY: 'doubao-secret',
       TAVILY_API_KEY: 'search-secret',

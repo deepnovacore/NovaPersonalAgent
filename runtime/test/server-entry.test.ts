@@ -137,6 +137,7 @@ for (const invalid of ['credential', 'endpoint', 'cascaded-credential'] as const
   const cleanups: (() => void | Promise<void>)[] = []
   process.env = {CAPABILITIES_CONFIG: config, REALTIME_TELEMETRY: '',
     PIPELINE_MODE: invalid === 'cascaded-credential' ? 'cascaded' : 'integrated',
+    ...(invalid === 'cascaded-credential' ? {CASCADE_LLM_PROVIDER: 'qwen'} : {}),
     ...(invalid === 'endpoint' ? {DASHSCOPE_API_KEY: 'test-only', QWEN_REALTIME_URL: 'http://invalid.example'} : {}),
   }
   try {

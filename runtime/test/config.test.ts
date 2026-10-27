@@ -9,12 +9,14 @@ import {
   resolveEmbeddingConnection,
   ConfigurationError,
   loadSettings,
+  memoryStatus,
   requireCascadedCredentials,
   requireIntegratedRealtime,
   requirePersonalMemory,
   requireQwenRealtime,
   requireVolcengineRealtime,
   resolveCascadedSelection,
+  resolveMemoryExtractionConnection,
   resolveModelApiKey,
   resolveWatchModelConnection,
   resolveProactivity,
@@ -269,16 +271,16 @@ test('StepFun realtime config resolves its own key and Qwen 3.1 gets its matchin
   })
 })
 
-test('StepFun support models default to Step 3.7 Flash while memory extraction stays on DashScope', () => {
+test('StepFun support models default to Step 3.7 Flash and memory extraction follows it', () => {
   const base = {INTEGRATED_PROVIDER: 'stepfun', STEPFUN_API_KEY: 'step-secret',
     DASHSCOPE_API_KEY: 'support-secret', MEMORY_CONNECTION: 'local'}
   const step = loadSettings(base)
   assert.deepEqual([step.support_model, step.compressor_model, step.watch_model],
     ['step-3.7-flash', 'step-3.7-flash', 'step-3.7-flash'])
-  // Extraction is independent of the DashScope embedding connection.
-  assert.equal(step.fast_model, 'deepseek-flash')
+  assert.equal(step.fast_model, 'step-3.7-flash')
   const memory = requirePersonalMemory(step)
-  assert.equal(memory?.connection === 'local' && memory.extractionModel, 'deepseek-flash')
+  assert.equal(memory?.connection === 'local' && memory.extractionModel, 'step-3.7-flash')
+  assert.equal(memory?.connection === 'local' && memory.extraction.baseUrl, 'https://api.stepfun.com/v1')
   assert.equal(memory?.connection === 'local' && memory.embedding.baseUrl, 'https://dashscope.aliyuncs.com/compatible-mode/v1')
   const explicit = loadSettings({...base, SUPPORT_MODEL: 'qwen-plus',
     WATCH_MODEL: ''})
@@ -286,7 +288,7 @@ test('StepFun support models default to Step 3.7 Flash while memory extraction s
   assert.equal(explicit.watch_model, 'step-3.7-flash', 'empty watch would fall back to a DashScope model')
   const gateway = loadSettings({...base, MODEL_API_KEY: 'gateway-secret'})
   assert.equal(gateway.support_model, 'deepseek-flash', 'a custom gateway keeps the generic defaults')
-  assert.equal(loadSettings({DASHSCOPE_API_KEY: 'qwen-secret'}).support_model, 'deepseek-flash')
+  assert.equal(loadSettings({DASHSCOPE_API_KEY: 'qwen-secret'}).support_model, 'qwen-flash')
 })
 
 test('Codex direct argv prefix is parsed only as a bounded JSON string array', () => {
@@ -352,6 +354,7 @@ test('integrated loading ignores invalid inactive cascaded selector and model va
 test('cascaded Qwen resolution never reads ARK_API_KEY', () => {
   const environment = new Proxy<NodeJS.ProcessEnv>({
     PIPELINE_MODE: 'cascaded',
+    CASCADE_LLM_PROVIDER: 'qwen',
     DASHSCOPE_API_KEY: 'dashscope-key',
     DOUBAO_BIGMODEL_API_KEY: 'doubao-key',
   }, {
@@ -764,7 +767,8 @@ test('memory connection separates local provider selection from remote engine ow
     connection: 'remote', url: remote.MEMORY_URL, token: 'owner-token',
   })
   const local = {MEMORY_CONNECTION:'local',
-    EMBEDDING_API_KEY:'test', EMBEDDING_BASE_URL:'https://example.com/v1'}
+    EMBEDDING_API_KEY:'test', EMBEDDING_BASE_URL:'https://example.com/v1',
+    MODEL_API_KEY:'extract-test', MODEL_BASE_URL:'https://example.com/v1'}
   assert.deepEqual(requirePersonalMemory(loadSettings(local)),
     requirePersonalMemory(loadSettings({...local, MEMORY_PROVIDER:'voicemem'})))
   assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION:'disabled'})), null)
@@ -858,16 +862,61 @@ test('daily memory consolidation uses a validated configurable hour and timezone
 test('DeepSeek defaults keep Qwen embedding credentials and endpoints isolated', () => {
   const settings = loadSettings({DEEPSEEK_API_KEY: 'text-only', DASHSCOPE_API_KEY: 'embedding-only'})
   assert.equal(settings.model_base_url, DEEPSEEK_BASE_URL)
-  for (const model of [settings.fast_model, settings.support_model, settings.compressor_model]) assert.equal(model, 'deepseek-flash')
+  for (const model of [settings.fast_model, settings.support_model, settings.compressor_model]) assert.equal(model, 'qwen-flash')
   assert.equal(resolveModelApiKey(settings), 'text-only')
   assert.deepEqual(resolveEmbeddingConnection(settings), {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'embedding-only'})
   const memory = requirePersonalMemory(settings)
   assert.ok(memory?.connection === 'local')
-  assert.deepEqual(memory.extraction, {baseUrl: DEEPSEEK_BASE_URL, apiKey: 'text-only'})
+  assert.deepEqual(memory.extraction, {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'embedding-only'})
+  assert.equal(memory.extractionModel, 'qwen-flash')
   assert.equal(memory.embedding.apiKey, 'embedding-only')
   assert.equal(memory.embedding.model, 'text-embedding-v4')
   assert.equal(resolveModelApiKey(loadSettings({DASHSCOPE_API_KEY: 'embedding-only'})), null)
   assert.equal(requirePersonalMemory(loadSettings({DEEPSEEK_API_KEY: 'text-only'})), null)
   assert.equal(resolveEmbeddingConnection(loadSettings({DASHSCOPE_API_KEY: 'secret', EMBEDDING_BASE_URL: 'https://custom.invalid/v1'})).apiKey, '')
   assert.equal(resolveModelApiKey(loadSettings({DEEPSEEK_API_KEY: 'secret', MODEL_BASE_URL: 'https://custom.invalid/v1'})), null)
+})
+
+test('one DashScope key pairs every auxiliary model and memory extraction with DashScope', () => {
+  const settings = loadSettings({DASHSCOPE_API_KEY: 'dash'})
+  assert.equal(settings.integrated_provider, 'qwen')
+  assert.equal(settings.support_model, 'qwen-flash')
+  assert.equal(settings.fast_model, 'qwen-flash')
+  assert.equal(settings.compressor_model, 'qwen-flash')
+  assert.equal(settings.watch_model, 'qwen3-vl-plus')
+  assert.deepEqual(memoryStatus(settings), {enabled: true, reason: null, fallback: null})
+  const memory = requirePersonalMemory(settings)
+  assert.equal(memory?.connection === 'local' && memory.extractionModel, 'qwen-flash')
+  assert.deepEqual(memory?.connection === 'local' && memory.extraction,
+    {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'dash'})
+  const extraction = resolveMemoryExtractionConnection(settings)
+  assert.equal(extraction.missing, null)
+  assert.equal(extraction.model, 'qwen-flash')
+})
+
+test('cascaded auxiliary models follow the selected LLM provider', () => {
+  const qwen = loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'qwen', DASHSCOPE_API_KEY: 'dash'})
+  assert.equal(qwen.support_model, 'qwen-flash')
+  assert.equal(qwen.watch_model, 'qwen3-vl-plus')
+  const deepseek = loadSettings({PIPELINE_MODE: 'cascaded', DEEPSEEK_API_KEY: 'deep', DOUBAO_BIGMODEL_API_KEY: 'speech'})
+  assert.equal(deepseek.cascade_llm_provider, 'deepseek')
+  assert.equal(deepseek.support_model, 'deepseek-flash')
+  assert.equal(deepseek.fast_model, 'deepseek-flash')
+  const selfHosted = loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'self-hosted',
+    CASCADE_LLM_MODEL: 'local-model', SELF_HOSTED_LLM_BASE_URL: 'https://gw.example/v1',
+    SELF_HOSTED_LLM_API_KEY: 'gateway', MEMORY_CONNECTION: 'local',
+    EMBEDDING_API_KEY: 'embed', EMBEDDING_BASE_URL: 'https://e.example/v1'})
+  for (const model of [selfHosted.support_model, selfHosted.fast_model, selfHosted.compressor_model, selfHosted.watch_model]) {
+    assert.equal(model, 'local-model')
+  }
+  assert.equal(resolveMemoryExtractionConnection(selfHosted).model, 'local-model')
+})
+
+test('memory status names a missing extraction credential instead of reporting enabled', () => {
+  const settings = loadSettings({EMBEDDING_API_KEY: 'embed', EMBEDDING_BASE_URL: 'https://e.example/v1',
+    MEMORY_CONNECTION: 'local'})
+  assert.deepEqual(memoryStatus(settings), {enabled: false, reason: 'missing_environment:DEEPSEEK_API_KEY', fallback: null})
+  assert.equal(requirePersonalMemory(settings), null)
+  const noEmbedding = loadSettings({DEEPSEEK_API_KEY: 'text'})
+  assert.deepEqual(memoryStatus(noEmbedding), {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY', fallback: null})
 })

@@ -70,9 +70,10 @@ function evaluateConfigFixture(fixture: ConfigCase): unknown {
 
 function loadPythonOwnedFixtureSettings(environment: NodeJS.ProcessEnv): Settings {
   // Pin the retired Python defaults; product defaults are tested separately.
+  const watchModelConfigured = environment.WATCH_MODEL !== undefined
   environment = {MODEL_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', FAST_MODEL: 'qwen3-vl-plus', ...environment, SUPPORT_MODEL: environment.SURROGATE_MODEL ?? 'qwen-flash'}
   const legacyProvider = stripLikePython(environment.REALTIME_PROVIDER ?? '')
-  if (legacyProvider !== 'volcengine') return {...loadSettings(environment), compressor_model: 'qwen-flash'}
+  if (legacyProvider !== 'volcengine') return {...loadSettings(environment), ...(watchModelConfigured ? {} : {watch_model: null}), compressor_model: 'qwen-flash'}
 
   // The shared fixture still describes the Python reference runtime's retired
   // selector. Adapt that input at the Node test boundary while preserving the
@@ -88,6 +89,9 @@ function loadPythonOwnedFixtureSettings(environment: NodeJS.ProcessEnv): Setting
 
   return Object.freeze({
     ...settings,
+    // The retired Python reference defaulted the watch model to null; product defaults are
+    // tested separately, and an explicit WATCH_MODEL is still passed through.
+    watch_model: watchModelConfigured ? settings.watch_model : null,
     compressor_model: 'qwen-flash',
     dashscope_api_key: fixtureOptional(environment.DASHSCOPE_API_KEY, settings.dashscope_api_key),
     qwen_realtime_url: fixtureString(
@@ -237,6 +241,7 @@ function secretPresent(value: string | null): boolean {
   return value !== null && stripLikePython(value) !== ''
 }
 
- test('Node defaults to DeepSeek Flash for progress and coordinator assessment', () => {
-  assert.equal(loadSettings({}).support_model, 'deepseek-flash')
+ test('Node defaults to the selected provider auxiliary model for progress and coordination', () => {
+  assert.equal(loadSettings({}).support_model, 'qwen-flash')
+  assert.equal(loadSettings({PIPELINE_MODE:'cascaded',DEEPSEEK_API_KEY:'d'}).support_model, 'deepseek-flash')
 })

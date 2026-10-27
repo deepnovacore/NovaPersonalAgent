@@ -29,7 +29,7 @@ test('production cascade forwards usage independently from semantic events with 
   const {buildCascadedRealtimeAssembly, cascadedProviderRegistries} = await import('../src/composition/cascaded-realtime-assembly.js')
   const {loadSettings} = await import('../src/config/config.js')
   const reports: UsageReport[] = []
-  const settings = loadSettings({MEMORY_CONNECTION: 'disabled', PIPELINE_MODE: 'cascaded', DASHSCOPE_API_KEY: 'test', DOUBAO_BIGMODEL_API_KEY: 'test', TAVILY_API_KEY: 'test'})
+  const settings = loadSettings({MEMORY_CONNECTION: 'disabled', PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'qwen', DASHSCOPE_API_KEY: 'test', DOUBAO_BIGMODEL_API_KEY: 'test', TAVILY_API_KEY: 'test'})
   buildCascadedRealtimeAssembly({settings, onUsage: value => reports.push(value)}, {
     ...cascadedProviderRegistries,
     asr: {'self-hosted':()=>{throw Error('unexpected self-hosted ASR')},gemini:()=>{throw new Error('unexpected Gemini speech factory')},volcengine: input => {
