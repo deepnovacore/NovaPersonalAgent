@@ -419,11 +419,13 @@ test('build.details steps merges thinking and tool steps chronologically',{skip:
  const f=await fixture((_request,step)=>step===0?{reasoning:'先读文件',call:{name:'file_write',arguments:{path:'steps.txt',content:'x'}}}:{reasoning:'继续说明',text:'完成'},'never',undefined,undefined,true)
  try{
   const id=await f.build();await f.host.waitConversation(id)
-  const page=await f.command('build.details',{id,view:'steps'}) as {items:{kind:string;id:string;created_at:string|null;text?:string;name?:string}[];total:number;next_offset:number|null;generation:number}
+  const page=await f.command('build.details',{id,view:'steps'}) as {items:{kind:string;id:string;created_at:string|null;text?:string;name?:string}[];total:number;next_offset:number|null;generation:number;first_id:string|null}
   assert.equal(page.total,3);assert.equal(page.next_offset,null);assert.equal(page.generation,0)
-  assert.ok(page.items.some(item=>item.kind==='thinking'&&item.text==='先读文件'))
-  assert.ok(page.items.some(item=>item.kind==='thinking'&&item.text==='继续说明'))
-  assert.ok(page.items.some(item=>item.kind==='tool'&&item.name==='file_write'))
+  assert.equal(page.first_id,page.items[0]?.id)
+  assert.deepEqual(page.items.map(item=>item.kind),['thinking','tool','thinking'])
+  assert.equal(page.items[0]?.text,'先读文件')
+  assert.equal(page.items[1]?.name,'file_write')
+  assert.equal(page.items[2]?.text,'继续说明')
   const times=page.items.map(item=>Date.parse(item.created_at!))
   assert.deepEqual(times,[...times].sort((left,right)=>left-right))
   assert.equal((await f.raw('build.details',{id,view:'steps',offset:-1})).error,'invalid_params')

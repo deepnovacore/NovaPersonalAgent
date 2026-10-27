@@ -188,7 +188,7 @@ export class WorkbenchStore {
    if(items.length&&bytes+size>12000)break
    items.push(step);bytes+=size;index++
   }
-  return {items,total:merged.length,next_offset:index<merged.length?index:null,generation}
+  return {items,total:merged.length,next_offset:index<merged.length?index:null,generation,first_id:merged[0]?.id??null}
  }
 }
 
@@ -219,4 +219,4 @@ export type WorkbenchCallPreview=ReturnType<typeof workbenchCallPreview>
 /** One display step: a bounded thought or the existing compact tool-call preview. */
 export interface WorkbenchThinkingStep {kind:'thinking';id:string;text:string;created_at:string;message_id:string|null}
 export type WorkbenchStep=WorkbenchThinkingStep|({kind:'tool'}&WorkbenchCallPreview)
-export interface WorkbenchStepPage {items:WorkbenchStep[];total:number;next_offset:number|null;generation:number}
+export interface WorkbenchStepPage {items:WorkbenchStep[];total:number;next_offset:number|null;generation:number;/** First id of the full merged list; changes when an old thought is evicted. */first_id:string|null}

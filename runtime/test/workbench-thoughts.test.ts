@@ -48,6 +48,8 @@ test('checkpoints bound thoughts to the newest 64, 8000 codepoints each and 256 
   assert.equal([...kept.at(-1)!.text].length,MAX_WORKBENCH_THOUGHT_CODEPOINTS)
   const persisted=JSON.parse(await readFile(checkpointFile(f.root,'chat:main',0),'utf8')) as {thoughts:WorkbenchThought[]}
   assert.ok(Buffer.byteLength(JSON.stringify(persisted.thoughts))<=MAX_WORKBENCH_THOUGHT_BYTES)
+  const firstPage=await f.store.steps('chat:main',0)
+  assert.equal(firstPage.first_id,kept[0]?.id,'the page exposes the first merged id after eviction')
  }finally{await f.close()}
 })
 
@@ -68,6 +70,7 @@ test('steps merge thoughts and tool previews chronologically and page within lim
   })
   const page=await f.store.steps('chat:main',0)
   assert.equal(page.total,4);assert.equal(page.next_offset,null);assert.equal(page.generation,0)
+  assert.equal(page.first_id,page.items[0]?.id)
   assert.deepEqual(page.items.map(item=>item.kind),['thinking','tool','thinking','tool'])
   assert.deepEqual(page.items.map(item=>item.created_at),[
    '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z','2026-01-01T00:00:02.000Z','2026-01-01T00:00:03.000Z',

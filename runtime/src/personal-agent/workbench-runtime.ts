@@ -259,18 +259,22 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
      const enabled=computerState(),tools=[...baseTools,...(enabled.enabled?computerTools(enabled.direct):[])]
      const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[],turn=randomUUID();let assistant='',preview='',completed=false
      // One bounded thought per model round; display-only, never model input or history.
-     let thinkingChunks:string[]=[],thinkingCodepoints=0
+     let thinkingChunks:string[]=[],thinkingCodepoints=0,thinkingStartedAt:string|null=null
      const addThinking=(text:string):void=>{
       const left=MAX_WORKBENCH_THOUGHT_CODEPOINTS-thinkingCodepoints
       if(left<=0||text==='')return
+      // The thought belongs before the tool calls it produces, so keep the
+      // timestamp of its first delta instead of the round's completion time.
+      thinkingStartedAt??=new Date().toISOString()
       const points=[...text]
       thinkingChunks.push(points.length<=left?text:points.slice(0,left).join(''));thinkingCodepoints+=Math.min(points.length,left)
      }
      const recordThinking=():void=>{
       if(!thinkingChunks.length)return
-      const text=thinkingChunks.join('');thinkingChunks=[];thinkingCodepoints=0
+      const text=thinkingChunks.join(''),created_at=thinkingStartedAt??new Date().toISOString()
+      thinkingChunks=[];thinkingCodepoints=0;thinkingStartedAt=null
       const thoughts=state.thoughts??[]
-      thoughts.push({id:randomUUID(),text,created_at:new Date().toISOString(),...(context?.user_message_id?{message_id:context.user_message_id}:{})})
+      thoughts.push({id:randomUUID(),text,created_at,...(context?.user_message_id?{message_id:context.user_message_id}:{})})
       state.thoughts=thoughts.slice(-MAX_WORKBENCH_THOUGHTS)
      }
      try{
