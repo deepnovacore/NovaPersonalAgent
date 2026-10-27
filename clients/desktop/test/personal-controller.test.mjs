@@ -98,7 +98,7 @@ test('a real exit after connect still raises the disconnect error',()=>{
  const {c}=harness();c.disconnect();assert.equal(c.error,'连接已断开，草稿已保留');assert.equal(c.everConnected,true)
 })
 test('rejected command remains an observable failure',async()=>{
- const {c,sent}=harness();const pending=c.command('memory.forget',{id:'x',expected_version:1});c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:false,error:'version_conflict'});await assert.rejects(pending,/version_conflict/)
+ const {c,sent}=harness();const pending=c.command('memory.forget',{id:'x',expected_version:1});c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:false,error:'version_conflict'});await assert.rejects(pending,error=>error.refusal_code==='version_conflict'&&/核对最新状态/.test(error.message))
 })
 test('pending voice claim gates its text before host state arrives; host release stops capture',async()=>{
  const h=harness({autoVoice:false});const claim=h.c.voice();h.c.draft='not mixed';assert.equal(await h.c.submit(),false)
@@ -277,7 +277,7 @@ test('starting a conversation sends one command, keeps drafts and reuses the req
  const answer=(frame,result)=>c.receive({type:'personal.result',request_id:frame.request_id,...result})
  const first=c.startConversationWithReference(request);await new Promise(resolve=>setImmediate(resolve))
  const frame=sent.at(-1);assert.equal(frame.method,'conversations.start');assert.deepEqual(frame.params,request)
- answer(frame,{ok:false,error:'stale_reference'});await assert.rejects(first,/stale_reference/);assert.equal(c.draft,'keep me','a failed start keeps the unsent draft')
+ answer(frame,{ok:false,error:'stale_reference'});await assert.rejects(first,error=>error.refusal_code==='stale_reference'&&/引用事项已变化/.test(error.message));assert.equal(c.draft,'keep me','a failed start keeps the unsent draft')
  const second=c.startConversationWithReference(request);await new Promise(resolve=>setImmediate(resolve))
  const retry=sent.at(-1);assert.notEqual(retry.request_id,frame.request_id,'a host-reported failure is final, so the next click is a new request')
  c.disconnect();await assert.rejects(second,e=>e.outcome_unknown===true)
@@ -312,5 +312,59 @@ test('known host refusals reach the user as readable Chinese instead of raw code
  assert.match(await fail('build_stop_required'),/先停止/)
  assert.match(await fail('voice_context_unavailable'),/上下文/)
  assert.match(await fail('project_busy'),/占用/)
- assert.equal(await fail('some_unmapped_code'),'some_unmapped_code')
+ const unknown=await fail('some_unmapped_code');assert.doesNotMatch(unknown,/some_unmapped_code/);assert.match(unknown,/没有完成/)
+})
+
+test('a successful clear, generation change, deletion or host mode conflict drops the draft intent',async()=>{
+ const h=harness()
+ const intent=(execution='build')=>{const state=h.c.state('a');state.execution=execution;state.workspace={workspace_id:'w1'};return state}
+ const state=(revision,items)=>h.c.receive({type:'personal.state',revision,feed:[],memory:{entries:[]},conversations:{selected_id:'a',voice_id:null,items,messages:[]}})
+ const cleared=()=>{const value=h.c.state('a');return value.execution===undefined&&value.workspace===undefined}
+ // 1. After the host confirms conversations.clear the renderer intent is retired.
+ intent()
+ const clearing=h.c.command('conversations.clear',{id:'a'}),request=h.sent.at(-1)
+ h.c.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await clearing
+ assert.equal(cleared(),true)
+ // 2. A generation change (host-side clear or replacement) retires it too.
+ state(100,[{id:'a',kind:'chat',title:'A',generation:1}]);intent()
+ state(101,[{id:'a',kind:'chat',title:'A',generation:2}])
+ assert.equal(cleared(),true)
+ // 3. A conversation that disappeared cannot keep its composer intent.
+ state(102,[{id:'a',kind:'chat',title:'A',generation:2}]);intent()
+ state(103,[{id:'b',kind:'chat',title:'B',generation:1}])
+ assert.equal(cleared(),true)
+ // 4. Host kind/mode conflicts win over the renderer's shadow intent.
+ state(104,[{id:'a',kind:'chat',title:'A',generation:2}]);intent()
+ state(105,[{id:'a',kind:'chat',title:'A',generation:2,mode:'plan'}])
+ assert.equal(cleared(),true)
+ state(106,[{id:'a',kind:'chat',title:'A',generation:2}]);intent()
+ state(107,[{id:'a',kind:'build',title:'A',generation:2,build:{status:'running'}}])
+ assert.equal(cleared(),true)
+ state(108,[{id:'a',kind:'chat',title:'A',generation:2,mode:'plan'}]);intent('delegate')
+ state(109,[{id:'a',kind:'chat',title:'A',generation:2,mode:'chat'}])
+ assert.equal(cleared(),true)
+})
+
+test('the composer mode derives from the host once the renderer intent is gone',async()=>{
+ const h=harness(),{composerMode}=await import('../src/renderer/composer-mode.mjs')
+ h.c.state('a').execution='build'
+ assert.equal(composerMode(h.c.selectedConversation,h.c.state('a')),'build')
+ const clearing=h.c.command('conversations.clear',{id:'a'}),request=h.sent.at(-1)
+ h.c.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await clearing
+ assert.equal(composerMode(h.c.selectedConversation,h.c.state('a')),'chat')
+})
+
+test('failed text submissions translate the host code and never print raw validation JSON',()=>{
+ const h=harness(),submit=(request_id,error)=>{
+  const state=h.c.state('a')
+  state.submission={request_id,text:'hello',instance:'host-A',restored:true}
+  h.c.receive({type:'input.text_result',request_id,conversation_id:'a',ok:false,error})
+  return state.error
+ }
+ assert.match(submit('r1','build_finished'),/已经结束/)
+ assert.match(submit('r2','conversation_busy'),/上一件事/)
+ assert.match(submit('r3','voice_active'),/正在使用语音/)
+ const json=submit('r4','[\n  {"origin":"string","code":"invalid_format","message":"Invalid"}\n]')
+ assert.match(json,/不符合要求/)
+ assert.doesNotMatch(json,/origin|invalid_format|[{}[\]]/)
 })

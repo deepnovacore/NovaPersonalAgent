@@ -5,10 +5,11 @@ const LABELS={chat:'Chat',plan:'Plan',build:'Build',delegate:'Delegate'}
 const CAPTIONS={
  chat:'直接对话',
  plan:'先澄清需求并制定计划，再选择 Build 或执行器',
- build:'直接在工作区里动手：读取、编辑、运行命令，同步完成',
+ build:'直接在工作区里动手：读取、编辑、运行命令，同步完成；每次都会新建一个 Build 任务',
  delegate:'制定计划后交给本机执行器异步完成',
  locked:'Build 会话进行中',
 }
+export const COMPOSER_MODE_CAPTIONS=CAPTIONS
 const MODE_KINDS=new Set(['chat','topic'])
 
 /**

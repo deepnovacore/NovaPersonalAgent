@@ -12,7 +12,7 @@ import {mountWorkspaceBar} from './workspace-bar.mjs'
 import {mountComposerMode,composerMode as currentComposerMode} from './composer-mode.mjs'
 import {mountComposerApproval} from './composer-approval.mjs'
 import {mountComputerUseControl} from './computer-use-control.mjs'
-import {createBuildCallLog} from './build-call-log.mjs'
+import {createBuildSteps} from './build-steps.mjs'
 import {createOrbVisualSafe} from './orb-visual.mjs'
 import {ORB_STATE_NAMES} from './state.mjs'
 
@@ -86,7 +86,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const emptyConversation=el('div',undefined,'chat-intro');emptyConversation.append(el('h1',t('有什么需要帮忙？')),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
  const companion=el('div',undefined,'chat-companion'),companionImage=el('img');companion.hidden=true;companionImage.alt='';companion.append(companionImage);head.append(companion)
  const companionAnimation=mountIdleAvatar(companionImage,{movieUrl:new URL('./assets/nova-idle.mp4',import.meta.url).href})
- let identityView=null
+ let identityView=null,hasTranscript=false
  function identity(value){identityView=value;companionImage.alt=value.profile.assistantName;companionAnimation.update(value);syncCompanion();renderHistory(true)}
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
  const stage=el('div',undefined,'voice-stage');stage.hidden=true
@@ -98,12 +98,31 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const pendingBuild=()=>{const item=c.selectedConversation;return Boolean(item)&&item.kind!=='build'&&currentComposerMode(item,c.state(item.id))==='build'}
  const workspaceBar=mountWorkspaceBar(pane,{c,el,button,run,api:api?.personal,visible:pendingBuild})
  const computerPanel=el('div',undefined,'computer-use-host');pane.append(computerPanel)
- let beginning=false
+ let beginning=false,confirmingBuildTask=null
+ /** Build always opens a new conversation, so attached references/todos would otherwise vanish silently. */
+ function confirmBuildNewTask(){
+  if(confirmingBuildTask)return confirmingBuildTask
+  confirmingBuildTask=new Promise(resolve=>{
+   const modal=el('dialog',undefined,'build-switch-dialog')
+   modal.append(el('h2',t('Build 会新建一个任务')),el('p',t('已附加的引用和关联待办不会带到新的 Build 任务。继续会先清空它们，再开始新的任务。')))
+   const actions=el('div',undefined,'build-switch-actions'),stay=el('button',t('取消'),'soft'),leave=el('button',t('继续并新建任务'))
+   stay.type=leave.type='button';actions.append(stay,leave);modal.append(actions)
+   const done=value=>{confirmingBuildTask=null;modal.close?.();modal.remove?.();resolve(value)}
+   stay.addEventListener('click',()=>done(false))
+   leave.addEventListener('click',()=>done(true))
+   modal.addEventListener('cancel',event=>{event.preventDefault?.();done(false)})
+   pane.append(modal);modal.showModal?.();leave.focus?.()
+  })
+  return confirmingBuildTask
+ }
  /** A Build chosen in the composer starts with its first message and has no plan in between. */
  async function sendDraft(){
   if(!pendingBuild())return c.submit()
   const id=c.selectedId,state=c.state(id),text=(state.draft??'').trim(),workspace=workspaceBar.value()
   if(!text||!c.connected||beginning||state.submission)return false
+  // The host's build.begin schema carries no references/source_todo: warn, and only drop them on consent.
+  if((state.references?.length||state.source_todo)&&!await confirmBuildNewTask())return false
+  if(state.references?.length||state.source_todo){state.references=[];state.source_todo=null;renderSource()}
   const submitted=state.draft
   beginning=true;c.changed?.()
   // Clear only what was sent: text typed or a mode picked while the host starts the Build stays.
@@ -162,8 +181,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(show&&!orb){orb=createOrbVisualSafe(stageCanvas,{size:STAGE_ORB_SIZE,palette:'ember',reducedMotion:media('(prefers-reduced-motion: reduce)'),highContrast:media('(prefers-contrast: more)'),...(speakingLevel?{getSpeakingLevel:speakingLevel}:{})});orb.setState(orbState.name,{codexWorking:orbState.codexWorking})}
   else if(!show&&orb){orb.destroy();orb=null}
  }
- // Companionship follows the visible main conversation, independently of backend activity.
- function syncCompanion(){const visible=Boolean(identityView)&&open&&!c.collapsed&&c.selectedId==='chat:main';companion.hidden=!visible;companionAnimation.setIdle(visible)}
+ // Companionship follows the visible main conversation, independently of backend activity; the animated header is the empty-state companion, so it yields to the transcript.
+ function syncCompanion(){const visible=Boolean(identityView)&&open&&!c.collapsed&&c.selectedId==='chat:main'&&!hasTranscript;companion.hidden=!visible;companionAnimation.setIdle(visible)}
  function setOrb({name,statusLine,codexWorking}={}){
   orbState={name:ORB_STATE_NAMES.includes(name)?name:'idle',statusLine:typeof statusLine==='string'?statusLine:'',codexWorking:codexWorking===true}
   stageLabel.textContent=orbState.statusLine
@@ -179,32 +198,48 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  history.addEventListener('scroll',()=>{if(history.scrollHeight-history.scrollTop-history.clientHeight<24)newMessages.hidden=true;deliverPresented();read()});const visible=()=>{deliverPresented();read()};document.addEventListener('visibilitychange',visible);window.addEventListener('focus',visible)
 
  let renderedMessages='',renderedConversation=null
- const buildLog=createBuildCallLog({c,el,changed:()=>renderHistory()})
+ const buildLog=createBuildSteps({c,el,changed:()=>renderHistory()})
  function renderConversations(){
   const items=c.snapshot?.conversations?.items??[]
   const active=items.find(item=>item.id===c.selectedId)
-  summaryTitle.textContent=conversationTitle(active);pane.dataset.main=String(c.selectedId==='chat:main');homeButton.hidden=c.selectedId==='chat:main';homeButton.title=t('返回主对话');homeButton.textContent='← '+t('返回主对话');homeButton.disabled=!c.connected||c.presentationReady===false
+  summaryTitle.textContent=conversationTitle(active);pane.dataset.main=String(c.selectedId==='chat:main');homeButton.hidden=!c.selectedId||c.selectedId==='chat:main';homeButton.title=t('返回主对话');homeButton.textContent='← '+t('返回主对话');homeButton.disabled=!c.connected||c.presentationReady===false
   previewPlan.hidden=active?.mode!=='plan'||!active.plan
   const voiceConversation=items.find(item=>item.id===c.voiceId)
-  voiceStatus.textContent=c.voiceId?`语音：${conversationTitle(voiceConversation)??'另一会话'}${c.voiceCapabilities?.model.nativeFullDuplex?' · 原生双工对话（无工具调用、无历史恢复）':''}`:''
+  const nativeNote=c.voiceCapabilities?.model.nativeFullDuplex?t(' · 原生双工对话（无工具调用、无历史恢复）'):''
+  voiceStatus.textContent=c.voiceId?t('语音：{0}',conversationTitle(voiceConversation)??t('另一会话'))+nativeNote:''
   resumeVoice.hidden=!c.voiceId||c.mode!=='text';resumeVoice.disabled=!c.connected||!c.presentationReady;
   endVoice.hidden=!c.voiceId;endVoice.disabled=!c.connected;voiceLine.hidden=!c.voiceId
  }
  const openLink=api?.personal?.openArticle?(url=>api.personal.openArticle(url)):undefined
- function renderMessage(message){
-  const feedId=typeof message.id==='string'&&message.id.startsWith('feed:')?message.id.slice(5):null
+ /** Assistant-only avatar; the image is decorative, so the name stays in the role label. */
+ function avatarNode(){
+  const wrap=el('span',undefined,'message-avatar'),image=el('img')
+  image.alt='';image.setAttribute('aria-hidden','true');image.src=identityView?.profile?.avatar??identityView?.defaultAvatar??''
+  wrap.append(image);return wrap
+ }
+ function renderMessage(message,{first=false,continuation=false}={}){
+  const user=message.role==='user'
+  const feedId=!user&&typeof message.id==='string'&&message.id.startsWith('feed:')?message.id.slice(5):null
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
-  if(feed){const node=el('article',undefined,'message assistant message-feed');node.dataset.messageId=message.id;node.append(el('small',identityView?.profile.assistantName??'Nova','message-role'),renderMarkdown(feedPlainText(feed,message),{openLink}));return node}
-  const node=el('article',undefined,`message ${message.role==='user'?'user':'assistant'}`);node.dataset.messageId=message.id;node.append(el('small',message.role==='user'?'你':identityView?.profile.assistantName??'Nova','message-role'))
-  if(message.role==='user')node.append(el('p',message.text));else {node.append(renderMarkdown(taskNotificationText(message),{openLink}));if(message.full_text_ref&&c.selectedConversation?.kind==='build'){
-   const full=el('details',undefined,'build-full-reply'),summary=el('summary',t('展开完整回复')),content=el('div',undefined,'build-full-reply-content');full.append(summary,content)
-   let loaded=false,loading=false
-   full.addEventListener('toggle',()=>{if(!full.open||loaded||loading)return;loading=true;content.replaceChildren(el('p',t('正在加载完整回复…'),'hint'));void (async()=>{try{const id=c.selectedId;let offset=0,text='';do{const page=await c.command('build.details',{id,view:'reply',message_id:message.turn_id,offset});if(id!==c.selectedId)return;text+=page.text;offset=page.next_offset}while(offset!==null);if(id!==c.selectedId)return;content.replaceChildren(renderMarkdown(text,{openLink}));loaded=true}catch(error){content.replaceChildren(el('p',t('完整回复加载失败：{0}',error.message),'hint'))}finally{loading=false}})()})
-   node.append(full)
-  }}
-  if(message.schedule_ref&&openSchedule){const ref=message.schedule_ref,card=el('div',undefined,'message-schedule');card.dataset.scheduleId=ref.schedule_id;const schedule=c.snapshot?.schedules?.items?.find(item=>item.id===ref.schedule_id);card.append(el('span','◷','schedule-emblem'));button(schedule?.title??t('查看定时任务'),()=>openSchedule(ref.schedule_id),card);if(ref.task_id)button(t('查看任务'),()=>openTask(ref.task_id),card);node.append(card)}
-  if(message.references?.length)node.append(el('small',t('引用 {0} 个事项',message.references.length),'message-reference'));
-  const generationLabel={pending:'正在回复…',failed:'回复失败，请重新发送',interrupted:'回复已中断，请重新发送'}[message.generation_status];if(generationLabel)node.append(el('small',generationLabel,'hint'))
+  const node=el('article',undefined,`message ${user?'user':'assistant'}${feed?' message-feed':''}${continuation?' message-continuation':''}`);node.dataset.messageId=message.id
+  if(!user&&first)node.append(avatarNode())
+  const body=el('div',undefined,'message-body')
+  body.append(el('small',user?identityView?.profile?.userName?.trim()||t('你'):identityView?.profile.assistantName??'Nova','message-role'))
+  node.append(body)
+  if(user){body.append(el('p',message.text))}
+  else if(feed){body.append(renderMarkdown(feedPlainText(feed,message),{openLink}));return node}
+  else {
+   body.append(renderMarkdown(taskNotificationText(message),{openLink}))
+   if(message.full_text_ref&&c.selectedConversation?.kind==='build'){
+    const full=el('details',undefined,'build-full-reply'),summary=el('summary',t('展开完整回复')),content=el('div',undefined,'build-full-reply-content');full.append(summary,content)
+    let loaded=false,loading=false
+    full.addEventListener('toggle',()=>{if(!full.open||loaded||loading)return;loading=true;content.replaceChildren(el('p',t('正在加载完整回复…'),'hint'));void (async()=>{try{const id=c.selectedId;let offset=0,text='';do{const page=await c.command('build.details',{id,view:'reply',message_id:message.turn_id,offset});if(id!==c.selectedId)return;text+=page.text;offset=page.next_offset}while(offset!==null);if(id!==c.selectedId)return;content.replaceChildren(renderMarkdown(text,{openLink}));loaded=true}catch(error){content.replaceChildren(el('p',t('完整回复加载失败：{0}',error.message),'hint'))}finally{loading=false}})()})
+    body.append(full)
+   }
+  }
+  if(message.schedule_ref&&openSchedule){const ref=message.schedule_ref,card=el('div',undefined,'message-schedule');card.dataset.scheduleId=ref.schedule_id;const schedule=c.snapshot?.schedules?.items?.find(item=>item.id===ref.schedule_id);card.append(el('span','◷','schedule-emblem'));button(schedule?.title??t('查看定时任务'),()=>openSchedule(ref.schedule_id),card);if(ref.task_id)button(t('查看任务'),()=>openTask(ref.task_id),card);body.append(card)}
+  if(message.references?.length)body.append(el('small',t('引用 {0} 个事项',message.references.length),'message-reference'));
+  const generationLabel={pending:t('正在回复…'),failed:t('回复失败，请重新发送'),interrupted:t('回复已中断，请重新发送')}[message.generation_status];if(generationLabel)body.append(el('small',generationLabel,'hint'))
   return node
  }
  function renderHistory(force=false){
@@ -212,19 +247,24 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const turns=new Set(persisted.map(message=>message.turn_id).filter(Boolean))
   const isBuild=c.selectedConversation?.kind==='build'
   const live=[...liveCaptions.values()].filter(frame=>frame.conversation_id===c.selectedId&&(frame.role!=='user'||frame.conversation_id===c.voiceId)&&!turns.has(frame.turn_id)&&(!isBuild||['running','awaiting_approval'].includes(c.selectedConversation?.build?.status)))
+  // The animated companion belongs to the empty intro only; it yields as soon as the transcript has a message.
+  const transcriptPresent=persisted.length>0||live.length>0,transcriptChanged=transcriptPresent!==hasTranscript
+  hasTranscript=transcriptPresent
   const key=JSON.stringify([c.selectedId,persisted,live,isBuild?buildLog.key:null,c.snapshot?.feed,c.snapshot?.memory,c.connected,c.snapshot?.settings?.timezone])
-  if(key===renderedMessages&&!force)return
+  if(key===renderedMessages&&!force){if(transcriptChanged)syncCompanion();return}
   const changedConversation=renderedConversation!==c.selectedId,previousTop=history.scrollTop;const nearBottom=history.scrollHeight-history.scrollTop-history.clientHeight<80
   if(changedConversation&&renderedConversation)positions.set(renderedConversation,{top:previousTop,bottom:nearBottom})
   const previousNodes=[...history.children],focused=history.contains(document.activeElement)?document.activeElement:null
   history.replaceChildren()
   if(c.selectedId==='chat:main'&&c.snapshot?.conversations?.home_truncated)history.append(el('p',t('部分提醒历史已收起，可从会话列表查看原对话。'),'hint'))
-  if(!persisted.length&&!live.length)history.append(c.selectedId==='chat:main'?intro:emptyConversation)
-  let day=null
+  if(!transcriptPresent)history.append(c.selectedId==='chat:main'?intro:emptyConversation)
+  let day=null,previousAssistant=false
   for(const message of orderTranscript(persisted,live)){
    if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
-   history.append(renderMessage(message))
-   if(isBuild&&message.role==='user')history.append(...buildLog.forMessage(message.id))
+   const user=message.role==='user',continuation=!user&&previousAssistant
+   history.append(renderMessage(message,{first:!user&&!previousAssistant,continuation}))
+   previousAssistant=!user
+   if(isBuild&&user)history.append(...buildLog.forMessage(message.id))
   }
   if(isBuild)history.append(...buildLog.remaining(new Set(persisted.map(message=>message.id))))
   for(const node of previousNodes)if(!history.contains(node))disposeSources(node)
@@ -233,6 +273,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const position=changedConversation?positions.get(c.selectedId):null
   history.scrollTop=changedConversation?(position&&!position.bottom?position.top:history.scrollHeight):nearBottom?history.scrollHeight:previousTop
   newMessages.hidden=(!persisted.length&&!live.length)||changedConversation||nearBottom
+  if(transcriptChanged)syncCompanion()
  }
  /** Receipts follow visibility, not transcript rebuilds: expanding the workbench or reopening the pane re-checks every rendered card. */
  function deliverPresented(){

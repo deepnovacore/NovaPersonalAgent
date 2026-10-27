@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src data:; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>设置</title>
+    <link rel="stylesheet" href="./controls.css">
     <link rel="stylesheet" href="./settings.css">
     <link rel="stylesheet" href="./welcome.css">
     <link rel="stylesheet" href="./feishu-guide.css">
@@ -68,15 +69,19 @@
       </section>
       <section class="setting-section" id="language-section">
         <h2>语言 / Language</h2>
-        <label for="language">语言 / Language</label>
-        <select id="language"><option value="zh-CN">简体中文</option><option value="en">English</option></select>
-        <p id="language-restart-hint" class="hint" role="status" hidden>保存并重启后生效。</p>
+        <div class="field">
+          <label for="language">界面语言</label>
+          <select id="language"><option value="zh-CN">简体中文</option><option value="en">English</option></select>
+          <small id="language-restart-hint" role="status" hidden>保存并重启后生效。</small>
+        </div>
       </section>
       <section class="setting-section" id="startup-view-section">
         <h2>启动时打开</h2>
-        <label for="startup-view">默认界面</label>
-        <select id="startup-view"><option value="orb">Orb（悬浮球）</option><option value="workbench">Workbench（工作台）</option><option value="last">上次使用</option></select>
-        <p class="hint">下次启动时生效；上次使用会记住最后打开的悬浮球或工作台。</p>
+        <div class="field">
+          <label for="startup-view">默认界面</label>
+          <select id="startup-view"><option value="orb">Orb（悬浮球）</option><option value="workbench">Workbench（工作台）</option><option value="last">上次使用</option></select>
+          <small>下次启动时生效；上次使用会记住最后打开的悬浮球或工作台。</small>
+        </div>
       </section>
       <section class="setting-section" id="hub-connection-section">
         <div class="phone-heading"><div><h2>手机同步 Hub</h2><p>在 Mac 后台运行 Hub，供 Android 手机同步资料与设备任务。</p></div></div>
@@ -114,9 +119,9 @@
         <div id="phone-devices" aria-label="已配对设备" hidden></div>
         <div class="phone-bottom"><details id="phone-advanced"><summary>高级设置</summary>
           <p class="note">通常无需修改，留空即由 Nova 自动管理。</p>
-          <div class="field"><label for="phone-server-url">自定义地址</label><input id="phone-server-url" type="text" placeholder="自动检测" autocomplete="off" spellcheck="false"></div>
-          <div class="field"><label for="phone-server-port">已有服务端口</label><input id="phone-server-port" type="number" min="1" max="65535" placeholder="自动管理"></div>
-          <div class="field"><label for="phone-server-token-file">认证文件</label><input id="phone-server-token-file" type="text" placeholder="认证文件路径" autocomplete="off" spellcheck="false"></div>
+          <div class="field field-stacked"><label for="phone-server-url">自定义地址</label><input id="phone-server-url" type="text" placeholder="自动检测" autocomplete="off" spellcheck="false"></div>
+          <div class="field field-stacked"><label for="phone-server-port">已有服务端口</label><input id="phone-server-port" type="number" min="1" max="65535" placeholder="自动管理"></div>
+          <div class="field field-stacked"><label for="phone-server-token-file">认证文件</label><input id="phone-server-token-file" type="text" placeholder="认证文件路径" autocomplete="off" spellcheck="false"></div>
           <button type="button" id="phone-pairing-open">保存并连接</button>
         </details><button type="button" id="phone-disable" class="phone-text-button" hidden>停用手机连接</button></div>
       </section>
@@ -127,7 +132,7 @@
           <button type="button" class="usage-scope" id="usage-session" aria-pressed="true"><span>本次运行</span><strong id="usage-session-cost">—</strong><span id="usage-session-count">0 次调用</span></button>
         </div>
         <p id="frontend-usage" role="status" aria-live="polite">模型调用后显示用量</p>
-        <p class="usage-note">包含对话与后台任务，费用为估算值。</p><p class="usage-note">部分外部工具的用量可能未计入。</p><label for="usage-group">统计维度</label><select id="usage-group"><option value="features">按功能</option><option value="models">按模型</option><option value="runs">按任务运行（最近 100 组）</option></select>
+        <p class="usage-note">包含对话与后台任务，费用为估算值。</p><p class="usage-note">部分外部工具的用量可能未计入。</p><div class="field"><label for="usage-group">统计维度</label><select id="usage-group"><option value="features">按功能</option><option value="models">按模型</option><option value="runs">按任务运行（最近 100 组）</option></select></div>
         <details id="usage-breakdown" open hidden><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
       </section>
       <section class="setting-section" id="skills-section"><h2>技能</h2><div id="skills-panel"></div></section>
@@ -172,13 +177,13 @@
         <p class="hint" id="memory-prerecall-hint">默认关闭，需要时仍可回忆。保存并重启后生效。</p>
         <p class="hint">先在「执行器与 MCP」中启用知识库。文档保存在本机，检索与回答会使用所选模型服务。</p>
         <div class="field"><label for="embeddingProvider">向量服务</label><select id="embeddingProvider"><option value="dashscope">DashScope</option></select></div>
-        <div class="field"><label for="embeddingModel">向量模型</label><input id="embeddingModel" type="text"></div>
-        <div class="field"><label for="knowledgePath">存储位置</label><input id="knowledgePath" type="text" placeholder="留空使用默认位置"></div>
-        <div class="field"><label for="capabilitiesConfigPath">能力配置文件</label><input id="capabilitiesConfigPath" type="text" placeholder="留空使用默认配置"></div>
+        <div class="field field-stacked"><label for="embeddingModel">向量模型</label><input id="embeddingModel" type="text"></div>
+        <div class="field field-stacked"><label for="knowledgePath">存储位置</label><input id="knowledgePath" type="text" placeholder="留空使用默认位置"></div>
+        <div class="field field-stacked"><label for="capabilitiesConfigPath">能力配置文件</label><input id="capabilitiesConfigPath" type="text" placeholder="留空使用默认配置"></div>
         <div id="knowledge-panel" hidden>
           <p class="hint">支持文本、Markdown、代码、PDF、DOCX，单文件最多 10 MB。更换模型后需重建来源。</p>
           <div class="knowledge-actions"><button type="button" id="knowledge-files">添加文件</button> <button type="button" id="knowledge-folder">添加文件夹</button> <button type="button" id="knowledge-refresh">刷新</button></div>
-          <div class="field"><label for="knowledge-url">公开网页 URL</label><input id="knowledge-url" type="url" maxlength="2048"><button type="button" id="knowledge-add-url">导入网页</button></div>
+          <div class="field field-stacked"><label for="knowledge-url">公开网页 URL</label><input id="knowledge-url" type="url" maxlength="2048"><button type="button" id="knowledge-add-url">导入网页</button></div>
           <p id="knowledge-status" role="status" aria-live="polite"></p>
           <ul id="knowledge-sources"></ul>
         </div>
@@ -189,7 +194,7 @@
           <legend>本地语音唤醒</legend>
           <label class="toggle-row" title="空闲后悬浮球缩成小气泡，在本机监听“你好星核 / Hi Nova”；闭麦时停止唤醒检测。"><input id="wake-word-enabled" type="checkbox" role="switch">启用“你好星核 / Hi Nova”唤醒</label>
           <small>空闲后悬浮球缩成小气泡，仅在本机监听唤醒词。首次开启需下载模型。</small>
-          <div class="field">
+          <div class="field field-stacked">
             <label for="auto-hide-seconds" title="空闲多久后休眠；0 表示不自动休眠。">空闲休眠秒数</label>
             <input id="auto-hide-seconds" type="number" min="0" max="3600" step="1" value="60">
             <small>0 为关闭，或设置为 30–3600 秒。</small>
@@ -313,6 +318,33 @@
           </div>
         </details>
       </section>
+      <section class="setting-section" id="display-section">
+        <h2>显示</h2>
+        <div class="field">
+          <label for="display-steps">工作步骤展示</label>
+          <select id="display-steps">
+            <option value="compact">简洁</option>
+            <option value="standard" selected>标准</option>
+            <option value="detailed">详细</option>
+          </select>
+          <small>控制 Build 中工作步骤的详细程度，修改立即生效。</small>
+        </div>
+        <div class="field">
+          <label for="display-collapse">工作步骤收起时机</label>
+          <select id="display-collapse">
+            <option value="after_reply" selected>回答结束后</option>
+            <option value="manual">手动</option>
+          </select>
+          <small>回答结束后自动收起，或保留展开直到你手动收起。</small>
+        </div>
+        <label class="toggle-row">
+          <span class="toggle-copy">
+            <span class="toggle-title">模型思考（Build）</span>
+            <span class="toggle-hint" id="build-reasoning-hint">开启后会保存模型的思考过程，可能增加等待时间和模型用量；保存并重启后生效。</span>
+          </span>
+          <input type="checkbox" role="switch" id="buildReasoning" aria-describedby="build-reasoning-hint">
+        </label>
+      </section>
       <section class="setting-section" id="diary-section">
         <h2>日记与简报</h2>
         <div id="diary-panel"></div>
@@ -402,8 +434,8 @@
             <div id="compatible-asr-settings" hidden>
               <div class="field"><label for="compatible-asr-preset">服务预设</label><select id="compatible-asr-preset"><option value="">自定义</option></select></div>
               <p class="hint">预设只填写接口参数，请确认账号可用的模型。更改地址会清除本阶段密钥。</p>
-              <div class="field"><label for="compatibleAsrBaseUrl">API Base URL</label><input id="compatibleAsrBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
-              <div class="field"><label for="compatibleAsrModel">模型 ID</label><input id="compatibleAsrModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
+              <div class="field field-stacked"><label for="compatibleAsrBaseUrl">API Base URL</label><input id="compatibleAsrBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
+              <div class="field field-stacked"><label for="compatibleAsrModel">模型 ID</label><input id="compatibleAsrModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
               <p class="hint">说完一句后才显示识别结果。</p>
               <label class="toggle-row"><input type="checkbox" role="switch" id="compatibleAsrOmitResponseFormat">省略 ASR response_format 参数（Mistral、智谱）</label>
               <details class="advanced-keys custom-endpoint" data-endpoint="compatibleAsrApiKey"><summary>自定义端点密钥</summary>
@@ -416,7 +448,7 @@
               </details>
             </div>
             <div id="self-hosted-asr-settings" hidden>
-              <div class="field"><label for="selfHostedAsrUrl">自托管 ASR 地址</label><input id="selfHostedAsrUrl" type="url" placeholder="wss://host/asr" maxlength="2048" autocomplete="off" spellcheck="false"></div>
+              <div class="field field-stacked"><label for="selfHostedAsrUrl">自托管 ASR 地址</label><input id="selfHostedAsrUrl" type="url" placeholder="wss://host/asr" maxlength="2048" autocomplete="off" spellcheck="false"></div>
               <details class="advanced-keys custom-endpoint" data-endpoint="selfHostedAsrApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="selfHostedAsrApiKey">
                 <label for="selfHostedAsrApiKey">自托管 ASR 密钥（可选）</label>
@@ -430,7 +462,7 @@
             <section aria-label="声纹验证">
               <h4>声纹验证</h4>
               <p class="hint">声纹功能仅支持火山引擎 ASR。</p>
-              <div class="field"><label for="voiceprint-upload-url">声纹上传服务地址</label><input id="voiceprint-upload-url" type="url" placeholder="HTTPS" autocomplete="off"></div>
+              <div class="field field-stacked"><label for="voiceprint-upload-url">声纹上传服务地址</label><input id="voiceprint-upload-url" type="url" placeholder="HTTPS" autocomplete="off"></div>
               <p id="voiceprint-health" class="hint" role="status"></p>
               <div id="voiceprint-controls" hidden>
                 <p class="hint">请在安静环境下独自朗读 12 秒。录音将上传至配置的服务和火山引擎用于注册；注册后清理临时录音，声纹保留在您的火山应用中。</p>
@@ -462,7 +494,7 @@
             <div id="compatible-llm-settings" hidden>
               <div class="field"><label for="compatible-llm-preset">服务预设</label><select id="compatible-llm-preset"><option value="">自定义</option></select></div>
               <p class="hint">预设只填写接口参数，请确认账号可用的模型。更改地址会清除本阶段密钥。</p>
-              <div class="field"><label for="openaiCompatibleBaseUrl">API Base URL</label><input id="openaiCompatibleBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
+              <div class="field field-stacked"><label for="openaiCompatibleBaseUrl">API Base URL</label><input id="openaiCompatibleBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
               <div class="field"><label for="openaiCompatibleProtocol">协议</label><select id="openaiCompatibleProtocol"><option value="chat-completions">Chat Completions</option><option value="responses">Responses</option></select></div>
               <p class="hint">请在下方填写模型 ID，部分能力取决于所选模型。</p>
               <details class="advanced-keys custom-endpoint" data-endpoint="openaiCompatibleApiKey"><summary>自定义端点密钥</summary>
@@ -475,7 +507,7 @@
               </details>
             </div>
             <div id="self-hosted-llm-settings" hidden>
-              <div class="field"><label for="selfHostedLlmBaseUrl">自托管 LLM 地址</label><input id="selfHostedLlmBaseUrl" type="url" placeholder="https://host/v1" maxlength="2048" autocomplete="off" spellcheck="false"></div>
+              <div class="field field-stacked"><label for="selfHostedLlmBaseUrl">自托管 LLM 地址</label><input id="selfHostedLlmBaseUrl" type="url" placeholder="https://host/v1" maxlength="2048" autocomplete="off" spellcheck="false"></div>
               <details class="advanced-keys custom-endpoint" data-endpoint="selfHostedLlmApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="selfHostedLlmApiKey">
                 <label for="selfHostedLlmApiKey">自托管 LLM 密钥（可选）</label>
@@ -505,9 +537,9 @@
             <div id="compatible-tts-settings" hidden>
               <div class="field"><label for="compatible-tts-preset">服务预设</label><select id="compatible-tts-preset"><option value="">自定义</option></select></div>
               <p class="hint">预设只填写接口参数，请确认账号可用的模型。更改地址会清除本阶段密钥。</p>
-              <div class="field"><label for="compatibleTtsBaseUrl">API Base URL</label><input id="compatibleTtsBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
-              <div class="field"><label for="compatibleTtsModel">模型 ID</label><input id="compatibleTtsModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
-              <div class="field"><label for="compatibleTtsVoice">音色 ID</label><input id="compatibleTtsVoice" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
+              <div class="field field-stacked"><label for="compatibleTtsBaseUrl">API Base URL</label><input id="compatibleTtsBaseUrl" type="url" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></div>
+              <div class="field field-stacked"><label for="compatibleTtsModel">模型 ID</label><input id="compatibleTtsModel" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
+              <div class="field field-stacked"><label for="compatibleTtsVoice">音色 ID</label><input id="compatibleTtsVoice" type="text" maxlength="256" autocomplete="off" spellcheck="false"></div>
               <label class="toggle-row"><input type="checkbox" role="switch" id="compatibleTtsSendSampleRate">发送 24000 Hz 采样率参数</label>
               <p class="hint">仅在服务支持时开启。</p>
               <details class="advanced-keys custom-endpoint" data-endpoint="compatibleTtsApiKey"><summary>自定义端点密钥</summary>
@@ -520,7 +552,7 @@
               </details>
             </div>
             <div id="self-hosted-tts-settings" hidden>
-              <div class="field"><label for="selfHostedTtsUrl">自托管 TTS 地址</label><input id="selfHostedTtsUrl" type="url" placeholder="https://host/tts" maxlength="2048" autocomplete="off" spellcheck="false"></div>
+              <div class="field field-stacked"><label for="selfHostedTtsUrl">自托管 TTS 地址</label><input id="selfHostedTtsUrl" type="url" placeholder="https://host/tts" maxlength="2048" autocomplete="off" spellcheck="false"></div>
               <details class="advanced-keys custom-endpoint" data-endpoint="selfHostedTtsApiKey"><summary>自定义端点密钥</summary>
               <div class="secret" data-key="selfHostedTtsApiKey">
                 <label for="selfHostedTtsApiKey">自托管 TTS 密钥（可选）</label>
@@ -530,7 +562,7 @@
               </div>
               </details>
             </div>
-            <div class="field" id="cascaded-tts-voice-settings">
+            <div class="field field-stacked" id="cascaded-tts-voice-settings">
               <div id="gemini-tts-settings" hidden><label for="geminiTtsModel">Gemini TTS 模型</label><input id="geminiTtsModel" type="text" maxlength="64" autocomplete="off"><p class="hint">分段合成并播放，每段会有短暂等待。</p></div>
               <label for="cascadedTtsVoicePreset">音色</label>
               <div class="voice-picker">
@@ -544,7 +576,7 @@
             <details id="chatgpt-settings">
               <summary>ChatGPT 账号（官方登录）</summary>
               <p>主对话可使用 ChatGPT 套餐；语音识别和合成仍使用各自的服务。</p>
-              <label for="chatgpt-account">账号</label><select id="chatgpt-account"><option value="">添加账号</option></select>
+              <div class="field"><label for="chatgpt-account">账号</label><select id="chatgpt-account"><option value="">添加账号</option></select></div>
               <button type="button" id="chatgpt-login">Continue with ChatGPT</button>
               <button type="button" id="chatgpt-cancel">取消登录</button>
               <button type="button" id="chatgpt-refresh">刷新账号状态</button>
@@ -673,7 +705,7 @@
             <h3 id="coding-backend-title"></h3>
             <p id="coding-backend-status" class="connection-status" role="status"></p>
             <p id="coding-backend-guidance" class="hint"></p>
-            <div class="field"><label for="coding-binary-path">可执行文件路径</label><input id="coding-binary-path" type="text" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="留空自动查找，或填写完整路径"></div>
+            <div class="field field-stacked"><label for="coding-binary-path">可执行文件路径</label><input id="coding-binary-path" type="text" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="留空自动查找，或填写完整路径"></div>
             <div id="coding-config-field" class="field"><label id="coding-config-label" for="coding-config-path"></label><input id="coding-config-path" type="text" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="留空使用默认位置"></div>
             <p class="hint">修改在保存并重启后用于新会话。登录与密钥由各工具自行管理。</p>
           </div>
@@ -692,16 +724,16 @@
           <button type="button" id="codex-rescan" class="icon-button" aria-label="重新检测 Codex" title="重新检测 Codex"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg></button>
           </div>
           <div id="codex-manual-settings" hidden>
-            <div class="field">
+            <div class="field field-stacked">
               <label for="codexBinaryPath">Codex 可执行文件</label>
               <input type="text" id="codexBinaryPath" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="输入完整路径">
             </div>
-            <div class="field">
+            <div class="field field-stacked">
               <label for="codexWorkspace">当前工作区</label>
               <input type="text" id="codexWorkspace" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="默认 ~/.nova-audio-agent/workspaces/default">
               <small>当前有效值：<code id="effective-workspace"></code></small>
             </div>
-            <div class="field">
+            <div class="field field-stacked">
               <label for="codexManagedRoot">工作区根目录</label>
               <input type="text" id="codexManagedRoot" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="默认 ~/.nova-audio-agent/workspaces">
               <small>当前有效值：<code id="effective-managed-root"></code></small>

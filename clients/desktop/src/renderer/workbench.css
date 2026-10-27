@@ -37,6 +37,7 @@ body[data-personal-collapsed="false"]{background:transparent;overflow:hidden}
 body[data-opaque="1"] .workbench,body[data-maximized="1"] .workbench{border-radius:0}
 /* Windows clips the opaque workbench to the system window corners. */
 body[data-platform="win32"] .workbench{border-radius:0}
+.workbench{--control-bg:var(--surface-raised);--control-bg-hover:var(--surface);--control-line:var(--line);--control-line-hover:var(--line-strong);--control-ink:var(--ink)}
 .page-head,.chat-head{-webkit-app-region:drag}
 .page-head :is(button,select,input),.chat-head :is(button,select,input,details){-webkit-app-region:no-drag}
 .workbench button{font:inherit;color:inherit;user-select:none;cursor:pointer;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-raised);padding:5px 10px;font-size:12px;line-height:1.4}
@@ -50,7 +51,9 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .workbench h1,.workbench h2,.workbench h3,.workbench h4,.workbench p{margin:0}
 .workbench .hint{font-size:12px;color:var(--ink-faint);line-height:1.6}
 .workbench [hidden]{display:none!important}
-.workbench textarea,.workbench input:not([type=checkbox]):not([type=radio]),.workbench select{font:inherit;font-size:13px;color:var(--ink);background:var(--surface-inset);border:1px solid var(--line);border-radius:var(--radius-sm);padding:7px 9px;width:100%}
+.workbench textarea,.workbench input:not([type=checkbox]):not([type=radio]){font:inherit;font-size:13px;color:var(--ink);background:var(--surface-inset);border:1px solid var(--line);border-radius:var(--radius-sm);padding:7px 9px;width:100%}
+/* Select geometry comes from controls.css; only the workbench type scale differs. */
+.workbench select{font-size:13px}
 .workbench textarea{resize:vertical;min-height:64px}
 .workbench label{display:grid;gap:4px;font-size:12px;color:var(--ink-dim)}
 .workbench label.consent,.workbench label.personal-consent{grid-template-columns:auto 1fr;align-items:center;gap:8px;color:var(--ink)}
@@ -128,7 +131,7 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .workbench button.card-body:disabled{opacity:1;cursor:text}
 .card-footer{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin-top:6px;padding-top:10px;border-top:1px solid var(--line)}
 .workbench .card-footer .card-actions{margin:0 0 0 auto}
-.workbench .card-footer>select{width:auto;font-size:12px;padding:4px 24px 4px 8px}
+.workbench .card-footer>select{width:auto;font-size:12px}
 .workbench .personal-card.life-card{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
 .workbench .personal-card.life-card>*{flex-basis:auto}
 .life-card>p:empty,.life-card>.chips:empty{display:none}
@@ -290,8 +293,8 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .presentation-waiting{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px}
 .presentation-waiting:empty{display:none}
 .presentation-waiting button{background:var(--accent-wash);border-color:transparent;color:var(--accent)}
-.page-head>select{width:auto;font-size:12px;padding:5px 24px 5px 9px;background-color:transparent;border-color:transparent;color:var(--ink-dim)}
-.page-head>select:hover:not(:disabled){background-color:var(--surface-inset);color:var(--ink)}
+.page-head>select{width:auto;min-width:0;max-width:160px;font-size:12px;color:var(--ink-dim)}
+@media(hover:hover){.page-head>select:hover:not(:disabled){color:var(--ink)}}
 .feed-card .feed-body{font-size:13px;color:var(--ink)}
 .feed-card .md{display:flex;flex-direction:column;gap:6px}
 
@@ -414,7 +417,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .schedule-list{display:grid;gap:12px}.schedule-card{display:flex;align-items:center;gap:16px;padding:19px 20px;background:var(--surface-raised);border:1px solid var(--line);border-radius:18px;transition:border-color .15s}.schedule-card:hover{border-color:var(--line-strong)}.schedule-card[data-enabled=false] .schedule-emblem{color:var(--ink-faint);background:var(--surface-inset)}.schedule-card-copy{flex:1;min-width:0}.schedule-card h3{font-size:15px;margin:0 0 4px;overflow-wrap:anywhere}.schedule-card p{margin:0 0 6px}.schedule-card small{color:var(--accent);font-size:11px}.schedule-card[data-enabled=false] small{color:var(--ink-faint)}
 .schedule-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:32px 22px;background:var(--surface-raised);border:1px dashed var(--line-strong);border-radius:20px}.schedule-empty h3{font-size:17px;margin:14px 0 2px}.schedule-empty p{margin:4px 0}
 .schedule-section-heading{display:flex;justify-content:space-between;align-items:center;margin:28px 0 14px;font-size:14px}.schedule-section-heading h3{margin:0;font-size:14px}.schedule-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.schedule-preset{display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:22px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(145deg,var(--accent-wash),transparent 75%),var(--surface-raised)}.schedule-preset[data-tone=violet]{background:linear-gradient(145deg,rgba(139,113,206,.12),transparent 75%),var(--surface-raised)}.schedule-preset[data-tone=violet] .schedule-emblem{background:rgba(139,113,206,.12);color:#9373cc}.schedule-preset h3{font-size:16px;line-height:1.6;margin:0}.schedule-preset p{margin:0;flex:1}.schedule-preset small{color:var(--ink-dim)}
-.schedule-editor{padding:24px;background:var(--surface-raised);border:1px solid var(--line);border-radius:20px;max-width:780px;margin:auto}.schedule-editor h3{font-size:20px;margin:0 0 8px}.schedule-field{display:flex;flex-direction:column;gap:7px;margin:18px 0;color:var(--ink-dim);font-size:12px}.schedule-field>span{font-weight:600}.workbench .schedule-field input,.workbench .schedule-field textarea,.workbench .schedule-field select{border-radius:10px;padding:11px 12px;background:var(--surface);box-sizing:border-box}.schedule-field textarea{resize:vertical;min-height:76px;line-height:1.7}.schedule-timing{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.schedule-timing .schedule-field{margin:8px 0 14px}.schedule-weekdays{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 18px}.workbench .schedule-weekdays button{padding:7px 11px}.schedule-weekdays button[aria-pressed=true]{background:var(--accent-wash);color:var(--accent);border-color:var(--accent)}
+.schedule-editor{padding:24px;background:var(--surface-raised);border:1px solid var(--line);border-radius:20px;max-width:780px;margin:auto}.schedule-editor h3{font-size:20px;margin:0 0 8px}.schedule-field{display:flex;flex-direction:column;gap:7px;margin:18px 0;color:var(--ink-dim);font-size:12px}.schedule-field>span{font-weight:600}.workbench .schedule-field input,.workbench .schedule-field textarea{border-radius:10px;padding:11px 12px;background:var(--surface);box-sizing:border-box}.workbench .schedule-field select{width:100%;background-color:var(--surface)}.schedule-field textarea{resize:vertical;min-height:76px;line-height:1.7}.schedule-timing{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.schedule-timing .schedule-field{margin:8px 0 14px}.schedule-weekdays{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 18px}.workbench .schedule-weekdays button{padding:7px 11px}.schedule-weekdays button[aria-pressed=true]{background:var(--accent-wash);color:var(--accent);border-color:var(--accent)}
 .schedule-preview{padding:12px 15px;border-radius:12px;color:var(--accent);background:var(--accent-wash);font-size:12px;line-height:1.7}.schedule-editor details{padding-top:12px;margin-top:12px;border-top:1px solid var(--line)}.schedule-scopes{display:flex;flex-wrap:wrap;gap:12px 20px;margin:12px 0}.schedule-scopes label{display:flex;align-items:center;gap:6px}.schedule-actions{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 8px}.schedule-editor .schedule-actions{justify-content:flex-end}.schedule-error{font-size:12px;line-height:1.6;color:var(--warn)}.schedule-error:empty{display:none}.schedule-goal{white-space:pre-wrap;line-height:1.9;color:var(--ink-dim)}
 .schedule-run{border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:12px;background:var(--surface-raised)}.schedule-run>small{color:var(--ink-faint)}.schedule-run>p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8;max-height:360px;overflow:auto}.schedule-adoption{padding:20px;background:var(--surface-raised);border:1px solid var(--accent);border-radius:16px}.schedule-removal{margin-top:30px;border-top:1px solid var(--line);padding-top:18px}.schedule-removal>summary{color:var(--warn)}.message-schedule{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--surface-raised)}.message-schedule .schedule-emblem{width:32px;height:32px;font-size:20px}
 @keyframes schedule-enter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
@@ -430,7 +433,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .message{width:min(100%,760px);align-self:center;font-size:14px;line-height:1.8}
 .workbench .message.user{width:auto;max-width:min(88%,680px);align-self:flex-end;border-radius:16px 16px 4px 16px;padding:12px 18px;background:var(--accent-wash)}
 .workbench .message.assistant{padding:0;background:transparent;border:0}
-.workbench .message.assistant:not(.message-feed)>.md{min-width:0;max-width:100%;padding:0;background:transparent;border:0}
+.workbench .message.assistant:not(.message-feed)>.message-body>.md{min-width:0;max-width:100%;padding:0;background:transparent;border:0}
 .workbench .message-role{margin-bottom:8px;letter-spacing:.04em;color:var(--ink-dim)}
 .workbench .chat-intro{margin:auto 0;max-width:520px;padding:24px 0}
 .workbench .chat-intro h1{font-size:25px;line-height:1.4;font-weight:600;margin-bottom:12px}
@@ -546,7 +549,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
  .workbench-status::before{margin:0}
  .page-head{gap:3px;padding-right:8px}
  .workbench .workspace-utility{font-size:11px;padding:5px}
- .page-head>select{max-width:85px;padding-right:4px}
+ .page-head>select{max-width:96px}
 }
 @container(max-width:380px){
  .timeline-card{padding:16px;gap:12px;border-radius:16px}
@@ -648,8 +651,23 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .timeline-coverage,.timeline-brief-count,.timeline-partial{margin:0;font-size:11px;line-height:1.5}
 .timeline-people .tag-person{font-size:11px;font-weight:500;border-radius:999px;padding:3px 10px;color:var(--ink-dim);background:color-mix(in srgb,var(--brief-accent) 7%,var(--surface));border-color:color-mix(in srgb,var(--brief-accent) 15%,transparent)}
 /* Ordinary speech has a quiet surface; actionable feeds retain their own card. */
-.workbench .message.assistant:not(.message-feed){padding:14px 18px;border:1px solid color-mix(in srgb,var(--line) 45%,transparent);border-radius:16px;background:color-mix(in srgb,var(--surface-raised) 70%,transparent);align-self:flex-start}
+.workbench .message.assistant:not(.message-feed)>.message-body{padding:14px 18px;border:1px solid color-mix(in srgb,var(--line) 45%,transparent);border-radius:16px;background:color-mix(in srgb,var(--surface-raised) 70%,transparent)}
+.workbench .message.assistant:not(.message-feed){padding:0;border:0;background:transparent;align-self:flex-start}
 .workbench .message.assistant.message-feed{background:transparent;padding:0;border:0}
+/* Assistant turns carry the identity avatar in a fixed gutter; continuation bubbles align under the first. */
+.workbench .message.assistant{display:grid;grid-template-columns:32px minmax(0,1fr);column-gap:10px;align-items:start;gap:0}
+.workbench .message-avatar{grid-column:1;grid-row:1;display:block;flex:none;width:32px;height:32px;margin-top:2px;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:var(--surface-inset)}
+.workbench .message-avatar img{display:block;width:100%;height:100%;object-fit:cover}
+.workbench .message.assistant>.message-body{grid-column:2;grid-row:1;display:flex;flex-direction:column;gap:4px;min-width:0;max-width:100%}
+.workbench .message.assistant.message-continuation{grid-template-columns:minmax(0,1fr);padding-left:42px}
+.workbench .message.assistant.message-continuation>.message-body{grid-column:1}
+.workbench .message.assistant.message-continuation .message-role{display:none}
+@media(max-width:600px){
+ .workbench .message.assistant{grid-template-columns:26px minmax(0,1fr);column-gap:8px}
+ .workbench .message-avatar{width:26px;height:26px;border-radius:8px}
+ .workbench .message.assistant.message-continuation{padding-left:34px}
+}
+@media(forced-colors:active){.workbench .message-avatar{border-color:CanvasText}}
 .timeline-card[data-suggested="true"]{border:1px dashed var(--line-strong);box-shadow:none}
 .source-status{font-size:12px;color:var(--ink-dim);line-height:1.6;max-width:100%}
 .source-status summary{display:inline-flex;gap:8px;align-items:center;cursor:pointer;list-style:none}
@@ -669,7 +687,9 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 /* Local Agent controls share the workbench's existing surface and type scale. */
 .workbench-agent{padding:8px 12px;border-top:1px solid var(--line,#333);font-size:12px;flex-shrink:0;max-height:48vh;overflow:auto}
 .workbench-mode-bar,.workbench-plan-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.workbench-mode-bar select,.workbench-agent button,.workbench-agent select{font:inherit;min-height:28px;max-width:100%}
+.workbench-agent button{font:inherit;min-height:28px;max-width:100%}
+.workbench-agent select,.workbench-mode-bar select{font:inherit;max-width:100%}
+.workbench-agent select{width:100%}
 .workbench-mode-bar>select{width:auto;flex:0 0 auto}
 .workbench-mode-bar{flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:12px}
 .workbench-build-info{display:flex;align-items:center;flex-wrap:nowrap;gap:4px 10px;flex:1 1 0;min-width:0}
@@ -683,11 +703,12 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-build-project[hidden],.workbench-build-reason[hidden]{display:none}
 .workbench-build-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;flex-wrap:nowrap}
 .workbench-plan,.workbench-local-approval{margin-top:10px;padding:10px;border:1px solid var(--line,#555);border-radius:8px}
-.workspace-bar{display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:6px 10px;border-radius:12px;background:var(--surface-inset);color:var(--ink-dim);font-size:13px}
+.workspace-bar{display:flex;align-items:center;gap:8px;margin:0 8px 6px;padding:6px 10px;border-radius:12px;background:var(--surface-inset);color:var(--ink-dim);font-size:13px}
+.workspace-bar .workspace-hint{flex:1 1 auto;min-width:0;color:var(--danger,#d4483b);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .workspace-bar[hidden]{display:none}
 .workspace-bar .workspace-folder{border-color:transparent;background:transparent;color:var(--ink);padding:2px 6px}
 .workspace-bar .workspace-host{margin-left:auto;flex-shrink:0;white-space:nowrap}
-.approval-dock{margin:0 0 8px;display:flex;flex-direction:column;gap:6px}
+.approval-dock{margin:0 8px 8px;display:flex;flex-direction:column;gap:6px}
 .approval-dock[hidden]{display:none}
 .approval-dock-card{padding:10px 12px;border:1px solid var(--line,#555);border-left:3px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent-wash) 60%,var(--surface-raised))}
 .approval-dock-summary{margin:0 0 8px;font-size:13px;line-height:1.5}
@@ -728,13 +749,38 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 /* Native details retain expansion and keyboard focus as tool receipts stream in. */
 .workbench .tool-message{align-self:stretch;max-width:100%;padding:0;background:transparent;border:0;min-width:0}
 .workbench .tool-message-group{align-self:stretch;max-width:100%;padding:0;background:transparent;border:0;min-width:0;color:var(--ink-dim)}
-.build-tool-group>summary{list-style:none;cursor:pointer;padding:4px 0;color:var(--ink-faint);font-size:12px}
-.build-tool-group>summary::-webkit-details-marker{display:none}
-.build-tool-group>summary::before{content:'⌄';display:inline-block;width:18px;color:var(--ink-faint)}
-.build-tool-group:not([open])>summary::before{content:'›'}
-.build-tool-rows{padding-left:10px;border-left:1px solid var(--line)}
+/* Build steps: DSH-like disclosure flow — hairline header, 24-28px rows, no bubble chrome. */
+.workbench .message.build-steps{width:100%;max-width:100%;min-width:0;align-self:stretch;gap:0}
+.workbench .build-steps-header{display:flex;align-items:center;gap:8px;width:100%;min-height:33px;padding:5px 2px 6px;border:0;border-bottom:.5px solid var(--line);border-radius:0;background:transparent;color:var(--ink-dim);font:11px/1.6 var(--mono);text-align:left;cursor:pointer;transition:color .1s ease}
+.workbench .build-steps-header:hover:not(:disabled){color:var(--ink);border-color:var(--line)}
+.build-steps-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--ink-faint)}
+.build-steps[data-build-status="running"] .build-steps-dot,.build-steps[data-build-status="completed"] .build-steps-dot{background:var(--ok)}
+.build-steps[data-build-status="awaiting_approval"] .build-steps-dot,.build-steps[data-build-status="paused"] .build-steps-dot,.build-steps[data-build-status="failed"] .build-steps-dot,.build-steps[data-build-status="outcome_unknown"] .build-steps-dot{background:var(--warn)}
+.build-steps-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em}
+.build-steps-duration{margin-left:auto;color:var(--ink-faint);font-variant-numeric:tabular-nums}
+.build-steps-chevron{flex:none;display:grid;place-items:center;width:14px;height:14px;color:inherit;transition:transform .12s ease}
+.build-steps-chevron::before{content:'›';font:12px/1 var(--mono)}
+.build-steps-header[aria-expanded="true"] .build-steps-chevron{transform:rotate(90deg)}
+.build-steps-rows{display:flex;flex-direction:column;min-width:0;max-height:420px;overflow:auto;scrollbar-width:thin;padding:1px 0 3px}
+.build-steps-rows[hidden]{display:none}
+.workbench .build-steps .build-step{border:0;background:transparent;padding:0;margin:0;min-width:0;width:100%;align-self:stretch}
+.workbench .build-step-summary{display:flex;align-items:center;gap:6px;min-height:26px;padding:2px;list-style:none;color:var(--ink-dim);cursor:pointer}
+.workbench .build-step-summary::before{display:none}
+.build-step-summary::-webkit-details-marker{display:none}
+.build-step-leading{flex:none;display:grid;place-items:center;width:14px;height:14px;color:var(--ink-faint)}
+.build-step-leading .ui-icon{width:14px;height:14px;stroke-width:1.6}
+.build-step-title{flex:none;color:var(--ink-dim);font:11px/1.5 var(--mono)}
+.build-step-separator{flex:none;width:2px;height:2px;margin:0 2px;border-radius:1px;background:var(--ink-faint)}
+.build-step-summary-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-faint);font-size:13px;line-height:1.6}
+.build-step-time{flex:none;margin-left:auto;color:var(--ink-faint);font:11px/1.5 var(--mono)}
+.build-step-body{padding:0 0 6px 20px;min-width:0}
+.build-step-think-text{color:var(--ink-dim);font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
+.build-steps .build-tool-content{padding:2px 10px 10px 18px}
+@media(max-width:600px){.workbench .build-steps-rows{max-height:56vh}}
+@media(prefers-reduced-motion:reduce){.workbench .build-steps-header,.build-steps-chevron{transition:none}}
+@media(forced-colors:active){.workbench .build-steps-header{border-color:CanvasText;color:CanvasText}.build-steps-dot{background:CanvasText}.build-steps-chevron{color:CanvasText}}
 .build-tool-call{border:0;border-radius:0;background:transparent;overflow:hidden}
-.build-tool-call>summary{display:flex;align-items:center;gap:7px;padding:4px 2px;min-width:0;color:var(--ink-dim);cursor:pointer}
+.build-tool-call>summary{display:flex;align-items:center;gap:7px;min-height:26px;padding:2px;min-width:0;color:var(--ink-dim);cursor:pointer}
 .build-tool-call>summary::before{flex-shrink:0}
 .build-tool-call summary code{font:11px/1.5 var(--mono);color:var(--ink);flex-shrink:0}
 .build-tool-mark{color:var(--accent);font-weight:600;flex-shrink:0}
@@ -790,10 +836,8 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .composer-actions .computer-use-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .composer-actions .computer-use-toggle:disabled{opacity:.55;cursor:default}
 .computer-use-host:empty{display:none}
-/* Plan card pickers: our own arrow and corners instead of the platform control, with a visible label. */
-.workbench-plan select{appearance:none;-webkit-appearance:none;width:100%;margin:0 0 2px;padding:8px 32px 8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-inset) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%238a8f98' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E") no-repeat right 12px center;color:var(--ink);font:inherit;font-size:13px;cursor:pointer;transition:border-color .12s}
-.workbench-plan select:hover:not(:disabled){border-color:var(--line-strong)}
-.workbench-plan select:disabled{opacity:.6;cursor:default}
+/* Plan card pickers use the shared controls.css select (chevron included). */
+.workbench-plan select{width:100%;margin:0 0 2px;font-size:13px}
 .workbench-field-label{display:block;margin:10px 0 4px;color:var(--ink-faint);font-size:11px;letter-spacing:.02em}
 .workbench-field-label[hidden]{display:none}
 /* Markdown blocks: tables, rules, strikethrough and task lists. */
@@ -834,3 +878,6 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench-plan-preview .workbench-plan textarea{min-height:40vh;font-size:13px}
 
 .workbench-page:has(>.workbench-plan-preview){overflow-anchor:none}
+/* Keep the side strips aligned with the composer at narrow widths; these override the base margins above. */
+@media(max-width:959px){.workspace-bar{margin:0 12px 6px}.approval-dock{margin:0 12px 8px}}
+@media(max-width:600px){.workspace-bar{margin:0 16px 6px}.approval-dock{margin:0 16px 8px}}

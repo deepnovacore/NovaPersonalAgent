@@ -124,6 +124,7 @@ test('the default settings are the documented schema', () => {
     clarificationDepth: 'balanced',
     planReadback: 'summary',
     generatePlan: true,
+    buildReasoning: false,
     profileParticipantMessages: false,
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
@@ -136,6 +137,15 @@ test('the default settings are the documented schema', () => {
     secrets: {},
   })
   assert.deepEqual([...SECRET_KEYS], ALL_SECRET_KEYS)
+})
+
+test('buildReasoning is a boolean host switch that defaults off and survives a round trip', () => {
+  assert.equal(normalizeSettings({}).buildReasoning, false)
+  assert.equal(normalizeSettings({buildReasoning: true}).buildReasoning, true)
+  assert.equal(normalizeSettings({buildReasoning: 'yes'}).buildReasoning, false)
+  assert.equal(normalizeSettings({buildReasoning: 1}).buildReasoning, false)
+  assert.equal(publicSettings({buildReasoning: true}).buildReasoning, true)
+  assert.equal(publicSettings({buildReasoning: false}).buildReasoning, false)
 })
 
 test('version 3 migrates to v4 defaults while preserving existing desktop fields', () => {
@@ -313,6 +323,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     clarificationDepth: 'balanced',
     planReadback: 'summary',
     generatePlan: true,
+    buildReasoning: false,
     profileParticipantMessages: false,
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
@@ -367,6 +378,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
 
   assert.deepEqual(Object.keys(normalized).sort(), [
     'autoHideSeconds',
+    'buildReasoning',
     'capabilitiesConfigPath',
     'cascadedAsrProvider',
     'cascadedEndpointingProvider',
@@ -582,6 +594,7 @@ test('publicSettings never carries the secrets object', () => {
 
   assert.deepEqual(Object.keys(view).sort(), [
     'autoHideSeconds',
+    'buildReasoning',
     'capabilitiesConfigPath',
     'cascadedAsrProvider',
     'cascadedEndpointingProvider',

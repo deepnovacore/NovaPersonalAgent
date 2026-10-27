@@ -48,3 +48,25 @@ test('a Build with an uncertain outcome remains actionable instead of appearing 
  assert.ok(descendants(row).some(node=>node.textContent==='待你处理'))
  assert.equal(descendants(row).some(node=>node.textContent==='已完成'),false)
 })
+
+test('cancelled delegated tasks read 已停止 and a waiting phase outranks a stale failure',()=>{
+ const el=(tag,text='',className='')=>({tag,textContent:text,className,children:[],dataset:{},attrs:{},append(...xs){this.children.push(...xs)},setAttribute(k,v){this.attrs[k]=v}})
+ const button=(text,_click,parent)=>{const node=el('button',text);parent.append(node);return node}
+ const descendants=node=>node.children.flatMap(child=>[child,...descendants(child)])
+ const status=({tasks=[],build,generation_status}={})=>{
+  const panel=el('main'),item={id:'c',title:'C',updated_at:'2026-10-27T00:00:00Z',build,...(generation_status?{generation_status}:{})}
+  const c={connected:true,selectedId:null,state:()=>({}),snapshot:{tasks,conversations:{items:[item],messages:[]}}}
+  renderConversationTasks(panel,{c,el,button})
+  const row=panel.children.find(node=>node.dataset.conversationId==='c')
+  return {text:descendants(row).find(node=>node.className==='conversation-task-status').textContent,state:row.dataset.state}
+ }
+ // Durable phase `failed` is not a real phase, so it must not be treated as a task failure any more.
+ assert.deepEqual(status({tasks:[{conversation_id:'c',phase:'cancelled'}]}),{text:'已停止',state:'cancelled'})
+ assert.deepEqual(status({tasks:[{conversation_id:'c',phase:'waiting'},{conversation_id:'c',phase:'cancelled'}],generation_status:'failed'}),{text:'待你处理',state:'waiting'})
+ assert.deepEqual(status({tasks:[],generation_status:'failed'}),{text:'失败',state:'failed'})
+ assert.deepEqual(status({tasks:[],build:{status:'failed'}}),{text:'失败',state:'failed'})
+ assert.deepEqual(status({tasks:[{conversation_id:'c',phase:'running'}]}),{text:'进行中',state:'running'})
+ assert.deepEqual(status({tasks:[],build:{status:'paused'}}),{text:'待你处理',state:'waiting'})
+ assert.deepEqual(status({tasks:[{conversation_id:'c',phase:'completed'}],generation_status:'completed'}),{text:'已完成',state:'completed'})
+ assert.deepEqual(status({tasks:[{conversation_id:'c',phase:'failed'}]}),{text:'已完成',state:'completed'},'the dead durable failed check is gone')
+})

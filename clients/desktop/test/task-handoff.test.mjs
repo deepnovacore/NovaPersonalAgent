@@ -5,7 +5,7 @@ function harness(){const sent=[],applied=[];const c=new PersonalController({send
 for(const mode of ['orb','background'])test(`${mode} handback notice requires receipt and preserves exact retry across reconnect`,async()=>{
  const h=harness(),ready=h.c.connect();h.ack();await ready;h.c.draft='Nova draft'
  h.c.receive({type:'personal.state',revision:1,tasks:[{id:'a',controller:{kind:'user',client_id:'me'}}]})
- const exit=h.c.setPresentation(mode);const first=h.sent.at(-1);assert.match(h.c.taskNotice,/待确认/);h.ack({},false);await assert.rejects(exit,/handback_pending/);assert.match(h.c.taskNotice,/待确认/)
+ const exit=h.c.setPresentation(mode);const first=h.sent.at(-1);assert.match(h.c.taskNotice,/待确认/);h.ack({},false);await assert.rejects(exit,error=>error.refusal_code==='handback_pending'&&/没有完成/.test(error.message));assert.match(h.c.taskNotice,/待确认/)
  h.c.disconnect();const reconnect=h.c.connect();assert.deepEqual(h.sent.at(-1),first)
  h.ack({returned_task_ids:['a','b'],task_control_revisions:{a:2,b:5}});await reconnect
  assert.match(h.c.taskNotice,/已交还 Nova/);assert.equal(h.c.draft,'Nova draft')

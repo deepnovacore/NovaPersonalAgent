@@ -238,11 +238,6 @@ input[role="switch"]:disabled { opacity: .45; cursor: default; }
   line-height: 1.45;
 }
 
-.field > small {
-  grid-column: 2 / -1;
-  margin: 0;
-}
-
 code {
   color: var(--ink-dim);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -380,23 +375,6 @@ legend {
   box-shadow: inset 0 1px rgba(255, 255, 255, .8);
 }
 
-.field {
-  display: grid;
-  grid-template-columns: var(--label-col) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  margin-bottom: 7px;
-}
-
-.field:last-child { margin-bottom: 0; }
-
-.field > label {
-  min-width: 0;
-  color: var(--ink-dim);
-  font-size: 11.5px;
-}
-
 .field input[type="range"] {
   min-width: 0;
   height: 20px;
@@ -417,8 +395,7 @@ input[type="text"],
 input[type="url"],
 input[type="password"],
 input[type="number"],
-textarea,
-select {
+textarea {
   width: 100%;
   min-width: 0;
   min-height: 40px;
@@ -434,8 +411,7 @@ select {
 
 input[type="text"]:hover,
 input[type="url"]:hover,
-input[type="password"]:hover,
-select:hover {
+input[type="password"]:hover {
   border-color: var(--line-strong);
   background-color: var(--surface-active);
 }
@@ -486,11 +462,6 @@ input::placeholder { color: #9aa2ac; }
   background: var(--accent);
   box-shadow: 0 0 6px rgba(200, 103, 18, .28);
   content: "";
-}
-
-.pipeline-card .field {
-  grid-template-columns: var(--label-col) minmax(0, 1fr);
-  margin-bottom: 6px;
 }
 
 .voice-picker {
@@ -803,12 +774,11 @@ button { min-height: 36px; padding: 7px 12px; }
 .secret { padding: 12px 2px; gap: 10px; }
 .secret:last-child { border-bottom: 0; }
 .key-usage { font-size: 11px; text-align: right; }
-#capabilities-editor .field { grid-template-columns: minmax(0, 1fr); gap: 7px; margin-bottom: 16px; }
+#capabilities-editor .field { margin-bottom: 16px; }
 :is(#capabilities-editor, .executor-card) .checkbox-field { grid-template-columns: minmax(0, 1fr) 38px; align-items: center; gap: 18px; padding: 14px 16px; margin: 0; border-bottom: 1px solid var(--line); background: var(--surface); cursor: pointer; }
 #capabilities-editor legend { position: static; width: auto; height: auto; margin: 0; padding: 0 6px; clip-path: none; white-space: normal; font-weight: 600; }
 #capabilities-editor textarea { padding: 10px 12px; line-height: 1.6; border: 1px solid var(--line); border-radius: var(--radius-sm); }
-#knowledge-section .field { grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 16px 0; }
-#knowledge-section .field > label { font-size: 12px; color: var(--ink); }
+#knowledge-section .field { margin: 0; }
 #knowledge-panel { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
 .knowledge-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 #knowledge-status { padding: 12px; background: var(--surface); border-radius: var(--radius-sm); color: var(--ink-dim); font-size: 12px; white-space: pre-line; }
@@ -867,7 +837,6 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; min-height:
 #settings-restart { min-width: 80px; }
 .setting-section { margin: 0; padding: 22px 0; }
 .setting-section > h2 { margin: 0 0 16px; }
-.setting-section .field { margin: 12px 0; }
 #wake-word-section .hint { margin: 10px 0 16px; }
 
 .switch-copy { display: flex; flex-direction: column; gap: 3px; font-weight: 550; }
@@ -931,7 +900,6 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; min-height:
 #phone-advanced { flex:1; }
 #phone-advanced summary { color:var(--ink-faint); font-size:11px; cursor:pointer; }
 #phone-advanced[open] { width:100%; }
-#phone-advanced .field { grid-template-columns:95px minmax(0,1fr); }
 #phone-devices { border:1px solid var(--line); border-radius:8px; margin:14px 0; padding:6px 14px; }
 .phone-device { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0; font-size:12px; }
 .phone-device button { color:var(--ink-dim); font-size:11px; }
@@ -997,14 +965,11 @@ input[type="file"]::file-selector-button:hover { background: var(--surface-raise
 /* Keep native controls and keyboard behavior, with consistent settings geometry. */
 input[type="checkbox"]:not([role="switch"]) { width: 18px; height: 18px; flex: 0 0 18px; margin: 0; accent-color: var(--accent); vertical-align: middle; cursor: pointer; }
 label:has(> input[type="checkbox"]:not([role="switch"])) { gap: 10px; }
-select { appearance: none; padding-right: 36px; background-image: linear-gradient(45deg, transparent 50%, var(--ink-dim) 50%), linear-gradient(135deg, var(--ink-dim) 50%, transparent 50%); background-position: calc(100% - 19px) 50%, calc(100% - 14px) 50%; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
-select:hover, input:is([type="text"], [type="url"], [type="password"]):hover { background-color: var(--surface-active); }
-select:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 input:is([type="date"], [type="time"]) { min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; }
 #connections-section .im-field:has(input[role="switch"]) { flex-direction: row; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
 #connections-section fieldset:has(.personal-consent) { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 #connections-section fieldset .personal-consent { margin: 4px 0; padding: 6px; }
-@media (forced-colors: active) { select { appearance: auto; background-image: none; } input[type="checkbox"] { accent-color: auto; } }
+@media (forced-colors: active) { input[type="checkbox"] { accent-color: auto; } }
 @media (prefers-color-scheme: dark) {
   :root { color-scheme: dark; --plate: #191c20; --surface: #22262c; --surface-raised: #2b3038; --surface-active: #292e35; --line: rgba(235, 240, 248, .12); --line-strong: rgba(235, 240, 248, .25); --ink: #eef1f5; --ink-dim: #b0b8c5; --ink-faint: #8b95a5; --accent: #efa866; --accent-strong: #ffc18b; --accent-wash: rgba(239, 168, 102, .12); }
   input::placeholder { color: var(--ink-faint); }
@@ -1060,14 +1025,14 @@ button[aria-busy="true"]::before { content: ""; display: inline-block; width: 12
 html { background: var(--page); }
 
 body {
-  grid-template-columns: 208px minmax(0, 1fr);
-  column-gap: 24px;
-  padding: 0 24px 104px;
+  grid-template-columns: 188px minmax(0, 1fr);
+  column-gap: 28px;
+  padding: 0 26px 104px;
   background: var(--page);
   font-size: 14px;
 }
 
-main { max-width: 780px; }
+main { max-width: 720px; }
 
 header {
   min-height: 64px;
@@ -1078,16 +1043,20 @@ header {
 
 header h1 { font-size: 20px; font-weight: 650; letter-spacing: 0; }
 
-.settings-nav { top: 72px; gap: 3px; }
+.settings-nav { top: 76px; gap: 2px; }
 
 .settings-nav .nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 9px 12px;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
   border-radius: 10px;
   font-size: 14px;
+  line-height: 22px;
   white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .settings-nav .nav-item::before {
@@ -1100,12 +1069,14 @@ header h1 { font-size: 20px; font-weight: 650; letter-spacing: 0; }
   content: "";
 }
 
-.settings-nav .nav-item:hover { background: rgba(24, 31, 41, .04); }
+@media (hover: hover) {
+  .settings-nav .nav-item:hover { background: rgba(24, 31, 41, .05); color: var(--ink); }
+}
 
 .settings-nav .nav-item[aria-current="true"] {
   background: var(--nav-active);
   color: var(--ink);
-  font-weight: 620;
+  font-weight: 600;
 }
 
 #category-general { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0'/%3E%3Ccircle cx='16' cy='6' r='2'/%3E%3Ccircle cx='10' cy='12' r='2'/%3E%3Ccircle cx='18' cy='18' r='2'/%3E%3C/svg%3E"); }
@@ -1124,26 +1095,34 @@ header h1 { font-size: 20px; font-weight: 650; letter-spacing: 0; }
 
 .setting-section,
 main > .setting-section:first-child {
-  margin: 0 0 16px;
-  padding: 20px 22px;
-  border: 0;
+  margin: 0 0 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--plate);
-  box-shadow: var(--card-shadow), 0 0 0 1px var(--line);
+  box-shadow: var(--card-shadow);
 }
 
-.setting-section > h2 { margin: 0 0 14px; font-size: 15px; font-weight: 620; }
+.setting-section > h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
 
 .secret-disclosure,
 #chatgpt-settings {
-  margin: 0 0 16px;
-  border: 0;
+  margin: 0 0 14px;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--plate);
-  box-shadow: var(--card-shadow), 0 0 0 1px var(--line);
+  box-shadow: var(--card-shadow);
 }
 
-#chatgpt-settings { padding: 16px 22px; }
+#chatgpt-settings { padding: 16px 18px; }
 #chatgpt-settings > summary { font-weight: 620; cursor: pointer; }
 #chatgpt-settings > button { margin: 6px 8px 0 0; }
 
@@ -1206,8 +1185,6 @@ footer {
   #chatgpt-settings { border: 1px solid CanvasText; box-shadow: none; }
 }
 
-select{height:36px;min-height:36px;padding:0 36px 0 12px;border-radius:8px;line-height:1.4;background-color:var(--surface);text-overflow:ellipsis;box-shadow:0 1px 2px rgba(0,0,0,.025)}
-select option{color:var(--ink);background:var(--surface)}
 #category-diary{--nav-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3.5h11a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6zM6 3.5v17M10 8h5M10 12h5'/%3E%3C/svg%3E")}
 #category-skills{--nav-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linejoin='round'%3E%3Cpath d='M12 2l9 5v10l-9 5-9-5V7zM12 12l9-5M12 12v10M12 12L3 7'/%3E%3C/svg%3E")}
 
@@ -1243,3 +1220,165 @@ select option{color:var(--ink);background:var(--surface)}
 #diary-section .brief-quiet { display: flex; align-items: center; gap: 10px; padding: 10px 0 2px; font-size: 13px; }
 #diary-section .im-card button { margin: 4px 0 0; }
 #diary-error { margin: 8px 0 0; color: var(--ink-dim); }
+
+/* ── Preference row layer ──────────────────────────────────────────────────
+ * Rows follow the product's settings pattern: title (and a small hint under it)
+ * on the left, its control on the right, separated by a hairline that the last
+ * row of a card does not draw. Selects themselves come from controls.css so the
+ * workbench and the first-run window share the same geometry. */
+.field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label control"
+    "hint control";
+  align-items: center;
+  column-gap: 18px;
+  row-gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 0.5px solid var(--line);
+}
+
+.field:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.field > label {
+  grid-area: label;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.field > small,
+.field > .field-hint {
+  grid-area: hint;
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.field > :is(input, select, textarea, .voice-picker) {
+  grid-column: 2;
+  min-width: 0;
+  margin: 0;
+  justify-self: end;
+}
+
+.field > select {
+  width: auto;
+  min-width: 172px;
+  max-width: 320px;
+}
+
+.field > input[type="range"] {
+  grid-column: 2;
+  width: 100%;
+  max-width: 240px;
+  align-self: center;
+}
+
+/* Long-form fields keep the whole row for the control instead of squeezing it
+   next to its label. The explicit class covers markup we author; `:has()`
+   covers controls rendered by the child panels without their own class. */
+.field-stacked,
+.field:has(> :is(input[type="text"], input[type="url"], input[type="password"], input[type="number"], input[type="search"], textarea, .voice-picker)) {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "label"
+    "control"
+    "hint";
+  row-gap: 6px;
+}
+
+.field-stacked > :is(input:not([type="range"]), select, textarea, .voice-picker),
+.field:has(> :is(input[type="text"], input[type="url"], input[type="password"], input[type="number"], input[type="search"], textarea, .voice-picker)) > :is(input:not([type="range"]), select, textarea, .voice-picker) {
+  grid-column: 1 / -1;
+  width: 100%;
+  justify-self: stretch;
+}
+
+.field > input[type="number"] { max-width: 240px; }
+
+.voice-picker > select { width: 100%; }
+
+.setting-section small {
+  display: block;
+  margin: 4px 0 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* A row followed only by hidden panels is still the last visible row. */
+.field:has(+ [hidden]:last-child) {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* A switch row is the same title/description shape with the control on the
+   right; the label wraps the copy so the whole row stays clickable. */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 26px;
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 0.5px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+label.toggle-row:last-child,
+.setting-section > .toggle-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.toggle-row input { order: 2; flex: none; margin-left: auto; }
+
+.toggle-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toggle-title { line-height: 22px; }
+
+.toggle-hint {
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+#build-reasoning-hint { margin: 0; }
+
+/* Nested checkbox rows keep their own alignment inside toggle copy. */
+.toggle-row > input[role="switch"] { margin-top: 2px; }
+
+@media (prefers-color-scheme: dark) {
+  .settings-nav .nav-item:hover { background: rgba(255, 255, 255, .06); }
+  .field, .toggle-row { border-color: var(--line); }
+}
+
+@media (prefers-contrast: more) {
+  .field, .toggle-row { border-bottom-color: var(--line-strong); }
+  .setting-section, main > .setting-section:first-child { border-color: var(--line-strong); }
+}
+
+@media (forced-colors: active) {
+  .field, .toggle-row { border-bottom-color: CanvasText; }
+}

@@ -1,3 +1,5 @@
+import {refusalText} from './host-refusals.mjs'
+
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 const DICTATION_FAILURES={
   no_audio:'没有录到声音，请检查麦克风后再试 · 原有草稿已保留',
@@ -21,17 +23,18 @@ function conversationSnapshot(value){
   for(const item of value.items){if(!item||typeof item.id!=='string'||!item.id||ids.has(item.id))return false;ids.add(item.id)}
   return ids.has(value.selected_id)
 }
-/** Host refusals a user can act on; anything else keeps the host's own text. */
-const HOST_REFUSALS=Object.freeze({
- build_stop_required:'请先停止正在进行的 Build，再进行这个操作。',
- voice_context_unavailable:'当前语音模型无法带入这段对话的上下文，请先在文字模式继续。',
- project_busy:'这个工作区正被另一项任务占用，请稍后再试或换一个工作区。',
- conversation_busy:'这段对话正在处理上一件事，请稍后再试。',
- local_build_unavailable:'当前平台暂不支持本地 Build。',
- project_directory_required:'请先选择工作区。',
- executor_unavailable:'这个执行器当前不可用。',
- unknown_project:'这个工作区不在执行器已登记的列表里，请从列表中选择。',
-})
+/**
+ * Drops a composer's pending mode/workspace intent. The host owns conversation kind and mode, so
+ * an intent that outlived its conversation (clear, generation change, purge, host mode change)
+ * would otherwise keep showing Build and start a new Build on the next Enter.
+ */
+function dropDraftIntent(state){
+ if(!state||typeof state!=='object')return false
+ const had=state.execution!==undefined||state.workspace!==undefined
+ delete state.execution
+ delete state.workspace
+ return had
+}
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{}}) {
     this.confirmBuildSwitch=confirmBuildSwitch
@@ -46,6 +49,21 @@ export class PersonalController {
   get voiceCapabilities(){return this.connected&&this.voiceId?this.state(this.voiceId).voiceCapabilities?.capabilities??null:null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
   state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',submission:null});return this.drafts.get(id)}
+  /** The host just cleared or replaced this conversation's generation: its composer intent is stale. */
+  resetDraftIntent(id){if(id!=null)dropDraftIntent(this.drafts.get(id))}
+  /** A host snapshot is the sole owner of kind/mode; drop intents that contradict it or outlived it. */
+  reconcileDraftIntents(previous,next){
+    const priorItems=previous?.conversations?.items??[],items=next?.conversations?.items??[]
+    for(const [id,state]of this.drafts){
+      if(id==null||(state.execution===undefined&&state.workspace===undefined))continue
+      const item=items.find(row=>row.id===id)
+      if(!item){dropDraftIntent(state);continue}
+      const prior=priorItems.find(row=>row.id===id)
+      if(prior&&prior.generation!==item.generation){dropDraftIntent(state);continue}
+      if(state.execution==='build'&&(item.kind==='build'||item.mode==='plan'||!['chat','topic'].includes(item.kind))){dropDraftIntent(state);continue}
+      if(state.execution==='delegate'&&item.mode!=='plan'){dropDraftIntent(state);continue}
+    }
+  }
   get draft(){return this.state().draft} set draft(value){this.state().draft=value;if(!value.trim())this.state().source_todo=null}
   get error(){return this.state().error} set error(value){this.state().error=value}
   get submittedRequestId(){return this.state().submission?.request_id??null}
@@ -149,14 +167,15 @@ export class PersonalController {
     if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
       const request=state.submission
       if(!request||request.request_id!==frame.request_id||(frame.conversation_id&&frame.conversation_id!==id))continue
-      if(!frame.ok){if(!request.restored)this.restoreSubmission(state,request);state.error=frame.error==='stale_reference'?'引用事项已变化或不可用，请移除引用后重新选择。':frame.error==='reference_not_authorized'?'引用来源当前不允许用于对话，请核对来源权限。':frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
+      if(!frame.ok){if(!request.restored)this.restoreSubmission(state,request);state.error=refusalText(frame.error)}
       else if(request.restored_into_draft&&state.draft===request.text){state.draft='';state.source_todo=null;state.references=[]}
       if(frame.ok&&state.failed_card?.request_id===request.request_id)state.failed_card=null
       state.submission=null
     }
     if(['client.ready','desktop.capabilities'].includes(frame.type)){this.capabilities=frame.capabilities??[];this.inputInstance=frame.input_instance_id??null}
     if(frame.type==='personal.state'&&Number.isSafeInteger(frame.revision)&&(!this.snapshot||frame.revision>this.snapshot.revision)){
-      const previous=this.selectedId;this.snapshot=frame
+      const previous=this.selectedId,previousSnapshot=this.snapshot;this.snapshot=frame
+      this.reconcileDraftIntents(previousSnapshot,frame)
       const voice=frame.conversations?.items?.find(item=>item.id===frame.conversations.voice_id)
       if(voice&&frame.conversations.voice_capabilities)this.receive({type:'conversation.capabilities',mode:'voice',conversation_id:voice.id,conversation_generation:voice.generation,capabilities:frame.conversations.voice_capabilities})
       if(this.applyPresentation&&this.presentationReady&&!this.presentationPending&&['background','workbench','orb'].includes(frame.presentation_mode)&&frame.presentation_mode!==this.presentationMode){this.desiredPresentation=frame.presentation_mode;void this.applyMode(frame.presentation_mode).catch(error=>{this.error=error.message;this.changed()})}
@@ -173,7 +192,7 @@ export class PersonalController {
       // Opening task progress returns its owner for draft preparation. Selection remains owned by
       // the revisioned state broadcast; an old or malformed receipt cannot replace that snapshot.
       if(entry&&entry.method!=='conversations.open_work'&&frame.ok&&conversationSnapshot(frame.data)&&this.snapshot)this.snapshot={...this.snapshot,conversations:frame.data}
-      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(Object.assign(new Error(HOST_REFUSALS[frame.error]??(frame.error||'操作失败')),{input_status:frame.input_status}));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
+      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);if(frame.ok){if(entry.method==='conversations.clear')this.resetDraftIntent(entry.params?.id);entry.resolve(frame.data)}else entry.reject(Object.assign(new Error(refusalText(frame.error)),{input_status:frame.input_status,refusal_code:frame.error}));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
     }
     if(frame.type==='input.transcription'&&frame.id===this.dictationId&&(!frame.conversation_id||frame.conversation_id===this.dictationConversationId)){
       const state=this.state(this.dictationConversationId)
@@ -191,7 +210,7 @@ export class PersonalController {
     const request_id=options.request_id??crypto.randomUUID()
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{this.pending.delete(request_id);reject(Object.assign(new Error('操作超时，请刷新状态后重试'),{outcome_unknown:true}))},30000)
-      this.pending.set(request_id,{resolve,reject,timer,method})
+      this.pending.set(request_id,{resolve,reject,timer,method,params})
       if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(notSent('发送失败'))}
     })
   }
