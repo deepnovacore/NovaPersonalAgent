@@ -47,10 +47,13 @@ export function mountWorkspaceBar(parent,{c,el,button,run,api,visible,onChange=(
  async function submitCreate(){
   if(!creating||creatingBusy)return
   if(workspaceNameError(name.value)){syncCreateRow();update();return false}
+  // Pin the owner before the request: an async create must write back to the
+  // conversation that asked for it, never to a later selection.
+  const owner=state()
   creatingBusy=true;syncCreateRow();c.error=''
   try{
    const result=await c.command('workspaces.create',{name:name.value.trim()})
-   state().workspace={workspace_id:result.workspace_id}
+   owner.workspace={workspace_id:result.workspace_id}
    name.value='';creating=false;hint.hidden=true
    onChange()
    // The workspace exists even if the follow-up list read fails; never leave the create row open for retry.

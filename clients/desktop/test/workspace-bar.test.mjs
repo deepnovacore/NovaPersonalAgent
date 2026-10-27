@@ -78,6 +78,26 @@ test('the client mirror of the host name rule accepts only the same characters',
  for(const value of ['','   ','项目 #1','工作区（新）','demo·2','.','..','a'.repeat(81)])assert.notEqual(workspaceNameError(value),'',value)
 })
 
+test('a delayed create writes back to the conversation that started it',async()=>{
+ const states=new Map(),items=[{workspace_id:'w0',name:'default',is_default:true}]
+ let resolveCreate
+ const c={connected:true,presentationReady:true,selectedId:'a',changed(){},state(id){if(!states.has(id))states.set(id,{});return states.get(id)},async command(method,params){
+  if(method==='workspaces.list')return items
+  if(method==='workspaces.create')return new Promise(resolve=>{resolveCreate=()=>resolve({workspace_id:'w2',name:params.name})})
+  return {}
+ }}
+ const parent=el('main'),bar=mountWorkspaceBar(parent,{c,el,button,run:value=>value(),api:{},visible:()=>true})
+ bar.update();await flush()
+ const select=bar.element.children[0],name=bar.element.children[1],create=bar.element.children[2]
+ select.value='new';await select.listeners.change()
+ name.value='Delayed';name.listeners.input()
+ const pending=create.listeners.click();await flush()
+ c.selectedId='b'
+ resolveCreate();await pending
+ assert.deepEqual(states.get('a')?.workspace,{workspace_id:'w2'},'the original conversation owns the created workspace')
+ assert.equal(states.get('b')?.workspace,undefined,'the later selection is untouched')
+})
+
 test('create and list failures read as sentences and never expose host codes or Zod JSON',async()=>{
  const zod=new Error('[\n  {\n    "origin": "string",\n    "code": "invalid_format",\n    "format": "regex",\n    "pattern": "^[\\\\p{L}\\\\p{N} _().-]+$",\n    "message": "Invalid string: must match pattern"\n  }\n]')
  const items=[{workspace_id:'w0',name:'default',is_default:true}]

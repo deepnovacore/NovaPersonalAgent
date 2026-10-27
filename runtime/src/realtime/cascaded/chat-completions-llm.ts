@@ -41,7 +41,7 @@ export interface ChatCompletionsLlmFactoryOptions extends LlmTransportOptions {
   readonly closeTimeoutMs?: number
 }
 interface Call { readonly id: string; readonly type: 'function'; readonly extra_content?: JsonObject; readonly function: {readonly name: string; readonly arguments: string} }
-interface Message { readonly role: 'system' | 'user' | 'assistant' | 'tool'; readonly content: string | readonly JsonObject[] | null; readonly tool_calls?: readonly Call[]; readonly tool_call_id?: string }
+interface Message { readonly role: 'system' | 'user' | 'assistant' | 'tool'; readonly content: string | readonly JsonObject[] | null; readonly tool_calls?: readonly Call[]; readonly tool_call_id?: string; /** Provider-private thinking returned with tool calls (DeepSeek requires it back). */ readonly reasoning_content?: string }
 interface Fragment { extra_content?: JsonObject; id: string | null; name: string; arguments: string }
 interface Active { completion: Promise<void> | null; usageDeadline: number | null; readonly controller: AbortController; reader: ReadableStreamDefaultReader<Uint8Array> | null; failureCode: ChatCompletionsLlmFailureCode | null }
 
@@ -162,15 +162,18 @@ class Session implements CascadedLlmSession {
       if (response.body === null || !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) { await this.#cancel(response.body?.getReader() ?? null); throw fail('protocol') }
       active.reader = response.body.getReader()
       let started = false, text = '', sawText = false
-      let reasoningCodepoints = 0
-      // Thinking text is display-only and separately bounded; it never joins `content` or history.
+      let reasoningCodepoints = 0, reasoningText = ''
+      // Thinking text is display-only and separately bounded; it never joins `content`.
+      // DeepSeek also requires the complete field back on a tool-call assistant message.
       const reasoningDelta = (value: unknown): string | undefined => {
         if (typeof value !== 'string' || value === '') return undefined
         const left = MAX_REASONING_CODEPOINTS - reasoningCodepoints
         if (left <= 0) return undefined
         const points = [...value]
+        const chunk = points.length <= left ? value : points.slice(0, left).join('')
         reasoningCodepoints += Math.min(points.length, left)
-        return points.length <= left ? value : points.slice(0, left).join('')
+        reasoningText += chunk
+        return chunk
       }
       const fragments = new Map<number, Fragment>()
       events = this.#events(active)[Symbol.asyncIterator]()
@@ -208,7 +211,7 @@ class Session implements CascadedLlmSession {
             } else if (choice.finish_reason === 'tool_calls') {
               if ((sawText && input.tools.length === 0) || fragments.size === 0) throw fail('protocol'); const callsOut = this.#calls(fragments)
               for (const call of callsOut) yield {kind: 'tool_call', item_id: call.id, call_id: call.id, name: call.function.name, arguments: JSON.parse(call.function.arguments) as JsonObject}
-              this.#unresolved = [...(unresolved ?? []), ...current, {role: 'assistant', content: null, tool_calls: callsOut}]
+              this.#unresolved = [...(unresolved ?? []), ...current, {role: 'assistant', content: null, tool_calls: callsOut, ...(this.#provider === 'deepseek' && reasoningText !== '' ? {reasoning_content: reasoningText} : {})}]
               terminal = true; yield {kind: 'response_completed', response_id: responseId}; return
             } else throw protocol(choice.finish_reason==='length'?'output_limit':'finish_reason')
           }

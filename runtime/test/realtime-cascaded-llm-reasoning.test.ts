@@ -110,3 +110,27 @@ test('a 400 without a reasoning request is not retried',async()=>{
  const factory=createChatCompletionsLlmFactory({provider:'deepseek',apiKey:'synthetic',baseUrl:'https://example.test',model:'test',instructions:'Plan',fetchImpl:(_url,init)=>{requests.push(JSON.parse(init!.body as string) as Record<string,unknown>);return Promise.resolve(new Response(JSON.stringify({error:{code:'invalid_request'}}),{status:400,headers:{'content-type':'application/json'}}))}}),session=factory.open()
  try{await assert.rejects(collect(session.stream({inputs:[{kind:'user_text',text:'first'}],tools:[],reasoning:'disabled',signal})),/http/u);assert.equal(requests.length,1)}finally{await session.close()}
 })
+
+test('DeepSeek tool-call rounds return the complete reasoning_content on the next request',async()=>{
+ const requests:Record<string,unknown>[]=[];let step=0
+ const tools=[{name:'file_read',description:'Read a file',parameters:{type:'object',properties:{path:{type:'string'}},required:['path']}}]
+ const factory=createChatCompletionsLlmFactory({provider:'deepseek',apiKey:'synthetic',baseUrl:'https://example.test',model:'test',instructions:'Plan',fetchImpl:(_url,init)=>{
+  requests.push(JSON.parse(init!.body as string) as Record<string,unknown>)
+  if(step++===0)return Promise.resolve(sse([
+   {id:'r1',choices:[{delta:{reasoning_content:'需要先读文件'}}]},
+   {id:'r1',choices:[{delta:{tool_calls:[{index:0,id:'call-1',type:'function',function:{name:'file_read',arguments:'{"path":"a"}'}}]},finish_reason:'tool_calls'}]},
+  ]))
+  return Promise.resolve(sse([{id:'r2',choices:[{delta:{content:'完成'},finish_reason:'stop'}]}]))
+ }}),session=factory.open()
+ try{
+  const first=await collect(session.stream({inputs:[{kind:'user_text',text:'读文件'}],tools,reasoning:'enabled',signal}))
+  assert.equal(first.some(event=>event.kind==='tool_call'),true)
+  const second=await collect(session.stream({inputs:[{kind:'tool_result',call_id:'call-1',output:{status:'ok'}}],tools,reasoning:'enabled',signal}))
+  assert.equal(second.at(-1)?.kind,'response_completed')
+  const messages=requests[1]!.messages as {role:string;tool_calls?:unknown[];reasoning_content?:string}[]
+  const assistant=messages.find(message=>message.role==='assistant'&&Array.isArray(message.tool_calls))
+  assert.equal(assistant?.reasoning_content,'需要先读文件','the provider-private field survives the tool round')
+  assert.equal(reasoningEvents(first),'需要先读文件')
+  assert.doesNotMatch(JSON.stringify(first.filter(event=>event.kind==='text_delta')),/需要先读文件/u)
+ }finally{await session.close()}
+})

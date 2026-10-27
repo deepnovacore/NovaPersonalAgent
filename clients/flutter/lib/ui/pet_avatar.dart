@@ -24,8 +24,12 @@ const petAvatarMaxInputBytes = 8 * 1024 * 1024;
 /// Longest edge of the PNG written to the app-support directory.
 const petAvatarMaxDimension = 512;
 
-/// File name written under the application-support directory.
-const petAvatarFileName = 'pet-avatar.png';
+/// Versioned prefix written under the application-support directory. A new
+/// file name makes Flutter's FileImage cache see a new provider identity.
+const petAvatarFilePrefix = 'pet-avatar-';
+
+/// Legacy fixed name from before versioned writes; still cleaned up on reset.
+const petAvatarLegacyFileName = 'pet-avatar.png';
 
 /// Raised when a picked image cannot be decoded, resized or encoded.
 class PetAvatarFailure implements Exception {
@@ -212,13 +216,28 @@ class PetAvatarStore extends ChangeNotifier {
       final png = await scalePetAvatarPng(bytes);
       final directory = await _supportDirectory();
       await directory.create(recursive: true);
-      final file = File(
-        '${directory.path}${Platform.pathSeparator}$petAvatarFileName',
+      // Write a brand-new versioned file first: a failed write never truncates
+      // the current avatar, and a successful one gives FileImage a new identity.
+      final next = File(
+        '${directory.path}${Platform.pathSeparator}$petAvatarFilePrefix${DateTime.now().microsecondsSinceEpoch}.png',
       );
-      await file.writeAsBytes(png, flush: true);
-      _customPath = file.path;
+      try {
+        await next.writeAsBytes(png, flush: true);
+      } catch (_) {
+        try {
+          await next.delete();
+        } catch (_) {
+          // A partial file is best-effort cleanup; the old avatar is untouched.
+        }
+        rethrow;
+      }
+      final previous = _customPath;
+      _customPath = next.path;
       _revision++;
       await _persist();
+      if (previous != null && previous != next.path) {
+        await _deleteAvatarFile(previous);
+      }
       return true;
     } on PetAvatarFailure catch (failure) {
       _error = failure.code;
@@ -250,9 +269,18 @@ class PetAvatarStore extends ChangeNotifier {
     _revision++;
     _notify();
     await _persist();
-    if (previous == null || !previous.endsWith(petAvatarFileName)) return;
+    if (previous != null) await _deleteAvatarFile(previous);
+  }
+
+  /// Deletes only files this store owns, never an arbitrary persisted path.
+  Future<void> _deleteAvatarFile(String path) async {
+    final name = path.split(Platform.pathSeparator).last;
+    if (!name.startsWith(petAvatarFilePrefix) &&
+        name != petAvatarLegacyFileName) {
+      return;
+    }
     try {
-      final file = File(previous);
+      final file = File(path);
       if (await file.exists()) await file.delete();
     } catch (_) {
       // The file may already be gone or on read-only storage.

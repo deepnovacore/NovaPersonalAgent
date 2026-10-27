@@ -177,8 +177,9 @@ export class WorkbenchStore {
  async steps(id:string,generation:number,offset=0):Promise<WorkbenchStepPage>{
   const raw=await this.#readCheckpoint(id,generation)
   const state=raw===null?emptyWorkbenchCheckpoint(id,generation):z.object({calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional()}).parse(raw) as Pick<WorkbenchCheckpoint,'calls'|'thoughts'>
+  const thoughts=boundWorkbenchThoughts(state.thoughts??[])
   const merged:WorkbenchStep[]=[
-   ...boundWorkbenchThoughts(state.thoughts??[]).map(thought=>({kind:'thinking' as const,id:thought.id,text:thought.text,created_at:thought.created_at,message_id:thought.message_id??null})),
+   ...thoughts.map(thought=>({kind:'thinking' as const,id:thought.id,text:thought.text,created_at:thought.created_at,message_id:thought.message_id??null})),
    ...state.calls.map((call,index)=>({kind:'tool' as const,...workbenchCallPreview(call,index)})),
   ]
   merged.sort((left,right)=>{const a=left.created_at??'',b=right.created_at??'';return a<b?-1:a>b?1:0})
@@ -188,7 +189,9 @@ export class WorkbenchStore {
    if(items.length&&bytes+size>12000)break
    items.push(step);bytes+=size;index++
   }
-  return {items,total:merged.length,next_offset:index<merged.length?index:null,generation,first_id:merged[0]?.id??null}
+  // `first_id` catches a removed first row; `thoughts_first_id` also catches a thought
+  // evicted after a permanent leading tool call, which leaves `first_id` unchanged.
+  return {items,total:merged.length,next_offset:index<merged.length?index:null,generation,first_id:merged[0]?.id??null,thoughts_first_id:thoughts[0]?.id??null}
  }
 }
 
@@ -219,4 +222,4 @@ export type WorkbenchCallPreview=ReturnType<typeof workbenchCallPreview>
 /** One display step: a bounded thought or the existing compact tool-call preview. */
 export interface WorkbenchThinkingStep {kind:'thinking';id:string;text:string;created_at:string;message_id:string|null}
 export type WorkbenchStep=WorkbenchThinkingStep|({kind:'tool'}&WorkbenchCallPreview)
-export interface WorkbenchStepPage {items:WorkbenchStep[];total:number;next_offset:number|null;generation:number;/** First id of the full merged list; changes when an old thought is evicted. */first_id:string|null}
+export interface WorkbenchStepPage {items:WorkbenchStep[];total:number;next_offset:number|null;generation:number;/** First id of the full merged list; changes when an old thought is evicted. */first_id:string|null;/** First retained thought id; changes on every thought eviction, even mid-list. */thoughts_first_id:string|null}
