@@ -16,6 +16,7 @@ directories:
 
 files:
   - src/**/*
+  - build/renderer/**/*
   - package.json
   - THIRD_PARTY_NOTICES.md
   - LICENSES/**/*

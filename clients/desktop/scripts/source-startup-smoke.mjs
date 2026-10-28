@@ -27,6 +27,8 @@ export function sourceStartupSmokeEnvironment(parentEnvironment, {home}) {
   const environment = {}
   for (const [key, value] of Object.entries(parentEnvironment)) {
     const normalizedKey = key.toUpperCase()
+    // Build location is an explicit, non-secret source artifact selector.
+    if (normalizedKey === 'NOVA_DESKTOP_RENDERER_OUTPUT_ROOT') { environment.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT = value; continue }
     if (
       normalizedKey.startsWith('NOVA_') || productEnvironmentNames.has(normalizedKey) ||
       normalizedKey === 'ELECTRON_RUN_AS_NODE' ||

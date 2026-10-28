@@ -58,3 +58,10 @@ test('source smoke lifecycle clock emits integer milliseconds without private st
   vm.runInContext(body + "sourceSmokeStage('before_quit')", context)
   assert.deepEqual(lines, [[2, '[desktop-smoke] before_quit elapsed_ms=1235\n']])
 })
+
+test('source startup smoke retains only the explicit renderer build directory among NOVA overrides',()=>{
+ const parent={NOVA_DESKTOP_RENDERER_OUTPUT_ROOT:'/tmp/nova-isolated/renderer',NOVA_ORB_OPAQUE:'1',NOVA_TOKEN:'private'}
+ const env=sourceStartupSmokeEnvironment(parent,{home:'/tmp/nova-smoke'})
+ assert.equal(env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT,parent.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT)
+ assert.equal(env.NOVA_ORB_OPAQUE,undefined);assert.equal(env.NOVA_TOKEN,undefined)
+})

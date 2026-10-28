@@ -133,7 +133,7 @@ test('staging preserves nested dependency versions and omits development files',
   const json = value => JSON.stringify(value)
   try {
     await file(root, 'package.json', json({name: 'desktop', dependencies: {a: '1', b: '1'}}))
-    for (const name of ['src/main.mjs', 'LICENSES/MIT', 'THIRD_PARTY_NOTICES.md']) await file(root, name)
+    for (const name of ['src/main.mjs', 'LICENSES/MIT', 'THIRD_PARTY_NOTICES.md', 'build/renderer/index.html']) await file(root, name)
     await file(root, 'node_modules/a/package.json', json({name: 'a', dependencies: {c: '1'}}))
     await file(root, 'node_modules/b/package.json', json({name: 'b', dependencies: {c: '2'}}))
     await file(root, 'node_modules/c/package.json', json({name: 'c', version: '1'}))
@@ -153,7 +153,7 @@ test('staging keeps the runtime CLI evaluation imports executable', async () => 
   const runtime = 'node_modules/@nova-personal-agent/runtime'
   try {
     await file(root, 'package.json', JSON.stringify({dependencies: {'@nova-personal-agent/runtime': '1'}}))
-    for (const name of ['src/main.mjs', 'LICENSES/MIT', 'THIRD_PARTY_NOTICES.md']) await file(root, name)
+    for (const name of ['src/main.mjs', 'LICENSES/MIT', 'THIRD_PARTY_NOTICES.md', 'build/renderer/index.html']) await file(root, name)
     await file(root, `${runtime}/package.json`, JSON.stringify({name: '@nova-personal-agent/runtime', type: 'module', files: ['dist/src', 'dist/eval']}))
     await file(root, `${runtime}/dist/src/cli.js`, "import {marker} from '../eval/probe.js'; console.log(marker)")
     await file(root, `${runtime}/dist/eval/probe.js`, "export const marker = 'evaluation-ready'")
