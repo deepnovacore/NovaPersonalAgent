@@ -1,12 +1,14 @@
 /** A badge cannot release the host's presentation hold; an actionable card can. */
 export function visibleApprovals(c,document){
  if(!c?.connected||!c.presentationReady||c.presentationPending||c.presentationMode!=='workbench'||c.collapsed||document.visibilityState!=='visible'||!document.hasFocus())return[]
+ const modals=[...document.querySelectorAll('dialog[open]')].filter(dialog=>dialog.matches(':modal')),modal=modals.find(dialog=>dialog.contains(document.activeElement))??modals.at(-1)
  const visible=node=>{
+  if(modal&&!modal.contains(node))return false
   const box=node.getBoundingClientRect()
   if(box.width<=0||box.height<=0)return false
   let top=Math.max(0,box.top),bottom=Math.min(document.defaultView.innerHeight,box.bottom),left=Math.max(0,box.left),right=Math.min(document.defaultView.innerWidth,box.right)
   for(let parent=node;parent;parent=parent.parentElement){
-   if(parent.hidden||parent.getAttribute('aria-hidden')==='true')return false
+   if(parent.hidden||parent.hasAttribute('inert')||parent.getAttribute('aria-hidden')==='true')return false
    const style=document.defaultView.getComputedStyle(parent)
    if(style.display==='none'||style.visibility==='hidden')return false
    if(parent!==node&&/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)){

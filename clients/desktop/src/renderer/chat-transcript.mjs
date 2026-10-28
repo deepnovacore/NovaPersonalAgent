@@ -137,7 +137,9 @@ export function createChatStream(){
    for(const message of [...frame.conversations?.messages??[],...frame.conversations?.home_messages??[]]){
     if(message.role!=='assistant')continue
     if(!message.turn_id)continue
-    adoptAnonymousToolTrace(message.conversation_id,message.turn_id)
+    const anonymous=liveTools.get(liveToolKey(message.conversation_id,''))
+    // A historical snapshot cannot name an in-flight lookup; only a positively newer reply can.
+    if(anonymous&&Date.parse(message.created_at)>=anonymous.seen_at)adoptAnonymousToolTrace(message.conversation_id,message.turn_id)
     const key=`${message.conversation_id}:${message.turn_id}`,live=liveCaptions.get(key)
     // A lagging or shortened persisted reply must not delete a longer caption still on screen.
     if(live&&(message.text??'').length>=(live.text??'').length)liveCaptions.delete(key)

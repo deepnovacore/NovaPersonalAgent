@@ -3,6 +3,7 @@ import {test} from 'node:test'
 import {readFile} from 'node:fs/promises'
 import vm from 'node:vm'
 import {JSDOM} from 'jsdom'
+import {createChatStream} from '../src/renderer/chat-transcript.mjs'
 
 for(const entry of ['index.mjs','react/desktop-engine.mjs']){
  test(`${entry}: only visible actionable approval cards acknowledge presentation`,async()=>{
@@ -37,4 +38,25 @@ test('React engine reserves the orb confirmation surface for project decisions',
  const source=await readFile(new URL('../src/renderer/react/desktop-engine.mjs',import.meta.url),'utf8')
  assert.equal(source.includes('parseCodexApprovalMessage'),false)
  assert.equal(source.includes('CodexApprovalDecisionController'),false)
+})
+
+
+test('an anonymous running lookup survives an initial historical snapshot',()=>{
+ const stream=createChatStream();stream.receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'running',summary:'Lookup'});
+ stream.receive({type:'personal.state',conversations:{messages:[{id:'old',conversation_id:'chat:main',role:'assistant',turn_id:'old-turn',text:'Old answer'}]}});
+ assert.equal(stream.tools.size,1);assert.equal([...stream.tools.values()][0].turn_id,'');
+ stream.receive({type:'caption',conversation_id:'chat:main',turn_id:'current',role:'assistant',text:'Answer'});
+ assert.equal(stream.tools.size,1);assert.equal([...stream.tools.values()][0].turn_id,'current');
+ stream.receive({type:'personal.state',conversations:{messages:[{id:'current',conversation_id:'chat:main',role:'assistant',turn_id:'current',text:'Answer'}]}});
+ assert.equal(stream.tools.size,0);
+})
+
+
+test('a positively newer durable assistant message can retire its anonymous lookup without a caption',()=>{
+ const stream=createChatStream();stream.receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'running',summary:'Lookup'});
+ stream.receive({type:'personal.state',conversations:{messages:[{id:'old',conversation_id:'chat:main',role:'assistant',turn_id:'old-turn',text:'Old answer',created_at:'2020-01-01T00:00:00.000Z'}]}});
+ assert.equal(stream.tools.size,1);
+ const created_at=new Date([...stream.tools.values()][0].seen_at+1).toISOString();
+ stream.receive({type:'personal.state',conversations:{messages:[{id:'current',conversation_id:'chat:main',role:'assistant',turn_id:'current',text:'Current answer',created_at}]}});
+ assert.equal(stream.tools.size,0);
 })

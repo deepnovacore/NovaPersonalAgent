@@ -13,7 +13,7 @@ class Socket {
  open(){this.readyState=1;this.onopen?.()}
 }
 function fixture() {
- const dom=new JSDOM('<!doctype html><html><body><div id="orb"></div><canvas></canvas></body></html>',{pretendToBeVisual:true,url:'https://nova.local'})
+ const dom=new JSDOM('<!doctype html><html><body><div id="orb"></div><div id="personal-root"></div><canvas></canvas></body></html>',{pretendToBeVisual:true,url:'https://nova.local'})
  const media={matches:false,addEventListener(){},removeEventListener(){}}
  Object.assign(globalThis,{window:dom.window,document:dom.window.document,WebSocket:Socket,matchMedia:()=>media})
  Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true})
@@ -25,7 +25,7 @@ function fixture() {
  ;(window as any).novaPersonalAgentDesktop=api
  const controller:any={presentationMode:'orb',mode:'text',connect:async()=>{},command:async()=>{},disconnect(){},desiredPresentation:'orb'},view:any={controller,refresh(){},startup(){},setOrb(){},setOrbLevel(){},identity(){},receive(){},expand(){calls.push('expand')},dispose(){calls.push('dispose-view')}}
  const ui=createShellStore(),engine=startDesktopEngine({ui,refs:{orb:document.getElementById('orb'),canvas},mountPersonalView:()=>view})
- return{dom,ui,engine,listeners,counts,calls}
+ return{dom,ui,engine,listeners,counts,calls,controller}
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve))
 
@@ -51,4 +51,24 @@ test('shell bridge disables decisions when delivery is unavailable and does not 
  await f.engine.receive({type:'executor.approval',executor:'codex',display_name:'Codex',pending_approval:true,pending_approval_busy:false,pending_approval_id:'approval-2',kind:'command_execution',local_detail:{kind:'command_execution',command:'npm test',cwd:'workspace'},operation_summary:'执行器请求执行命令',expires_in_seconds:0})
  assert.equal(f.ui.get().orb.decisionEnabled,false);f.ui.invoke('confirm');assert.equal(Socket.sockets.at(-1)!.sent.length,0)
  f.engine.dispose();await settle();f.dom.window.close()
+})
+
+
+test('committed approval waits through inert and modal blockers and acknowledges when each clears',async()=>{
+ const f=fixture();try{
+ await settle();const doc=f.dom.window.document,commands:any[]=[];
+ Object.assign(f.controller,{presentationReady:true,presentationPending:false,presentationMode:'workbench',connected:true,selectedId:'A',command:async(method:any,params:any)=>commands.push([method,params])});
+ Object.defineProperty(doc,'hasFocus',{value:()=>true});
+ f.dom.window.HTMLElement.prototype.getBoundingClientRect=()=>({left:0,top:0,right:100,bottom:100,width:100,height:100,toJSON(){}}) as any;
+ // jsdom has no modal top layer; model only its missing :modal selector.
+ const matches=f.dom.window.HTMLDialogElement.prototype.matches;
+ f.dom.window.HTMLDialogElement.prototype.matches=function(selector:string){return selector===':modal'?this.open:matches.call(this,selector)};
+ const host=doc.getElementById('personal-root')!;host.setAttribute('inert','');host.innerHTML='<section class="approval-dock"><article data-approval-id="a" data-conversation-id="A"><button>Allow</button></article></section>';
+ await settle();assert.equal(commands.length,0,'welcome inert ancestry blocks approval interaction');
+ host.removeAttribute('inert');await settle();assert.equal(commands.length,1,'clearing inert must acknowledge without a host frame');
+ const modal=doc.createElement('dialog');modal.open=true;doc.body.append(modal);host.querySelector('article')!.setAttribute('data-approval-id','b');
+ await settle();assert.equal(commands.length,1,'a modal outside the workbench blocks its approval buttons');
+ modal.open=false;await settle();assert.equal(commands.length,2,'closing sibling modal must acknowledge the committed card');assert.equal(commands[1][1].approval_id,'b');
+ f.engine.dispose();host.querySelector('article')!.setAttribute('data-approval-id','c');await settle();assert.equal(commands.length,2,'disposed engine releases its observer');
+ }finally{f.engine.dispose();f.dom.window.close()}
 })

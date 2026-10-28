@@ -360,7 +360,7 @@ window.addEventListener('focus',()=>render())
 document.addEventListener('visibilitychange',()=>render())
 const acknowledgeApprovals=()=>acknowledgeVisibleConfirmation(deriveOrbState(axes))
 const approvalObserver=new window.MutationObserver(acknowledgeApprovals)
-approvalObserver.observe(document.getElementById('personal-root')??document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','disabled','data-approval-id','data-conversation-id']})
+approvalObserver.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','disabled','inert','open','data-approval-id','data-conversation-id']})
 document.addEventListener('scroll',acknowledgeApprovals,true)
 
 function render() {

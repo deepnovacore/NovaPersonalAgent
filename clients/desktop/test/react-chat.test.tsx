@@ -135,3 +135,21 @@ test('legacy approval notifications do not duplicate the selected approval dock'
  h.c.snapshot.pending_approvals=[];await h.render();assert.equal(document.querySelectorAll('[role=log] .message').length,2);
  }finally{await h.close()}
 })
+
+
+test('historical snapshots cannot claim an anonymous tool before its current caption',async()=>{
+ const h=await mount();try{
+ const receive=(frame:any)=>act(async()=>h.ref.current.receive(frame));
+ const old={id:'old',conversation_id:'chat:main',role:'assistant',turn_id:'old-turn',text:'Old answer',created_at:'2020-01-01T00:00:00.000Z'};
+ h.c.snapshot.conversations.messages=[old];await receive({type:'personal.state',conversations:h.c.snapshot.conversations});
+ await receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'running',summary:'Current lookup'});
+ assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,1);
+ await receive({type:'personal.state',conversations:h.c.snapshot.conversations});
+ assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,1,'unrelated state must retain current anonymous lookup');
+ await receive({type:'caption',conversation_id:'chat:main',turn_id:'current-turn',role:'assistant',text:'Current answer',sequence:1});
+ assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,1);
+ h.c.snapshot.conversations.messages=[old,{id:'current',conversation_id:'chat:main',turn_id:'current-turn',role:'assistant',text:'Current answer',tool_trace:[{name:'memory__recall',state:'ok',summary:'Current done'}]}];
+ await receive({type:'personal.state',conversations:h.c.snapshot.conversations});
+ assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,0);
+ }finally{await h.close()}
+})
