@@ -2110,4 +2110,9 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "需要处理的投递": "Deliveries needing attention",
   "连接飞书应用后可改为在飞书接收。": "Connect a Feishu app to receive messages in Feishu.",
   "同步飞书会话，并在飞书中接收 Nova 的主动消息。": "Sync Feishu chats and receive Nova's proactive messages in Feishu.",
+  "按任务": "By task",
+  "未估价": "Unpriced",
+  "人民币": "CNY",
+  "美元": "USD",
+  "历史用量读取或保存失败，当前用量仍保留。": "Reading or saving usage history failed; current usage is still shown.",
 })
