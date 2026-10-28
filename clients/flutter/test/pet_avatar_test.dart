@@ -66,11 +66,14 @@ void main() {
     if (support.existsSync()) await support.delete(recursive: true);
   });
 
-  PetAvatarStore storeWith({Future<Uint8List?> Function()? pickImage}) =>
-      PetAvatarStore(
-        supportDirectory: () async => support,
-        pickImage: pickImage,
-      );
+  PetAvatarStore storeWith({
+    Future<Uint8List?> Function()? pickImage,
+    Future<bool> Function(String value)? writePreference,
+  }) => PetAvatarStore(
+    supportDirectory: () async => support,
+    pickImage: pickImage,
+    writePreference: writePreference,
+  );
 
   test('bundled default avatar is the approved byte-identical copy', () async {
     final bundled = await File(petAvatarAsset).readAsBytes();
@@ -148,6 +151,56 @@ void main() {
     final blocker = File('${support.path}/blocker')..writeAsStringSync('x');
     directory = Directory('${blocker.path}/nested');
     expect(await store.pickCustomImage(), isFalse);
+    expect(store.error, 'image_failed');
+    expect(store.customPath, previous);
+    expect(File(previous).existsSync(), isTrue);
+  });
+
+  test('a failed preference write keeps the previous avatar and removes the new file', () async {
+    var persistOk = true;
+    var image = await _png(120, 60);
+    final store = storeWith(
+      pickImage: () async => image,
+      writePreference: (_) async => persistOk,
+    );
+    await store.load();
+    expect(await store.pickCustomImage(), isTrue);
+    final previous = store.customPath!;
+    image = await _png(80, 80);
+    persistOk = false;
+    expect(await store.pickCustomImage(), isFalse);
+    expect(store.error, 'image_failed');
+    expect(store.customPath, previous, reason: 'the session keeps the old avatar');
+    expect(File(previous).existsSync(), isTrue, reason: 'the old file is not deleted');
+    expect(
+      support
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.split('/').last.startsWith(petAvatarFilePrefix))
+          .length,
+      1,
+      reason: 'the unpersisted new file is cleaned up',
+    );
+    // A restart still loads the previous persisted avatar rather than the default.
+    SharedPreferences.setMockInitialValues({
+      petAvatarPreferenceKey: jsonEncode({'mode': 'custom', 'path': previous}),
+    });
+    final reloaded = storeWith();
+    await reloaded.load();
+    expect(reloaded.customPath, previous);
+  });
+
+  test('a failed reset preference keeps the custom avatar file and path', () async {
+    var persistOk = true;
+    final store = storeWith(
+      pickImage: () async => _png(64, 64),
+      writePreference: (_) async => persistOk,
+    );
+    await store.load();
+    expect(await store.pickCustomImage(), isTrue);
+    final previous = store.customPath!;
+    persistOk = false;
+    await store.resetToDefault();
     expect(store.error, 'image_failed');
     expect(store.customPath, previous);
     expect(File(previous).existsSync(), isTrue);

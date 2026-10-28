@@ -100,15 +100,18 @@ class PetAvatarStore extends ChangeNotifier {
   factory PetAvatarStore({
     Future<Directory> Function()? supportDirectory,
     Future<Uint8List?> Function()? pickImage,
+    Future<bool> Function(String value)? writePreference,
   }) => PetAvatarStore._(
     supportDirectory ?? getApplicationSupportDirectory,
     pickImage,
+    writePreference,
   );
 
-  PetAvatarStore._(this._supportDirectory, this._pickImage);
+  PetAvatarStore._(this._supportDirectory, this._pickImage, this._writePreference);
 
   final Future<Directory> Function() _supportDirectory;
   final Future<Uint8List?> Function()? _pickImage;
+  final Future<bool> Function(String value)? _writePreference;
 
   bool _loaded = false, _busy = false, _disposed = false;
   String? _customPath, _error;
@@ -185,15 +188,24 @@ class PetAvatarStore extends ChangeNotifier {
     return path;
   }
 
-  Future<void> _persist() async {
+  /// Persists the selected mode/path and reports whether the write succeeded.
+  /// Callers must not delete the previous file until this returns true, or a
+  /// restart would point preferences at a deleted image.
+  Future<bool> _persist() async {
+    final value = jsonEncode({'mode': mode, 'path': _customPath});
+    final write = _writePreference;
+    if (write != null) {
+      try {
+        return await write(value);
+      } catch (_) {
+        return false;
+      }
+    }
     try {
       final preferences = await SharedPreferences.getInstance();
-      await preferences.setString(
-        petAvatarPreferenceKey,
-        jsonEncode({'mode': mode, 'path': _customPath}),
-      );
+      return await preferences.setString(petAvatarPreferenceKey, value);
     } catch (_) {
-      // The chosen avatar still renders for this session.
+      return false;
     }
   }
 
@@ -233,8 +245,14 @@ class PetAvatarStore extends ChangeNotifier {
       }
       final previous = _customPath;
       _customPath = next.path;
+      final saved = await _persist();
+      if (!saved) {
+        _customPath = previous;
+        _error = 'image_failed';
+        await _deleteAvatarFile(next.path);
+        return false;
+      }
       _revision++;
-      await _persist();
       if (previous != null && previous != next.path) {
         await _deleteAvatarFile(previous);
       }
@@ -260,7 +278,8 @@ class PetAvatarStore extends ChangeNotifier {
     return picked.readAsBytes();
   }
 
-  /// Restores the default avatar and deletes the resized custom PNG.
+  /// Restores the default avatar and deletes the resized custom PNG only after
+  /// the default preference is durably saved.
   Future<void> resetToDefault() async {
     if (_disposed) return;
     final previous = _customPath;
@@ -268,7 +287,14 @@ class PetAvatarStore extends ChangeNotifier {
     _error = null;
     _revision++;
     _notify();
-    await _persist();
+    final saved = await _persist();
+    if (!saved) {
+      _customPath = previous;
+      _error = 'image_failed';
+      _revision++;
+      _notify();
+      return;
+    }
     if (previous != null) await _deleteAvatarFile(previous);
   }
 
