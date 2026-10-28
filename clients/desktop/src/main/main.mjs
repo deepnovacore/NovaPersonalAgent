@@ -85,7 +85,7 @@ import {
   createDebugBoardRequester,
   formatMemoryBoardExport,
 } from './debug-board-client.mjs'
-import { installAppProtocol, loadAppWindow, registerAppScheme } from './app-protocol.mjs'
+import { buildRendererAssetGraph, installAppProtocol, loadAppWindow, registerAppScheme } from './app-protocol.mjs'
 import { startWithSelectedCamera } from './camera-source.mjs'
 import { createDragController } from './drag-controller.mjs'
 import { configureWorkbenchNativeDrag } from './workbench-drag.mjs'
@@ -184,7 +184,7 @@ const developmentEnv = !app.isPackaged && existsSync(developmentEnvFile)
 for (const name of Object.values(SECRET_ENV_MAP)) {
   if (developmentEnv[name] !== undefined) process.env[name] = developmentEnv[name]
 }
-const rendererRoot = resolve(packageRoot, 'src/renderer')
+const rendererRoot = resolve(process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT ?? resolve(packageRoot, 'build/renderer'))
 const preload = resolve(packageRoot, 'src/preload/preload.cjs')
 const WINDOW_SIZE = Object.freeze({ width: 160, height: 160 })
 // Long-standing Chromium/X11 quirk: the ARGB visual backing a transparent,
@@ -2458,12 +2458,7 @@ async function runInstalledFileCameraSmoke() {
       try {
         installAppProtocol(window.webContents.session.protocol, {
           rendererRoot,
-          rendererFiles: [
-            '/release-camera.html',
-            '/release-camera.mjs',
-            '/release-camera-contract.mjs',
-            '/camera.mjs',
-          ],
+          rendererFiles: await buildRendererAssetGraph(rendererRoot, undefined, ['/release-camera.html']),
           fetchFile: (file, options) => net.fetch(pathToFileURL(file).href, options),
           cameraFile: camera.file,
           fetchCameraFile: (url, init) => net.fetch(url, init),
