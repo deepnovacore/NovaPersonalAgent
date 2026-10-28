@@ -596,7 +596,6 @@ body:hover #orb-rail,
 
 #codex-confirmation-actions[hidden] { display: none; }
 #codex-confirmation-actions button[hidden] { display: none; }
-#codex-confirmation-actions #codex-allow-session { width: auto; padding: 0 7px; font-size: 10px; }
 
 #codex-confirmation-actions button {
   width: 20px;

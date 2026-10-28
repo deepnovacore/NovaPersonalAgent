@@ -1286,7 +1286,7 @@ test('background return reconciles unchanged renderer dormancy with native show 
  const source=await readFile(new URL('../src/renderer/index.mjs',import.meta.url),'utf8')
  const main=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
  const applyBody=source.slice(source.indexOf('applyPresentation: async ')+19,source.indexOf('\n  taskAction:',source.indexOf('applyPresentation: async '))).replace(/,\s*$/,'')
- const reportBody=source.slice(source.indexOf('  const dormant = orbDormant('),source.indexOf('\n  const activeDecision',source.indexOf('  const dormant = orbDormant(')))
+ const reportBody=source.slice(source.indexOf('  const dormant = orbDormant('),source.indexOf('\n  const decisionEnabled',source.indexOf('  const dormant = orbDormant(')))
  const showBody=main.match(/mainWindow\.on\('show', (\(\) => \{[^\n]+\})\)/)[1]
  for(const surface of ['resting','bubble','task','confirmation']){
   let bounds={x:500,y:400,width:160,height:160},visible=true

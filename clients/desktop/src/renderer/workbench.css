@@ -820,11 +820,19 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .soul-error{color:var(--danger,#c0392b);font-size:13px}
 .workbench-plan .workbench-runner-note{margin:4px 0 8px;font-size:12px}
 .workbench-plan select{max-width:100%;margin:0 0 4px}
-.executor-float{position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:20;display:flex;flex-direction:column;gap:6px;width:min(300px,calc(100vw - 24px));max-height:60vh;overflow:auto;padding:8px;border:1px solid var(--line);border-radius:14px;background:var(--surface-raised);box-shadow:0 10px 30px color-mix(in srgb,var(--ink) 14%,transparent)}
+/* A centered floating status pill: collapsed it is content-sized, so anchoring to the window center keeps its
+   edge predictable while tasks come and go instead of drifting from an arbitrary left edge. */
+.executor-float{position:fixed;left:50vw;top:50vh;transform:translate(-50%,-50%);z-index:20;display:flex;flex-direction:column;align-items:center;gap:6px;width:max-content;max-width:min(320px,calc(100vw - 32px));max-height:60vh;overflow:auto}
 .executor-float[hidden]{display:none}
-.executor-float[data-expanded="false"]{width:auto}
-.executor-float-pill{justify-content:flex-start;font-size:13px}
-.executor-float-task{display:flex;flex-direction:column;gap:4px;padding:8px;border-radius:10px;background:var(--surface-inset)}
+.executor-float[data-expanded="true"]{align-items:stretch;width:min(320px,calc(100vw - 32px));padding:8px;border:1px solid var(--line);border-radius:14px;background:var(--surface-raised);box-shadow:0 10px 30px color-mix(in srgb,var(--ink) 14%,transparent)}
+.executor-float-pill{display:flex;align-items:center;gap:7px;flex:none;max-width:100%;height:28px;padding:0 12px;border:1px solid var(--line-strong);border-radius:999px;background:var(--surface-raised);box-shadow:0 4px 14px color-mix(in srgb,var(--ink) 12%,transparent);color:var(--ink);font:500 12px/26px var(--font);text-align:left;cursor:pointer;pointer-events:auto}
+.executor-float[data-expanded="true"] .executor-float-pill{align-self:flex-start}
+.executor-float-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.executor-float-phase{flex:none;width:7px;height:7px;border-radius:50%;background:var(--ink-faint)}
+.executor-float[data-phase="started"] .executor-float-phase,.executor-float[data-phase="working"] .executor-float-phase{background:var(--accent)}
+.executor-float[data-phase="failed"] .executor-float-phase,.executor-float[data-phase="refused"] .executor-float-phase,.executor-float[data-phase="unknown"] .executor-float-phase{background:var(--warn)}
+.executor-float[data-phase="completed"] .executor-float-phase{background:var(--ok)}
+.executor-float-task{display:flex;flex-direction:column;gap:4px;padding:8px;border-radius:10px;background:var(--surface-inset);pointer-events:auto}
 .executor-float-task small{color:var(--ink-dim)}
 .executor-float-output{margin:0;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono)}
 

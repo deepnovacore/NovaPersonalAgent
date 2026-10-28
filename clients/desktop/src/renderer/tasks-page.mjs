@@ -6,6 +6,19 @@ export function taskNotificationText(message){
  const match=message.id?.startsWith('notification:')&&/^需要你处理\n([a-z_]+)\n请在 Nova 中查看并处理。$/.exec(message.text??'')
  return match?taskWaitingLabel(match[1]):message.text
 }
+// Older hosts projected pending decisions and executor progress into the transcript as `notification:` chat
+// rows. Decisions now live in the composer dock and progress in the executor float, so those legacy rows are
+// hidden here until every persisted workspace has cycled through hosts that no longer write them. A progress
+// row is only redundant while a decision is on screen; on its own it is still the transcript's progress record.
+const LEGACY_DECISION_NOTIFICATION=/^需要你处理\n/u
+const LEGACY_PROGRESS_NOTIFICATION=/^任务进展\n/u
+export function hiddenTranscriptNotification(message,{decisionPending=false}={}){
+ if(typeof message?.id!=='string'||!message.id.startsWith('notification:'))return false
+ const text=typeof message.text==='string'?message.text:''
+ if(LEGACY_DECISION_NOTIFICATION.test(text))return true
+ return decisionPending===true&&LEGACY_PROGRESS_NOTIFICATION.test(text)
+}
+export const visibleTranscriptMessages=(messages,options)=>messages.filter(message=>!hiddenTranscriptNotification(message,options))
 /** Who acts next on a delegated task, in one short phrase for cards. */
 export const taskNextStep=task=>task.phase==='waiting'?t('需要你：{0}',taskWaitingLabel(task.waiting_reason)||t('任务需要你处理')):task.controller?.kind==='user'?t('你在控制'):['completed','cancelled'].includes(task.phase)?t('无需操作'):t('Nova 在推进')
 // Built-in source maintenance keeps its recovery ledger without becoming a user task.

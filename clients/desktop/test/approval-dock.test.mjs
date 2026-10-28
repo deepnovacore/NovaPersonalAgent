@@ -77,3 +77,16 @@ test('a double click sends exactly one decision and exposes an in-flight state',
  assert.equal(allow.disabled,false);assert.equal(deny.disabled,false)
  assert.deepEqual(commands,[['conversations.approve',{id:'chat:main',approval_id:'a1',approved:true}]])
 })
+
+test('the dock follows the selected conversation so one approval is decided from exactly one place',()=>{
+ const f=fixture({approvals:[row({approval_id:'a1',summary:'主对话审批'}),row({approval_id:'a2',conversation_id:'other',summary:'另一个会话的审批'})]})
+ f.dock.update()
+ assert.equal(f.root.hidden,false)
+ assert.equal(all(f.root).filter(n=>n.name==='article').length,1,'only the selected conversation approval is rendered')
+ assert.ok(all(f.root).some(n=>n.textContent==='主对话审批'))
+ f.c.selectedId='other';f.dock.update()
+ assert.ok(all(f.root).some(n=>n.textContent==='另一个会话的审批'))
+ assert.equal(all(f.root).some(n=>n.textContent==='主对话审批'),false)
+ all(f.root).find(n=>n.textContent==='允许').listeners.click()
+ assert.deepEqual(f.commands,[['conversations.approve',{id:'other',approval_id:'a2',approved:true}]])
+})

@@ -1,4 +1,4 @@
-import {taskNotificationText} from './tasks-page.mjs'
+import {taskNotificationText,visibleTranscriptMessages} from './tasks-page.mjs'
 import {mountIdleAvatar} from './idle-avatar.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {disposeSources} from './source-popover.mjs'
@@ -40,18 +40,45 @@ export function homeTranscript(conversations){
 /**
  * Live captions are not persisted, so they carry the local time they were first seen. They belong right after the
  * last persisted message that existed then; appending them last would pin a stale caption below newer messages.
- * A caption whose text already arrived as a persisted reply is redundant.
+ * Identity, not text, decides whether a caption is already in the transcript: the runtime may rewrite or merge the
+ * persisted text, and comparing strings would either duplicate the reply or swallow the newer caption.
  */
 export function orderTranscript(persisted,live){
  const placed=new Map(),tail=[]
  for(const frame of live){
   if(typeof frame.seen_at!=='number'){tail.push(frame);continue}
-  const text=frame.text?.trim()
-  if(text&&persisted.some(message=>message.role==='assistant'&&message.text?.trim()===text&&Date.parse(message.created_at)>=frame.seen_at))continue
+  if(persistedCoversCaption(persisted,frame))continue
   const index=persisted.findLastIndex(message=>Date.parse(message.created_at)<=frame.seen_at)
   placed.set(index,[...(placed.get(index)??[]),frame])
  }
  return [...(placed.get(-1)??[]),...persisted.flatMap((message,index)=>[message,...(placed.get(index)??[])]),...tail]
+}
+/** A persisted assistant reply owns the caption of its turn once it carries at least as much text. */
+function persistedCoversCaption(persisted,frame){
+ if(typeof frame.turn_id!=='string'||typeof frame.text!=='string')return false
+ return persisted.some(message=>message.role==='assistant'&&message.turn_id===frame.turn_id
+  && typeof message.text==='string'&&message.text.length>=frame.text.length)
+}
+/**
+ * The persisted reply is the durable copy of its turn, but a snapshot can lag the streamed caption, and a merged
+ * turn can be persisted shorter than what the preview already showed. The longer text wins for display so the
+ * first paragraph a caption already rendered is never swallowed when the message row arrives.
+ */
+function mergeLiveCaptionText(persisted,captions){
+ const longest=new Map()
+ for(const caption of captions)if(typeof caption.turn_id==='string'){
+  const current=longest.get(caption.turn_id)
+  if(!current||(caption.text??'').length>(current.text??'').length)longest.set(caption.turn_id,caption)
+ }
+ const owned=new Set()
+ const messages=persisted.map(message=>{
+  if(message.role!=='assistant'||typeof message.turn_id!=='string')return message
+  const caption=longest.get(message.turn_id)
+  if(!caption)return message
+  owned.add(message.turn_id)
+  return (caption.text??'').length>(message.text??'').length?{...message,text:caption.text}:message
+ })
+ return {messages,live:captions.filter(caption=>typeof caption.turn_id!=='string'||!owned.has(caption.turn_id))}
 }
 function messageVisible(history,id){
  if(!history.getBoundingClientRect)return true
@@ -94,10 +121,11 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const stageLabel=el('p','','voice-stage-label');stageLabel.setAttribute('role','status');stage.append(stageCanvas,stageLabel);pane.append(stage)
  const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
  const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api,planHost})
- const approvalDock=mountApprovalDock(pane,{c,el,button,run})
  const pendingBuild=()=>{const item=c.selectedConversation;return Boolean(item)&&item.kind!=='build'&&currentComposerMode(item,c.state(item.id))==='build'}
  const workspaceBar=mountWorkspaceBar(pane,{c,el,button,run,api:api?.personal,visible:pendingBuild})
  const computerPanel=el('div',undefined,'computer-use-host');pane.append(computerPanel)
+ // Mounted last so the dock is the element directly above the composer: one place answers a pending approval.
+ const approvalDock=mountApprovalDock(pane,{c,el,button,run})
  let beginning=false,confirmingBuildTask=null
  /** Build always opens a new conversation, so attached references/todos would otherwise vanish silently. */
  function confirmBuildNewTask(){
@@ -244,10 +272,13 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   return node
  }
  function renderHistory(force=false){
-  const persisted=c.selectedId==='chat:main'?homeTranscript(c.snapshot?.conversations):(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===c.selectedId)
-  const turns=new Set(persisted.map(message=>message.turn_id).filter(Boolean))
+  const raw=c.selectedId==='chat:main'?homeTranscript(c.snapshot?.conversations):(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===c.selectedId)
+  // Legacy host notification rows repeated the decision dock and executor progress as chat bubbles.
+  const decisionPending=(c.snapshot?.pending_approvals?.length??0)+((c.snapshot?.pending_confirmations??[]).length)>0
   const isBuild=c.selectedConversation?.kind==='build'
-  const live=[...liveCaptions.values()].filter(frame=>frame.conversation_id===c.selectedId&&(frame.role!=='user'||frame.conversation_id===c.voiceId)&&!turns.has(frame.turn_id)&&(!isBuild||['running','awaiting_approval'].includes(c.selectedConversation?.build?.status)))
+  const captions=[...liveCaptions.values()].filter(frame=>frame.conversation_id===c.selectedId&&(frame.role!=='user'||frame.conversation_id===c.voiceId)&&(!isBuild||['running','awaiting_approval'].includes(c.selectedConversation?.build?.status)))
+  // A caption the persisted reply already owns is retired; a shorter persisted reply borrows the caption's text.
+  const {messages:persisted,live}=mergeLiveCaptionText(visibleTranscriptMessages(raw,{decisionPending}),captions)
   // The animated companion belongs to the empty intro only; it yields as soon as the transcript has a message.
   const transcriptPresent=persisted.length>0||live.length>0,transcriptChanged=transcriptPresent!==hasTranscript
   hasTranscript=transcriptPresent
@@ -317,16 +348,28 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  function reveal(){setOpen(true);update();draft.focus()}
  function receive(frame){
   targetMenu.receive(frame)
-  if(frame.type==='caption'&&typeof frame.text==='string'&&frame.conversation_id&&frame.turn_id&&(frame.role!=='user'||frame.conversation_id===c.voiceId)){
+  if(frame.type==='caption'&&(typeof frame.text==='string'||typeof frame.full_text==='string')&&frame.conversation_id&&frame.turn_id&&(frame.role!=='user'||frame.conversation_id===c.voiceId)){
    const key=`${frame.conversation_id}:${frame.turn_id}`
-   // An empty final caption retracts a preview the runtime discarded (for example narration before a tool call).
-   const text=typeof frame.full_text==='string'?frame.full_text:frame.text
-   if(text)liveCaptions.set(key,{...frame,text,seen_at:liveCaptions.get(key)?.seen_at??Date.now()})
-   else if(frame.final===true)liveCaptions.delete(key)
+   const existing=liveCaptions.get(key)
+   const sequence=Number.isFinite(frame.sequence)?frame.sequence:null
+   // Captions are cumulative and carry a monotonic sequence: a late frame must never regress the visible text.
+   if(!(existing&&sequence!==null&&existing.sequence!==null&&sequence<existing.sequence)){
+    const text=typeof frame.full_text==='string'&&frame.full_text.trim()?frame.full_text:frame.text
+    if(typeof text==='string'&&text){
+     liveCaptions.set(key,{...frame,text,sequence:sequence??existing?.sequence??null,seen_at:existing?.seen_at??Date.now()})
+    }
+    // An empty final retracts exactly the segment it ends; a newer segment's text outranks an older retraction.
+    else if(frame.final===true&&(sequence===null||existing?.sequence===null||existing===undefined||sequence>=existing.sequence))liveCaptions.delete(key)
+   }
    while(liveCaptions.size>128)liveCaptions.delete(liveCaptions.keys().next().value)
   }
   if(frame.type==='personal.state'){
-   for(const message of frame.conversations?.messages??[])if(message.turn_id)liveCaptions.delete(`${message.conversation_id}:${message.turn_id}`)
+   for(const message of frame.conversations?.messages??[]){
+    if(!message.turn_id||message.role!=='assistant')continue
+    const key=`${message.conversation_id}:${message.turn_id}`,live=liveCaptions.get(key)
+    // A lagging or shortened persisted reply must not delete a longer caption still on screen.
+    if(live&&(message.text??'').length>=(live.text??'').length)liveCaptions.delete(key)
+   }
    const idleBuilds=new Set((frame.conversations?.items??[]).filter(item=>item.kind==='build'&&!['running','awaiting_approval'].includes(item.build?.status)).map(item=>item.id))
    for(const [key,value] of liveCaptions)if(idleBuilds.has(value.conversation_id))liveCaptions.delete(key)
   }
