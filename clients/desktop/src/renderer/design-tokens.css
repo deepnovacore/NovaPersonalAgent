@@ -1,0 +1,77 @@
+/*
+ * Shared design tokens: the structural half of the visual system.
+ *
+ * Loading: index.html links this file before the page stylesheets, and
+ * settings.css imports it first (settings.html loads settings.css directly, so
+ * an @import keeps the token file out of settings.html, which the icon work
+ * owns). setup.html/visor*.html are standalone windows with their own tiny
+ * palettes and do not load it.
+ *
+ * Only geometry, type and elevation live here. Colour stays page-owned:
+ * index.css is the transparent orb plate, settings.css the light settings
+ * page, workbench.css the light/dark workbench, and each keeps its own
+ * palette + dark-mode + forced-colours overrides. A page may map its local
+ * names onto these tokens, but the tokens never carry a page's colour.
+ *
+ * The system is deliberately restrained: 4px spacing steps, cards and panels
+ * never round past 12px, elevation is a hairline rather than a blur, and one
+ * focus ring shape is shared by every control.
+ */
+:root {
+  /* 4px spacing scale: gutters, paddings, card interiors. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  /* Radius: 4/6/8/10/12. Cards and panels cap at --radius-xl (12px); only
+     pills, chips, switches and circular indicators use --radius-pill. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+
+  /* Elevation: separation comes from the 1px line, not from a shadow. Popovers
+     and floating surfaces may use the hairlines below; content cards stay flat. */
+  --shadow-1: 0 1px 2px rgba(20, 24, 31, .05);
+  --shadow-2: 0 4px 14px rgba(20, 24, 31, .08);
+  --shadow-3: 0 12px 32px rgba(20, 24, 31, .12);
+
+  /* Typography. */
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "PingFang SC", monospace;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --leading-tight: 1.35;
+  --leading-normal: 1.6;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Control geometry: inputs, selects and buttons share these heights so a row
+     of mixed controls lines up. controls.css keeps the native select itself. */
+  --control-height-sm: 28px;
+  --control-height-md: 32px;
+  --control-height-lg: 36px;
+
+  /* One focus ring everywhere: 2px accent, 2px offset, relaxed to 3px when the
+     OS asks for more contrast. */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+}
+
+@media (prefers-contrast: more) {
+  :root { --focus-ring-width: 3px; }
+}

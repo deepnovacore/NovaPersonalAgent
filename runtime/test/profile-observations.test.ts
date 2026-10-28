@@ -81,3 +81,19 @@ test('a bare review-note array is normalized without regenerating valid review f
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateProfile([{id:'project',version:1,origin:'stated',content:'I develop Orchard.'}],new AbortController().signal)
  assert.equal(result.about?.text,'You develop Orchard.');assert.equal(requests.length,3)
 })
+
+test('the previous publication is continuity context only and never contributes references',async()=>{
+ const requests:{system:string;prompt:string}[]=[];let stage=0
+ const narrative={about:{paragraphs:[{text:'You develop Orchard.',refs:['e0']}]},work:[],interests:[]}
+ const gateway={complete:(request:{system:string;prompt:string})=>{requests.push(request);return Promise.resolve({text:JSON.stringify(++stage===1?narrative:stage===2?{review_notes:[]}:{profile:narrative,review_notes:[]})})}} as unknown as ModelGateway
+ const writer=new GatewayPersonalWriter({gateway,model:'fixture'})
+ const result=await writer.generateProfile([{id:'project',version:1,origin:'stated',content:'I develop Orchard.'}],new AbortController().signal,undefined,{generated_at:'2026-10-18T00:00:00Z',about:'DELETED_SOURCE_FACT about a closed project',work:[{title:'Old project',text:'OLD_PROJECT_WORK'}],interests:['OLD_INTEREST']})
+ assert.ok(requests.length>=1,'a draft was requested')
+ const draftRequest=requests.find(request=>request.prompt.includes('"previous_publication"'))
+ assert.ok(draftRequest,'the previous publication reaches the draft request')
+ assert.match(draftRequest.prompt,/DELETED_SOURCE_FACT/)
+ assert.match(draftRequest.system,/不是证据/)
+ // Continuity is prose only: the parsed draft still cites nothing but the current entries.
+ assert.deepEqual(result.about?.refs,[{entry_id:'project',version:1}])
+ assert.deepEqual(result.work,[]);assert.deepEqual(result.interests,[])
+})

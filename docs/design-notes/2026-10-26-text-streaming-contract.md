@@ -46,3 +46,33 @@
 - 只改 `runtime/`；不引入新依赖和环境变量；风格与周边代码一致。
 - 日志与编译产物写到外置盘，不要写进仓库树（auto-checkpoint 会把它们提交）。
 - 不要 push；在你自己的 worker 分支上提交，整合由主控完成。
+
+## 2026-10-28 修订：P4 输出上限与 P8 首段保留
+
+上一版契约的"预览 → tool_call 一定撤回"会让用户在工具轮之后丢掉首段口播。实测还发现真实模型在输出上限处静默截断，界面只留下半句。本次修订替换第 4、5 条中的撤回语义，并新增输出上限的失败与续写契约；渲染端约定（`final:true` + `text:''` 撤回、同 `turn_id` 覆盖）不变。
+
+### P8：一个用户轮次一个转写
+
+1. provider（Chat Completions 与 Ark，仅 `previewText:true`）：工具决策前的文本不再只是可撤回预览。`finish_reason='tool_calls'` / Ark `response.completed` 带工具时，先在 `tool_call` 之前补发一次权威 `text_delta`，内容与该轮预览一致；语音（未开启预览）行为不变，仍然完全不向 TTS 暴露。
+2. `adapter.ts`（`textOnly`）：`tool_call` 不再发 `text:''` 的 final，也不清空已累计的转写；`response_completed` 带待执行工具时只发 `tool_call_ready`，narration 以非 final 的 delta 留在同一轮。语音路径保持原有撤回/TTS 行为。
+3. `conversation-runtime.ts`（文字模式）：`runTurn` 为每个用户轮次维护 `turnTexts` 槽位，一个响应一个槽位；同一响应的增量按 `startsWith` 覆盖，跨工具响应按 `\n\n` 合并（`mergeTurnText`，与 workbench 共用）。`response_started` 不再清空进行中的轮次；首个 caption 的 `turn_id` 被固定为该轮的唯一 turn_id，后续响应（工具续写）全部复用它，最终 `runTurn().assistant` / `turn_id` 与落库消息一致，因此首段一定在最终回复里。后台任务/语音响应不走该合并，仍按响应各自成轮。
+4. `workbench-runtime.ts`：turn id 与累计文本提升到一次 `run()`（一个用户轮次）作用域；工具轮不再撤回 narration，预览在 `tool_call` 时提交为权威文本；caption 最多 4000 个码点，**保留头部**（此前 `slice(-4000)` 保留尾部，导致首段被截掉）；最终 `assistant`、`state.assistant`、长文 `saveReply` 都用整轮合并文本。
+5. 失败或暂停仍可用 `final:true` + `text:''` 撤回未落库的临时 caption；工具边界不再是失败，因此不撤回。
+
+### P4：输出上限是一等失败，可续写
+
+1. Chat Completions 请求显式发送输出上限：`deepseek/qwen/gemini/ark/默认 8192`、`openai 16384`（用 `max_completion_tokens`，其余用 `max_tokens`）；Ark Responses 发送 `max_output_tokens: 8192`。不把上限交给 provider 默认值，截断才可检测。
+2. 新增失败码 `output_limit`。Chat Completions `finish_reason='length'` 时：文本模式下先释放为权威 `text_delta`（工具决策前的 narration），再发 `response_failed{code:'output_limit',detail:'length'|'tool_arguments'}`；未发出的工具片段绝不产生 `tool_call`，`checkpoint.pending` 不落入半截参数，宿主可原样重放该轮。Ark `response.incomplete` 映射为 `output_limit` 并保留可展示 narration。
+3. `workbench-runtime.ts` 自动续写（均以失败轮之前的 checkpoint 重新开会话，避免重复 user turn）：
+   - 文本截断：追加 `host_context`（`purpose:'output_limit_continuation'`，带 `previous_partial` 尾部与"从截断处继续、不重复"指令），每个 `run_version` 最多 2 次；
+   - 工具 JSON 截断（`detail:'tool_arguments'`）：本轮不执行任何调用，追加 `host_context`（`purpose:'output_limit_tool_split'`）要求拆成多次较小串行调用，最多重试 1 次；
+   - 仍失败：`status='paused'`、`reason='model_output_limit'`，返回可读文案（区分工具截断/文本截断）；`model_failure` 保留供诊断。
+4. Resume 是控制动作，不产生用户消息：`workbench-runtime` 接受 `context.resume===true` 且忽略 turn 文本，需要触发时只追加 `host_context{purpose:'resume_control'}`，不再合成 `user_text`。宿主需继续以 `context.resume` 调用 `runTurn`，并保证不新增可见用户行。
+
+### 验收（`runtime/test`）
+
+- `realtime-cascaded-output-limit.test.ts`：上限字段表；`length` 释放文本并返回 `output_limit`（可重放）；工具参数截断无 `tool_call`。
+- `realtime-cascaded-qwen/ark-llm`：工具决策前文本模式补发 narration；Ark `incomplete → output_limit`；`max_output_tokens` 断言。
+- `realtime-cascaded-adapter`：preview → tool_call 不撤回、无空 final；preview → tool → 续写保持同一轮。
+- `conversation-tool-continuation`：pre-tool narration 与续写合并为一条最终回复，caption 只有一个 turn_id。
+- `workbench-runtime`：首段保留、稳定 turn_id、上限续写两次、截断工具 JSON 拆分重试一次、head-preserving caption、Resume 无可见用户气泡。

@@ -94,22 +94,23 @@ export class DailyWorkbench {
  #existing():WorkbenchExisting[]{const life=this.options.life().snapshot(),saved=[...life.ideas,...life.goals].map(row=>({id:row.id,kind:row.kind,title:row.title,note:row.note,status:row.status,version:row.version}));return [...saved,...this.#state.recorded.filter(r=>r.undone&&!saved.some(row=>row.id===r.id)).map(r=>({id:r.id,kind:'goal' as const,title:r.matter.title,note:r.matter.summary,status:'cancelled',version:r.version}))]}
  #matterCurrent(matter:WorkbenchMatter){return !this.#pendingValidation&&this.#grounded(matter.refs)&&validWorkbenchMatter(matter,this.#inputs)}
  #composition(value:unknown){const raw=workbenchCompositionSchema.extend({suggestions:z.array(z.unknown()).max(9)}).parse(value);return {...raw,suggestions:raw.suggestions.flatMap(item=>{const parsed=workbenchCompositionSchema.shape.suggestions.element.safeParse(item);if(parsed.success)return [parsed.data];this.#state.diagnostics.rejected++;return []})}}
- async refresh(automatic=false):Promise<void>{
+ /** `force` re-runs the shared pipeline for an explicit user retry even when today's automatic attempt is spent or the inputs are unchanged. */
+ async refresh(automatic=false,force=false):Promise<void>{
   if(this.#run)return this.#run
-  const work=this.#refresh(automatic);this.#run=work
+  const work=this.#refresh(automatic,force);this.#run=work
   try{await work}finally{this.#run=undefined;this.options.changed()}
  }
- async #refresh(automatic:boolean){
+ async #refresh(automatic:boolean,force:boolean){
   await this.sync();if(!this.#opened||this.#defer||!this.#inputs.length||!this.options.ready()||this.#error==='sources_unavailable'||this.#error==='cache_invalid')return
-  if(automatic&&this.#state.automatic_day>=this.#day())return
-  const key=this.#key();if(key===this.#state.key){this.#status='ready';return}
+  if(automatic&&!force&&this.#state.automatic_day>=this.#day())return
+  const key=this.#key();if(!force&&key===this.#state.key){this.#status='ready';return}
   clearTimeout(this.#timer);this.#status='working';this.#error=null;this.#state.failure=null
   // A full run includes bounded extraction, global review and multiple sequential composition batches.
   const cancel=this.#abort.signal,signal=AbortSignal.any([cancel,AbortSignal.timeout(1800000)]),inputs=structuredClone(this.#inputs),day=this.#day(),timezone=this.options.timezone()
   const guard=()=>{signal.throwIfAborted();if(!this.#opened)throw Error('workbench_closed')}
   this.#state.diagnostics={...diagnostics(),inputs:inputs.length}
   try{
-   if(automatic){this.#state.automatic_day=day;await this.#save()}
+   if(automatic&&!force){this.#state.automatic_day=day;await this.#save()}
    const caches:State['cache']=[],batches=workbenchBatches(inputs),initialKeys=new Set(this.#state.cache.map(c=>c.key))
    for(const [index,batch] of batches.entries()){
     guard();const cacheKey=workbenchHash([RECIPE,timezone,batch.inputs]),cached=this.#state.cache.find(c=>c.key===cacheKey)

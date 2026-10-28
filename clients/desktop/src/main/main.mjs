@@ -21,7 +21,7 @@ import {createBackendControl, classifyBackendFailure, configWarnings, startupErr
 import {codingBackendStatus} from './coding-settings.mjs'
 import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
-import {FeishuConnector, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
+import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
@@ -404,6 +404,7 @@ function settingsView() {
     skills: skillsCache,
     frontendUsage: frontendUsage.snapshot(),
     visionModels: VISION_MODELS,
+    modelCatalog: MODEL_CATALOG,
     backendStatus: backendStatus.state,
     backendDiagnostic: backendStatus.diagnostic,
     backendRetryInMs: backendStatus.retryInMs,

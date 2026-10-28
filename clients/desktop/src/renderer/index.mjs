@@ -3,9 +3,11 @@ import {mountWelcomeFlow} from './welcome-flow.mjs'
 import {mountPersonalView} from './personal-view.mjs'
 import {t} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
+import {installIconSprite} from './icon-sprite.mjs'
+installIconSprite(document)
 localizeDocument(document)
 import { WakeAudioRouter, canAutoSleep } from './wake-audio.mjs'
-import {DESKTOP_ACTIVITY, CLOCK_PING, PLAYBACK_CLEAR, PLAYBACK_ALERT, PLAYBACK_TERMINAL, EXECUTOR_STATE, PROJECT_STATE, EXECUTOR_APPROVAL, CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULTS_RESET, EXECUTOR_RESULT, EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from './wire-frame-types.mjs'
+import {DESKTOP_ACTIVITY, CLOCK_PING, PLAYBACK_CLEAR, PLAYBACK_ALERT, PLAYBACK_TERMINAL, EXECUTOR_STATE, PROJECT_STATE, CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULTS_RESET, EXECUTOR_RESULT, EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from './wire-frame-types.mjs'
 import {
   activateCaptureMode,
   AlertTone,
@@ -39,10 +41,8 @@ import { createSkinVisual } from './orb-skin-visual.mjs'
 import { OrbPaletteHoverController } from './palette-hover.mjs'
 import { ConfirmationCountdown } from './confirmation-countdown.mjs'
 import {
-  CodexApprovalDecisionController,
   ConfirmationDecisionController,
   ConfirmationPresentationController,
-  parseCodexApprovalMessage,
 } from './confirmation-controls.mjs'
 import { deriveOrbState, orbDormant } from './state.mjs'
 import { BackendReconnectController } from './backend-reconnect.mjs'
@@ -64,7 +64,6 @@ const codexSummary = document.querySelector('#codex-summary')
 const codexOperation = document.querySelector('#codex-operation')
 const codexExpiry = document.querySelector('#codex-expiry')
 const confirmationActions = document.querySelector('#codex-confirmation-actions')
-const confirmationAllowSession = document.querySelector('#codex-allow-session')
 const confirmationConfirm = document.querySelector('#codex-confirm')
 const confirmationCancel = document.querySelector('#codex-cancel')
 const confirmationAnnouncement = document.querySelector('#confirmation-announcement')
@@ -209,8 +208,6 @@ const axes = {
   capture: 'idle',
   playback: 'idle',
   codex: 'idle',
-  /** Display name of the coding executor, from the last executor.state frame; '' until one arrives. */
-  executorName: '',
   executorId: '',
   workspace: '',
   session: '',
@@ -250,10 +247,8 @@ const confirmationCountdown = new ConfirmationCountdown({
 })
 
 const confirmationDecision = new ConfirmationDecisionController({send})
-const codexApprovalDecision = new CodexApprovalDecisionController({send})
 const confirmationPresentation = new ConfirmationPresentationController()
 let latestProjectConfirmation = null
-let latestCodexApproval = null
 let lastReportedConfirmationMode = null
 let lastReportedDormant = null
 
@@ -338,15 +333,26 @@ const backendRecovery = new BackendReconnectController({
 })
 
 const seenPresentations = new Set()
+/**
+ * Tells the host which decision is actually on screen. The host pauses an approval's TTL while the renderer cannot
+ * present it, so every visible decision must be acknowledged exactly once. Project confirmations have their own
+ * capsule; executor approvals render in the composer dock (or, collapsed, the orb task pill) since the HUD card was
+ * removed, so they are acknowledged from the personal snapshot rather than the single HUD decision.
+ */
 function acknowledgeVisibleConfirmation(state){
   const c=personalView?.controller
-  if(!c?.presentationReady||c.presentationPending||c.presentationMode==='background'||!state.confirmationVisible||document.visibilityState!=='visible'||!document.hasFocus())return
-  const active=axes.pendingConfirmationKind==='codex'?latestCodexApproval:latestProjectConfirmation
+  if(!c?.presentationReady||c.presentationPending||c.presentationMode==='background'||document.visibilityState!=='visible'||!document.hasFocus())return
+  if(state.confirmationVisible)acknowledgeDecision(c,'project',latestProjectConfirmation)
+  for(const approval of c.snapshot?.pending_approvals??[])acknowledgeDecision(c,'approval',approval?.approval_id?{id:approval.approval_id,conversationId:approval.conversation_id}:null)
+}
+function acknowledgeDecision(c,kind,active){
   if(!active?.id)return
-  const key=`${active.kind}:${active.id}`
+  const key=`${kind}:${active.id}`
   if(seenPresentations.has(key))return
   seenPresentations.add(key)
-  const params=active.kind==='codex'?{approval_id:active.id}:{proposal_id:active.id,...(active.conversationId?{conversation_id:active.conversationId}:{})}
+  const params=kind==='approval'
+    ? {approval_id:active.id,...(active.conversationId?{conversation_id:active.conversationId}:{})}
+    : {proposal_id:active.id,...(active.conversationId?{conversation_id:active.conversationId}:{})}
   void c.command('presentation.seen',params).catch(error=>{seenPresentations.delete(key);c.error=error.message;personalView.refresh()})
 }
 window.addEventListener('focus',()=>render())
@@ -387,18 +393,12 @@ function render() {
     window.novaPersonalAgentDesktop.windowLayout.setDormant?.(dormant)
     lastReportedDormant = dormant
   }
-  const activeDecision = axes.pendingConfirmationKind === 'codex'
-    ? codexApprovalDecision
-    : confirmationDecision
-  const decisionEnabled = activeDecision.enabled
+  const decisionEnabled = confirmationDecision.enabled
     && axes.connected
     && !axes.pendingConfirmationBusy
     && confirmationUnexpired()
   confirmationActions.hidden = !axes.pendingConfirmation || axes.pendingConfirmationId === null
   confirmationConfirm.disabled = !decisionEnabled
-  confirmationConfirm.hidden = axes.pendingConfirmationKind === 'codex' && !codexApprovalDecision.canAccept
-  confirmationAllowSession.hidden = axes.pendingConfirmationKind !== 'codex' || !codexApprovalDecision.canAcceptForSession
-  confirmationAllowSession.disabled = !decisionEnabled
   confirmationCancel.disabled = !decisionEnabled
   setText(aecLabel, state.aecLabel)
   setAttribute(orb, 'aria-label', sleeping ? t("已休眠，点击唤醒") : `${state.label}；${state.accessibleCodexLabel}；${t("双击或按 Enter 展开工作台")}`)
@@ -432,7 +432,7 @@ function remainingConfirmationSeconds(deadline) {
 }
 
 function confirmationUnexpired() {
-  const active = axes.pendingConfirmationKind === 'codex' ? latestCodexApproval : latestProjectConfirmation
+  const active = latestProjectConfirmation
   return active !== null && remainingConfirmationSeconds(active.deadline) !== 0
 }
 
@@ -440,11 +440,7 @@ function applyConfirmationPresentation() {
   const previousKind = axes.pendingConfirmationKind
   const previousId = axes.pendingConfirmationId
   const activeKind = confirmationPresentation.activeKind
-  const active = activeKind === 'project'
-    ? latestProjectConfirmation
-    : activeKind === 'codex'
-      ? latestCodexApproval
-      : null
+  const active = activeKind === 'project' ? latestProjectConfirmation : null
   if (active === null) {
     axes.pendingConfirmation = false
     axes.pendingConfirmationKind = null
@@ -457,10 +453,7 @@ function applyConfirmationPresentation() {
     axes.pendingOperation = ''
     confirmationCountdown.stop()
     if (previousKind !== null) {
-      setText(
-        confirmationAnnouncement,
-        previousKind === 'project' ? t("项目确认已结束。") : t("{0} 授权确认已结束。", axes.executorName || t("执行器")),
-      )
+      setText(confirmationAnnouncement, t("项目确认已结束。"))
     }
     return
   }
@@ -474,15 +467,12 @@ function applyConfirmationPresentation() {
   axes.pendingWorkspace = active.kind === 'project' ? active.workspace : ''
   axes.pendingSession = active.kind === 'project' ? active.session : ''
   axes.pendingExpiresInSeconds = remaining
-  axes.pendingOperation = active.kind === 'codex' ? active.operation : ''
+  axes.pendingOperation = ''
   if (remaining === null) confirmationCountdown.stop()
   else confirmationCountdown.start(remaining)
   if (previousKind !== active.kind || previousId !== active.id) {
     clearAssistantCaption()
-    const operation = active.kind === 'codex'
-      ? active.operation
-      : deriveOrbState(axes).confirmationOperation
-    setText(confirmationAnnouncement, t("{0}；尚未执行，需要你的确认。", operation))
+    setText(confirmationAnnouncement, t("{0}；尚未执行，需要你的确认。", deriveOrbState(axes).confirmationOperation))
   }
 }
 
@@ -960,7 +950,6 @@ async function handleControl(message) {
     captionLabel.hidden = !message.text
   } else if (message.type === EXECUTOR_STATE) {
     axes.codex = message.state === 'running' ? 'working' : message.state === 'preparing' ? 'preparing' : 'idle'
-    if (typeof message.display_name === 'string') axes.executorName = message.display_name
     if (typeof message.executor === 'string') axes.executorId = message.executor
   } else if (message.type === PROJECT_STATE) {
     const keys = Object.keys(message).sort().join(',')
@@ -1049,31 +1038,6 @@ async function handleControl(message) {
       confirmationPresentation.sync('project', pillPending)
       applyConfirmationPresentation()
     }
-  } else if (message.type === EXECUTOR_APPROVAL) {
-    const approval = parseCodexApprovalMessage(message)
-    if (approval !== null) {
-      axes.executorName = approval.display_name
-      axes.executorId = approval.executor
-      latestCodexApproval = approval.pending_approval
-        ? {
-            kind: 'codex',
-            id: approval.pending_approval_id,
-            busy: approval.pending_approval_busy,
-            operation: approval.operation,
-            deadline: confirmationDeadline(approval.expires_in_seconds),
-          }
-        : null
-      codexApprovalDecision.sync({
-        conversationId: approval.conversation_id,
-        pending: approval.pending_approval,
-        approvalId: approval.pending_approval ? approval.pending_approval_id : null,
-        executor: approval.executor,
-        busy: approval.pending_approval_busy,
-        allowedDecisions: approval.allowed_decisions,
-      })
-      confirmationPresentation.sync('codex', approval.pending_approval)
-      applyConfirmationPresentation()
-    }
   } else if (message.type === EXECUTOR_TASKS) {
     taskBanner.receive(message)
     personalView.refresh()
@@ -1160,14 +1124,12 @@ function resetRendererConnection(processReplaced, {closeSocket = true} = {}) {
   personalView.controller.disconnect()
   axes.error = ''
   confirmationDecision.deliveryLost()
-  codexApprovalDecision.deliveryLost()
   taskBanner.disconnect()
   void progressBubbles.clear()
   if (processReplaced) {
     retainedResults.clear()
     projectRoster = []
     updateResultButton()
-    axes.executorName = ''
     axes.executorId = ''
     axes.codex = 'idle'
     axes.pendingConfirmation = false
@@ -1273,7 +1235,6 @@ async function boot() {
     const bootstrap = await window.novaPersonalAgentDesktop.bootstrap()
     personalView.controller.desiredPresentation = bootstrap.startupPresentation ?? 'workbench'
     cameraController.setSourceMode(bootstrap.cameraSource)
-    cameraController.setConversationEnabled(bootstrap.settings?.conversationVisionEnabled === true)
     axes.cameraSource = bootstrap.cameraSource
     axes.camera = bootstrap.cameraSource === 'file' ? 'file' : 'off'
     axes.audioMode = bootstrap.audioMode
@@ -1307,7 +1268,6 @@ async function boot() {
     // A narration preference is live host state; do not restart running work.
     window.novaPersonalAgentDesktop.settings?.onChanged?.(next => {
       applySkin(next)
-      cameraController.setConversationEnabled(next.conversationVisionEnabled === true)
       if (['off', 'milestones', 'all'].includes(next.progressBubbles)) {
         bubbleMode = next.progressBubbles
         if (bubbleMode !== 'all') void progressBubbles.clear()
@@ -1471,21 +1431,11 @@ cameraToggle.addEventListener('click', () => window.novaPersonalAgentDesktop.orb
 sleepButton.addEventListener('click', () => window.novaPersonalAgentDesktop.wakeWord.sleep())
 confirmationConfirm.addEventListener('click', () => {
   if (!confirmationUnexpired()) return
-  const decision = axes.pendingConfirmationKind === 'codex'
-    ? codexApprovalDecision
-    : confirmationDecision
-  if (decision.decide(true)) render()
+  if (confirmationDecision.decide(true)) render()
 })
 confirmationCancel.addEventListener('click', () => {
   if (!confirmationUnexpired()) return
-  const decision = axes.pendingConfirmationKind === 'codex'
-    ? codexApprovalDecision
-    : confirmationDecision
-  if (decision.decide(false)) render()
-})
-confirmationAllowSession.addEventListener('click', () => {
-  if (!confirmationUnexpired()) return
-  if (axes.pendingConfirmationKind === 'codex' && codexApprovalDecision.decide(true, 'session')) render()
+  if (confirmationDecision.decide(false)) render()
 })
 lastResultButton.addEventListener('click', () => {
   if (!taskBanner.state().visible && taskBanner.restore()) return

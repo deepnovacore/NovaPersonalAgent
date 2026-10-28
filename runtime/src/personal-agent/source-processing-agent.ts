@@ -16,7 +16,8 @@ import type {ScheduledRunGrant} from './scheduled-run-authority.js'
 import type {ScheduleRun} from './scheduled-tasks.js'
 import type {TaskRecord} from './tasks.js'
 import type {TaskDecision} from './task-loop.js'
-import type {ProfileInput,ProfileDraft,ProfileObservation} from './profile-warmup.js'
+import type {ProfileInput,ProfileDraft,ProfileObservation,ProfileContinuity} from './profile-warmup.js'
+import type {ProfileHistoryItem} from '../memory-substrate/source-processing.js'
 
 const batchResult=z.object({batch:z.custom<ProcessingBatch>(),valid:z.boolean(),observed:z.boolean().optional(),published:z.boolean().optional()})
 const originalSchema=z.object({items:z.array(processingRefSchema.and(z.object({source_key:z.string(),text:z.string(),version:z.string(),source_kind:z.string(),observed_at:z.string(),locator:z.string(),source_metadata:z.record(z.string(),z.unknown()).nullable()})))})
@@ -24,7 +25,7 @@ const originalSchema=z.object({items:z.array(processingRefSchema.and(z.object({s
 /** Uses the existing ScheduleRun/Task ledgers and scheduler wake; owns no timer. */
 export class SourceProcessingAgent{
  constructor(readonly host:PersonalAgentHost){}
- #products=emptyUnderstanding();#revision=0;#error=false;#lastGitCheck=0;#gitOffset=0
+ #products=emptyUnderstanding();#history:ProfileHistoryItem[]=[];#refreshPending=false;#revision=0;#error=false;#lastGitCheck=0;#gitOffset=0
  get enabled(){return !!this.host.options.memory()?.sourceProcessing}
  #source(item:UnderstandingProducts['suggestions'][number]){const anchor=item.anchor,ref=anchor&&item.refs.find(ref=>ref.entry_id===anchor.entry_id);return anchor?.quote&&ref?{candidate_id:item.id,refs:[{...ref,version:String(ref.version),quote:anchor.quote}]}:undefined}
  #captured(item:UnderstandingProducts['suggestions'][number]){
@@ -39,11 +40,21 @@ export class SourceProcessingAgent{
   if(!this.enabled)return
   const revision=++this.#revision
   const account=this.#account()
-  try{const products=await this.operation({action:'products',presentation:true,...(typeof account==='string'?{account_scope:account}: {})}) as UnderstandingSnapshot;const current=this.#account();if(revision!==this.#revision||current!==account)return;this.#products=products;this.#presentationAccount=typeof account==='string'?account:undefined;this.#error=false
+  try{const snapshot=await this.operation({action:'products',presentation:true,...(typeof account==='string'?{account_scope:account}: {})}) as UnderstandingSnapshot&{history?:ProfileHistoryItem[];refresh_pending?:boolean};const current=this.#account();if(revision!==this.#revision||current!==account)return
+   const {history,refresh_pending,...products}=snapshot
+   this.#products=products;this.#history=Array.isArray(history)?history:[];this.#refreshPending=refresh_pending===true;this.#presentationAccount=typeof account==='string'?account:undefined;this.#error=false
    if(products.news_cleanup_pending)try{await this.host.news.clearSeededInterests();await this.operation({action:'confirm_cleanup'});this.#products.news_cleanup_pending=false}catch{/* Durable marker survives a failed write; retry on the next wake. */}}
-  catch{if(revision!==this.#revision)return;const current=this.#account();const retained=(typeof current==='string'?current:undefined)===this.#presentationAccount?this.#products.last_success:null;this.#products={...emptyUnderstanding(),last_success:retained??null};this.#error=true}
+  catch{if(revision!==this.#revision)return;const current=this.#account(),sameAccount=(typeof current==='string'?current:undefined)===this.#presentationAccount,retained=sameAccount?this.#products.last_success:null;this.#products={...emptyUnderstanding(),last_success:retained??null};this.#history=sameAccount?this.#history:[];this.#refreshPending=false;this.#error=true}
  }
- profileSnapshot(){const latest=this.host.schedules.terminalRuns().filter(run=>run.processing).sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at))[0];return {status:this.host.schedules.activeRuns().some(run=>run.processing)?'working':this.#error||latest?.terminal_summary?.outcome==='failed'?'failed':this.#products.profile_pending?'working':this.#products.draft?'ready':'idle',draft:this.#products.draft,last_success:this.#products.last_success,needs_update:this.#products.profile_needs_update===true,sources:this.#products.sources,processing:[...this.host.schedules.activeRuns(),...this.host.schedules.terminalRuns()].filter(run=>run.processing).sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at)).slice(0,5).map(run=>({started_at:run.claimed_at,status:run.terminal_summary?.outcome??'running',model_calls:run.processing?.model_calls??0,tool_calls:run.processing?.calls.length??0}))}}
+ /** Read-only published versions, newest first; compact enough for every state projection. */
+ #historyView(){return this.#history.map(item=>({generated_at:item.generated_at,generation_version:item.generation_version,about:item.draft.about?.text.slice(0,240)??null,work:item.draft.work.map(work=>work.title).slice(0,6),interests:item.draft.interests.map(interest=>interest.text).slice(0,8),unavailable_sources:item.unavailable_sources}))}
+ profileSnapshot(){
+  const active=this.host.schedules.activeRuns().filter(run=>run.processing),terminal=this.host.schedules.terminalRuns().filter(run=>run.processing),runs=[...active,...terminal].sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at)),latest=terminal.sort((a,b)=>b.claimed_at.localeCompare(a.claimed_at))[0]
+  // A queued refresh is an accepted request that has not started a run yet; last_attempt_at comes from the run ledger.
+  const status=active.length?'working':this.#error||latest?.terminal_summary?.outcome==='failed'?'failed':this.#products.profile_pending?'working':this.#refreshPending?'queued':this.#products.draft?'ready':'idle'
+  return {status,draft:this.#products.draft,last_success:this.#products.last_success,history:this.#historyView(),last_attempt_at:runs[0]?.claimed_at??null,last_success_at:this.#products.generated_at??this.#history[0]?.generated_at??null,needs_update:this.#products.profile_needs_update===true,sources:this.#products.sources,processing:runs.slice(0,5).map(run=>({started_at:run.claimed_at,status:run.terminal_summary?.outcome??'running',model_calls:run.processing?.model_calls??0,tool_calls:run.processing?.calls.length??0}))}}
+ /** Full read-only publication history for an explicit client request. */
+ async profileHistory(limit=10){if(!this.enabled)return {items:[]};const account=this.#account();return await this.operation({action:'profile.history',limit,...(typeof account==='string'?{account_scope:account}: {})})}
  contextSnapshot():ReturnType<WorkbenchContext['snapshot']>{
   const p=this.snapshot(),status=this.profileSnapshot().status
   const cards=p.suggestions.filter(item=>item.kind==='goal'||item.kind==='idea').map(item=>({id:item.id,candidate_id:item.id,tab:item.kind==='goal'?'goals' as const:'ideas' as const,title:item.title,body:item.body,why:null,next:null,refs:item.refs.map(ref=>({...ref,label:p.sources.find(source=>source.id===ref.entry_id)?.label??'来源'})),sources:understandingSourceTags(item.refs,p.sources)}))
@@ -176,7 +187,16 @@ export class SourceProcessingAgent{
     // Rehydrate current original slices; cached observations are never used as factual text.
     observations=context.observations.map(item=>({...item,refs:item.refs.map(ref=>({entry_id:ref.evidence_id,version:context.items.find(original=>original.evidence_id===ref.evidence_id)!.version}))}))
    }
-   const draft=deferProfile||unchangedProfile?(previous.draft??{about:null,work:[],interests:[]}):await generate(profileEntries,signal,authorizeWithProjects,modelCall,observations)
+   // Read-only continuity: the current card's prose (already pruned to live evidence) shapes voice only, never facts.
+   // Archived prose is a fallback only when every cited source is still available, so a deleted version cannot be resurrected.
+   const continuityOf=(prior:ProfileDraft|null,generatedAt:string|null):ProfileContinuity|undefined=>prior&&(prior.about||prior.work.length||prior.interests.length)?{generated_at:generatedAt,about:prior.about?.text??null,work:prior.work.map(item=>({title:item.title,text:item.text})),interests:prior.interests.map(item=>item.text)}:undefined
+   let continuity=continuityOf(previous.draft,previousProducts.generated_at)
+   if(!continuity&&!deferProfile&&!unchangedProfile)try{
+    const account=this.#account(),history=await this.operation({action:'profile.history',limit:3,...(typeof account==='string'?{account_scope:account}: {})}) as {items:ProfileHistoryItem[]}
+    const archived=history.items.find(item=>item.unavailable_sources===0)
+    continuity=archived?continuityOf(archived.draft,archived.generated_at):undefined
+   }catch{/* An unreadable archive only removes continuity; generation continues from current evidence. */}
+   const draft=deferProfile||unchangedProfile?(previous.draft??{about:null,work:[],interests:[]}):await generate(profileEntries,signal,authorizeWithProjects,modelCall,observations,continuity)
 
    await authorizeWithProjects()
    this.host.scheduledAuthority.assert(grant,grant.fence)

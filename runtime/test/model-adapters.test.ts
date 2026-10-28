@@ -827,3 +827,19 @@ test('timeline review retains the user request even when the draft cites only th
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal)
  assert.equal(reviewed,true);assert.equal(result.cards.length,1)
 })
+
+test('timeline incremental synthesis carries prior card ids only in composition and preserves revisions',async()=>{
+ const requests:{system:string;prompt:string}[]=[]
+ const prior={id:'card-1',title:'Previous node check',category:'Storage',why_now:'Earlier view',anchor_date:'2026-10-10'}
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Node recovered',why_now:'A recovery was reported',facts:[{text:'The node recovered',quote:'node recovered',ref:'e0'}],uncertainty:'',actions:[],refs:['e0'],prior_id:'card-1'}
+ const gateway={complete:(request:{system:string;prompt:string})=>{requests.push(request);return Promise.resolve({text:JSON.stringify({cards:[card]})})}} as unknown as ModelGateway
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline([{id:'alert',version:'1',kind:'im',text:'The node recovered',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC',prior_cards:[prior],new_input_ids:['alert']},new AbortController().signal)
+ assert.ok(requests.length>=1)
+ for(const request of requests){
+  assert.match(request.system,/本次是增量整理/)
+  const body=JSON.parse(request.prompt) as {context:{prior_cards?:{id:string}[];new_input_ids?:string[]}}
+  assert.deepEqual(body.context.prior_cards,[prior])
+  assert.deepEqual(body.context.new_input_ids,['alert'])
+ }
+ assert.equal(result.cards[0]?.prior_id,'card-1','the composition keeps the prior card id for the host to resolve')
+})

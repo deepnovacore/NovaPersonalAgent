@@ -1,17 +1,21 @@
 import {t} from './locale.mjs'
-import {EXECUTOR_PROGRESS, EXECUTOR_RESULT} from './wire-frame-types.mjs'
+import {CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULT} from './wire-frame-types.mjs'
 const DETAIL_MS = 6_000
 const MILESTONE_MS = 12_000
 const MAX_BUBBLES = 3
 const PROGRESS_PHASES = new Set(['started', 'working', 'completed', 'failed', 'refused', 'unknown', 'cancelled', 'alert'])
 const RESULT_OUTCOMES = new Set(['ok', 'failed', 'refused', 'unknown', 'cancelled'])
 
-// Captions are cumulative user-visible replies, including streaming text before TTS ends.
+// Captions are cumulative user-visible replies, including streaming text before TTS ends. `full_text` keeps the
+// head of a long reply; `text` may be only its tail when it is also driving the short subtitle.
 export function parseConversationBubble(frame, mode) {
-  if (mode !== 'all' || frame?.type !== 'caption' || frame.role !== 'assistant'
-    || typeof frame.final !== 'boolean' || typeof frame.text !== 'string' || !frame.text.trim()) return null
-  return {kind: 'conversation', delegateId: `reply-${frame.message_id ?? frame.sequence ?? ''}`,
-    summary: frame.text.slice(0, 4000), level: 'milestone', ...workIdentity(frame)}
+  if (!frame || typeof frame !== 'object' || mode !== 'all' || frame.type !== CAPTION || frame.role !== 'assistant'
+    || typeof frame.final !== 'boolean') return null
+  const text = typeof frame.full_text === 'string' && frame.full_text.trim() ? frame.full_text : frame.text
+  if (typeof text !== 'string' || !text.trim()) return null
+  // The turn is the caption's identity: segments of one reply must update the same bubble.
+  return {kind: 'conversation', delegateId: `reply-${frame.turn_id ?? frame.message_id ?? frame.sequence ?? ''}`,
+    summary: text.slice(0, 4000), level: 'milestone', ...workIdentity(frame)}
 }
 
 export function parseProgressFrame(frame) {

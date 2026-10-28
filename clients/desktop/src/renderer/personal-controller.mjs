@@ -10,6 +10,8 @@ const MODEL_FAILURES={
   model_protocol_tool_identity:'模型返回了重复或无效的工具调用标识，请重试。',
   model_protocol_tool_call_limit:'单次回复的工具调用数量超出限制，请重试。',
   model_protocol_output_limit:'模型回复达到输出长度上限，请缩小本次范围后重试。',
+  model_output_limit:'模型回复达到输出长度上限，已自动续写；仍失败时请缩小本次范围。',
+  model_output_limit_tool_arguments:'工具调用的内容超过模型输出上限，未执行；请拆小后重试。',
   model_timeout:'等待模型回复超时，请重试。',
   model_http:'模型服务返回错误，请重试。',
   model_network:'模型连接中断，请重试。',

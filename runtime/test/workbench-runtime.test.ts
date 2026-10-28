@@ -22,13 +22,13 @@ import {loadSettings,settingsSchema} from '../src/config/config.js'
 
 function observation(image:ToolImage):ComputerObservation{return {id:'test-observation',captured_at:image.captured_at,image,space:{logical_width:image.width,logical_height:image.height,scale:1},target:null,focus:null,foreground:true,ax:{status:image.native_ui?'truncated':'unavailable',...(image.native_ui?{summary:image.native_ui}:{}),...(image.native_editor?{editor:image.native_editor}:{})}}}
 type Request=Parameters<CascadedLlmSession['stream']>[0]
-interface Reply {text?:string;reasoning?:string;call?:{name:string;arguments:Record<string,JsonValue>;id?:string};calls?:{name:string;arguments:Record<string,JsonValue>;id:string}[]}
+interface Reply {text?:string;reasoning?:string;call?:{name:string;arguments:Record<string,JsonValue>;id?:string};calls?:{name:string;arguments:Record<string,JsonValue>;id:string}[];failure?:{code:string;detail?:string}}
 function scripted(reply:(request:Request,step:number)=>Reply|Promise<Reply>){
  const requests:Request[]=[],restores:JsonValue[]=[]
  const factory:CascadedLlmFactory={open:()=>{
   let step=0
   return {setHistoryLimits:()=>{ /* scripted model has no trimming */ },checkpoint:()=>({step}),restoreCheckpoint:value=>{restores.push(value);step=(value as {step:number}).step},
-   async *stream(request){requests.push(request);const next=await reply(request,step);request.signal.throwIfAborted();if(next.reasoning!==undefined)yield {kind:'reasoning_delta',text:next.reasoning};yield {kind:'response_started',response_id:'r'+step};const calls=next.calls??(next.call?[{...next.call,id:next.call.id??'c'+step}]:[]);for(const call of calls)yield {kind:'tool_call',item_id:'i'+step+':'+call.id,call_id:call.id,name:call.name,arguments:call.arguments};if(!calls.length)yield {kind:'text_delta',text:next.text??'done'};step++;yield {kind:'response_completed',response_id:'r'+(step-1)}},
+   async *stream(request){requests.push(request);const next=await reply(request,step);request.signal.throwIfAborted();if(next.reasoning!==undefined)yield {kind:'reasoning_delta',text:next.reasoning};yield {kind:'response_started',response_id:'r'+step};if(next.failure){if(next.text!==undefined&&next.text!=='')yield {kind:'text_delta',text:next.text};step++;yield {kind:'response_failed',response_id:'r'+(step-1),code:next.failure.code,...(next.failure.detail?{detail:next.failure.detail}:{})};return}const calls=next.calls??(next.call?[{...next.call,id:next.call.id??'c'+step}]:[]);for(const call of calls)yield {kind:'tool_call',item_id:'i'+step+':'+call.id,call_id:call.id,name:call.name,arguments:call.arguments};if(!calls.length)yield {kind:'text_delta',text:next.text??'done'};step++;yield {kind:'response_completed',response_id:'r'+(step-1)}},
    abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),
   }
  }}
@@ -221,21 +221,6 @@ test('Plan exposes read-only tools, refuses forged local/dispatch calls and publ
  }finally{await f.close()}
 })
 
-test('an explicit Chat tool request changes to Plan only after its reply settles and creates no task',{skip:!supported},async()=>{
- const f=await fixture(()=>({text:'Chat reply'}))
- try{
-  f.plain.runTurn=async()=>{
-   assert.equal(f.host.conversationSnapshot().items[0]!.mode??'chat','chat')
-   await f.host.requestPlanModeFromTool('chat:main',0,'enter-plan-call','conversation:origin',()=>true)
-   return {assistant:'已切换到 Plan 模式。'}
-  }
-  await f.host.submitConversationText('chat:main','我们先进入 plan 梳理需求。');await f.host.waitConversation('chat:main')
-  await until(()=>f.host.conversationSnapshot().items[0]!.mode==='plan',Boolean)
-  assert.equal(f.host.tasks.list().length,0)
-  assert.equal(f.host.conversationSnapshot().messages.at(-1)?.text,'已切换到 Plan 模式。')
- }finally{await f.close()}
-})
-
 test('Build requires approval before side effects, stops on denial and does not create task or Todo',{skip:!supported},async()=>{
  const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'new.txt',content:'批准后写入'}}}:{text:'已完成'})
  try{
@@ -327,6 +312,8 @@ for(const reason of ['model_timeout','model_overflow'])test(`Build pauses with a
   await writeFile(join(f.root,'once.txt'),'user change')
   await f.command('build.resume',{id});await f.host.waitConversation(id)
   assert.equal(await readFile(join(f.root,'once.txt'),'utf8'),'user change');assert.equal(buildView(f.host,id).status,'completed')
+  assert.equal(f.host.conversationSnapshot().messages.filter(message=>message.role==='user').length,1)
+  assert.equal(f.host.conversationSnapshot().messages.some(message=>message.text==='Resume'),false)
   assert.equal((await f.host.workbench.checkpoint(id,0)).calls.length,1);assert.equal(f.host.tasks.list().length,0)
  }finally{await f.close()}
 })
@@ -466,6 +453,11 @@ test('Stop during model streaming pauses; explicit Resume restores context and i
   await f.command('presentation.set',{mode:'orb'});assert.equal((await f.raw('build.resume',{id})).error,'local_workbench_required');block=false
   await f.command('presentation.set',{mode:'workbench'});await f.command('build.resume',{id});await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).status,'completed');assert.equal(f.host.tasks.list().length,0)
+  // Resume is a control action: no literal user bubble and no synthesized user turn reaches the model.
+  const messages=f.host.conversationSnapshot().messages
+  assert.equal(messages.filter(message=>message.role==='user').length,1)
+  assert.equal(messages.some(message=>message.text==='Resume'),false)
+  assert.equal(f.script.requests.at(-1)!.inputs.some(input=>input.kind==='user_text'&&input.text==='Resume'),false)
  }finally{await f.close()}
 })
 
@@ -1047,7 +1039,7 @@ test('direct Build instructions skip planning but retain approval and completion
  assert.match(workbenchInstructions('build','en',true),/executing the user-confirmed plan/)
 })
 
-test('Plan and Build previews grow, retract at tool calls and persist only authoritative text', async () => {
+test('Plan and Build previews grow, keep pre-tool narration and persist the merged turn', async () => {
  for(const mode of ['plan','build'] as const){
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
@@ -1061,16 +1053,18 @@ test('Plan and Build previews grow, retract at tool calls and persist only autho
    if(mode==='build')id=await f.build()
    else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
    await f.host.waitConversation(id)
-   const captions=f.frames.filter(x=>x.type==='caption')
-   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['',true],['final ',false],['final answer',false],['final answer',false]])
-   assert.equal(captions[0]!.turn_id,captions[2]!.turn_id);assert.notEqual(captions[2]!.turn_id,captions[3]!.turn_id)
+   const captions=f.frames.filter(x=>x.type==='caption'),merged='discard me\n\nfinal answer'
+   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['discard me\n\nfinal ',false],['discard me\n\nfinal answer',false],['discard me\n\nfinal answer',false]])
+   // The turn identity survives the tool round; every caption belongs to the same reply.
+   assert.equal(new Set(captions.map(x=>x.turn_id)).size,1)
+   assert.equal(captions.some(x=>x.final===true&&x.text===''),false)
    const message=f.host.conversationSnapshot().messages.at(-1)!
-   assert.equal(message.text,'final answer');assert.equal(message.turn_id,captions.at(-1)!.turn_id)
+   assert.equal(message.text,merged);assert.equal(message.turn_id,captions.at(-1)!.turn_id)
   }finally{await f.close()}
  }
 })
 
-test('Plan and Build withdraw authoritative narration before a tool call', async () => {
+test('Plan and Build keep authoritative narration before a tool call', async () => {
  for(const mode of ['plan','build'] as const){
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
@@ -1083,12 +1077,112 @@ test('Plan and Build withdraw authoritative narration before a tool call', async
    if(mode==='build')id=await f.build()
    else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
    await f.host.waitConversation(id)
-   const captions=f.frames.filter(x=>x.type==='caption')
-   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],['',true],['final answer',false]])
+   const captions=f.frames.filter(x=>x.type==='caption'),merged='narration before the tool\n\nfinal answer'
+   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],[merged,false]])
+   assert.equal(new Set(captions.map(x=>x.turn_id)).size,1)
    assert.equal(f.frames.some(x=>x.type==='conversation.error'),false)
-   assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'final answer')
+   assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,merged)
   }finally{await f.close()}
  }
+})
+
+test('a model output limit continues the reply twice and keeps one turn identity', async () => {
+ let attempts=0
+ const f=await fixture((request)=>{
+  attempts++
+  const continuations=request.inputs.filter(input=>input.kind==='host_context'&&input.content.includes('output_limit_continuation')).length
+  if(attempts===1)return {text:'第一段',failure:{code:'output_limit',detail:'length'}}
+  if(attempts===2){assert.equal(continuations,1);return {text:'第二段',failure:{code:'output_limit',detail:'length'}}}
+  assert.equal(continuations,2)
+  return {text:'完成'}
+ })
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','写一份很长的计划');await f.host.waitConversation('chat:main')
+  assert.equal(attempts,3)
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.equal(message.text,'第一段\n\n第二段\n\n完成')
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  assert.equal(checkpoint.status,'completed');assert.equal(checkpoint.model_failure,undefined)
+  const captions=f.frames.filter(x=>x.type==='caption')
+  assert.ok(captions.length>0);assert.equal(new Set(captions.map(x=>x.turn_id)).size,1)
+  assert.equal(f.frames.some(x=>x.type==='conversation.error'),false)
+ }finally{await f.close()}
+})
+
+test('exhausted output-limit continuations pause with a readable label', async () => {
+ let attempts=0
+ const f=await fixture(()=>{attempts++;return {text:'仍被截断',failure:{code:'output_limit',detail:'length'}}})
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','写一份很长的计划');await f.host.waitConversation('chat:main')
+  assert.equal(attempts,3)
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  assert.equal(checkpoint.status,'paused');assert.equal(checkpoint.reason,'model_output_limit')
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.match(message.text,/输出长度上限/u);assert.match(message.text,/Resume/u)
+  assert.equal(f.frames.some(frame=>frame.type==='conversation.error'),false)
+ }finally{await f.close()}
+})
+
+test('truncated tool-call JSON is never executed and retries once with split-write guidance',{skip:!supported},async()=>{
+ let attempts=0
+ const f=await fixture((request)=>{
+  attempts++
+  if(attempts===1)return {failure:{code:'output_limit',detail:'tool_arguments'}}
+  if(attempts===2){
+   assert.ok(request.inputs.some(input=>input.kind==='host_context'&&input.content.includes('output_limit_tool_split')))
+   return {call:{name:'file_write',arguments:{path:'big.txt',content:'完整内容'}}}
+  }
+  return {text:'写入完成'}
+ },'never')
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(attempts,3)
+  assert.equal(await readFile(join(f.root,'big.txt'),'utf8'),'完整内容')
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.equal(checkpoint.status,'completed');assert.deepEqual(checkpoint.calls.map(call=>call.name),['file_write'])
+  assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'写入完成')
+  assert.equal(f.frames.some(frame=>frame.type==='conversation.error'),false)
+ }finally{await f.close()}
+})
+
+test('a second truncated tool-call JSON pauses without executing or retrying again',{skip:!supported},async()=>{
+ let attempts=0
+ const f=await fixture((request)=>{
+  attempts++
+  if(attempts===2)assert.ok(request.inputs.some(input=>input.kind==='host_context'&&input.content.includes('output_limit_tool_split')))
+  return {failure:{code:'output_limit',detail:'tool_arguments'}}
+ },'never')
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(attempts,2)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.equal(checkpoint.status,'paused');assert.equal(checkpoint.reason,'model_output_limit')
+  assert.deepEqual(checkpoint.calls,[])
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.match(message.text,/未执行/u)
+  assert.equal(f.frames.some(frame=>frame.type==='conversation.error'),false)
+ }finally{await f.close()}
+})
+
+test('Plan captions keep the head of a long reply instead of its tail', async () => {
+ const opening='开头：'+'内容😀'.repeat(1600)
+ const script=scripted(()=>({text:opening}))
+ const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();return {...base,async *stream(request){
+  for await(const event of base.stream(request)){yield event;if(event.kind==='response_started')yield {kind:'text_preview' as const,text:opening}}
+ }}}}
+ const f=await fixture(()=>({}),'ask',factory)
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','给我一份长计划');await f.host.waitConversation('chat:main')
+  const captions=f.frames.filter(x=>x.type==='caption')
+  const full=String(captions.at(-1)!.full_text)
+  assert.ok([...full].length===4001);assert.ok(full.startsWith('开头：'));assert.ok(full.endsWith('…'))
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.ok(message.text.startsWith('开头：'));assert.ok(message.text.includes('😀'))
+  assert.equal(message.text,opening)
+ }finally{await f.close()}
 })
 
 test('managed workspace commands validate names, hide paths and resolve Build defaults and IDs', {skip:!supported},async()=>{

@@ -2,7 +2,7 @@ import {selfHostedEndpoint} from '../../config/self-hosted.js'
 import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
 import {translateSystemPrompt, type PromptLanguage} from '../prompt-language.js'
 import {cascadedNarrationInstructions} from './llm.js'
-import {originalImageUrl, toolObservations, trimToolImages, isToolObservation, imageFreeMessage} from './llm.js'
+import {chatCompletionsOutputTokensField, modelOutputTokens, originalImageUrl, toolObservations, trimToolImages, isToolObservation, imageFreeMessage} from './llm.js'
 import {beginModelUsage,mergeModelUsage} from '../../usage/model-call.js'
 import type {UsageReporter} from '../usage.js'
 import type { Clock } from '../../core/clock.js'
@@ -25,7 +25,7 @@ const MAX_EVENT_BYTES = 512 * 1024
 /** Per-response bound for display-only thinking text; it never grows provider history. */
 export const MAX_REASONING_CODEPOINTS = 65_536
 
-export type ChatCompletionsLlmFailureCode = 'configuration' | 'aborted' | 'timeout' | 'protocol' | 'overflow' | 'closed' | 'network' | 'http'
+export type ChatCompletionsLlmFailureCode = 'configuration' | 'aborted' | 'timeout' | 'protocol' | 'overflow' | 'closed' | 'network' | 'http' | 'output_limit'
 export class ChatCompletionsLlmFailure extends Error {
   constructor(readonly code: ChatCompletionsLlmFailureCode, readonly statusCode: number | null = null, readonly detail:string|null=null) {
     super(`Chat Completions LLM ${code} failure`)
@@ -130,6 +130,9 @@ class Session implements CascadedLlmSession {
       else if (this.#provider === 'qwen') value.enable_thinking = reasoning === 'enabled'
       else if (this.#provider === 'openai') value.reasoning_effort = reasoning === 'enabled' ? 'low' : 'none'
       if (input.tools.length > 0) { value.tools = input.tools.map(schema); if (this.#provider !== 'gemini') value.parallel_tool_calls = this.#toolCallLimit>1 }
+      // Never leave the output ceiling to the provider default: the ceiling is what makes a
+      // truncated reply detectable and resumable instead of silently short.
+      value[chatCompletionsOutputTokensField(this.#provider)] = modelOutputTokens(this.#provider)
       return value
     }
     let reasoning: 'enabled' | 'disabled' = input.reasoning === 'enabled' && !this.#reasoningUnsupported ? 'enabled' : 'disabled'
@@ -210,10 +213,19 @@ class Session implements CascadedLlmSession {
               yield {kind: 'response_completed', response_id: responseId}; return
             } else if (choice.finish_reason === 'tool_calls') {
               if ((sawText && input.tools.length === 0) || fragments.size === 0) throw fail('protocol'); const callsOut = this.#calls(fragments)
+              // Text-mode callers keep the narration that preceded the tool decision; voice still
+              // withholds it so the opening sentence never reaches TTS before the round resolves.
+              if (text !== '' && input.previewText === true) yield {kind: 'text_delta', text}
               for (const call of callsOut) yield {kind: 'tool_call', item_id: call.id, call_id: call.id, name: call.function.name, arguments: JSON.parse(call.function.arguments) as JsonObject}
               this.#unresolved = [...(unresolved ?? []), ...current, {role: 'assistant', content: null, tool_calls: callsOut, ...(this.#provider === 'deepseek' && reasoningText !== '' ? {reasoning_content: reasoningText} : {})}]
               terminal = true; yield {kind: 'response_completed', response_id: responseId}; return
-            } else throw protocol(choice.finish_reason==='length'?'output_limit':'finish_reason')
+            } else if (choice.finish_reason === 'length') {
+              // The provider stopped at its output ceiling. Text it withheld for the tool decision
+              // is real narration: hand it to display-only consumers before reporting a limit
+              // failure the host can continue from.
+              if (text !== '' && input.tools.length > 0 && input.previewText === true) yield {kind: 'text_delta', text}
+              throw new ChatCompletionsLlmFailure('output_limit', null, fragments.size > 0 ? 'tool_arguments' : 'length')
+            } else throw protocol('finish_reason')
           }
         }
       }

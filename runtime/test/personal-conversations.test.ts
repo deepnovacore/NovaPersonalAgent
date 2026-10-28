@@ -663,3 +663,13 @@ test('task list metadata includes a bounded latest excerpt and failed state for 
  const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  try{await host.open();const snapshot=host.conversationSnapshot(),task=snapshot.items.find(value=>value.id==='task')!;assert.equal(snapshot.selected_id,'chat:main');assert.equal(task.last_message,'x'.repeat(160));assert.equal(task.generation_status,'failed');assert.equal(snapshot.messages.some(message=>message.id==='failed'),false)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('a prepared bridge override is not reused for the next normal conversation turn',async()=>{
+ const seen:({chat?:boolean}|undefined)[]=[]
+ const pool=new ConversationRuntimePool((_conversation,_emit,_mode,_lifetime,_recovery,_execution,overrides)=>{seen.push(overrides);return Promise.resolve({runTurn:()=>Promise.resolve({assistant:'ok'}),close:()=>Promise.resolve()})},()=>{/* no transport */})
+ const conversation=createConversation('chat','Bridge',null,'bridge-chat')
+ await pool.prepare(conversation,undefined,{chat:false})
+ await pool.clear(conversation.id)
+ await pool.run(conversation,'next')
+ assert.deepEqual(seen,[{chat:false},undefined])
+})

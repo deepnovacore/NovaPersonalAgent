@@ -6,6 +6,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:*; img-src data:; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>Nova Personal Agent Desktop</title>
     <link rel="stylesheet" href="./controls.css">
+    <link rel="stylesheet" href="./design-tokens.css">
     <link rel="stylesheet" href="./index.css">
     <link rel="stylesheet" href="./task-banner.css">
     <link rel="stylesheet" href="./workbench.css">
@@ -68,7 +69,6 @@
         <span id="codex-expiry" aria-hidden="true"></span>
         <span id="codex-confirmation-actions" aria-label="工作区确认操作" hidden>
           <button id="codex-confirm" type="button" aria-label="确认工作区操作">✓</button>
-          <button id="codex-allow-session" type="button" aria-label="本会话内允许该执行器的权限请求" hidden>本会话内允许</button>
           <button id="codex-cancel" type="button" aria-label="取消工作区操作">×</button>
         </span>
       </p>

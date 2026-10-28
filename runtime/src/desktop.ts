@@ -2,7 +2,37 @@ import type {PersonalCommandContext} from './personal-agent/host.js'
 import {personalCommandSchema} from './personal-agent/contracts.js'
 import {parsePromptLanguage, type PromptLanguage} from './realtime/prompt-language.js'
 export {VISION_MODELS, supportsVision} from './model/vision-capability.js'
-export {describeMissingBlockingEnvironment} from './config/config.js'
+export {
+  MODEL_CATALOG,
+  MODEL_CATALOG_MODELS,
+  MODEL_CATALOG_PROVIDERS,
+  MODEL_LANE_IDS,
+  MODEL_MODELS,
+  MODEL_PROVIDERS,
+  catalogModel,
+  catalogProvider,
+  defaultMaxOutputTokens,
+  isModelRouteProvider,
+  modelCapabilities,
+  modelLabel,
+  providerLabel,
+  providerSupports,
+  type ModelCapability,
+  type ModelCatalog,
+  type ModelCatalogModel,
+  type ModelCatalogProvider,
+} from './model/model-catalog.js'
+export {
+  MODEL_ROUTE_LANE_IDS,
+  MODEL_ROUTE_LANE_PROVIDERS,
+  MODEL_ROUTE_PROVIDER_IDS,
+  parseModelRoutes,
+  type ModelRoute,
+  type ModelRouteLane,
+  type ModelRouteProvider,
+  type ModelRoutes,
+} from './config/model-routes.js'
+export {describeMissingBlockingEnvironment, resolveModelRoute, type ResolvedModelRoute} from './config/config.js'
 export {stripLikePython} from './text/python-text.js'
 import {taskActionSchema} from './desktop/desktop-tasks.js'
 import { timingSafeEqual } from 'node:crypto'

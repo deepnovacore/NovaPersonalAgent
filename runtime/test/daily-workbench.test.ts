@@ -315,3 +315,11 @@ test('opening a cache that still holds todo matters, todo cards or recorded todo
   await assert.rejects(daily.adopt('old-card'),/card_not_found/)
  }finally{await life.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('a forced refresh re-runs the shared pipeline after the automatic quota is spent',()=>fixture(async({daily})=>{
+ await daily.refresh(true);assert.equal(daily.snapshot().diagnostics.cache_hits,0)
+ await daily.refresh(true);assert.equal(daily.snapshot().diagnostics.cache_hits,0,'the automatic daily retry stays blocked')
+ await daily.refresh(true,true)
+ assert.ok(daily.snapshot().diagnostics.cache_hits>0,'an explicit force bypasses the spent quota and reuses validated caches')
+ assert.equal(daily.snapshot().status,'ready')
+}))

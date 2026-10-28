@@ -1,3 +1,4 @@
+import {t,currentLanguage} from './locale.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
 const topics=['人工智能','科技产品','设计','科学','文化','商业']
 export function initialInterests(news,warmup){
@@ -9,12 +10,14 @@ export function initialInterests(news,warmup){
 export function confirmedInterests(news){return {enabled:news?.enabled??false,explore:news?.explore??true,interests:(news?.interests??[]).map(i=>i.text),expected_version:news?.profile_version??0}}
 export function renderWarmup(parent,{warmup,command,button}){
  // Background work never hides the previous draft or disables unrelated controls.
- if(warmup?.status!=='working'&&warmup?.status!=='failed')return
- const busy=warmup.status==='working',box=el('section',undefined,'warmup-status');box.setAttribute('role','status');box.setAttribute('aria-live','polite');box.setAttribute('aria-busy',String(busy));parent.append(box)
+ if(warmup?.status!=='working'&&warmup?.status!=='queued'&&warmup?.status!=='failed')return
+ const busy=warmup.status==='working',queued=warmup.status==='queued',box=el('section',undefined,'warmup-status');box.setAttribute('role','status');box.setAttribute('aria-live','polite');box.setAttribute('aria-busy',String(busy));parent.append(box)
  if(busy){const spinner=el('span',undefined,'warmup-spinner');spinner.setAttribute('aria-hidden','true');box.append(spinner)}
- box.append(el('p',busy?'正在后台更新画像，不影响对话和其他功能。':warmup.draft?'画像暂时未能更新，现有内容仍可使用。':warmup.needs_update?'个人资料尚未更新，原有资料仍保存在本机。':'画像暂未生成，不影响对话和其他功能。'))
+ box.append(el('p',busy?'正在后台更新画像，不影响对话和其他功能。':queued?'画像更新已排队，完成后会自动显示。':warmup.draft?'画像暂时未能更新，现有内容仍可使用。':warmup.needs_update?'个人资料尚未更新，原有资料仍保存在本机。':'画像暂未生成，不影响对话和其他功能。'))
  if(busy&&!warmup.draft){const skeleton=el('div',undefined,'warmup-skeleton');skeleton.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)skeleton.append(el('span'));box.append(skeleton)}
- if(!busy)button('重试',()=>command('profile.refresh',{}),box)
+ // A failed or queued refresh is still an attempt; show when it last ran without presenting it as success.
+ if(warmup.last_attempt_at&&Number.isFinite(Date.parse(warmup.last_attempt_at)))box.append(el('p',t('上次尝试：{0}',new Date(warmup.last_attempt_at).toLocaleString(currentLanguage(),{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})),'hint'))
+ if(!busy&&!queued)button('重试',()=>command('profile.refresh',{}),box)
 }
 export function renderInterests(parent,{news,warmup,command,button,local,rerender,delegate}){
  const texts=initialInterests(news,warmup),seeded=Boolean(news?.interests_seeded&&news.interests?.length),configured=!seeded&&Boolean(news?.interests?.length||news?.profile_version>0)

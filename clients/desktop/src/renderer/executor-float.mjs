@@ -5,20 +5,22 @@ const PHASE_LABEL={started:'已开始',working:'进行中',failed:'执行失败'
 const DONE=new Set(['completed','cancelled'])
 
 /**
- * A small window floating at the vertical middle of the workbench edge that follows executor tasks. Output of a
- * delegated plan shows here, not in the task tab: collapsed it is one line per task, expanded it shows the latest
- * output and a link to the task detail. Snapshots come from the host's `executor.tasks` frames.
+ * A small pill floating at the workbench centre that follows executor tasks. Output of a delegated plan shows
+ * here, not in the task tab: collapsed it names the leading task and its phase dot, expanded it shows each task's
+ * latest output and a link to the task detail. Snapshots come from the host's `executor.tasks` frames.
  */
 export function mountExecutorFloat(parent,{el,button,openTask,taskFor}){
  const root=el('aside',undefined,'executor-float');root.hidden=true;root.dataset.expanded='false';root.setAttribute('aria-label',t('执行器进展'));root.setAttribute('aria-live','polite')
  parent.append(root)
  let tasks=[],revision=-1,expanded=false
  function render(){
-  root.hidden=!tasks.length;root.dataset.expanded=String(expanded);root.replaceChildren()
+  root.hidden=!tasks.length;root.dataset.expanded=String(expanded);root.dataset.phase=tasks[0]?.phase??'';root.replaceChildren()
   const first=tasks[0]
   if(!first)return
   const label=tasks.length>1?t('{0} · {1} 个任务',first.executor,tasks.length):`${first.executor} · ${t(PHASE_LABEL[first.phase]??first.phase)}`
-  const pill=button(label,()=>{expanded=!expanded;render()},root);pill.className='executor-float-pill';pill.setAttribute('aria-expanded',String(expanded))
+  const pill=button('',()=>{expanded=!expanded;render()},root);pill.className='executor-float-pill';pill.dataset.phase=first.phase;pill.setAttribute('aria-expanded',String(expanded));pill.setAttribute('aria-label',`${t('执行器进展')} · ${label}`)
+  const dot=el('span',undefined,'executor-float-phase');dot.dataset.phase=first.phase;dot.setAttribute('aria-hidden','true')
+  pill.append(dot,el('span',label,'executor-float-label'))
   if(!expanded)return
   for(const task of tasks){
    const card=el('article',undefined,'executor-float-task')

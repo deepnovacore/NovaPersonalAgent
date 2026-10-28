@@ -28,7 +28,6 @@ export const HOST_REFUSALS=Object.freeze({
  invalid_params:'提交的内容不符合要求，请检查后重试。',
  build_finished:'这个 Build 已经结束，不能再发送消息。',
  voice_active:'另一段对话正在使用语音，请先结束语音。',
- conversation_mode_transition:'这段对话正在切换模式，请稍后再试。',
  source_todo_conflict:'关联的待办已经变化，请重新选择后再发送。',
  stale_reference:'引用事项已变化或不可用，请移除引用后重新选择。',
  reference_not_authorized:'引用来源当前不允许用于对话，请核对来源权限。',

@@ -1,4 +1,4 @@
-import {taskNotificationText} from './tasks-page.mjs'
+import {taskNotificationText,visibleTranscriptMessages} from './tasks-page.mjs'
 import {mountIdleAvatar} from './idle-avatar.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {disposeSources} from './source-popover.mjs'
@@ -13,6 +13,7 @@ import {mountComposerMode,composerMode as currentComposerMode} from './composer-
 import {mountComposerApproval} from './composer-approval.mjs'
 import {mountComputerUseControl} from './computer-use-control.mjs'
 import {createBuildSteps} from './build-steps.mjs'
+import {createToolTraceNode,normalizeToolTrace,TOOL_TRACE_LIMIT} from './chat-tool-trace.mjs'
 import {createOrbVisualSafe} from './orb-visual.mjs'
 import {ORB_STATE_NAMES} from './state.mjs'
 
@@ -40,18 +41,45 @@ export function homeTranscript(conversations){
 /**
  * Live captions are not persisted, so they carry the local time they were first seen. They belong right after the
  * last persisted message that existed then; appending them last would pin a stale caption below newer messages.
- * A caption whose text already arrived as a persisted reply is redundant.
+ * Identity, not text, decides whether a caption is already in the transcript: the runtime may rewrite or merge the
+ * persisted text, and comparing strings would either duplicate the reply or swallow the newer caption.
  */
 export function orderTranscript(persisted,live){
  const placed=new Map(),tail=[]
  for(const frame of live){
   if(typeof frame.seen_at!=='number'){tail.push(frame);continue}
-  const text=frame.text?.trim()
-  if(text&&persisted.some(message=>message.role==='assistant'&&message.text?.trim()===text&&Date.parse(message.created_at)>=frame.seen_at))continue
+  if(persistedCoversCaption(persisted,frame))continue
   const index=persisted.findLastIndex(message=>Date.parse(message.created_at)<=frame.seen_at)
   placed.set(index,[...(placed.get(index)??[]),frame])
  }
  return [...(placed.get(-1)??[]),...persisted.flatMap((message,index)=>[message,...(placed.get(index)??[])]),...tail]
+}
+/** A persisted assistant reply owns the caption of its turn once it carries at least as much text. */
+function persistedCoversCaption(persisted,frame){
+ if(typeof frame.turn_id!=='string'||typeof frame.text!=='string')return false
+ return persisted.some(message=>message.role==='assistant'&&message.turn_id===frame.turn_id
+  && typeof message.text==='string'&&message.text.length>=frame.text.length)
+}
+/**
+ * The persisted reply is the durable copy of its turn, but a snapshot can lag the streamed caption, and a merged
+ * turn can be persisted shorter than what the preview already showed. The longer text wins for display so the
+ * first paragraph a caption already rendered is never swallowed when the message row arrives.
+ */
+function mergeLiveCaptionText(persisted,captions){
+ const longest=new Map()
+ for(const caption of captions)if(typeof caption.turn_id==='string'){
+  const current=longest.get(caption.turn_id)
+  if(!current||(caption.text??'').length>(current.text??'').length)longest.set(caption.turn_id,caption)
+ }
+ const owned=new Set()
+ const messages=persisted.map(message=>{
+  if(message.role!=='assistant'||typeof message.turn_id!=='string')return message
+  const caption=longest.get(message.turn_id)
+  if(!caption)return message
+  owned.add(message.turn_id)
+  return (caption.text??'').length>(message.text??'').length?{...message,text:caption.text}:message
+ })
+ return {messages,live:captions.filter(caption=>typeof caption.turn_id!=='string'||!owned.has(caption.turn_id))}
 }
 function messageVisible(history,id){
  if(!history.getBoundingClientRect)return true
@@ -94,10 +122,11 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  const stageLabel=el('p','','voice-stage-label');stageLabel.setAttribute('role','status');stage.append(stageCanvas,stageLabel);pane.append(stage)
  const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
  const workbenchAgent=mountWorkbenchAgent(pane,{c,el,run,api,planHost})
- const approvalDock=mountApprovalDock(pane,{c,el,button,run})
  const pendingBuild=()=>{const item=c.selectedConversation;return Boolean(item)&&item.kind!=='build'&&currentComposerMode(item,c.state(item.id))==='build'}
  const workspaceBar=mountWorkspaceBar(pane,{c,el,button,run,api:api?.personal,visible:pendingBuild})
  const computerPanel=el('div',undefined,'computer-use-host');pane.append(computerPanel)
+ // Mounted last so the dock is the element directly above the composer: one place answers a pending approval.
+ const approvalDock=mountApprovalDock(pane,{c,el,button,run})
  let beginning=false,confirmingBuildTask=null
  /** Build always opens a new conversation, so attached references/todos would otherwise vanish silently. */
  function confirmBuildNewTask(){
@@ -192,6 +221,68 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  let open=true
  function setOpen(value){open=value;pane.hidden=!value;onOpenChange(value);syncStage();syncCompanion();if(value){renderHistory(true);deliverPresented();read()}}
  const readMessages=new Set(),presented=new Set(),liveCaptions=new Map(),positions=new Map()
+ // Live conversation.tool frames are per assistant turn; the durable message of a turn retires them.
+ const liveTools=new Map(),LIVE_TOOL_TURNS=64
+ const liveToolKey=(conversationId,turnId)=>`${conversationId}:${turnId}`
+ /**
+  * The runtime can report a tool before the turn has streamed its first caption, so the frame may not
+  * carry a turn id yet. Such rows stay in one per-conversation bucket until a caption or the durable
+  * assistant message names the turn, then move onto it so a running row is never shown twice.
+  */
+ function liveToolEntry(conversationId,turnId,name){
+  const direct=liveTools.get(liveToolKey(conversationId,turnId))
+  if(direct)return direct
+  if(turnId)return null
+  let sameName=null
+  for(const entry of liveTools.values()){
+   const last=entry.items.at(-1)
+   if(entry.conversation_id!==conversationId||!entry.turn_id||last?.name!==name)continue
+   if(last.state==='running')return entry
+   sameName=entry
+  }
+  return sameName
+ }
+ function adoptAnonymousToolTrace(conversationId,turnId){
+  const anonymous=liveTools.get(liveToolKey(conversationId,''))
+  if(!anonymous)return
+  liveTools.delete(liveToolKey(conversationId,''))
+  const key=liveToolKey(conversationId,turnId),existing=liveTools.get(key),items=existing?[...existing.items]:[]
+  for(const item of anonymous.items){
+   const last=items.at(-1)
+   if(last&&last.name===item.name)items[items.length-1]=item
+   else items.push(item)
+  }
+  while(items.length>TOOL_TRACE_LIMIT)items.shift()
+  liveTools.set(key,{conversation_id:conversationId,turn_id:turnId,seen_at:existing?.seen_at??anonymous.seen_at,items})
+ }
+ /** Repeats of one tool name update its last row; a new call after a finished one appends. */
+ function applyToolFrame(frame){
+  if(typeof frame.conversation_id!=='string'||!frame.conversation_id)return
+  const turnId=typeof frame.turn_id==='string'?frame.turn_id:''
+  const item=normalizeToolTrace([frame])[0]
+  if(!item)return
+  const entry=liveToolEntry(frame.conversation_id,turnId,item.name)
+  const conversationId=frame.conversation_id,turn=entry?.turn_id??turnId,key=liveToolKey(conversationId,turn),items=entry?[...entry.items]:[]
+  const last=items.at(-1)
+  if(last&&last.name===item.name)items[items.length-1]=item
+  else if(items.length<TOOL_TRACE_LIMIT)items.push(item)
+  else return
+  // Reinsert so the least recently updated turn is the one evicted at the bound.
+  liveTools.delete(key);liveTools.set(key,{conversation_id:conversationId,turn_id:turn,seen_at:entry?.seen_at??Date.now(),items})
+  while(liveTools.size>LIVE_TOOL_TURNS)liveTools.delete(liveTools.keys().next().value)
+ }
+ function liveToolTrace(message){
+  if(message?.live_tool_items?.length)return{items:message.live_tool_items,live:true}
+  if(typeof message?.turn_id!=='string'||typeof message?.conversation_id!=='string')return null
+  const entry=liveTools.get(liveToolKey(message.conversation_id,message.turn_id))
+  return entry?.items.length?{items:entry.items,live:true}:null
+ }
+ /** The persisted copy is authoritative; the live rows only stand in until it arrives. */
+ function traceForMessage(message){
+  const persisted=normalizeToolTrace(message.tool_trace)
+  if(persisted.length)return{items:persisted,live:false}
+  return liveToolTrace(message)
+ }
  const newMessages=button(t('查看新消息'),()=>{history.scrollTop=history.scrollHeight;newMessages.hidden=true;deliverPresented();read()},pane);newMessages.className='chat-new-messages';newMessages.hidden=true
  const read=()=>markVisibleRead({c,document,history,readMessages,chatOpen:open})
  history.addEventListener('scroll',()=>{if(history.scrollHeight-history.scrollTop-history.clientHeight<24)newMessages.hidden=true;deliverPresented();read()});const visible=()=>{deliverPresented();read()};document.addEventListener('visibilitychange',visible);window.addEventListener('focus',visible)
@@ -219,16 +310,21 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   wrap.append(image);return wrap
  }
  function renderMessage(message,{first=false,continuation=false}={}){
-  const user=message.role==='user'
+  const user=message.role==='user',toolOnly=!user&&message.live_tool_only===true
   const feedId=!user&&typeof message.id==='string'&&message.id.startsWith('feed:')?message.id.slice(5):null
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
-  const node=el('article',undefined,`message ${user?'user':'assistant'}${feed?' message-feed':''}${continuation?' message-continuation':''}`);node.dataset.messageId=message.id
+  const node=el('article',undefined,`message ${user?'user':'assistant'}${feed?' message-feed':''}${continuation?' message-continuation':''}${toolOnly?' message-tool-trace-live':''}`);node.dataset.messageId=message.id
   if(!user&&first){const avatar=avatarNode();if(avatar)node.append(avatar)}
   const body=el('div',undefined,'message-body')
   body.append(el('small',user?identityView?.profile?.userName?.trim()||t('你'):identityView?.profile.assistantName??'Nova','message-role'))
   node.append(body)
   if(user){body.append(el('p',message.text))}
   else if(feed){body.append(renderMarkdown(feedPlainText(feed,message),{openLink}));return node}
+  // A turn can start with retrieval before its first caption: show the trace card without inventing text.
+  else if(toolOnly){
+   const trace=liveToolTrace(message),traceNode=trace?createToolTraceNode(trace.items,{el,live:true}):null
+   if(traceNode)body.append(traceNode)
+  }
   else {
    body.append(renderMarkdown(taskNotificationText(message),{openLink}))
    if(message.full_text_ref&&c.selectedConversation?.kind==='build'){
@@ -237,6 +333,9 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
     full.addEventListener('toggle',()=>{if(!full.open||loaded||loading)return;loading=true;content.replaceChildren(el('p',t('正在加载完整回复…'),'hint'));void (async()=>{try{const id=c.selectedId;let offset=0,text='';do{const page=await c.command('build.details',{id,view:'reply',message_id:message.turn_id,offset});if(id!==c.selectedId)return;text+=page.text;offset=page.next_offset}while(offset!==null);if(id!==c.selectedId)return;content.replaceChildren(renderMarkdown(text,{openLink}));loaded=true}catch(error){content.replaceChildren(el('p',t('完整回复加载失败：{0}',error.message),'hint'))}finally{loading=false}})()})
     body.append(full)
    }
+   // Retrieval/memory calls belong to this turn but never expose their arguments or results.
+   const trace=traceForMessage(message),traceNode=trace?createToolTraceNode(trace.items,{el,live:trace.live}):null
+   if(traceNode)body.append(traceNode)
   }
   if(message.schedule_ref&&openSchedule){const ref=message.schedule_ref,card=el('div',undefined,'message-schedule');card.dataset.scheduleId=ref.schedule_id;const schedule=c.snapshot?.schedules?.items?.find(item=>item.id===ref.schedule_id);card.append(el('span','◷','schedule-emblem'));button(schedule?.title??t('查看定时任务'),()=>openSchedule(ref.schedule_id),card);if(ref.task_id)button(t('查看任务'),()=>openTask(ref.task_id),card);body.append(card)}
   if(message.references?.length)body.append(el('small',t('引用 {0} 个事项',message.references.length),'message-reference'));
@@ -244,14 +343,23 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   return node
  }
  function renderHistory(force=false){
-  const persisted=c.selectedId==='chat:main'?homeTranscript(c.snapshot?.conversations):(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===c.selectedId)
-  const turns=new Set(persisted.map(message=>message.turn_id).filter(Boolean))
+  const raw=c.selectedId==='chat:main'?homeTranscript(c.snapshot?.conversations):(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===c.selectedId)
+  // Legacy host notification rows repeated the decision dock and executor progress as chat bubbles.
+  const decisionPending=(c.snapshot?.pending_approvals?.length??0)+((c.snapshot?.pending_confirmations??[]).length)>0
   const isBuild=c.selectedConversation?.kind==='build'
-  const live=[...liveCaptions.values()].filter(frame=>frame.conversation_id===c.selectedId&&(frame.role!=='user'||frame.conversation_id===c.voiceId)&&!turns.has(frame.turn_id)&&(!isBuild||['running','awaiting_approval'].includes(c.selectedConversation?.build?.status)))
+  const captions=[...liveCaptions.values()].filter(frame=>frame.conversation_id===c.selectedId&&(frame.role!=='user'||frame.conversation_id===c.voiceId)&&(!isBuild||['running','awaiting_approval'].includes(c.selectedConversation?.build?.status)))
+  // A caption the persisted reply already owns is retired; a shorter persisted reply borrows the caption's text.
+  const {messages:persisted,live}=mergeLiveCaptionText(visibleTranscriptMessages(raw,{decisionPending}),captions)
+  // A live tool trace rides along with its turn's caption, or opens the turn while the reply has no text yet.
+  const toolEntries=[...liveTools.values()].filter(entry=>entry.conversation_id===c.selectedId)
+  const toolTurns=new Map(toolEntries.map(entry=>[entry.turn_id,entry]))
+  const transcriptTurns=new Set([...persisted,...live].flatMap(message=>message.role!=='user'&&typeof message.turn_id==='string'?[message.turn_id]:[]))
+  const annotatedLive=live.map(frame=>toolTurns.has(frame.turn_id)?{...frame,live_tool_items:toolTurns.get(frame.turn_id).items}:frame)
+  const toolOnly=[...toolTurns.values()].filter(entry=>!transcriptTurns.has(entry.turn_id)).map(entry=>({id:'live-tool:'+entry.conversation_id+':'+entry.turn_id,conversation_id:entry.conversation_id,turn_id:entry.turn_id,role:'assistant',seen_at:entry.seen_at,live_tool_items:entry.items,live_tool_only:true}))
   // The animated companion belongs to the empty intro only; it yields as soon as the transcript has a message.
-  const transcriptPresent=persisted.length>0||live.length>0,transcriptChanged=transcriptPresent!==hasTranscript
+  const transcriptPresent=persisted.length>0||live.length>0||toolOnly.length>0,transcriptChanged=transcriptPresent!==hasTranscript
   hasTranscript=transcriptPresent
-  const key=JSON.stringify([c.selectedId,persisted,live,isBuild?buildLog.key:null,c.snapshot?.feed,c.snapshot?.memory,c.connected,c.snapshot?.settings?.timezone])
+  const key=JSON.stringify([c.selectedId,persisted,annotatedLive,toolEntries,isBuild?buildLog.key:null,c.snapshot?.feed,c.snapshot?.memory,c.connected,c.snapshot?.settings?.timezone])
   if(key===renderedMessages&&!force){if(transcriptChanged)syncCompanion();return}
   const changedConversation=renderedConversation!==c.selectedId,previousTop=history.scrollTop;const nearBottom=history.scrollHeight-history.scrollTop-history.clientHeight<80
   if(changedConversation&&renderedConversation)positions.set(renderedConversation,{top:previousTop,bottom:nearBottom})
@@ -260,7 +368,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   if(c.selectedId==='chat:main'&&c.snapshot?.conversations?.home_truncated)history.append(el('p',t('部分提醒历史已收起，可从会话列表查看原对话。'),'hint'))
   if(!transcriptPresent)history.append(c.selectedId==='chat:main'?intro:emptyConversation)
   let day=null,previousAssistant=false
-  for(const message of orderTranscript(persisted,live)){
+  for(const message of orderTranscript(persisted,[...annotatedLive,...toolOnly])){
    if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;previousAssistant=false;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
    const user=message.role==='user',continuation=!user&&previousAssistant
    history.append(renderMessage(message,{first:!user&&!previousAssistant,continuation}))
@@ -317,18 +425,39 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  function reveal(){setOpen(true);update();draft.focus()}
  function receive(frame){
   targetMenu.receive(frame)
-  if(frame.type==='caption'&&typeof frame.text==='string'&&frame.conversation_id&&frame.turn_id&&(frame.role!=='user'||frame.conversation_id===c.voiceId)){
+  if(frame.type==='conversation.tool')applyToolFrame(frame)
+  // A failed turn leaves nothing durable behind; its anonymous tool bucket must not claim to run forever.
+  if(['conversation.error','conversation.notice'].includes(frame.type)&&typeof frame.conversation_id==='string')for(const [key,entry] of liveTools)if(entry.conversation_id===frame.conversation_id&&!entry.turn_id)liveTools.delete(key)
+  if(frame.type==='caption'&&(typeof frame.text==='string'||typeof frame.full_text==='string')&&frame.conversation_id&&frame.turn_id&&(frame.role!=='user'||frame.conversation_id===c.voiceId)){
+   if(frame.role==='assistant')adoptAnonymousToolTrace(frame.conversation_id,frame.turn_id)
    const key=`${frame.conversation_id}:${frame.turn_id}`
-   // An empty final caption retracts a preview the runtime discarded (for example narration before a tool call).
-   const text=typeof frame.full_text==='string'?frame.full_text:frame.text
-   if(text)liveCaptions.set(key,{...frame,text,seen_at:liveCaptions.get(key)?.seen_at??Date.now()})
-   else if(frame.final===true)liveCaptions.delete(key)
+   const existing=liveCaptions.get(key)
+   const sequence=Number.isFinite(frame.sequence)?frame.sequence:null
+   // Captions are cumulative and carry a monotonic sequence: a late frame must never regress the visible text.
+   if(!(existing&&sequence!==null&&existing.sequence!==null&&sequence<existing.sequence)){
+    const text=typeof frame.full_text==='string'&&frame.full_text.trim()?frame.full_text:frame.text
+    if(typeof text==='string'&&text){
+     liveCaptions.set(key,{...frame,text,sequence:sequence??existing?.sequence??null,seen_at:existing?.seen_at??Date.now()})
+    }
+    // An empty final retracts exactly the segment it ends; a newer segment's text outranks an older retraction.
+    else if(frame.final===true&&(sequence===null||existing?.sequence===null||existing===undefined||sequence>=existing.sequence))liveCaptions.delete(key)
+   }
    while(liveCaptions.size>128)liveCaptions.delete(liveCaptions.keys().next().value)
   }
   if(frame.type==='personal.state'){
-   for(const message of frame.conversations?.messages??[])if(message.turn_id)liveCaptions.delete(`${message.conversation_id}:${message.turn_id}`)
+   // The durable assistant message of a turn retires that turn's live rows, including home history.
+   for(const message of [...frame.conversations?.messages??[],...frame.conversations?.home_messages??[]]){
+    if(message.role!=='assistant')continue
+    if(!message.turn_id)continue
+    adoptAnonymousToolTrace(message.conversation_id,message.turn_id)
+    const key=`${message.conversation_id}:${message.turn_id}`,live=liveCaptions.get(key)
+    // A lagging or shortened persisted reply must not delete a longer caption still on screen.
+    if(live&&(message.text??'').length>=(live.text??'').length)liveCaptions.delete(key)
+    liveTools.delete(key)
+   }
    const idleBuilds=new Set((frame.conversations?.items??[]).filter(item=>item.kind==='build'&&!['running','awaiting_approval'].includes(item.build?.status)).map(item=>item.id))
    for(const [key,value] of liveCaptions)if(idleBuilds.has(value.conversation_id))liveCaptions.delete(key)
+   for(const [key,value] of liveTools)if(idleBuilds.has(value.conversation_id))liveTools.delete(key)
   }
  }
  return {identity,element:pane,update,receive,focusDraft,focusReference,reveal,setOpen,setOrb,setOrbLevel,get open(){return open},history}

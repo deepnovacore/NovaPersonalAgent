@@ -13,8 +13,12 @@ import {createConnectionsPanel} from './connections-panel.mjs'
 import {createProactivityPanel, memoryEmbeddingNote} from './proactivity-panel.mjs'
 import {t, currentLanguage} from './locale.mjs'
 import {readDisplayPreferences, subscribeDisplayPreferences, writeDisplayPreferences} from './view-preferences.mjs'
+import {installIconSprite, icon} from './icon-sprite.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
+// Install the shared sprite before any panel renders an icon; the call is
+// idempotent, so lazy installs from iconNode() later stay no-ops.
+installIconSprite(document)
 import {createHubPanel} from './hub-panel.mjs'
 import {createPhonePanel} from './phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
@@ -32,6 +36,7 @@ import {
   SETTINGS_CATEGORIES,
   categoryTabForKey,
   isValidCategory,
+  resolveCategory,
 } from './settings-categories.mjs'
 import {
   CUSTOM_VOICE_VALUE,
@@ -55,10 +60,12 @@ function renderSettingsSkills(){
  if(focused){const next=panel.querySelector('.skills-search');next.focus();if(selection?.every(Number.isInteger))next.setSelectionRange(...selection)}
 }
 const welcomeApi=window.novaPersonalAgentDesktop.welcome
+let permissionsLoad=()=>{}
 if(welcomeApi){
  const permissions=mountPermissionCards(document.querySelector('#desktop-permissions-panel'),{api:welcomeApi})
  const update=value=>permissions.update(value.permissions)
  const load=()=>welcomeApi.get().then(update).catch(()=>{})
+ permissionsLoad=load
  welcomeApi.onChanged(update);window.addEventListener('focus',()=>void load());void load()
 }
 const imPanel = createImPanel({document, api})
@@ -211,6 +218,23 @@ displaySteps.addEventListener('change', () => writeDisplayPreferences({steps: di
 displayCollapse.addEventListener('change', () => writeDisplayPreferences({collapse: displayCollapse.value}))
 
 const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelector(`#category-${category.id}`))
+// One glyph per sidebar category, injected at boot so the static nav stays
+// text-only (readable without JS) while the sprite owns all icon geometry.
+const NAV_GLYPHS = Object.freeze({
+  general: 'gear', diary: 'calendar', themes: 'theme', usage: 'chart',
+  models: 'cube', skills: 'folder', capabilities: 'plus', connectors: 'chat',
+  permissions: 'lock', privacy: 'shield', knowledge: 'book', secrets: 'key',
+  hub: 'monitor', phone: 'phone', codex: 'code',
+})
+for (const [index, button] of categoryButtons.entries()) {
+  const category = button?.dataset?.category ?? SETTINGS_CATEGORIES[index].id
+  const glyph = icon(NAV_GLYPHS[category] ?? 'gear', {document, size: 18})
+  if (glyph) button.prepend(glyph)
+}
+{
+  const rescanGlyph = icon('refresh', {document, size: 18})
+  if (rescanGlyph) codexRescan.append(rescanGlyph)
+}
 let activeCategory = SETTINGS_CATEGORIES[0].id
 const skinPanel = createSkinPanel({document, stage: patch => controller.stage(patch), discard: () => controller.discardFields(['skinId', 'importedSkins'])})
 window.addEventListener('beforeunload', () => skinPanel.destroy(), {once: true})
@@ -221,10 +245,13 @@ const phonePanel = createPhonePanel({document, api, save: saveAll})
 // attribute, so showing a category never depends on document order.
 function applyCategory(id) {
   if (!isValidCategory(id)) return
+  const requested = id
+  id = resolveCategory(id)
+  if (id === 'models' && requested === 'pipeline') modelPane = 'pipeline'
   activeCategory = id
   if (id === 'skills') renderSettingsSkills()
-  if (id === 'im') void imPanel.load()
-  if (id === 'connections') void connectionsPanel.load()
+  if (id === 'connectors') { void imPanel.load(); void connectionsPanel.load() }
+  if (id === 'permissions') void permissionsLoad()
   if (id === 'general') void proactivityPanel.load()
   if (id === 'diary') void diaryPanel.load()
   hubPanel.setActive(id === 'hub')
@@ -237,6 +264,7 @@ function applyCategory(id) {
       if (section) section.hidden = !visible
     }
   }
+  if (id === 'models') applyModelPane(modelPane)
   for (const [index, button] of categoryButtons.entries()) {
     const selected = SETTINGS_CATEGORIES[index].id === id
     button.setAttribute('aria-current', selected ? 'true' : 'false')
@@ -352,29 +380,13 @@ function searchKeyUsage(search) {
   return note || t("可选；不配则回退百炼联网搜索（需 DashScope 密钥），两者都没有则搜索关闭")
 }
 
-// Required keys stay in view; the rest fold into 高级 so a first-time user sees one key to fill in.
-const MODEL_SECRET_KEYS = ['dashscopeApiKey', 'stepfunApiKey', 'openrouterApiKey', 'geminiApiKey', 'openaiApiKey', 'deepseekApiKey', 'arkApiKey', 'doubaoBigmodelApiKey']
-function arrangeSecrets(usage) {
-  const primary = document.querySelector('#secrets-primary')
-  const advanced = document.querySelector('#secrets-advanced-list')
-  let required = 0
-  for (const key of MODEL_SECRET_KEYS) {
-    const row = document.querySelector(`.secret[data-key="${key}"]`)
-    const isRequired = usage[key] === t("必需")
-    if (isRequired) required += 1
-    ;(isRequired ? primary : advanced).append(row)
-  }
-  document.querySelector('#secrets-advanced').open ||= required === 0
+function renderKeyUsage(view) {
+  const usage = keyUsage(view)
+  for (const [key, text] of Object.entries(usage)) document.querySelector(`#usage-${key}`).textContent = text
   for (const key of SECRET_KEYS) {
     const endpoint = document.querySelector(`details[data-endpoint="${key}"]`)
     if (endpoint && usage[key] === t("必需")) endpoint.open = true
   }
-}
-
-function renderKeyUsage(view) {
-  const usage = keyUsage(view)
-  for (const [key, text] of Object.entries(usage)) document.querySelector(`#usage-${key}`).textContent = text
-  arrangeSecrets(usage)
 }
 
 function renderPreset(select, customInput, value, presets) {
@@ -442,14 +454,9 @@ function updateButtons() {
   settingsRestore.disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
 }
 
-const conversationVision = document.getElementById('conversation-vision-enabled')
 const monitorCamera = document.getElementById('monitor-camera')
 let cameraDevices = []
 function renderVision(view) {
-  const supported = view.pipelineMode === 'cascaded' && view.visionModels?.[view.cascadedLlmProvider]?.includes(view.cascadedLlmModels?.[view.cascadedLlmProvider]) === true
-  conversationVision.checked = supported && view.conversationVisionEnabled === true
-  conversationVision.disabled = !supported
-  document.getElementById('conversation-vision-status').textContent = ''
   const enabled = view.capabilitiesDocument?.modules?.camera?.enabled !== false
   const watchSelect = document.getElementById('watch-model')
   const presets = Object.entries(view.visionModels ?? {}).flatMap(([provider, models]) =>
@@ -477,15 +484,6 @@ function renderVision(view) {
   }
   monitorCamera.value = selected
 }
-conversationVision.addEventListener('change', async () => {
-  const enabled = conversationVision.checked
-  if (enabled) {
-    try { if (await window.novaPersonalAgentDesktop.camera.requestPermission() !== 'granted') throw Error('permission') }
-    catch { conversationVision.checked = false; document.getElementById('conversation-vision-status').textContent = t("摄像头权限未授予"); return }
-  }
-  if (conversationVision.checked !== enabled || conversationVision.disabled) return
-  controller.stage({conversationVisionEnabled: enabled})
-})
 monitorCamera.addEventListener('change', () => controller.stage({monitorCameraDeviceId: monitorCamera.value}))
 document.getElementById('watch-model').addEventListener('change', event => {
   if (!event.target.disabled && event.target.value) controller.stage({watchModel: event.target.value})
@@ -531,6 +529,115 @@ for (const scope of ['history', 'session']) document.getElementById(`usage-${sco
   renderUsage()
 })
 
+const MODEL_ROUTE_SECRETS = {
+  DASHSCOPE_API_KEY: 'dashscopeApiKey', DEEPSEEK_API_KEY: 'deepseekApiKey', OPENAI_API_KEY: 'openaiApiKey',
+  GEMINI_API_KEY: 'geminiApiKey', STEPFUN_API_KEY: 'stepfunApiKey', ARK_API_KEY: 'arkApiKey',
+  OPENAI_COMPATIBLE_API_KEY: 'openaiCompatibleApiKey', SELF_HOSTED_LLM_API_KEY: 'selfHostedLlmApiKey',
+}
+const MODEL_ROUTE_LANES = [
+  {id: 'conversationText', label: '对话文本', capability: 'text', follow: false},
+  {id: 'support', label: '辅助与后台', capability: 'text', follow: true},
+  {id: 'fast', label: '记忆提取', capability: 'text', follow: true},
+  {id: 'compressor', label: '上下文压缩', capability: 'text', follow: true},
+  {id: 'watch', label: '视觉监控', capability: 'vision', follow: false},
+  {id: 'embedding', label: '知识与记忆嵌入', capability: 'embedding', follow: false},
+]
+let modelPane = 'routes'
+function applyModelPane(pane) {
+  modelPane = pane === 'pipeline' ? 'pipeline' : 'routes'
+  const routes = document.querySelector('#model-routes')
+  const pipeline = document.querySelector('#pipeline')
+  if (routes) routes.hidden = modelPane !== 'routes'
+  if (pipeline) pipeline.hidden = modelPane !== 'pipeline'
+  for (const tab of document.querySelectorAll('[data-model-pane][role="tab"]')) {
+    const selected = tab.dataset.modelPane === modelPane
+    tab.setAttribute('aria-selected', String(selected))
+    tab.tabIndex = selected ? 0 : -1
+  }
+}
+for (const tab of document.querySelectorAll('[data-model-pane][role="tab"]')) {
+  tab.addEventListener('click', () => applyModelPane(tab.dataset.modelPane))
+}
+function routeModelChoices(catalog, lane, provider) {
+  return (catalog?.models ?? []).filter(model => model.provider === provider && (model.capabilities ?? []).includes(lane.capability))
+}
+function renderModelRoutes(view) {
+  const root = document.querySelector('#model-routes')
+  if (!root) return
+  root.replaceChildren()
+  const catalog = view.modelCatalog
+  const secrets = view.secretsPresent ?? {}
+  if (!catalog?.providers?.length) {
+    const note = document.createElement('p'); note.className = 'hint'; note.textContent = t('模型目录暂时不可用，请重启后台后重试。'); root.append(note); return
+  }
+  const configured = catalog.providers.filter(provider => secrets[MODEL_ROUTE_SECRETS[provider.keyName]] === true && (provider.capabilities ?? []).includes('text'))
+  for (const lane of MODEL_ROUTE_LANES) {
+    const row = document.createElement('div'); row.className = 'model-route-row'; row.dataset.lane = lane.id
+    const copy = document.createElement('div'); copy.className = 'model-route-copy'
+    const title = document.createElement('strong'); title.textContent = t(lane.label)
+    const note = document.createElement('small'); note.textContent = lane.follow ? t('默认跟随对话模型') : t('用于该能力的全部调用')
+    copy.append(title, note); row.append(copy)
+    const controls = document.createElement('div'); controls.className = 'model-route-controls'
+    const route = view.modelRoutes?.[lane.id] ?? null
+    const currentProvider = route?.provider ?? (lane.id === 'conversationText' ? view.cascadedLlmProvider : '')
+    const conversationProviders = new Set(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted', 'openai-compatible'])
+    const providerChoices = lane.id === 'embedding'
+      ? catalog.providers.filter(provider => (provider.capabilities ?? []).includes('embedding') && secrets[MODEL_ROUTE_SECRETS[provider.keyName]] === true)
+      : lane.id === 'watch'
+        ? catalog.providers.filter(provider => (provider.capabilities ?? []).includes('vision'))
+        : configured.filter(provider => lane.id !== 'conversationText' || conversationProviders.has(provider.id))
+    const providerSelect = document.createElement('select'); providerSelect.dataset.laneProvider = lane.id
+    providerSelect.setAttribute('aria-label', t('{0}服务商', t(lane.label)))
+    if (lane.follow) { const follow = document.createElement('option'); follow.value = ''; follow.textContent = t('跟随对话模型'); providerSelect.append(follow) }
+    for (const provider of providerChoices) {
+      if (lane.id === 'watch' && secrets[MODEL_ROUTE_SECRETS[provider.keyName]] !== true) continue
+      const option = document.createElement('option'); option.value = provider.id; option.textContent = provider.label
+      if (currentProvider && provider.id !== currentProvider && !providerChoices.some(item => item.id === currentProvider)) option.disabled = false
+      providerSelect.append(option)
+    }
+    if (currentProvider && ![...providerSelect.options].some(option => option.value === currentProvider)) {
+      const option = document.createElement('option'); option.value = currentProvider; option.textContent = t('{0}（当前不可用）', currentProvider); option.disabled = true; providerSelect.append(option)
+    }
+    providerSelect.value = currentProvider || ''
+    const modelSelect = document.createElement('select'); modelSelect.dataset.laneModel = lane.id
+    modelSelect.setAttribute('aria-label', t('{0}模型', t(lane.label)))
+    const selectedProvider = providerSelect.value
+    const currentModel = route?.model ?? (lane.id === 'conversationText' ? view.cascadedLlmModels?.[view.cascadedLlmProvider] : '')
+    const choices = routeModelChoices(catalog, lane, selectedProvider)
+    for (const model of choices) { const option = document.createElement('option'); option.value = model.id; option.textContent = model.label; modelSelect.append(option) }
+    if (currentModel && ![...modelSelect.options].some(option => option.value === currentModel)) { const option = document.createElement('option'); option.value = currentModel; option.textContent = t('{0}（当前不可用）', currentModel); modelSelect.append(option) }
+    modelSelect.value = currentModel || choices[0]?.id || ''
+    modelSelect.disabled = !selectedProvider
+    const customModel = document.createElement('input'); customModel.type = 'text'; customModel.maxLength = 256
+    customModel.dataset.laneCustomModel = lane.id; customModel.placeholder = t('输入模型 ID'); customModel.value = choices.length ? '' : (route?.model ?? '')
+    customModel.hidden = choices.length > 0; customModel.setAttribute('aria-label', t('{0}自定义模型 ID', t(lane.label)))
+    const stageRoute = model => {
+      const provider = providerSelect.value
+      if (!provider || !model) return
+      controller.stage({modelRoutes: {[lane.id]: {provider, model}}, ...(lane.id === 'conversationText' ? {cascadedLlmProvider: provider, cascadedLlmModels: {[provider]: model}} : {})})
+    }
+    providerSelect.addEventListener('change', () => {
+      const provider = providerSelect.value
+      if (lane.follow && provider === '') { controller.stage({modelRoutes: {[lane.id]: null}}); return }
+      const next = routeModelChoices(catalog, lane, provider)
+      const model = next[0]?.id ?? ''
+      customModel.hidden = next.length > 0
+      modelSelect.hidden = next.length === 0
+      if (!provider) return
+      if (model) stageRoute(model)
+      else if (customModel.value.trim()) stageRoute(customModel.value.trim())
+    })
+    modelSelect.addEventListener('change', () => { if (modelSelect.value) stageRoute(modelSelect.value) })
+    customModel.addEventListener('change', () => { if (customModel.value.trim()) stageRoute(customModel.value.trim()) })
+    controls.append(providerSelect, modelSelect, customModel)
+    if (currentProvider && !secrets[MODEL_ROUTE_SECRETS[catalog.providers.find(item => item.id === currentProvider)?.keyName]] && providerChoices.length === 0) controls.append(Object.assign(document.createElement('span'), {className: 'hint', textContent: t('请先在 API 密钥中配置服务商密钥')}))
+    row.append(controls); root.append(row)
+  }
+  const account = document.createElement('p'); account.className = 'hint'
+  account.textContent = t('编程执行器与 ChatGPT 账号分别在「编程」「API 密钥」中配置。')
+  root.append(account)
+}
+
 function render(view, drafts, state) {
   if (!view) return
   document.getElementById('startup-view').value = view.startupView ?? 'workbench'
@@ -542,6 +649,7 @@ function render(view, drafts, state) {
   skinPanel.render(view, state)
   renderUsage()
   renderVision(view)
+  renderModelRoutes(view)
   capabilityEditor.render(view)
   knowledgePanel.render(view)
   memoryPrerecall.checked = view.memoryPrerecallEnabled === true

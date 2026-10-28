@@ -37,7 +37,7 @@ test('settings public projection never opens the keychain or capability files', 
   const context = vm.createContext({capabilityEditorCache:null, skillsCache:[], runtimeCapabilities:null, settingsWindow:{}, settingsGeneration:1, currentSettings:{},
     secretCodec:{available:touched}, capabilityDocumentRevision:touched, decryptSecretsForSpawn:touched,
     readCapabilityDocument:touched, resolveSecretConfiguration:()=>({secretsPresent:{},secretSources:{}}),process:{env:{}},developmentEnv:{},
-    secretsPresent:()=>({}), publicSettings:()=>({}), codexStatus:{},frontendUsage:{snapshot:()=>({})},VISION_MODELS:[],backendStatus:{state:'stopped'},
+    secretsPresent:()=>({}), publicSettings:()=>({}), codexStatus:{},frontendUsage:{snapshot:()=>({})},VISION_MODELS:[],MODEL_CATALOG:{},backendStatus:{state:'stopped'},
     settingsApplyStatus:'idle',settingsRecoveryAvailable:false,managedWorkspacesView:()=>({}),microphoneStatus:'unknown',wakeWord:null,desktopConfig:null,
     hasPlaintextSecret:()=>false,keyringAvailable:null,startup:{stage:'configuration',code:null},
     // Executable presence only: never reads the keychain, credentials or capability files.

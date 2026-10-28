@@ -79,3 +79,18 @@ test('interrupt and new confirmation clear the visible conversation bubble', asy
   assert.match(source, /function clearAssistantCaption\(\) \{\n  void progressBubbles\.clearConversation\(\)/)
   assert.match(source, /if \(previousKind !== active.kind \|\| previousId !== active.id\) \{\n    clearAssistantCaption\(\)/)
 })
+
+test('the orb HUD answers project confirmations only; executor approvals live in the composer dock', async () => {
+  const source = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
+  const markup = await readFile(new URL('../src/renderer/index.html', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(markup, /id="codex-allow-session"/u)
+  assert.doesNotMatch(source, /codexApprovalDecision|parseCodexApprovalMessage|latestCodexApproval/u)
+  assert.doesNotMatch(source, /message\.type === EXECUTOR_APPROVAL/u)
+  assert.match(source, /confirmationPresentation\.sync\('project', pillPending\)/u)
+  assert.match(source, /confirmationDecision\.decide\(true\)/u)
+  assert.match(markup, /id="codex-confirm"[^>]*aria-label="确认工作区操作"/u)
+  // The host pauses an approval's TTL until the renderer acknowledges it, so the dock surface must still report seen.
+  assert.match(source, /for\(const approval of c\.snapshot\?\.pending_approvals\?\?\[\]\)acknowledgeDecision\(c,'approval'/u)
+  assert.match(source, /\{approval_id:active\.id/u)
+})

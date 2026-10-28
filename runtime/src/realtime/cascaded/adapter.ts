@@ -1151,10 +1151,12 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         } else if (event.kind === 'tool_call') {
           if (toolSeen) throw new MixedResponseFailure()
           if (llmResponseId === null) throw new Error('LLM tool before identity')
-          // Some providers narrate before calling a tool in the same response. The narration is
-          // display-only; withdraw it (and its queued speech) so the turn can continue with the tool
-          // instead of failing the whole response.
-          if (textSeen || preview || captionSent) {
+          // A provider may narrate before calling a tool in the same response. In text mode that
+          // narration is the opening paragraph of the user-visible turn: keep it on screen instead
+          // of emitting a turn-level empty final, so the continuation can extend the same answer.
+          // Speech keeps the historical withdrawal: narration must not reach TTS before the tool
+          // decision is final.
+          if (!this.#textOnly && (textSeen || preview || captionSent)) {
             await this.#cancelTts(owner, active)
             await this.#emit(owner, {kind:'response_transcript_final',session_epoch:owner.epoch,response_id:active.id,text:''})
             textSeen = false
@@ -1164,6 +1166,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
             transcript.length = 0
             transcriptLength = 0
           }
+          if (this.#textOnly) { preview = ''; previewLength = 0 }
           toolSeen = true
           pendingTool = event
           owner.pendingToolCallId = event.call_id
@@ -1187,20 +1190,24 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
             }
             await this.#finishTts(owner, active)
             }
-            await this.#emit(owner, {
-              kind: 'response_transcript_final', session_epoch: owner.epoch,
-              response_id: active.id, text: transcript.join(''),
-            })
-          } else {
-            await this.#cancelTts(owner, active)
-            if (pendingTool !== null) {
+            // Text-mode narration before a pending tool call is not a final: the turn continues
+            // after the tool result and the consumer merges both responses into one answer.
+            if (!(this.#textOnly && pendingTool !== null)) {
               await this.#emit(owner, {
-                kind: 'tool_call_ready', session_epoch: owner.epoch,
-                call_id: pendingTool.call_id, item_id: pendingTool.item_id,
-                name: pendingTool.name, arguments: structuredClone(pendingTool.arguments),
-                response_id: active.id,
+                kind: 'response_transcript_final', session_epoch: owner.epoch,
+                response_id: active.id, text: transcript.join(''),
               })
             }
+          } else {
+            await this.#cancelTts(owner, active)
+          }
+          if (pendingTool !== null && (!textSeen || this.#textOnly)) {
+            await this.#emit(owner, {
+              kind: 'tool_call_ready', session_epoch: owner.epoch,
+              call_id: pendingTool.call_id, item_id: pendingTool.item_id,
+              name: pendingTool.name, arguments: structuredClone(pendingTool.arguments),
+              response_id: active.id,
+            })
           }
           if (active.origin.kind === 'user_item' && owner.userInput?.itemId === active.origin.item_id) {
             owner.userInput.submitted = true
@@ -1239,7 +1246,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         const ttsFailure = error instanceof TtsResponseFailure
         const rawCode = llmFailureCode ?? (error instanceof Error && 'code' in error ? error.code : null)
         const code = typeof rawCode === 'string'
-          && ['configuration', 'aborted', 'timeout', 'protocol', 'overflow', 'closed', 'network', 'http'].includes(rawCode)
+          && ['configuration', 'aborted', 'timeout', 'protocol', 'overflow', 'closed', 'network', 'http', 'output_limit'].includes(rawCode)
           ? rawCode : 'unknown'
         this.#record('cascaded.response.failed', {component: ttsFailure ? 'tts' : 'llm', code})
         active.id ??= this.#freshId()
@@ -1247,7 +1254,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         const detail = error instanceof Error && 'detail' in error ? error.detail : null
         const reason = ttsFailure ? 'tts_failure'
           : code === 'http' && (detail === 'auth' || detail === 'quota' || detail === 'rate_limited') ? `provider_http_${detail}`
-            : code === 'network' || code === 'timeout' ? `provider_${code}` : 'provider_failure'
+            : code === 'network' || code === 'timeout' || code === 'output_limit' ? `provider_${code}` : 'provider_failure'
         await this.#emitTerminal(owner, active, 'failed', reason)
         // Reconnect advances the epoch; settle the owned response before emitting its recoverable error.
         await this.#emit(owner, {
