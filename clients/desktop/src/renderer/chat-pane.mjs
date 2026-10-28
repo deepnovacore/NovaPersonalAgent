@@ -355,7 +355,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const toolTurns=new Map(toolEntries.map(entry=>[entry.turn_id,entry]))
   const transcriptTurns=new Set([...persisted,...live].flatMap(message=>message.role!=='user'&&typeof message.turn_id==='string'?[message.turn_id]:[]))
   const annotatedLive=live.map(frame=>toolTurns.has(frame.turn_id)?{...frame,live_tool_items:toolTurns.get(frame.turn_id).items}:frame)
-  const toolOnly=[...toolTurns.values()].filter(entry=>!transcriptTurns.has(entry.turn_id)).map(entry=>({conversation_id:entry.conversation_id,turn_id:entry.turn_id,role:'assistant',seen_at:entry.seen_at,live_tool_items:entry.items,live_tool_only:true}))
+  const toolOnly=[...toolTurns.values()].filter(entry=>!transcriptTurns.has(entry.turn_id)).map(entry=>({id:'live-tool:'+entry.conversation_id+':'+entry.turn_id,conversation_id:entry.conversation_id,turn_id:entry.turn_id,role:'assistant',seen_at:entry.seen_at,live_tool_items:entry.items,live_tool_only:true}))
   // The animated companion belongs to the empty intro only; it yields as soon as the transcript has a message.
   const transcriptPresent=persisted.length>0||live.length>0||toolOnly.length>0,transcriptChanged=transcriptPresent!==hasTranscript
   hasTranscript=transcriptPresent
@@ -448,7 +448,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
    // The durable assistant message of a turn retires that turn's live rows, including home history.
    for(const message of [...frame.conversations?.messages??[],...frame.conversations?.home_messages??[]]){
     if(message.role!=='assistant')continue
-    if(!message.turn_id){liveTools.delete(liveToolKey(message.conversation_id,''));continue}
+    if(!message.turn_id)continue
     adoptAnonymousToolTrace(message.conversation_id,message.turn_id)
     const key=`${message.conversation_id}:${message.turn_id}`,live=liveCaptions.get(key)
     // A lagging or shortened persisted reply must not delete a longer caption still on screen.

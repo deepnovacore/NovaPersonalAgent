@@ -910,5 +910,6 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .chat-tool-trace-dot[data-state="ok"],.chat-tool-trace-item[data-state="ok"] .chat-tool-trace-dot{background:var(--ok)}
 .chat-tool-trace-dot[data-state="error"],.chat-tool-trace-item[data-state="error"] .chat-tool-trace-dot{background:var(--warn)}
 .chat-tool-trace-label{font:500 11px/1.5 var(--mono);color:var(--ink)}
-.chat-tool-trace-note{min-width:0;font:11px/1.5 var(--mono);color:var(--ink-faint);overflow-wrap:anywhere}
+.chat-tool-trace-note{min-width:0;font:11px/1.5 var(--mono);color:var(--ink-dim);overflow-wrap:anywhere}
 @media(prefers-reduced-motion:no-preference){.chat-tool-trace[data-live="true"] .chat-tool-trace-dot[data-state="running"]{animation:warmup-pulse 1.4s ease-in-out infinite}}
+@media(forced-colors:active){.chat-tool-trace-dot{forced-color-adjust:none;border:1px solid CanvasText;background:Canvas}.chat-tool-trace-dot[data-state="ok"],.chat-tool-trace-item[data-state="ok"] .chat-tool-trace-dot{background:Highlight;border-color:Highlight}.chat-tool-trace-dot[data-state="error"],.chat-tool-trace-item[data-state="error"] .chat-tool-trace-dot{background:Mark;border-color:Mark}}
