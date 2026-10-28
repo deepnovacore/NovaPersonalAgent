@@ -12,7 +12,7 @@ const PATHS = [
     ['cascaded', '高级', '火山引擎语音识别与合成，搭配你选择的大模型。', SlidersHorizontal, false],
 ];
 const STEPS = ['选择语音方式', '连接模型服务', '开始对话'];
-function NovaOrb({ size = 176 }: { size?: number }) {
+function SetupOrb({ size = 176 }: { size?: number }) {
     const canvas = useRef<HTMLCanvasElement>(null);
     useEffect(() => { const node = canvas.current;
         if (!node)
@@ -22,6 +22,11 @@ function NovaOrb({ size = 176 }: { size?: number }) {
         return () => visual.destroy();
     }, [size]);
     return <div className="setup-orb" aria-hidden="true"><canvas ref={canvas} width={size} height={size}/></div>;
+}
+function SetupCompanion({ form, avatar }: { form?: string, avatar?: string }) {
+    if (form === 'orb')
+        return <SetupOrb/>;
+    return <div className="setup-pet" aria-hidden="true">{avatar ? <img src={avatar} alt=""/> : <span className="setup-pet-placeholder"/>}</div>;
 }
 const closeSetupWindow = () => window.close();
 export default function SetupApp({ api = (window as any).novaPersonalAgentDesktop?.setup, onClose = closeSetupWindow }: any) {
@@ -110,7 +115,7 @@ export default function SetupApp({ api = (window as any).novaPersonalAgentDeskto
     return <div className="setup-shell">
         <aside className="setup-rail">
             <div className="setup-brand">NOVA</div>
-            <NovaOrb/>
+            <SetupCompanion form={view?.companionForm} avatar={view?.defaultAvatar}/>
             <div className="setup-rail-copy">
                 <p className="setup-rail-eyebrow">{t('首次设置')}</p>
                 <h1>{t('你好，我是 Nova')}</h1>

@@ -84,6 +84,7 @@ test('the default settings are the documented schema', () => {
     version: 5,
     modelRoutes: {conversationText: null, support: null, fast: null, compressor: null, watch: null, embedding: null},
     skinId: 'nova', importedSkins: [],
+    companionForm: 'pet',
     startupView: 'workbench',
     lastPresentation: 'workbench',
     workbenchMaximized: true,
@@ -283,6 +284,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     version: 5,
     modelRoutes: {conversationText: null, support: null, fast: null, compressor: null, watch: null, embedding: null},
     skinId: 'nova', importedSkins: [],
+    companionForm: 'pet',
     startupView: 'workbench',
     lastPresentation: 'workbench',
     workbenchMaximized: true,
@@ -397,6 +399,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'codingBackendPaths',
     'codingBackendProfiles',
     'codingProgressNarration',
+    'companionForm',
     'compatibleAsrBaseUrl', 'compatibleAsrModel', 'compatibleAsrOmitResponseFormat', 'compatibleTtsBaseUrl', 'compatibleTtsModel', 'compatibleTtsSendSampleRate', 'compatibleTtsVoice',
     'embeddingModel',
     'embeddingProvider',
@@ -611,6 +614,7 @@ test('publicSettings never carries the secrets object', () => {
     'codingBackend',
     'codingBackendPaths',
     'codingProgressNarration',
+    'companionForm',
     'compatibleAsrBaseUrl', 'compatibleAsrModel', 'compatibleAsrOmitResponseFormat', 'compatibleTtsBaseUrl', 'compatibleTtsModel', 'compatibleTtsSendSampleRate', 'compatibleTtsVoice',
     'embeddingModel',
     'embeddingProvider',
@@ -655,7 +659,7 @@ test('orb settings expose only renderer-owned appearance and activation fields',
     startListeningOnLaunch: true,
     codexBinaryPath: 'C:\\private\\codex.exe',
     modelBaseUrl: 'https://private.example/v1',
-  }), {progressBubbles: 'milestones', codingProgressNarration: 'smart', language: 'zh-CN', palette: 'graphite', skinId: 'nova', importedSkins: [], startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
+  }), {progressBubbles: 'milestones', codingProgressNarration: 'smart', language: 'zh-CN', palette: 'graphite', skinId: 'nova', importedSkins: [], companionForm: 'pet', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
 })
 
 test('secretsPresent reports booleans for every key and leaks no ciphertext', () => {
@@ -1419,4 +1423,13 @@ test('model routes round-trip per lane and an explicit null clears the override'
   assert.deepEqual(cleared.modelRoutes.watch, {provider: 'qwen', model: 'qwen3-vl-plus'})
   assert.equal(normalizeSettings({modelRoutes: {support: {provider: 'unknown', model: 'x'}}}).modelRoutes.support, null)
   assert.equal(normalizeSettings({modelRoutes: {watch: {provider: 'qwen', model: '   '}}}).modelRoutes.watch, null)
+})
+
+test('companion form is renderer-owned, defaults to pet and only accepts orb or pet', () => {
+  assert.equal(normalizeSettings({}).companionForm, 'pet')
+  assert.equal(normalizeSettings({companionForm: 'dragon'}).companionForm, 'pet')
+  assert.equal(normalizeSettings({companionForm: 'orb'}).companionForm, 'orb')
+  assert.equal(publicSettings({companionForm: 'pet'}).companionForm, 'pet')
+  assert.equal(orbSettings({companionForm: 'pet'}).companionForm, 'pet')
+  assert.equal('companionForm' in backendSettings({companionForm: 'orb'}), false)
 })

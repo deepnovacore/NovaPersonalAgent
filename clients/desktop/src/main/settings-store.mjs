@@ -83,6 +83,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   workbenchMaximized: true,
   palette: 'ember',
   skinId: 'nova',
+  companionForm: 'pet',
   importedSkins: Object.freeze([]),
   codingProgressNarration: 'smart',
   codingBackend: 'codex',
@@ -139,6 +140,10 @@ function pick(candidate, base, defaultValue, validate) {
 
 function validPalette(value) {
   return PALETTE_SET.has(value) ? value : null
+}
+
+function validCompanionForm(value) {
+  return value === 'orb' || value === 'pet' ? value : null
 }
 
 function validProactivity(value) {
@@ -298,6 +303,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     lastPresentation: pick(source.lastPresentation, fallback.lastPresentation, DEFAULT_SETTINGS.lastPresentation, value => ['orb', 'workbench'].includes(value) ? value : null),
     workbenchMaximized: pick(source.workbenchMaximized, fallback.workbenchMaximized, DEFAULT_SETTINGS.workbenchMaximized, value => typeof value === 'boolean' ? value : null),
     palette: pick(source.palette, fallback.palette, DEFAULT_SETTINGS.palette, validPalette),
+    companionForm: pick(source.companionForm, fallback.companionForm, DEFAULT_SETTINGS.companionForm, validCompanionForm),
     codingProgressNarration: pick(source.codingProgressNarration, fallback.codingProgressNarration, DEFAULT_SETTINGS.codingProgressNarration, value => value === 'smart' || value === 'continuous' ? value : null),
     codingBackend: pick(source.codingBackend, fallback.codingBackend, DEFAULT_SETTINGS.codingBackend, value => CODING_BACKENDS.includes(value) ? value : null),
     codingBackendPaths: normalizeCodingPaths(source.codingBackendPaths, fallback.codingBackendPaths),
@@ -378,7 +384,7 @@ export function startupPresentation(settings, argv = []) {
 }
 
 export function backendSettings(settings) {
-  const {skinId, importedSkins, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, ...backend} = normalizeSettings(settings)
+  const {skinId, importedSkins, companionForm, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -394,6 +400,7 @@ export function publicSettings(settings) {
     palette: normalized.palette,
     skinId: normalized.skinId,
     importedSkins: normalized.importedSkins,
+    companionForm: normalized.companionForm,
     proactivity: normalized.proactivity,
     codingProgressNarration: normalized.codingProgressNarration,
     codingBackend: normalized.codingBackend,
@@ -456,6 +463,7 @@ export function orbSettings(settings) {
     palette: normalized.palette,
     skinId: normalized.skinId,
     importedSkins: normalized.importedSkins,
+    companionForm: normalized.companionForm,
     startListeningOnLaunch: normalized.startListeningOnLaunch,
     wakeWordEnabled: normalized.wakeWordEnabled,
     autoHideSeconds: normalized.autoHideSeconds,

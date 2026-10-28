@@ -325,6 +325,11 @@ function sendToSettings(channel, ...args) {
 }
 
 // First-run projection: which pipeline is chosen, which of its keys exist, and what the last launch lacked.
+let setupAvatarUrl
+function setupAvatar() {
+  setupAvatarUrl ??= 'data:image/png;base64,' + readFileSync(new URL('./nova-avatar.png', import.meta.url)).toString('base64')
+  return setupAvatarUrl
+}
 function setupView() {
   const {secretsPresent: present} = settingsView()
   return Object.freeze({
@@ -333,6 +338,8 @@ function setupView() {
     secretsPresent: Object.fromEntries(SETUP_KEYS.map(key => [key, present[key] === true])),
     missing: runtimeCapabilities?.reason === 'configuration_required' ? runtimeCapabilities.missing ?? [] : [],
     backendStatus: backendStatus.state,
+    companionForm: currentSettings.companionForm === 'orb' ? 'orb' : 'pet',
+    defaultAvatar: setupAvatar(),
   })
 }
 

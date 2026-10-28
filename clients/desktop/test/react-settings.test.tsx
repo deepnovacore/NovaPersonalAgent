@@ -131,3 +131,16 @@ test('news preferences save through settings with the original revision and reta
  await waitFor(()=>assert.ok(v.queryByRole('button',{name:'完成调整'}),'interest draft should remain open after navigation'));fireEvent.click(v.getByRole('button',{name:'完成调整'}));await waitFor(()=>assert.ok(v.container.textContent?.includes('调整已保留'),'conflicting interest changes should remain available'));
  assert.deepEqual(calls,[['news.configure',{enabled:true,explore:false,interests:['科学','音乐'],expected_version:8}]]);assert.ok(v.getByLabelText('自定义兴趣'));
 })
+
+test('appearance form is a renderer-owned setting saved without a backend restart',async()=>{
+ const b=bridge(base({focusCategory:'themes'}))
+ const v=render(<SettingsApp bridge={b.bridge}/>)
+ await waitFor(()=>assert.ok(v.container.querySelector('#orb-skin-section')))
+ const select=[...v.container.querySelectorAll('#orb-skin-section select')].find((node:any)=>node.getAttribute('aria-label')==='形象') as HTMLSelectElement
+ assert.ok(select,'appearance select should exist')
+ assert.equal(select.value,'pet')
+ fireEvent.change(select,{target:{value:'orb'}})
+ fireEvent.click(v.container.querySelector('#settings-save')!)
+ await waitFor(()=>assert.equal(b.calls.length,1))
+ assert.deepEqual(b.calls[0],{settingsPatch:{companionForm:'orb'}})
+})
