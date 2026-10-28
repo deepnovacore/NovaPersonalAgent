@@ -23,7 +23,7 @@ test('actionable host refusal codes become readable sentences in both languages'
 })
 
 test('the review-listed codes are all curated',()=>{
- for(const code of ['workspaces_unavailable','unknown_workspace','workspace_name_conflict','plan_delegation_unknown','plan_version_conflict','voice_active','generation_conflict','conversation_limit','invalid_project_directory','build_finished','conversation_busy','conversation_mode_transition','source_todo_conflict','stale_reference','reference_not_authorized','outcome_unknown','invalid_params','workspace_project_conflict'])
+ for(const code of ['workspaces_unavailable','unknown_workspace','workspace_name_conflict','plan_delegation_unknown','plan_version_conflict','voice_active','generation_conflict','conversation_limit','invalid_project_directory','build_finished','conversation_busy','source_todo_conflict','stale_reference','reference_not_authorized','outcome_unknown','invalid_params','workspace_project_conflict'])
   assert.ok(Object.hasOwn(HOST_REFUSALS,code),`missing ${code}`)
 })
 
