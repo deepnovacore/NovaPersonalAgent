@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Action, Card, Field } from './controls';
 import { t } from '../../locale.mjs';
+import {moduleIcons} from './icons';
 const PRESET = { url: 'https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp', tool: 'bailian_web_search', headers: { authorization: 'Bearer ${DASHSCOPE_API_KEY}' } };
 const DEFAULT_TOOL = { enabled: false, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2 };
 function Mapping({ label, value, change }: any) { const [error, setError] = useState(''), [local, setLocal] = useState<string | null>(null); const text = Object.entries(value ?? {}).map(([k, v]) => `${k}=${v}`).join('\n'); return <><Field label={label} type="textarea" value={local ?? text} onChange={(s: string) => { setLocal(s); try {
@@ -13,7 +14,7 @@ function Mapping({ label, value, change }: any) { const [error, setError] = useS
 catch {
     setError(t('字段格式无效，请检查每行 key=${ENV}。'));
 } }}/>{error && <p role="alert">{error}</p>}</>; }
-export function ModuleToggle({ name, label, view, stage }: any) { const module = view.capabilitiesDocument?.modules?.[name] ?? {}, running = view.capabilities?.runtime?.modules?.[name]; return <><Field label={label} type="checkbox" value={module.enabled ?? name !== 'knowledge'} onChange={(enabled: boolean) => { const doc = structuredClone(view.capabilitiesDocument ?? { version: 1 }); doc.modules ??= {}; doc.modules[name] = { ...module, enabled }; stage({ capabilitiesDocument: doc }); }}/>{running?.reason && <p className="hint">{t('运行状态')} · {running.reason}</p>}</>; }
+export function ModuleToggle({ name, label, view, stage }: any) { const module = view.capabilitiesDocument?.modules?.[name] ?? {}, running = view.capabilities?.runtime?.modules?.[name]; return <><Field label={label} icon={moduleIcons[name]} type="checkbox" value={module.enabled ?? name !== 'knowledge'} onChange={(enabled: boolean) => { const doc = structuredClone(view.capabilitiesDocument ?? { version: 1 }); doc.modules ??= {}; doc.modules[name] = { ...module, enabled }; stage({ capabilitiesDocument: doc }); }}/>{running?.reason && <p className="hint">{t('运行状态')} · {running.reason}</p>}</>; }
 export function CapabilitiesPanel({ view, stage, api }: any) { const doc = view.capabilitiesDocument ?? { version: 1 }, modules = doc.modules ?? {}, [probes, setProbes] = useState<any>({}), [busy, setBusy] = useState(false); const lock = useRef(false); function update(fn: any) { const next = structuredClone(doc); fn(next); stage({ capabilitiesDocument: next }); } const changeModule = (name: string, patch: any) => update((n: any) => { n.modules ??= {}; n.modules[name] = { ...n.modules[name], ...patch }; }); async function probe(server: string) { if (lock.current)
     return; lock.current = true; setBusy(true); setProbes((p: any) => ({ ...p, [server]: { status: 'checking' } })); try {
     const r = await api.probeCapabilities({ document: doc, server });

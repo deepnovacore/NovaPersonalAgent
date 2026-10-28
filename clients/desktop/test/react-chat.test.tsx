@@ -153,3 +153,15 @@ test('historical snapshots cannot claim an anonymous tool before its current cap
  assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,0);
  }finally{await h.close()}
 })
+
+test('compact native workspace picker keeps the chosen workspace in the Build request',async()=>{
+ const h=await mount();try{h.c.state().execution='build';h.c.command=async(method:string,params:any)=>{h.calls.push([method,params]);return method==='workspaces.list'?[{workspace_id:'default',is_default:true},{workspace_id:'project-b',name:'Project B'}]:{}};await h.render();
+ const picker=document.querySelector<HTMLSelectElement>('.workspace-picker select.workspace-folder');assert.ok(picker,'native workspace picker');assert.ok(picker.parentElement?.querySelector('svg[aria-hidden="true"]'));
+ await act(async()=>{picker.value='project-b';picker.dispatchEvent(new h.dom.window.Event('change',{bubbles:true}))});h.c.draft='Build selected workspace';await h.render();await h.key(h.byLabel('消息草稿'),{key:'Enter'});
+ assert.deepEqual(h.calls.find(([method]:any)=>method==='build.begin'),['build.begin',{text:'Build selected workspace',workspace_id:'project-b'}]);
+ }finally{await h.close()}
+})
+test('Computer Use shows one SVG and configuration failures open Permissions settings',async()=>{
+ const opened:string[]=[];const h=await mount({snapshot:{conversations:{items:[{id:'chat:main',kind:'build',build:{status:'paused',computer_use:{enabled:false,direct:false}}}],messages:[]}},command:async(method:string)=>method==='build.computer_use'?{ok:false,missing:['configuration']}:{}} ,{api:{orbMenu:{openSettings:(category:string)=>opened.push(category)}}});
+ try{const toggle=document.querySelector<HTMLButtonElement>('.computer-use-toggle')!;assert.equal(toggle.querySelectorAll('svg').length,1);await h.click(toggle);await h.click([...document.querySelectorAll('button')].find(node=>node.textContent==='打开设置'));assert.deepEqual(opened,['permissions'])}finally{await h.close()}
+})

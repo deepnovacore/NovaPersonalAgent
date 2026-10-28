@@ -113,3 +113,11 @@ test('project confirmation entry keeps its separate orb route',async()=>{
  assert.equal(view.controller.selectedId,'topic:review')
  assert.equal(view.controller.presentationMode,'orb')
 })
+
+test('assistant tab follows the saved user name and stays beside the personal profile',async()=>{
+ const {view}=await mount();await act(async()=>view.identity({profile:{assistantName:'小星'}}));
+ const tab=document.querySelector<HTMLButtonElement>('[data-page="assistant"]');assert.ok(tab);assert.equal(tab.textContent,'小星');assert.equal(tab.previousElementSibling?.getAttribute('data-page'),'profile');
+ await act(async()=>fireEvent.click(tab));assert.equal(tab.getAttribute('aria-selected'),'true');assert.ok(document.querySelector('.soul-card'));
+ const {setLanguage}=await import('../src/renderer/locale.mjs');try{await act(async()=>{setLanguage('en');view.identity({profile:{assistantName:'设置'}})});assert.equal(tab.textContent,'设置','user names are displayed without translation')}finally{setLanguage('zh-CN')}
+ await act(async()=>fireEvent.keyDown(tab,{key:'ArrowRight'}));assert.equal(document.querySelector('[data-page="timeline"]')?.getAttribute('aria-selected'),'true');
+})

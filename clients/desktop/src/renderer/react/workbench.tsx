@@ -1,7 +1,7 @@
 import React,{useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react'
 import {createPortal} from 'react-dom'
 import {Button,Tooltip} from '@radix-ui/themes'
-import {Settings,Minimize2,X,Minus,Square,Clock3,Lightbulb,Target,Newspaper,Zap,User,ArrowLeft} from 'lucide-react'
+import {Settings,Minimize2,X,Minus,Square,Clock3,Lightbulb,Target,Newspaper,Zap,User,Bot,ArrowLeft} from 'lucide-react'
 import {t} from '../locale.mjs'
 import {attentionTarget} from '../attention-target.mjs'
 import {OrbDragGesture} from '../drag-gesture.mjs'
@@ -12,7 +12,7 @@ import {WorkspacePage} from './pages'
 import {TasksPage,TaskDetail,ScheduledTasksPage,ExecutorFloat} from './tasks'
 import type {WorkbenchRuntime} from './personal-view'
 
-const PAGES=[{id:'timeline',label:'时间线',Icon:Clock3},{id:'ideas',label:'想法',Icon:Lightbulb},{id:'goals',label:'目标',Icon:Target},{id:'feeds',label:'资讯',Icon:Newspaper},{id:'tasks',label:'任务',Icon:Zap},{id:'profile',label:'个人资料',Icon:User}]
+const PAGES=[{id:'timeline',label:'时间线',Icon:Clock3},{id:'ideas',label:'想法',Icon:Lightbulb},{id:'goals',label:'目标',Icon:Target},{id:'feeds',label:'资讯',Icon:Newspaper},{id:'tasks',label:'任务',Icon:Zap},{id:'profile',label:'个人资料',Icon:User},{id:'assistant',label:'nova',Icon:Bot}]
 function activeCount(c:any,work:any){const tasks=c.snapshot?.tasks??[],owned=new Set(tasks.flatMap((task:any)=>task.work_ids??[]));return tasks.filter((task:any)=>!task.trigger?.schedule_id?.startsWith('builtin-source-')&&['queued','running','verifying','waiting'].includes(task.phase)).length+(work?.tasks??[]).filter((task:any)=>!owned.has(task.work_id)&&['started','working'].includes(task.phase)).length}
 function WindowGrip({api}:{api:any}){
  const gesture=useMemo(()=>new OrbDragGesture(),[])
@@ -32,10 +32,13 @@ function ScrollPanel({pageKey,children,...props}:{pageKey:string;children:React.
 }
 export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
  const revision=useSyncExternalStore(runtime.subscribe,runtime.snapshot,runtime.snapshot)
+ const assistantName=(runtime.identityValue?.profile?.assistantName??runtime.controller.snapshot?.soul?.assistant_name??'nova').trim()||'nova'
+ const pageLabel=(id:string,label:string)=>id==='assistant'?assistantName:t(label)
  const c=runtime.controller,{api,tasks,speakingLevel}=runtime.options,run=runtime.run
  const [selected,setSelected]=useState('timeline'),[taskTab,setTaskTab]=useState('tasks'),[taskId,setTaskId]=useState<string|null>(null),[approvalFocus,setApprovalFocus]=useState(false),[scheduleId,setScheduleId]=useState<string|null>(null),[previewPlan,setPreviewPlan]=useState(false),[planPending,setPlanPending]=useState(false),[maximized,setMaximized]=useState(false),[clock,setClock]=useState(0)
  const lastWorkspacePage=useRef('timeline');if(selected!=='tasks')lastWorkspacePage.current=selected
  const originFocus=useRef<HTMLElement|null>(null),taskHistories=useRef(new Map<string,any>()),viewedCursors=useRef(new Map<string,number>()),opening=useRef(0),initialHome=useRef(false),orbVoiceTried=useRef(false),lastPlan=useRef(''),tabRefs=useRef(new Map<string,HTMLButtonElement>())
+ useLayoutEffect(()=>{const reveal=()=>tabRefs.current.get(selected)?.scrollIntoView?.({block:'nearest',inline:'nearest'});reveal();window.addEventListener('resize',reveal);return()=>window.removeEventListener('resize',reveal)},[selected,assistantName])
  const [viewedResults,setViewedResults]=useState<Set<string>>(()=>{try{const rows=JSON.parse(localStorage.getItem('nova:viewed-task-results')??'[]');return new Set(Array.isArray(rows)?rows.filter(id=>typeof id==='string').slice(-200):[])}catch{return new Set()}})
  const openSettings=(category?:string)=>api.orbMenu?.openSettings?.(category)
  const openTask=useCallback(async(id:string,approval=false)=>{const seq=++opening.current;originFocus.current=document.activeElement as HTMLElement;if(c.presentationMode!=='workbench')await c.setPresentation('workbench');if(seq!==opening.current)return;setSelected('tasks');setPreviewPlan(false);setApprovalFocus(approval);setTaskId(id);if(!taskHistories.current.has(id))taskHistories.current.set(id,{items:new Map(),cursor:0,incomplete:false,truncated:false})},[c])
@@ -86,7 +89,7 @@ export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
    <ChatPane ref={runtime.chat} c={c} run={run} api={api} onHome={showHome} openTask={(id:string)=>void run(()=>openTask(id))} openSchedule={openSchedule} onPreviewPlan={openPlan} speakingLevel={speakingLevel} revision={revision}/>
   </section>
   <section className="workspace" aria-label={t('工作区')}>
-   <nav className="workspace-topbar" aria-label={t('工作区')}><div className="workspace-tabs" role="tablist" aria-label={t('工作区')} aria-orientation="horizontal">{PAGES.map(({id,label,Icon})=><button key={id} ref={node=>{if(node)tabRefs.current.set(id,node);else tabRefs.current.delete(id)}} type="button" className="workspace-tab" id={`workspace-tab-${id}`} role="tab" data-page={id} aria-selected={selected===id} aria-controls="workbench-panel" tabIndex={selected===id?0:-1} title={t(label)} onClick={()=>selectPage(id)} onKeyDown={event=>{const index=PAGES.findIndex(page=>page.id===id),next=event.key==='Home'?0:event.key==='End'?PAGES.length-1:event.key==='ArrowLeft'?(index+PAGES.length-1)%PAGES.length:event.key==='ArrowRight'?(index+1)%PAGES.length:null;if(next===null)return;event.preventDefault();selectPage(PAGES[next].id);tabRefs.current.get(PAGES[next].id)?.focus()}}><Icon aria-hidden="true"/><span className="workspace-tab-label">{t(label)}</span>{id==='tasks'&&active>0&&<span className="workspace-tab-badge">{active}</span>}{id==='tasks'&&planPending&&<span className="workspace-tab-plan-badge" aria-hidden="true"/>}</button>)}</div></nav>
+   <nav className="workspace-topbar" aria-label={t('工作区')}><div className="workspace-tabs" role="tablist" aria-label={t('工作区')} aria-orientation="horizontal">{PAGES.map(({id,label,Icon})=><button key={id} ref={node=>{if(node)tabRefs.current.set(id,node);else tabRefs.current.delete(id)}} type="button" className="workspace-tab" id={`workspace-tab-${id}`} role="tab" data-page={id} aria-selected={selected===id} aria-controls="workbench-panel" tabIndex={selected===id?0:-1} title={pageLabel(id,label)} onClick={()=>selectPage(id)} onKeyDown={event=>{const index=PAGES.findIndex(page=>page.id===id),next=event.key==='Home'?0:event.key==='End'?PAGES.length-1:event.key==='ArrowLeft'?(index+PAGES.length-1)%PAGES.length:event.key==='ArrowRight'?(index+1)%PAGES.length:null;if(next===null)return;event.preventDefault();selectPage(PAGES[next].id);tabRefs.current.get(PAGES[next].id)?.focus()}}><Icon aria-hidden="true"/><span className="workspace-tab-label">{pageLabel(id,label)}</span>{id==='tasks'&&active>0&&<span className="workspace-tab-badge">{active}</span>}{id==='tasks'&&planPending&&<span className="workspace-tab-plan-badge" aria-hidden="true"/>}</button>)}</div></nav>
    {taskId&&<h2 className="page-title">{t('任务详情')}</h2>}
    <div className="presentation-waiting">{pending.map((item:any)=><Button key={item.id??item.request_id??item.summary} variant="soft" disabled={!c.connected} onClick={()=>void run(()=>openDecision(item))}>{t('处理审批：{0}',item.summary)}</Button>)}</div>
    <ScrollPanel pageKey={taskId?`detail:${taskId}`:selected==='tasks'?`${selected}:${previewPlan?'plan':taskTab}`:selected} id="workbench-panel" role="tabpanel" tabIndex={0} aria-labelledby={`workspace-tab-${selected}`}>
@@ -94,7 +97,7 @@ export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
      {c.snapshot?.capabilities?.schedules&&<div className="schedule-tabs" role="tablist" aria-label={t('任务类型')}>{[['tasks','任务'],['schedules','定时任务']].map(([id,label])=><button type="button" key={id} role="tab" aria-selected={taskTab===id} onClick={()=>setTaskTab(id)}>{t(label)}</button>)}</div>}
      {c.snapshot?.capabilities?.schedules&&taskTab==='schedules'?<ScheduledTasksPage c={c} run={run} api={{...api,revealChat:()=>runtime.chat.current?.reveal()}} openTask={openTask} selectedId={scheduleId??undefined}/>:<TasksPage c={c} run={run} openTask={openTask} api={api}/>}
     </>:null}
-    <div className="workspace-page-host" hidden={Boolean(taskId)||previewPlan||selected==='tasks'}><WorkspacePage page={lastWorkspacePage.current} c={c} run={run} api={api} discuss={discuss} startConversation={startConversation} openTask={openTask} openSettings={openSettings} delegate={(text:string)=>runtime.chat.current?.focusDraft(text)} continueChat={(text:string)=>runtime.chat.current?.focusDraft(`关于「${text}」：`)}/></div>
+    <div className="workspace-page-host" hidden={Boolean(taskId)||previewPlan||selected==='tasks'}><WorkspacePage identity={runtime.identityValue} page={lastWorkspacePage.current} c={c} run={run} api={api} discuss={discuss} startConversation={startConversation} openTask={openTask} openSettings={openSettings} delegate={(text:string)=>runtime.chat.current?.focusDraft(text)} continueChat={(text:string)=>runtime.chat.current?.focusDraft(`关于「${text}」：`)}/></div>
    </ScrollPanel>
   </section>
   <div className="window-controls" role="group" aria-label={t('窗口控制')}>{[{action:'close',label:'关闭窗口',title:'关闭（转入后台）',className:'window-close',Icon:X},{action:'minimize',label:'最小化',title:'最小化',className:'window-minimize',Icon:Minus},{action:'toggleMaximize',label:'最大化或还原',title:'最大化或还原',className:'window-maximize',Icon:Square}].map(({action,label,title,className,Icon})=><button key={action} type="button" className={`window-control ${className}`} aria-label={t(label)} title={t(title)} onClick={()=>api.windowControls?.[action]?.()}><Icon size={12}/></button>)}</div>

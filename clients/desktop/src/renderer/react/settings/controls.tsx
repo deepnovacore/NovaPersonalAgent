@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@radix-ui/themes';
 import { t } from '../../locale.mjs';
+import {cardIcons,Plug} from './icons';
 export type AnyRecord = Record<string, any>;
 export function Action({ children, action, disabled = false, ...props }: any) {
     const [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -17,11 +18,11 @@ export function Action({ children, action, disabled = false, ...props }: any) {
         setBusy(false);
     } }}>{children}</Button>{error && <p role="alert">{error}</p>}</>;
 }
-export function Field({ label, value, onChange, type = 'text', options, ...props }: any) {
+export function Field({ label, value, onChange, type = 'text', options, icon:Icon, ...props }: any) {
     const inputProps = { ...props, 'aria-label': label, onChange: (e: any) => onChange(type === 'checkbox' ? e.target.checked : type === 'number' || type === 'range' ? Number(e.target.value) : e.target.value) };
-    return <label className={type === 'checkbox' ? 'toggle-row' : 'field'}><span>{t(label)}</span>{options ? <select {...inputProps} value={value ?? ''}>{options.map((o: any) => { const v = typeof o === 'string' ? o : o.value; return <option key={v} value={v}>{t(typeof o === 'string' ? o : o.label)}</option>; })}</select> : type === 'textarea' ? <textarea {...inputProps} value={value ?? ''}/> : type === 'checkbox' ? <input {...inputProps} type="checkbox" role="switch" checked={value === true}/> : <input {...inputProps} type={type} value={value ?? ''}/>}</label>;
+    return <label className={type === 'checkbox' ? 'toggle-row' : 'field'}><span>{Icon&&<Icon size={19} aria-hidden="true"/>}{t(label)}</span>{options ? <select {...inputProps} value={value ?? ''}>{options.map((o: any) => { const v = typeof o === 'string' ? o : o.value; return <option key={v} value={v}>{t(typeof o === 'string' ? o : o.label)}</option>; })}</select> : type === 'textarea' ? <textarea {...inputProps} value={value ?? ''}/> : type === 'checkbox' ? <input {...inputProps} type="checkbox" role="switch" checked={value === true}/> : <input {...inputProps} type={type} value={value ?? ''}/>}</label>;
 }
-export function Card({ title, children, description }: any) { return <article className="im-card"><h3>{t(title)}</h3>{description && <p>{t(description)}</p>}{children}</article>; }
+export function Card({ title, children, description, icon:Icon=cardIcons[title]??Plug }: any) { return <article className="im-card"><div className="settings-card-heading"><span className="settings-card-icon"><Icon size={20} aria-hidden="true"/></span><div><h3>{t(title)}</h3>{description && <p>{t(description)}</p>}</div></div>{children}</article>; }
 export function useCommand(api: any, method = 'personalCommand', initial = 'state') {
     const [state, setState] = useState<any>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
     const active = useRef(true), lock = useRef(false), epoch = useRef(0);
