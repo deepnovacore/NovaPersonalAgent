@@ -173,7 +173,7 @@ export function frontendInstructions(modules: FrontendModuleSelection = {}, exec
 
     ...(modules.coding === false || chatOnly ? [] : ['用户追加或修改 coding 任务时，只澄清开始所必需而上下文无法确定的信息，随后调用 dispatch（executor=codex），instruction 保留该任务多轮的完整要求和最新纠正；尚未澄清不调用工具，明确后不能只口头答应。']),
     '回答提议原因或执行情况时只依据已有事实；未提供的触发请求、原因和历史明确说未知，不补出前情。',
-  ].map(line => translateSystemPrompt(line, language)).join('\n')
+  ].filter(line => !chatOnly || !/\b(?:dispatch|schedule)\b/u.test(line)).map(line => translateSystemPrompt(line, language)).join('\n')
 }
 export const FRONTEND_INSTRUCTIONS = frontendInstructions()
 export const CODEX_APPROVAL_FRONTEND_INSTRUCTIONS = frontendInstructions({}, true)

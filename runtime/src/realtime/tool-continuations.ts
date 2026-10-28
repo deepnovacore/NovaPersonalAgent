@@ -54,10 +54,13 @@ function acceptanceSummary(acceptance: ToolAcceptance): string {
   const content = acceptance.host_item?.content
   if (typeof content !== 'string') return ''
   try {
-    const value = JSON.parse(content) as {items?:unknown;results?:unknown;result?:{items?:unknown;results?:unknown}}
+    const value = JSON.parse(content) as {items?:unknown;results?:unknown;entries?:unknown;snippets?:unknown;hit_count?:unknown;result?:{items?:unknown;results?:unknown;entries?:unknown;snippets?:unknown;hit_count?:unknown}}
     const inner = value.result && typeof value.result === 'object' ? value.result : value
     if (Array.isArray(inner.items)) return `${inner.items.length} 条`
     if (Array.isArray(inner.results)) return `${inner.results.length} 条`
+    if (Array.isArray(inner.entries)) return `${inner.entries.length} 条`
+    if (Array.isArray(inner.snippets)) return `${inner.snippets.length} 条`
+    if (typeof inner.hit_count === 'number' && Number.isSafeInteger(inner.hit_count)) return `${inner.hit_count} 条`
   } catch { /* non-JSON host results carry no safe summary */ }
   return ''
 }

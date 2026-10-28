@@ -765,10 +765,10 @@ export class PersonalAgentHost {
         if((!background&&!voice)||frame.final!==true||typeof frame.text!=='string'||!frame.text.trim()||typeof frame.conversation_id!=='string')return;
         if(!background&&this.#state.conversations.voice_id!==frame.conversation_id&&!(frame.conversation_id==='chat:main'&&this.#presentationMode==='orb'))return;
         await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===frame.conversation_id);if(!item)return;
-            const turn=typeof frame.turn_id==='string'?frame.turn_id:randomUUID();const previous=item.messages.find(message=>message.turn_id===turn);
+            const turn=typeof frame.turn_id==='string'?frame.turn_id:randomUUID();const previous=item.messages.find(message=>message.turn_id===turn);const trace=Array.isArray(frame.tool_trace)?frame.tool_trace.filter(entry=>entry&&typeof entry==='object'&&!Array.isArray(entry)&&typeof (entry as {name?:unknown}).name==='string'&&['running','ok','error'].includes(String((entry as {state?:unknown}).state))).slice(0,16).map(entry=>({name:String((entry as {name:unknown}).name).slice(0,128),state:String((entry as {state:unknown}).state) as 'running'|'ok'|'error',summary:typeof (entry as {summary?:unknown}).summary==='string'?String((entry as {summary:unknown}).summary).slice(0,160):''})):[];
             const delivery=frame.delivery==='generated'||frame.delivery==='interrupted'?frame.delivery:'completed';
-            if(previous){if(frame.type!=='conversation.delivered'&&!(frame.type==='conversation.completed'&&turn.startsWith('task:')))return;previous.delivery=delivery;previous.text=String(frame.text).slice(0,16000)}
-            else item.messages.push({id:randomUUID(),conversation_id:item.id,role:frame.role==='user'?'user':'assistant',text:String(frame.text).slice(0,16000),created_at:this.#now().toISOString(),turn_id:turn,delivery,...(voice?{input_mode:'voice' as const}:{})});
+            if(previous){if(frame.type!=='conversation.delivered'&&!(frame.type==='conversation.completed'&&turn.startsWith('task:')))return;previous.delivery=delivery;previous.text=String(frame.text).slice(0,16000);if(trace.length)previous.tool_trace=trace}
+            else item.messages.push({id:randomUUID(),conversation_id:item.id,role:frame.role==='user'?'user':'assistant',text:String(frame.text).slice(0,16000),created_at:this.#now().toISOString(),turn_id:turn,delivery,...(voice?{input_mode:'voice' as const}:{}),...(trace.length?{tool_trace:trace}:{})});
             item.messages=item.messages.slice(-512);await this.#commit(next);
         });
     }

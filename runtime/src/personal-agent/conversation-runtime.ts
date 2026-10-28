@@ -81,7 +81,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  options.host.setWorkbenchExecutors([...(options.agentDescriptors??[]),...(options.codexResource?.agentDescriptor?[options.codexResource.agentDescriptor]:[])].map(agent=>agent.name))
  return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution,overrides:{chat?:boolean}={})=>{
   const workbenchVoice=mode==='voice'&&(conversation.kind==='build'||conversation.mode==='plan')&&!execution
-  const chatMode=overrides?.chat!==false&&!execution&&conversation.kind==='chat'&&(conversation.mode??'chat')==='chat'
+  const chatMode=overrides?.chat!==false&&!execution&&['chat','topic'].includes(conversation.kind)&&(conversation.mode??'chat')==='chat'
   if((conversation.kind==='build'||conversation.mode==='plan')&&!execution&&mode==='text'){
    const workbenchMode=conversation.kind==='build'?'build':'plan'
    const reporter=bindUsageReporter(options.onUsage,{feature:'conversation',conversationId:conversation.id,trigger:'manual'})
@@ -194,6 +194,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   // before the provider sees them and rejected again at invoke time.
   const chatToolNames=chatMode?(()=>{const readonly=new Set([...core.tools.bindings].filter(([,binding])=>binding.kind==='query'||(binding.executor!==null&&core.runtime.executors.get(binding.executor)?.manifest.ops.some(op=>op.name===binding.op&&op.readonly))).map(([name])=>name));return new Set(core.tools.schemas.flatMap(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&!core.tools.hidden.has(name)&&chatToolAllowed(name,core.tools.bindings.get(name),readonly)?[name]:[]}))})():undefined
   const recordToolEvent=(event:{name:string;state:'running'|'ok'|'error';summary:string})=>{
+   if(mode==='text'&&pending===undefined)return
    const index=turnToolTrace.findLastIndex(item=>item.name===event.name)
    if(index>=0)turnToolTrace[index]={name:event.name,state:event.state,summary:event.summary}
    else turnToolTrace.push({name:event.name,state:event.state,summary:event.summary})
@@ -257,7 +258,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
      const externalTask=!options.host.localNotifications&&graph.service.isTaskContinuationResponse(event.response_id)
      captureTaskResponse();if(currentResponse===event.response_id)currentResponse=undefined
      if(!hasTools||event.status!=='completed')taskTurnContinuing=false
-     if(event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending))emit({delivery_class:taskResponseItems.has(event.response_id)?'task_output':graph.service.isProactiveResponse(event.response_id)?'proactive':'reply',type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true})
+     if(event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending)){emit({delivery_class:taskResponseItems.has(event.response_id)?'task_output':graph.service.isProactiveResponse(event.response_id)?'proactive':'reply',type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true,...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});if(mode==='voice')turnToolTrace=[]}
      if(hasTools&&event.status==='completed'){taskResponseItems.delete(event.response_id);taskResponses.delete(event.response_id);taskForegroundResponses.delete(event.response_id)}
      else if(mode==='text'||event.status!=='completed'||externalTask)void settleTaskResponse(event.response_id,assistant,event.status==='completed',externalTask?'generated':'delivered').then(async()=>{if(externalTask)await graph.service.session.quarantineActiveOrAwaitingResponse()}).finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)})
      if(pending&&(event.status!=='completed'||(!hasTools&&assistant.trim()!==''))){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{}),...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});else current.reject(Object.assign(Error('response_'+event.status),{reason:event.reason}))}

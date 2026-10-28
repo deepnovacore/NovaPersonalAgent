@@ -6,14 +6,15 @@ import {ENGLISH_SYSTEM_PROMPTS} from '../src/realtime/system-prompts.en.js'
 import {parsePromptLanguage} from '../src/realtime/prompt-language.js'
 
 test('both prompt languages cover every capability branch without changing protocol identifiers', () => {
-  for (const enabled of [true, false]) for (const gui of [true, false]) {
-    const modules = {coding: enabled, camera: enabled, search: enabled, knowledge: enabled, gui}
+  for (const enabled of [true, false]) for (const gui of [true, false]) for (const chatToolPolicy of [true, false]) {
+    const modules = {coding: enabled, camera: enabled, search: enabled, knowledge: enabled, gui, chatToolPolicy}
     const zh = frontendInstructions(modules, true)
     const en = frontendInstructions(modules, true, 'en')
     for (const line of zh.split('\n')) assert.equal(typeof ENGLISH_SYSTEM_PROMPTS[line], 'string', line)
     assert.equal(en, zh.split('\n').map(line => ENGLISH_SYSTEM_PROMPTS[line]).join('\n'))
     for (const marker of ['memory__recall', '<active_executor_context>', 'recorded_at_ms', HOST_ACTIVATION_PREFIX]) assert.ok(en.includes(marker), marker)
-    if (enabled) for (const marker of ['dispatch', 'confirm', 'accepted=true', 'accepted=false', 'acceptForSession', 'source_refs']) assert.ok(en.includes(marker), marker)
+    if (enabled && !chatToolPolicy) for (const marker of ['dispatch', 'confirm', 'accepted=true', 'accepted=false', 'acceptForSession', 'source_refs']) assert.ok(en.includes(marker), marker)
+    if (chatToolPolicy) assert.match(en, /You are in Chat/u)
     assert.match(en, /^You are Nova/)
   }
   assert.match(cascadedNarrationInstructions('en'), /^You are Nova/)
