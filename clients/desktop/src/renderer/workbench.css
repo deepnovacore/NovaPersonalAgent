@@ -913,3 +913,17 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .chat-tool-trace-note{min-width:0;font:11px/1.5 var(--mono);color:var(--ink-dim);overflow-wrap:anywhere}
 @media(prefers-reduced-motion:no-preference){.chat-tool-trace[data-live="true"] .chat-tool-trace-dot[data-state="running"]{animation:warmup-pulse 1.4s ease-in-out infinite}}
 @media(forced-colors:active){.chat-tool-trace-dot{forced-color-adjust:none;border:1px solid CanvasText;background:Canvas}.chat-tool-trace-dot[data-state="ok"],.chat-tool-trace-item[data-state="ok"] .chat-tool-trace-dot{background:Highlight;border-color:Highlight}.chat-tool-trace-dot[data-state="error"],.chat-tool-trace-item[data-state="error"] .chat-tool-trace-dot{background:Mark;border-color:Mark}}
+
+/* ── Companion form (pet vs floating orb) ─────────────────────────────────
+   The chat header, voice stage and transcript avatars follow the same
+   companion setting as the floating window. The pet uses the welcome profile
+   image; the orb uses the production particle visual. */
+.workbench .chat-companion[data-form=pet] .idle-avatar img{background:#fbf4e8;object-fit:cover;animation:companion-bob 5.5s ease-in-out infinite}
+.workbench .chat-companion-orb{display:block;width:84px;height:84px;border-radius:50%;pointer-events:none}
+.workbench .voice-stage-pet{display:block;width:96px;height:96px;object-fit:cover;border-radius:50%;background:#fbf4e8;box-shadow:0 10px 26px -18px rgba(20,20,60,.5)}
+.workbench .voice-stage[data-companion-form=pet] .voice-stage-pet{animation:companion-talk 1.15s ease-in-out infinite}
+@keyframes companion-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes companion-talk{0%,100%{transform:scale(1)}45%{transform:scale(1.035)}}
+@media(max-width:600px),(max-height:700px){.workbench .chat-companion-orb{width:64px;height:64px}}
+@media(prefers-reduced-motion:reduce){.workbench .chat-companion[data-form=pet] .idle-avatar img,.workbench .voice-stage[data-companion-form=pet] .voice-stage-pet{animation:none}}
+@media(forced-colors:active){.workbench .voice-stage-pet,.workbench .chat-companion-orb{border:1px solid CanvasText}}

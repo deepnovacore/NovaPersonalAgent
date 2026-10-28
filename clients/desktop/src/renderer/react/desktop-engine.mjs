@@ -170,17 +170,21 @@ const paletteHover = new OrbPaletteHoverController({
 })
 
 let customSkinActive = false
+let companionForm = 'pet'
 function applySkin(settings = {}) {
   customSkinActive = settings.skinId && settings.skinId !== 'nova'
+  companionForm = settings.companionForm === 'orb' ? 'orb' : 'pet'
   visual.setSkin(settings)
   idleOrb.settings(settings)
+  personalView?.setCompanionForm?.(companionForm)
+  ui.set({companionForm})
   paletteHover.reset(settings.palette)
   syncPaletteAccessibility()
 }
 
 function syncPaletteAccessibility() {
   visual.setAccessibility({reducedMotion: reducedMotionQuery.matches, highContrast: highContrastQuery.matches})
-  paletteHover.setDisabled(customSkinActive || reducedMotionQuery.matches || highContrastQuery.matches)
+  paletteHover.setDisabled(companionForm === 'pet' || customSkinActive || reducedMotionQuery.matches || highContrastQuery.matches)
 }
 
 reducedMotionQuery.addEventListener('change', syncPaletteAccessibility)

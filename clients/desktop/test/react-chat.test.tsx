@@ -165,3 +165,47 @@ test('Computer Use shows one SVG and configuration failures open Permissions set
  const opened:string[]=[];const h=await mount({snapshot:{conversations:{items:[{id:'chat:main',kind:'build',build:{status:'paused',computer_use:{enabled:false,direct:false}}}],messages:[]}},command:async(method:string)=>method==='build.computer_use'?{ok:false,missing:['configuration']}:{}} ,{api:{orbMenu:{openSettings:(category:string)=>opened.push(category)}}});
  try{const toggle=document.querySelector<HTMLButtonElement>('.computer-use-toggle')!;assert.equal(toggle.querySelectorAll('svg').length,1);await h.click(toggle);await h.click([...document.querySelectorAll('button')].find(node=>node.textContent==='打开设置'));assert.deepEqual(opened,['permissions'])}finally{await h.close()}
 })
+
+test('the companion form switches the chat header between pet portrait and orb canvas',async()=>{
+ const pet=await mount({}, {companionForm:'pet'})
+ try{
+  pet.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  await pet.render()
+  const layer=document.querySelector('.chat-companion') as HTMLElement
+  assert.equal(layer.getAttribute('data-form'),'pet')
+  assert.equal(layer.querySelector('img')?.getAttribute('src'),'data:image/png;base64,PET')
+  assert.equal(layer.querySelector('canvas'),null)
+ } finally { await pet.close() }
+ const orb=await mount({}, {companionForm:'orb'})
+ try{
+  orb.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  await orb.render()
+  const layer=document.querySelector('.chat-companion') as HTMLElement
+  assert.equal(layer.getAttribute('data-form'),'orb')
+  assert.ok(layer.querySelector('.chat-companion-orb'))
+  assert.equal(layer.querySelector('img'),null)
+ } finally { await orb.close() }
+})
+
+test('the live voice stage follows the companion form',async()=>{
+ const pet=await mount({isVoiceConversation:true}, {companionForm:'pet'})
+ try{
+  pet.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  pet.c.voiceId='chat:main'
+  await pet.render()
+  const stage=document.querySelector('.voice-stage') as HTMLElement
+  assert.equal(stage.getAttribute('data-companion-form'),'pet')
+  assert.equal(stage.querySelector('.voice-stage-pet')?.getAttribute('src'),'data:image/png;base64,PET')
+  assert.equal(stage.querySelector('canvas'),null)
+ } finally { await pet.close() }
+ const orb=await mount({isVoiceConversation:true}, {companionForm:'orb'})
+ try{
+  orb.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  orb.c.voiceId='chat:main'
+  await orb.render()
+  const stage=document.querySelector('.voice-stage') as HTMLElement
+  assert.equal(stage.getAttribute('data-companion-form'),'orb')
+  assert.ok(stage.querySelector('.voice-stage-orb'))
+  assert.equal(stage.querySelector('.voice-stage-pet'),null)
+ } finally { await orb.close() }
+})

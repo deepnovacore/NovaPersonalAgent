@@ -797,3 +797,15 @@ body:hover #last-result, #last-result:focus-visible { opacity: 1; pointer-events
 
 /* Keep the result entry out of the orb until its interaction is redesigned. */
 #last-result { display: none; }
+
+/* ── Companion form (pet vs floating orb) ─────────────────────────────────
+   The floating window follows the same form setting: pet keeps a portrait in
+   the disc, orb keeps the particle canvas. */
+#shell[data-companion-form=pet] .orb-canvas{display:none!important}
+#shell[data-companion-form=pet] .orb-idle-avatar img{object-fit:cover;background:#fbf4e8;animation:companion-float 5.5s ease-in-out infinite}
+#shell[data-companion-form=pet][data-state=listening] .orb-idle-avatar img{animation:companion-listen 1.5s ease-in-out infinite}
+#shell[data-companion-form=pet][data-state=speaking] .orb-idle-avatar img{animation:companion-speak .9s ease-in-out infinite}
+@keyframes companion-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
+@keyframes companion-listen{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
+@keyframes companion-speak{0%,100%{transform:scale(1)}45%{transform:scale(1.04)}}
+@media(prefers-reduced-motion:reduce){#shell[data-companion-form=pet] .orb-idle-avatar img{animation:none!important}}

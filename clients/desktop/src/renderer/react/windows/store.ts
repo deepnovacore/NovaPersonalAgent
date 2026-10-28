@@ -12,6 +12,7 @@ export interface ShellSnapshot {
  resultTitle?: string
  confirmationPlacement?: string
  palette?: string
+ companionForm?: 'orb' | 'pet'
  paletteDuration?: number
  profile?: any
  idleState?: any
