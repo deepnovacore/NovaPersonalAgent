@@ -13,7 +13,7 @@ Future<void> openSettingsItem(WidgetTester tester, String item) async {
     ),
   );
   await tester.pump();
-  await tester.tap(find.text('Settings'));
+  await tester.tap(find.byTooltip('Settings'));
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 500));
   await tester.ensureVisible(find.text(item));

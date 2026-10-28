@@ -366,7 +366,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
                   ),
                 ),
             ] else ...[
-              const Text('手机直接连接所选服务，无需连接电脑或 Hub。语音设置与文字模型独立，密钥仅保存在本机安全存储中。'),
+              const Text('手机直接连接所选服务，在独立 Space 中使用。语音设置与文字模型独立，密钥仅保存在本机安全存储中。'),
               const SizedBox(height: 12),
               DropdownButtonFormField<VoicePipeline>(
                 key: const ValueKey('voice.pipeline'),

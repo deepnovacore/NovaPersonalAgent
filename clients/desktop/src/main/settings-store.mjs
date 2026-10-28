@@ -102,10 +102,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
   voiceprintUploadUrl: '',
   monitorCameraDeviceId: '',
   watchModel: '',
-  phoneConnectionEnabled: false,
-  phoneServerPort: 0,
-  phoneServerTokenFile: '',
-  phoneServerUrl: '',
   memoryPrerecallEnabled: false,
   secrets: Object.freeze({}),
 })
@@ -215,17 +211,6 @@ export function validModelBaseUrl(value) {
   } catch {
     return null
   }
-}
-
-function validPhoneServerUrl(value) {
-  const text = validDesktopString(value)
-  if (text === null || text === '') return text
-  if (text.length > 2048) return null
-  try {
-    const url = new URL(text)
-    return url.protocol === 'wss:' && url.hostname && !url.username && !url.password && !url.search && !url.hash
-      && ['', '/', '/client/v1'].includes(url.pathname) ? text : null
-  } catch { return null }
 }
 
 function normalizeModelRoute(lane, raw) {
@@ -377,10 +362,6 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     progressBubbles: pick(acceptsV4Fields ? source.progressBubbles : undefined, acceptsV4Fields ? fallback.progressBubbles : undefined, DEFAULT_SETTINGS.progressBubbles, validProgressBubbles),
     monitorCameraDeviceId: pick(source.monitorCameraDeviceId, fallback.monitorCameraDeviceId, DEFAULT_SETTINGS.monitorCameraDeviceId, value => typeof value === 'string' && value.length <= 256 && !/[\x00-\x1f]/u.test(value) ? value : null),
     watchModel: pick(source.watchModel, fallback.watchModel, DEFAULT_SETTINGS.watchModel, validModelOrVoice),
-    phoneConnectionEnabled: pick(source.phoneConnectionEnabled, fallback.phoneConnectionEnabled, false, validBoolean),
-    phoneServerPort: pick(source.phoneServerPort, fallback.phoneServerPort, 0, value => Number.isInteger(value) && value >= 0 && value <= 65535 ? value : null),
-    phoneServerTokenFile: pick(source.phoneServerTokenFile, fallback.phoneServerTokenFile, '', value => { const path = validDesktopString(value); return path !== null && (path === '' || isAbsolute(path)) ? path : null }),
-    phoneServerUrl: pick(source.phoneServerUrl, fallback.phoneServerUrl, '', validPhoneServerUrl),
     embeddingProvider: pick(acceptsV4Fields ? source.embeddingProvider : undefined, acceptsV4Fields ? fallback.embeddingProvider : undefined, DEFAULT_SETTINGS.embeddingProvider, validEmbeddingProvider),
     embeddingModel: pick(acceptsV4Fields ? source.embeddingModel : undefined, acceptsV4Fields ? fallback.embeddingModel : undefined, DEFAULT_SETTINGS.embeddingModel, validDesktopString),
     capabilitiesConfigPath: pick(acceptsV4Fields ? source.capabilitiesConfigPath : undefined, acceptsV4Fields ? fallback.capabilitiesConfigPath : undefined, DEFAULT_SETTINGS.capabilitiesConfigPath, validDesktopString),
@@ -397,7 +378,7 @@ export function startupPresentation(settings, argv = []) {
 }
 
 export function backendSettings(settings) {
-  const {skinId, importedSkins, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
+  const {skinId, importedSkins, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -458,10 +439,6 @@ export function publicSettings(settings) {
     progressBubbles: normalized.progressBubbles,
     monitorCameraDeviceId: normalized.monitorCameraDeviceId,
     watchModel: normalized.watchModel,
-    phoneConnectionEnabled: normalized.phoneConnectionEnabled,
-    phoneServerPort: normalized.phoneServerPort,
-    phoneServerTokenFile: normalized.phoneServerTokenFile,
-    phoneServerUrl: normalized.phoneServerUrl,
     embeddingProvider: normalized.embeddingProvider,
     embeddingModel: normalized.embeddingModel,
     capabilitiesConfigPath: normalized.capabilitiesConfigPath,

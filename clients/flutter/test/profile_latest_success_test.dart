@@ -9,7 +9,7 @@ import 'local_profile_results_test.dart' show ReadyHost;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
@@ -51,7 +51,7 @@ void main() {
         );
         await ingest([message('first', 'original')]);
         await source.grantProcessing('p', 'profile', true);
-        final auth = SpaceAuthorityRepository(MemoryLifePersistence());
+        final auth = LocalPublicationContext(MemoryLifePersistence());
         await auth.open();
         final disk = MemoryLifePersistence(),
             profile = ProfileRepository(MemoryLifePersistence(), auth, source);
@@ -68,7 +68,7 @@ void main() {
         ];
         await actual.publish(
           jsonEncode(entries),
-          epoch: auth.epoch,
+
           sourceRevision: source.revision,
           consentRevision: source.processingRevision,
           provider: 'p',
@@ -110,7 +110,7 @@ void main() {
         await expectLater(
           actual.publish(
             '[{}]',
-            epoch: auth.epoch,
+
             sourceRevision: source.revision,
             consentRevision: source.processingRevision,
             provider: 'p',
@@ -159,14 +159,14 @@ void main() {
         legacy.remove(field);
       }
       f.disk.value = jsonEncode(legacy);
-      final migrated = ProfileRepository(f.disk, f.authority, f.sources);
+      final migrated = ProfileRepository(f.disk, f.publication, f.sources);
       await migrated.open();
       expect(migrated.value!['generated_at'], isNull);
       await f.sources.remove('chat');
       expect(migrated.value!['entries'], isNotEmpty);
       expect(migrated.value!['available_evidence_ids'], isEmpty);
       final unsafe = MemoryLifePersistence()..value = jsonEncode(legacy);
-      final stale = ProfileRepository(unsafe, f.authority, f.sources);
+      final stale = ProfileRepository(unsafe, f.publication, f.sources);
       await stale.open();
       expect(stale.value, isNull);
       expect(jsonDecode(unsafe.value!).containsKey('history_schema'), false);
@@ -220,12 +220,12 @@ void main() {
       });
       await FeishuHost.invalidateDerivedProfile();
       expect(
-        await const SecureContextPersistence('nova.profile.local.v1').read(),
+        await SecureContextPersistence('nova.profile.local.v1').read(),
         '{"success":"synthetic"}',
       );
       await FeishuHost.invalidateDerivedProfile(clearPublished: true);
       expect(
-        await const SecureContextPersistence('nova.profile.local.v1').read(),
+        await SecureContextPersistence('nova.profile.local.v1').read(),
         'null',
       );
     },
@@ -242,7 +242,7 @@ void main() {
             body: SingleChildScrollView(
               child: LocalProfileResults(
                 host: host,
-                authority: f.authority,
+                publication: f.publication,
                 repository: f.profile,
                 kind: 'timeline',
               ),
@@ -257,7 +257,7 @@ void main() {
       expect(find.textContaining('最近成功整理'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       host.dispose();
-      f.authority.dispose();
+      f.publication.dispose();
     },
   );
 }
@@ -289,8 +289,8 @@ class _Fixture {
   DateTime now = DateTime.utc(2026, 10, 19);
   final disk = _HookDisk();
   late final sources = SourceStore(MemoryLifePersistence(), now: () => now);
-  final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-  late final profile = ProfileRepository(disk, authority, sources);
+  final publication = LocalPublicationContext(MemoryLifePersistence());
+  late final profile = ProfileRepository(disk, publication, sources);
   late String ref;
   static Future<_Fixture> create() async {
     final f = _Fixture();
@@ -298,7 +298,7 @@ class _Fixture {
     await f.sources.select('chat', DateTime.utc(1970));
     await f.addMessage('first');
     await f.sources.grantProcessing('p', 'profile', true);
-    await f.authority.open();
+    await f.publication.open();
     f.ref = f.sources.messages('chat').single['evidence_id'];
     await f.publish('last success');
     return f;
@@ -331,7 +331,7 @@ class _Fixture {
         'observed_at': DateTime.utc(2026, 10, 19).toIso8601String(),
       },
     ]),
-    epoch: authority.epoch,
+
     sourceRevision: sources.revision,
     consentRevision: sources.processingRevision,
     provider: 'p',

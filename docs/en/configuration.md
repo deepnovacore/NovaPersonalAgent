@@ -31,6 +31,7 @@ Set only what you need to change. Keep credentials out of Git.
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | Variable | Default | Purpose |
 |---|---|---|
+| `NOVA_SPACE_HOST_CONFIG` | None | Absolute path to a private Host Space configuration; runtime data stays on this Host. |
 | `NOVA_LOCAL_TOOL_APPROVAL` | ask | Local Build file writes, edits and shell approval: ask or never; independent of executor approval. |
 | `PIPELINE_MODE` | integrated | Product pipeline shape: integrated or cascaded. |
 | `PROMPT_LANGUAGE` | zh-CN | AI system prompt language: zh-CN or en; desktop supplies its saved preference. |

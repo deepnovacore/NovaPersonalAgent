@@ -5,7 +5,7 @@ import '../protocol/request_id.dart';
 import 'tool_registry.dart';
 import 'workspace_browser.dart';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import '../space/space_storage.dart';
 import '../conversation/local_conversation_store.dart';
 import '../personal/local_life.dart';
 import 'model_client.dart';
@@ -50,7 +50,10 @@ class AgentCoreHost extends ChangeNotifier {
     BackgroundExecution? backgroundExecution,
     ModelClient Function()? clientFactory,
   }) async {
-    final directory = await getApplicationSupportDirectory();
+    if (SpaceStorage.active?.mode == SpaceMode.client) {
+      throw StateError('client_runtime_forbidden');
+    }
+    final directory = await SpaceStorage.directory();
     final store = ConversationStore(
       FileLifePersistence(
         File('${directory.path}/local-conversations-v1.json'),

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/ui/local_profile_results.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 import 'local_profile_results_test.dart' show ReadyHost;
@@ -30,13 +30,13 @@ class _Fixture {
   var now = DateTime.utc(2026, 10, 20);
   final disk = MemoryLifePersistence();
   late final sources = _CountingSources(disk, now: () => now);
-  final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+  final publication = LocalPublicationContext(MemoryLifePersistence());
   final profileDisk = MemoryLifePersistence();
-  late final profile = ProfileRepository(profileDisk, authority, sources);
+  late final profile = ProfileRepository(profileDisk, publication, sources);
   late String ref;
 
   Future<void> open() async {
-    await authority.open();
+    await publication.open();
     await sources.bind('fixture:self', 1);
     for (final chat in ['selected', 'unrelated']) {
       await sources.select(chat, DateTime.utc(1970));
@@ -70,7 +70,7 @@ class _Fixture {
           'evidence_ids': [ref],
         },
       ]),
-      epoch: authority.epoch,
+
       sourceRevision: sources.revision,
       consentRevision: sources.processingRevision,
       provider: 'p',
@@ -80,7 +80,7 @@ class _Fixture {
 
   void dispose() {
     sources.dispose();
-    authority.dispose();
+    publication.dispose();
   }
 }
 
@@ -239,7 +239,7 @@ void main() {
         home: Scaffold(
           body: LocalProfileResults(
             host: host,
-            authority: f.authority,
+            publication: f.publication,
             repository: f.profile,
             kind: 'timeline',
             language: 'en',
@@ -257,6 +257,6 @@ void main() {
     expect(f.sources.chatScans, 0);
     await tester.pumpWidget(const SizedBox.shrink());
     host.dispose();
-    f.authority.dispose();
+    f.publication.dispose();
   });
 }

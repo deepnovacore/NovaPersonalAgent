@@ -1,3 +1,4 @@
+import type {SpaceMobilePort} from '../space-host/mobile-tools.js'
 import type {RealtimeCapabilities} from './capabilities.js'
 import type {ToolAcceptance,ToolCallReady} from './bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
@@ -181,6 +182,7 @@ export interface RealtimeServiceOptions {
 
   readonly onIntakePrepared?:(intake:Readonly<IntakeSession>,proposal:ProjectProposal)=>void
   readonly taskHost?: TaskToolHost
+  readonly spaceMobile?:SpaceMobilePort
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
   readonly toolGate?: (name:string)=>boolean

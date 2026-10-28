@@ -31,6 +31,7 @@ DASHSCOPE_API_KEY=你的百炼密钥
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | 变量 | 默认 | 用途 |
 |---|---|---|
+| `NOVA_SPACE_HOST_CONFIG` | 无 | Host Space 私密配置的绝对路径；runtime 与数据保留在本机 Host。 |
 | `NOVA_LOCAL_TOOL_APPROVAL` | ask | 本地 Build 写入、编辑和命令审批：ask 或 never；独立于执行器审批。 |
 | `PIPELINE_MODE` | integrated | 产品管线形态：集成或级联。 |
 | `PROMPT_LANGUAGE` | zh-CN | AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。 |

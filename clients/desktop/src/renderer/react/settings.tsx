@@ -1,3 +1,4 @@
+import {SpaceHostPanel} from './settings/space-host';
 import React, { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@radix-ui/themes';
 import { Settings, Save, RefreshCw } from 'lucide-react';
@@ -12,7 +13,7 @@ import { startupMessage } from '../startup-notice.mjs';
 import { settingsLayout, LayoutNode } from './settings/layout';
 import { Action, Field } from './settings/controls';
 import { SkinPanel, VisorPanel, PermissionsPanel, UsagePanel, SkillsPanel, KnowledgePanel, DisplayPanel } from './settings/panels';
-import { ProactivityPanel, DevicePanel, ChatGptPanel } from './settings/live';
+import { ProactivityPanel, ChatGptPanel } from './settings/live';
 import { CapabilitiesPanel, ModuleToggle } from './settings/capabilities';
 import { ConnectionsPanel, ImPanel } from './settings/integrations';
 import { ModelRoutesPanel } from './settings/models';
@@ -20,7 +21,7 @@ import {SettingsCategoryIcon} from './settings/icons';
 import {NewsPreferencesPanel} from './settings/news';
 import { VoiceprintPanel } from './settings/voiceprint';
 const SECRET_LABELS: any = { minicpmRealtimeApiKey: 'MiniCPM-o', personaplexRealtimeApiKey: 'PersonaPlex', openaiCompatibleApiKey: 'OpenAI-compatible LLM', compatibleAsrApiKey: 'OpenAI-compatible ASR', compatibleTtsApiKey: 'OpenAI-compatible TTS', selfHostedAsrApiKey: 'Self-hosted ASR', selfHostedLlmApiKey: 'Self-hosted LLM', selfHostedTtsApiKey: 'Self-hosted TTS', composioApiKey: 'Composio', dashscopeApiKey: 'DashScope', stepfunApiKey: 'StepFun', openaiApiKey: 'OpenAI', geminiApiKey: 'Google Gemini', tavilyApiKey: 'Tavily', openrouterApiKey: 'OpenRouter · Jev', arkApiKey: 'Ark', deepseekApiKey: 'DeepSeek（官方）', doubaoBigmodelApiKey: '火山语音' };
-const ALIASES: any = { 'startup-view': 'startupView', 'wake-word-enabled': 'wakeWordEnabled', 'auto-hide-seconds': 'autoHideSeconds', 'coding-progress-narration': 'codingProgressNarration', heartbeat: 'codexHeartbeatSeconds', 'coding-provider': 'codingBackend', 'memory-prerecall-enabled': 'memoryPrerecallEnabled', 'phone-server-url': 'phoneServerUrl', 'phone-server-port': 'phoneServerPort', 'phone-server-token-file': 'phoneServerTokenFile', 'monitor-camera': 'monitorCameraDeviceId', 'watch-model': 'watchModel', 'conversation-vision-enabled': 'conversationVisionEnabled' };
+const ALIASES: any = { 'startup-view': 'startupView', 'wake-word-enabled': 'wakeWordEnabled', 'auto-hide-seconds': 'autoHideSeconds', 'coding-progress-narration': 'codingProgressNarration', heartbeat: 'codexHeartbeatSeconds', 'coding-provider': 'codingBackend', 'memory-prerecall-enabled': 'memoryPrerecallEnabled', 'monitor-camera': 'monitorCameraDeviceId', 'watch-model': 'watchModel', 'conversation-vision-enabled': 'conversationVisionEnabled' };
 const WORKSPACE_TEXT: any = { opened: '已打开当前工作区', open_failed: '系统未能打开当前工作区', cleared: '已清空工作区', cancelled: '已取消', not_managed: '当前工作区不在 Nova 工作区根目录中', empty: '没有可清空的工作区', busy: '另一项保存或维护操作正在进行', stop_failed: '后台未能安全停止，未清空工作区', clear_failed: '工作区清空未完整完成，可重试清理', restart_failed: '工作区已处理，但后台恢复失败，请重试连接', clear_and_restart_failed: '工作区清理未完整完成，后台恢复也失败；请重启后重试清理', rollback_pending: '工作区原内容尚未安全恢复，后台保持停止；请先处理回滚', cleanup_pending: '工作区清理仍在进行，请稍后重试', unavailable: '工作区维护状态暂时不可用', recovered: '工作区恢复完成，后台已开始重新连接', recovery_failed: '工作区恢复尚未完成，后台保持停止；请重试恢复' };
 const NOTICE: any = { restarting: '已保存，后台正在重启并重新连接', failed: '未生效：请恢复上次可用设置，再检查未保存的草稿', restart_failed: '后端未启动：上次设置已保留，请恢复后端', recovery_pending: '上次设置已还原，请点击恢复以确认后端可用', recovery_failed: '设置恢复未完成，恢复记录已保留；若重试仍失败，请修复配置目录中的 settings.json.recovery 或配置冲突后再恢复', complete: '设置已生效' };
 const GUIDANCE: any = { opencode: ['OpenCode', '配置文件', '安装 opencode-ai，并用 OpenCode 自己的登录或配置文件设置模型与凭据。'], codebuddy: ['CodeBuddy', '', '安装 @tencent-ai/codebuddy-code，并在 CodeBuddy 命令行中完成登录或密钥配置。'], pi: ['Pi', '配置目录', '安装 Pi 与 pi-acp，并在 Pi 自己的配置中设置模型与登录。Pi 不支持逐项审批，询问模式下任务会被拒绝。'], deepseek: ['DeepSeek Harness', '配置目录', '安装 @deepseek-ai/dsh，并在其配置中设置凭据；也可以使用服务配置里的 DeepSeek API Key。'] };
@@ -144,14 +145,10 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             return category === 'themes' ? <SkinPanel key={key} view={view} stage={stage} discard={controller.discardFields} busy={snapshot.busy}/> : null;
         if (id === 'frontend-usage-section')
             return category === 'usage' ? <UsagePanel key={key} usage={view.frontendUsage}/> : null;
-        if (id === 'hub-connection-section')
-            return category === 'hub' ? <DevicePanel key={key} hub api={api}/> : null;
-        if (id === 'phone-connection-section')
-            return category === 'phone' ? <DevicePanel key={key} api={api} save={saveAll}>{['phoneServerUrl', 'phoneServerPort', 'phoneServerTokenFile'].map((f, i) => <Field key={f} label={['自定义地址', '已有服务端口', '认证文件'][i]} type={i === 1 ? 'number' : 'text'} value={view[f] ?? ''} min={i === 1 ? 1 : undefined} max={i === 1 ? 65535 : undefined} onChange={(v: any) => stage({ [f]: v })}/>)}</DevicePanel> : null;
         if (id === 'desktop-permissions-panel')
             return category === 'permissions' ? <PermissionsPanel key={key} api={bridge?.welcome}/> : null;
         if (id === 'connections-panel')
-            return category === 'connectors' ? <ConnectionsPanel key={key} api={api}/> : null;
+            return category === 'connectors' ? <React.Fragment key={key}><ConnectionsPanel api={api}/><SpaceHostPanel api={api}/></React.Fragment> : null;
         if (id === 'im-connection')
             return category === 'connectors' ? <ImPanel key={key} api={api}/> : null;
         if (id === 'proactivity-panel' || id === 'diary-panel')

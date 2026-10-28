@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
+
 import '../personal/local_life.dart';
 
 /// A failed output must not trigger another paid Profile round automatically.
@@ -357,10 +359,7 @@ class ProfileGenerationCoordinator extends ChangeNotifier
                 'authorization_changed',
                 'processing_not_allowed',
                 'processing_consent_required',
-                'authority_changed',
-                'authority_transition',
-                'stale_authority',
-                'publisher_required',
+                'local_host_required',
                 'provider_changed',
                 'model_required',
                 'connector_unavailable',

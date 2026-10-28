@@ -13,7 +13,7 @@ import 'package:nova_mobile/context/profile_pipeline_checkpoint.dart';
 import 'package:nova_mobile/context/profile_observation_checkpoint.dart';
 import 'package:nova_mobile/context/secure_persistence.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 class _Models extends ModelSettings {
@@ -29,7 +29,7 @@ class _Fixture {
   late HttpServer server;
   late FeishuHost host;
   late SourceStore sources;
-  late SpaceAuthorityRepository authority;
+  late LocalPublicationContext publication;
   late _Models models;
   bool failSecondCompose = true;
   bool failProfileDraft = false;
@@ -41,7 +41,7 @@ class _Fixture {
   bool revoked = false;
   final now = DateTime.utc(2026, 10, 19);
   String get provider => '${models.configuration.endpoint}|fixture';
-  ProfileAgent createAgent() => ProfileAgent(host, authority, models);
+  ProfileAgent createAgent() => ProfileAgent(host, publication, models);
 
   Future<void> open() async {
     FlutterSecureStorage.setMockInitialValues({});
@@ -102,8 +102,8 @@ class _Fixture {
       ),
     );
     await sources.grantProcessing(provider, 'profile', true);
-    authority = SpaceAuthorityRepository(MemoryLifePersistence());
-    await authority.open();
+    publication = LocalPublicationContext(MemoryLifePersistence());
+    await publication.open();
     host = FeishuHost(auth: auth, sources: sources);
     addTearDown(host.dispose);
     server.listen((request) async {
@@ -134,7 +134,7 @@ class _Fixture {
         bodies.putIfAbsent(stage, () => []).add(input);
         if (stage == 'profile_review' && revokeDuringProfileReview) {
           revoked = true;
-          profileAtRevocation = await const SecureContextPersistence(
+          profileAtRevocation = await SecureContextPersistence(
             'nova.profile.local.v1',
           ).read();
           await sources.grantProcessing(provider, 'profile', false);
@@ -194,7 +194,7 @@ class _Fixture {
           }
           if (stage == 'timeline_review' && revokeDuringReview && !revoked) {
             revoked = true;
-            profileAtRevocation = await const SecureContextPersistence(
+            profileAtRevocation = await SecureContextPersistence(
               'nova.profile.local.v1',
             ).read();
             await sources.grantProcessing(provider, 'profile', false);
@@ -274,7 +274,7 @@ class _Fixture {
           'evidence_ids': [original['evidence_id']],
         },
       ]),
-      epoch: authority.epoch,
+
       sourceRevision: sources.revision,
       consentRevision: sources.processingRevision,
       provider: provider,
@@ -316,7 +316,7 @@ void main() {
       expect(partial['coverage']['timeline_pending_batches'], 0);
       expect(partial['coverage']['profile_pending'], 1);
       final failedReceipt = jsonDecode(
-        (await const SecureContextPersistence(ProfileAgent.receiptKey).read())!,
+        (await SecureContextPersistence(ProfileAgent.receiptKey).read())!,
       );
       expect(failedReceipt['error_code'], 'profile_output_invalid');
       expect(
@@ -407,11 +407,11 @@ void main() {
       final state = await first.inspectGeneration();
       expect(state!.pendingOutput, true);
       expect(state.complete, false);
-      final savedObservations = await const SecureContextPersistence(
+      final savedObservations = await SecureContextPersistence(
         ProfileObservationCheckpoint.storageKey,
       ).read();
       expect(savedObservations, isNot('null'));
-      final savedStages = await const SecureContextPersistence(
+      final savedStages = await SecureContextPersistence(
         ProfilePipelineCheckpoint.storageKey,
       ).read();
       expect((jsonDecode(savedStages!)['entries'] as Map).length, 5);
@@ -458,7 +458,7 @@ void main() {
       expect(finalState!.pendingOutput, false);
       expect(finalState.complete, true);
       final receipt = jsonDecode(
-        (await const SecureContextPersistence(ProfileAgent.receiptKey).read())!,
+        (await SecureContextPersistence(ProfileAgent.receiptKey).read())!,
       );
       expect(receipt['status'], 'completed');
       expect(receipt['coverage']['timeline_pending_batches'], 0);
@@ -512,7 +512,7 @@ void main() {
         ),
       );
       final receipt = jsonDecode(
-        (await const SecureContextPersistence(ProfileAgent.receiptKey).read())!,
+        (await SecureContextPersistence(ProfileAgent.receiptKey).read())!,
       );
       expect(receipt['error_code'], 'model_http_503');
       expect(receipt['profile_validation_error'], 'invalid_profile_review');
@@ -537,11 +537,11 @@ void main() {
       expect(fixture.counts['timeline_select'], isNull);
       expect(fixture.counts['profile_edit'], isNull);
       expect(
-        await const SecureContextPersistence('nova.profile.local.v1').read(),
+        await SecureContextPersistence('nova.profile.local.v1').read(),
         fixture.profileAtRevocation,
       );
       expect(
-        await const SecureContextPersistence(
+        await SecureContextPersistence(
           ProfilePipelineCheckpoint.storageKey,
         ).read(),
         'null',
@@ -565,11 +565,11 @@ void main() {
       expect(fixture.counts['timeline_compose'], 1);
       expect(fixture.counts['timeline_review'], 1);
       expect(
-        await const SecureContextPersistence('nova.profile.local.v1').read(),
+        await SecureContextPersistence('nova.profile.local.v1').read(),
         fixture.profileAtRevocation,
       );
       expect(
-        await const SecureContextPersistence(
+        await SecureContextPersistence(
           ProfilePipelineCheckpoint.storageKey,
         ).read(),
         'null',

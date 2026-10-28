@@ -249,6 +249,7 @@ test('Build requires approval before side effects, stops on denial and does not 
 test('switching the local tool approval at runtime applies to the next call without a restart',{skip:!supported},async()=>{
  const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'live.txt',content:'无需确认'}}}:{text:'已完成'})
  try{
+  assert.equal((await f.raw('settings.local_tool_approval',{mode:'never'},false)).error,'local_workbench_required')
   assert.deepEqual(await f.command('settings.local_tool_approval',{mode:'never'}),{mode:'never'})
   const id=await f.build();await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).status==='awaiting_approval',false)

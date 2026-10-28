@@ -38,6 +38,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   mobile_scanner: 7.4.2
   crypto: ^3.0.7
+  cryptography: ^2.7.0
+  pointycastle: ^4.0.0
+  jose: ^0.3.5+2
   ffi: ^2.1.4
   xml: 6.6.1
   path_provider: ^2.1.6

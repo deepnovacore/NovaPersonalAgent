@@ -107,3 +107,6 @@ references/
 # Private device acceptance journal
 /docs/testing/mobile-authority-acceptance-2026-10-17.zh-CN.md
 /docs/plans/2026-10-15-unified-understanding.md
+
+# Per-task scratch, local review logs and generated integration fixtures
+/work/

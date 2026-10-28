@@ -118,9 +118,10 @@ void main() {
       );
       expect(fixture.host.store.conversations, hasLength(2));
       await tab(tester, 'Me');
-      for (final label in ['Profile', 'Goals', 'Settings']) {
+      for (final label in ['Profile', 'Goals']) {
         expect(find.text(label), findsOneWidget);
       }
+      expect(find.byTooltip('Settings'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

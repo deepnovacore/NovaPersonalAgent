@@ -233,7 +233,7 @@ test('batch context revalidation includes prior originals read through topic sea
 test('profile writer retries revalidate authorization before sending original text again',async()=>{
  let allowed=true,calls=0
  const gateway={complete:()=>{calls++;allowed=false;return Promise.resolve({text:'invalid-json'})},stream(){throw Error('unused')}} as unknown as ModelGateway
- const resource=new SubstrateMemoryResource({client:{} as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
+ const resource=new SubstrateMemoryResource({client:{memory:()=>Promise.resolve({revision:0,corrections:{}})} as unknown as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
  await assert.rejects(resource.sourceProcessingProfile([{id:'personal:test:e',version:'v',origin:'inferred',content:'synthetic original',source:{project:'synthetic',document:'self',kind:'im',relation:'self',sender_id:'self'}}],new AbortController().signal,()=>allowed?Promise.resolve():Promise.reject(Error('revoked'))),/revoked/)
  assert.equal(calls,1)
 })
@@ -251,7 +251,7 @@ test('profile writer retries revalidate authorization before sending original te
 test('revocation after whole-profile critique prevents the final editing request',async()=>{
  let allowed=true,calls=0
  const gateway={complete:()=>{calls++;if(calls===1)return Promise.resolve({text:JSON.stringify({about:{paragraphs:[{text:'你在准备验证接口。',refs:['e0']}]},work:[],interests:[]})});allowed=false;return Promise.resolve({text:JSON.stringify({review_notes:['保持计划状态。']})})},stream(){throw Error('unused')}} as unknown as ModelGateway
- const resource=new SubstrateMemoryResource({client:{} as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
+ const resource=new SubstrateMemoryResource({client:{memory:()=>Promise.resolve({revision:0,corrections:{}})} as unknown as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
  await assert.rejects(resource.sourceProcessingProfile([{id:'personal:test:e',version:'v',origin:'stated',content:'我计划验证接口'}],new AbortController().signal,()=>allowed?Promise.resolve():Promise.reject(Error('revoked'))),/revoked/)
  assert.equal(calls,2)
 })

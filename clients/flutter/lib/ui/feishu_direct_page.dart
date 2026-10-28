@@ -1,22 +1,22 @@
 import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+
 import '../connectors/feishu/browser.dart';
 import '../connectors/feishu/host.dart';
 import '../connectors/feishu/auth.dart';
 import '../connectors/feishu/api.dart';
 import '../agent_core/model_settings.dart';
 import '../agent_core/model_client.dart';
-import '../device/space_authority.dart';
+import '../context/local_publication.dart';
 import '../context/profile_agent.dart';
-import '../context/context_sync.dart';
 import '../context/profile_corrections.dart';
 import 'local_profile_results.dart';
 import 'theme.dart';
 import 'profile_generation_status.dart';
 import '../context/profile_generation_coordinator.dart';
-import '../personal/life_reducer.dart';
 
 /// Short display copy only; detailed agent diagnostics never become progress UI.
 String profileProgressLabel(String status, {String language = 'zh'}) {
@@ -57,8 +57,7 @@ class FeishuDirectPage extends StatefulWidget {
     super.key,
     required this.host,
     required this.models,
-    required this.authority,
-    required this.contextSync,
+    required this.publication,
     this.adoptTodo,
     this.profileAgent,
     this.generation,
@@ -71,8 +70,7 @@ class FeishuDirectPage extends StatefulWidget {
   final ProfileGenerationCoordinator? generation;
   final FeishuHost host;
   final ModelSettings models;
-  final SpaceAuthorityRepository authority;
-  final Future<ContextSync> Function() contextSync;
+  final LocalPublicationContext publication;
   @override
   State<FeishuDirectPage> createState() => _FeishuDirectPageState();
 }
@@ -95,7 +93,12 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
   Timer? timer;
   late final profile =
       widget.profileAgent ??
-      ProfileAgent(host, widget.authority, widget.models, onProgress: _changed);
+      ProfileAgent(
+        host,
+        widget.publication,
+        widget.models,
+        onProgress: _changed,
+      );
   FeishuHost get host => widget.host;
   @override
   void initState() {
@@ -196,7 +199,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
               children: [
                 LocalProfileResults(
                   host: host,
-                  authority: widget.authority,
+                  publication: widget.publication,
                   repository: profile.repository,
                   generation: widget.generation,
                   kind: 'all',
@@ -453,8 +456,8 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
         ),
         content: Text(
           t(
-            '所选聊天中已同步的文字消息会发送给以下模型，用于生成近况和个人信息：\n\n$providerLabel\n\n新增消息会自动继续整理，可随时停止模型使用。此操作不会发送飞书消息，也不会上传到 Hub。',
-            'Synced text from the selected chats will be sent to this model to generate updates and personal info:\n\n$providerLabel\n\nNew messages are processed automatically. You can stop model access at any time. This does not send Feishu messages or upload content to Hub.',
+            '所选聊天中已同步的文字消息会发送给以下模型，用于生成近况和个人信息：\n\n$providerLabel\n\n新增消息会自动继续整理，可随时停止模型使用。此操作不会发送飞书消息。',
+            'Synced text from the selected chats will be sent to this model to generate updates and personal info:\n\n$providerLabel\n\nNew messages are processed automatically. You can stop model access at any time. This does not send Feishu messages.',
           ),
         ),
         actions: [
@@ -530,52 +533,6 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
     if (accepted != true) return;
     await host.sources.grantProcessing(provider!, 'profile', false);
     await profile.repository.clear();
-  }
-
-  String _remoteSource(String chat) => lifeFingerprint({
-    'hub': widget.authority.hubId,
-    'identity': host.auth.identityKey,
-    'chat': chat,
-  });
-  Future<void> _upload(String chat) async {
-    final model = await widget.models.read();
-    if (model == null) throw StateError('model_required');
-    final recipient = '${model.endpoint}|${model.model}';
-    if (!mounted) return;
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        scrollable: true,
-        title: const Text('上传选定来源'),
-        content: Text(
-          '将此聊天当前已读取的文本上传到你配置的 Hub，同一空间的设备可读取；Hub 可以看到这些内容。允许主电脑使用以下模型整理画像：\n\n$recipient\n\n后续新消息需再次点击上传。飞书应用凭据不会上传。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(t('取消', 'Cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('允许上传和处理'),
-          ),
-        ],
-      ),
-    );
-    if (accepted != true) return;
-    final sync = await widget.contextSync();
-    await sync.exportSource(
-      _remoteSource(chat),
-      recipient,
-      host.sources.messages(chat),
-    );
-    await sync.sync();
-  }
-
-  Future<void> _forgetRemote(String chat) async {
-    final sync = await widget.contextSync();
-    await sync.forget(_remoteSource(chat));
-    await sync.sync();
   }
 
   bool get processingAllowed {
@@ -762,7 +719,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                 child: Text(t('查看近况', 'View updates')),
               ),
               if (widget.generation == null &&
-                  widget.authority.canPublish &&
+                  widget.publication.canPublish &&
                   !profile.busy)
                 OutlinedButton(
                   onPressed: busy ? null : _organize,
@@ -774,7 +731,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                 ),
             ] else ...[
               if (widget.generation == null &&
-                  widget.authority.canPublish &&
+                  widget.publication.canPublish &&
                   !profile.busy)
                 FilledButton(
                   onPressed: busy ? null : _organize,
@@ -790,7 +747,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
               ),
             ],
             if (widget.generation == null &&
-                widget.authority.canPublish &&
+                widget.publication.canPublish &&
                 !profile.busy) ...[
               TextButton(
                 onPressed: busy
@@ -842,11 +799,11 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                 ),
               ],
             ),
-            if (!widget.authority.canPublish)
+            if (!widget.publication.canPublish)
               Text(
                 t(
-                  '个人信息由主设备更新；已同步的消息保留在这台设备。',
-                  'Your primary device updates personal info. Synced messages stay on this device.',
+                  '此 Space 的个人信息由 Host 更新；已同步的消息保留在这台设备。',
+                  'This Space uses its Host to update personal info. Synced messages stay on this device.',
                 ),
               ),
           ],
@@ -1009,20 +966,6 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                                     }),
                               child: const Text('断开并删除本机消息'),
                             ),
-                            if (widget.authority.hubId != null)
-                              TextButton(
-                                onPressed: busy
-                                    ? null
-                                    : () => _run(() => _upload(id)),
-                                child: const Text('上传当前内容给主电脑'),
-                              ),
-                            if (widget.authority.hubId != null)
-                              TextButton(
-                                onPressed: busy
-                                    ? null
-                                    : () => _run(() => _forgetRemote(id)),
-                                child: const Text('请求跨端忘记此来源'),
-                              ),
                           ],
                         ),
                       ],

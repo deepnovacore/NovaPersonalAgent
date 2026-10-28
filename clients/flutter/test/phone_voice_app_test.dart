@@ -105,6 +105,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+
   testWidgets('voice progress does not rebuild the hidden chat tree', (
     tester,
   ) async {

@@ -1,3 +1,4 @@
+import '../space/space_storage.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/widgets.dart';
@@ -68,13 +69,16 @@ class ScheduledAgentRunner extends ChangeNotifier with WidgetsBindingObserver {
     bool headless = false,
     AgentWorkspace? workspace,
   }) async {
+    if (SpaceStorage.active?.mode == SpaceMode.client) {
+      throw StateError('client_runtime_forbidden');
+    }
     final nativeWake = ScheduleWake();
     await nativeWake.acquire(headless: headless);
     try {
       await life.open();
       final repository = ScheduleRepository(
-        const SecureContextPersistence('nova.local.schedules.v1'),
-        deviceId: life.authority.localDeviceId,
+        SecureContextPersistence('nova.local.schedules.v1'),
+        deviceId: life.publication.deviceId,
         clock: ScheduleClock(),
       );
       await repository.open();
@@ -135,7 +139,9 @@ class ScheduledAgentRunner extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> wake() {
-    if (_disposed) return Future.value();
+    if (_disposed || SpaceStorage.active?.mode == SpaceMode.client) {
+      return Future.value();
+    }
     return _wakeInFlight ??= _wake().whenComplete(() => _wakeInFlight = null);
   }
 

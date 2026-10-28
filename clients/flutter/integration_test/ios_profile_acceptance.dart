@@ -15,7 +15,7 @@ import 'package:nova_mobile/context/profile_agent.dart';
 import 'package:nova_mobile/context/profile_pipeline_checkpoint.dart';
 import 'package:nova_mobile/context/secure_persistence.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/personal/local_life.dart';
 
 class _Memory implements LifePersistence {
@@ -161,11 +161,11 @@ class _State extends State<_Acceptance> {
       );
       host = FeishuHost(auth: auth, sources: sources);
       await host.open();
-      final authority = SpaceAuthorityRepository(_Memory());
-      await authority.open();
+      final publication = LocalPublicationContext(_Memory());
+      await publication.open();
       agent = ProfileAgent(
         host,
-        authority,
+        publication,
         _Models(model),
         maxDuration: const Duration(minutes: 5),
       );

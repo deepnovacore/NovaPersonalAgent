@@ -20,7 +20,7 @@ void main() {
   test('secure round trip is independent of text settings', () async {
     const storage = FlutterSecureStorage();
     await storage.write(key: ModelSettings.storageKey, value: 'text-config');
-    const settings = VoiceSettings();
+    final settings = VoiceSettings();
     expect(await settings.read(), isNull);
     final saved = await settings.save(configured());
     final loaded = (await settings.read())!;
@@ -36,7 +36,7 @@ void main() {
   test(
     'ASR-only configuration works without integrated, LLM or TTS credentials',
     () async {
-      const settings = VoiceSettings();
+      final settings = VoiceSettings();
       final saved = await settings.saveAsr(
         provider: SpeechProvider.volcengine,
         asr: const VoiceServiceConfiguration(
@@ -62,7 +62,7 @@ void main() {
   test(
     'ASR save preserves conversation settings and scopes retained secrets',
     () async {
-      const settings = VoiceSettings();
+      final settings = VoiceSettings();
       await settings.save(configured());
       const service = VoiceServiceConfiguration(
         endpoint: 'wss://example.com/asr',
@@ -103,7 +103,7 @@ void main() {
   );
 
   test('blank key preserved only for same endpoint and provider', () async {
-    const settings = VoiceSettings();
+    final settings = VoiceSettings();
     final original = await settings.save(configured());
     final blank = original.copyWith(
       integrated: original.integrated.copyWith(model: 'another-model', key: ''),
@@ -133,7 +133,7 @@ void main() {
   });
 
   test('cascaded secrets are independent and have separate scopes', () async {
-    const settings = VoiceSettings();
+    final settings = VoiceSettings();
     final original = const VoiceConfiguration().copyWith(
       pipeline: VoicePipeline.cascaded,
       asr: const VoiceConfiguration().asr.copyWith(key: 'asr-secret'),
@@ -247,7 +247,7 @@ void main() {
       ]) {
         await storage.write(key: VoiceSettings.storageKey, value: raw);
         await expectLater(
-          const VoiceSettings().read(),
+          VoiceSettings().read(),
           throwsA(
             isA<AgentFailure>().having(
               (e) => e.toString(),
@@ -272,7 +272,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: VoiceSettingsSheet(
-              settings: const VoiceSettings(),
+              settings: VoiceSettings(),
               initial: configured(),
             ),
           ),

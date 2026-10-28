@@ -1,3 +1,4 @@
+import {createSpaceHostPanel} from './space-host-panel.mjs'
 import {NATIVE_VOICE_PROVIDERS} from './native-voice.mjs'
 import {renderSkillsPage} from './skills-page.mjs'
 import {createChatGptPanel} from './chatgpt-panel.mjs'
@@ -19,8 +20,6 @@ localizeDocument(document)
 // Install the shared sprite before any panel renders an icon; the call is
 // idempotent, so lazy installs from iconNode() later stay no-ops.
 installIconSprite(document)
-import {createHubPanel} from './hub-panel.mjs'
-import {createPhonePanel} from './phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
 import {createCapabilitiesEditor, moduleStatusNote} from './capabilities-editor.mjs'
 import {createKnowledgePanel} from './knowledge-panel.mjs'
@@ -70,6 +69,7 @@ if(welcomeApi){
 }
 const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
+const spaceHostPanel = createSpaceHostPanel({document, api})
 let currentView = null
 const proactivityPanel = createProactivityPanel({document, api, moduleStatusNote, rankFallback: () => {
   if (!currentView?.secretsPresent) return null
@@ -138,8 +138,6 @@ const restartNotice = document.querySelector('#restart-notice')
 const warning = document.querySelector('#keyring-warning')
 const settingsRestore = document.querySelector('#settings-restore')
 const settingsSave = document.querySelector('#settings-save')
-const phoneFields = {phoneServerPort: document.querySelector('#phone-server-port'), phoneServerTokenFile: document.querySelector('#phone-server-token-file'), phoneServerUrl: document.querySelector('#phone-server-url')}
-const phonePairingOpen = document.querySelector('#phone-pairing-open')
 const settingsRestart = document.querySelector('#settings-restart')
 let restarting = false
 const workspaceOpenCurrent = document.querySelector('#workspace-open-current')
@@ -238,8 +236,6 @@ for (const [index, button] of categoryButtons.entries()) {
 let activeCategory = SETTINGS_CATEGORIES[0].id
 const skinPanel = createSkinPanel({document, stage: patch => controller.stage(patch), discard: () => controller.discardFields(['skinId', 'importedSkins'])})
 window.addEventListener('beforeunload', () => skinPanel.destroy(), {once: true})
-const hubPanel = createHubPanel({document, api})
-const phonePanel = createPhonePanel({document, api, save: saveAll})
 
 // Sections are addressed by id from the category table rather than by a markup
 // attribute, so showing a category never depends on document order.
@@ -250,13 +246,10 @@ function applyCategory(id) {
   if (id === 'models' && requested === 'pipeline') modelPane = 'pipeline'
   activeCategory = id
   if (id === 'skills') renderSettingsSkills()
-  if (id === 'connectors') { void imPanel.load(); void connectionsPanel.load() }
+  if (id === 'connectors') { void imPanel.load(); void connectionsPanel.load(); void spaceHostPanel.load() }
   if (id === 'permissions') void permissionsLoad()
   if (id === 'general') void proactivityPanel.load()
   if (id === 'diary') void diaryPanel.load()
-  hubPanel.setActive(id === 'hub')
-  phonePanel.setActive(id === 'phone')
-  document.querySelector('footer').hidden = id === 'phone' || id === 'hub'
   for (const category of SETTINGS_CATEGORIES) {
     const visible = category.id === id
     for (const sectionId of category.sections) {
@@ -654,8 +647,6 @@ function render(view, drafts, state) {
   knowledgePanel.render(view)
   memoryPrerecall.checked = view.memoryPrerecallEnabled === true
   for (const input of capabilitySettings) input.value = view[input.id] ?? ''
-  for (const [key, input] of Object.entries(phoneFields)) input.value = String(view[key] || '')
-  phonePairingOpen.disabled = state.busy
   controllerState = state
   wakeEnabled.checked = view.wakeWordEnabled === true
   autoHideSeconds.value = String(view.autoHideSeconds ?? 60)
@@ -830,7 +821,6 @@ function bindStage(element, event, patch) {
   element.addEventListener(event, () => { controller.stage(patch()) })
 }
 
-for (const [key, input] of Object.entries(phoneFields)) bindStage(input, 'input', () => ({[key]: key === 'phoneServerPort' ? Number(input.value) : input.value}))
 
 bindStage(document.getElementById('language'), 'change', () => ({language: document.getElementById('language').value}))
 bindStage(wakeEnabled, 'change', () => ({wakeWordEnabled: wakeEnabled.checked}))

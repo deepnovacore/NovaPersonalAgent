@@ -9,6 +9,26 @@ import {buildCodexSandboxProbe} from '../clients/desktop/scripts/build-codex-san
 import {stageEndpointingProbeAssets} from '../clients/desktop/scripts/stage-endpointing-probe-assets.mjs'
 import {generateSourceHostResourceManifest} from '../clients/desktop/scripts/native-resource-contract.mjs'
 
+// Ship private workspace code as a standard npm bundled dependency. A file:
+// dependency inside an outer tarball is resolved before that tarball is unpacked.
+export async function bundleServerRelay({root, stage, dependencies}) {
+  const relay = JSON.parse(await readFile(join(root, 'relay/package.json'), 'utf8'))
+  assert.equal(relay.name, '@nova-personal-agent/relay')
+  assert.equal(dependencies[relay.name], relay.version, 'server relay dependency version mismatch')
+  for (const [name, version] of Object.entries(relay.dependencies)) {
+    assert.equal(dependencies[name], version, `server relay dependency mismatch: ${name}`)
+  }
+  const destination = join(stage, 'node_modules', relay.name)
+  await mkdir(destination, {recursive: true})
+  const {name, version, type, exports, dependencies: relayDependencies, engines, license} = relay
+  await writeFile(join(destination, 'package.json'), JSON.stringify({name, version, type, exports, dependencies: relayDependencies, engines, license}) + '\n')
+  await cp(join(root, 'relay/dist/src'), join(destination, 'dist/src'), {
+    recursive: true,
+    filter: async source => (await stat(source)).isDirectory() || source.endsWith('.js'),
+  })
+  return [relay.name]
+}
+
 // Keep one runtime dependency authority; npm resolves native addons for the host.
 export async function packServer({root = resolve(import.meta.dirname, '..'), destination}) {
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('Build the Ubuntu server package on Linux x64')
@@ -24,7 +44,7 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
       type: 'module', bin: {'novapersonal-server': 'bin/novapersonal-server.mjs', 'novaaudio-server': 'bin/novapersonal-server.mjs'},
       engines: {node: '>=22.14.0'}, os: ['linux'], cpu: ['x64'],
       files: ['bin/', 'src/', 'runtime/dist/src/', 'runtime/dist/eval/', 'runtime/scripts/pair-device.mjs', 'resources/', 'README.md', 'LICENSE'],
-      dependencies: runtime.dependencies, license: cli.license,
+      dependencies: runtime.dependencies, bundleDependencies: await bundleServerRelay({root, stage, dependencies: runtime.dependencies}), license: cli.license,
       repository: cli.repository, homepage: cli.homepage, publishConfig: cli.publishConfig,
     }
     await writeFile(join(stage, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
@@ -53,10 +73,11 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const [{filename, files}] = JSON.parse(result.stdout)
     const allowed = new Set(['package.json', 'README.md', 'LICENSE', 'bin/novapersonal-server.mjs', 'src/command.mjs',
       'runtime/scripts/pair-device.mjs', 'resources/native-resources-v1.json',
+      'node_modules/@nova-personal-agent/relay/package.json',
       'resources/native/project-native/nova_project_native.node', 'resources/native/codex-sandbox-probe',
       ...['MANIFEST.json', 'LICENSE.silero-vad.txt', 'speech-16k-s16le.pcm', 'silence-16k-s16le.pcm'].map(name => `resources/endpointing/volcengine-v1/${name}`)])
     for (const {path, mode} of files) {
-      assert.ok(!path.split('/').includes('..') && (allowed.has(path) || /^runtime\/dist\/(src|eval)\/.+\.js$/u.test(path)), `unexpected server package file: ${path}`)
+      assert.ok(!path.split('/').includes('..') && (allowed.has(path) || (/^runtime\/dist\/(src|eval)\/.+\.js$/u.test(path) || /^node_modules\/@nova-personal-agent\/relay\/dist\/src\/.+\.js$/u.test(path))), `unexpected server package file: ${path}`)
       assert.equal(mode & 0o777, executables.has(path) ? 0o755 : 0o644, `server package mode: ${path}`)
     }
     return join(output, filename)

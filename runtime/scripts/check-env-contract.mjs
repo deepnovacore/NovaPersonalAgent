@@ -16,7 +16,7 @@ const coreNames = new Set([
   'QWEN_REALTIME_VOICE', 'CODEX_BIN',
   'CODEX_WORKSPACE', 'CODEX_APPROVAL_MODE', 'NOVA_LOCAL_TOOL_APPROVAL',
   'MEMORY_CONNECTION', 'MEMORY_PROVIDER',
-  'CAPABILITIES_CONFIG',
+  'CAPABILITIES_CONFIG', 'NOVA_SPACE_HOST_CONFIG',
 ])
 
 // Keep executable examples separate from human-readable fallback descriptions.
@@ -30,6 +30,7 @@ const exampleValues = {
   DOUBAO_TTS_ENDPOINT: 'wss://openspeech.bytedance.com/api/v3/tts/bidirection',
 }
 const envSections = [
+  ['Space Host — private local configuration, no cloud runtime', 'NOVA_SPACE_HOST_CONFIG'],
   ['OpenAI-compatible providers — independent credentials for each stage',
     'OPENAI_COMPATIBLE_BASE_URL OPENAI_COMPATIBLE_API_KEY OPENAI_COMPATIBLE_PROTOCOL COMPATIBLE_ASR_BASE_URL COMPATIBLE_ASR_API_KEY COMPATIBLE_ASR_MODEL COMPATIBLE_ASR_OMIT_RESPONSE_FORMAT COMPATIBLE_TTS_BASE_URL COMPATIBLE_TTS_API_KEY COMPATIBLE_TTS_MODEL COMPATIBLE_TTS_VOICE COMPATIBLE_TTS_SEND_SAMPLE_RATE'],
   ['Credentials — fill only for the services you use',

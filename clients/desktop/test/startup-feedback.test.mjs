@@ -31,6 +31,25 @@ test('the first paint fence accepts a visible same-stage spinner and requires cr
   await assert.rejects(context.paintStartup('credentials'),error=>error.code==='startup_presentation_required')
 })
 
+test('closing settings releases recording and clears UI ownership after phone migration', () => {
+  const open = source.indexOf('function openSettingsWindow(')
+  const begin = source.indexOf("window.on('closed', () => {", open)
+  const body = source.slice(begin, source.indexOf('\n  })', begin) + 5)
+  const handlers = new Map()
+  let released = 0
+  const context = vm.createContext({
+    window: {on: (event, callback) => handlers.set(event, callback)},
+    endVoiceprintRecording: () => { released++ },
+    settingsWindow: {}, pendingSettingsCategory: 'connections',
+  })
+  vm.runInContext(body, context)
+  assert.equal(typeof handlers.get('closed'), 'function')
+  assert.doesNotThrow(() => handlers.get('closed')())
+  assert.equal(released, 1)
+  assert.equal(context.settingsWindow, null)
+  assert.equal(context.pendingSettingsCategory, null)
+})
+
 test('settings public projection never opens the keychain or capability files', () => {
   const body = source.slice(source.indexOf('function settingsView()'), source.indexOf('async function loadMemoryBoardExport()'))
   const touched = () => {throw Error('keychain/file access')}
@@ -214,18 +233,15 @@ test('generic assembly failure still schedules automatic recovery', async () => 
 })
 
 
-test('configuration commits start phone independently and keep its failures out of backend status', async () => {
+test('configuration commits keep startup readiness independent of unrelated device services', async () => {
   const body=source.slice(source.indexOf('async function commitDesktopConfiguration('),source.indexOf('async function discardDesktopConfiguration('))
-  let starts=0
   const context=vm.createContext({managedWorkspaceMaintenance:null,refreshManagedWorkspaceCapabilities:async()=>{},configurationReady:false,settingsReady:true,
-    acceptance:null,currentSettings:{phoneConnectionEnabled:true},managedPhone:{start:async()=>{starts++;throw Error('private phone detail')}},
     startup:{stage:'ready'},backendStatus:{state:'connected'}})
   vm.runInContext(body,context)
   await context.commitDesktopConfiguration({maintenance:null,config:{},codexStatus:{}})
-  await new Promise(resolve=>setImmediate(resolve));assert.equal(starts,1);assert.equal(context.startup.stage,'ready')
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(context.startup.stage,'ready')
   context.backendStatus={state:'unavailable'}
   await context.commitDesktopConfiguration({maintenance:null,config:{},codexStatus:{}})
-  assert.equal(starts,2)
   const prepare=source.slice(source.indexOf('async function prepareDesktopConfiguration('),source.indexOf('async function commitDesktopConfiguration('))
   assert.doesNotMatch(prepare,/paintStartup|requestPresentation|showInactive/)
 })

@@ -1,241 +1,36 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'authority_controls.dart';
 import '../personal/life_host.dart';
-import '../personal/local_life.dart';
-import '../agent/hub_tasks.dart';
 import 'components.dart';
-import 'local_dialog.dart';
 import 'local_tasks.dart';
-import 'theme.dart';
-import 'hub_connection_page.dart';
 
-/// Controls for the application-owned dataset; never opens a second repository.
-class LifeControls extends StatefulWidget {
+/// Independent Space actions; Client connection controls belong to Space setup.
+class LifeControls extends StatelessWidget {
   const LifeControls({super.key, required this.host});
   final LifeHost host;
   @override
-  State<LifeControls> createState() => _LifeControlsState();
-}
-
-class _LifeControlsState extends State<LifeControls> {
-  LocalLife? get repo => widget.host.repo;
-  bool choosing = false;
-  String? lastPromptedConflict;
-  String? error;
-
-  Future<void> _run(Future<void> Function() action) async {
-    try {
-      await action();
-      if (mounted) setState(() => error = null);
-    } catch (e) {
-      if (mounted) setState(() => error = widget.host.error ?? '操作失败，请检查事项状态。');
-    }
-  }
-
-  Future<void> _settings() async {
-    if (!mounted) return;
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => HubConnectionPage(
-          host: widget.host,
-          language: Localizations.localeOf(context).languageCode == 'zh'
-              ? 'zh'
-              : 'en',
-        ),
-      ),
-    );
-  }
-
-  Future<void> _choose() async {
-    if (choosing) return;
-    final conflict = repo?.conflict;
-    if (conflict == null) return;
-    final expectedConflict = repo!.conflictToken!;
-    choosing = true;
-    lastPromptedConflict = expectedConflict;
-    final local = conflict['local'] as Map?,
-        synced = conflict['synced'] as Map?;
-    final missingGoal = conflict['code'] == 'goal_not_found';
-    const fields = {
-      'title': '标题',
-      'note': '备注',
-      'status': '状态',
-      'due': '日期',
-      'importance': '重要程度',
-      'goal_id': '关联目标',
-      'success_criteria': '完成标准',
-      'about': '个人描述',
-    };
-    final choice = await showLocalDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('这条记录在另一端有修改'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('请选择要采用的版本。未选择的修改会被丢弃。'),
-              if (missingGoal)
-                const Text('关联目标已不可用。采用本机内容会解除目标关联；尚未同步的新记录会保存为独立记录。'),
-              if (synced == null && !missingGoal)
-                const Text('已同步版本中，这条记录已不存在。恢复需要重新创建。'),
-              for (final field in fields.entries)
-                if (local?[field.key] != synced?[field.key])
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: SelectableText(
-                      '${field.value}\n本机：${local?[field.key] ?? "—"}\n已同步：${synced?[field.key] ?? "—"}',
-                    ),
-                  ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('稍后选择'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('采用已同步版本'),
-          ),
-          FilledButton(
-            onPressed:
-                local != null &&
-                    ((synced != null &&
-                            [
-                              'update',
-                              'profile',
-                            ].contains(conflict['input']['op'])) ||
-                        (missingGoal && conflict['input']['op'] == 'create'))
-                ? () => Navigator.pop(context, true)
-                : null,
-            child: Text(missingGoal ? '采用本机内容并解除关联' : '采用本机版本'),
-          ),
-        ],
-      ),
-    );
-    choosing = false;
-    if (choice == null) return;
-    // The dialog captured a version. A concurrent refresh must not change what
-    // "use local" means while the user is deciding.
-    try {
-      await repo!.resolveConflict(
-        useLocal: choice,
-        expectedConflict: expectedConflict,
-        unlinkGoal: choice && missingGoal,
-      );
-    } on StateError catch (error) {
-      if (error.message != 'conflict_changed') rethrow;
-      if (mounted) await _choose();
-    }
-  }
-
-  Future<void> _openTasks() async {
-    HubTasks? hub;
-    try {
-      hub = await widget.host.getTasks();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Hub 暂不可用，本机任务仍可使用。')));
-    }
-    if (!mounted) return;
-    await Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => LocalTasksPage(hub: hub, life: repo),
-      ),
-    );
-  }
-
-  @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.host,
-    builder: (context, _) {
-      final busy = widget.host.busy, ready = repo != null;
-      final lastSync = widget.host.lastSync;
-      // Tooltips keep each row addressable by its action name.
-      Widget row({
-        required String tooltip,
-        required IconData icon,
-        required String title,
-        String? subtitle,
-        VoidCallback? onTap,
-      }) => Tooltip(
-        message: tooltip,
-        child: NovaTile(
-          leading: NovaIconTile(icon),
-          title: title,
-          subtitle: subtitle == null ? null : Text(subtitle),
+    listenable: host,
+    builder: (context, _) => NovaSection(
+      header: '本机事项',
+      footer:
+          host.error ??
+          (host.repo == null ? '正在打开本机事项' : '独立运行，事项保存在这个 Space。'),
+      children: [
+        NovaTile(
+          leading: const NovaIconTile(CupertinoIcons.play_circle),
+          title: '任务与执行记录',
           trailing: const CupertinoListTileChevron(),
-          onTap: onTap,
-        ),
-      );
-      return Column(
-        children: [
-          AuthorityControls(host: widget.host),
-          NovaSection(
-            header: '同步',
-            footer: !ready
-                ? '正在打开本机事项'
-                : '${repo!.pendingCount} 项待同步 · ${repo!.accountId == null ? "仅本机" : "已连接同步"}',
-            children: [
-              row(
-                tooltip: '同步',
-                icon: CupertinoIcons.arrow_2_circlepath,
-                title: '立即同步',
-                subtitle: lastSync == null
-                    ? null
-                    : '最近同步：${relativeTime(lastSync.toIso8601String(), 'zh')}',
-                onTap: busy || !ready
-                    ? null
-                    : () => _run(() async {
-                        if (!widget.host.hubConfigured) await _settings();
-                        await widget.host.sync();
-                      }),
-              ),
-              row(
-                tooltip: '同步设置',
-                icon: CupertinoIcons.gear,
-                title: 'Hub 连接',
-                onTap: busy || !ready ? null : () => _run(_settings),
-              ),
-              row(
-                tooltip: '本机任务',
-                icon: CupertinoIcons.play_circle,
-                title: '任务与执行记录',
-                onTap: ready ? () => _run(_openTasks) : null,
-              ),
-            ],
-          ),
-          if (busy)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: LinearProgressIndicator(),
-            ),
-          if (error != null || widget.host.error != null)
-            NovaNotice(error ?? widget.host.error!),
-          if (repo?.conflict != null)
-            NovaSection(
-              children: [
-                NovaTile(
-                  leading: const NovaIconTile(
-                    CupertinoIcons.exclamationmark_triangle_fill,
-                    color: Nova.amber,
+          onTap: host.repo == null
+              ? null
+              : () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => LocalTasksPage(life: host.repo),
                   ),
-                  title: '有修改需要选择版本',
-                  trailing: const CupertinoListTileChevron(),
-                  onTap: busy ? null : () => _run(_choose),
                 ),
-              ],
-            ),
-        ],
-      );
-    },
+        ),
+      ],
+    ),
   );
 }

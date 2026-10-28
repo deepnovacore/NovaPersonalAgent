@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_evidence.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 Map<String, dynamic> brief(String ref) => {
@@ -45,10 +45,10 @@ void main() {
         );
       }
       await source.grantProcessing('p', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final disk = MemoryLifePersistence();
-      final repo = ProfileRepository(disk, authority, source);
+      final repo = ProfileRepository(disk, publication, source);
       final originals = {
         for (final message in source.readAuthorizedEvidence('p', 'profile'))
           message['evidence_id']: message,
@@ -81,7 +81,7 @@ void main() {
       Future<void> publish(List<Map<String, dynamic>> items) async {
         await repo.publish(
           jsonEncode(items),
-          epoch: authority.epoch,
+
           sourceRevision: source.revision,
           consentRevision: source.processingRevision,
           provider: 'p',
@@ -115,10 +115,10 @@ void main() {
       expect(repo.value!['entries'], entries);
       expect(repo.value!['revision'], revision);
       expect(repo.value!['generated_at'], generated);
-      final reopened = ProfileRepository(disk, authority, source);
+      final reopened = ProfileRepository(disk, publication, source);
       await reopened.open();
       expect(reopened.value!['entries'], entries);
-      authority.dispose();
+      publication.dispose();
     },
   );
 
@@ -149,10 +149,10 @@ void main() {
           );
       await ingest('first');
       await source.grantProcessing('p', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final disk = MemoryLifePersistence();
-      final repo = ProfileRepository(disk, authority, source);
+      final repo = ProfileRepository(disk, publication, source);
       Future<void> publish(List<String> refs, String text) async {
         await repo.publish(
           jsonEncode([
@@ -164,7 +164,7 @@ void main() {
               'observed_at': now.toIso8601String(),
             },
           ]),
-          epoch: authority.epoch,
+
           sourceRevision: source.revision,
           consentRevision: source.processingRevision,
           provider: 'p',
@@ -207,14 +207,14 @@ void main() {
         history,
       );
       expect(replayed.map((entry) => entry['key']).toSet(), hasLength(2));
-      final reopened = ProfileRepository(disk, authority, source);
+      final reopened = ProfileRepository(disk, publication, source);
       await reopened.open();
       expect(reopened.value!['entries'], replayed);
       expect(
         reopened.value!['available_evidence_ids'],
         unorderedEquals(newRefs),
       );
-      authority.dispose();
+      publication.dispose();
     },
   );
 
@@ -245,15 +245,15 @@ void main() {
           );
       await ingest('first', '本人介绍工作与兴趣，并计划验收接口');
       await source.grantProcessing('p', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final disk = MemoryLifePersistence();
-      final repo = ProfileRepository(disk, authority, source);
+      final repo = ProfileRepository(disk, publication, source);
       final oldRef = source.messages('chat').single['evidence_id'];
       Future<void> publish(List entries) async {
         await repo.publish(
           jsonEncode(entries),
-          epoch: authority.epoch,
+
           sourceRevision: source.revision,
           consentRevision: source.processingRevision,
           provider: 'p',
@@ -339,7 +339,7 @@ void main() {
       expect(first['available_evidence_ids'], [newRef]);
       expect(first['historical'], true);
       expect(first['preserved_history'], 3);
-      final reopened = ProfileRepository(disk, authority, source);
+      final reopened = ProfileRepository(disk, publication, source);
       await reopened.open();
       expect(reopened.value!['entries'], first['entries']);
       await publish([
@@ -469,16 +469,16 @@ void main() {
         windowEnd: now,
       );
       await source.grantProcessing('p', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final disk = MemoryLifePersistence(),
-          repo = ProfileRepository(MemoryLifePersistence(), authority, source);
-      final actual = ProfileRepository(disk, authority, source);
+          repo = ProfileRepository(MemoryLifePersistence(), publication, source);
+      final actual = ProfileRepository(disk, publication, source);
       final ref = source.messages('chat').single['evidence_id'];
       Future<Map<String, dynamic>> publish(List entries, String scope) =>
           actual.publish(
             jsonEncode(entries),
-            epoch: authority.epoch,
+
             sourceRevision: source.revision,
             consentRevision: source.processingRevision,
             provider: 'p',
@@ -499,7 +499,7 @@ void main() {
       expect(actual.value!['entries'].single['text'], '已有真实结果');
       expect(actual.value!['generated_at'], generated);
       expect(actual.value!['generation_scope'], 'new');
-      final reopened = ProfileRepository(disk, authority, source);
+      final reopened = ProfileRepository(disk, publication, source);
       await reopened.open();
       expect(reopened.value!['entries'].single['text'], '已有真实结果');
       expect(reopened.value!['generated_at'], generated);

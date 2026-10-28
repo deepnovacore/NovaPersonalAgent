@@ -90,7 +90,7 @@ void main() {
       await restored.open();
       debugPrint('LIVE: persisted data reopened');
       expect(restored.life['todos'][0]['goal_id'], goal['id']);
-      expect(restored.pendingCount, 2);
+      expect(restored.life['todos'], hasLength(1));
       await tester.pumpWidget(
         NovaApp(lifeHost: LifeHost(repository: restored)),
       );

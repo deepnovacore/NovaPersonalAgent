@@ -134,7 +134,6 @@ test('the default settings are the documented schema', () => {
     knowledgePath: '',
     memoryPrerecallEnabled: false,
     monitorCameraDeviceId: '', watchModel: '',
-    phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
   assert.deepEqual([...SECRET_KEYS], ALL_SECRET_KEYS)
@@ -334,7 +333,6 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     knowledgePath: '',
     memoryPrerecallEnabled: false,
     monitorCameraDeviceId: '', watchModel: '',
-    phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
 })
@@ -420,7 +418,6 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
     'personaplexRealtimeUrl',
-    'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'proactivity',
@@ -634,7 +631,6 @@ test('publicSettings never carries the secrets object', () => {
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
     'personaplexRealtimeUrl',
-    'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'proactivity',
@@ -1296,23 +1292,6 @@ test('memory prerecall defaults off and preserves explicit opt-in', () => {
   assert.equal(normalizeSettings({memoryPrerecallEnabled:'false'}).memoryPrerecallEnabled,false)
 })
 
-test('phone pairing configuration persists but does not restart or leak into the voice backend', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'nova-phone-settings-'))
-  t.after(() => rm(dir, {recursive: true, force: true}))
-  const fields = {phoneServerPort: 9020, phoneServerTokenFile: '/private/host.token', phoneServerUrl: 'wss://host.example'}
-  const next = applySettingsUpdate(DEFAULT_SETTINGS, fields)
-  const file = join(dir, 'settings.json')
-  await saveSettings(file, next)
-  const loaded = publicSettings(await loadSettings(file))
-  for (const [key, value] of Object.entries(fields)) assert.equal(loaded[key], value)
-  assert.deepEqual(backendSettings(next), backendSettings(DEFAULT_SETTINGS))
-  for (const invalid of [{phoneServerPort: 65536}, {phoneServerTokenFile: '../token'},
-    {phoneServerUrl: 'wss://' + 'x'.repeat(2049)}, {phoneServerUrl: 'ws://host.example'}, {phoneServerUrl: 'wss://u:p@host.example'}, {phoneServerUrl: 'wss://host.example/?token=x'}]) {
-    const rejected = publicSettings(applySettingsUpdate(next, invalid))
-    for (const key of Object.keys(invalid)) assert.equal(rejected[key], fields[key])
-  }
-})
-
 test('unsupported embedding settings never become cloud defaults during normalize, save or load', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nova-embedding-settings-'))
   const file = join(directory, 'settings.json')
@@ -1408,6 +1387,15 @@ test('reading other people\'s messages for the profile is off by default and onl
   assert.equal(applySettingsUpdate(on, {language: 'en'}).profileParticipantMessages, true, 'an unrelated update keeps the choice')
 })
 
+test('removed direct-phone connection settings are never restored or exposed to the backend',async t=> {
+ const directory=await mkdtemp(join(tmpdir(),'nova-removed-phone-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const obsolete={phoneConnectionEnabled:true,phoneServerPort:19876,phoneServerTokenFile:'/tmp/obsolete.token',phoneServerUrl:'wss://obsolete.example'};
+ const settings=applySettingsUpdate(DEFAULT_SETTINGS,obsolete);
+ const file=join(directory,'settings.json');await saveSettings(file,settings);
+ for(const view of [settings,await loadSettings(file),publicSettings(settings),backendSettings(settings)]) {
+  for(const field of Object.keys(obsolete))assert.equal(Object.hasOwn(view,field),false);
+ }
+});
 test('the workbench fill preference defaults on, is backend-invisible and only accepts booleans', () => {
   assert.equal(normalizeSettings({}).workbenchMaximized, true)
   assert.equal(normalizeSettings({workbenchMaximized: false}).workbenchMaximized, false)

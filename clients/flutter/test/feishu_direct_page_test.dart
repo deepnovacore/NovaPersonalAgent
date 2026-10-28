@@ -8,7 +8,7 @@ import 'package:nova_mobile/connectors/feishu/auth.dart';
 import 'package:nova_mobile/connectors/feishu/api.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/context/profile_agent.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/ui/feishu_direct_page.dart';
@@ -99,16 +99,15 @@ void main() {
         'fixture-chat',
         DateTime.now().subtract(const Duration(days: 1)),
       );
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final models = FixtureModels();
       await tester.pumpWidget(
         MaterialApp(
           home: FeishuDirectPage(
             host: host,
             models: models,
-            authority: authority,
-            contextSync: () async => throw StateError('not needed'),
+            publication: publication,
           ),
         ),
       );
@@ -262,7 +261,7 @@ void main() {
             'evidence_ids': [evidence],
           },
         ]),
-        epoch: authority.epoch,
+
         sourceRevision: host.sources.revision,
         consentRevision: host.sources.processingRevision,
         provider: 'https://model.example/v1|fixture',
@@ -281,7 +280,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       host.dispose();
-      authority.dispose();
+      publication.dispose();
     },
   );
   testWidgets(
@@ -295,15 +294,14 @@ void main() {
         auth: FeishuAuth(MemoryLifePersistence(), FeishuApi()),
         sources: SourceStore(MemoryLifePersistence()),
       );
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       await tester.pumpWidget(
         MaterialApp(
           home: FeishuDirectPage(
             host: host,
             models: ModelSettings(),
-            authority: authority,
-            contextSync: () async => throw StateError('not needed'),
+            publication: publication,
           ),
         ),
       );
@@ -313,7 +311,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       host.dispose();
-      authority.dispose();
+      publication.dispose();
     },
   );
 }

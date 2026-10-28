@@ -9,8 +9,8 @@ import java.io.File
 
 /** Native-only writer, excluded from Android Auto Backup. Unknown attempts are
  * retained for reconciliation, never replayed when the process reconnects. */
-class LocalAgentJournal(context: Context) : SQLiteOpenHelper(
-    context, File(context.noBackupFilesDir, "local-agent-v1.db").path, null, 1
+class LocalAgentJournal(context: Context, spaceId: String) : SQLiteOpenHelper(
+    context, File(NovaSpaceScope.privateDirectory(context, spaceId), "local-agent-v1.db").path, null, 1
 ) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE tasks(id TEXT PRIMARY KEY, record TEXT NOT NULL)")

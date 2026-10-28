@@ -1,4 +1,6 @@
-# Hub pairing implementation
+# Archived Hub pairing implementation
+
+This records the former Tailscale/Hub implementation and its historical test evidence. It is not the connection flow for new Spaces. See [current connection behavior](HUB-PAIRING.zh-CN.md) and the [Space implementation ledger](../design-notes/2026-10-23-space-host-client-full-plan.md). The old transport shell, authority transfer and schedule handoff have been removed after the new chain passed automated end-to-end network acceptance.
 
 Approved scope: macOS + Android, Tailscale only for new QR pairing, 5-minute single-use invites, multiple devices (32 active/account), protect existing account binding. Existing manual configuration remains advanced compatibility.
 

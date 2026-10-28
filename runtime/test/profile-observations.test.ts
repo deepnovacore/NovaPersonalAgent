@@ -97,3 +97,13 @@ test('the previous publication is continuity context only and never contributes 
  assert.deepEqual(result.about?.refs,[{entry_id:'project',version:1}])
  assert.deepEqual(result.work,[]);assert.deepEqual(result.interests,[])
 })
+
+test('profile JSON accepts a complete fence without retry but still validates its content',async()=>{
+ const entries=[{id:'m',version:1,origin:'stated' as const,content:'I develop Orchard.'}]
+ for(const [response,valid] of [["```json\n{\"observations\":[]}\n```",true],["```json\n{\"observations\":\"invalid\"}\n```",false],["Explanation\n```json\n{\"observations\":[]}\n```",false]] as const){
+  let calls=0
+  const gateway={complete:()=>{calls++;return Promise.resolve({text:response})}} as unknown as ModelGateway
+  const result=new GatewayPersonalWriter({gateway,model:'fixture'}).observeProfile(entries,new AbortController().signal)
+  if(valid){assert.deepEqual(await result,[]);assert.equal(calls,1)}else{await assert.rejects(result);assert.equal(calls,2)}
+ }
+})

@@ -13,13 +13,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Device-local, authenticated encryption; neither Hub nor task records receive the key. */
-class LocalModelSettings(context: Context) {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "agent-model-v1.enc"))
+class LocalModelSettings(context: Context, private val spaceId: String) {
+    private val file = AtomicFile(File(NovaSpaceScope.privateDirectory(context, spaceId), "agent-model-v1.enc"))
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey("nova.agent.model.v1", null) as? SecretKey)?.let { return it }
+        (store.getKey("nova.agent.model.v1.$spaceId", null) as? SecretKey)?.let { return it }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(KeyGenParameterSpec.Builder("nova.agent.model.v1", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            init(KeyGenParameterSpec.Builder("nova.agent.model.v1.$spaceId", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }

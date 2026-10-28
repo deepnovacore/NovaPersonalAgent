@@ -1,0 +1,38 @@
+{
+  "name": "@nova-personal-agent/relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Authenticated opaque relay with encrypted mailbox delivery, pairing and live streams",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/test.mjs",
+    "build": "tsc -p tsconfig.json --noEmit false --outDir dist"
+  },
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "jose": "6.2.10",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
+  },
+  "exports": {
+    ".": "./dist/src/client.js",
+    "./client": "./dist/src/client.js",
+    "./crypto": "./dist/src/crypto.js",
+    "./security": "./dist/src/security.js",
+    "./pairing": "./dist/src/pairing.js",
+    "./protocol": "./dist/src/protocol.js",
+    "./server": "./dist/src/server.js"
+  },
+  "bin": {
+    "nova-relay": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src"
+  ]
+}

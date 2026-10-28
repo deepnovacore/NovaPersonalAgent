@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import {Linter} from 'eslint'
 import { acceptanceWakeSettings } from '../src/main/workbench-native-acceptance.mjs'
 import { createWorkbenchFrame } from '../src/main/workbench-frame.mjs'
 import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import { createContext, runInContext } from 'node:vm'
+
+test('desktop main has no unresolved globals after module removal', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const globals = Object.fromEntries(Object.getOwnPropertyNames(globalThis).map(name => [name, 'readonly']))
+  const diagnostics = new Linter().verify(source, {
+    languageOptions: {ecmaVersion: 'latest', sourceType: 'module', globals},
+    rules: {'no-undef': 'error'},
+  })
+  assert.deepEqual(diagnostics.map(({line, column, message}) => ({line, column, message})), [])
+})
 
 test('main owns single-instance lifecycle and denies renderer escape', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
@@ -43,7 +54,6 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:confirmation-mode',
     'nova:confirmation-placement',
     'nova:executor-result:open',
-    'nova:hub:action',
     'nova:knowledge:action',
     'nova:memory-board:clear',
     'nova:memory-board:copy-json',
@@ -75,7 +85,6 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:personal:presentation-request',
     'nova:personal:unread',
     'nova:personal:wake',
-    'nova:phone:action',
     'nova:projects:repair',
     'nova:release-camera:result',
     'nova:settings:changed',
@@ -914,12 +923,11 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const {default: vm} = await import('node:vm')
   let beforeQuit, releaseMaintenanceDeadline, releaseBackend, timeout
-  let prevented = 0, quits = 0, backendStops = 0, hubCancels = 0
+  let prevented = 0, quits = 0, backendStops = 0
   const event = {preventDefault() { prevented++ }}
   const context = vm.createContext({
     computerOverlay: null,
-    desktopHubConnection: {action: async action => { assert.equal(action, 'cancel'); hubCancels++ }},
-    sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}}, cancelPhonePairing: async () => {}, managedPhone: {stop: async () => {}},
+    sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}},
     app: {
       on: (name, handler) => { if (name === 'before-quit') beforeQuit = handler },
       quit() { quits++; beforeQuit(event) },
@@ -945,7 +953,6 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   await context.quitDrain
   assert.equal(quits, 1)
   assert.equal(prevented, 2, 'the resumed quit must reach normal window shutdown')
-  assert.equal(hubCancels, 1, 'quitting cancels pairing without stopping the background Hub')
   assert.equal(backendStops, Number(hasBackend))
 })
 
@@ -1179,23 +1186,6 @@ test('sleep and wake IPC reject other windows and unexpected arguments', async (
     assert.equal(calls, 1)
   }
 })
-
-test('phone actions require the settings sender and restrict actions and device identifiers', async () => {
-  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
-  const {default: vm} = await import('node:vm')
-  const body = source.slice(source.indexOf("  ipcMain.handle('nova:phone:action'"), source.indexOf("  ipcMain.on('nova:setup:open'"))
-  let handler
-  const sender = {}, calls = []
-  vm.runInNewContext(body, {ipcMain: {handle: (_channel, fn) => {handler = fn}}, settingsWindow: {webContents: sender},
-    phoneEpoch: 0, phoneQueue: Promise.resolve(), phoneAction: async (...args) => {calls.push(args); return {state: 'ready'}}})
-  assert.equal((await handler({sender: {}}, 'enable')).state, 'unavailable')
-  assert.equal((await handler({sender}, 'exec')).state, 'unavailable')
-  assert.equal((await handler({sender}, 'status', 'extra')).state, 'unavailable')
-  assert.equal((await handler({sender}, 'revoke', '../token')).state, 'unavailable')
-  assert.equal((await handler({sender}, 'enable')).state, 'ready')
-  assert.equal(calls.length, 1)
-})
-
 
 test('unsupported embedding in recovery reaches startup diagnostics without mutating either file', async () => {
   const {mkdtemp, writeFile, rm} = await import('node:fs/promises')
