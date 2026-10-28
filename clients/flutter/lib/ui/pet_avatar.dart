@@ -249,7 +249,8 @@ class PetAvatarStore extends ChangeNotifier {
       if (!saved) {
         _customPath = previous;
         _error = 'image_failed';
-        await _deleteAvatarFile(next.path);
+        // A failed platform write may still change the preference cache.
+        if (await _persist()) await _deleteAvatarFile(next.path);
         return false;
       }
       _revision++;
@@ -290,6 +291,7 @@ class PetAvatarStore extends ChangeNotifier {
     final saved = await _persist();
     if (!saved) {
       _customPath = previous;
+      await _persist();
       _error = 'image_failed';
       _revision++;
       _notify();
