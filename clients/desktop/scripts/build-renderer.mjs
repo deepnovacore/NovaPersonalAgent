@@ -13,7 +13,7 @@ export const rendererEntries=Object.freeze({
  'memory-board':'entries/memory-board.tsx','release-camera':'entries/release-camera.tsx',
 })
 const titles={index:'Nova Personal Agent Desktop',settings:'设置 · Nova',setup:'开始使用 · Nova','memory-board':'记忆 · Nova',visor:'Nova Visor'}
-const css={index:['controls.css','index.css','task-banner.css','workbench.css','welcome.css'],settings:['controls.css','settings.css','skills.css'],setup:['controls.css','setup.css'],visor:['visor.css'],'visor-controls':['controls.css','visor-controls.css'],'computer-bar':['computer-overlay.css'],'computer-edge':['computer-overlay.css'],'memory-board':['controls.css','memory-board.css'],'release-camera':[]}
+const css={index:['design-tokens.css','controls.css','index.css','task-banner.css','workbench.css','welcome.css'],settings:['controls.css','settings.css','skills.css'],setup:['controls.css','setup.css'],visor:['visor.css'],'visor-controls':['controls.css','visor-controls.css'],'computer-bar':['computer-overlay.css'],'computer-edge':['computer-overlay.css'],'memory-board':['controls.css','memory-board.css'],'release-camera':[]}
 export async function buildRenderer({outputRoot=process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT, sourcemap=false}={}){
  assert.ok(outputRoot,'Set NOVA_DESKTOP_RENDERER_OUTPUT_ROOT or pass --outdir to an isolated external build directory')
  const out=resolve(outputRoot),path=relative(sourceRoot,out)

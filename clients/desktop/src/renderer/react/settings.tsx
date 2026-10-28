@@ -3,7 +3,7 @@ import { Button } from '@radix-ui/themes';
 import { Settings, Save, RefreshCw } from 'lucide-react';
 import { t, currentLanguage } from '../locale.mjs';
 import { createSettingsController, settingsButtonState } from '../settings-controller.mjs';
-import { SETTINGS_CATEGORIES, categoryTabForKey, isValidCategory } from '../settings-categories.mjs';
+import { SETTINGS_CATEGORIES, categoryTabForKey, isValidCategory, resolveCategory } from '../settings-categories.mjs';
 import { COMPATIBLE_STAGES, COMPATIBLE_FIELDS, COMPATIBLE_PRESETS, isEndpointSecret } from '../compatible-providers.mjs';
 import { SELF_HOSTED_STAGES, endpointOrigin } from '../voice-preset.mjs';
 import { NATIVE_VOICE_PROVIDERS } from '../native-voice.mjs';
@@ -15,6 +15,7 @@ import { SkinPanel, VisorPanel, PermissionsPanel, UsagePanel, SkillsPanel, Knowl
 import { ProactivityPanel, DevicePanel, ChatGptPanel } from './settings/live';
 import { CapabilitiesPanel, ModuleToggle } from './settings/capabilities';
 import { ConnectionsPanel, ImPanel } from './settings/integrations';
+import { ModelRoutesPanel } from './settings/models';
 import { VoiceprintPanel } from './settings/voiceprint';
 const SECRET_LABELS: any = { minicpmRealtimeApiKey: 'MiniCPM-o', personaplexRealtimeApiKey: 'PersonaPlex', openaiCompatibleApiKey: 'OpenAI-compatible LLM', compatibleAsrApiKey: 'OpenAI-compatible ASR', compatibleTtsApiKey: 'OpenAI-compatible TTS', selfHostedAsrApiKey: 'Self-hosted ASR', selfHostedLlmApiKey: 'Self-hosted LLM', selfHostedTtsApiKey: 'Self-hosted TTS', composioApiKey: 'Composio', dashscopeApiKey: 'DashScope', stepfunApiKey: 'StepFun', openaiApiKey: 'OpenAI', geminiApiKey: 'Google Gemini', tavilyApiKey: 'Tavily', openrouterApiKey: 'OpenRouter · Jev', arkApiKey: 'Ark', deepseekApiKey: 'DeepSeek（官方）', doubaoBigmodelApiKey: '火山语音' };
 const ALIASES: any = { 'startup-view': 'startupView', 'wake-word-enabled': 'wakeWordEnabled', 'auto-hide-seconds': 'autoHideSeconds', 'coding-progress-narration': 'codingProgressNarration', heartbeat: 'codexHeartbeatSeconds', 'coding-provider': 'codingBackend', 'memory-prerecall-enabled': 'memoryPrerecallEnabled', 'phone-server-url': 'phoneServerUrl', 'phone-server-port': 'phoneServerPort', 'phone-server-token-file': 'phoneServerTokenFile', 'monitor-camera': 'monitorCameraDeviceId', 'watch-model': 'watchModel', 'conversation-vision-enabled': 'conversationVisionEnabled' };
@@ -23,7 +24,7 @@ const NOTICE: any = { restarting: '已保存，后台正在重启并重新连接
 const GUIDANCE: any = { opencode: ['OpenCode', '配置文件', '安装 opencode-ai，并用 OpenCode 自己的登录或配置文件设置模型与凭据。'], codebuddy: ['CodeBuddy', '', '安装 @tencent-ai/codebuddy-code，并在 CodeBuddy 命令行中完成登录或密钥配置。'], pi: ['Pi', '配置目录', '安装 Pi 与 pi-acp，并在 Pi 自己的配置中设置模型与登录。Pi 不支持逐项审批，询问模式下任务会被拒绝。'], deepseek: ['DeepSeek Harness', '配置目录', '安装 @deepseek-ai/dsh，并在其配置中设置凭据；也可以使用服务配置里的 DeepSeek API Key。'] };
 const toOptions = (values: any[]) => values.map(v => typeof v === 'string' ? { value: v, label: v } : v);
 export default function SettingsApp({ bridge = (window as any).novaPersonalAgentDesktop, api = bridge?.settings }: any) {
-    const [snapshot, setSnapshot] = useState<any>({ view: {}, drafts: {}, dirty: false, busy: false }), [category, setCategory] = useState('general'), [status, setStatus] = useState(''), [notice, setNotice] = useState(''), [workspaceNote, setWorkspaceNote] = useState(''), [maintenance, setMaintenance] = useState(false), [secretDirty, setSecretDirty] = useState<Set<string>>(new Set()), [notes, setNotes] = useState<any>({}), [cameraDevices, setCameraDevices] = useState<any[]>([]), [custom, setCustom] = useState<any>({}), [nativeVoices, setNativeVoices] = useState<any>({});
+    const [snapshot, setSnapshot] = useState<any>({ view: {}, drafts: {}, dirty: false, busy: false }), [category, setCategory] = useState('general'), [status, setStatus] = useState(''), [notice, setNotice] = useState(''), [workspaceNote, setWorkspaceNote] = useState(''), [maintenance, setMaintenance] = useState(false), [secretDirty, setSecretDirty] = useState<Set<string>>(new Set()), [notes, setNotes] = useState<any>({}), [cameraDevices, setCameraDevices] = useState<any[]>([]), [custom, setCustom] = useState<any>({}), [nativeVoices, setNativeVoices] = useState<any>({}), [idleText, setIdleText] = useState<string | null>(null), [modelPane, setModelPane] = useState('routes');
     const mounted = useRef(true), secretInputs = useRef<Record<string, HTMLInputElement | null>>({}), secretRevisions = useRef<Record<string, number>>({}), secretWrites = useRef<any>(null), writeOutcome = useRef<any>(null), categoryButtons = useRef<Record<string, HTMLButtonElement | null>>({}), maintenanceLock = useRef(false), currentView = useRef<any>({});
     currentView.current = snapshot.view;
     const controller = useMemo(() => createSettingsController({ api: { set: async (patch: any) => { const { capabilitiesDocument, capabilitiesBaseRevision, ...settingsPatch } = patch; if (secretWrites.current && Object.keys(secretWrites.current).length)
@@ -32,21 +33,28 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             setStatus(s); }, notice: (s?: string) => { if (mounted.current)
             setNotice(s ?? ''); } } as any), [api]);
     useEffect(() => { mounted.current = true; const off = api?.onChanged?.((view: any) => { if (isValidCategory(view?.focusCategory))
-        setCategory(view.focusCategory); controller.syncView(view); }); void api?.get?.().then((view: any) => { if (!mounted.current)
+        setCategory(resolveCategory(view.focusCategory)); controller.syncView(view); }); void api?.get?.().then((view: any) => { if (!mounted.current)
         return; if (isValidCategory(view?.focusCategory))
-        setCategory(view.focusCategory); controller.setView(view); }).catch(() => { if (mounted.current)
+        setCategory(resolveCategory(view.focusCategory)); controller.setView(view); }).catch(() => { if (mounted.current)
         setStatus(t('读取设置失败')); }); const activity = () => bridge?.wakeWord?.activity?.(); document.addEventListener('pointerdown', activity); document.addEventListener('keydown', activity); return () => { mounted.current = false; off?.(); document.removeEventListener('pointerdown', activity); document.removeEventListener('keydown', activity); for (const input of Object.values(secretInputs.current))
         if (input)
             input.value = ''; secretWrites.current = null; }; }, [api, controller, bridge]);
     const view = snapshot.view ?? {}, stage = (patch: any) => controller.stage(patch), setNote = (id: string, value: string) => setNotes((n: any) => ({ ...n, [id]: value }));
-    const buttons = settingsButtonState({ dirty: snapshot.dirty || secretDirty.size > 0, controllerBusy: snapshot.busy, lifecycleBusy: view.managedWorkspaces?.lifecycleBusy === true, workspaceBusy: maintenance, managedHealth: view.managedWorkspaces?.health, managedRecoveryStatus: view.managedWorkspaces?.recoveryStatus, currentManagedAvailable: view.managedWorkspaces?.current?.available === true, allManagedAvailable: view.managedWorkspaces?.all?.available === true });
+    const buttons = settingsButtonState({ dirty: snapshot.dirty || secretDirty.size > 0 || idleText !== null, controllerBusy: snapshot.busy, lifecycleBusy: view.managedWorkspaces?.lifecycleBusy === true, workspaceBusy: maintenance, managedHealth: view.managedWorkspaces?.health, managedRecoveryStatus: view.managedWorkspaces?.recoveryStatus, currentManagedAvailable: view.managedWorkspaces?.current?.available === true, allManagedAvailable: view.managedWorkspaces?.all?.available === true });
     function markSecret(key: string) { secretRevisions.current[key] = (secretRevisions.current[key] ?? 0) + 1; setSecretDirty(s => new Set(s).add(key)); }
     async function saveAll() { if (controller.busy || secretWrites.current)
-        return { saved: false, status: 'busy' }; const writes: any = {}, revisions: any = {}; for (const key of secretDirty) {
+        return { saved: false, status: 'busy' };
+        const idle = document.getElementById('auto-hide-seconds') as HTMLInputElement | null;
+        if (idleText !== null && idle && !commitIdle(idle)) return { saved: false, status: 'invalid' };
+        for (const input of document.querySelectorAll<HTMLInputElement>('[data-lane-custom-model]')) {
+            if (!input.checkValidity()) { setStatus(input.validationMessage); setCategory('models'); setModelPane('routes'); input.reportValidity(); return { saved: false, status: 'invalid' }; }
+        }
+        const writes: any = {}, revisions: any = {}; for (const key of secretDirty) {
         writes[key] = secretInputs.current[key]?.value ?? '';
         revisions[key] = secretRevisions.current[key];
     } ; secretWrites.current = writes; writeOutcome.current = null; try {
         const result: any = await controller.save(writes);
+        if (result.saved) setIdleText(current => current === idleText ? null : current);
         const accepted = writeOutcome.current?.persisted ? Object.keys(writes).filter(k => !writeOutcome.current.rejected.includes(k)) : [];
         for (const key of accepted) {
             if (secretRevisions.current[key] === revisions[key]) {
@@ -101,6 +109,13 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             markSecret(secret);
         }
     } stage(patch); }
+    function commitIdle(input: HTMLInputElement) {
+        const text = input.value, value = Number(text);
+        const valid = text.trim() !== '' && Number.isInteger(value) && (value === 0 || value >= 30 && value <= 3600);
+        input.setCustomValidity(valid ? '' : t('请输入 0 或 30–3600 的整数'));
+        if (!valid) { setCategory('general'); input.reportValidity(); return false; }
+        stage({ autoHideSeconds: value }); return true;
+    }
     function secretUsage(key: string) { if (key === 'composioApiKey')
         return t('应用连接；修改后需重启'); if (key === 'tavilyApiKey')
         return t('联网搜索'); const required = (key === 'dashscopeApiKey' && ((view.pipelineMode === 'integrated' && view.integratedProvider === 'qwen') || view.cascadedLlmProvider === 'qwen')) || (key === 'stepfunApiKey' && view.integratedProvider === 'stepfun') || (key === 'openaiApiKey' && (view.integratedProvider === 'openai' || view.cascadedLlmProvider === 'openai')) || (key === 'geminiApiKey' && [view.integratedProvider, view.cascadedLlmProvider, view.cascadedAsrProvider, view.cascadedTtsProvider].includes('gemini')) || (key === 'doubaoBigmodelApiKey' && view.pipelineMode === 'cascaded' && [view.cascadedAsrProvider, view.cascadedTtsProvider].includes('volcengine')) || COMPATIBLE_STAGES.some(({ secret, provider }: any) => key === secret && view[provider] === 'openai-compatible') || SELF_HOSTED_STAGES.some(({ secret, provider }: any) => key === secret && view[provider] === 'self-hosted') || (key === 'deepseekApiKey' && view.cascadedLlmProvider === 'deepseek') || (key === 'arkApiKey' && view.cascadedLlmProvider === 'ark'); return t(required ? '必需' : '当前未使用'); }
@@ -119,6 +134,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         const { tag, props, children } = node, id = props.id ?? '', key = id || index;
         const categoryHidden = allSections.has(id) && !visibleSections.has(id);
         const active = !categoryHidden;
+        if (id === 'model-routes') return <ModelRoutesPanel key={key} view={view} stage={stage} hidden={modelPane !== 'routes'}/>;
         if (id === 'visor-section')
             return category === 'themes' ? <VisorPanel key={key} api={bridge?.visor}/> : null;
         if (id === 'orb-skin-section')
@@ -130,11 +146,11 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         if (id === 'phone-connection-section')
             return category === 'phone' ? <DevicePanel key={key} api={api} save={saveAll}>{['phoneServerUrl', 'phoneServerPort', 'phoneServerTokenFile'].map((f, i) => <Field key={f} label={['自定义地址', '已有服务端口', '认证文件'][i]} type={i === 1 ? 'number' : 'text'} value={view[f] ?? ''} min={i === 1 ? 1 : undefined} max={i === 1 ? 65535 : undefined} onChange={(v: any) => stage({ [f]: v })}/>)}</DevicePanel> : null;
         if (id === 'desktop-permissions-panel')
-            return category === 'connections' ? <PermissionsPanel key={key} api={bridge?.welcome}/> : null;
+            return category === 'permissions' ? <PermissionsPanel key={key} api={bridge?.welcome}/> : null;
         if (id === 'connections-panel')
-            return category === 'connections' ? <ConnectionsPanel key={key} api={api}/> : null;
+            return category === 'connectors' ? <ConnectionsPanel key={key} api={api}/> : null;
         if (id === 'im-connection')
-            return category === 'im' ? <ImPanel key={key} api={api}/> : null;
+            return category === 'connectors' ? <ImPanel key={key} api={api}/> : null;
         if (id === 'proactivity-panel' || id === 'diary-panel')
             return category === (id === 'diary-panel' ? 'diary' : 'general') ? <ProactivityPanel key={key} api={api} diary={id === 'diary-panel'} keyMissing={!view.secretsPresent?.openrouterApiKey} memory={view.capabilities?.runtime?.modules?.memory}/> : null;
         if (id === 'capabilities-editor')
@@ -148,7 +164,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         if (id === 'chatgpt-settings')
             return category === 'secrets' ? <ChatGptPanel key={key} api={bridge?.chatgpt}/> : null;
         if (id === 'voiceprint-settings' || (tag === 'section' && props['aria-label'] === '声纹验证'))
-            return category === 'pipeline' ? <VoiceprintPanel key={key} api={api} view={view} drafts={snapshot.drafts} stage={stage}/> : null;
+            return category === 'models' && modelPane === 'pipeline' ? <VoiceprintPanel key={key} api={api} view={view} drafts={snapshot.drafts} stage={stage}/> : null;
         if (id === 'display-steps')
             return <DisplayPanel key={key}/>;
         if (id === 'display-collapse' || (tag === 'label' && ['display-steps', 'display-collapse'].includes(props.for ?? '')))
@@ -164,6 +180,11 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
                 continue;
             p[names[k] ?? k] = v === null ? true : typeof v === 'string' && ['title', 'placeholder', 'aria-label', 'alt'].includes(k) ? t(v) : v;
         }
+        if (id.startsWith('model-tab-')) {
+            const pane = id.slice(10); p['aria-selected'] = modelPane === pane; p.tabIndex = modelPane === pane ? 0 : -1;
+            p.onClick = () => setModelPane(pane);
+            p.onKeyDown = (e: any) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const next = e.key === 'Home' ? 'routes' : e.key === 'End' ? 'pipeline' : pane === 'routes' ? 'pipeline' : 'routes'; setModelPane(next); document.getElementById('model-tab-' + next)?.focus(); } };
+        }
         if (tag === 'option' && props.value !== undefined)
             p.value = props.value;
         if (categoryHidden)
@@ -172,6 +193,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             p.hidden = true;
         if (allSections.has(id))
             p.hidden = categoryHidden;
+        if (id === 'pipeline') p.hidden = categoryHidden || modelPane !== 'pipeline';
         if(props['data-endpoint']&&secretUsage(props['data-endpoint'])===t('必需'))p.open=true; if(id==='secrets-advanced')p.open=true; if(props.class==='secret'&&secretUsage(props['data-key']??'')===t('必需'))p['data-required']='true'; if (id === 'secrets' || id === 'codex-projects')
             p.open = true;
         const hidden: any = { 'language-restart-hint': (view.language ?? 'zh-CN') === currentLanguage(), 'codex-manual-settings': view.codexBinaryMode !== 'manual', 'codex-rescan': view.codexBinaryMode === 'manual', 'codex-yolo-warning': view.codexApprovalMode !== 'yolo', 'integrated-pipeline': view.pipelineMode !== 'integrated', 'cascaded-pipeline': view.pipelineMode !== 'cascaded', 'gemini-live-limit': view.integratedProvider !== 'gemini', 'gemini-asr-settings': view.cascadedAsrProvider !== 'gemini', 'gemini-tts-settings': view.cascadedTtsProvider !== 'gemini', 'cascaded-tts-voice-settings': ['self-hosted', 'openai-compatible'].includes(view.cascadedTtsProvider), 'keyring-warning': view.keyringAvailable !== false, 'wake-word-retry': view.wakeWord?.status !== 'error', 'wake-word-status': !['error', 'loading'].includes(view.wakeWord?.status), 'workspace-retry-recovery': (view.managedWorkspaces?.recoveryStatus ?? 'idle') === 'idle', 'codex-discovery': !!GUIDANCE[view.codingBackend], 'codex-status': !!GUIDANCE[view.codingBackend], 'coding-acp-settings': !GUIDANCE[view.codingBackend], 'coding-config-field': !GUIDANCE[view.codingBackend]?.[1] };
@@ -243,14 +265,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
                     p.checked = value === true;
                 else
                     p.value = value;
-                p.onChange = (e: any) => { let value = checkbox ? e.target.checked : ['number', 'range'].includes(props.type ?? '') ? Number(e.target.value) : e.target.value; if (id === 'auto-hide-seconds') {
-                    const valid = Number.isInteger(value) && (value === 0 || value >= 30 && value <= 3600);
-                    e.target.setCustomValidity(valid ? '' : t('请输入 0 或 30–3600 的整数'));
-                    if (!valid) {
-                        e.target.reportValidity();
-                        return;
-                    }
-                } if (id === 'coding-binary-path' || id === 'coding-config-path') {
+                p.onChange = (e: any) => { let value = checkbox ? e.target.checked : ['number', 'range'].includes(props.type ?? '') ? Number(e.target.value) : e.target.value; if (id === 'coding-binary-path' || id === 'coding-config-path') {
                     stage({ codingBackendPaths: { [view.codingBackend]: { [id === 'coding-binary-path' ? 'binaryPath' : 'configPath']: value } } });
                     return;
                 } if (id === 'integratedProvider') {
@@ -273,6 +288,11 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
                     } })();
                     return;
                 } endpointPatch({ [field]: value }); };
+            }
+            if (id === 'auto-hide-seconds') {
+                p.value = idleText ?? view.autoHideSeconds ?? '';
+                p.onChange = (e: any) => { setIdleText(e.target.value); e.target.setCustomValidity(''); };
+                p.onBlur = (e: any) => { if (idleText !== null) commitIdle(e.target); };
             }
             if (id === 'codexBinaryPath')
                 p.disabled = view.codexBinaryMode !== 'manual';
