@@ -28,9 +28,11 @@ test('a timeline cached before claim scope review is regenerated with unchanged 
  let brief=make()
  try{
   await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');await brief.refresh();await brief.close()
-  const disk=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>
+  const saved=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>
+  // Simulate a state written by the previous scope revision (state v1, no checkpoint).
   const key=createHash('sha256').update(JSON.stringify(['timeline-scope-v14','2026-10-17','Asia/Shanghai',[{id:'message',version:'v1'}]])).digest('hex')
-  await writeFile(path,JSON.stringify({...disk,key,last_attempt:0}))
+  const disk:Record<string,unknown>={...saved,version:1,key,last_attempt:0};delete disk.checkpoint
+  await writeFile(path,JSON.stringify(disk))
   brief=make();await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai')
   t.mock.timers.enable({apis:['setTimeout']});brief.startGeneration();t.mock.timers.tick(1000)
   assert.equal(brief.snapshot().status,'working','the old synthesis must be reviewed again even when its sources have not changed')
@@ -343,5 +345,101 @@ test('identical local-source cards and dismissals remain independent between acc
   assert.equal(brief.snapshot().cards.length,1)
   brief.update([],'2026-10-19','UTC',access('a'));assert.equal(brief.snapshot().cards.length,0)
   brief.update([],'2026-10-19','UTC',access('b'));assert.equal(brief.snapshot().cards.length,1)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a v1 state migrates to a v2 checkpoint idempotently and an unchanged checkpoint needs no model call',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-migrate-')),path=join(dir,'timeline.json');let calls=0
+ const make=()=>new TimelineBrief(path,()=>{calls++;return Promise.resolve(reply)},()=>undefined)
+ let brief=make()
+ try{
+  await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');await brief.refresh();await brief.close()
+  const saved=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>,legacyKey=String(saved.key)
+  const legacy:Record<string,unknown>={...saved,version:1,updated_at:'2026-10-18T00:00:00.000Z',last_attempt:0};delete legacy.checkpoint
+  await writeFile(path,JSON.stringify(legacy))
+  brief=make();await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai')
+  assert.equal(brief.snapshot().cards.length,1)
+  const id=brief.snapshot().cards[0]!.id
+  await brief.dismiss(id)
+  const migrated=JSON.parse(await readFile(path,'utf8')) as {version:number;checkpoint:{last_success_at:string|null;input_versions:{id:string;version:string}[];generation:string}}
+  assert.equal(migrated.version,2)
+  assert.equal(migrated.checkpoint.last_success_at,'2026-10-18T00:00:00.000Z','the migrated checkpoint keeps the last successful time')
+  assert.deepEqual(migrated.checkpoint.input_versions,[{id:'message',version:'v1'}])
+  assert.equal(migrated.checkpoint.generation,legacyKey)
+  await brief.refresh({force:false});assert.equal(calls,1,'the migrated checkpoint matches the current inputs')
+  await brief.close()
+  // Re-opening an already migrated state is a no-op, not a second rewrite.
+  brief=make();await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');await brief.refresh({force:false});assert.equal(calls,1)
+  const again=JSON.parse(await readFile(path,'utf8')) as {version:number}
+  assert.equal(again.version,2)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('unchanged automatic refreshes spend no model call and identical output never moves updated_at',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-skip-'))
+ let generated:{cards:unknown[]}={cards:[reply.cards[0]!]},count=0
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>{count++;return Promise.resolve(generated as typeof reply)},()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  const first=brief.snapshot();assert.equal(count,1);assert.ok(first.updated_at)
+  await brief.refresh({force:false});await brief.refresh({force:false})
+  assert.equal(count,1,'an unchanged checkpoint is not re-synthesized')
+  assert.equal(brief.snapshot().updated_at,first.updated_at)
+  await brief.refresh()
+  assert.equal(count,2,'a user refresh still asks the model')
+  assert.equal(brief.snapshot().updated_at,first.updated_at,'an identical answer is not a real change')
+  generated={cards:[{...reply.cards[0]!,title:'Check the node again'}]}
+  await brief.refresh()
+  assert.notEqual(brief.snapshot().updated_at,first.updated_at,'a changed card moves the briefing timestamp')
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('incremental synthesis receives prior card summaries and only the changed input ids',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-delta-'))
+ const contexts:{prior_cards?:{id:string}[];new_input_ids?:string[]}[]=[]
+ const brief=new TimelineBrief(join(dir,'timeline.json'),(_inputs,context)=>{contexts.push(context);return Promise.resolve(reply)},()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  assert.deepEqual(contexts[0]!.new_input_ids,['message'],'the first synthesis treats every input as new')
+  assert.equal(contexts[0]!.prior_cards,undefined)
+  await brief.refresh({force:false});assert.equal(contexts.length,1)
+  await brief.refresh()
+  assert.equal(contexts[1]!.prior_cards?.length,1);assert.equal(contexts[1]!.prior_cards[0]!.id,brief.snapshot().cards[0]!.id)
+  assert.equal(contexts[1]!.new_input_ids,undefined,'nothing changed since the checkpoint')
+  brief.update([{...input,version:'v2',text:'The node recovered'}],'2026-10-17','UTC');await brief.refresh()
+  assert.deepEqual(contexts[2]!.new_input_ids,['message'])
+  assert.equal(contexts[2]!.prior_cards?.length,1)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a delta revision keeps the published identity and an unknown prior id is not trusted',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-prior-id-'))
+ let generated:{cards:unknown[]}=reply
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(generated as typeof reply),()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  const original=brief.snapshot().cards[0]!
+  generated={cards:[{...reply.cards[0]!,prior_id:original.id,title:'Check the node again',why_now:'The node was reported again'}]}
+  await brief.refresh()
+  const cards=brief.snapshot().cards
+  assert.equal(cards.length,1,'a revision updates the published card instead of adding a duplicate')
+  assert.equal(cards[0]!.id,original.id);assert.equal(cards[0]!.title,'Check the node again')
+  generated={cards:[{...reply.cards[0]!,prior_id:'not-a-published-card',title:'Independent issue'}]}
+  await brief.refresh()
+  assert.equal(brief.snapshot().cards.length,2,'an unknown prior id falls back to a new grounded identity')
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('snapshot separates active and archived cards and keeps the page key stable across source rechecks',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-counts-'))
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(reply),()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  const before=brief.snapshot()
+  assert.equal(before.active_count,1);assert.equal(before.archived_count,0);assert.equal(typeof before.pagination_key,'string')
+  brief.update([{...input,version:'v2'}],'2026-10-17','UTC')
+  const after=brief.snapshot()
+  assert.equal(after.active_count,0);assert.equal(after.archived_count,1,'withdrawn evidence is retained as archived history')
+  assert.equal(after.pagination_key,before.pagination_key,'the page key follows the generation, not the recheck timestamp')
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })

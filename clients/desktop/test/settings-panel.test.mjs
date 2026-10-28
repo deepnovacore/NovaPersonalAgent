@@ -17,6 +17,8 @@ import * as voiceChoice from '../src/renderer/voice-choice.mjs'
 import {moduleStatusNote} from '../src/renderer/capabilities-editor.mjs'
 import {memoryEmbeddingNote} from '../src/renderer/proactivity-panel.mjs'
 import * as viewPreferences from '../src/renderer/view-preferences.mjs'
+import * as iconSprite from '../src/renderer/icon-sprite.mjs'
+import {ICON_GLYPHS as iconSpriteGlyphs} from '../src/renderer/icon-artwork.mjs'
 const { createSettingsController, mergePatch, settingsButtonState } = settingsController
 
 const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
@@ -80,7 +82,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}, sandbox = {}) 
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    ...sandbox, NATIVE_VOICE_PROVIDERS, onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, ...viewPreferences, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage, moduleStatusNote,
+    ...sandbox, NATIVE_VOICE_PROVIDERS, onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, ...viewPreferences, ...iconSprite, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage, moduleStatusNote,
     createSkinPanel: () => ({render() {}, destroy() {}}),
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
@@ -626,15 +628,17 @@ test('every API key is a password field with a badge, hint, and clear button', (
   assert.equal((html.match(/type="password"/g) || []).length, 18)
 })
 
-test('only the selected pipeline key stays in view; the rest fold into 高级 with one-line fallbacks', () => {
+test('every model provider key stays visible in one stable group instead of being promoted by selection', () => {
   for (const key of ['compatibleAsrApiKey', 'selfHostedAsrApiKey', 'openaiCompatibleApiKey', 'selfHostedLlmApiKey', 'compatibleTtsApiKey', 'selfHostedTtsApiKey']) {
     assert.match(html, new RegExp(`<details class="advanced-keys custom-endpoint" data-endpoint="${key}"><summary>自定义端点密钥</summary>\\s*<div class="secret" data-key="${key}">`))
   }
-  const primary = html.slice(html.indexOf('id="secrets-primary"'), html.indexOf('id="secrets-advanced"'))
-  assert.doesNotMatch(primary, /type="password"/)
-  assert.match(html, /<details id="secrets-advanced" class="advanced-keys"><summary>高级：其他供应商与增强项<\/summary>/)
+  const models = html.slice(html.indexOf('id="secrets-models"'), html.indexOf('id="secret-panel-connections"'))
+  for (const key of ['dashscopeApiKey', 'stepfunApiKey', 'openrouterApiKey', 'geminiApiKey', 'openaiApiKey', 'deepseekApiKey', 'arkApiKey', 'doubaoBigmodelApiKey']) {
+    assert.match(models, new RegExp(`class="secret" data-key="${key}"`), key)
+  }
+  assert.doesNotMatch(html, /id="secrets-primary"|id="secrets-advanced"/)
   assert.doesNotMatch(html, /id="(doubaoAsr|model)ApiKey"/)
-  assert.match(script, /arrangeSecrets\(usage\)/)
+  assert.match(script, /function renderKeyUsage/)
   assert.match(script, /不配则改用对话模型判断资讯相关度/)
   assert.match(script, /不配则回退百炼联网搜索/)
 })
@@ -1201,7 +1205,7 @@ test('every settings block belongs to exactly one sidebar category', () => {
   // table would be hidden permanently by applyCategory.
   const blocks = [...html.matchAll(/<(?:section|details) (?:class="[^"]*" )?id="([^"]+)"/g)]
     .map(match => match[1])
-    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced', 'secrets-advanced', 'proactivity-advanced'].includes(id))
+    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced', 'proactivity-advanced'].includes(id))
   for (const id of blocks) assert.ok(sections.includes(id), `${id} is missing from a category`)
 })
 
@@ -1216,6 +1220,35 @@ test('the sidebar renders one button per category with the first current', () =>
   assert.match(html, /id="category-general" data-category="general" aria-current="true">/)
   assert.equal((html.match(/class="nav-item"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length)
   assert.equal((html.match(/class="nav-item"[^>]*tabindex="-1"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length - 1)
+})
+
+test('sidebar and icon-button glyphs come from the shared sprite, injected at boot', () => {
+  // The static markup stays text-only: geometry and colour live in the sprite.
+  const nav = html.match(/<nav class="settings-nav"[\s\S]*?<\/nav>/)[0]
+  assert.doesNotMatch(nav, /<svg/, 'the static rail contains no icons')
+  assert.doesNotMatch(html, /--nav-icon/)
+  assert.doesNotMatch(css, /--nav-icon|nav-item::before/)
+  assert.match(css, /\.settings-nav \.nav-item \.ui-icon \{[^}]*width:\s*18px/)
+
+  // Boot installs the sprite once and prepends one <svg><use> per category.
+  assert.match(script, /import \{installIconSprite, icon\} from '\.\/icon-sprite\.mjs'/)
+  assert.match(script, /installIconSprite\(document\)/)
+  assert.match(script, /button\?\.dataset\?\.category/)
+  assert.match(script, /button\.prepend\(glyph\)/)
+  const mapping = script.match(/const NAV_GLYPHS = Object\.freeze\(\{([\s\S]*?)\}\)\n/)?.[1]
+  assert.ok(mapping, 'the rail keeps an explicit category-to-glyph table')
+  const glyphs = [...mapping.matchAll(/: '([a-z][a-z0-9-]*)'/g)].map(match => match[1])
+  for (const category of settingsCategories.SETTINGS_CATEGORIES) {
+    assert.match(mapping, new RegExp(`\\b${category.id}: '[a-z]`), `${category.id} gets a glyph`)
+  }
+  for (const glyph of glyphs) assert.ok(iconSpriteGlyphs.includes(glyph), `${glyph} exists in the sprite`)
+
+  // Decorative inline SVG is gone from settings.html; only the phone brand
+  // illustration stays inline, and #codex-rescan is filled by settings.mjs.
+  assert.equal((html.match(/<svg/g) || []).length, 1, 'only the phone illustration stays inline')
+  assert.match(html, /id="phone-illustration"[^>]*>\s*<svg/)
+  assert.match(html, /id="codex-rescan"[^>]*><\/button>/)
+  assert.doesNotMatch(html, /id="codex-rescan"[^>]*><svg/)
 })
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {
@@ -1440,19 +1473,11 @@ test('usage scope switches independently and stays selected through live updates
   assert.equal(panel.node('#usage-history').attributes['aria-pressed'], 'true')
 })
 
-test('conversation vision is unavailable for audio or unknown models and never offers a camera selector', async () => {
-  const base = {visionModels:{qwen:['qwen3-vl-plus']},conversationVisionEnabled:true}
-  const panel = await mountSettingsPanel(publicView(base))
-  assert.equal(panel.node('#conversation-vision-enabled').disabled,true)
-  assert.equal(panel.node('#conversation-vision-enabled').checked,false)
-  assert.equal(panel.node('#conversation-vision-status').textContent, '')
-  panel.push(publicView({...base,pipelineMode:'cascaded',cascadedLlmModels:{qwen:'qwen3-vl-plus'}}))
-  assert.equal(panel.node('#conversation-vision-enabled').disabled,false)
-  assert.equal(panel.node('#conversation-vision-enabled').checked,true)
-  panel.push(publicView({...base,pipelineMode:'cascaded',cascadedLlmModels:{qwen:'unknown-vl'}}))
-  assert.equal(panel.node('#conversation-vision-enabled').disabled,true)
-  assert.doesNotMatch(html,/id="conversation-camera"/u)
-  assert.doesNotMatch(await readFile(new URL('../src/renderer/capabilities-editor.mjs',import.meta.url),'utf8'),/mcp__nova_camera/u)
+test('the main-agent conversation vision switch is gone while camera monitoring stays', () => {
+  assert.doesNotMatch(html, /conversation-vision-enabled|主 Agent 视觉能力/)
+  assert.match(html, /id="camera-executor-toggle"/)
+  assert.match(html, /id="watch-model"/)
+  assert.doesNotMatch(script, /conversationVisionEnabled/)
 })
 
 test('monitor model presets require the matching saved API key and preserve unavailable selections', async () => {
@@ -1734,4 +1759,31 @@ test('compatible speech presets save vendor path prefixes and reset sampling ext
   assert.equal(patch.compatibleTtsBaseUrl,'https://open.bigmodel.cn/api/paas/v4')
   assert.equal(patch.compatibleTtsVoice,'tongtong')
   assert.equal(patch.compatibleTtsSendSampleRate,false)
+})
+
+test('native, StepFun and connector secrets retain boolean presence while plaintext stays write only', async () => {
+  const keys = ['minicpmRealtimeApiKey', 'personaplexRealtimeApiKey', 'stepfunApiKey', 'composioApiKey']
+  const plaintext = Object.fromEntries(keys.map(key => [key, `private-value-${key}`]))
+  const presence = Object.fromEntries(keys.map(key => [key, true]))
+  const sources = Object.fromEntries(keys.map(key => [key, 'environment']))
+  const calls = [], renders = []
+  const remote = publicView({...plaintext, secrets: plaintext, secretsPresent: presence, secretSources: sources})
+  const controller = createSettingsController({
+    api: {set: async patch => {calls.push(structuredClone(patch)); return remote}},
+    render: (view, drafts) => renders.push({view, drafts}), status() {},
+  })
+  controller.setView(remote)
+  assert.deepEqual(controller.snapshot().view.secretsPresent, presence)
+  assert.deepEqual(controller.snapshot().view.secretSources, sources)
+  controller.stage({...plaintext, secrets: plaintext})
+  assert.deepEqual(controller.snapshot().drafts, {})
+  assert.equal((await controller.save(plaintext)).saved, true)
+  assert.deepEqual(calls, [{secrets: plaintext}])
+  for (const snapshot of [...renders, controller.snapshot()]) {
+    assert.doesNotMatch(JSON.stringify(snapshot), /private-value-/)
+    for (const key of keys) assert.equal(Object.hasOwn(snapshot.view, key), false)
+    assert.equal(Object.hasOwn(snapshot.view, 'secrets'), false)
+  }
+  controller.syncView(publicView({secretsPresent: {...presence, stepfunApiKey: 'unsafe-plaintext', minicpmRealtimeApiKey: false}}))
+  assert.deepEqual(controller.snapshot().view.secretsPresent, {minicpmRealtimeApiKey:false,personaplexRealtimeApiKey:true,composioApiKey:true})
 })

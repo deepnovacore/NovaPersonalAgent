@@ -45,3 +45,31 @@ test('without a current draft the profile shows the empty state, not the previou
   assert.ok(!all.includes('Complete prior portrait'));assert.ok(all.includes('个人资料需要更新，原有资料仍保存在本机。'))
  }finally{globalThis.document=previous}
 })
+
+
+test('published versions are listed as read-only history beside the current portrait',()=>{
+ const previous=globalThis.document;globalThis.document={createElement:tag=>new Element(tag)}
+ try{
+  const panel=new Element('main'),button=(text,_click,host)=>{const item=new Element('button',text);host.append(item);return item},ref={entry_id:'s',version:'v'}
+  renderProfile(panel,{state:{profile:{version:0,about:''}},news:{},warmup:{status:'ready',draft:{about:{text:'Current portrait',refs:[ref]},work:[],interests:[]},last_attempt_at:'2026-10-18T00:00:00Z',history:[
+   {generated_at:'2026-10-18T00:00:00Z',generation_version:'understanding-v8',about:'Earlier published portrait',work:['Earlier work'],interests:['Earlier interest'],unavailable_sources:1},
+   {generated_at:'2026-10-17T00:00:00Z',generation_version:'understanding-v7',about:'Oldest portrait',work:[],interests:[],unavailable_sources:0},
+  ]},command(){},button,local:{},rerender(){}})
+  const texts=node=>[node.textContent??'',...node.children.flatMap(texts)],all=texts(panel)
+  assert.ok(all.includes('Current portrait'),'the current card is still authoritative')
+  assert.ok(all.includes('历史版本'))
+  assert.ok(all.includes('Earlier published portrait'));assert.ok(all.includes('Oldest portrait'))
+  assert.ok(all.some(text=>text.includes('1')&&text.includes('来源已不可用')),'unavailable archived sources are disclosed')
+ }finally{globalThis.document=previous}
+})
+
+test('a queued profile refresh and its last attempt are visible without claiming success',()=>{
+ const previous=globalThis.document;globalThis.document={createElement:tag=>new Element(tag)}
+ try{
+  const panel=new Element('main'),button=(text,_click,host)=>{const item=new Element('button',text);host.append(item);return item}
+  renderProfile(panel,{state:{profile:{version:0,about:''}},news:{},warmup:{status:'queued',draft:null,history:[],last_attempt_at:'2026-10-18T12:00:00Z'},command(){},button,local:{},rerender(){}})
+  const texts=node=>[node.textContent??'',...node.children.flatMap(texts)],all=texts(panel)
+  assert.ok(all.some(text=>text.includes('已排队')))
+  assert.ok(all.some(text=>text.includes('上次尝试')))
+ }finally{globalThis.document=previous}
+})

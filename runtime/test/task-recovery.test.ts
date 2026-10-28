@@ -173,3 +173,38 @@ test('recovery skips unchanged writes while preserving queued state transitions'
   await tasks.recoveryWait(task.id,null);assert.equal(tasks.get(task.id).phase,'queued')
  }finally{await tasks.close();await rm(root,{recursive:true,force:true})}
 })
+
+
+import {createConversation} from '../src/personal-agent/conversations.js'
+import {realtimeCapabilities} from '../src/realtime/capabilities.js'
+import type {RealtimeProvider} from '../src/realtime/protocol.js'
+for(const retired of [false,true])test(`production task recovery uses the host graph while visible conversation stays Plan: retired=${retired}`,async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'task-plan-recovery-')),path=join(root,'host.json')
+ const make=()=>new PersonalAgentHost({path,userScope:'test',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null})
+ const first=make(),second=make(),target={workspace_id:'ws',session_id:null,project:'Demo',title:'Demo',executor:'codex' as const}
+ const factory=(host:PersonalAgentHost)=>conversationRuntimeFactory({host,memory:()=>undefined,blackboard:{path:join(root,'board.sqlite'),ownerId:'test'},settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'unused-fixture'}),gateway:{complete:async()=>{throw Error('unexpected model call')},async *stream(){throw Error('unexpected model stream')}},searchTransport:{search:async()=>{throw Error('unexpected search')}},createTextProvider:()=>({capabilities:realtimeCapabilities.cascaded,connect:()=>Promise.resolve({epoch:1,provider_session_id:'fixture'}),sendAudio:()=>Promise.reject(Error('unexpected audio')),injectHostItem:()=>Promise.resolve(),createResponse:()=>Promise.reject(Error('unexpected model response')),cancelResponse:()=>Promise.resolve(),async *events(signal){await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true})});yield* []},close:()=>Promise.resolve()} satisfies RealtimeProvider)})
+ let initial:Awaited<ReturnType<ReturnType<typeof conversationRuntimeFactory>>>|undefined
+ try{
+  await first.open();first.setConversationRuntime(factory(first),()=>{})
+  await first.rememberCodingTarget('chat:main',0,target,()=>true)
+  initial=await factory(first)(createConversation('chat','Test',null,'chat:main'),()=>{},'text',undefined,false,undefined,{chat:false})
+  const origin=await initial.toolBridge!.origin('Approved delegated plan')
+  const task=await first.tasks.delegate('approved',{...input,origin_ref:origin,execution_route:'codex'})
+  await first.tasks.control('take',fence(task.id),{kind:'nova'},{kind:'user',client_id:'offline'})
+  if(retired)await first.command({type:'personal.command',request_id:'clear-plan',method:'conversations.clear',params:{id:'chat:main'}})
+  await first.command({type:'personal.command',request_id:'show-workbench',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'})
+  const mode=await first.command({type:'personal.command',request_id:'visible-plan',method:'conversations.mode',params:{id:'chat:main',mode:'plan'}},{client_id:'desktop:local'}) as {ok:boolean;error?:string}
+  assert.equal(mode.ok,true,mode.error)
+  await initial.close();await first.close()
+  const recovered:{kind:string;mode:string|undefined;generation:number;coding_target:unknown}[]=[]
+  const production=factory(second)
+  second.setConversationRuntime(async(...args)=>{recovered.push({kind:args[0].kind,mode:args[0].mode,generation:args[0].generation,coding_target:args[0].coding_target});return production(...args)},()=>{})
+  await second.open()
+  const port=second.taskRuntime(task.id)
+  assert.equal(await port.recover!(second.tasks.get(task.id)),null,'recovered graph must retain the real durable task origin')
+  assert.deepEqual(recovered,[{kind:'chat',mode:'chat',generation:0,coding_target:retired?null:target}])
+  const visible=second.conversationSnapshot().items.find(item=>item.id==='chat:main')!
+  assert.equal(visible.mode,'plan');assert.equal(visible.generation,retired?1:0);assert.deepEqual(visible.coding_target,target)
+  assert.deepEqual(second.conversationSnapshot().messages,[])
+ }finally{await initial?.close();await first.close();await second.close();await rm(root,{recursive:true,force:true})}
+})

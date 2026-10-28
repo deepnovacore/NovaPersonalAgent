@@ -17,7 +17,7 @@
 .welcome-eyebrow{font-size:11px;letter-spacing:.14em;color:#8d86ae;margin:0 0 14px}
 .welcome-lead,.welcome-footnote,.permission-note{font-size:13px;line-height:1.8;color:#797989}
 .welcome-footnote{font-size:11px;margin:18px 0}
-.permission-row{display:flex;align-items:center;justify-content:space-between;gap:24px;border:1px solid #e6e3ed;background:#fff;border-radius:14px;padding:17px 20px;margin:12px 0}
+.permission-row{display:flex;align-items:center;justify-content:space-between;gap:24px;border:1px solid #e6e3ed;background:#fff;border-radius:var(--radius-xl);padding:17px 20px;margin:12px 0}
 .permission-row h3{font-size:14px;margin:0 0 5px;color:#353249}
 .permission-row p{font-size:12px;color:#7f7b90;line-height:1.7;margin:0 0 7px}
 .permission-row button{white-space:nowrap;flex-shrink:0}
@@ -30,8 +30,8 @@ button.welcome-primary:hover{background:#554b7a}
 .welcome-reload{margin-top:25px;opacity:.65;font-size:11px!important}
 .welcome-error{color:#ac4e49;font-size:12px;line-height:1.6;max-width:600px}
 .chat-intro.assistant-welcome{padding:22px 4px 12px;text-align:left;margin:0;max-width:100%}
-.welcome-bubble{padding:15px 18px;background:#f2f0f7;border-radius:5px 18px 18px 18px;font-size:13px!important;line-height:1.9!important;color:#605a70!important;margin:12px 0!important}
-.welcome-name-card{padding:20px;border:1px solid #e8e4ed;border-radius:20px;background:var(--surface-raised,#fff);margin-top:18px}
+.welcome-bubble{padding:15px 18px;background:#f2f0f7;border-radius:var(--radius-xs) var(--radius-xl) var(--radius-xl) var(--radius-xl);font-size:13px!important;line-height:1.9!important;color:#605a70!important;margin:12px 0!important}
+.welcome-name-card{padding:20px;border:1px solid #e8e4ed;border-radius:var(--radius-xl);background:var(--surface-raised,#fff);margin-top:18px}
 .identity-editor{display:grid;gap:16px}
 .identity-top{display:flex;gap:20px;align-items:center}
 .portrait-wrap{position:relative;flex:none}
@@ -45,7 +45,7 @@ button.welcome-primary:hover{background:#554b7a}
 .identity-side{display:grid;flex:1;gap:12px;min-width:0}
 .identity-fields{display:grid;gap:12px;margin:0}
 .identity-fields label{display:grid;gap:6px;font-size:12px;font-weight:550;color:var(--ink-muted,#82798d)}
-.identity-fields input{box-sizing:border-box;width:100%;min-width:0;border:1px solid #e2dce9;border-radius:12px;padding:11px 14px;background:var(--surface,#faf9fc);color:var(--ink,#343145);font:inherit;font-size:14px;font-weight:400}
+.identity-fields input{box-sizing:border-box;width:100%;min-width:0;border:1px solid #e2dce9;border-radius:var(--radius-lg);padding:11px 14px;background:var(--surface,#faf9fc);color:var(--ink,#343145);font:inherit;font-size:14px;font-weight:400}
 .identity-fields input:focus-visible{border-color:#645b8b}
 .identity-name-choices{display:flex;flex-wrap:wrap;gap:8px;margin:0}
 .identity-editor .identity-name-choices button{padding:5px 14px;border-color:transparent;border-radius:999px;background:#f1eefb;color:#645b8b;font-size:12px}
@@ -62,12 +62,12 @@ body[data-personal-collapsed=true] .welcome-screen{display:none}
 .welcome-screen .window-grip{position:absolute;top:4px;left:80px;right:12px;height:36px;margin:0;flex:none}
 
 /* Permission step: hero mark, icon tiles, status pills. */
-.welcome-hero{display:grid;place-items:center;width:64px;height:64px;margin:0 auto 18px;border-radius:20px;background:linear-gradient(145deg,#f3f0fb,#e4def6);color:#645b8b;box-shadow:0 6px 16px rgba(100,91,139,.16)}
+.welcome-hero{display:grid;place-items:center;width:64px;height:64px;margin:0 auto 18px;border:1px solid #e6e3ed;border-radius:var(--radius-xl);background:#f3f0fb;color:#645b8b}
 .welcome-hero svg{width:30px;height:30px}
 .welcome-permissions .welcome-eyebrow,.welcome-permissions h1,.welcome-permissions .welcome-lead{text-align:center}
 .welcome-permissions .welcome-lead{margin:0 0 24px}
-.permission-row{gap:16px;border-radius:16px;padding:16px 18px;box-shadow:0 1px 2px rgba(39,40,59,.04)}
-.permission-icon{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:13px;background:#f1eefb;color:#645b8b}
+.permission-row{gap:16px;border-radius:var(--radius-xl);padding:16px 18px}
+.permission-icon{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:var(--radius-lg);background:#f1eefb;color:#645b8b}
 .permission-icon svg{width:22px;height:22px}
 .permission-copy{flex:1;min-width:0}
 .permission-copy p{margin:0}
@@ -80,7 +80,7 @@ body[data-personal-collapsed=true] .welcome-screen{display:none}
 .permission-row button{border-radius:999px;padding:7px 16px}
 button.welcome-primary{border-radius:999px;padding:13px 22px}
 @media(max-height:740px){.welcome-hero{display:none}.permission-row{padding:12px 14px}}
-@media(prefers-color-scheme:dark){.welcome-hero{background:linear-gradient(145deg,#33304a,#2a2740);color:#b9acec;box-shadow:none}.permission-icon{background:#322f44;color:#b9acec}.permission-state{background:#3a332a;color:#d9bd91}.permission-state[data-status=granted]{background:#25372c;color:#8fd0aa}.permission-state[data-status=not_required],.permission-state[data-status=unsupported]{background:#2d2c33;color:#a9a5b3}.identity-editor .assistant-portrait,.identity-editor .assistant-portrait:hover:not(:disabled){background:#2c2a36}.identity-editor .portrait-reset{background:#25242e;border-color:#3e3a4b;color:#cfc6ee}.identity-editor .identity-name-choices button{background:#2f2c3b;color:#cfc6ee}.identity-editor .identity-name-choices button[aria-pressed=true]{background:#786ba8;color:#fff}.portrait-badge{background:#786ba8}.identity-fields input:focus-visible{border-color:#b0a0df}}
+@media(prefers-color-scheme:dark){.welcome-hero{background:#33304a;border-color:#3e3a4b;color:#b9acec}.permission-icon{background:#322f44;color:#b9acec}.permission-state{background:#3a332a;color:#d9bd91}.permission-state[data-status=granted]{background:#25372c;color:#8fd0aa}.permission-state[data-status=not_required],.permission-state[data-status=unsupported]{background:#2d2c33;color:#a9a5b3}.identity-editor .assistant-portrait,.identity-editor .assistant-portrait:hover:not(:disabled){background:#2c2a36}.identity-editor .portrait-reset{background:#25242e;border-color:#3e3a4b;color:#cfc6ee}.identity-editor .identity-name-choices button{background:#2f2c3b;color:#cfc6ee}.identity-editor .identity-name-choices button[aria-pressed=true]{background:#786ba8;color:#fff}.portrait-badge{background:#786ba8}.identity-fields input:focus-visible{border-color:#b0a0df}}
 
 .idle-avatar{display:inline-block;position:relative;vertical-align:middle;flex-shrink:0;line-height:0}
 .idle-avatar img{display:block}

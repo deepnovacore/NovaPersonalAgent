@@ -22,3 +22,11 @@ test('a fresh state has only the main conversation and rejects the removed proac
  assert.deepEqual(initialConversations().items.map(item=>item.id),['chat:main'])
  assert.throws(()=>conversationSchema.parse({...createConversation('chat','x'),kind:'proactive'}))
 })
+
+test('new conversations default to Chat and assistant tool traces are bounded',()=>{
+ const c=createConversation('chat','新对话',null,'new-chat'),at=new Date().toISOString()
+ assert.equal(c.mode??'chat','chat')
+ c.messages.push({id:'a',conversation_id:c.id,role:'assistant',text:'reply',created_at:at,tool_trace:[{name:'memory__recall',state:'ok',summary:'2 条'}]})
+ assert.equal(conversationSchema.parse(c).messages[0]!.tool_trace?.[0]?.name,'memory__recall')
+ assert.throws(()=>conversationSchema.parse({...c,messages:[{id:'a',conversation_id:c.id,role:'assistant',text:'x',created_at:at,tool_trace:Array.from({length:17},()=>({name:'memory__recall',state:'ok',summary:''}))}]}))
+})

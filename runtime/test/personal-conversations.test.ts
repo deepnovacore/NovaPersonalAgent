@@ -663,3 +663,34 @@ test('task list metadata includes a bounded latest excerpt and failed state for 
  const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  try{await host.open();const snapshot=host.conversationSnapshot(),task=snapshot.items.find(value=>value.id==='task')!;assert.equal(snapshot.selected_id,'chat:main');assert.equal(task.last_message,'x'.repeat(160));assert.equal(task.generation_status,'failed');assert.equal(snapshot.messages.some(message=>message.id==='failed'),false)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('a prepared bridge override is not reused for the next normal conversation turn',async()=>{
+ const seen:({chat?:boolean}|undefined)[]=[]
+ const pool=new ConversationRuntimePool((_conversation,_emit,_mode,_lifetime,_recovery,_execution,overrides)=>{seen.push(overrides);return Promise.resolve({runTurn:()=>Promise.resolve({assistant:'ok'}),close:()=>Promise.resolve()})},()=>{/* no transport */})
+ const conversation=createConversation('chat','Bridge',null,'bridge-chat')
+ await pool.prepare(conversation,undefined,{chat:false})
+ await pool.clear(conversation.id)
+ await pool.run(conversation,'next')
+ assert.deepEqual(seen,[{chat:false},undefined])
+})
+
+
+test('isolated dispatch retains work ownership and closes with the pool without replacing Chat',async()=>{
+ let dispatchClosed=0,chatClosed=0,parked=0
+ let dispatchLifetime:AbortSignal|undefined
+ const conversation=createConversation('chat','Test',null,'chat:main')
+ const pool=new ConversationRuntimePool((_conversation,_emit,_mode,lifetime,_recovery,_execution,overrides)=>{
+  const host=overrides?.chat===false
+  if(host)dispatchLifetime=lifetime
+  return Promise.resolve({runTurn:()=>Promise.resolve({assistant:host?'host':'chat'}),retainTasks:()=>host,ownsWork:id=>host&&id==='owned-work',parkVoice:()=>{parked++;return Promise.resolve()},close:()=>{if(host)dispatchClosed++;else chatClosed++;return Promise.resolve()}})
+ },()=>{ /* no transport */ })
+ try{
+  await pool.isolated(conversation,async()=>{
+   assert.equal(pool.workConversation('owned-work'),'chat:main')
+   assert.deepEqual(await pool.run(conversation,'hello'),{assistant:'chat'})
+  })
+  assert.equal(dispatchLifetime?.aborted,true);assert.equal(parked,1);assert.equal(dispatchClosed,0);assert.equal(chatClosed,0)
+  assert.equal(pool.workConversation('owned-work'),'chat:main')
+ }finally{await pool.close()}
+ assert.equal(dispatchClosed,1);assert.equal(chatClosed,1)
+})

@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {Conversation,ConversationRuntime,ConversationTurnContext} from './conversations.js'
 import type {PersonalAgentHost} from './host.js'
-import type {CascadedLlmFactory,CascadedLlmSession,CascadedLlmTool} from '../realtime/cascaded/llm.js'
+import {mergeTurnText,type CascadedLlmFactory,type CascadedLlmSession,type CascadedLlmTool} from '../realtime/cascaded/llm.js'
 import {LOCAL_TOOLS,executeLocalTool,isLocalTool,localPathEscapesProject,localToolArguments,projectResourceKey} from './local-tools.js'
 import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources} from '../executors/task-resources.js'
 import {localShellProcessGone,type LocalShellOptions} from './local-shell.js'
@@ -90,13 +90,22 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
     for(const message of voiceMessages)if(!state.voice_message_ids?.includes(message.id))state.inputs.push({kind:'host_context',content:JSON.stringify({previous_message:{role:message.role,text:message.text},source:'voice',trust:'untrusted_external'})})
     state.voice_message_ids=voiceMessages.map(message=>message.id)
     if(!context?.resume){state.last_user=text;state.inputs.push({kind:'user_text',text})}
-    else if(!state.inputs.length&&!state.pending_calls.length)state.inputs.push({kind:'user_text',text:RESUME_CHECK})
+    // Resume is a control action: it never invents a user turn in the provider conversation.
+    else if(!state.inputs.length&&!state.pending_calls.length)state.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'resume_control',instruction:RESUME_CHECK})})
     if(context?.resume&&state.reason==='approval_denied')return {assistant:'上次操作已拒绝，请补充新的要求后继续。'}
     state.status='running';state.reason=null;state.assistant='';delete state.model_failure;await save()
     const toolBridge=await bridge(),baseTools=build?[...toolBridge.tools.filter(tool=>tool.name!=='dispatch'),...LOCAL_TOOLS,finishTool]:[...toolBridge.tools.filter(tool=>toolBridge.readonlyNames.includes(tool.name)),publishTool]
     const authorizedTools=[...baseTools,...(build?computerTools(true):[])]
     const allowed=new Set(authorizedTools.map(tool=>tool.name));if(allowed.size!==authorizedTools.length||authorizedTools.length>128)throw Error('workbench_tool_configuration')
     let toolRounds=0,finishedReply:string|undefined
+    // One user turn can span several model responses (tool rounds). Its identity and accumulated
+    // text are turn-scoped so a later round extends the same answer instead of replacing it.
+    const turn=randomUUID();let turnText='',outputLimitContinues=0,toolTruncationRetried=false
+    const compactCaption=(text:string):string=>{const points=[...text];return points.length>4000?points.slice(0,4000).join('')+'…':text}
+    const emitTurnCaption=(roundText:string):void=>{
+     const visible=compactCaption(mergeTurnText(turnText,roundText))
+     options.emit({type:'caption',role:'assistant',text:visible,full_text:visible,turn_id:turn,final:false})
+    }
     while(true){
      signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale')
      const executeCall=async(call:WorkbenchCall)=>{
@@ -257,7 +266,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
      }
      if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
      const enabled=computerState(),tools=[...baseTools,...(enabled.enabled?computerTools(enabled.direct):[])]
-     const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[],turn=randomUUID();let assistant='',preview='',captionSent=false,completed=false
+     const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[];let assistant='',preview='',captionSent=false,completed=false
      // One bounded thought per model round; display-only, never model input or history.
      let thinkingChunks:string[]=[],thinkingCodepoints=0,thinkingStartedAt:string|null=null
      const addThinking=(text:string):void=>{
@@ -282,17 +291,17 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
        if(event.kind==='reasoning_delta'){addThinking(event.text);signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale');continue}
        signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale')
        if(event.kind==='text_preview'||event.kind==='text_delta'){
-        if(event.kind==='text_preview')preview=(preview+event.text).slice(-4001)
+        if(event.kind==='text_preview'){const points=[...preview+event.text];preview=points.length>16000?points.slice(0,16000).join(''):points.join('')}
         else{assistant+=event.text;preview=''}
-        // Keep progress frames compact; the complete final reply is durably paged to the UI.
-        const text=assistant+preview,visible=text.slice(-4000)+(text.length>4000?'…':'')
+        // Keep progress frames compact from the head: the opening paragraph must not scroll out
+        // of the live caption before the durable reply replaces it.
         captionSent=true
-        options.emit({type:'caption',role:'assistant',text:visible,full_text:visible,turn_id:turn,final:false})
+        emitTurnCaption(assistant+preview)
        }
        else if(event.kind==='tool_call'){
-        // Narration before a tool call is display-only: withdraw it before the tool round so it
-        // neither stays on screen nor becomes the persisted Build reply.
-        if(preview||assistant||captionSent){options.emit({type:'caption',role:'assistant',text:'',full_text:'',turn_id:turn,final:true});preview='';assistant='';captionSent=false}
+        // Narration before a tool call is the opening of this turn's answer, not display-only
+        // speculation: commit it as authoritative and keep it across the tool round.
+        if(preview){assistant=mergeTurnText(assistant,preview);preview=''}
         if(calls.some(call=>call.id===event.call_id))throw Error('duplicate_tool_call');calls.push({id:event.call_id,name:event.name,arguments:structuredClone(event.arguments),state:'prepared',created_at:new Date().toISOString(),...(context?.user_message_id?{message_id:context.user_message_id}:{})})}
        else if(event.kind==='response_completed')completed=true
        else if(event.kind==='response_failed'){
@@ -302,15 +311,55 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
        }
       }
       if(!completed)throw Error('model_response_incomplete')
+      if(preview){assistant=mergeTurnText(assistant,preview);preview=''}
       recordThinking()
       if(!llm.checkpoint)throw Error('model_checkpoint_unsupported')
-      state.model=llm.checkpoint();state.inputs=[]
-      if(!calls.length&&assistant.length>16000)await store.saveReply(conversation.id,conversation.generation,turn,assistant)
-      state.assistant=assistant.slice(0,16000)
+      state.model=llm.checkpoint();state.inputs=[];delete state.model_failure
+      turnText=mergeTurnText(turnText,assistant)
+      if(turnText.length>16000)await store.saveReply(conversation.id,conversation.generation,turn,turnText)
+      state.assistant=turnText.slice(0,16000)
       for(const call of calls){const prior=state.calls.find(item=>item.id===call.id);if(prior){if(prior.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');state.pending_calls.push(prior)}else {state.calls.push(call);state.pending_calls.push(call)}}
       await save()
-     }catch(error){recordThinking();if(captionSent&&version===runVersion)options.emit({type:'caption',role:'assistant',text:'',full_text:'',turn_id:turn,final:true});state.model=before;await session?.close();session=undefined;if(error instanceof Error&&'code' in error&&typeof error.code==='string'){const detail='detail' in error&&typeof error.detail==='string'&&/^[a-z_]{1,64}$/u.test(error.detail)?'_'+error.detail:'';throw Error('model_'+error.code+detail,{cause:error})}throw error}
-     if(!calls.length){state.status='completed';state.reason=null;await save();return {assistant,turn_id:turn}}
+     }catch(error){
+      recordThinking()
+      const reason=error instanceof Error?error.message:''
+      // An output-limit failure is respendable: the provider stopped at its ceiling without a
+      // protocol error. Continue text turns at most twice; retry a truncated tool call once with
+      // an instruction to split the payload, and never execute the truncated call itself.
+      const outputLimit=reason==='model_output_limit'||reason.startsWith('model_output_limit_')
+      if(outputLimit&&version===runVersion&&!signal.aborted){
+       state.model=before;await session?.close();session=undefined
+       // Keep the text that did arrive before the ceiling: the continuation extends it.
+       turnText=mergeTurnText(turnText,assistant);state.assistant=turnText.slice(0,16000)
+       const truncatedTool=reason.endsWith('_tool_arguments'),partial=assistant.slice(-4000),en=options.language==='en'
+       if(!truncatedTool&&outputLimitContinues<2){
+        outputLimitContinues+=1
+        state.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'output_limit_continuation',attempt:outputLimitContinues,previous_partial:partial,instruction:en?'The previous reply was cut off by the model output limit before it finished. Continue the same answer from where it stopped without repeating text the user already saw, and finish the requested work in this turn.':'上一轮回复因模型输出长度上限在完成前被截断。请从截断处继续同一段回答，不要重复用户已经看到的内容，并在本轮完成用户要求的全部工作。'})})
+        delete state.model_failure;await save();continue
+       }
+       if(truncatedTool&&!toolTruncationRetried){
+        toolTruncationRetried=true
+        state.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'output_limit_tool_split',attempt:1,previous_partial:partial,instruction:en?'The previous tool call was cut off by the model output limit and was NOT executed. Do not send one oversized call: split the payload into several smaller sequential calls (for example one file or one section per call) and never repeat a call that already completed.':'上一轮工具调用因输出长度上限被截断，且没有被执行。不要再次发送一个超大的调用：请把内容拆成多个较小的串行调用（例如每次只写一个文件或一个段落），不要重复已经完成的调用。'})})
+        delete state.model_failure;await save();continue
+       }
+       state.status='paused';state.reason='model_output_limit'
+       const modeLabel=build?'Build':'Plan',limitLabel=truncatedTool
+        ?(en?'the tool call exceeded the model output limit and was not executed':`工具调用超出模型输出长度上限，未执行`)
+        :(en?'the model reply exceeded its output limit':'模型回复超出输出长度上限')
+       const continuation=build?(en?'Click Resume to continue; completed operations will not be replayed.':'点击 Resume 继续，已完成的操作不会重放。'):(en?'Send another message to continue.':'发送新消息继续。')
+       const notice=en?`${modeLabel} paused: ${limitLabel}. ${continuation}`:`${modeLabel} 已暂停：${limitLabel}。${continuation}`
+       const fullReply=mergeTurnText(turnText,notice)
+       if(fullReply.length>16000)await store.saveReply(conversation.id,conversation.generation,turn,fullReply)
+       const visible=fullReply.length>16000?turnText.slice(0,16000-notice.length-2)+'\n\n'+notice:fullReply
+       state.assistant=visible;await save()
+       return {assistant:visible,...(fullReply.length>16000?{full_text_ref:true}:{}),turn_id:turn}
+      }
+      if(captionSent&&version===runVersion)options.emit({type:'caption',role:'assistant',text:'',full_text:'',turn_id:turn,final:true})
+      state.model=before;await session?.close();session=undefined
+      if(error instanceof Error&&'code' in error&&typeof error.code==='string'){const detail='detail' in error&&typeof error.detail==='string'&&/^[a-z_]{1,64}$/u.test(error.detail)?'_'+error.detail:'';throw Error('model_'+error.code+detail,{cause:error})}
+      throw error
+     }
+     if(!calls.length){state.status='completed';state.reason=null;await save();return {assistant:turnText,turn_id:turn}}
     }
    }catch(error){
     for(const call of state.pending_calls)if(call.state!=='completed'){
@@ -322,7 +371,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
     if(reason==='cleanup_unknown')verificationRequired=true
     state.status=reason==='cleanup_unknown'?'outcome_unknown':signal.aborted||modelInterrupted?'paused':'failed';state.reason=signal.aborted?'stopped':reason;await save();if(signal.aborted)return {assistant:'Build 已暂停。'}
     if(modelInterrupted){
-     const label=options.language==='en'?({model_timeout:'The model stopped returning data',model_overflow:'The model response exceeded the stream capacity',model_http:'The model service returned an error',model_network:'The model connection was interrupted'} as Record<string,string>)[reason]??'The model response was interrupted':({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_http:'模型服务返回错误',model_network:'模型连接中断'} as Record<string,string>)[reason]??'模型回复中断'
+     const label=options.language==='en'?({model_timeout:'The model stopped returning data',model_overflow:'The model response exceeded the stream capacity',model_http:'The model service returned an error',model_network:'The model connection was interrupted',model_output_limit:'The model reply exceeded its output limit',model_output_limit_tool_arguments:'The tool call exceeded the model output limit and was not executed',model_protocol_output_limit:'The model reply exceeded its output limit'} as Record<string,string>)[reason]??'The model response was interrupted':({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_http:'模型服务返回错误',model_network:'模型连接中断',model_output_limit:'模型回复超出输出长度上限',model_output_limit_tool_arguments:'工具调用超出模型输出长度上限，未执行',model_protocol_output_limit:'模型回复超出输出长度上限'} as Record<string,string>)[reason]??'模型回复中断'
      return {assistant:options.language==='en'?`Build paused: ${label} (${reason}). Click Resume to continue. Completed operations will not be replayed.`:`Build 已暂停：${label}（${reason}）。点击 Resume 继续，已完成的操作不会重放。`}
     }
     throw error

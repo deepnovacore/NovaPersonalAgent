@@ -2,7 +2,7 @@ import {t} from './locale.mjs'
 
 const ITEMS={
  platform:{text:'当前系统不支持 Computer Use，仅支持 macOS 和 Windows。'},
- configuration:{text:'电脑操作的高级配置无效，请检查后重试。',action:'打开设置',run:api=>api.orbMenu?.openSettings?.('connections')},
+ configuration:{text:'电脑操作的高级配置无效，请检查后重试。',action:'打开设置',run:api=>api.orbMenu?.openSettings?.('permissions')},
  screen_permission:{text:'Nova 需要“屏幕录制”权限才能看到屏幕。',action:'打开系统设置',run:api=>api.welcome?.permission?.('screen')},
  accessibility_permission:{text:'Nova 需要“辅助功能”权限才能点击和输入。',action:'打开系统设置',run:api=>api.welcome?.permission?.('accessibility')},
  vision_model:{text:'当前模型不支持图片，切换到视觉模型后即可使用电脑操作。'},

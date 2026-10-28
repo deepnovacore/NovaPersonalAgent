@@ -25,11 +25,11 @@
       <button type="button" class="nav-item" id="category-diary" data-category="diary" aria-current="false" tabindex="-1">日记与简报</button>
       <button type="button" class="nav-item" id="category-themes" data-category="themes" aria-current="false" tabindex="-1">主题</button>
       <button type="button" class="nav-item" id="category-usage" data-category="usage" aria-current="false" tabindex="-1">用量</button>
-      <button type="button" class="nav-item" id="category-pipeline" data-category="pipeline" aria-current="false" tabindex="-1">语音管线</button>
+      <button type="button" class="nav-item" id="category-models" data-category="models" aria-current="false" tabindex="-1">模型</button>
       <button type="button" class="nav-item" id="category-skills" data-category="skills" aria-current="false" tabindex="-1">技能</button>
       <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">执行器与 MCP</button>
-      <button type="button" class="nav-item" id="category-im" data-category="im" aria-current="false" tabindex="-1">IM 渠道</button>
-      <button type="button" class="nav-item" id="category-connections" data-category="connections" aria-current="false" tabindex="-1">连接与权限</button>
+      <button type="button" class="nav-item" id="category-connectors" data-category="connectors" aria-current="false" tabindex="-1">连接器</button>
+      <button type="button" class="nav-item" id="category-permissions" data-category="permissions" aria-current="false" tabindex="-1">权限</button>
       <button type="button" class="nav-item" id="category-privacy" data-category="privacy" aria-current="false" tabindex="-1">隐私与数据</button>
       <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
       <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
@@ -139,11 +139,6 @@
       <section class="setting-section" id="capabilities-section">
         <h2>能力</h2>
         <p id="capabilities-problems" class="warning" aria-live="polite"></p>
-        <div class="vision-settings">
-          <h3>主 Agent 视觉能力</h3>
-          <label class="toggle-row">允许主 Agent 使用摄像头<input id="conversation-vision-enabled" type="checkbox" role="switch"></label>
-          <p id="conversation-vision-status" class="hint" role="status"></p>
-        </div>
         <div class="capability-group" id="executors-section">
           <h3>执行器</h3>
           <div class="executor-card">
@@ -163,8 +158,8 @@
           <div id="capabilities-editor"></div>
         </div>
       </section>
-      <section class="setting-section" id="im-section" hidden><h2>IM 渠道</h2><p class="hint">连接你使用的聊天工具，选择同步范围与提醒方式。</p><div id="im-connection"></div><p id="im-error" role="status" aria-live="polite"></p></section>
-      <section class="setting-section" id="connections-section" hidden><h2>连接与权限</h2><p class="hint">只读取你授权的内容，不会代你修改或发送；内容会交给你选择的模型服务处理。</p><div id="connections-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
+      <section class="setting-section" id="im-section" hidden><h2>IM 渠道</h2><p class="hint">连接聊天工具，选择同步范围与提醒方式。</p><div id="im-connection"></div><p id="im-error" role="status" aria-live="polite"></p></section>
+      <section class="setting-section" id="connections-section" hidden><h2>应用与资料</h2><p class="hint">只读取你授权的内容，不会代你修改或发送；内容会交给你选择的模型服务处理。</p><div id="connections-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
       <section class="setting-section" id="privacy-section">
         <h2>隐私与数据</h2>
         <p class="hint">决定哪些内容会交给模型服务处理。默认只读取你发的消息，以及 @ 你的消息。</p>
@@ -204,7 +199,7 @@
         </fieldset>
       </section>
       <section class="setting-section" id="codex-approval-section">
-        <h2>权限</h2>
+        <h2>编程执行器审批</h2>
         <p id="coding-permission-note" class="hint"></p>
         <fieldset id="codex-approval-mode" class="segmented segmented-approval">
           <legend>Coding 执行器审批模式</legend>
@@ -350,7 +345,16 @@
         <div id="diary-panel"></div>
         <p id="diary-error" role="status" aria-live="polite"></p>
       </section>
-      <section id="pipeline" class="setting-section">
+      <section id="models-section" class="setting-section">
+        <h2>模型</h2>
+        <div class="model-subnav" role="tablist" aria-label="模型设置">
+          <button type="button" id="model-tab-routes" data-model-pane="routes" role="tab" aria-selected="true">模型路由</button>
+          <button type="button" id="model-tab-pipeline" data-model-pane="pipeline" role="tab" aria-selected="false" tabindex="-1">语音管线</button>
+        </div>
+        <p class="hint">选择每类能力实际使用的模型；下拉框只列出已配置密钥的服务商。保存后点击重启生效。</p>
+        <div id="model-routes" data-model-pane="routes"></div>
+      </section>
+      <section id="pipeline" class="setting-section" data-model-pane="pipeline" hidden>
         <h2>语音管线</h2>
         <fieldset id="pipeline-mode" class="segmented segmented-pipeline">
           <legend>处理方式</legend>
@@ -603,9 +607,7 @@
             <button type="button" id="secret-tab-connections" role="tab" aria-selected="false" aria-controls="secret-panel-connections" tabindex="-1">搜索与应用连接</button>
           </div>
           <div id="secret-panel-models" role="tabpanel" aria-labelledby="secret-tab-models">
-          <div id="secrets-primary"></div>
-          <details id="secrets-advanced" class="advanced-keys"><summary>高级：其他供应商与增强项</summary>
-<div id="secrets-advanced-list">
+          <div id="secrets-models">
 <div class="secret" data-key="dashscopeApiKey">
             <label for="dashscopeApiKey">DashScope</label>
             <span class="badge" id="badge-dashscopeApiKey">未设置</span>
@@ -669,8 +671,6 @@
             <a class="key-link" href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
           </div>
           </div>
-          </details>
-          </div>
           <div id="secret-panel-connections" role="tabpanel" aria-labelledby="secret-tab-connections" hidden>
           <details class="advanced-keys"><summary>高级：联网搜索与应用连接</summary>
 <div class="secret" data-key="composioApiKey">
@@ -721,7 +721,7 @@
               <span class="option"><span class="option-name">手动路径</span></span>
             </label>
           </fieldset>
-          <button type="button" id="codex-rescan" class="icon-button" aria-label="重新检测 Codex" title="重新检测 Codex"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg></button>
+          <button type="button" id="codex-rescan" class="icon-button" aria-label="重新检测 Codex" title="重新检测 Codex"></button>
           </div>
           <div id="codex-manual-settings" hidden>
             <div class="field field-stacked">

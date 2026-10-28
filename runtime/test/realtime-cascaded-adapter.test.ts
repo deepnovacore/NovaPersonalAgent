@@ -3018,7 +3018,7 @@ test('streaming speech reaches TTS before completion and cleans split markup wit
   await adapter.close()
 })
 
-test('text-only previews stream without duplicate authority and retract before tools', async () => {
+test('text-only previews stream without duplicate authority and keep narration before tools', async () => {
   for (const ending of ['same','suffix','split','mismatch','tool','failure','split-failure'] as const) {
     const llm=new FakeLlm([{kind:'response_started',response_id:'r'},
       {kind:'text_preview',text:'hel'},{kind:'text_preview',text:'lo'},
@@ -3035,11 +3035,47 @@ test('text-only previews stream without duplicate authority and retract before t
       const events=await settleWithin('preview response',collecting)
       assert.equal(llm.calls[0]?.previewText,true)
       assert.deepEqual(events.filter(e=>e.kind==='response_transcript_delta').map(e=>e.text),['hel','lo',...(['suffix','split'].includes(ending)?['!']:[])])
-      assert.deepEqual(events.filter(e=>e.kind==='response_transcript_final').map(e=>e.text),[['tool','failure','split-failure'].includes(ending)?'':ending==='mismatch'?'correct':['suffix','split'].includes(ending)?'hello!':'hello'])
+      // A text-mode tool round keeps its narration: no empty final retracts the opening paragraph,
+      // and the consumer merges it with the response that follows the tool result.
+      const finals=['tool'].includes(ending)?[]:['failure','split-failure'].includes(ending)?['']:[ending==='mismatch'?'correct':['suffix','split'].includes(ending)?'hello!':'hello']
+      assert.deepEqual(events.filter(e=>e.kind==='response_transcript_final').map(e=>e.text),finals)
       assert.equal(events.some(e=>e.kind==='provider_error'&&e.code==='cascaded_mixed_text_tool'),false)
       if(ending==='tool')assert.equal(events.some(e=>e.kind==='tool_call_ready'),true)
     }finally{await adapter.close()}
   }
+})
+
+test('text-only preview narration survives a tool call and continues the same turn', async () => {
+  const llm = new FakeLlm([
+    {kind:'response_started',response_id:'preview-turn'},{kind:'text_preview',text:'先检查一下。'},
+    {kind:'tool_call',item_id:'item-lookup',call_id:'call-lookup',name:'lookup',arguments:{}},
+    {kind:'response_completed',response_id:'preview-turn'},
+  ], [
+    {kind:'response_started',response_id:'preview-continuation'},
+    {kind:'text_delta',text:'检查完成。'},
+    {kind:'response_completed',response_id:'preview-continuation'},
+  ])
+  const adapter = new CascadedRealtimeAdapter({textOnly:true,llm})
+  const signal = new AbortController().signal
+  await adapter.connect({tools:[{type:'function',function:{name:'lookup',parameters:{type:'object',properties:{}}}}],signal})
+  const watching = observe(adapter)
+  try {
+    await adapter.submitText('帮我检查', signal)
+    await waitFor('tool call ready', () => watching.events.some(event => event.kind === 'tool_call_ready'))
+    const ready = watching.events.find(event => event.kind === 'tool_call_ready')
+    assert.equal(ready?.kind === 'tool_call_ready' ? ready.call_id : null, 'call-lookup')
+    assert.deepEqual(watching.events.filter(event => event.kind === 'response_transcript_delta').map(event => event.text),
+      ['先检查一下。'])
+    assert.equal(watching.events.some(event => event.kind === 'response_transcript_final'), false,
+      'narration before a tool call is not a turn-level final')
+    assert.equal(llm.calls[0]?.previewText, true)
+    const item = {kind:'tool_output' as const, host_item_id:'preview-tool', event_id:'preview-tool-event',
+      call_id:'call-lookup', content:'检查结果'}
+    await adapter.injectHostItem(item, directOptions())
+    await adapter.createResponse({kind:'tool_result', item, task_summary:null, origin_spoken:false}, new AbortController().signal)
+    await waitFor('continuation final', () => watching.events.some(event => event.kind === 'response_transcript_final' && event.text === '检查完成。'))
+    assert.equal(watching.events.some(event => event.kind === 'provider_error'), false)
+  } finally { await watching.stop(); await adapter.close() }
 })
 
 test('voice ignores speculative text and only speaks authoritative text', async () => {

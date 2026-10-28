@@ -16,7 +16,8 @@ export const planReferenceSchema=z.object({id:z.string(),version:z.number().int(
 export const localBuildSchema=z.object({computer_use:computerUseStateSchema.optional(),project:z.string(),plan_id:z.string().optional(),plan_version:z.number().int().positive().optional(),source_conversation_id:z.string(),status:buildStatusSchema,reason:z.string().nullable().default(null),log_revision:z.number().int().nonnegative().default(0),approval:z.object({id:z.string(),call_id:z.string(),name:z.string(),preview:z.string().max(1800)}).strict().nullable().default(null)}).strict()
 export const sourceTodoSchema=z.object({id:z.string().min(1).max(512),version:z.number().int().nonnegative()}).strict()
 export interface ConversationTurnContext {user_message_id?:string;local_desktop?:boolean;resume?:boolean;source_todo?:z.infer<typeof sourceTodoSchema>; prepared?:PreparedContent; references?:DiscussionReference[]; refresh?:()=>Promise<ConversationTurnContext>}
-export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),origin:z.literal('proactive').optional(),input_mode:z.literal('voice').optional(),schedule_ref:scheduleReferenceSchema.optional(),references:z.array(discussionReferenceSchema).max(2).optional(),source_todo:sourceTodoSchema.optional(),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),full_text_ref:z.boolean().optional(),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
+const toolTraceSchema=z.array(z.object({name:z.string().min(1).max(128),state:z.enum(['running','ok','error']),summary:z.string().max(160)}).strict()).max(16)
+export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),origin:z.literal('proactive').optional(),input_mode:z.literal('voice').optional(),schedule_ref:scheduleReferenceSchema.optional(),references:z.array(discussionReferenceSchema).max(2).optional(),source_todo:sourceTodoSchema.optional(),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),full_text_ref:z.boolean().optional(),tool_trace:toolTraceSchema.optional(),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
 export const codingTargetSchema=z.object({workspace_id:z.string().min(1).max(128),session_id:z.string().min(1).max(128).nullable(),project:z.string().min(1).max(120),title:z.string().max(120),executor:z.literal('codex')}).strict()
 export const conversationSchema=z.object({mode:z.enum(['chat','plan']).optional(),plan:planReferenceSchema.optional(),build:localBuildSchema.optional(),scheduled_result_focus:z.string().min(1).max(128).optional(),coding_target:codingTargetSchema.nullable().default(null),id:z.string().min(1).max(128),kind:z.enum(['chat','topic','schedule','build']),title:z.string().min(1).max(120),subject_key:z.string().max(512).nullable(),created_at:z.string().datetime(),updated_at:z.string().datetime(),generation:z.number().int().nonnegative(),messages:z.array(conversationMessageSchema).max(512),feed_ids:z.array(z.string().max(128)).max(256),read_through_id:z.string().nullable().default(null),prepared:z.object({trust:z.literal('untrusted_external'),text:z.string().max(12000),evidence_refs:z.array(z.string().max(512)).max(32)}).strict().nullable()}).strict()
 export type Conversation=z.infer<typeof conversationSchema>
@@ -27,11 +28,11 @@ export function nextConversationTitle(items:readonly Pick<Conversation,'title'>[
 export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat',nextConversationTitle([]),null,'chat:main')],work_owners:{},approval_owners:{}}}
 export interface ConversationRuntime {
  readonly capabilities?:RealtimeCapabilities|undefined
- toolBridge?:{readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
+ toolBridge?:{readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];readonly chatTools?:readonly CascadedLlmTool[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
  stopBuild?():Promise<void>
  localApproval?(id:string,approved:boolean,always?:boolean):Promise<void>
  retainTasks?():boolean
- runTurn(text:string,signal:AbortSignal,context?:ConversationTurnContext):Promise<{assistant:string;turn_id?:string}>
+ runTurn(text:string,signal:AbortSignal,context?:ConversationTurnContext):Promise<{assistant:string;full_text_ref?:boolean;turn_id?:string;tool_trace?:readonly {name:string;state:'running'|'ok'|'error';summary:string}[]}>
  parkVoice?():Promise<void>
  canSwitch?():boolean
  deliverSuggestion?(suggestion:Suggestion,reason:WakeReason):void
@@ -42,12 +43,13 @@ export interface ConversationRuntime {
  approvalDecision?(approvalId:string,approved:boolean):Promise<void>
  confirmationDecision?(proposalId:string,confirmed:boolean):Promise<void>
 }
-export type ConversationRuntimeFactory=(conversation:Readonly<Conversation>,emit:(frame:Record<string,unknown>)=>void,mode?:'text'|'voice',lifetime?:AbortSignal,recovery?:boolean,execution?:ScheduledRunGrant)=>Promise<ConversationRuntime>
+export type ConversationRuntimeFactory=(conversation:Readonly<Conversation>,emit:(frame:Record<string,unknown>)=>void,mode?:'text'|'voice',lifetime?:AbortSignal,recovery?:boolean,execution?:ScheduledRunGrant,overrides?:{chat?:boolean})=>Promise<ConversationRuntime>
 /** The global host owns resources; this pool owns only each conversation's scoped turn graph. */
 export class ConversationRuntimePool {
  readonly #modes=new Map<string,'text'|'voice'|'parked'>()
  readonly #lifetimes=new Map<string,AbortController>()
  readonly #retired=new Map<string,Set<ConversationRuntime>>()
+ readonly #isolated=new Set<Promise<ConversationRuntime>>()
  readonly #ready=new Map<string,ConversationRuntime>()
  readonly #runtimes=new Map<string,Promise<ConversationRuntime>>()
  readonly #tails=new Map<string,Promise<unknown>>()
@@ -56,9 +58,26 @@ export class ConversationRuntimePool {
  #closed=false
  readonly #executions=new Map<string,string>()
  constructor(readonly create:ConversationRuntimeFactory,readonly emit:(frame:Record<string,unknown>)=>void){}
- async prepare(conversation:Conversation,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{return this.#prepare(conversation,false,execution)}
- async restore(conversation:Conversation,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{return this.#prepare(conversation,true,execution)}
- async #prepare(conversation:Conversation,recovery:boolean,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{
+ /** Host action graphs share task ownership, never the foreground Chat slot. */
+ async isolated<T>(conversation:Conversation,operation:(runtime:ConversationRuntime)=>Promise<T>,recovery=false):Promise<T>{
+  if(this.#closed)throw Error('conversation_runtime_closed')
+  const lifetime=new AbortController(),id=conversation.id
+  const starting=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,recovery,undefined,{chat:false})
+  this.#isolated.add(starting)
+  let runtime:ConversationRuntime|undefined
+  try{
+   runtime=await starting
+   if(this.#closed)throw Error('conversation_runtime_closed')
+   const retained=this.#retired.get(id)??new Set<ConversationRuntime>();retained.add(runtime);this.#retired.set(id,retained)
+   return await operation(runtime)
+  }finally{
+   lifetime.abort();this.#isolated.delete(starting)
+   if(runtime){if(!this.#closed&&runtime.retainTasks?.())await runtime.parkVoice?.();else{this.#retired.get(id)?.delete(runtime);await runtime.close()}}
+  }
+ }
+ async prepare(conversation:Conversation,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{return this.#prepare(conversation,false,execution,overrides)}
+ async restore(conversation:Conversation,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{return this.#prepare(conversation,true,execution,overrides)}
+ async #prepare(conversation:Conversation,recovery:boolean,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{
   if(this.#closed)throw Error('conversation_runtime_closed')
   if(conversation.kind==='schedule'&&!execution)throw Error('scheduled_execution_required')
   if(execution&&conversation.kind!=='schedule')throw Error('invalid_scheduled_conversation')
@@ -66,10 +85,10 @@ export class ConversationRuntimePool {
   if(execution)this.#executions.set(conversation.id,execution.namespace)
   const id=conversation.id,existing=this.#runtimes.get(id);if(existing)return existing
   const lifetime=new AbortController();this.#lifetimes.set(id,lifetime);this.#modes.set(id,'text')
-  const promise=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,recovery,execution);this.#runtimes.set(id,promise)
+  const promise=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,recovery,execution,overrides);this.#runtimes.set(id,promise)
   try{const runtime=await promise;if(this.#closed||this.#lifetimes.get(id)!==lifetime){await runtime.close();throw Error('conversation_runtime_closed')}this.#ready.set(id,runtime);return runtime}catch(error){lifetime.abort();this.#runtimes.delete(id);this.#lifetimes.delete(id);this.#modes.delete(id);throw error}
  }
- run(conversation:Conversation,text:string,context?:ConversationTurnContext):Promise<{assistant:string;turn_id?:string}>{
+ run(conversation:Conversation,text:string,context?:ConversationTurnContext):Promise<{assistant:string;full_text_ref?:boolean;turn_id?:string;tool_trace?:readonly {name:string;state:'running'|'ok'|'error';summary:string}[]}>{
   if(conversation.kind==='schedule')return Promise.reject(Error('hidden_conversation'))
   if(this.#closed)return Promise.reject(Error('conversation_runtime_closed'))
   if(!this.acceptsText(conversation.id))return Promise.reject(Error('conversation_busy'))
@@ -100,7 +119,7 @@ export class ConversationRuntimePool {
  async sendAudio(id:string,pcm:Uint8Array):Promise<void>{const runtime=await this.#runtimes.get(id);if(!runtime?.sendAudio)throw Error('voice_unavailable');await runtime.sendAudio(pcm)}
  async confirm(id:string,proposalId:string,confirmed:boolean):Promise<void>{const runtime=await this.#runtimes.get(id);if(!runtime?.confirmationDecision)throw Error('confirmation_unavailable');await runtime.confirmationDecision(proposalId,confirmed)}
  async approve(id:string,approvalId:string,approved:boolean):Promise<void>{const candidates=[await this.#runtimes.get(id),...(this.#retired.get(id)??[])];for(const runtime of candidates){if(!runtime?.approvalDecision)continue;try{await runtime.approvalDecision(approvalId,approved);return}catch{}}throw Error('approval_unavailable')}
- async close():Promise<void>{this.#closed=true;await Promise.all([...new Set([...this.#controllers.keys(),...this.#runtimes.keys()])].map(id=>this.clear(id)));await Promise.all([...this.#retired.values()].flatMap(items=>[...items].map(runtime=>runtime.close())));this.#retired.clear()}
+ async close():Promise<void>{this.#closed=true;await Promise.allSettled(this.#isolated);await Promise.all([...new Set([...this.#controllers.keys(),...this.#runtimes.keys()])].map(id=>this.clear(id)));await Promise.all([...this.#retired.values()].flatMap(items=>[...items].map(runtime=>runtime.close())));this.#retired.clear()}
 }
 
 /** Acknowledgements cover only messages actually visible, never later arrivals. */

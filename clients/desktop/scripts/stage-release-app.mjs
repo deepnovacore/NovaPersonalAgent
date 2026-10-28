@@ -5,13 +5,15 @@ import {relative, resolve, sep} from 'node:path'
 
 // Materialize the installed production graph. npm owns resolution and integrity;
 // staging only removes development files and the unused optional ffmpeg binaries.
-export async function stageReleaseApplication({packageRoot}) {
+export async function stageReleaseApplication({packageRoot, rendererOutputRoot = process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT ?? resolve(packageRoot, 'build/renderer')}) {
   const stageRoot = resolve(packageRoot, 'build/release-app')
   await rm(stageRoot, {recursive: true, force: true})
   await mkdir(stageRoot, {recursive: true, mode: 0o700})
   for (const name of ['src', 'LICENSES', 'package.json', 'THIRD_PARTY_NOTICES.md']) {
     await cp(resolve(packageRoot, name), resolve(stageRoot, name), {recursive: true})
   }
+  // Bundled renderer assets are built before staging and contain no runtime npm imports.
+  await cp(resolve(rendererOutputRoot), resolve(stageRoot, 'build/renderer'), {recursive: true})
   const selected = new Map()
   const queue = [{source: packageRoot, destination: stageRoot}]
   while (queue.length) {

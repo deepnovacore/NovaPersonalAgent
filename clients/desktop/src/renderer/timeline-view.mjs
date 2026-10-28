@@ -48,7 +48,8 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
  }
  const attention=snapshot.timeline
  const briefCards=[]
- const pageKey=`timeline:page:${attention?.generation_id??attention?.updated_at??'pending'}:`
+ // Progress publishes keep the same input generation, so expansion survives batch updates instead of resetting on updated_at.
+ const pageKey=`timeline:page:${attention?.pagination_key??attention?.generation_id??attention?.updated_at??'pending'}:`
  let pages=1;while(expanded.has(pageKey+pages))pages++
  const visibleCount=compact?3:pages*8
  if(attention){
@@ -58,10 +59,15 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
   if(attention.input_count&&attention.coverage)section.append(el('p',attention.coverage,'hint timeline-coverage'))
   if((attention.diagnostics?.failed_batches?.length||attention.diagnostics?.pending_batches)&&attention.status!=='working')section.append(el('p',t('部分资料尚未完成整理，以下保留已核对的进展；可刷新补充。'),'hint timeline-partial'))
   if(attention.cards?.length&&attention.status==='failed')section.append(el('p',t('本次更新未完成，以下保留上次结果。'),'hint'))
-  if(command){const refresh=button(t(attention.status==='working'?'正在整理…':'刷新'),()=>command('timeline.refresh',{}),header,'timeline:refresh');refresh.className='quiet';refresh.disabled=attention.status==='working'||attention.available===false}
+  if(command){const refresh=button(t(attention.status==='working'?'正在整理…':'刷新'),()=>command('timeline.refresh',{force:true}),header,'timeline:refresh');refresh.className='quiet';refresh.disabled=attention.status==='working'||attention.available===false}
   const latestReport=item=>Math.max(0,...(item.sources??[]).map(source=>Date.parse(source.observed_at??'')||0))
   const orderedBriefs=[...(attention.cards??[])].sort((a,b)=>(b.time?.anchor_date??'').localeCompare(a.time?.anchor_date??'')||latestReport(b)-latestReport(a))
-  if(orderedBriefs.length)section.append(el('p',t('共 {0} 条进展 · 已展示 {1} 条',orderedBriefs.length,Math.min(visibleCount,orderedBriefs.length)),'hint timeline-brief-count'))
+  if(orderedBriefs.length){
+   section.append(el('p',t('共 {0} 条进展 · 已展示 {1} 条',orderedBriefs.length,Math.min(visibleCount,orderedBriefs.length)),'hint timeline-brief-count'))
+   // Active cards still have their evidence; archived cards are retained history whose sources moved or were withdrawn.
+   const archived=Math.max(0,Math.min(attention.archived_count??orderedBriefs.filter(item=>item.sources_available===false||item.historical===true).length,orderedBriefs.length))
+   if(archived)section.append(el('p',t('其中 {0} 条为来源不可用的归档记录',archived),'hint timeline-brief-archived'))
+  }
   for(const item of orderedBriefs.slice(0,visibleCount)){
    const historical=item.historical===true||!!item.time?.as_of&&(item.time.as_of!==currentDate||!!item.timezone&&item.timezone!==(snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone))
    const kind=['attention','deadline','progress','insight'].includes(item.kind)?item.kind:'insight'

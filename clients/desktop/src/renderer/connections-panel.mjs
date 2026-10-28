@@ -23,7 +23,7 @@ export function createConnectionsPanel({document, api}) {
    for(const [id]of items){const page=el('div',undefined,'connections-page');page.id='connections-page-'+id;page.setAttribute('role','tabpanel');page.setAttribute('aria-labelledby','connections-tab-'+id);page.hidden=selected!==id;panels[id]=page;root.append(page)}
    target=panels.files
   }
-  const card=(title,description)=>{const node=el('article',undefined,'im-card');node.append(el('h3',title));if(description)node.append(el('p',description));target.append(node);return node}
+  const card=(title,description)=>{const node=el('article',undefined,'im-card');node.dataset.connector='source';node.append(el('h3',title));if(description)node.append(el('p',description));target.append(node);return node}
   if(state===null){const loading=card(t('连接与权限'),t('正在读取连接状态…'));loading.setAttribute('aria-busy',String(busy));return}
   const s=state,caps=s.capabilities??{}
   const sourceCard=card(t('本机目录'),t('已授权的来源列在下方；新增来源时单独确认读取和模型处理权限。'))

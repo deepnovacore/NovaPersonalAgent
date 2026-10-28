@@ -36,6 +36,7 @@ export const processingRequestSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('topics'),batch_id:id.optional(),after:z.number().int().nonnegative().default(0),limit:z.number().int().min(1).max(100).default(20),query:z.string().trim().max(200).default('')}).strict(),
  z.object({action:z.literal('evidence'),...owner,refs:z.array(processingRefSchema).min(1).max(8).refine(refs=>refs.reduce((sum,ref)=>sum+ref.end-ref.start,0)<=16000)}).strict(),
  z.object({action:z.literal('profile'),batch_id:id.optional()}).strict(),
+ z.object({action:z.literal('profile.history'),account_scope:id.optional(),limit:z.number().int().min(1).max(20).default(10)}).strict(),
  z.object({action:z.literal('observe'),...owner,refs:z.array(processingRefSchema).min(1).max(8),observations:z.array(processingObservationSchema).max(24)}).strict(),
  z.object({action:z.literal('profile_context'),...owner}).strict(),
  z.object({action:z.literal('identities'),...owner,refs:z.array(processingRefSchema).min(1).max(8)}).strict(),
@@ -150,18 +151,29 @@ function archivePublication(db:LedgerDatabase,prefix:string,provider:string,payl
  const published={draft:content.draft,projects:content.products?.projects??[],suggestions:(content.products?.suggestions??[]).map(suggestion=>{const item={...suggestion};delete item.anchor;delete item.date_evidence;return item}),generation_version:content.generation_version??null,generated_at:content.generated_at??null,sources}
  db.prepare('INSERT OR IGNORE INTO processing_publications VALUES(?,?,?,?,?)').run(prefix,provider,key,canonicalJson([...accounts].sort()),canonicalJson(published))
 }
+interface SavedPublication {draft:z.infer<typeof profileDraftSchema>;projects:unknown[];suggestions:unknown[];generation_version:string|null;generated_at:string|null;sources:{id:string;version:string;label:string;observed_at:string;type:string}[]}
+/** Archived profile prose is display history: it is never current input and never evidence. */
+export interface ProfileHistoryItem {generation_version:string|null;generated_at:string|null;draft:z.infer<typeof profileDraftSchema>;read_only:true;unavailable_sources:number;sources:{id:string;version:string;label:string;observed_at:string;type:string;available:boolean}[]}
+/** Publications of one user scope, newest first. Account scoping matches lastPublication: offline history is read only when it is unambiguous. */
+function publicationRows(db:LedgerDatabase,prefix:string,order:'discussion'|'recent'){
+ const sql=order==='discussion'?"SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY EXISTS(SELECT 1 FROM json_each(payload_json,'$.sources') WHERE json_extract(value,'$.type')='im') DESC,rowid DESC":"SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY rowid DESC"
+ return db.prepare(sql).all(prefix).map(row=>({accounts:JSON.parse(String(row.scope_json)) as string[],saved:JSON.parse(String(row.payload_json)) as SavedPublication}))
+}
+function visiblePublications(rows:ReturnType<typeof publicationRows>,accountScope:string|undefined){
+ const savedAccounts=new Set(rows.flatMap(row=>row.accounts))
+ return rows.filter(row=>!(row.accounts.length&&(accountScope===undefined?savedAccounts.size!==1:row.accounts.some(account=>account!==accountScope))))
+}
+function hydratePublication(db:LedgerDatabase,consumer:string,saved:SavedPublication):ProfileHistoryItem{
+ const sources=saved.sources.map(item=>{const record=effectiveEvidence(db,item.id,{purpose:'extraction',provider:consumer});return {...item,available:!!record&&record.hash===item.version}})
+ return {...saved,sources,read_only:true as const,unavailable_sources:sources.filter(source=>!source.available).length}
+}
 function lastPublication(db:LedgerDatabase,prefix:string,consumer:string,accountScope:string|undefined){
- const rows=db.prepare("SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY EXISTS(SELECT 1 FROM json_each(payload_json,'$.sources') WHERE json_extract(value,'$.type')='im') DESC,rowid DESC").all(prefix)
- const savedAccounts=new Set(rows.flatMap(row=>JSON.parse(String(row.scope_json)) as string[]))
- for(const row of rows){
-  const accounts=JSON.parse(String(row.scope_json)) as string[]
-  // Offline history is unambiguous only for one saved account; explicit account switches remain fenced.
-  if(accounts.length&&(accountScope===undefined?savedAccounts.size!==1:accounts.some(account=>account!==accountScope)))continue
-  const saved=JSON.parse(String(row.payload_json)) as {draft:z.infer<typeof profileDraftSchema>;projects:unknown[];suggestions:unknown[];generation_version:string|null;generated_at:string|null;sources:{id:string;version:string;label:string;observed_at:string;type:string}[]}
-  const sources=saved.sources.map(item=>{const record=effectiveEvidence(db,item.id,{purpose:'extraction',provider:consumer});return {...item,available:!!record&&record.hash===item.version}})
-  return {...saved,sources,read_only:true as const,unavailable_sources:sources.filter(source=>!source.available).length}
- }
- return null
+ const first=visiblePublications(publicationRows(db,prefix,'discussion'),accountScope)[0]
+ return first?hydratePublication(db,consumer,first.saved):null
+}
+/** Recent published versions, newest first, read-only. Never consulted as generation evidence. */
+function profileHistory(db:LedgerDatabase,prefix:string,consumer:string,accountScope:string|undefined,limit:number){
+ return visiblePublications(publicationRows(db,prefix,'recent'),accountScope).slice(0,limit).map(row=>hydratePublication(db,consumer,row.saved))
 }
 
 function joinAbout(parts:z.infer<typeof profileDraftSchema>['about'][]){
@@ -302,6 +314,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   decision('refresh',provider,'pending')
   return {queued:true}
  }
+ if(q.action==='profile.history')return {items:profileHistory(db,prefix,consumer,q.account_scope,q.limit)}
  if(q.action==='profile'||q.action==='products'){
   const saved=db.prepare('SELECT revision,payload_json FROM processing_profiles WHERE prefix=? AND provider=?').get(prefix,provider)
   if(!saved&&q.action==='profile')return {revision:0,draft:null}
@@ -329,7 +342,8 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const suggestions=(content.products?.suggestions??[]).filter(item=>valid(item)&&(q.include_dismissed===true||!dismissed.has(item.id))&&(!item.project_id||projects.some(project=>project.id===item.project_id&&project.relation==='participating'&&project.status==='current')))
   const originals=content.refs.flatMap(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)?.items??[])
   const profile_needs_update=!result.draft&&!!db.prepare("SELECT 1 FROM processing_profiles WHERE prefix=? AND provider<>? AND (json_type(payload_json,'$.draft.about')='object' OR json_array_length(payload_json,'$.draft.work')>0 OR json_array_length(payload_json,'$.draft.interests')>0) LIMIT 1").get(prefix,provider)
-  return {...result,projects,suggestions,corrections,...(q.presentation?{last_success:lastPublication(db,prefix,consumer,q.account_scope)}:{}),profile_needs_update,profile_pending:content.profile_pending===true,news_cleanup_pending:decisions.some(row=>row.kind==='policy'&&row.id==='cleanup'&&row.value==='pending'),generated_at:content.generated_at??null,sources:[...new Map(originals.map(item=>[item.evidence_id,{id:item.evidence_id,version:item.version,label:item.locator,observed_at:item.observed_at,type:item.source_kind==='user_correction'?'conversation':item.source_kind==='task_result'?'task':item.source_kind,...(item.source_metadata?.provider?{provider:item.source_metadata.provider.slice(0,80)}:{}),...(item.source_metadata?.source_url?{url:item.source_metadata.source_url}:{})}])).values()]}
+  const refresh_pending=!!db.prepare("SELECT 1 FROM processing_decisions WHERE prefix=? AND kind='refresh' AND value='pending'").get(prefix)
+  return {...result,projects,suggestions,corrections,...(q.presentation?{last_success:lastPublication(db,prefix,consumer,q.account_scope),history:profileHistory(db,prefix,consumer,q.account_scope,10)}:{}),profile_needs_update,profile_pending:content.profile_pending===true,refresh_pending,news_cleanup_pending:decisions.some(row=>row.kind==='policy'&&row.id==='cleanup'&&row.value==='pending'),generated_at:content.generated_at??null,sources:[...new Map(originals.map(item=>[item.evidence_id,{id:item.evidence_id,version:item.version,label:item.locator,observed_at:item.observed_at,type:item.source_kind==='user_correction'?'conversation':item.source_kind==='task_result'?'task':item.source_kind,...(item.source_metadata?.provider?{provider:item.source_metadata.provider.slice(0,80)}:{}),...(item.source_metadata?.source_url?{url:item.source_metadata.source_url}:{})}])).values()]}
 
  }
  const row=db.prepare('SELECT payload_json FROM processing_batches WHERE id=? AND prefix=? AND provider=?').get(q.batch_id,prefix,provider)

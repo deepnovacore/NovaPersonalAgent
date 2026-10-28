@@ -14,8 +14,6 @@ import type {CommittedConversationPair} from '../realtime/history.js'
 import {transcribeDraft} from '../realtime/cascaded/transcribe.js'
 import type {PromptLanguage} from '../realtime/prompt-language.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
-import {supportsVision} from '../model/vision-capability.js'
-import {captureConversationFrame} from '../core/camera-session.js'
 import {usageReporterForEndpoint, type UsageReporter} from '../realtime/usage.js'
 import {
   capabilitiesFromSettings,
@@ -286,7 +284,7 @@ export function buildTextRealtimeAssembly(
       return transcribeDraft(factory.openClient(),pcm,signal)
     },
   })
-  const intake=options.intake??defaultIntake(core,support.gateway,support.settings)
+  const intake=options.intake??defaultIntake(core,core.gateway,core.settings)
   const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
   const composition=composeRealtime(core,provider,{...options,memoryReadMode:'text',...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
   return composition
@@ -378,8 +376,6 @@ export function buildCascadedRealtimeAssembly(
   })
   const provider = new CascadedRealtimeProvider({
     language: options.settings.language,
-    ...(options.settings.conversation_vision_enabled && supportsVision(selection.llmProvider, selection.llmModel)
-      ? {captureFrame: (signal: AbortSignal) => captureConversationFrame(core.frameSource, signal, core.mediaStore)} : {}),
     endpointingFactory,
     asrFactory,
     llmFactory,
@@ -387,7 +383,7 @@ export function buildCascadedRealtimeAssembly(
     ...(options.telemetry === undefined ? {} : {telemetry: options.telemetry}),
     idFactory: () => ids.next('cascaded'),
   })
-  const intake = options.intake ?? defaultIntake(core, support.gateway, support.settings)
+  const intake = options.intake ?? defaultIntake(core, core.gateway, core.settings)
   const composition = composeRealtime(core, provider, {
     ...options,
     ...(intake === undefined ? {} : {intake}),
@@ -429,15 +425,22 @@ function supportComposition(
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
   if (connection.source === 'generic') return {settings: options.settings, gateway}
+  // A provider-derived default must never overwrite a lane the desktop routed explicitly.
+  const routed = options.settings.model_routes
   const watchModel = stripLikePython(options.settings.watch_model ?? '')
     || (provider === 'qwen' ? 'qwen3-vl-plus' : model)
+  // Never enumerate the whole settings object: an unselected provider's credential slot must
+  // stay unread even when this override exists.
+  const overrides: Record<string, unknown> = {}
+  if (routed.watch === undefined) overrides.watch_model = watchModel
+  if (routed.support === undefined) overrides.support_model = model
+  if (routed.compressor === undefined) {
+    overrides.compressor_model = isProviderDefaultCompressor(options.settings.compressor_model)
+      ? model : options.settings.compressor_model
+  }
+  if (Object.keys(overrides).length === 0) return {settings: options.settings, gateway}
   const settings = Object.create(options.settings) as Settings
-  Object.assign(settings, {
-    watch_model: watchModel,
-    support_model: model,
-    compressor_model: isProviderDefaultCompressor(options.settings.compressor_model)
-      ? model : options.settings.compressor_model,
-  })
+  Object.assign(settings, overrides)
   Object.freeze(settings)
   return {settings, gateway}
 }
@@ -530,7 +533,7 @@ export interface BuildQwenRealtimeProviderOptions {
   readonly idFactory: () => string
   readonly now: () => number
   readonly executorApproval: boolean
-  readonly modules?: {readonly schedules?: boolean; readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean; readonly gui?: boolean}
+  readonly modules?: {readonly schedules?: boolean; readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean; readonly gui?: boolean; readonly chatToolPolicy?: boolean}
 }
 
 function buildIntegratedWireProvider(options: BuildQwenRealtimeProviderOptions, profile?: IntegratedWireProfile): QwenAudioRealtimeAdapter {
@@ -618,7 +621,7 @@ export function buildQwenRealtimeAssembly(
     },
     executorApproval: (options.executorApproval ?? options.codexResource?.approvalController) != null,
   })
-  const intake = options.intake ?? defaultIntake(core, gateway, options.settings)
+  const intake = options.intake ?? defaultIntake(core, core.gateway, core.settings)
   return composeRealtime(core, provider, {
     ...options,
     ...(intake === undefined ? {} : {intake}),

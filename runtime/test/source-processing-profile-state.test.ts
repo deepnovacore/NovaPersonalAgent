@@ -28,3 +28,18 @@ test('temporary read failure preserves only same-account published display and c
  fail=true;await agent.reload();assert.deepEqual(agent.profileSnapshot().last_success,published);assert.equal(agent.profileSnapshot().status,'failed');assert.deepEqual(agent.snapshot().suggestions,[])
  account='second';agent.setPresentationAccount(account);assert.equal(agent.profileSnapshot().draft,null);assert.equal(agent.profileSnapshot().last_success,undefined);assert.deepEqual(agent.snapshot().suggestions,[]);await agent.reload();assert.equal(agent.profileSnapshot().last_success,null)
 })
+
+
+test('switching accounts clears profile history before reload and after a read failure',async()=>{
+ const {SourceProcessingAgent}=await import('../src/personal-agent/source-processing-agent.js')
+ const {emptyUnderstanding}=await import('../src/personal-agent/understanding-products.js')
+ let account='first',fail=false
+ const history=[{draft:{about:{text:'Private first account portrait',refs:[]},work:[],interests:[]},generation_version:'v',generated_at:'2026-10-18T00:00:00Z',read_only:true,unavailable_sources:0,sources:[]}]
+ const host={options:{memory:()=>({sourceProcessing:()=>fail?Promise.reject(Error('offline')):Promise.resolve({...emptyUnderstanding(),history,refresh_pending:true})})},snapshot:()=>({feishu:{account_id:account}}),life:{snapshot:()=>({todos:[],ideas:[],goals:[]})},schedules:{activeRuns:()=>[],terminalRuns:()=>[]}}
+ const agent=new SourceProcessingAgent(host as unknown as PersonalAgentHost)
+ await agent.reload();assert.equal(agent.profileSnapshot().history.length,1)
+ account='second';agent.setPresentationAccount(account)
+ assert.deepEqual(agent.profileSnapshot().history,[]);assert.equal(agent.profileSnapshot().last_success_at,null);assert.equal(agent.profileSnapshot().status,'idle')
+ fail=true;await agent.reload()
+ assert.deepEqual(agent.profileSnapshot().history,[]);assert.equal(agent.profileSnapshot().last_success_at,null)
+})

@@ -34,10 +34,11 @@ import {
   type ModelPort,
 } from '../core/causal-runtime.js'
 import { RealClock, type Clock } from '../core/clock.js'
-import { capabilitiesFromSettings, resolveModelApiKey, resolveProactivity, resolveWatchModelConnection, type Settings } from '../config/config.js'
+import { capabilitiesFromSettings, resolveModelApiKey, resolveModelRoute, resolveProactivity, resolveWatchModelConnection, type ResolvedModelRoute, type Settings } from '../config/config.js'
 import { MonotonicIdFactory, type IdFactory } from '../core/ids.js'
 import { GatewayCompressor } from '../model/model-adapters.js'
 import { unconfiguredModelGateway, OpenAIModelGateway, type MetricsSink, type ModelGateway } from '../model/model-gateway.js'
+import { ResponsesModelGateway } from '../model/responses-model-gateway.js'
 import { classifyProactiveSelection, runProactiveSelection } from '../core/calls.js'
 import {
   VisionAgentController,
@@ -78,7 +79,6 @@ export class AssemblyError extends Error {
 
 export interface AssemblyOptions {
   readonly taskHost?: boolean
-  readonly includeEnterPlanMode?:boolean
   readonly includeSchedules?: boolean
   readonly sourceProcessingContext?: boolean
   readonly scheduledContext?: boolean
@@ -127,7 +127,11 @@ export interface Assembly {
   readonly capabilities: CapabilityRegistry
   readonly capabilityStatus: CapabilityStatus
   readonly runtime: CausalRuntime
+  /** Shell/schedule/intake fallback gateway; the routed support lane when one is configured. */
   readonly gateway: ModelGateway
+  readonly supportGateway: ModelGateway
+  readonly compressorGateway: ModelGateway
+  readonly watchGateway: ModelGateway
   readonly tools: CompiledTools
   readonly manifests: readonly ExecutorManifest[]
   readonly mediaStore: MediaStore
@@ -211,6 +215,63 @@ function isAdmissionGatedFrameSource(source: FrameSource): source is AdmissionGa
 }
 
 /**
+ * Build the gateway for one explicitly routed lane.
+ *
+ * A route whose credential is missing becomes an unconfigured gateway: voice still starts
+ * and only auxiliary work that needs that lane fails locally. The routed provider owns its
+ * canonical endpoint, so provider thinking controls stay exact.
+ */
+export function buildModelRouteGateway(route: ResolvedModelRoute, options: {
+  readonly clock: Clock
+  readonly protocol?: 'chat-completions' | 'responses'
+  readonly onUsage?: UsageReporter
+  readonly metrics?: MetricsSink
+}): ModelGateway {
+  if (route.missing !== null) return unconfiguredModelGateway
+  const usage = options.onUsage === undefined ? {} : {onUsage: options.onUsage}
+  if (route.provider === 'openai-compatible' && options.protocol === 'responses') {
+    return new ResponsesModelGateway({baseUrl: route.baseUrl, apiKey: route.apiKey, ...usage})
+  }
+  return new OpenAIModelGateway({
+    ...usage,
+    baseUrl: route.baseUrl,
+    apiKey: route.apiKey,
+    allowAnonymous: route.provider === 'self-hosted',
+    redirect: route.provider === 'self-hosted' || route.provider === 'openai-compatible' ? 'error' : 'follow',
+    ...(route.provider === 'deepseek' || route.provider === 'openai' || route.provider === 'qwen'
+      ? {thinkingControl: route.provider} : {}),
+    clock: options.clock,
+    ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
+  })
+}
+
+/** Effective settings: explicit route models replace the legacy lane defaults. */
+function settingsWithRouteModels(
+  settings: Settings,
+  conversationTextRoute: ResolvedModelRoute | null,
+  supportRoute: ResolvedModelRoute | null,
+  compressorRoute: ResolvedModelRoute | null,
+  watchRoute: ResolvedModelRoute | null,
+): Settings {
+  // A loader that already applied the routes (the desktop path) yields an unchanged object, so
+  // the historical plain settings object survives. Only a caller that parsed the schema directly
+  // needs the route models layered on, and that layering must not enumerate unselected slots.
+  const overrides: Record<string, unknown> = {}
+  if (conversationTextRoute !== null
+    && (settings.cascade_llm_provider !== conversationTextRoute.provider || settings.cascade_llm_model !== conversationTextRoute.model)) {
+    overrides.cascade_llm_provider = conversationTextRoute.provider
+    overrides.cascade_llm_model = conversationTextRoute.model
+  }
+  if (supportRoute !== null && settings.support_model !== supportRoute.model) overrides.support_model = supportRoute.model
+  if (compressorRoute !== null && settings.compressor_model !== compressorRoute.model) overrides.compressor_model = compressorRoute.model
+  if (watchRoute !== null && settings.watch_model !== watchRoute.model) overrides.watch_model = watchRoute.model
+  if (Object.keys(overrides).length === 0) return settings
+  const routed = Object.create(settings) as Settings
+  Object.assign(routed, overrides)
+  return Object.freeze(routed)
+}
+
+/**
  * Build the runtime the desktop entry serves.
  *
  * The support model ports are wired as `ModelPort`s over one gateway; Proactive selection and
@@ -233,17 +294,32 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   }
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
+  // Explicit lanes own their provider/model; an unrouted lane keeps the historical defaults.
+  const conversationTextRoute = resolveModelRoute(settings, 'conversationText')
+  const supportRoute = resolveModelRoute(settings, 'support')
+  const compressorRoute = resolveModelRoute(settings, 'compressor')
+  const watchRoute = resolveModelRoute(settings, 'watch')
+  const routedSettings = settingsWithRouteModels(settings, conversationTextRoute, supportRoute, compressorRoute, watchRoute)
 
   // Preserve Python's validation order: the model credential is checked before
   // Tavily when neither production transport is injected.
   const nativeWithoutSupport = settings.pipeline_mode === 'integrated' && ['minicpm-o','personaplex'].includes(settings.integrated_provider) && !(settings.model_api_key ?? '').trim()
-  const gateway = options.gateway ?? (nativeWithoutSupport ? unconfiguredModelGateway : new OpenAIModelGateway({
+  let baseGateway: ModelGateway | undefined = options.gateway
+  const legacyBaseGateway = (): ModelGateway => baseGateway ??= (nativeWithoutSupport ? unconfiguredModelGateway : new OpenAIModelGateway({
     ...(options.onUsage?{onUsage:options.onUsage}:{}),
     baseUrl: settings.model_base_url,
     apiKey: requireApiKey(settings),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   }))
+  const routeGateway = (route: ResolvedModelRoute): ModelGateway => buildModelRouteGateway(route, {
+    clock,
+    protocol: settings.openai_compatible_protocol,
+    ...(options.onUsage?{onUsage:options.onUsage}:{}),
+    ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
+  })
+  const supportGateway = supportRoute === null ? legacyBaseGateway() : routeGateway(supportRoute)
+  const compressorGateway = compressorRoute === null ? supportGateway : routeGateway(compressorRoute)
   const searchTransport: SearchTransport | undefined = !capabilities.modules.search.enabled ? undefined : options.searchTransport
     ?? (capabilities.modules.search.provider === 'mcp'
       ? new McpSearchTransport(capabilities.modules.search.mcp!)
@@ -257,12 +333,15 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   if (suppliedReserved !== undefined || configuredReserved !== undefined) {
     throw new AssemblyError(`built-in executor cannot be overridden: ${suppliedReserved?.manifest.name ?? configuredReserved}`)
   }
-  const watchModel = stripLikePython(settings.watch_model ?? '') || settings.fast_model
-  const watchConnection = cameraModuleEnabled || settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)) ? resolveWatchModelConnection(settings) : null
-  const watchGateway = watchConnection === null ? gateway : new OpenAIModelGateway({
-    ...(options.onUsage?{onUsage:options.onUsage}:{}),
-    ...watchConnection, clock, ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
-  })
+  const watchModel = stripLikePython(routedSettings.watch_model ?? '') || routedSettings.fast_model
+  const watchConnection = watchRoute === null
+    && (cameraModuleEnabled || routedSettings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)))
+    ? resolveWatchModelConnection(routedSettings) : null
+  const watchGateway = watchRoute !== null ? routeGateway(watchRoute)
+    : watchConnection === null ? baseGateway ?? supportGateway : new OpenAIModelGateway({
+      ...(options.onUsage?{onUsage:options.onUsage}:{}),
+      ...watchConnection, clock, ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
+    })
   const visionLifecycle = cameraModuleEnabled ? new VisionLifecycleBridge() : undefined
 
   const search = searchTransport === undefined ? undefined : new SearchAdapter(searchTransport)
@@ -319,17 +398,17 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       || !descriptor.ownedChannels.some(channel => (options.executors ?? []).some(adapter => adapter.manifest.name === channel && adapter.manifest.roles.includes('coding')))),
     ...(cameraModuleEnabled ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
-  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, includeExplicitMemory: options.scheduledContext!==true&&options.sourceProcessingContext!==true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true,includeEnterPlanMode:options.includeEnterPlanMode===true})
+  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, includeExplicitMemory: options.scheduledContext!==true&&options.sourceProcessingContext!==true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true})
 
   const proactive = new GatewayProactivity({
-    gateway,
-    model: settings.support_model,
+    gateway: supportGateway,
+    model: routedSettings.support_model,
     proactivityPreset: settings.proactivity_preset,
   })
-  const writer = new GatewayPersonalWriter({gateway,model:settings.support_model})
-  const taskVerifier = new GatewayTaskVerifier({gateway,model:settings.support_model,vision:{gateway:watchGateway,model:watchModel}})
+  const writer = new GatewayPersonalWriter({gateway: supportGateway,model:routedSettings.support_model})
+  const taskVerifier = new GatewayTaskVerifier({gateway: supportGateway,model:routedSettings.support_model,vision:{gateway:watchGateway,model:watchModel}})
   const jev = {apiKey:settings.openrouter_api_key ?? '',...(options.onUsage?{onUsage:options.onUsage}:{})}
-  const compressor = new GatewayCompressor({gateway, model: settings.compressor_model})
+  const compressor = new GatewayCompressor({gateway: compressorGateway, model: routedSettings.compressor_model})
 
   const proactivity = resolveProactivity(settings)
   const models: Partial<Record<Slot, ModelPort>> = {
@@ -406,29 +485,32 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     return pending
   }
   return {
-    settings, taskVerifier,
+    settings: routedSettings, taskVerifier,
     ...(options.blackboard===undefined?{}:{personalAgentConfig: {path: options.blackboard.path + '.personal.json', userScope: settings.blackboard_owner_id, newsLanguage: settings.news_language, profileParticipantMessages: settings.profile_participant_messages, taskVerifier, models: {
       generateProfile: observeOperation('profile',writer.generateProfile),
       generateDigests: observeOperation('digest',writer.generateDigests),
       generateContext: observeOperation('context',writer.generateContext),
-      generateWorkbench: observeOperation('context',createWorkbenchGenerator(gateway,settings.support_model)),
+      generateWorkbench: observeOperation('context',createWorkbenchGenerator(supportGateway,routedSettings.support_model)),
       generateTimeline:observeOperation('timeline',writer.generateTimeline),
       rankNews: observeOperation('news',createJevNewsRanker(jev)),
       // Only without an OpenRouter key; the host decides per ranking whether the user still allows it.
-      ...(jev.apiKey.trim()?{}:{rankNewsFallback: observeOperation('news',createNewsRanker(gateway,settings.support_model))}),
-      understand: observeOperation('understanding',createUnderstandingPipeline({gateway,model:settings.support_model,judge:createJevJudge(jev)})),
+      ...(jev.apiKey.trim()?{}:{rankNewsFallback: observeOperation('news',createNewsRanker(supportGateway,routedSettings.support_model))}),
+      understand: observeOperation('understanding',createUnderstandingPipeline({gateway:supportGateway,model:routedSettings.support_model,judge:createJevJudge(jev)})),
       prepareBrief: observeOperation('digest',writer.prepareBrief.bind(writer)),
       prepareProposal: observeOperation('proactivity',writer.prepareProposal.bind(writer)),
       summarizeMemory: observeOperation('memory',writer.summarizeMemory.bind(writer)),
       discover: observeOperation('proactivity',proactive.discover.bind(proactive)),
-      proposeGoals: observeOperation('proactivity',(input:GoalProposerInput,signal:AbortSignal)=>proposeGoals(gateway,settings.support_model,input,signal)),
-      prepareGoalCheckin: observeOperation('proactivity',(input:GoalCheckinInput,signal:AbortSignal)=>writeGoalCheckins(gateway,settings.support_model,input,signal)),
-      updateGoalProgress: observeOperation('proactivity',(input:GoalProgressUpdateInput,signal:AbortSignal)=>writeGoalProgress(gateway,settings.support_model,input,signal)),
+      proposeGoals: observeOperation('proactivity',(input:GoalProposerInput,signal:AbortSignal)=>proposeGoals(supportGateway,routedSettings.support_model,input,signal)),
+      prepareGoalCheckin: observeOperation('proactivity',(input:GoalCheckinInput,signal:AbortSignal)=>writeGoalCheckins(supportGateway,routedSettings.support_model,input,signal)),
+      updateGoalProgress: observeOperation('proactivity',(input:GoalProgressUpdateInput,signal:AbortSignal)=>writeGoalProgress(supportGateway,routedSettings.support_model,input,signal)),
     }}}),
     capabilities,
     capabilityStatus: capabilityStatus(capabilities, tools.schemas.length),
     runtime,
-    gateway,
+    gateway: supportGateway,
+    supportGateway,
+    compressorGateway,
+    watchGateway,
     tools,
     manifests,
     mediaStore,
@@ -455,7 +537,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
           () => options.sharedResources ? undefined : options.externalMcp?.close(),
           () => searchTransport?.close?.(),
           async () => {
-            if (!options.sharedResources && started && (cameraModuleEnabled || settings.conversation_vision_enabled)) {
+            if (!options.sharedResources && started && cameraModuleEnabled) {
               await frameSource.stop()
             }
             started = false

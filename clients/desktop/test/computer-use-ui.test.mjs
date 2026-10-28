@@ -108,7 +108,7 @@ test('turning Computer Use on sends the permission readout and lists each missin
  const rows=panel.children[1].children
  assert.deepEqual(rows.map(row=>row.attributes['data-item']),['accessibility_permission','configuration'])
  rows[0].children[1].listeners.click();rows[1].children[1].listeners.click();await flush()
- assert.deepEqual(opened,['accessibility','settings:connections'])
+ assert.deepEqual(opened,['accessibility','settings:permissions'])
  assert.ok(texts(panel).includes('电脑操作暂不可用'))
 })
 

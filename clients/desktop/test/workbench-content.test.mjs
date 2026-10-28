@@ -15,7 +15,7 @@ test('daily workbench offers one refresh route on all tabs and saves inspiration
  for(const tab of ['ideas','goals']){const h=harness(t),commands=[]
   renderSourceSuggestions(h.panel,{tab,context:{daily:true,status:'ready',automatic_available:false,candidate_count:1,cards:tab==='ideas'?[{id:'i',tab,title:'做一张预检清单',body:'可以先把重复操作记下来。',refs:[]}]:[]},sources:[],connected:true,button:h.button,command:(...args)=>commands.push(args),continueChat:()=>{}})
   assert.match(text(h.panel),/重新整理/u);assert.doesNotMatch(text(h.panel),/还没给我看过资料/u)
-  all(h.panel).find(n=>n.textContent==='重新整理').action();assert.deepEqual(commands[0],['context.refresh',{}])
+  all(h.panel).find(n=>n.textContent==='重新整理').action();assert.deepEqual(commands[0],['context.refresh',{force:true}],'an explicit retry forces the shared pipeline')
   if(tab==='ideas'){all(h.panel).find(n=>n.textContent==='保存想法').action();assert.deepEqual(commands[1],['context.adopt',{id:'i'}])}
  }
 })

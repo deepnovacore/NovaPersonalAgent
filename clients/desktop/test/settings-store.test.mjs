@@ -81,7 +81,8 @@ async function withTempDirectory(run) {
 
 test('the default settings are the documented schema', () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
-    version: 4,
+    version: 5,
+    modelRoutes: {conversationText: null, support: null, fast: null, compressor: null, watch: null, embedding: null},
     skinId: 'nova', importedSkins: [],
     startupView: 'workbench',
     lastPresentation: 'workbench',
@@ -132,7 +133,7 @@ test('the default settings are the documented schema', () => {
     capabilitiesConfigPath: '',
     knowledgePath: '',
     memoryPrerecallEnabled: false,
-    conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
+    monitorCameraDeviceId: '', watchModel: '',
     phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
@@ -156,7 +157,7 @@ test('version 3 migrates to v4 defaults while preserving existing desktop fields
     codexApprovalMode: 'yolo',
   })
 
-  assert.equal(migrated.version, 4)
+  assert.equal(migrated.version, 5)
   assert.equal(migrated.integratedModel, 'qwen-custom')
   assert.equal(migrated.codexBinaryMode, 'auto')
   assert.equal(migrated.codexBinaryPath, '')
@@ -280,7 +281,8 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
   })
 
   assert.deepEqual(normalized, {
-    version: 4,
+    version: 5,
+    modelRoutes: {conversationText: null, support: null, fast: null, compressor: null, watch: null, embedding: null},
     skinId: 'nova', importedSkins: [],
     startupView: 'workbench',
     lastPresentation: 'workbench',
@@ -331,7 +333,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     capabilitiesConfigPath: '',
     knowledgePath: '',
     memoryPrerecallEnabled: false,
-    conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
+    monitorCameraDeviceId: '', watchModel: '',
     phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
@@ -398,7 +400,6 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'codingBackendProfiles',
     'codingProgressNarration',
     'compatibleAsrBaseUrl', 'compatibleAsrModel', 'compatibleAsrOmitResponseFormat', 'compatibleTtsBaseUrl', 'compatibleTtsModel', 'compatibleTtsSendSampleRate', 'compatibleTtsVoice',
-    'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
     'geminiAsrModel', 'geminiTtsModel', 'geminiTtsVoice',
@@ -414,6 +415,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'memoryPrerecallEnabled',
     'minicpmRealtimeUrl',
     'modelBaseUrl',
+    'modelRoutes',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
@@ -613,7 +615,6 @@ test('publicSettings never carries the secrets object', () => {
     'codingBackendPaths',
     'codingProgressNarration',
     'compatibleAsrBaseUrl', 'compatibleAsrModel', 'compatibleAsrOmitResponseFormat', 'compatibleTtsBaseUrl', 'compatibleTtsModel', 'compatibleTtsSendSampleRate', 'compatibleTtsVoice',
-    'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
     'geminiAsrModel', 'geminiTtsModel', 'geminiTtsVoice',
@@ -628,6 +629,7 @@ test('publicSettings never carries the secrets object', () => {
     'memoryPrerecallEnabled',
     'minicpmRealtimeUrl',
     'modelBaseUrl',
+    'modelRoutes',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
@@ -657,7 +659,7 @@ test('orb settings expose only renderer-owned appearance and activation fields',
     startListeningOnLaunch: true,
     codexBinaryPath: 'C:\\private\\codex.exe',
     modelBaseUrl: 'https://private.example/v1',
-  }), {conversationVisionEnabled: false, progressBubbles: 'milestones', codingProgressNarration: 'smart', language: 'zh-CN', palette: 'graphite', skinId: 'nova', importedSkins: [], startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
+  }), {progressBubbles: 'milestones', codingProgressNarration: 'smart', language: 'zh-CN', palette: 'graphite', skinId: 'nova', importedSkins: [], startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
 })
 
 test('secretsPresent reports booleans for every key and leaks no ciphertext', () => {
@@ -1273,15 +1275,13 @@ test('coding narration mode changes persist without requesting a backend restart
   assert.equal(orbSettings({codingProgressNarration: 'continuous'}).codingProgressNarration, 'continuous')
 })
 
-test('native vision settings persist independently and device IDs have a bounded UTF-16 limit', () => {
-  const valid = normalizeSettings({conversationVisionEnabled:true,monitorCameraDeviceId:'usb-device',watchModel:'qwen3-vl-plus'})
-  assert.equal(valid.conversationVisionEnabled,true)
+test('monitor camera and watch model persist independently with a bounded device ID', () => {
+  const valid = normalizeSettings({monitorCameraDeviceId:'usb-device',watchModel:'qwen3-vl-plus'})
   assert.equal(valid.monitorCameraDeviceId,'usb-device')
   assert.equal(valid.watchModel,'qwen3-vl-plus')
   assert.equal(publicSettings(valid).monitorCameraDeviceId,'usb-device')
   assert.equal(normalizeSettings({monitorCameraDeviceId:'x'.repeat(257)}).monitorCameraDeviceId,'')
   assert.equal(normalizeSettings({monitorCameraDeviceId:'x\n'}).monitorCameraDeviceId,'')
-  assert.equal(normalizeSettings({conversationVisionEnabled:'true'}).conversationVisionEnabled,false)
 })
 
 test('explicit integrated preference is preserved for existing users', () => {
@@ -1415,4 +1415,20 @@ test('the workbench fill preference defaults on, is backend-invisible and only a
   assert.equal(normalizeSettings({workbenchMaximized: 0}).workbenchMaximized, true)
   assert.equal('workbenchMaximized' in backendSettings({workbenchMaximized: false}), false)
   assert.equal('workbenchMaximized' in publicSettings({workbenchMaximized: false}), false)
+})
+
+test('model routes round-trip per lane and an explicit null clears the override', () => {
+  const routed = applySettingsUpdate(DEFAULT_SETTINGS, {modelRoutes: {
+    support: {provider: 'qwen', model: 'qwen-plus'},
+    watch: {provider: 'qwen', model: 'qwen3-vl-plus'},
+    embedding: {provider: 'dashscope', model: 'text-embedding-v4'},
+  }})
+  assert.deepEqual(routed.modelRoutes.support, {provider: 'qwen', model: 'qwen-plus'})
+  assert.deepEqual(publicSettings(routed).modelRoutes.watch, {provider: 'qwen', model: 'qwen3-vl-plus'})
+  assert.equal(routed.modelRoutes.conversationText, null)
+  const cleared = applySettingsUpdate(routed, {modelRoutes: {support: null}})
+  assert.equal(cleared.modelRoutes.support, null)
+  assert.deepEqual(cleared.modelRoutes.watch, {provider: 'qwen', model: 'qwen3-vl-plus'})
+  assert.equal(normalizeSettings({modelRoutes: {support: {provider: 'unknown', model: 'x'}}}).modelRoutes.support, null)
+  assert.equal(normalizeSettings({modelRoutes: {watch: {provider: 'qwen', model: '   '}}}).modelRoutes.watch, null)
 })

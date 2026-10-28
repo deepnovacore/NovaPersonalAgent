@@ -71,6 +71,6 @@ test('dynamic message tables used through t() are fully translated',async contex
 })
 
 test('refusal codes and parameter errors are covered by the curated table',()=>{
- for(const code of ['build_finished','conversation_busy','voice_active','conversation_mode_transition','source_todo_conflict','stale_reference','reference_not_authorized','outcome_unknown','invalid_params','workspaces_unavailable','unknown_workspace','workspace_name_conflict','workspace_project_conflict','plan_delegation_unknown','plan_version_conflict','generation_conflict','conversation_limit','invalid_project_directory'])
+ for(const code of ['build_finished','conversation_busy','voice_active','source_todo_conflict','stale_reference','reference_not_authorized','outcome_unknown','invalid_params','workspaces_unavailable','unknown_workspace','workspace_name_conflict','workspace_project_conflict','plan_delegation_unknown','plan_version_conflict','generation_conflict','conversation_limit','invalid_project_directory'])
   assert.ok(Object.hasOwn(HOST_REFUSALS,code),`missing curated refusal: ${code}`)
 })

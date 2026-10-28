@@ -11,27 +11,38 @@ export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'diary', label: t('日记与简报'), sections: Object.freeze(['diary-section'])}),
   Object.freeze({id: 'themes', label: t("主题"), sections: Object.freeze(['visor-section','orb-skin-section'])}),
   Object.freeze({id: 'usage', label: t("用量"), sections: Object.freeze(['frontend-usage-section'])}),
-  Object.freeze({id: 'pipeline', label: t("语音管线"), sections: Object.freeze(['pipeline'])}),
+  Object.freeze({id: 'models', label: t("模型"), sections: Object.freeze(['models-section','pipeline'])}),
   Object.freeze({id: 'skills', label: t('技能'), sections: Object.freeze(['skills-section'])}),
   Object.freeze({id: 'capabilities', label: t("执行器与 MCP"), sections: Object.freeze(['capabilities-section'])}),
-  Object.freeze({id: 'im', label: t("IM 渠道"), sections: Object.freeze(['im-section'])}),
-  Object.freeze({id: 'connections', label: t("连接与权限"), sections: Object.freeze(['desktop-permissions-section','connections-section'])}),
+  Object.freeze({id: 'connectors', label: t("连接器"), sections: Object.freeze(['im-section','connections-section'])}),
+  Object.freeze({id: 'permissions', label: t("权限"), sections: Object.freeze(['desktop-permissions-section','codex-approval-section'])}),
   Object.freeze({id: 'privacy', label: t("隐私与数据"), sections: Object.freeze(['privacy-section'])}),
   Object.freeze({id: 'knowledge', label: t("知识库"), sections: Object.freeze(['knowledge-section'])}),
   Object.freeze({id: 'secrets', label: t("API 密钥"), sections: Object.freeze(['chatgpt-settings','secrets'])}),
   Object.freeze({id: 'hub', label: t("手机同步 Hub"), sections: Object.freeze(['hub-connection-section'])}),
   Object.freeze({id: 'phone', label: t("连接 iPhone"), sections: Object.freeze(['phone-connection-section'])}),
   Object.freeze({id: 'codex', label: t("编程"), sections: Object.freeze([
-    'codex-approval-section', 'codex-projects',
+    'codex-projects',
   ])}),
 ])
+
+/** Old deep links keep working after the settings categories were split. */
+const CATEGORY_ALIASES = Object.freeze({
+  im: 'connectors',
+  connections: 'connectors',
+  pipeline: 'models',
+})
 
 export function categoryIds() {
   return SETTINGS_CATEGORIES.map(category => category.id)
 }
 
+export function resolveCategory(id) {
+  return CATEGORY_ALIASES[id] ?? id
+}
+
 export function isValidCategory(id) {
-  return categoryIds().includes(id)
+  return categoryIds().includes(resolveCategory(id))
 }
 
 /** Every section owned by any category, so a caller can hide the panel in one pass. */

@@ -35,6 +35,7 @@ export function mountApprovalDock(parent,{c,el,button,run}){
   rendered=key;root.hidden=!approvals.length;root.replaceChildren();cards.clear()
   for(const approval of approvals){
    const card=el('article',undefined,'approval-dock-card'),actions=el('div',undefined,'approval-dock-actions')
+   card.setAttribute('data-approval-id',approval.approval_id);card.setAttribute('data-conversation-id',approval.conversation_id)
    card.append(el('p',approval.summary||t('等待审批'),'approval-dock-summary'))
    const allow=button(t('允许'),()=>decide(approval,true),actions),deny=button(t('拒绝'),()=>decide(approval,false),actions)
    allow.className='soft';deny.className='ghost'

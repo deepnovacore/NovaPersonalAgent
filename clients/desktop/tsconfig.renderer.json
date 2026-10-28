@@ -1,0 +1,9 @@
+{
+ "compilerOptions": {
+  "target":"ES2023", "module":"ESNext", "moduleResolution":"Bundler", "lib":["ES2023","DOM","DOM.Iterable"],
+  "jsx":"react-jsx", "noEmit":true, "allowJs":true, "checkJs":false, "skipLibCheck":true,
+  "strict":true, "noImplicitAny":false, "allowSyntheticDefaultImports":true, "esModuleInterop":true,
+  "types":["react","react-dom","node"]
+ },
+ "include":["src/renderer/react/**/*.ts","src/renderer/react/**/*.tsx"]
+}

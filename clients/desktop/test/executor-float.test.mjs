@@ -21,11 +21,15 @@ function fixture(){
  return {float,opened,root:parent.children[0]}
 }
 
-test('a running executor task floats collapsed at the vertical middle and expands to its latest output',()=>{
+test('a running executor task floats as a centred pill and expands to its latest output',()=>{
  const f=fixture();assert.equal(f.root.hidden,true)
  f.float.receive(frame([task('a')]))
- assert.equal(f.root.hidden,false);assert.equal(f.root.dataset.expanded,'false')
- const pill=all(f.root).find(n=>n.className==='executor-float-pill');assert.match(pill.textContent,/codex/);assert.match(pill.textContent,/进行中/)
+ assert.equal(f.root.hidden,false);assert.equal(f.root.dataset.expanded,'false');assert.equal(f.root.dataset.phase,'working')
+ const pill=all(f.root).find(n=>n.className==='executor-float-pill')
+ assert.match(all(f.root).find(n=>n.className==='executor-float-label').textContent,/codex/);assert.match(all(f.root).find(n=>n.className==='executor-float-label').textContent,/进行中/)
+ assert.equal(pill.attributes['aria-expanded'],'false');assert.match(pill.attributes['aria-label'],/执行器进展/u)
+ const dot=all(f.root).find(n=>n.className==='executor-float-phase')
+ assert.ok(dot,'a phase dot carries the state without relying on colour');assert.equal(dot.dataset.phase,'working');assert.equal(dot.attributes['aria-hidden'],'true')
  assert.equal(all(f.root).some(n=>n.textContent==='正在运行测试'),false,'collapsed shows no output lines')
  pill.listeners.click();assert.equal(f.root.dataset.expanded,'true')
  assert.ok(all(f.root).some(n=>n.textContent==='正在运行测试'));assert.ok(all(f.root).some(n=>n.textContent==='任务 a'))
@@ -36,7 +40,7 @@ test('finished tasks leave the float, a failure stays until the next snapshot, a
  f.float.receive(frame([task('a'),task('b','completed')]))
  all(f.root).find(n=>n.className==='executor-float-pill').listeners.click()
  assert.equal(all(f.root).filter(n=>n.className==='executor-float-task').length,1,'the completed task is gone')
- f.float.receive(frame([task('a','failed')],2));assert.equal(f.root.hidden,false)
+ f.float.receive(frame([task('a','failed')],2));assert.equal(f.root.hidden,false);assert.equal(f.root.dataset.phase,'failed')
  all(f.root).find(n=>n.textContent==='查看详情').listeners.click();assert.deepEqual(f.opened,['durable-a'])
  f.float.receive(frame([],3));assert.equal(f.root.hidden,true)
 })

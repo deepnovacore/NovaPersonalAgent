@@ -21,7 +21,7 @@ import {createBackendControl, classifyBackendFailure, configWarnings, startupErr
 import {codingBackendStatus} from './coding-settings.mjs'
 import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
-import {FeishuConnector, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
+import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
@@ -85,7 +85,7 @@ import {
   createDebugBoardRequester,
   formatMemoryBoardExport,
 } from './debug-board-client.mjs'
-import { installAppProtocol, loadAppWindow, registerAppScheme } from './app-protocol.mjs'
+import { buildRendererAssetGraph, installAppProtocol, loadAppWindow, registerAppScheme } from './app-protocol.mjs'
 import { startWithSelectedCamera } from './camera-source.mjs'
 import { createDragController } from './drag-controller.mjs'
 import { configureWorkbenchNativeDrag } from './workbench-drag.mjs'
@@ -184,7 +184,7 @@ const developmentEnv = !app.isPackaged && existsSync(developmentEnvFile)
 for (const name of Object.values(SECRET_ENV_MAP)) {
   if (developmentEnv[name] !== undefined) process.env[name] = developmentEnv[name]
 }
-const rendererRoot = resolve(packageRoot, 'src/renderer')
+const rendererRoot = resolve(process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT ?? resolve(packageRoot, 'build/renderer'))
 const preload = resolve(packageRoot, 'src/preload/preload.cjs')
 const WINDOW_SIZE = Object.freeze({ width: 160, height: 160 })
 // Long-standing Chromium/X11 quirk: the ARGB visual backing a transparent,
@@ -404,6 +404,7 @@ function settingsView() {
     skills: skillsCache,
     frontendUsage: frontendUsage.snapshot(),
     visionModels: VISION_MODELS,
+    modelCatalog: MODEL_CATALOG,
     backendStatus: backendStatus.state,
     backendDiagnostic: backendStatus.diagnostic,
     backendRetryInMs: backendStatus.retryInMs,
@@ -2458,12 +2459,7 @@ async function runInstalledFileCameraSmoke() {
       try {
         installAppProtocol(window.webContents.session.protocol, {
           rendererRoot,
-          rendererFiles: [
-            '/release-camera.html',
-            '/release-camera.mjs',
-            '/release-camera-contract.mjs',
-            '/camera.mjs',
-          ],
+          rendererFiles: await buildRendererAssetGraph(rendererRoot, undefined, ['/release-camera.html']),
           fetchFile: (file, options) => net.fetch(pathToFileURL(file).href, options),
           cameraFile: camera.file,
           fetchCameraFile: (url, init) => net.fetch(url, init),
