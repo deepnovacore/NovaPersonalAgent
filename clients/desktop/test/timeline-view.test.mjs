@@ -402,3 +402,24 @@ test('every todo status primary action opens a conversation about that exact tod
  assert.equal(starts.length,4);assert.equal(calls.length,0)
  parent.querySelectorAll('.timeline-title')[0].listeners.click();assert.equal(calls.length,1);assert.equal(starts.length,4)
 })
+
+test('briefing pagination survives progress publishes through the stable page key',()=>{
+ const cards=Array.from({length:10},(_,i)=>datedBrief(String(i),{kind:'event',anchor_date:'2026-10-'+String(i+1).padStart(2,'0'),anchor_basis:'reported'}))
+ const state={life:{todos:[],goals:[]},timeline:{status:'working',cards,pagination_key:'generation-page',updated_at:'2026-10-20T00:00:00Z'}}
+ const expanded=new Set(),{parent}=render(state,{expanded})
+ assert.equal(parent.querySelectorAll('.timeline-attention-card').length,8)
+ parent.querySelectorAll('.timeline-load-more')[0].listeners.click()
+ assert.equal(parent.querySelectorAll('.timeline-attention-card').length,10)
+ state.timeline.updated_at='2026-10-20T00:01:00Z'
+ assert.equal(render(state,{expanded}).parent.querySelectorAll('.timeline-attention-card').length,10,'a later batch timestamp does not collapse the expanded page')
+})
+
+test('briefing reports active and archived card counts separately',()=>{
+ const cards=[briefCard({id:'active',sources_available:true}),briefCard({id:'archived',title:'Retained history',sources_available:false,historical:true})]
+ const state={life:{todos:[],goals:[]},timeline:{status:'ready',cards,active_count:1,archived_count:1}}
+ const {parent}=render(state)
+ assert.ok(parent.querySelectorAll('.timeline-brief-count')[0].textContent.includes('2'))
+ assert.match(parent.querySelectorAll('.timeline-brief-archived')[0].textContent,/1/)
+ const compact=render({...state,timeline:{status:'ready',cards:[briefCard({id:'active'})],active_count:1,archived_count:0}},{compact:true}).parent
+ assert.equal(compact.querySelectorAll('.timeline-brief-archived').length,0,'no archive note when every card is active')
+})

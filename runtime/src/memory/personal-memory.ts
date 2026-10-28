@@ -4,7 +4,7 @@ import type {ExplicitMemoryTurn,ExplicitMemoryArguments,ExplicitMemoryLookup,Exp
 import type {UnderstandingProducts,ProductGenerationContext} from '../personal-agent/understanding-products.js'
 import type {ProcessingRequest} from '../memory-substrate/source-processing.js'
 import type {SourceFilter,SourceRecallResult} from './source-retrieval.js'
-import type {ProfileObservation,ProfileInput,ProfileGenerator} from '../personal-agent/profile-warmup.js'
+import type {ProfileContinuity,ProfileObservation,ProfileInput,ProfileGenerator} from '../personal-agent/profile-warmup.js'
 import type {EvaluatedCandidate} from '../understanding/candidates.js'
 import type {ResolvedLifeCandidate} from '../memory-substrate/resolution.js'
 import type {LifeBackend} from '../personal-agent/life.js'
@@ -107,7 +107,7 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   /** Internal built-in maintenance port; identity and provider are supplied by the host. */
   readonly sourceProcessingLlm?: ()=>{baseUrl:string;apiKey:string;model:string}|undefined
   readonly sourceProcessingObserve?: (entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>)=>Promise<ProfileObservation[]>
-  readonly sourceProcessingProfile?: (entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>,observations?:readonly ProfileObservation[])=>ReturnType<ProfileGenerator>
+  readonly sourceProcessingProfile?: (entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>,observations?:readonly ProfileObservation[],continuity?:ProfileContinuity)=>ReturnType<ProfileGenerator>
   readonly sourceProcessingTodoContext?:()=>Promise<{todos:ProductGenerationContext['todos'];authorize:()=>Promise<void>}>
   readonly sourceProcessingProducts?: (entries:readonly ProfileInput[],context:ProductGenerationContext,signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>)=>Promise<UnderstandingProducts>
   readonly sourceProcessingConsumer?: ()=>string
