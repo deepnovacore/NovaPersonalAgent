@@ -567,8 +567,10 @@ export class DesktopSocketBridge {
       else if(prior)receipt=prior.hash===hash?await prior.result:result(false,'request_id_conflict')
       else if(this.#textReceipts.size>=256)receipt=result(false,'request_capacity')
       else {
+        // Preserve the host refusal code when it is a single snake_case token; never leak message detail.
+        const failureCode=(error:unknown):string=>error instanceof Error&&/^[a-z][a-z0-9_]{0,63}$/u.test(error.message)?error.message:'submission_failed'
         // Record before calling the provider. Reconnect retries share this exact operation.
-        const operation=Promise.resolve().then(submit).then(()=>result(true),()=>result(false,'submission_failed'))
+        const operation=Promise.resolve().then(submit).then(()=>result(true),error=>result(false,failureCode(error)))
         this.#textReceipts.set(id,{hash,result:operation})
         receipt=await operation
       }

@@ -186,6 +186,7 @@ export function backendLaunchSpec({
     CLARIFICATION_DEPTH: settings?.clarificationDepth
       ?? SETTINGS_DEFAULTS.clarificationDepth,
     GENERATE_PLAN: String(settings?.generatePlan ?? SETTINGS_DEFAULTS.generatePlan),
+    NOVA_BUILD_REASONING: String(settings?.buildReasoning ?? SETTINGS_DEFAULTS.buildReasoning),
     PROFILE_PARTICIPANT_MESSAGES: String(settings?.profileParticipantMessages ?? SETTINGS_DEFAULTS.profileParticipantMessages),
     PLAN_READBACK: settings?.planReadback ?? SETTINGS_DEFAULTS.planReadback,
     PROGRESS_BUBBLES: settings?.progressBubbles

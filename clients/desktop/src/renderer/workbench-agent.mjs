@@ -5,7 +5,8 @@ import {iconNode,withIcon} from './icons.mjs'
 
 const folderName=path=>String(path??'').split(/[\\/]+/).filter(Boolean).at(-1)??''
 /** Why a Build is paused, in words the user can act on. Unknown codes stay hidden rather than leaking a raw identifier. */
-const BUILD_REASONS=Object.freeze({
+export const BUILD_STATUS_LABELS=Object.freeze({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})
+export const BUILD_REASONS=Object.freeze({
  model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',
  restart_requires_resume:'已暂停，点击继续恢复任务',approval_denied:'你拒绝了一次操作，补充新的要求后继续',
  cleanup_unknown:'上一步的清理结果不确定，请核实后继续',outcome_unknown:'上一步的结果不确定，请核实后继续',new_user_input_received:'收到新消息，已暂停当前步骤',
@@ -25,22 +26,38 @@ export function mountWorkbenchAgent(parent,{c,el,run,api,planHost}){
  }))
  const approval=el('section',undefined,'workbench-local-approval');approval.hidden=true;root.append(approval)
  const approvalTitle=el('h3',t('本地工具待确认')),preview=el('pre'),approve=el('button',t('允许本次')),deny=el('button',t('拒绝')),always=el('button',t('始终允许'));approve.type=deny.type=always.type='button';always.hidden=true;deny.className='ghost';approve.className='soft'
- const approvalHead=el('div',undefined,'workbench-approval-head'),approvalIcon=iconNode('shield');if(approvalIcon)approvalHead.append(approvalIcon);approvalHead.append(approvalTitle);const approvalActions=el('div',undefined,'workbench-approval-actions');approvalActions.append(deny,always,approve);approval.append(approvalHead,preview,approvalActions)
- let loadedApproval=null,loadingApproval=null
+ const approvalHead=el('div',undefined,'workbench-approval-head'),approvalIcon=iconNode('shield');if(approvalIcon)approvalHead.append(approvalIcon);approvalHead.append(approvalTitle);const approvalActions=el('div',undefined,'workbench-approval-actions'),retryPreview=el('button',t('重试预览'));retryPreview.type='button';retryPreview.className='ghost';retryPreview.hidden=true;approvalActions.append(deny,retryPreview,always,approve);approval.append(approvalHead,preview,approvalActions)
+ let loadedApproval=null,loadingApproval=null,previewFallback=null
+ function syncApprovalControls(ready=c.connected&&c.presentationReady!==false){
+  const current=c.selectedConversation?.build?.approval
+  approve.disabled=always.disabled=!ready||loadedApproval!==current?.id
+  retryPreview.hidden=previewFallback!==current?.id
+  retryPreview.disabled=!ready
+ }
  async function loadApproval(pending,id){
   if(loadingApproval===pending.id||loadedApproval===pending.id)return
   if(pending.name==='computer_connect'){
    let app;try{app=JSON.parse(pending.preview)?.params?.application}catch{}
-   if(app?.name){preview.textContent=t('允许 Nova 操作 {0}？',app.name);approvalTitle.textContent=t('应用控制授权');always.hidden=false;approval.setAttribute('data-kind','app');loadedApproval=pending.id;approve.disabled=always.disabled=!c.connected;return}
+   if(app?.name){preview.textContent=t('允许 Nova 操作 {0}？',app.name);approvalTitle.textContent=t('应用控制授权');always.hidden=false;approval.setAttribute('data-kind','app');loadedApproval=pending.id;previewFallback=null;syncApprovalControls();return}
   }
   always.hidden=true;approval.setAttribute('data-kind','tool');approvalTitle.textContent=t('本地工具待确认')
   loadingApproval=pending.id
   try {
    let offset=0,text=''
    do {const page=await c.command('build.details',{id,call_id:pending.call_id,offset});if(c.selectedId!==id||c.selectedConversation?.build?.approval?.id!==pending.id)return;text+=page.text;offset=page.next_offset}while(offset!==null)
-   preview.textContent=text;loadedApproval=pending.id
-  } finally {if(loadingApproval===pending.id)loadingApproval=null;approve.disabled=loadedApproval!==c.selectedConversation?.build?.approval?.id||!c.connected}
+   preview.textContent=text;loadedApproval=pending.id;previewFallback=null
+  } catch {
+   // A failed preview must not block the decision: show the host's own fallback and let the user
+   // retry explicitly instead of silently refetching on every update.
+   if(c.selectedId!==id||c.selectedConversation?.build?.approval?.id!==pending.id)return
+   preview.textContent=pending.name+'\n'+pending.preview;loadedApproval=pending.id;previewFallback=pending.id
+  } finally {if(loadingApproval===pending.id)loadingApproval=null;syncApprovalControls()}
  }
+ retryPreview.addEventListener('click',()=>{
+  const pending=c.selectedConversation?.build?.approval
+  if(!pending)return
+  loadedApproval=null;previewFallback=null;retryPreview.hidden=true;update()
+ })
  for(const [button,value] of [[approve,true],[always,true],[deny,false]])button.addEventListener('click',()=>run(async()=>{const pending=c.selectedConversation?.build?.approval;if(pending)await c.command('build.approve',{id:c.selectedId,approval_id:pending.id,approved:value,...(button===always?{always:true}:{})})}))
  const planCard=el('section',undefined,'workbench-plan');planCard.hidden=true;(planHost??root).append(planCard)
  const planTitle=el('h3'),body=el('div',undefined,'workbench-plan-body'),edit=el('textarea');edit.hidden=true;edit.setAttribute('aria-label',t('计划内容'));edit.maxLength=131072
@@ -90,14 +107,15 @@ export function mountWorkbenchAgent(parent,{c,el,run,api,planHost}){
  function update(){
   const ready=c.connected&&c.presentationReady!==false,item=c.selectedConversation,build=item?.build,active=['running','awaiting_approval'].includes(build?.status),voiceActive=Boolean(c.voiceId&&c.voiceId===c.selectedId)
   root.hidden=!item
-  status.textContent=build?t('Build · {0}',t(({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})[build.status]??build.status)):''
+  status.textContent=build?t('Build · {0}',t(BUILD_STATUS_LABELS[build.status]??build.status)):''
   status.setAttribute('data-state',build?.status??'')
   // The path is one ellipsized line; the full value stays reachable on hover.
   project.textContent=folderName(build?.project);project.title=folderName(build?.project);project.hidden=!project.textContent
   reason.textContent=build?.reason&&build.reason!=='stopped'&&BUILD_REASONS[build.reason]?t(BUILD_REASONS[build.reason]):'';reason.hidden=!reason.textContent;reason.title=reason.textContent
   stop.hidden=!build||!active;resume.hidden=!build||active||['completed','finished'].includes(build.status);details.hidden=!build
   stop.disabled=resume.disabled=details.disabled=!ready
-  always.disabled=!ready||loadedApproval!==build?.approval?.id;approval.hidden=!build?.approval;deny.disabled=!ready;approve.disabled=!ready||loadedApproval!==build?.approval?.id
+  approval.hidden=!build?.approval;deny.disabled=!ready
+  syncApprovalControls(ready)
   if(ready&&build?.approval&&loadedApproval!==build.approval.id){if(loadingApproval!==build.approval.id)preview.textContent=build.approval.name+'\n'+build.approval.preview;void loadApproval(build.approval,item.id).catch(error=>{c.error=error.message;c.changed()})}
   const hasPlan=item?.mode==='plan'&&item.plan;planCard.hidden=!hasPlan
   // The mode lives in the composer; this strip appears only for a Build session or a published plan.

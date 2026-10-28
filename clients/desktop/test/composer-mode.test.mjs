@@ -89,3 +89,13 @@ test('switching keeps the focused mode button enabled while the host command is 
  assert.equal(button.disabled,false);assert.equal(button.attributes['aria-busy'],'true')
  release();await pending;assert.equal(button.attributes['aria-busy'],'false')
 })
+
+test('Build mode copy says every start creates a new task',async()=>{
+ const {setLanguage}=await import('../src/renderer/locale.mjs')
+ const item={id:'chat:main',kind:'chat'},{c,control,button}=fixture(item)
+ c.state('chat:main').execution='build'
+ control.update()
+ assert.match(button.title,/新建一个 Build 任务/)
+ setLanguage('en')
+ try{control.update();assert.match(button.title,/new Build task/)}finally{setLanguage('zh-CN')}
+})

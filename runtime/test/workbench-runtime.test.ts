@@ -18,17 +18,17 @@ import {PLAN_LLM_TRANSPORT} from '../src/realtime/cascaded/llm-stream-limits.js'
 import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
 import type {ComputerObservation,ToolImage} from '../src/personal-agent/computer-use/contract.js'
 import {workbenchInstructions} from '../src/personal-agent/workbench-instructions.js'
-import {settingsSchema} from '../src/config/config.js'
+import {loadSettings,settingsSchema} from '../src/config/config.js'
 
 function observation(image:ToolImage):ComputerObservation{return {id:'test-observation',captured_at:image.captured_at,image,space:{logical_width:image.width,logical_height:image.height,scale:1},target:null,focus:null,foreground:true,ax:{status:image.native_ui?'truncated':'unavailable',...(image.native_ui?{summary:image.native_ui}:{}),...(image.native_editor?{editor:image.native_editor}:{})}}}
 type Request=Parameters<CascadedLlmSession['stream']>[0]
-interface Reply {text?:string;call?:{name:string;arguments:Record<string,JsonValue>;id?:string};calls?:{name:string;arguments:Record<string,JsonValue>;id:string}[]}
+interface Reply {text?:string;reasoning?:string;call?:{name:string;arguments:Record<string,JsonValue>;id?:string};calls?:{name:string;arguments:Record<string,JsonValue>;id:string}[]}
 function scripted(reply:(request:Request,step:number)=>Reply|Promise<Reply>){
  const requests:Request[]=[],restores:JsonValue[]=[]
  const factory:CascadedLlmFactory={open:()=>{
   let step=0
   return {setHistoryLimits:()=>{ /* scripted model has no trimming */ },checkpoint:()=>({step}),restoreCheckpoint:value=>{restores.push(value);step=(value as {step:number}).step},
-   async *stream(request){requests.push(request);const next=await reply(request,step);request.signal.throwIfAborted();yield {kind:'response_started',response_id:'r'+step};const calls=next.calls??(next.call?[{...next.call,id:next.call.id??'c'+step}]:[]);for(const call of calls)yield {kind:'tool_call',item_id:'i'+step+':'+call.id,call_id:call.id,name:call.name,arguments:call.arguments};if(!calls.length)yield {kind:'text_delta',text:next.text??'done'};step++;yield {kind:'response_completed',response_id:'r'+(step-1)}},
+   async *stream(request){requests.push(request);const next=await reply(request,step);request.signal.throwIfAborted();if(next.reasoning!==undefined)yield {kind:'reasoning_delta',text:next.reasoning};yield {kind:'response_started',response_id:'r'+step};const calls=next.calls??(next.call?[{...next.call,id:next.call.id??'c'+step}]:[]);for(const call of calls)yield {kind:'tool_call',item_id:'i'+step+':'+call.id,call_id:call.id,name:call.name,arguments:call.arguments};if(!calls.length)yield {kind:'text_delta',text:next.text??'done'};step++;yield {kind:'response_completed',response_id:'r'+(step-1)}},
    abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),
   }
  }}
@@ -37,12 +37,12 @@ function scripted(reply:(request:Request,step:number)=>Reply|Promise<Reply>){
 async function until<T>(read:()=>T,predicate:(value:T)=>boolean):Promise<T>{
  for(let count=0;count<500;count++){const value=read();if(predicate(value))return value;await new Promise(resolve=>setTimeout(resolve,10))}throw Error('state wait expired')
 }
-async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>,approval:'ask'|'never'='ask',factory?:CascadedLlmFactory,computerSession?:Parameters<typeof createWorkbenchRuntime>[0]['computerSession']){
+async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>,approval:'ask'|'never'='ask',factory?:CascadedLlmFactory,computerSession?:Parameters<typeof createWorkbenchRuntime>[0]['computerSession'],reasoning?:boolean){
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-loop-')),script=scripted(reply),invocations:{name:string;arguments:Record<string,JsonValue>}[]=[],frames:Record<string,unknown>[]=[]
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[{name:'monitor',parameters:{type:'object'}},{name:'dispatch',parameters:{type:'object',properties:{executor:{enum:['codex']}}}}],readonlyNames:['monitor'],origin:()=>Promise.resolve('memory:test-user'),invoke:(_text,call,_signal,grant)=>{invocations.push(call);if(call.name!=='dispatch'||!grant)return Promise.resolve({accepted:true});const delegate_id='fixture-work-'+invocations.length;return host.tasks.bindWork(grant.fence,delegate_id).then(()=>({accepted:true,delegate_id}))}}
  const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
- const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{})}):plain,frame=>frames.push(frame))
+ const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{}),...(reasoning===undefined?{}:{reasoning})}):plain,frame=>frames.push(frame))
  let request=0
  const raw=(method:string,params:Record<string,unknown>={},local=true)=>host.command({type:'personal.command',request_id:'r'+request++,method,params},{client_id:local?'desktop:local':'remote:test'}) as Promise<{ok:boolean;error?:string;data:unknown}>
  const command=async(method:string,params:Record<string,unknown>={})=>{const result=await raw(method,params);if(!result.ok)throw Error(result.error);return result.data}
@@ -348,6 +348,100 @@ test('Build call pages show durable tool state, bounded previews and owning user
   const restored=await f.command('build.details',{id,view:'calls'}) as typeof after
   assert.deepEqual(restored.items,after.items)
  }finally{await f.close()}
+})
+
+test('Plan reasoning is captured once per model round and never enters model inputs or personal state',async()=>{
+ const hidden='隐藏推理：先核对项目状态',second='隐藏推理：第二轮'
+ const f=await fixture((_request,step)=>step===0?{reasoning:hidden,call:{name:'monitor',arguments:{project:'One'}}}:{reasoning:second,text:'计划完成'},'never',undefined,undefined,true)
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','先检查再制定计划');await f.host.waitConversation('chat:main')
+  assert.equal(f.script.requests[0]!.reasoning,'enabled')
+  const state=await f.host.workbench.checkpoint('chat:main',0)
+  assert.deepEqual(state.thoughts!.map(item=>item.text),[hidden,second])
+  const userId=f.host.conversationSnapshot().messages.find(message=>message.role==='user')!.id
+  assert.ok(state.thoughts!.every(item=>item.message_id===userId))
+  assert.ok(state.thoughts!.every(item=>typeof item.id==='string'&&item.id.length>0))
+  for(const request of f.script.requests)assert.doesNotMatch(JSON.stringify(request.inputs),/隐藏推理/u)
+  assert.doesNotMatch(JSON.stringify(state.model),/隐藏推理/u)
+  assert.doesNotMatch(JSON.stringify(f.host.snapshot()),/隐藏推理/u)
+  assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'计划完成')
+  assert.ok(state.thoughts!.every(item=>[...item.text].length<=8000))
+ }finally{await f.close()}
+})
+
+test('workbench reasoning is disabled unless the runtime enables it',async()=>{
+ const f=await fixture(()=>({text:'直接完成'}))
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','直接回答');await f.host.waitConversation('chat:main')
+  assert.equal(f.script.requests[0]!.reasoning,'disabled')
+  assert.deepEqual((await f.host.workbench.checkpoint('chat:main',0)).thoughts,[])
+ }finally{await f.close()}
+})
+
+test('a single reasoning thought is capped at the per-entry bound',async()=>{
+ const long='🤔'.repeat(9000)
+ const f=await fixture(()=>({reasoning:long,text:'完成'}),'never',undefined,undefined,true)
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','长思考');await f.host.waitConversation('chat:main')
+  const thoughts=(await f.host.workbench.checkpoint('chat:main',0)).thoughts!
+  assert.equal(thoughts.length,1);assert.equal([...thoughts[0]!.text].length,8000)
+ }finally{await f.close()}
+})
+
+test('aborting a model round keeps the reasoning that already arrived',{skip:!supported},async()=>{
+ let entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve})
+ const factory:CascadedLlmFactory={open:()=>({setHistoryLimits:()=>{ /* the fixture model has no history */ },checkpoint:()=>({step:0}),restoreCheckpoint:()=>{ /* fresh fixture session */ },async *stream(request){entered();yield {kind:'reasoning_delta',text:'先想一半'};await new Promise<void>((_resolve,reject)=>{if(request.signal.aborted){reject(Error('aborted'));return}request.signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true})})},abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()})}
+ const f=await fixture(()=>({}),'never',factory,undefined,true)
+ try{
+  const id=await f.build();await started;await f.command('build.stop',{id});await f.host.waitConversation(id)
+  const state=await f.host.workbench.checkpoint(id,0)
+  assert.equal(state.thoughts!.length,1);assert.equal(state.thoughts![0]!.text,'先想一半')
+ }finally{await f.close()}
+})
+
+test('a failed model round still persists the reasoning that already arrived',async()=>{
+ const hidden='失败回合的推理'
+ const factory:CascadedLlmFactory={open:()=>({setHistoryLimits:()=>{ /* the fixture model has no history */ },checkpoint:()=>({step:0}),restoreCheckpoint:()=>{ /* fresh fixture session */ },async *stream(){await Promise.resolve();yield {kind:'reasoning_delta',text:hidden};yield {kind:'response_started',response_id:'r1'};yield {kind:'response_failed',response_id:'r1',code:'timeout'}},abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()})}
+ const f=await fixture(()=>({}),'never',factory,undefined,true)
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','失败回合');await f.host.waitConversation('chat:main')
+  const state=await f.host.workbench.checkpoint('chat:main',0)
+  assert.equal(state.thoughts!.length,1);assert.equal(state.thoughts![0]!.text,hidden)
+  assert.equal(state.model_failure?.code,'timeout')
+  assert.doesNotMatch(JSON.stringify(state.model),/失败回合的推理/u)
+  assert.doesNotMatch(JSON.stringify(state.inputs),/失败回合的推理/u)
+  assert.doesNotMatch(JSON.stringify(f.host.snapshot()),/失败回合的推理/u)
+  assert.doesNotMatch(JSON.stringify(f.host.conversationSnapshot().messages),/失败回合的推理/u)
+ }finally{await f.close()}
+})
+
+test('build.details steps merges thinking and tool steps chronologically',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step===0?{reasoning:'先读文件',call:{name:'file_write',arguments:{path:'steps.txt',content:'x'}}}:{reasoning:'继续说明',text:'完成'},'never',undefined,undefined,true)
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  const page=await f.command('build.details',{id,view:'steps'}) as {items:{kind:string;id:string;created_at:string|null;text?:string;name?:string}[];total:number;next_offset:number|null;generation:number;first_id:string|null}
+  assert.equal(page.total,3);assert.equal(page.next_offset,null);assert.equal(page.generation,0)
+  assert.equal(page.first_id,page.items[0]?.id)
+  assert.deepEqual(page.items.map(item=>item.kind),['thinking','tool','thinking'])
+  assert.equal(page.items[0]?.text,'先读文件')
+  assert.equal(page.items[1]?.name,'file_write')
+  assert.equal(page.items[2]?.text,'继续说明')
+  const times=page.items.map(item=>Date.parse(item.created_at!))
+  assert.deepEqual(times,[...times].sort((left,right)=>left-right))
+  assert.equal((await f.raw('build.details',{id,view:'steps',offset:-1})).error,'invalid_params')
+ }finally{await f.close()}
+})
+
+test('NOVA_BUILD_REASONING is a boolean settings override with a false default',()=>{
+ assert.equal(settingsSchema.parse({executors:[]}).build_reasoning,false)
+ assert.equal(loadSettings({}).build_reasoning,false)
+ assert.equal(loadSettings({NOVA_BUILD_REASONING:'1'}).build_reasoning,true)
+ assert.equal(loadSettings({NOVA_BUILD_REASONING:'true'}).build_reasoning,true)
+ assert.equal(loadSettings({NOVA_BUILD_REASONING:'off'}).build_reasoning,false)
 })
 
 test('batched calls require separate approvals showing the actual pending arguments',{skip:!supported},async()=>{
@@ -1004,7 +1098,7 @@ test('managed workspace commands validate names, hide paths and resolve Build de
  try{
   assert.deepEqual(await f.command('workspaces.list'),[workspace])
   assert.equal((await f.raw('workspaces.list',{},false)).error,'local_workbench_required')
-  for(const name of ['', '.', '..', '../escape','a/b','x'.repeat(81),'bad\nname'])assert.equal((await f.raw('workspaces.create',{name})).ok,false)
+  for(const name of ['', '.', '..', '../escape','a/b','x'.repeat(81),'bad\nname']){const failed=await f.raw('workspaces.create',{name});assert.equal(failed.ok,false);assert.equal(failed.error,'invalid_params');assert.match(failed.error??'',/^[a-z][a-z0-9_]{0,63}$/u)}
   assert.equal((await f.command('workspaces.create',{name:'Notes'}) as {workspace_id:string}).workspace_id,'w-new');assert.deepEqual(created,['Notes'])
   assert.equal((await f.raw('build.begin',{text:'work',workspace_id:'w-default',project:f.root})).error,'workspace_project_conflict')
   assert.equal((await f.raw('build.begin',{text:'work',workspace_id:'missing'})).error,'unknown_workspace')

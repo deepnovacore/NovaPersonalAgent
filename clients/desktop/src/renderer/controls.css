@@ -1,0 +1,119 @@
+/*
+ * Shared controls (loaded before every page stylesheet).
+ *
+ * One place for the geometry of the native form controls Nova shows inside
+ * pages: a 36px, 10px-radius select with its own CSP-safe chevron. Page
+ * stylesheets keep their layout and colour tokens; this file only supplies the
+ * tokens' defaults and the control chrome, so selects look the same in
+ * settings, the workbench (workspace / runner / task detail), setup and the
+ * welcome flow. No external images: the chevron is an inline data: URI, which
+ * every page's CSP already allows through `img-src data:`.
+ */
+:root {
+  --control-height: 36px;
+  --control-radius: 10px;
+  --control-pad-x: 12px;
+  --control-chevron-gap: 34px;
+  --control-bg: var(--surface, #f6f7f9);
+  --control-bg-hover: var(--surface-active, #fff);
+  --control-line: var(--line, rgba(24, 31, 41, .14));
+  --control-line-hover: var(--line-strong, rgba(24, 31, 41, .28));
+  --control-ink: var(--ink, #20252c);
+  --control-disabled-opacity: .55;
+  --control-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%236b7480' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+}
+
+/*
+ * `.llm-choice select` is the first-run (setup.css) form's own selector; the
+ * page stylesheet is loaded after this one, so the shared geometry is repeated
+ * for that one selector to win the cascade without a page-specific ruleset.
+ */
+select,
+:root body .llm-choice select {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  max-width: 100%;
+  padding: 0 var(--control-chevron-gap) 0 var(--control-pad-x);
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background-color: var(--control-bg);
+  background-image: var(--control-chevron);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+  color: var(--control-ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+@media (hover: hover) {
+  select:hover:not(:disabled),
+  :root body .llm-choice select:hover:not(:disabled) {
+    border-color: var(--control-line-hover);
+    background-color: var(--control-bg-hover);
+  }
+}
+
+/* The focus ring matches the page's one accent colour; `:focus-visible` keeps
+   mouse clicks from flashing it. */
+select:focus-visible,
+:root body .llm-choice select:focus-visible {
+  outline: 2px solid var(--accent, #c86712);
+  outline-offset: 2px;
+  border-color: var(--accent, #c86712);
+}
+
+select:disabled,
+:root body .llm-choice select:disabled {
+  opacity: var(--control-disabled-opacity);
+  cursor: default;
+}
+
+/* Native dropdown rows follow the page surface, including its dark tokens. */
+select option {
+  color: var(--control-ink);
+  background-color: var(--control-bg);
+  font-size: 14px;
+}
+
+/* The page may use a custom (non-native) colour scheme; keep the popup legible
+   in dark mode even before a page's own dark tokens load. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --control-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%239aa4b1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --control-line: rgba(0, 0, 0, .58);
+    --control-line-hover: #000;
+  }
+}
+
+/* Forced colors: hand the control back to the platform so it keeps its native
+   high-contrast affordances; the painted chevron would just be a dark blob. */
+@media (forced-colors: active) {
+  select,
+  :root body .llm-choice select {
+    -webkit-appearance: auto;
+    appearance: auto;
+    padding-right: 8px;
+    border: 1px solid ButtonText;
+    background-image: none;
+    background-color: Canvas;
+    color: ButtonText;
+  }
+
+  select:disabled {
+    color: GrayText;
+    border-color: GrayText;
+  }
+}

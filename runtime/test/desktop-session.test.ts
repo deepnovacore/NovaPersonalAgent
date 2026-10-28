@@ -1196,6 +1196,28 @@ test('text failure receipts and backend instance fences never turn into repeated
   bridge.release()
 })
 
+test('text refusal receipts preserve the host code and hide opaque failure messages',async()=>{
+ const finished=harness({submitConversationText:()=>Promise.reject(Error('build_finished'))})
+ finished.bridge.markAuthenticated();drainJsonFrames(finished.bridge)
+ await finished.bridge.receiveControl({type:'input.text',conversation_id:'build-1',request_id:'finished',text:'again'})
+ assert.deepEqual(JSON.parse(String(finished.bridge.takeNextFrame())),{type:'input.text_result',request_id:'finished',ok:false,conversation_id:'build-1',error:'build_finished'})
+ finished.bridge.release()
+
+ const voice=harness();voice.service.submitText=()=>Promise.reject(Error('voice_active'))
+ voice.bridge.markAuthenticated();drainJsonFrames(voice.bridge)
+ await voice.bridge.receiveControl({type:'input.text',request_id:'voice',text:'speak'})
+ assert.deepEqual(JSON.parse(String(voice.bridge.takeNextFrame())),{type:'input.text_result',request_id:'voice',ok:false,error:'voice_active'})
+ voice.bridge.release()
+
+ const opaque=harness();opaque.service.submitText=()=>Promise.reject(Error('[\n  {\n    "origin": "string",\n    "code": "invalid_format"\n  }\n]'))
+ opaque.bridge.markAuthenticated();drainJsonFrames(opaque.bridge)
+ await opaque.bridge.receiveControl({type:'input.text',request_id:'opaque',text:'draft'})
+ const receipt=JSON.parse(String(opaque.bridge.takeNextFrame())) as {ok:boolean;error?:string}
+ assert.deepEqual(receipt,{type:'input.text_result',request_id:'opaque',ok:false,error:'submission_failed'})
+ assert.doesNotMatch(JSON.stringify(receipt),/origin|invalid_format/u)
+ opaque.bridge.release()
+})
+
 test('caption wire preserves stable source identity even when a previous final is dropped',()=>{
   const {bridge}=harness();bridge.markAuthenticated();drainJsonFrames(bridge)
   bridge.onCaption({role:'user',text:'first',final:false,turn_id:'1:user:item-1'})

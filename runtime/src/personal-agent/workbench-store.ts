@@ -13,11 +13,32 @@ export type WorkbenchPlan=z.infer<typeof planSchema>
 export const buildStatusSchema=z.enum(['idle','running','awaiting_approval','paused','completed','failed','outcome_unknown','finished'])
 export type BuildStatus=z.infer<typeof buildStatusSchema>
 export interface WorkbenchCall {id:string;name:string;arguments:Record<string,JsonValue>;state:'prepared'|'awaiting_approval'|'running'|'completed';result?:JsonValue;message_id?:string;created_at?:string;approval_id?:string;started_at?:string;finished_at?:string;process?:LocalShellProcess}
+/** Display-only provider thinking; never a model input, never merged into the assistant reply. */
+export interface WorkbenchThought {id:string;text:string;created_at:string;message_id?:string}
+export const MAX_WORKBENCH_THOUGHTS=64
+export const MAX_WORKBENCH_THOUGHT_CODEPOINTS=8000
+export const MAX_WORKBENCH_THOUGHT_BYTES=256*1024
 export interface WorkbenchCheckpoint {
  version:1;conversation_id:string;generation:number;run_version:number;status:BuildStatus;reason:string|null;model:JsonValue|null;
  inputs:CascadedLlmInput[];pending_calls:WorkbenchCall[];calls:WorkbenchCall[];last_user:string;assistant:string;updated_at:string
  voice_message_ids?:string[]
+ /** Bounded display-only history; empty for checkpoints written before capture existed. */
+ thoughts?:WorkbenchThought[]
  model_failure?:{code:string;detail?:string;tool_call_count?:number}
+}
+const thoughtSchema=z.object({id:z.string().min(1),text:z.string(),created_at:z.string(),message_id:z.string().optional()}).strict()
+/** Newest 64 bounded thoughts within 256 KiB; the oldest entries are discarded first. */
+export function boundWorkbenchThoughts(thoughts:readonly WorkbenchThought[]):WorkbenchThought[]{
+ const kept:WorkbenchThought[]=[];let bytes=0
+ for(const thought of [...thoughts].reverse()){
+  if(kept.length>=MAX_WORKBENCH_THOUGHTS)break
+  const text=[...thought.text].slice(0,MAX_WORKBENCH_THOUGHT_CODEPOINTS).join('')
+  const item:WorkbenchThought={id:thought.id,text,created_at:thought.created_at,...(thought.message_id===undefined?{}:{message_id:thought.message_id})}
+  const size=Buffer.byteLength(JSON.stringify(item))
+  if(kept.length>0&&bytes+size>MAX_WORKBENCH_THOUGHT_BYTES)break
+  kept.unshift(item);bytes+=size
+ }
+ return kept
 }
 const callSchema=z.object({id:z.string().min(1),name:z.string().min(1),arguments:z.record(z.string(),jsonValueSchema),state:z.enum(['prepared','awaiting_approval','running','completed']),result:jsonValueSchema.optional(),message_id:z.string().optional(),created_at:z.string().optional(),approval_id:z.string().optional(),started_at:z.string().optional(),finished_at:z.string().optional(),process:z.object({platform:z.enum(['darwin','win32']),pid:z.number().int().positive()}).strict().optional()}).strict()
 const inputSchema=z.union([
@@ -25,7 +46,7 @@ const inputSchema=z.union([
  z.object({kind:z.enum(['host_context','host_task','host_activation','packed_history']),content:z.string()}).strict(),
  z.object({kind:z.literal('tool_result'),call_id:z.string(),output:jsonValueSchema,images:z.array(z.custom<ToolImage>(value=>{try{validateToolImage(value as ToolImage);return true}catch{return false}})).optional()}).strict(),
 ])
-export function emptyWorkbenchCheckpoint(conversation_id:string,generation:number):WorkbenchCheckpoint{return {version:1,conversation_id,generation,run_version:0,status:'idle',reason:null,model:null,inputs:[],pending_calls:[],calls:[],last_user:'',assistant:'',updated_at:new Date().toISOString()}}
+export function emptyWorkbenchCheckpoint(conversation_id:string,generation:number):WorkbenchCheckpoint{return {version:1,conversation_id,generation,run_version:0,status:'idle',reason:null,model:null,inputs:[],pending_calls:[],calls:[],thoughts:[],last_user:'',assistant:'',updated_at:new Date().toISOString()}}
 /** Durable private state is separate from the bounded UI transcript. Never stores model credentials. */
 const storeOperations=new Map<string,Promise<void>>()
 export class WorkbenchStore {
@@ -122,13 +143,16 @@ export class WorkbenchStore {
  async checkpoint(id:string,generation:number):Promise<WorkbenchCheckpoint>{
   const value=await this.#images(await this.#readCheckpoint(id,generation),id,generation,true)
   if(value===null)return emptyWorkbenchCheckpoint(id,generation)
-  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),last_user:z.string(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
+  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional(),last_user:z.string(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
   const calls=new Map(checked.calls.map(call=>[call.id,call]));if(calls.size!==checked.calls.length)throw Error('duplicate_tool_call')
   checked.pending_calls=checked.pending_calls.map(call=>{const prior=calls.get(call.id);if(prior?.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');return prior})
+  checked.thoughts=boundWorkbenchThoughts((checked.thoughts??[]).map(thought=>({id:thought.id,text:thought.text,created_at:thought.created_at,...(thought.message_id===undefined?{}:{message_id:thought.message_id})})))
   return checked as WorkbenchCheckpoint
  }
  async saveCheckpoint(checkpoint:WorkbenchCheckpoint):Promise<void>{
   const snapshot=structuredClone(checkpoint),path=this.#file('build',snapshot.conversation_id+':'+snapshot.generation)
+  // Thoughts stay inside the private checkpoint; no caller-supplied size can exceed the bound.
+  snapshot.thoughts=boundWorkbenchThoughts(snapshot.thoughts??[])
   await this.#io(path+':images',async()=>this.#write(path,await this.#images(snapshot,snapshot.conversation_id,snapshot.generation,false)))
  }
  async resetCheckpoint(id:string,generation:number):Promise<void>{
@@ -148,6 +172,26 @@ export class WorkbenchStore {
    items.push(item);bytes+=size;index++
   }
   return {items,total:state.calls.length,next_offset:index<state.calls.length?index:null,generation}
+ }
+ /** Chronological display timeline: thoughts and tool calls merged, never model input. */
+ async steps(id:string,generation:number,offset=0):Promise<WorkbenchStepPage>{
+  const raw=await this.#readCheckpoint(id,generation)
+  const state=raw===null?emptyWorkbenchCheckpoint(id,generation):z.object({calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional()}).parse(raw) as Pick<WorkbenchCheckpoint,'calls'|'thoughts'>
+  const thoughts=boundWorkbenchThoughts(state.thoughts??[])
+  const merged:WorkbenchStep[]=[
+   ...thoughts.map(thought=>({kind:'thinking' as const,id:thought.id,text:thought.text,created_at:thought.created_at,message_id:thought.message_id??null})),
+   ...state.calls.map((call,index)=>({kind:'tool' as const,...workbenchCallPreview(call,index)})),
+  ]
+  merged.sort((left,right)=>{const a=left.created_at??'',b=right.created_at??'';return a<b?-1:a>b?1:0})
+  const items:WorkbenchStep[]=[];let bytes=0,index=offset
+  for(const step of merged.slice(offset,offset+20)){
+   const size=Buffer.byteLength(JSON.stringify(step))
+   if(items.length&&bytes+size>12000)break
+   items.push(step);bytes+=size;index++
+  }
+  // `first_id` catches a removed first row; `thoughts_first_id` also catches a thought
+  // evicted after a permanent leading tool call, which leaves `first_id` unchanged.
+  return {items,total:merged.length,next_offset:index<merged.length?index:null,generation,first_id:merged[0]?.id??null,thoughts_first_id:thoughts[0]?.id??null}
  }
 }
 
@@ -173,3 +217,9 @@ export function workbenchCallPreview(call:WorkbenchCall,sequence:number){
   exit_code:typeof result.exit_code==='number'?result.exit_code:null,
   created_at:call.created_at??call.started_at??null,started_at:call.started_at??null,finished_at:call.finished_at??null}
 }
+
+export type WorkbenchCallPreview=ReturnType<typeof workbenchCallPreview>
+/** One display step: a bounded thought or the existing compact tool-call preview. */
+export interface WorkbenchThinkingStep {kind:'thinking';id:string;text:string;created_at:string;message_id:string|null}
+export type WorkbenchStep=WorkbenchThinkingStep|({kind:'tool'}&WorkbenchCallPreview)
+export interface WorkbenchStepPage {items:WorkbenchStep[];total:number;next_offset:number|null;generation:number;/** First id of the full merged list; changes when an old thought is evicted. */first_id:string|null;/** First retained thought id; changes on every thought eviction, even mid-list. */thoughts_first_id:string|null}

@@ -8,6 +8,9 @@ class Node{
  querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1;document.activeElement=this}contains(node){return this===node||this.children.some(child=>child.contains?.(node))}
  dispatchEvent(event){this.listeners[event.type]?.(event);if(event.bubbles)this.parentElement?.dispatchEvent(event)}
  get childElementCount(){return this.children.length}
+ remove(){if(this.parentElement)this.parentElement.children=this.parentElement.children.filter(child=>child!==this)}
+ showModal(){}
+ close(){}
 }
 const controllers=[]
 afterEach(async()=>{for(const c of controllers.splice(0))c.disconnect();await new Promise(resolve=>setImmediate(resolve))})
@@ -413,18 +416,81 @@ test('the chat shows no task strip, and the background task summary still counts
  assert.ok(m.all().some(n=>n.textContent==='运行中 · 0 个后台任务'))
 })
 
-test('main conversation keeps one companion outside the transcript through messages, sending and voice states',()=>{
+test('the animated companion only stands in for an empty main transcript',()=>{
  const m=mount({defaultHome:true,api:{orbMenu:{},personal:{setUnread(){},onPresentationRequest(){},onCollapsed(){}},welcome:{}}})
  const snapshot=(revision,messages=[])=>feedState(revision,'chat:main',{feed:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages}})
  m.view.receive(snapshot(1));m.view.identity({profile:{assistantName:'nova',userName:'',avatar:null,introduced:true},defaultAvatar:''})
  const companion=m.all().find(n=>n.className==='chat-companion'),history=m.all().find(n=>n.className==='chat-history')
- assert.ok(companion);assert.equal(companion.hidden,false);assert.equal(history.contains(companion),false)
+ assert.ok(companion);assert.equal(companion.hidden,false);assert.equal(history.contains(companion),false,'the intro avatar stays outside the transcript')
  m.view.receive(snapshot(2,[{id:'u1',role:'user',text:'今天想聊聊',conversation_id:'chat:main'},{id:'a1',role:'assistant',text:'我在这里。',conversation_id:'chat:main'}]))
+ assert.equal(m.all().find(n=>n.className==='chat-companion'),companion)
+ assert.equal(companion.hidden,true,'a persisted transcript replaces the intro companion')
  m.view.controller.state().submission={request_id:'waiting'};m.view.refresh();m.view.setOrb({name:'speaking',codexWorking:true})
- assert.equal(m.all().find(n=>n.className==='chat-companion'),companion);assert.equal(companion.hidden,false)
- m.view.controller.disconnect();m.view.refresh();assert.equal(companion.hidden,false)
- m.view.receive(feedState(3,'other',{feed:[]}));assert.equal(companion.hidden,true)
- m.view.receive(snapshot(4));assert.equal(companion.hidden,false)
+ assert.equal(companion.hidden,true,'sending and voice states keep the transcript companion hidden')
+ m.view.controller.disconnect();m.view.refresh();assert.equal(companion.hidden,true)
+ m.view.receive(feedState(3,'other',{feed:[]}));assert.equal(companion.hidden,true,'another conversation never shows the main intro companion')
+ m.view.receive(snapshot(4));assert.equal(companion.hidden,false,'an empty main conversation brings the companion back')
+})
+
+test('assistant replies carry the identity avatar in a grid gutter while user messages stay clean',()=>{
+ const m=mount({defaultHome:true})
+ const convo=(revision,messages)=>({type:'personal.state',revision,feed:[],memory:{entries:[]},tasks:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages,home_messages:[]}})
+ const message=(id,role,text,created_at)=>({id,conversation_id:'chat:main',role,text,created_at})
+ m.view.receive(convo(1,[]))
+ m.view.identity({profile:{assistantName:'Nova',userName:'Alice',avatar:'data:image/png;base64,AVATAR',introduced:true},defaultAvatar:'default-avatar.png'})
+ m.view.receive(convo(2,[
+  message('a1','assistant','第一段','2026-10-27T10:00:01Z'),
+  message('a2','assistant','第二段','2026-10-27T10:00:02Z'),
+  message('u1','user','你好','2026-10-27T10:00:03Z'),
+  message('a3','assistant','重置后','2026-10-27T10:00:04Z'),
+ ]))
+ const articles=()=>m.all().filter(n=>typeof n.className==='string'&&n.className.split(' ').includes('message')&&n.dataset.messageId)
+ const byId=id=>articles().find(node=>node.dataset.messageId===id)
+ const has=(id,name)=>byId(id).className.split(' ').includes(name)
+ const avatarOf=node=>node.children.find(child=>child.className==='message-avatar')
+ assert.ok(avatarOf(byId('a1')),'the first assistant reply of a group carries the avatar')
+ assert.equal(avatarOf(byId('a2')),undefined,'a consecutive assistant reply continues without a second avatar')
+ assert.ok(has('a2','message-continuation'))
+ assert.ok(has('a2','assistant'))
+ assert.equal(avatarOf(byId('u1')),undefined,'user messages never carry an avatar')
+ assert.ok(has('u1','user'))
+ assert.equal(has('u1','message-continuation'),false)
+ assert.ok(avatarOf(byId('a3')),'a user message resets the assistant group')
+ const avatar=avatarOf(byId('a1')),image=avatar.children[0]
+ assert.equal(image.src,'data:image/png;base64,AVATAR')
+ assert.equal(image.alt,'')
+ assert.equal(image.attrs['aria-hidden'],'true')
+})
+
+test('the avatar falls back to the default identity image and is decorative',()=>{
+ const m=mount({defaultHome:true})
+ const convo=(revision,messages)=>({type:'personal.state',revision,feed:[],memory:{entries:[]},tasks:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages,home_messages:[]}})
+ m.view.receive(convo(1,[]))
+ m.view.identity({profile:{assistantName:'Nova',userName:'',avatar:null,introduced:true},defaultAvatar:'default-avatar.png'})
+ m.view.receive(convo(2,[{id:'a1',conversation_id:'chat:main',role:'assistant',text:'你好','created_at':'2026-10-27T10:00:01Z'}]))
+ const article=m.all().find(node=>typeof node.className==='string'&&node.className.split(' ').includes('message')&&node.dataset.messageId==='a1')
+ const image=article.children[0].children[0]
+ assert.equal(image.src,'default-avatar.png','without a profile avatar the identity default is used')
+ assert.equal(article.children.filter(child=>child.className==='message-avatar').length,1)
+})
+
+test('feed messages count as assistant turns for avatar grouping',()=>{
+ const m=mount({defaultHome:true})
+ m.view.receive(feedState(1,'chat:main',{conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages:[]}}))
+ m.view.identity({profile:{assistantName:'Nova',userName:'',avatar:'data:image/png;base64,AVATAR',introduced:true},defaultAvatar:'default-avatar.png'})
+ m.view.receive(feedState(2,'chat:main',{conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages:[
+  {id:'feed:f1',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'T\n## 前瞻\n- 一条',created_at:'2026-10-27T10:00:01Z'},
+  {id:'a2',conversation_id:'chat:main',role:'assistant',text:'跟进','created_at':'2026-10-27T10:00:02Z'},
+  {id:'u1',conversation_id:'chat:main',role:'user',text:'收到','created_at':'2026-10-27T10:00:03Z'},
+  {id:'a3',conversation_id:'chat:main',role:'assistant',text:'好的','created_at':'2026-10-27T10:00:04Z'},
+ ]}}))
+ const articles=()=>m.all().filter(n=>typeof n.className==='string'&&n.className.split(' ').includes('message')&&n.dataset.messageId)
+ const byId=id=>articles().find(node=>node.dataset.messageId===id)
+ const avatarOf=node=>node?.children.find(child=>child.className==='message-avatar')
+ assert.ok(avatarOf(byId('feed:f1')),'a feed card is an assistant turn and opens the group')
+ assert.equal(avatarOf(byId('a2')),undefined)
+ assert.ok(byId('a2').className.split(' ').includes('message-continuation'))
+ assert.ok(avatarOf(byId('a3')),'a user message resets the feed group')
 })
 test('a goal check-in in the main chat is plain text without tags or action buttons',()=>{
  const m=mount({defaultHome:true})
@@ -538,13 +604,112 @@ test('task conversation has a visible home action that survives assistant identi
 test('published plans preview on the right without taking back a tab the user selected',async()=>{
  const m=mount(),state=revision=>feedState(revision,'c',{feed:[],conversations:{selected_id:'c',items:[{id:'c',title:'Task',mode:'plan',plan:{id:'p',version:1}}],messages:[]}})
  m.view.receive(state(1))
- const right=m.all().find(n=>n.className==='workspace'),left=m.all().find(n=>n.className==='nova-column'),card=m.all().find(n=>n.className==='workbench-plan'),preview=m.all().find(n=>n.className==='chat-preview-plan')
- assert.ok(right.contains(card));assert.equal(left.contains(card),false);assert.equal(preview.hidden,false)
- const editor=card.children.find(n=>n.tag==='textarea');editor.value='unsaved plan draft'
- selectPage(m,'时间线');m.view.receive(state(2));assert.equal(right.contains(card),false)
+ const right=m.all().find(n=>n.className==='workspace'),left=m.all().find(n=>n.className==='nova-column'),card=()=>m.all().find(n=>n.className==='workbench-plan'),preview=m.all().find(n=>n.className==='chat-preview-plan')
+ const tasksTab=m.all().find(n=>n.dataset.page==='tasks')
+ assert.equal(right.contains(card()),false,'a published plan must not take back the tab the user selected')
+ assert.equal(left.contains(card()),false);assert.equal(preview.hidden,false,'the chat-head entry stays available')
+ assert.equal(tasksTab.dataset.plan,'true','Tasks carries a pending-plan indicator instead')
+ await preview.listeners.click()
+ assert.ok(right.contains(card()));assert.equal(tasksTab.dataset.plan,undefined,'opening the plan clears the indicator')
+ const editor=card().children.find(n=>n.tag==='textarea');editor.value='unsaved plan draft'
+ selectPage(m,'时间线');m.view.receive(state(2));assert.equal(right.contains(card()),false)
  const panel=m.all().find(n=>n.className==='workbench-page');panel.scrollTop=420
- await preview.listeners.click();assert.ok(right.contains(card));assert.equal(editor.value,'unsaved plan draft');assert.equal(panel.scrollTop,0)
- await m.all().find(n=>n.textContent==='← 返回任务列表').listeners.click();assert.equal(right.contains(card),false)
- m.view.receive(state(3));assert.equal(right.contains(card),false)
- await preview.listeners.click();m.view.receive(feedState(4,'chat:main',{feed:[]}));assert.equal(right.contains(card),false);assert.equal(preview.hidden,true)
+ await preview.listeners.click();assert.ok(right.contains(card()));assert.equal(editor.value,'unsaved plan draft');assert.equal(panel.scrollTop,0)
+ await m.all().find(n=>n.textContent==='← 返回任务列表').listeners.click();assert.equal(right.contains(card()),false)
+ selectPage(m,'时间线');assert.equal(panel.scrollTop,420,'opening a plan never resets another page position')
+ m.view.receive(state(3));assert.equal(right.contains(card()),false)
+ await preview.listeners.click();m.view.receive(feedState(4,'chat:main',{feed:[]}));assert.equal(right.contains(card()),false);assert.equal(preview.hidden,true)
+})
+
+test('the cold-start chat hides the return-to-main action until a conversation is selected',()=>{
+ const m=mount(),home=m.all().find(n=>n.className==='chat-home')
+ assert.equal(home.hidden,true,'a null selectedId is not a reason to offer the main conversation')
+ m.view.receive(feedState(1,'c',{feed:[]}))
+ assert.equal(home.hidden,false)
+ m.view.receive(feedState(2,'chat:main',{feed:[]}))
+ assert.equal(home.hidden,true)
+})
+
+test('each workspace page remembers its own scroll position across tab switches',async()=>{
+ const m=mount(),panel=()=>m.all().find(n=>n.className==='workbench-page')
+ const open=page=>m.all().find(n=>n.dataset.page===page).listeners.click()
+ m.view.receive(feedState(1,'chat:main',{feed:[],life:{todos:[],goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ await open('timeline');panel().scrollTop=310
+ await open('goals');assert.equal(panel().scrollTop,0,'a freshly visited page starts at the top')
+ panel().scrollTop=140
+ await open('timeline');assert.equal(panel().scrollTop,310,'returning restores the previous offset')
+ await open('goals');assert.equal(panel().scrollTop,140)
+ await open('ideas');assert.equal(panel().scrollTop,0)
+})
+
+test('Build with attached references asks before dropping them and only continues on consent',async()=>{
+ const m=mount(),c=m.view.controller
+ m.view.receive(feedState(1,'c',{feed:[]}))
+ const reference={kind:'todo',id:'t1',version:1}
+ c.draft='build this';c.state().execution='build';c.state().references=[reference]
+ m.view.refresh()
+ const submit=()=>m.all().find(n=>n.className==='composer-submit')
+ submit().listeners.click();await tick()
+ const dialogs=()=>m.all().filter(n=>n.tag==='dialog')
+ assert.equal(dialogs().length,1,'attached references trigger a confirmation before build.begin')
+ assert.equal(m.sent.some(f=>f.method==='build.begin'),false)
+ const button=dialogs()[0].children.flatMap(function walk(n){return [n,...n.children.flatMap(walk)]}).find(n=>n.textContent==='取消')
+ button.listeners.click();await tick()
+ assert.equal(c.draft,'build this');assert.deepEqual(c.state().references,[reference],'cancelling keeps the references and sends nothing')
+ assert.equal(dialogs().length,0)
+ submit().listeners.click();await tick()
+ dialogs()[0].children.flatMap(function walk(n){return [n,...n.children.flatMap(walk)]}).find(n=>n.textContent==='继续并新建任务').listeners.click();await tick()
+ const begin=m.sent.find(f=>f.type==='personal.command'&&f.method==='build.begin')
+ assert.ok(begin,'continuing starts the new Build task')
+ assert.equal(begin.params.text,'build this')
+ assert.equal(c.state().references.length,1,'a pending host call keeps the chips until it succeeds')
+ m.view.receive({type:'personal.result',request_id:begin.request_id,ok:true,data:{}});await tick()
+ assert.equal(c.state().references.length,0);assert.equal(c.state().source_todo,null)
+})
+
+test('clearing or replacing a conversation drops a stale Build choice so Enter sends text',async()=>{
+ const m=mount(),c=m.view.controller
+ const state=(revision,generation)=>({type:'personal.state',revision,feed:[],memory:{entries:[]},tasks:[],conversations:{selected_id:'c',voice_id:null,items:[{id:'c',kind:'chat',title:'C',generation}],messages:[]}})
+ m.view.receive(state(1,1))
+ c.state().execution='build';c.state().workspace={workspace_id:'w1'}
+ m.view.refresh()
+ assert.equal(m.all().find(n=>n.className==='composer-mode-active').textContent,'Build')
+ m.view.receive(state(2,2))
+ assert.equal(c.state().execution,undefined,'a host generation change retires the renderer intent')
+ assert.equal(c.state().workspace,undefined)
+ m.view.refresh()
+ assert.equal(m.all().find(n=>n.className==='composer-mode-active').textContent,'Chat')
+ const draft=m.all().find(n=>n.attrs['aria-label']==='消息草稿');draft.value='hello';draft.listeners.input()
+ m.all().find(n=>n.className==='composer-submit').listeners.click();await tick()
+ assert.ok(m.sent.some(f=>f.type==='input.text'&&f.text==='hello'))
+ assert.equal(m.sent.some(f=>f.method==='build.begin'),false)
+})
+
+test('English covers user labels, generation status, voice ownership and the approval line',async()=>{
+ const {setLanguage}=await import('../src/renderer/locale.mjs')
+ setLanguage('en')
+ try{
+  const m=mount()
+  const convo=(revision,voice='')=>({type:'personal.state',revision,feed:[],memory:{entries:[]},tasks:[],pending_approvals:[{conversation_id:'c',approval_id:'a1',summary:'Approve run'}],conversations:{selected_id:'c',voice_id:voice||null,items:[{id:'c',kind:'chat',title:'C'}],messages:[{id:'u',conversation_id:'c',role:'user',text:'hi'},{id:'r',conversation_id:'c',role:'assistant',text:'ok',generation_status:'failed'}]}})
+  m.view.receive(convo(1))
+  assert.ok(m.all().some(n=>n.textContent==='You'),'the user role falls back to a translated label')
+  assert.ok(m.all().some(n=>n.textContent==='Reply failed. Send again.'))
+  assert.ok(m.all().some(n=>n.textContent==='Handle approval: Approve run'))
+  m.view.identity({profile:{assistantName:'Nova',userName:'Alice',avatar:null,introduced:true},defaultAvatar:''})
+  assert.ok(m.all().some(n=>n.textContent==='Alice'),'a profile user name labels the user bubble')
+  m.view.receive(convo(2,'c'))
+  assert.ok(m.all().some(n=>n.textContent==='Voice: C'),'voice ownership names the speaking conversation')
+ }finally{setLanguage('zh-CN')}
+})
+
+test('a published plan never steals the panel while a task inspector is open',async()=>{
+ const m=mount()
+ const task={id:'t1',goal:'Task one',conversation_id:'c',phase:'running',controller:{kind:'nova'},control_revision:0,goal_revision:0,session_ids:[],events:{items:[],next:0},capabilities:{},viewer:{client_id:'a'}}
+ m.view.receive(feedState(1,'c',{feed:[],tasks:[task],conversations:{selected_id:'c',items:[{id:'c',title:'C'}],messages:[]}}))
+ const opening=m.view.openTask('t1'),request=m.sent.findLast(frame=>frame.method==='tasks.get')
+ m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:task});await opening
+ assert.ok(m.all().some(node=>node.className==='task-detail'))
+ m.view.receive(feedState(2,'c',{feed:[],conversations:{selected_id:'c',items:[{id:'c',title:'C',mode:'plan',plan:{id:'p',version:1}}],messages:[]}}))
+ assert.ok(m.all().some(node=>node.className==='task-detail'),'the inspector keeps the panel')
+ assert.equal(m.all().find(node=>node.dataset.page==='tasks').dataset.plan,'true','the publish is flagged on Tasks instead')
 })
