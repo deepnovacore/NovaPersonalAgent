@@ -55,7 +55,8 @@ input.on('line', (line: string) => {
           const result = await native.request(body)
           if(request.op==='Tap'&&result.editor===true)editorPoint=z.tuple([z.number().finite(),z.number().finite()]).parse(point)
           if (request.op === 'target' || request.op === 'connect') {
-            if (result.keyWindowMatches !== true || typeof result.target !== 'string' || (binding !== undefined && result.target !== binding)) throw Error('screen_changed')
+            // Observation can bind a visible background window; native writes still require its AX key window.
+            if (typeof result.keyWindowMatches !== 'boolean' || typeof result.target !== 'string' || (binding !== undefined && result.target !== binding)) throw Error('screen_changed')
             binding = result.target
           }
           value = request.op === 'screenshot' ? result.image : result

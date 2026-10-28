@@ -63,6 +63,19 @@ test('window metadata remains inside owned RPC and is validated before the guard
 })
 
 
+test('a stable visible window can be observed without AX key-window focus', {skip: process.platform !== 'darwin'}, async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-window-observation-')))
+  await mkdir(join(root, 'native'))
+  const helper = '#!/usr/bin/env node\nlet body="";process.stdin.on("data",c=>body+=c);process.stdin.on("end",()=>{const r=JSON.parse(body);console.log(JSON.stringify(r.op==="screenshot"?{image:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg=="}:{target:"approved-without-focus",width:800,height:600,keyWindowMatches:false}))})'
+  await writeFile(join(root, 'native/macos_gui'), helper); await chmod(join(root, 'native/macos_gui'), 0o755)
+  await writeFile(join(root, 'native-resources-v1.json'), JSON.stringify({schema_version:1,target:'darwin-'+process.arch,resources:[{logical_id:'macos_gui',relative_path:'native/macos_gui',kind:'executable',platform:'darwin',architecture:process.arch,byte_size:Buffer.byteLength(helper),sha256:createHash('sha256').update(helper).digest('hex'),build_contract_version:1}]}))
+  const backend = await startComputerBackend('0', new AbortController().signal, 10000, undefined, root, 100, {pid:12345,windowId:678})
+  t.after(async () => {await backend.close(); await rm(root, {recursive:true,force:true})})
+  assert.equal((await backend.windowTarget()).target, 'approved-without-focus')
+  await backend.connect()
+  assert.match(await backend.device.screenshotBase64(), /^data:image\/png;base64,/u)
+})
+
 test('native window binding cannot silently change between target and connect', {skip: process.platform !== 'darwin'}, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-window-binding-')))
   await mkdir(join(root, 'native'))

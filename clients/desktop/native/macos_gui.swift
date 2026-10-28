@@ -82,11 +82,8 @@ private struct Binding: Equatable {
               (window[kCGWindowLayer as String] as? Int)==0, let values=window[kCGWindowBounds as String] as? NSDictionary,
               let bounds=CGRect(dictionaryRepresentation: values), bounds.width>0, bounds.height>0,
               bounds.width<=8192, bounds.height<=8192 else {try reject("screen_changed")}
-        var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute as CFString, &focused)==AXError.success,
-              let focused=focused, CFGetTypeID(focused)==AXUIElementGetTypeID() else {try reject("needs_user_action")}
-        var keyWindow: CGWindowID=0
-        guard nativeWindowID(unsafeBitCast(focused,to:AXUIElement.self), &keyWindow)==AXError.success else {try reject("needs_user_action")}
+        // Missing AX focus may block input, but does not make a visible window unobservable.
+        let keyWindow=windowID(axElement(AXUIElementCreateApplication(pid),kAXFocusedWindowAttribute)) ?? 0
         return Binding(pid:pid,windowID:wid,started:started,bounds:bounds,keyWindow:keyWindow)
     }
     private static var axTimedOut=false
@@ -101,11 +98,28 @@ private struct Binding: Equatable {
         var result: DarwinBoolean=false
         return AXUIElementIsAttributeSettable(element,name as CFString,&result) == .success && result.boolValue
     }
-    private static func ownerWindow(_ element: AXUIElement) -> UInt32? {
-        guard let value=attribute(element,kAXWindowAttribute),CFGetTypeID(value)==AXUIElementGetTypeID() else {return nil}
+    private static func axElement(_ element: AXUIElement,_ name: String) -> AXUIElement? {
+        guard let value=attribute(element,name),CFGetTypeID(value)==AXUIElementGetTypeID() else {return nil}
+        return unsafeBitCast(value,to:AXUIElement.self)
+    }
+    private static func windowID(_ element: AXUIElement?) -> UInt32? {
+        guard let element,attribute(element,kAXRoleAttribute) as? String == kAXWindowRole else {return nil}
         var id:CGWindowID=0
-        guard nativeWindowID(unsafeBitCast(value,to:AXUIElement.self),&id) == .success else {return nil}
+        guard nativeWindowID(element,&id) == .success,id>0 else {return nil}
         return id
+    }
+    private static func windowElement(_ pid: Int32,_ id: UInt32) -> AXUIElement? {
+        let app=AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app,1)
+        let preferred=[axElement(app,kAXFocusedWindowAttribute),axElement(app,kAXMainWindowAttribute)].compactMap{$0}
+        let windows=(attribute(app,kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        return (preferred+windows).first{windowID($0)==id}
+    }
+    private static func ownerWindow(_ element: AXUIElement,_ pid: Int32) -> UInt32? {
+        return owningGUIWindow(element,pid:pid,process:{ node in
+            var owner:pid_t=0
+            return AXUIElementGetPid(node,&owner) == .success ? owner : nil
+        },windowID:{windowID($0)},window:{axElement($0,kAXWindowAttribute)},parent:{axElement($0,kAXParentAttribute)})
     }
     private static func receiver(_ binding: Binding) throws -> AXUIElement {
         let app=AXUIElementCreateApplication(binding.pid)
@@ -132,7 +146,7 @@ private struct Binding: Equatable {
             guard let found=candidates.first else {try reject("operation_unsupported")}
             element=found
         }
-        guard ownerWindow(element)==binding.windowID else {try reject("screen_changed")}
+        guard ownerWindow(element,binding.pid)==binding.windowID else {try reject("screen_changed")}
         guard attribute(element,kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole else {try reject("operation_unsupported")}
         return element
     }
@@ -141,7 +155,7 @@ private struct Binding: Equatable {
         AXUIElementSetMessagingTimeout(app,1)
         var hit:AXUIElement?
         guard AXUIElementCopyElementAtPosition(app,Float(point.x+binding.bounds.minX),Float(point.y+binding.bounds.minY),&hit) == .success,let element=hit else {return nil}
-        guard ownerWindow(element)==binding.windowID else {try reject("screen_changed")}
+        guard ownerWindow(element,binding.pid)==binding.windowID else {try reject("screen_changed")}
         let role=attribute(element,kAXRoleAttribute) as? String
         if [kAXTextFieldRole,kAXTextAreaRole,kAXComboBoxRole].contains(role ?? ""), writable(element,kAXFocusedAttribute) {
             guard AXUIElementSetAttributeValue(element,kAXFocusedAttribute as CFString,kCFBooleanTrue) == .success else {try reject("action_failed")}
@@ -186,8 +200,7 @@ private struct Binding: Equatable {
     }
     private static func metadata(_ binding: Binding) -> [String: Any] {
         let app=NSRunningApplication(processIdentifier:binding.pid)
-        let window=attribute(AXUIElementCreateApplication(binding.pid),kAXFocusedWindowAttribute)
-        let title=window.flatMap { CFGetTypeID($0)==AXUIElementGetTypeID() ? attribute(unsafeBitCast($0,to:AXUIElement.self),kAXTitleAttribute) as? String : nil } ?? ""
+        let title=windowElement(binding.pid,binding.windowID).flatMap{attribute($0,kAXTitleAttribute) as? String} ?? ""
         return ["target":binding.identity,"width":binding.bounds.width,"height":binding.bounds.height,"keyWindowMatches":binding.keyWindow==binding.windowID,
                 "title":String(title.prefix(200)),"application":["name":app?.localizedName ?? "","bundleId":app?.bundleIdentifier ?? "","path":app?.bundleURL?.standardizedFileURL.path ?? ""]]
     }
@@ -199,11 +212,11 @@ private struct Binding: Equatable {
             guard apps.count==1,let app=apps.first else {try reject("application_not_found_or_ambiguous")}
             let ax=AXUIElementCreateApplication(app.processIdentifier)
             AXUIElementSetMessagingTimeout(ax,1)
-            guard let value=attribute(ax,kAXFocusedWindowAttribute),CFGetTypeID(value)==AXUIElementGetTypeID() else {try reject("needs_user_action")}
-            var id:CGWindowID=0
-            guard nativeWindowID(unsafeBitCast(value,to:AXUIElement.self),&id) == .success else {try reject("needs_user_action")}
+            let windows=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],0) as? [[String:Any]] ?? []
+            let visible=windows.filter{($0[kCGWindowOwnerPID as String] as? Int32)==app.processIdentifier && ($0[kCGWindowLayer as String] as? Int)==0}.compactMap{$0[kCGWindowNumber as String] as? UInt32}
+            guard let id=selectedGUIWindow(focused:windowID(axElement(ax,kAXFocusedWindowAttribute)),main:windowID(axElement(ax,kAXMainWindowAttribute)),visible:visible) else {try reject("needs_user_action")}
             let selected=try bind(["pid":app.processIdentifier,"windowId":id])
-            return ["pid":selected.pid,"windowId":selected.windowID,"title":String((attribute(unsafeBitCast(value,to:AXUIElement.self),kAXTitleAttribute) as? String ?? "").prefix(200)),"target":selected.identity,"application":["name":app.localizedName ?? query,"bundleId":app.bundleIdentifier ?? "","path":app.bundleURL?.standardizedFileURL.path ?? ""]]
+            return metadata(selected).merging(["pid":selected.pid,"windowId":selected.windowID]){_,new in new}
         }
         let binding=try bind(request)
         guard let operation=request["op"] as? String else {try reject("invalid_configuration")}
@@ -219,10 +232,7 @@ private struct Binding: Equatable {
             }
             let app=AXUIElementCreateApplication(binding.pid)
             AXUIElementSetMessagingTimeout(app,0.5)
-            if let value=attribute(app,kAXFocusedWindowAttribute),CFGetTypeID(value)==AXUIElementGetTypeID() {
-                let window=unsafeBitCast(value,to:AXUIElement.self)
-                var id:CGWindowID=0
-                guard nativeWindowID(window,&id) == .success,id==binding.windowID else {try reject("screen_changed")}
+            if let window=windowElement(binding.pid,binding.windowID) {
                 var queue=[window],index=0
                 let deadline=Date().addingTimeInterval(1)
                 while index<queue.count,index<500,content.count<80,Date()<deadline {
