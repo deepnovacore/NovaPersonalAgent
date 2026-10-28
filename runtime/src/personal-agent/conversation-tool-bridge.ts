@@ -19,17 +19,15 @@ interface ConversationToolBridgeOptions {
 }
 
 function summarizeToolResult(result: JsonValue): string {
-  if (result === null || typeof result !== 'object' || Array.isArray(result)) return typeof result === 'string' ? result.slice(0, 80) : ''
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return ''
   const record = result as Record<string, JsonValue>
   const inner = record.result
   if (inner !== null && typeof inner === 'object' && !Array.isArray(inner)) {
     const value = inner as Record<string, JsonValue>
     if (Array.isArray(value.items)) return `${value.items.length} 条`
     if (Array.isArray(value.results)) return `${value.results.length} 条`
-    if (typeof value.message === 'string') return value.message.slice(0, 80)
   }
-  if (typeof record.message === 'string') return record.message.slice(0, 80)
-  if (typeof record.code === 'string') return record.code
+  if (typeof record.code === 'string' && /^[a-z_]{1,64}$/u.test(record.code)) return record.code
   return ''
 }
 
