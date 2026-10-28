@@ -917,13 +917,40 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 /* ── Companion form (pet vs floating orb) ─────────────────────────────────
    The chat header, voice stage and transcript avatars follow the same
    companion setting as the floating window. The pet uses the welcome profile
-   image; the orb uses the production particle visual. */
+   image; the orb uses the production particle visual. Pet surfaces also
+   consume the shared data-companion-state aura tokens defined in index.css. */
+.workbench .chat-companion{position:relative}
 .workbench .chat-companion[data-form=pet] .idle-avatar img{background:#fbf4e8;object-fit:cover;animation:companion-bob 5.5s ease-in-out infinite}
 .workbench .chat-companion-orb{display:block;width:84px;height:84px;border-radius:50%;pointer-events:none}
-.workbench .voice-stage-pet{display:block;width:96px;height:96px;object-fit:cover;border-radius:50%;background:#fbf4e8;box-shadow:0 10px 26px -18px rgba(20,20,60,.5)}
+.workbench .chat-companion[data-form=pet]::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  border:2px solid var(--companion-ring);box-shadow:inset 0 0 18px var(--companion-glow);
+  opacity:var(--companion-aura-opacity);
+  animation:var(--companion-aura-animation) var(--companion-aura-duration) ease-in-out infinite;
+  transition:opacity .35s ease,border-color .35s ease,box-shadow .35s ease;
+}
+.workbench .voice-stage-pet-frame{position:relative;display:block;width:96px;height:96px;flex:none}
+.workbench .voice-stage-pet{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%;background:#fbf4e8;box-shadow:0 10px 26px -18px rgba(20,20,60,.5)}
+.workbench .voice-stage-pet-frame .companion-aura{
+  position:absolute;inset:0;border-radius:50%;pointer-events:none;
+  border:2px solid var(--companion-ring);
+  box-shadow:inset 0 0 20px var(--companion-glow),0 0 22px var(--companion-glow);
+  opacity:var(--companion-aura-opacity);
+  animation:var(--companion-aura-animation) var(--companion-aura-duration) ease-in-out infinite;
+  transition:opacity .35s ease,border-color .35s ease,box-shadow .35s ease;
+}
 .workbench .voice-stage[data-companion-form=pet] .voice-stage-pet{animation:companion-talk 1.15s ease-in-out infinite}
 @keyframes companion-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes companion-talk{0%,100%{transform:scale(1)}45%{transform:scale(1.035)}}
 @media(max-width:600px),(max-height:700px){.workbench .chat-companion-orb{width:64px;height:64px}}
-@media(prefers-reduced-motion:reduce){.workbench .chat-companion[data-form=pet] .idle-avatar img,.workbench .voice-stage[data-companion-form=pet] .voice-stage-pet{animation:none}}
-@media(forced-colors:active){.workbench .voice-stage-pet,.workbench .chat-companion-orb{border:1px solid CanvasText}}
+@media(prefers-reduced-motion:reduce){
+  .workbench .chat-companion[data-form=pet] .idle-avatar img,
+  .workbench .voice-stage[data-companion-form=pet] .voice-stage-pet,
+  .workbench .chat-companion[data-form=pet]::after,
+  .workbench .voice-stage-pet-frame .companion-aura{animation:none!important}
+}
+@media(forced-colors:active){
+  .workbench .voice-stage-pet,.workbench .chat-companion-orb{border:1px solid CanvasText}
+  .workbench .chat-companion[data-form=pet]::after,
+  .workbench .voice-stage-pet-frame .companion-aura{border-color:CanvasText;box-shadow:none;opacity:1}
+}

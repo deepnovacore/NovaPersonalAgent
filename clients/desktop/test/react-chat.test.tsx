@@ -209,3 +209,31 @@ test('the live voice stage follows the companion form',async()=>{
   assert.equal(stage.querySelector('.voice-stage-pet'),null)
  } finally { await orb.close() }
 })
+
+test('the pet voice aura follows the validated orb state',async()=>{
+ const pet=await mount({isVoiceConversation:true}, {companionForm:'pet'})
+ try{
+  pet.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  pet.c.voiceId='chat:main'
+  await pet.render()
+  const pane=document.querySelector('#chat-pane') as HTMLElement
+  assert.equal(pane.getAttribute('data-companion-form'),'pet')
+  assert.equal(pane.getAttribute('data-companion-state'),'idle')
+  assert.ok(document.querySelector('.voice-stage-pet-frame .companion-aura'))
+  await act(async()=>pet.ref.current.setOrb({name:'listening',statusLine:'正在聆听'}))
+  assert.equal(pane.getAttribute('data-companion-state'),'listening')
+  await act(async()=>pet.ref.current.setOrb({name:'speaking',statusLine:'正在回复'}))
+  assert.equal(pane.getAttribute('data-companion-state'),'speaking')
+  await act(async()=>pet.ref.current.setOrb({name:'not-a-real-state'}))
+  assert.equal(pane.getAttribute('data-companion-state'),'idle')
+ } finally { await pet.close() }
+ const orb=await mount({isVoiceConversation:true}, {companionForm:'orb'})
+ try{
+  orb.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  orb.c.voiceId='chat:main'
+  await orb.render()
+  assert.equal(document.querySelector('.voice-stage-pet-frame'),null)
+  assert.equal(document.querySelector('.companion-aura'),null)
+  assert.ok(document.querySelector('.voice-stage-orb'))
+ } finally { await orb.close() }
+})

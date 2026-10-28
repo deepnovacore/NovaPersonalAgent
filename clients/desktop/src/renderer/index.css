@@ -800,12 +800,76 @@ body:hover #last-result, #last-result:focus-visible { opacity: 1; pointer-events
 
 /* ── Companion form (pet vs floating orb) ─────────────────────────────────
    The floating window follows the same form setting: pet keeps a portrait in
-   the disc, orb keeps the particle canvas. */
+   the disc, orb keeps the particle canvas. The pet borrows the orb's own state
+   vocabulary for a small aura ring, so listening/speaking read at a glance
+   without pretending to be a second particle field. */
 #shell[data-companion-form=pet] .orb-canvas{display:none!important}
 #shell[data-companion-form=pet] .orb-idle-avatar img{object-fit:cover;background:#fbf4e8;animation:companion-float 5.5s ease-in-out infinite}
 #shell[data-companion-form=pet][data-state=listening] .orb-idle-avatar img{animation:companion-listen 1.5s ease-in-out infinite}
 #shell[data-companion-form=pet][data-state=speaking] .orb-idle-avatar img{animation:companion-speak .9s ease-in-out infinite}
+#shell[data-companion-form=pet] .orb-idle-avatar::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  border:2px solid var(--companion-ring);box-shadow:inset 0 0 18px var(--companion-glow);
+  opacity:var(--companion-aura-opacity);
+  animation:var(--companion-aura-animation) var(--companion-aura-duration) ease-in-out infinite;
+  transition:opacity .35s ease,border-color .35s ease,box-shadow .35s ease;
+}
 @keyframes companion-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
 @keyframes companion-listen{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
 @keyframes companion-speak{0%,100%{transform:scale(1)}45%{transform:scale(1.04)}}
-@media(prefers-reduced-motion:reduce){#shell[data-companion-form=pet] .orb-idle-avatar img{animation:none!important}}
+@keyframes companion-aura-breathe{0%,100%{opacity:var(--companion-aura-opacity);transform:scale(.996)}50%{opacity:calc(var(--companion-aura-opacity) + .12);transform:scale(1.004)}}
+@keyframes companion-aura-pulse{0%,100%{opacity:var(--companion-aura-opacity);transform:scale(.994)}50%{opacity:1;transform:scale(1.012)}}
+@media(prefers-reduced-motion:reduce){
+  #shell[data-companion-form=pet] .orb-idle-avatar img{animation:none!important}
+  #shell[data-companion-form=pet] .orb-idle-avatar::after{animation:none!important}
+}
+@media(forced-colors:active){
+  #shell[data-companion-form=pet] .orb-idle-avatar::after{border-color:CanvasText;box-shadow:none;opacity:1}
+}
+
+
+/* ── Companion state aura ─────────────────────────────────────────────────
+   One state vocabulary, two consumers: the floating window (#shell) and the
+   chat pane. Fixed semantic colors match the state-label treatment: an error
+   must not rotate hue with the skin palette, and listening/speaking must stay
+   legible over every pet portrait. The aura is decorative; the existing
+   role=status labels remain the accessible source of truth. */
+:where(#shell, .chat-pane){
+  --companion-ring:rgba(255,228,194,.46);
+  --companion-glow:rgba(255,197,135,.16);
+  --companion-aura-animation:companion-aura-breathe;
+  --companion-aura-duration:5.2s;
+  --companion-aura-opacity:.55;
+}
+[data-companion-state='idle'],[data-companion-state='inactive']{
+  --companion-ring:rgba(255,228,194,.46);--companion-glow:rgba(255,197,135,.16);
+  --companion-aura-animation:companion-aura-breathe;--companion-aura-duration:5.2s;--companion-aura-opacity:.55;
+}
+[data-companion-state='candidate'],[data-companion-state='listening']{
+  --companion-ring:#86e5ff;--companion-glow:rgba(93,210,255,.34);
+  --companion-aura-animation:companion-aura-pulse;--companion-aura-duration:1.7s;--companion-aura-opacity:.92;
+}
+[data-companion-state='speaking']{
+  --companion-ring:#ffb46b;--companion-glow:rgba(255,164,88,.36);
+  --companion-aura-animation:companion-aura-pulse;--companion-aura-duration:.98s;--companion-aura-opacity:.96;
+}
+[data-companion-state='booting'],[data-companion-state='reconnecting']{
+  --companion-ring:#b8a7ff;--companion-glow:rgba(146,127,255,.26);
+  --companion-aura-animation:companion-aura-pulse;--companion-aura-duration:2.4s;--companion-aura-opacity:.68;
+}
+[data-companion-state='muted']{
+  --companion-ring:rgba(205,208,218,.34);--companion-glow:transparent;
+  --companion-aura-animation:none;--companion-aura-duration:5.2s;--companion-aura-opacity:.34;
+}
+[data-companion-state='disconnected']{
+  --companion-ring:#f0c07a;--companion-glow:rgba(240,192,122,.22);
+  --companion-aura-animation:companion-aura-breathe;--companion-aura-duration:4.4s;--companion-aura-opacity:.62;
+}
+[data-companion-state='error'],[data-companion-state='configuration-required'],
+[data-companion-state='authentication-failed'],[data-companion-state='backend-unavailable'],
+[data-companion-state='permission-denied'],[data-companion-state='microphone-restricted'],
+[data-companion-state='microphone-no-device'],[data-companion-state='microphone-busy'],
+[data-companion-state='microphone-unavailable'],[data-companion-state='audio-pipeline-error']{
+  --companion-ring:#ff7b83;--companion-glow:rgba(255,90,105,.24);
+  --companion-aura-animation:none;--companion-aura-duration:4s;--companion-aura-opacity:.78;
+}
