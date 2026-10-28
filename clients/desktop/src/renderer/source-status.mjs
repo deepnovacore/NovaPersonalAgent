@@ -21,5 +21,5 @@ export function renderSourceStatus(parent,{sources=[],status,processing=[],el,bu
   for(const failure of (source.failures??[]).slice(0,3))body.append(el('p',[failure.path?.split(/[\\/]/u).at(-1),failure.reason??failure.code??t('读取失败')].filter(Boolean).join(' · '),'hint'))
  }
  for(const run of processing){const label=run.status==='completed'?'已完成':run.status==='running'?'处理中':'未完成';body.append(el('p',`${t('资料整理')} · ${t(label)} · ${run.started_at} · ${t('模型调用 {0} 次',run.model_calls)}`))}
- if(openSettings)button(t('来源设置'),()=>openSettings('connections'),body)
+ if(openSettings)button(t('来源设置'),()=>openSettings('connectors'),body)
 }

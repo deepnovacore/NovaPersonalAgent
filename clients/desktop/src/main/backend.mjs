@@ -66,6 +66,21 @@ const ALWAYS_ACTIVE_SECRET_KEYS = Object.freeze([
   'codexApiKey',
 ])
 
+/** The secret a model-lane provider authenticates with; mirrors runtime provider routing. */
+const ROUTE_PROVIDER_SECRETS = Object.freeze({
+  qwen: 'dashscopeApiKey', dashscope: 'dashscopeApiKey', ark: 'arkApiKey', deepseek: 'deepseekApiKey',
+  openai: 'openaiApiKey', gemini: 'geminiApiKey', stepfun: 'stepfunApiKey',
+  'openai-compatible': 'openaiCompatibleApiKey', 'self-hosted': 'selfHostedLlmApiKey',
+})
+
+function routeSecretKeys(settings) {
+  const keys = []
+  for (const route of Object.values(settings?.modelRoutes ?? {})) {
+    if (route && ROUTE_PROVIDER_SECRETS[route.provider]) keys.push(ROUTE_PROVIDER_SECRETS[route.provider])
+  }
+  return keys
+}
+
 /**
  * How long one connection may hold a file descriptor without authenticating.
  *
@@ -212,7 +227,6 @@ export function backendLaunchSpec({
     CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,
     MEMORY_PRERECALL_ENABLED: String(settings?.memoryPrerecallEnabled ?? false),
-    CONVERSATION_VISION_ENABLED: String(settings?.conversationVisionEnabled ?? false),
     MONITOR_CAMERA_DEVICE_ID: settings?.monitorCameraDeviceId ?? '',
   }
   for (const [name, value] of [
@@ -321,6 +335,8 @@ export function backendLaunchSpec({
   // and the value actually injected is the trimmed one, so accidental
   // surrounding whitespace in a pasted key is cleaned up too.
   Object.assign(env, capabilityEnvironment(settings, decryptedSecrets, env, capabilitiesDocument))
+  const modelRoutes = Object.fromEntries(Object.entries(settings?.modelRoutes ?? {}).filter(([, route]) => route))
+  if (Object.keys(modelRoutes).length > 0) env.MODEL_ROUTES = JSON.stringify(modelRoutes)
   return {
     kind: 'node',
     entry: nodeEntry,
@@ -646,7 +662,7 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
   const pipelineMode = settings?.pipelineMode ?? SETTINGS_DEFAULTS.pipelineMode
   {
     decryptedSecrets = decryptedSecrets && typeof decryptedSecrets === 'object' ? decryptedSecrets : {}
-    const activeSecretKeys = new Set(ALWAYS_ACTIVE_SECRET_KEYS)
+    const activeSecretKeys = new Set([...ALWAYS_ACTIVE_SECRET_KEYS, ...routeSecretKeys(settings)])
     const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
     activeSecretKeys.add(llmProvider === 'openai-compatible' ? 'openaiCompatibleApiKey' : llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
     if (pipelineMode === 'cascaded') {
