@@ -166,3 +166,40 @@ body.computer-bar-page>#root,body.computer-bar-page .nova-theme{width:100%}
  .nova-window-settings .codex-card{border:1px solid CanvasText}
 }
 
+/* IM: one Feishu card, with proactive delivery as a nested section. */
+.nova-window-settings .im-feishu-state{margin:0 0 8px;color:var(--ink);font-size:13px;font-weight:550}
+.nova-window-settings .im-proactive{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.nova-window-settings .im-proactive-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.nova-window-settings .im-proactive-heading h4{margin:0;font-size:14px;font-weight:620;line-height:1.6;color:var(--ink)}
+.nova-window-settings .im-proactive-channel{margin:0;padding:3px 9px;border-radius:999px;background:var(--surface-raised);color:var(--ink-dim);font-size:11px;white-space:nowrap}
+.nova-window-settings .im-proactive-channel[data-channel=feishu]{background:var(--accent-wash);color:var(--accent-strong)}
+.nova-window-settings .im-proactive-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 10px}
+.nova-window-settings .im-proactive-actions .personal-hint{margin:0}
+.nova-window-settings .im-delivery-counts{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0 0 8px;padding:0}
+.nova-window-settings .im-delivery-chip{display:inline-flex;align-items:baseline;gap:5px;padding:4px 9px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink-dim);font-size:11px}
+.nova-window-settings .im-delivery-chip[data-status=accepted]{border-color:color-mix(in srgb,var(--ok) 35%,transparent);background:var(--ok-wash);color:var(--ok)}
+.nova-window-settings .im-delivery-chip[data-status=blocked],.nova-window-settings .im-delivery-chip[data-status=unknown]{border-color:color-mix(in srgb,var(--warn) 40%,transparent);background:var(--warn-wash);color:var(--warn)}
+.nova-window-settings .im-delivery-chip[data-status=pending],.nova-window-settings .im-delivery-chip[data-status=retry_wait]{border-color:color-mix(in srgb,var(--accent) 35%,transparent);background:var(--accent-wash);color:var(--accent-strong)}
+.nova-window-settings .im-delivery-chip[data-status=cancelled],.nova-window-settings .im-delivery-chip[data-status=expired],.nova-window-settings .im-delivery-chip[data-status=superseded]{color:var(--ink-faint)}
+.nova-window-settings .im-delivery-chip-count{font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
+.nova-window-settings .im-delivery-list{display:grid;gap:8px;list-style:none;margin:0 0 10px;padding:0}
+.nova-window-settings .im-delivery-row{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.nova-window-settings .im-delivery-title{margin:0 0 4px;color:var(--ink);font-size:12px}
+.nova-window-settings .im-delivery-note{margin:0 0 8px;color:var(--ink-dim);font-size:11px;line-height:1.6}
+.nova-window-settings .im-proactive-help{margin-top:8px}
+.nova-window-settings .im-proactive-help summary,.nova-window-settings .im-bot-setup summary{cursor:pointer;color:var(--ink-dim);font-size:12px}
+.nova-window-settings .im-proactive-help .personal-hint{margin:6px 0 0}
+.nova-window-settings .im-proactive-footer{display:flex;justify-content:flex-end;margin-top:8px}
+.nova-window-settings .im-proactive-footer .rt-Button,.nova-window-settings .im-feishu-actions .rt-Button,.nova-window-settings .im-sync-actions .rt-Button{min-height:30px;height:30px;padding:0 10px;font-size:12px}
+.nova-window-settings .im-feishu-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.nova-window-settings .im-delete-history{flex-basis:100%;padding:12px;border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:10px;background:var(--warn-wash)}
+.nova-window-settings .im-delete-history p{margin:0 0 8px}
+.nova-window-settings .im-sync-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.nova-window-settings .im-bot-setup{margin-top:12px}
+.nova-window-settings .im-chat-selection{margin:14px 0}
+.nova-window-settings .im-step-label{font-size:12px}
+@media(forced-colors:active){
+ .nova-window-settings .im-proactive{border-top-color:CanvasText}
+ .nova-window-settings .im-delivery-chip,.nova-window-settings .im-delivery-row{border:1px solid CanvasText}
+}
+

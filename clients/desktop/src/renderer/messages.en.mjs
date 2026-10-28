@@ -2103,4 +2103,11 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "界面语言": "Interface language",
   "管理编程执行器和工作区；更换执行器后对新会话生效。": "Manage the coding executor and its workspaces. Executor changes apply to new sessions.",
   "工作区是执行器读写文件的目录；清空会删除工作区内的内容。": "The workspace is the directory the executor reads and writes. Clearing it deletes the workspace contents.",
+  "已过期": "Expired",
+  "已被新消息取代": "Superseded by a newer message",
+  "投递说明": "Delivery details",
+  "投递状态统计": "Delivery status counts",
+  "需要处理的投递": "Deliveries needing attention",
+  "连接飞书应用后可改为在飞书接收。": "Connect a Feishu app to receive messages in Feishu.",
+  "同步飞书会话，并在飞书中接收 Nova 的主动消息。": "Sync Feishu chats and receive Nova's proactive messages in Feishu.",
 })
