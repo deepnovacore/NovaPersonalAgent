@@ -274,3 +274,170 @@ body.computer-bar-page>#root,body.computer-bar-page .nova-theme{width:100%}
  .nova-window-settings .usage-feature-tab-partial{background:Highlight}
 }
 
+/* ── First-run setup window ────────────────────────────────────────────────
+   A calm split layout: a warm brand rail with the Nova orb beside a single
+   decision surface. The legacy setup sheet keeps the control geometry; these
+   rules own the React onboarding composition and its light/dark tokens. */
+body.nova-window-setup{
+ --setup-bg:#f4f1eb;--setup-panel:#fffcf8;--setup-card:#fff;--setup-soft:#f4efe8;
+ --setup-line:rgba(45,32,20,.12);--setup-line-strong:rgba(45,32,20,.22);
+ --setup-ink:#211912;--setup-dim:#6b5b4d;--setup-faint:#948374;
+ --setup-accent:#c86712;--setup-accent-strong:#a9510b;--setup-glow:rgba(219,132,58,.2);
+ --setup-success:#1e7a3a;--setup-warn:#b42318;
+ --setup-rail:linear-gradient(162deg,#1b1410 0%,#291a11 48%,#3a2113 100%);
+ --setup-rail-ink:#f8ede1;--setup-rail-dim:#b9a797;--setup-rail-line:rgba(255,232,208,.12);
+ display:block;height:100%;min-height:0;padding:0;overflow:hidden;
+ color:var(--setup-ink);background:radial-gradient(900px 520px at 98% -8%,#fdf8f0 0,transparent 62%),var(--setup-bg);
+}
+body.nova-window-setup::before{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(520px 380px at 78% 110%,rgba(226,164,103,.12),transparent 70%);content:""}
+.setup-shell{position:relative;z-index:1;display:grid;grid-template-columns:238px minmax(0,1fr);height:100dvh;min-height:0;overflow:hidden}
+.setup-rail{position:relative;display:flex;flex-direction:column;min-height:0;padding:28px 24px 22px;overflow:hidden;border-right:1px solid var(--setup-rail-line);background:var(--setup-rail);color:var(--setup-rail-ink)}
+.setup-rail::before{position:absolute;inset:-30% -50% auto;height:80%;background:radial-gradient(circle,rgba(240,166,96,.18),transparent 62%);content:""}
+.setup-brand{position:relative;display:flex;align-items:center;gap:9px;color:var(--setup-rail-ink);font-size:12px;font-weight:750;letter-spacing:.22em}
+.setup-brand-mark{display:grid;place-items:center;width:23px;height:23px;border:1px solid rgba(255,224,193,.34);border-radius:8px;background:linear-gradient(145deg,rgba(255,220,183,.22),rgba(255,150,72,.08));color:#ffd2a8}
+.setup-orb{position:relative;width:104px;height:104px;flex:none;margin:30px 0 24px;border-radius:50%;background:radial-gradient(circle at 34% 28%,#fff8ec 0,#ffd7a9 15%,#eea05b 36%,#bb6127 62%,#542816 88%,#2a140b 100%);box-shadow:0 1px 0 rgba(255,255,255,.3) inset,0 24px 60px -18px rgba(230,133,56,.55),0 0 0 1px rgba(255,211,166,.16);animation:setup-breathe 7s ease-in-out infinite}
+.setup-orb-core{position:absolute;inset:20px;border-radius:50%;background:radial-gradient(circle at 38% 32%,rgba(255,255,255,.92),rgba(255,208,152,.35) 36%,transparent 68%);filter:blur(3px);mix-blend-mode:screen}
+.setup-orb-ring{position:absolute;inset:-13px;border:1px solid rgba(255,190,132,.22);border-radius:50%;box-shadow:0 0 0 16px rgba(255,175,100,.045),0 0 0 36px rgba(255,175,100,.024)}
+@keyframes setup-breathe{0%,100%{transform:scale(1);filter:saturate(1)}50%{transform:scale(1.035);filter:saturate(1.12)}}
+.setup-rail-copy{position:relative;margin-bottom:26px}
+.setup-rail-eyebrow{margin:0 0 8px;color:#e7a76d;font-size:9.5px;font-weight:750;letter-spacing:.18em;text-transform:uppercase}
+.setup-rail-copy h1{margin:0 0 8px;color:var(--setup-rail-ink);font-size:25px;font-weight:650;line-height:1.22;letter-spacing:-.02em}
+.setup-rail-copy p{margin:0;color:var(--setup-rail-dim);font-size:12.5px;line-height:1.65}
+.setup-steps{position:relative;display:grid;gap:2px;margin:0;padding:0;list-style:none}
+.setup-steps li{display:flex;align-items:center;gap:10px;padding:8px 0;color:rgba(220,203,187,.56);font-size:12px;line-height:1.4;transition:color .15s}
+.setup-step-index{display:grid;place-items:center;width:21px;height:21px;flex:none;border:1px solid rgba(255,222,192,.2);border-radius:50%;color:inherit;font-size:10px;font-weight:650}
+.setup-steps li[data-state=done]{color:var(--setup-rail-ink)}
+.setup-steps li[data-state=done] .setup-step-index{border-color:rgba(255,204,156,.4);background:rgba(255,196,141,.14);color:#ffd0a0}
+.setup-steps li[data-state=current]{color:var(--setup-rail-ink);font-weight:550}
+.setup-steps li[data-state=current] .setup-step-index{border-color:#e6a05d;background:#e6a05d;color:#2a170c;box-shadow:0 0 0 4px rgba(230,160,93,.12)}
+.setup-rail-foot{display:flex;align-items:center;gap:7px;margin:auto 0 0;padding-top:18px;border-top:1px solid var(--setup-rail-line);color:var(--setup-rail-dim);font-size:10.5px;letter-spacing:.01em}
+.setup-main{display:flex;flex-direction:column;min-width:0;min-height:0;border-left:1px solid rgba(255,255,255,.04);background:var(--setup-panel)}
+.setup-head{flex:none;padding:28px 30px 14px}
+.setup-eyebrow{margin:0 0 7px;color:var(--setup-accent);font-size:9.5px;font-weight:750;letter-spacing:.16em;text-transform:uppercase}
+.setup-head h2{margin:0 0 7px;color:var(--setup-ink);font-size:24px;font-weight:650;line-height:1.2;letter-spacing:-.025em}
+.setup-lead{margin:0;color:var(--setup-dim);font-size:12.5px;line-height:1.6}
+.setup-content{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--setup-line-strong) transparent;padding:0 30px 20px}
+.setup-content::-webkit-scrollbar{width:7px}
+.setup-content::-webkit-scrollbar-track{background:transparent}
+.setup-content::-webkit-scrollbar-thumb{border-radius:999px;background:var(--setup-line-strong)}
+.nova-window-setup .paths{display:grid;grid-template-columns:1fr;gap:10px;margin:0 0 14px}
+.nova-window-setup .path{position:relative;display:grid;grid-template-columns:38px minmax(0,1fr) 22px;align-items:start;gap:11px;padding:11px 13px;border:1px solid var(--setup-line);border-radius:14px;background:var(--setup-card);box-shadow:0 1px 2px rgba(54,35,18,.03);cursor:pointer;transition:border-color .15s,background-color .15s,box-shadow .15s,transform .15s}
+.nova-window-setup .path:hover{border-color:var(--setup-line-strong);transform:translateY(-1px)}
+.nova-window-setup .path:has(input:checked){border-color:color-mix(in srgb,var(--setup-accent) 58%,var(--setup-line));background:linear-gradient(135deg,color-mix(in srgb,var(--setup-accent) 8%,var(--setup-card)),var(--setup-card) 72%);box-shadow:0 0 0 1px color-mix(in srgb,var(--setup-accent) 22%,transparent) inset,0 12px 28px -24px rgba(180,96,28,.55)}
+.nova-window-setup .path:has(input:focus-visible){outline:2px solid var(--setup-accent);outline-offset:2px}
+.nova-window-setup .path input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.nova-window-setup .path-icon{display:grid;place-items:center;width:38px;height:38px;border:1px solid color-mix(in srgb,var(--setup-accent) 18%,transparent);border-radius:12px;background:color-mix(in srgb,var(--setup-accent) 9%,var(--setup-card));color:var(--setup-accent-strong)}
+.nova-window-setup .path:nth-child(2) .path-icon{border-color:var(--setup-line);background:var(--setup-soft);color:var(--setup-dim)}
+.nova-window-setup .path:has(input:checked) .path-icon{border-color:color-mix(in srgb,var(--setup-accent) 34%,transparent);background:color-mix(in srgb,var(--setup-accent) 13%,var(--setup-card));color:var(--setup-accent-strong)}
+.nova-window-setup .path-copy{display:flex;min-width:0;flex-direction:column;gap:3px;padding-top:1px}
+.nova-window-setup .path-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--setup-ink);font-size:13px;font-weight:620;line-height:1.4}
+.nova-window-setup .path-badge{padding:2px 7px;border-radius:999px;background:color-mix(in srgb,var(--setup-accent) 11%,transparent);color:var(--setup-accent-strong);font-size:9.5px;font-weight:650;letter-spacing:.02em}
+.nova-window-setup .path-body{color:var(--setup-dim);font-size:11px;line-height:1.5}
+.nova-window-setup .path-check{display:grid;place-items:center;width:21px;height:21px;margin-top:1px;border:1px solid var(--setup-line-strong);border-radius:50%;color:transparent;transition:background-color .15s,border-color .15s,color .15s}
+.nova-window-setup .path:has(input:checked) .path-check{border-color:var(--setup-accent);background:var(--setup-accent);color:#fff8ed}
+.nova-window-setup .setup-provider{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 11px;padding:9px 13px;border:1px solid var(--setup-line);border-radius:12px;background:var(--setup-card);cursor:pointer}
+.nova-window-setup .setup-field-label{color:var(--setup-dim);font-size:12px;font-weight:550}
+.nova-window-setup .setup-provider select{min-width:190px;background-color:var(--setup-soft);font-size:12px}
+.nova-window-setup .setup-keys{margin:0;padding:13px 15px 4px;border:1px solid var(--setup-line);border-radius:16px;background:var(--setup-card);box-shadow:0 1px 2px rgba(54,35,18,.03)}
+.nova-window-setup .setup-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px}
+.nova-window-setup .setup-section-head h3{margin:0 0 3px;color:var(--setup-ink);font-size:13.5px;font-weight:620;line-height:1.4}
+.nova-window-setup .setup-section-head p{margin:0;color:var(--setup-faint);font-size:11px;line-height:1.5}
+.nova-window-setup .setup-secure{display:inline-flex;align-items:center;gap:5px;flex:none;padding:3px 8px;border-radius:999px;background:color-mix(in srgb,var(--setup-success) 8%,transparent);color:var(--setup-success);font-size:9.5px;font-weight:600;white-space:nowrap}
+.nova-window-setup .setup-keys .key-row{padding:11px 0 8px;border-top:1px solid var(--setup-line);margin-top:10px}
+.nova-window-setup .setup-keys .key-row:first-of-type{margin-top:0}
+.nova-window-setup .key-label{display:flex;align-items:center;gap:7px;margin-bottom:7px;color:var(--setup-dim)}
+.nova-window-setup .key-label svg{color:var(--setup-accent)}
+.nova-window-setup .key-label label{margin:0;color:var(--setup-ink);font-size:12px;font-weight:600}
+.nova-window-setup .key-input{display:flex;align-items:center;gap:7px}
+.nova-window-setup .key-input input{flex:1;min-width:0;height:40px;padding:0 12px;border:1px solid var(--setup-line-strong);border-radius:10px;background:var(--setup-soft);color:var(--setup-ink);font:inherit;font-size:12.5px;transition:border-color .15s,background-color .15s,box-shadow .15s}
+.nova-window-setup .key-input input:focus{outline:0;border-color:var(--setup-accent);background:var(--setup-card);box-shadow:0 0 0 3px color-mix(in srgb,var(--setup-accent) 14%,transparent)}
+.nova-window-setup .key-input input::placeholder{color:var(--setup-faint)}
+.nova-window-setup .key-reveal{display:grid;place-items:center;width:40px;height:40px;min-height:40px;flex:none;padding:0;border:1px solid var(--setup-line);border-radius:10px;background:transparent;color:var(--setup-faint);cursor:pointer;transition:color .15s,border-color .15s,background-color .15s}
+.nova-window-setup .key-reveal:hover:not(:disabled){border-color:var(--setup-line-strong);background:var(--setup-soft);color:var(--setup-dim)}
+.nova-window-setup .key-input .key-test.rt-Button{height:40px;min-height:40px;padding:0 14px;border:1px solid var(--setup-line);border-radius:10px;background:var(--setup-soft);color:var(--setup-ink);font-size:12px;font-weight:600;box-shadow:none;flex:none}
+.nova-window-setup .key-input .key-test.rt-Button:hover:not(:disabled){border-color:var(--setup-line-strong);background:var(--setup-card)}
+.nova-window-setup .key-input .key-test.rt-Button:disabled{opacity:.55}
+.nova-window-setup .key-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0 0;color:var(--setup-faint);font-size:10.5px}
+.nova-window-setup .key-meta a{display:inline-flex;align-items:center;gap:4px;color:var(--setup-accent-strong);text-decoration:none}
+.nova-window-setup .key-meta a:hover{text-decoration:underline}
+.nova-window-setup .key-result{display:inline-flex;align-items:center;gap:5px;min-height:17px;color:var(--setup-faint)}
+.nova-window-setup .key-result:empty{display:none}
+.nova-window-setup .key-result[data-status=ok]{color:var(--setup-success)}
+.nova-window-setup .key-result[data-status=warn]{color:var(--setup-warn)}
+.nova-window-setup .key-result[data-status=testing]{color:var(--setup-accent-strong)}
+.nova-window-setup .key-result[data-status=ok]::before,.nova-window-setup .key-result[data-status=warn]::before,.nova-window-setup .key-result[data-status=testing]::before{width:5px;height:5px;flex:none;border-radius:50%;background:currentColor;content:""}
+.nova-window-setup .setup-note{display:flex;align-items:flex-start;gap:9px;margin:9px 0 0;padding:10px 12px;border:1px solid color-mix(in srgb,var(--setup-line) 70%,transparent);border-radius:12px;background:color-mix(in srgb,var(--setup-soft) 60%,transparent);color:var(--setup-faint);font-size:10.5px;line-height:1.6}
+.nova-window-setup .setup-note svg{flex:none;margin-top:1px;color:var(--setup-accent)}
+.nova-window-setup .setup-note-extra{display:block;margin-top:2px}
+.setup-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;flex:none;padding:12px 30px 14px;border-top:1px solid var(--setup-line);background:color-mix(in srgb,var(--setup-panel) 92%,transparent);backdrop-filter:blur(16px) saturate(120%)}
+.setup-status{display:flex;align-items:center;gap:8px;min-width:0;color:var(--setup-dim);font-size:11.5px;line-height:1.5}
+.setup-status-dot{width:6px;height:6px;flex:none;border-radius:50%;background:var(--setup-faint)}
+.setup-status-dot[data-tone=ok]{background:var(--setup-success);box-shadow:0 0 0 3px color-mix(in srgb,var(--setup-success) 13%,transparent)}
+.setup-status-dot[data-tone=ready]{background:var(--setup-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--setup-accent) 13%,transparent)}
+.setup-status-dot[data-tone=busy]{background:var(--setup-accent);animation:setup-pulse 1.2s ease-in-out infinite}
+@keyframes setup-pulse{50%{opacity:.35}}
+.setup-status-dot[data-tone=warn]{background:var(--setup-warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--setup-warn) 13%,transparent)}
+#status{min-width:0;overflow-wrap:anywhere}
+#status[data-tone=warn]{color:var(--setup-warn)}
+#status[data-tone=ok]{color:var(--setup-success)}
+.nova-window-setup #start.rt-Button{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:42px;min-height:42px;padding:0 20px;border:1px solid color-mix(in srgb,var(--setup-accent-strong) 55%,transparent);border-radius:12px;background:linear-gradient(135deg,#f3b273 0%,#dc7c2e 100%);color:#211208;font-size:12.5px;font-weight:700;letter-spacing:.01em;box-shadow:0 10px 26px -14px rgba(198,103,18,.65),0 1px 0 rgba(255,255,255,.3) inset;transition:filter .15s,transform .15s,box-shadow .15s}
+.nova-window-setup #start.rt-Button:hover:not(:disabled){filter:brightness(1.04);box-shadow:0 12px 30px -13px rgba(198,103,18,.7),0 1px 0 rgba(255,255,255,.35) inset;transform:translateY(-1px)}
+.nova-window-setup #start.rt-Button:active:not(:disabled){transform:translateY(0)}
+.nova-window-setup #start.rt-Button:disabled{opacity:.55;box-shadow:none;transform:none}
+.nova-window-setup #start.rt-Button[aria-busy=true]{opacity:.92}
+.setup-spinner{animation:setup-spin 1s linear infinite}
+@keyframes setup-spin{to{transform:rotate(360deg)}}
+.setup-spinner:not(:only-child){flex:none}
+@media(max-width:640px){
+ .setup-shell{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);height:100dvh;min-height:0;overflow:hidden}
+ .setup-rail{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:0 16px;padding:18px 20px;border-right:0;border-bottom:1px solid var(--setup-rail-line)}
+ .setup-brand{grid-column:1/-1;margin-bottom:14px}
+ .setup-orb{width:54px;height:54px;margin:0;grid-row:2/4}
+ .setup-orb-ring{inset:-7px;box-shadow:0 0 0 8px rgba(255,175,100,.04)}
+ .setup-rail-copy{margin:0;min-width:0}
+ .setup-rail-copy h1{margin:0 0 2px;font-size:19px}
+ .setup-rail-copy p{font-size:11px;line-height:1.45}
+ .setup-rail-eyebrow{margin-bottom:3px;font-size:8.5px}
+ .setup-steps,.setup-rail-foot{display:none}
+ .setup-main{min-height:0}
+ .setup-head{padding:22px 20px 14px}
+ .setup-head h2{font-size:21px}
+ .setup-content{padding:0 20px 18px}
+ .setup-foot{padding:12px 20px 14px}
+}
+@media(max-width:480px){
+ .setup-foot{flex-wrap:wrap}
+ .setup-status{width:100%}
+ .nova-window-setup #start.rt-Button{width:100%}
+ .nova-window-setup .path{grid-template-columns:36px minmax(0,1fr);gap:10px}
+ .nova-window-setup .path-icon{width:36px;height:36px}
+ .nova-window-setup .path-check{display:none}
+ .nova-window-setup .key-input{flex-wrap:wrap}
+ .nova-window-setup .key-input input{flex-basis:calc(100% - 47px)}
+ .nova-window-setup .setup-provider{align-items:stretch;flex-direction:column;gap:7px}
+ .nova-window-setup .setup-provider select{width:100%;min-width:0}
+}
+@media(max-height:680px){.nova-window-setup .setup-note-extra{display:none}}
+@media(prefers-reduced-motion:reduce){
+ .setup-orb,.setup-spinner,.setup-status-dot[data-tone=busy]{animation:none}
+ .nova-window-setup #start.rt-Button{transition:none}
+}
+@media(prefers-color-scheme:dark){
+ body.nova-window-setup{
+  --setup-bg:#0d0f11;--setup-panel:#15181b;--setup-card:#1b1f23;--setup-soft:#20252a;
+  --setup-line:rgba(243,234,224,.12);--setup-line-strong:rgba(243,234,224,.24);
+  --setup-ink:#f3eee7;--setup-dim:#b8afa3;--setup-faint:#8f877d;
+  --setup-accent:#efa866;--setup-accent-strong:#ffc18b;--setup-glow:rgba(232,150,80,.14);
+  --setup-success:#8dd9a5;--setup-warn:#ffb4ab;
+  --setup-rail:linear-gradient(162deg,#090a0b 0%,#171310 52%,#21150e 100%);
+  --setup-rail-ink:#f8ede1;--setup-rail-dim:#b5a494;--setup-rail-line:rgba(255,231,205,.1);
+  background:radial-gradient(900px 520px at 98% -8%,#1a1511 0,transparent 62%),var(--setup-bg);
+ }
+ body.nova-window-setup::before{background:radial-gradient(520px 380px at 78% 110%,rgba(226,164,103,.08),transparent 70%)}
+}
+@media(forced-colors:active){
+ .nova-window-setup .path,body.nova-window-setup .setup-keys,body.nova-window-setup .setup-foot,body.nova-window-setup .setup-provider{border:1px solid CanvasText}
+ .nova-window-setup .path:has(input:checked){border-color:Highlight;outline:1px solid Highlight}
+ .nova-window-setup .key-input input{background:Canvas;color:CanvasText;border:1px solid CanvasText}
+ .nova-window-setup #start.rt-Button{background:Highlight;color:HighlightText;border:1px solid HighlightText}
+}
