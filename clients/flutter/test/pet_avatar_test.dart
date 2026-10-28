@@ -156,54 +156,63 @@ void main() {
     expect(File(previous).existsSync(), isTrue);
   });
 
-  test('a failed preference write keeps the previous avatar and removes the new file', () async {
-    var persistOk = true;
-    var image = await _png(120, 60);
-    final store = storeWith(
-      pickImage: () async => image,
-      writePreference: (_) async => persistOk,
+  for (final rollbackSucceeds in [true, false]) {
+    test(
+      'a failed preference write restores its cache (rollback=$rollbackSucceeds)',
+      () async {
+        final preferences = await SharedPreferences.getInstance();
+        var writes = 0;
+        final store = storeWith(
+          pickImage: () async => _png(64, 64),
+          writePreference: (value) async {
+            // SharedPreferences updates its cache even when the platform write fails.
+            await preferences.setString(petAvatarPreferenceKey, value);
+            writes++;
+            return writes == 1 || (writes > 2 && rollbackSucceeds);
+          },
+        );
+        await store.load();
+        expect(await store.pickCustomImage(), isTrue);
+        final previous = store.customPath!;
+        expect(await store.pickCustomImage(), isFalse);
+        expect(store.error, 'image_failed');
+        expect(store.customPath, previous);
+        expect(File(previous).existsSync(), isTrue);
+        expect((await _persisted())['path'], previous);
+        final reloaded = storeWith();
+        await reloaded.load();
+        expect(reloaded.customPath, previous);
+        expect(
+          support.listSync().whereType<File>().length,
+          rollbackSucceeds ? 1 : 2,
+          reason:
+              'an unconfirmed rollback must keep the file it might still reference',
+        );
+      },
     );
-    await store.load();
-    expect(await store.pickCustomImage(), isTrue);
-    final previous = store.customPath!;
-    image = await _png(80, 80);
-    persistOk = false;
-    expect(await store.pickCustomImage(), isFalse);
-    expect(store.error, 'image_failed');
-    expect(store.customPath, previous, reason: 'the session keeps the old avatar');
-    expect(File(previous).existsSync(), isTrue, reason: 'the old file is not deleted');
-    expect(
-      support
-          .listSync()
-          .whereType<File>()
-          .where((file) => file.path.split('/').last.startsWith(petAvatarFilePrefix))
-          .length,
-      1,
-      reason: 'the unpersisted new file is cleaned up',
-    );
-    // A restart still loads the previous persisted avatar rather than the default.
-    SharedPreferences.setMockInitialValues({
-      petAvatarPreferenceKey: jsonEncode({'mode': 'custom', 'path': previous}),
-    });
-    final reloaded = storeWith();
-    await reloaded.load();
-    expect(reloaded.customPath, previous);
-  });
+  }
 
-  test('a failed reset preference keeps the custom avatar file and path', () async {
-    var persistOk = true;
+  test('a failed reset restores the cached custom avatar preference', () async {
+    final preferences = await SharedPreferences.getInstance();
+    var writes = 0;
     final store = storeWith(
       pickImage: () async => _png(64, 64),
-      writePreference: (_) async => persistOk,
+      writePreference: (value) async {
+        await preferences.setString(petAvatarPreferenceKey, value);
+        return ++writes != 2;
+      },
     );
     await store.load();
     expect(await store.pickCustomImage(), isTrue);
     final previous = store.customPath!;
-    persistOk = false;
     await store.resetToDefault();
     expect(store.error, 'image_failed');
     expect(store.customPath, previous);
     expect(File(previous).existsSync(), isTrue);
+    expect((await _persisted())['path'], previous);
+    final reloaded = storeWith();
+    await reloaded.load();
+    expect(reloaded.customPath, previous);
   });
 
   test('rejects gallery images larger than 8 MB', () async {
