@@ -221,21 +221,6 @@ test('Plan exposes read-only tools, refuses forged local/dispatch calls and publ
  }finally{await f.close()}
 })
 
-test('an explicit Chat tool request changes to Plan only after its reply settles and creates no task',{skip:!supported},async()=>{
- const f=await fixture(()=>({text:'Chat reply'}))
- try{
-  f.plain.runTurn=async()=>{
-   assert.equal(f.host.conversationSnapshot().items[0]!.mode??'chat','chat')
-   await f.host.requestPlanModeFromTool('chat:main',0,'enter-plan-call','conversation:origin',()=>true)
-   return {assistant:'已切换到 Plan 模式。'}
-  }
-  await f.host.submitConversationText('chat:main','我们先进入 plan 梳理需求。');await f.host.waitConversation('chat:main')
-  await until(()=>f.host.conversationSnapshot().items[0]!.mode==='plan',Boolean)
-  assert.equal(f.host.tasks.list().length,0)
-  assert.equal(f.host.conversationSnapshot().messages.at(-1)?.text,'已切换到 Plan 模式。')
- }finally{await f.close()}
-})
-
 test('Build requires approval before side effects, stops on denial and does not create task or Todo',{skip:!supported},async()=>{
  const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'new.txt',content:'批准后写入'}}}:{text:'已完成'})
  try{

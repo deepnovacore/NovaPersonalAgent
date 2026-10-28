@@ -240,7 +240,7 @@ export class PersonalAgentHost {
         if(method==='settings.local_tool_approval'){const q=z.object({mode:z.enum(['ask','never'])}).strict().parse(p);this.localToolApproval=q.mode;return {mode:q.mode}}
         if(method==='conversations.mode'){
             const q=z.object({id:z.string(),mode:z.enum(['chat','plan'])}).strict().parse(p),item=this.#state.conversations.items.find(item=>item.id===q.id);
-        if(!item||item.kind==='build'||item.kind==='schedule')throw Error('mode_unavailable');if(this.#planModeTransitions.has(q.id)||this.#state.conversations.voice_id===q.id||this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
+        if(!item||item.kind==='build'||item.kind==='schedule')throw Error('mode_unavailable');if(this.#state.conversations.voice_id===q.id||this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
             if((item.mode??'chat')===q.mode)return this.conversationSnapshot();
             await this.#conversationPool?.clear(q.id);if(q.mode==='plan')await this.workbench.resetCheckpoint(q.id,item.generation);
             await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.items.find(item=>item.id===q.id)!.mode=q.mode;await this.#commit(next)});return this.conversationSnapshot();
@@ -733,7 +733,6 @@ export class PersonalAgentHost {
     #conversationEmit:((frame:Record<string,unknown>)=>void)|undefined;
     #conversationRuns=new Map<string,Promise<void>>();
     #goalProgressTail=new Map<string,Promise<void>>();
-    #planModeTransitions=new Map<string,{call_id:string;promise:Promise<void>}>();
     waitConversation(id:string):Promise<void>{return this.#conversationRuns.get(id)??Promise.resolve()}
     #announcementTail:Promise<void>=Promise.resolve();
     // Typed chat:main input and voice switches supersede queued announcements by bumping the
@@ -812,7 +811,6 @@ export class PersonalAgentHost {
         }catch(error){this.#admittingBuilds.delete(id);this.#localBuildAuthority.delete(id);throw error}
     }
     async #submitConversationText(id:string,text:string,requestId?:string,sourceTodo?:{id:string;version:number},context:ConversationTurnContext={}):Promise<void>{
-        if(this.#planModeTransitions.has(id))throw Error('conversation_mode_transition');
         if(!this.#opened)throw Error('unavailable');
         if(sourceTodo)sourceTodo=sourceTodoSchema.parse(sourceTodo);
         let conversation=this.#state.conversations.items.find(item=>item.id===id);
@@ -840,39 +838,11 @@ export class PersonalAgentHost {
         if(conversation.kind==='build'&&!this.localBuildAuthorized(id)){await this.updateLocalBuild(id,conversation.generation,{status:'paused',reason:'stopped',approval:null});return}
         if(!conversation.messages.some(message=>message.id===userMessageId))return;
         const generation=conversation.generation;
-        const operation=this.#conversationPool.run(conversation,text,{...context,user_message_id:userMessageId,...(sourceTodo?{source_todo:sourceTodo}:{}),...(context.references?{refresh:()=>this.discussionContext(context.references!)}:{})}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';const assistant={id:randomUUID(),conversation_id:id,role:'assistant' as const,reply_to:userMessageId,text:result.assistant.slice(0,16000),...(conversation.kind==='build'&&result.assistant.length>16000?{full_text_ref:true}:{}),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})},userIndex=item.messages.findIndex(message=>message.id===userMessageId);item.messages.splice(userIndex<0?item.messages.length:userIndex+1,0,assistant);item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed',...conversationFailureReason(error,conversation.mode==='plan'||conversation.kind==='build')})});
+        const operation=this.#conversationPool.run(conversation,text,{...context,user_message_id:userMessageId,...(sourceTodo?{source_todo:sourceTodo}:{}),...(context.references?{refresh:()=>this.discussionContext(context.references!)}:{})}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';const assistant={id:randomUUID(),conversation_id:id,role:'assistant' as const,reply_to:userMessageId,text:result.assistant.slice(0,16000),...(conversation.kind==='build'&&result.assistant.length>16000?{full_text_ref:true}:{}),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{}),...(result.tool_trace?.length?{tool_trace:result.tool_trace.map(item=>({...item}))}:{})},userIndex=item.messages.findIndex(message=>message.id===userMessageId);item.messages.splice(userIndex<0?item.messages.length:userIndex+1,0,assistant);item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed',...conversationFailureReason(error,conversation.mode==='plan'||conversation.kind==='build')})});
         this.#conversationRuns.set(id,operation);
         void operation.catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'status_persistence_failed'})});
         const goalRefs=id==='chat:main'?(context.references??[]).flatMap(ref=>ref.kind==='goal'?[{id:ref.id,version:ref.version}]:[]):[];
         if(goalRefs.length)void operation.then(()=>this.#goalReplyProgress(userMessageId,goalRefs)).catch(()=>{/* progress updates are best-effort */});
-    }
-    requestPlanModeFromTool(id:string,generation:number,callId:string,originRef:string,stillWanted:()=>boolean):Promise<{scheduled:true}>{
-        if(!callId||!originRef||!stillWanted())throw Error('superseded');
-        const item=this.#state.conversations.items.find(item=>item.id===id);
-        if(!this.#opened||this.#presentationMode!=='workbench'||this.#state.conversations.selected_id!==id||item?.generation!==generation||item.kind!=='chat'||(item.mode??'chat')!=='chat')throw Error('plan_mode_unavailable');
-        const existing=this.#planModeTransitions.get(id);
-        if(existing){if(existing.call_id===callId)return Promise.resolve({scheduled:true});throw Error('conversation_busy')}
-        const active=this.#conversationRuns.get(id);
-        if(!active||this.#conversationPool?.canChangeTarget(id)!==false)throw Error('conversation_not_busy');
-        const transition=active.then(async()=>{
-            if(!stillWanted())throw Error('superseded');
-            if(!this.#opened)throw Error('conversation_closed');
-            const current=this.#state.conversations.items.find(item=>item.id===id);
-            if(current?.generation!==generation||current.kind!=='chat'||(current.mode??'chat')!=='chat')throw Error('conversation_changed');
-            await this.#conversationPool?.clear(id);
-            await this.workbench.resetCheckpoint(id,generation);
-            await this.#serial(async()=>{
-                const next=structuredClone(this.#state),target=next.conversations.items.find(item=>item.id===id);
-                if(target?.generation!==generation||target.kind!=='chat'||(target.mode??'chat')!=='chat')throw Error('conversation_changed');
-                target.mode='plan';await this.#commit(next);
-            });
-        }).catch(error=>{
-            this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'mode_change_failed'});
-            throw error;
-        }).finally(()=>{if(this.#planModeTransitions.get(id)?.promise===transition)this.#planModeTransitions.delete(id)});
-        this.#planModeTransitions.set(id,{call_id:callId,promise:transition});
-        void transition.catch(()=>{ /* The user sees the mode-change error event. */ });
-        return Promise.resolve({scheduled:true});
     }
     /** One new conversation whose first message carries the card reference. A retry of the same request never creates a second one, and a failed start leaves no empty conversation. */
     async #startConversation(q:{title:string;text:string;references:DiscussionReference[];mode?:'chat'|'plan'|undefined},requestId:string,local:boolean):Promise<{accepted:true;conversation_id:string}>{

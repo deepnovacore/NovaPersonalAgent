@@ -422,7 +422,6 @@ export class RealtimeService {
     }
     this.#continuations = new ToolContinuations({
       ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
-      ...(options.requestPlanMode?{requestPlanMode:options.requestPlanMode}:{}),
       ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
       ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
       ...(options.taskHost ? {taskHost:options.taskHost} : {}),

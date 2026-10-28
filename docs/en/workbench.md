@@ -26,7 +26,7 @@ Nova can show up three ways: as the Workbench (this window), as a voice orb (a s
 
 Workbench conversations have Chat, Plan and Build modes. New regular conversations start in Chat. These modes do not change the existing permission boundary between the Workbench and the voice orb.
 
-- **Chat** keeps the existing conversation behavior. Nova can answer questions, hand work to an executor when asked, and track existing tasks. You can also ask Nova to switch to Plan. Like the voice orb, Chat cannot read or change local files or run shell commands.
+- **Chat** is the default conversation mode. Nova can answer questions, retrieve memory/search/knowledge, write or correct the user's own memory on explicit request, and show an expandable tool card. It cannot dispatch work, create or cancel tasks, create scheduled tasks, or read/change local files or run shell commands; use the mode selector to switch to Plan or Build for those. Mode changes are never performed by a model tool.
 - **Plan** clarifies the goal, scope, constraints and acceptance criteria, asking about ambiguities when needed. It has no local file or shell tools and does not create or dispatch a task before the user chooses. After Nova publishes a plan, you can edit it and choose local Build in the current project or Build through an executor.
 - **Build** is text-only and carries out the confirmed plan. On macOS and Windows, Nova can use native file read, write and exact-edit tools, plus shell execution. Platforms without local Build support do not show that entry. The selected project directory is the default working directory, and tools access local resources with the current user's operating-system permissions.
 

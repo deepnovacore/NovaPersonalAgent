@@ -53,7 +53,6 @@ const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirma
 interface ToolContinuationPorts {
   readonly taskHost?: TaskToolHost
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
-  readonly requestPlanMode?:(callId:string,originRef:string,stillWanted:()=>boolean)=>Promise<unknown>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
   readonly validateScopedContext?:()=>Promise<boolean>
   readonly session: RealtimeSession
@@ -1212,18 +1211,6 @@ export class ToolContinuations {
    * RealtimeService alone maps those facts to provider-facing result language.
    */
   async #interceptHost(event: ToolCallReady, originRef: string | null,standalone?:StandaloneToolTurn): Promise<ToolAcceptance | null> {
-    if(event.name==='enter_plan_mode'){
-      const user=standalone?.user??this.#ports.intakeUser(),authority=standalone?.authority??this.#ports.currentUserTurn(event,originRef)
-      if(Object.keys(event.arguments).length)return this.#refusalAcceptance(event,'invalid_params','{"code":"invalid_params"}')
-      if(!this.#ports.requestPlanMode)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')
-      if(!user||!authority||!originRef||user.epoch!==event.session_epoch||user.origin_ref!==originRef||event.session_epoch<=this.#ports.discardedInputEpoch()||!authority.stillWanted())return this.#refusalAcceptance(event,'missing_origin_ref','{"code":"missing_origin_ref"}')
-      try{
-        await this.#ports.requestPlanMode(event.call_id,originRef,authority.stillWanted)
-        if(!authority.stillWanted())return this.#refusalAcceptance(event,'superseded','{"code":"superseded"}')
-        const acceptance=this.#refusalAcceptance(event,'accepted','{"accepted":true,"mode":"plan","scheduled":true}')
-        return {...acceptance,accepted:true,inline_fulfilled:true}
-      }catch(error){const code=error instanceof Error?error.message:'mode_change_failed';return this.#refusalAcceptance(event,code,canonicalJson({code,state:'refused'}))}
-    }
     if (event.name === CONFIRM_TOOL) {
       return this.#refusalAcceptance(event, 'unknown_confirmation', UNKNOWN_CONFIRMATION_TOOL_RESULT)
     }
