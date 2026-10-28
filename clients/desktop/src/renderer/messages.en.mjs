@@ -2101,4 +2101,6 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "回答结束后自动收起，或保留展开直到你手动收起。": "Collapse automatically after the reply, or keep steps expanded until you collapse them.",
   "开启后会保存模型的思考过程，可能增加等待时间和模型用量；保存并重启后生效。": "Saves the model's reasoning, which may add latency and model usage. Takes effect after saving and restarting.",
   "界面语言": "Interface language",
+  "管理编程执行器和工作区；更换执行器后对新会话生效。": "Manage the coding executor and its workspaces. Executor changes apply to new sessions.",
+  "工作区是执行器读写文件的目录；清空会删除工作区内的内容。": "The workspace is the directory the executor reads and writes. Clearing it deletes the workspace contents.",
 })

@@ -1,10 +1,10 @@
 import {PermissionCards} from '../windows/welcome';
 import React, { useEffect, useRef, useState } from 'react';
+import { Monitor } from 'lucide-react';
 import { Action, Card, Field, useCommand } from './controls';
 import { t } from '../../locale.mjs';
 import { DEFAULT_SKIN, MAX_SKIN_BYTES, importSkin, removeSkin, selectedSkin } from '../../orb-skins.mjs';
 import { createSkinVisual } from '../../orb-skin-visual.mjs';
-import { frontendUsageText, usageCostText, usageFeatureLabels } from '../../frontend-usage.mjs';
 import { readDisplayPreferences, writeDisplayPreferences, subscribeDisplayPreferences } from '../../view-preferences.mjs';
 export function DisplayPanel() { const [p, setP] = useState(readDisplayPreferences); useEffect(() => subscribeDisplayPreferences(setP), []); return <><Field label="工作步骤展示" value={p.steps} options={[{ value: 'compact', label: '简洁' }, { value: 'standard', label: '标准' }, { value: 'detailed', label: '详细' }]} onChange={(steps: string) => writeDisplayPreferences({ steps })}/><Field label="工作步骤收起时机" value={p.collapse} options={[{ value: 'after_reply', label: '回答结束后' }, { value: 'manual', label: '手动' }]} onChange={(collapse: string) => writeDisplayPreferences({ collapse })}/></>; }
 export function VisorPanel({ api }: any) { const [p, setP] = useState<any>({}), [busy, setBusy] = useState(false), [status, setStatus] = useState(''); const lock = useRef(false); useEffect(() => { if (!api)
@@ -59,7 +59,7 @@ export function SkillsPanel({ skills, api }: any) { const [query, setQuery] = us
 }
 catch {
     setError(t('暂时无法读取技能，请稍后刷新。'));
-} }}>{t('刷新')}</Action><p role="status">{error}</p>{!Array.isArray(list) ? <p>{t('暂时无法读取技能，请稍后刷新。')}</p> : list.filter((s: any) => JSON.stringify(s).toLowerCase().includes(query.toLowerCase())).map((s: any, i: number) => <Card key={s.name ?? i} title={s.name ?? s.title ?? 'Skill'} description={s.description}><span className="skill-state" data-state={s.id==='computer-use'?'session':'on'}>{t(s.id==='computer-use'?'按会话':'已启用')}</span><p>{s.source ?? s.path}</p>{s.error && <p role="alert">{s.error}</p>}</Card>)}</>; }
+} }}>{t('刷新')}</Action><p role="status">{error}</p>{!Array.isArray(list) ? <p>{t('暂时无法读取技能，请稍后刷新。')}</p> : list.filter((s: any) => JSON.stringify(s).toLowerCase().includes(query.toLowerCase())).map((s: any, i: number) => <Card key={s.name ?? i} icon={s.id === 'computer-use' ? Monitor : undefined} title={s.name ?? s.title ?? 'Skill'} description={s.description}><span className="skill-state" data-state={s.id==='computer-use'?'session':'on'}>{t(s.id==='computer-use'?'按会话':'已启用')}</span><p>{s.source ?? s.path}</p>{s.error && <p role="alert">{s.error}</p>}</Card>)}</>; }
 export function KnowledgePanel({ api, view }: any) { const enabled = view.capabilities?.runtime?.modules?.knowledge?.enabled === true; const [state, setState] = useState<any>({}), [url, setUrl] = useState(''), [note, setNote] = useState(t('点击刷新查看知识库。')); const epoch = useRef(0), lock = useRef(false); useEffect(() => { epoch.current++; setState({}); setNote(t('点击刷新查看知识库。')); return () => { epoch.current++; }; }, [enabled, view.embeddingProvider, view.embeddingModel, view.modelBaseUrl]); async function run(input: any) { if (!enabled || lock.current)
     return; const rev = epoch.current; lock.current = true; setNote(t('处理中…')); try {
     if (['files', 'folder', 'url', 'reindex'].includes(input.action))

@@ -145,6 +145,24 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             return category === 'themes' ? <SkinPanel key={key} view={view} stage={stage} discard={controller.discardFields} busy={snapshot.busy}/> : null;
         if (id === 'frontend-usage-section')
             return category === 'usage' ? <UsagePanel key={key} usage={view.frontendUsage}/> : null;
+        if (id === 'codex-projects') {
+            const contentNode = children.find((node: any) => typeof node !== 'string' && node.props?.class === 'codex-content');
+            const content: any[] = contentNode && typeof contentNode !== 'string' ? contentNode.children : [];
+            const workspaceNode = (node: any) => typeof node !== 'string' && (node.props?.class === 'workspace-actions' || node.props?.id === 'workspace-action-status');
+            return <section className="setting-section codex-page" id={id} key={key} hidden={category !== 'codex'}>
+                <h2>{t('编程')}</h2>
+                <p className="hint">{t('管理编程执行器和工作区；更换执行器后对新会话生效。')}</p>
+                <div className="codex-card">
+                    <h3>{t('执行器')}</h3>
+                    {content.filter((node: any) => !workspaceNode(node)).map((node: any, i: number) => renderNode(node, i))}
+                </div>
+                <div className="codex-card codex-workspace-card">
+                    <h3>{t('工作区')}</h3>
+                    <p className="hint">{t('工作区是执行器读写文件的目录；清空会删除工作区内的内容。')}</p>
+                    {content.filter(workspaceNode).map((node: any, i: number) => renderNode(node, i))}
+                </div>
+            </section>;
+        }
         if (id === 'desktop-permissions-panel')
             return category === 'permissions' ? <PermissionsPanel key={key} api={bridge?.welcome}/> : null;
         if (id === 'connections-panel')
@@ -206,6 +224,8 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         if(props.class==='field'&&children.some((n:any)=>typeof n!=='string'&&n.props.for==='integratedVoicePreset'))p.hidden=view.integratedProvider==='minicpm-o'; if (Object.hasOwn(hidden, id))
             p.hidden = hidden[id];
         const text: any = { 'heartbeat-value': t('{0} 秒', view.codexHeartbeatSeconds ?? 30), 'effective-workspace': view.effectivePaths?.workspace ?? '', 'effective-managed-root': view.effectivePaths?.managedRoot ?? '', 'codex-status': view.codexStatus?.status === 'ready' ? t('已连接 {0}', view.codexStatus.version) : t('未找到可用的 Codex CLI；可刷新或指定完整路径，Windows 支持 npm 安装的 codex.cmd。'), 'workspace-action-status': workspaceNote || t((view.managedWorkspaces?.recoveryStatus ?? 'idle') !== 'idle' ? '工作区原内容尚未安全恢复，后台保持停止；请先处理回滚' : ''), 'wake-word-status': t(view.wakeWord?.status === 'loading' ? '正在准备唤醒模型…' : view.wakeWord?.status === 'error' ? '唤醒模型不可用，请重试；可用托盘显示窗口。' : ''), 'capabilities-problems': (view.capabilities?.problems ?? []).join(' · '), 'coding-backend-title': GUIDANCE[view.codingBackend] ? t('{0} 配置', GUIDANCE[view.codingBackend][0]) : '', 'coding-backend-guidance': GUIDANCE[view.codingBackend] ? t(GUIDANCE[view.codingBackend][2]) : '', 'coding-config-label': GUIDANCE[view.codingBackend]?.[1] ?? '', 'coding-permission-note': view.codingBackend === 'pi' ? t('Pi 不支持逐项审批：询问模式下任务会被拒绝，不会自动改为 YOLO。') : GUIDANCE[view.codingBackend] ? t('审批由所选执行器在任务开始时协商；不支持当前审批模式时任务会被拒绝。') : '', 'coding-backend-status': view.codingBackends?.[view.codingBackend]?.binary === 'available' ? t('已找到可执行文件；登录状态尚未验证，会在任务开始时检查。') : t('未找到可执行文件，请安装或指定路径'), ...notes };
+        if (id === 'codex-status')
+            p['data-ready'] = view.codexStatus?.status === 'ready' ? '1' : '0';
         if (id.startsWith('badge-')) {
             const sk = id.slice(6), stored = view.secretsPresent?.[sk] === true, source = view.secretSources?.[sk];
             text[id] = t(source === 'dotenv' && !isEndpointSecret(sk) ? '来自 .env' : stored ? source === 'environment' ? '来自系统配置' : '已设置' : '未设置');
@@ -358,7 +378,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             } };
         if (actions[id]) {
             const disabled = id === 'workspace-clear-all' ? buttons.workspaceDisabled : ['workspace-open-current', 'workspace-clear-current'].includes(id) ? buttons.currentDisabled : id === 'workspace-retry-recovery' ? buttons.recoveryDisabled : id === 'camera-refresh' ? view.capabilitiesDocument?.modules?.camera?.enabled === false : snapshot.busy || maintenance;
-            return <Action {...p} disabled={disabled} action={actions[id]}>{children.map(renderNode)}</Action>;
+            return <Action {...p} disabled={disabled} action={actions[id]}>{id === 'codex-rescan' ? <RefreshCw size={15} aria-hidden="true"/> : children.map(renderNode)}</Action>;
         }
         if (Object.hasOwn(text, id))
             return createElement(tag, p, text[id]);

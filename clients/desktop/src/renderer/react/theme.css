@@ -45,9 +45,27 @@ body.computer-bar-page>#root,body.computer-bar-page .nova-theme{width:100%}
 .workbench-page:has(>.workspace-page-host>.timeline-content){background:linear-gradient(165deg,var(--timeline-cool),var(--surface) 42%,var(--timeline-warm))}
 
 /* React settings use explicit icon headings instead of the legacy empty icon wells. */
-.nova-window-settings .settings-nav{max-height:calc(100vh - 168px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:3px}
-.nova-window-settings .settings-nav .nav-item{flex-shrink:0;min-height:40px}
+/* The rail owns its scroll so a short window never cuts the last category behind
+   the fixed footer. At the default 920x690 window the compact rows below fit all
+   categories without a scrollbar; shorter windows keep a correctly sized thumb. */
+.nova-window-settings .settings-nav{top:76px;max-height:calc(100vh - 168px);max-height:calc(100dvh - 168px);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent;scroll-padding:4px 0;scroll-snap-type:y proximity;padding:4px 3px 10px}
+.nova-window-settings .settings-nav::-webkit-scrollbar{width:6px}
+.nova-window-settings .settings-nav::-webkit-scrollbar-track{background:transparent}
+.nova-window-settings .settings-nav::-webkit-scrollbar-thumb{border-radius:999px;background:var(--line-strong);background-clip:padding-box}
+.nova-window-settings .settings-nav::-webkit-scrollbar-thumb:hover{background:var(--ink-faint);background-clip:padding-box}
+.nova-window-settings .settings-nav .nav-item{flex-shrink:0;min-height:40px;scroll-snap-align:start}
 .nova-window-settings .settings-nav .nav-item>span{overflow:hidden;text-overflow:ellipsis}
+@media(max-height:780px){
+ .nova-window-settings .settings-nav{gap:1px;padding:4px 3px 8px}
+ .nova-window-settings .settings-nav .nav-item{height:34px;min-height:34px;padding:0 10px;gap:8px;font-size:13px;line-height:1.5}
+ .nova-window-settings .settings-nav .nav-item .ui-icon{width:16px;height:16px}
+ .nova-window-settings .settings-nav .nav-item[aria-current="true"]::after{top:7px;bottom:7px}
+}
+@media(prefers-color-scheme:dark){
+ /* The dark settings tokens keep accent contrast but inherit the light warning
+    colours; status and destructive actions need their own readable ramp. */
+ .nova-window-settings{--warn:#ff9b91;--warn-wash:rgba(255,155,145,.12);--ok:#7ad6a2;--ok-wash:rgba(122,214,162,.12)}
+}
 .nova-window-settings #im-section .im-card,.nova-window-settings #connections-section .im-card{padding:18px;margin-bottom:16px}
 .nova-window-settings #im-section .im-card::before,.nova-window-settings #connections-section .im-card::before{content:none}
 .nova-window-settings .settings-card-heading{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:start;gap:12px;margin-bottom:14px}
@@ -107,3 +125,44 @@ body.computer-bar-page>#root,body.computer-bar-page .nova-theme{width:100%}
 .nova-window-settings .interest-tag{max-width:100%;white-space:normal}
 @media(max-width:959px){.workbench .workspace-bar{margin-inline:12px}}
 @media(max-width:600px){.workbench .composer-hint{display:none}.workbench .workspace-picker .workspace-folder{max-width:220px}.workbench .composer textarea{min-height:80px}}
+
+/* ── Settings surface corrections (React window only) ──────────────────────
+   The legacy sheets own geometry and the light palette. These rules only fill
+   React-specific surfaces and keep hard-coded legacy demos layered on tokens. */
+.nova-window-settings #skills-section .im-card{margin:0 0 12px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings #skills-section .im-card .settings-card-heading{margin-bottom:8px}
+
+/* Coding: a normal settings page with one card per concern instead of the
+   legacy disclosure. The layout nodes keep their ids, validation and drafts. */
+.nova-window-settings .codex-page>.hint{margin:0 0 16px}
+.nova-window-settings .codex-card{margin:0 0 14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings .codex-card:last-child{margin-bottom:0}
+.nova-window-settings .codex-card>h3{margin:0;font-size:14px;font-weight:620;line-height:1.6;color:var(--ink)}
+.nova-window-settings .codex-card>h3+.hint{margin:4px 0 14px}
+.nova-window-settings .codex-card .connection-status{margin:14px 0}
+.nova-window-settings #codex-status[data-ready="1"]::before{background:var(--ok)}
+.nova-window-settings #codex-status[data-ready="0"]::before{background:var(--ink-faint)}
+.nova-window-settings .codex-discovery{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.nova-window-settings .codex-discovery .segmented{flex:1 1 280px;max-width:360px;min-width:0;margin:0}
+.nova-window-settings .codex-discovery .icon-button{width:38px;height:38px;min-height:38px;flex:0 0 auto;border:1px solid var(--line);border-radius:10px;background:var(--surface-raised);color:var(--ink-dim)}
+.nova-window-settings .codex-discovery .icon-button:hover:not(:disabled){border-color:var(--line-strong);color:var(--ink)}
+.nova-window-settings .codex-card .field:last-child{padding-bottom:0;border-bottom:0}
+.nova-window-settings .codex-card #projects-repair{display:inline-flex;margin:0 0 4px}
+.nova-window-settings .codex-workspace-card .workspace-actions h3{display:none}
+.nova-window-settings .codex-workspace-card .workspace-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:0;border-top:0}
+.nova-window-settings .codex-workspace-card .workspace-actions .rt-Button{min-height:32px;height:32px;padding:0 12px;font-size:12px;font-weight:550}
+.nova-window-settings #workspace-open-current{color:var(--ink);background:var(--surface-raised);border:1px solid var(--line)}
+.nova-window-settings #workspace-open-current:hover:not(:disabled){background:var(--surface-active);border-color:var(--line-strong);color:var(--ink)}
+.nova-window-settings #workspace-clear-current,.nova-window-settings #workspace-clear-all{color:var(--warn);background:transparent;border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)}
+.nova-window-settings #workspace-clear-current:hover:not(:disabled),.nova-window-settings #workspace-clear-all:hover:not(:disabled){background:var(--warn-wash);border-color:var(--warn);color:var(--warn)}
+.nova-window-settings #workspace-clear-all{margin-left:auto}
+.nova-window-settings .workspace-action-status{margin:10px 0 0}
+@media(max-width:600px){
+ .nova-window-settings .codex-discovery{align-items:stretch}
+ .nova-window-settings .codex-discovery .segmented{flex:1 1 auto;max-width:none}
+ .nova-window-settings #workspace-clear-all{margin-left:0}
+}
+@media(forced-colors:active){
+ .nova-window-settings .codex-card{border:1px solid CanvasText}
+}
+
