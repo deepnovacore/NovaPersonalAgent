@@ -96,7 +96,6 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       : settings.integrated_provider === 'openai' ? settings.openai_realtime_model
       : settings.integrated_provider === 'gemini' ? settings.gemini_realtime_model : settings.qwen_realtime_model,
     asr: settings.cascade_asr_provider, tts: settings.cascade_tts_provider,
-    vision: settings.conversation_vision_enabled,
   })
   let publishExecutorApproval: (view: ExecutorApprovalView) => void = () => undefined
   const guiNames = settings.executors.filter(name => name === 'autoglm' || name === 'mobile' || name === 'computer' || name === 'browser')
