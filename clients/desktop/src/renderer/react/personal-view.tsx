@@ -14,6 +14,7 @@ export class WorkbenchRuntime{
  chat=createRef<any>()
  detail=createRef<any>()
  executorFloat=createRef<any>()
+ identityValue:any=null
  startupValue:any=null
  executorFrame:any=null
  confirmation:{resolve:(answer:boolean)=>void}|null=null
@@ -55,7 +56,7 @@ export function mountPersonalView(options:WorkbenchOptions){
  const invoke=(type:string,value?:any)=>host.dispatchEvent(new CustomEvent(`nova-workbench-${type}`,{detail:value}))
  return {
   controller:runtime.controller,receive:runtime.receive,refresh:runtime.refresh,
-  identity:(value:any)=>runtime.chat.current?.identity(value),
+  identity:(value:any)=>{runtime.identityValue=value;runtime.chat.current?.identity(value);runtime.refresh()},
   setOrb:(value:any)=>runtime.chat.current?.setOrb(value),
   setOrbLevel:(value:number)=>runtime.chat.current?.setOrbLevel(value),
   expand:()=>runtime.run(async()=>{await runtime.controller.setPresentation('workbench');if(runtime.controller.snapshot?.conversations?.items?.some((item:any)=>item.id==='chat:main'))await runtime.controller.home();runtime.chat.current?.reveal()}),

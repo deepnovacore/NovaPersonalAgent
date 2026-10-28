@@ -78,7 +78,7 @@ test('visor resizes its declarative armor and suspends canvas frames on reduced 
  dom.window.HTMLCanvasElement.prototype.getContext=(()=>({clearRect(){},beginPath(){},arc(){},stroke(){},fill(){},fillRect(){},createRadialGradient(){return{addColorStop(){}}}})) as any
  Object.assign(globalThis,{innerWidth:1200,innerHeight:900,getComputedStyle:dom.window.getComputedStyle.bind(dom.window),requestAnimationFrame:()=>{scheduled++;return ++raf},cancelAnimationFrame:()=>{cancelled++},matchMedia:()=>query})
  const api=hostApi({preferences:{enabled:true,motion:true,mode:'focus',hardware:true,ai:true,opacity:.8},hardware:{cpu:25,memoryUsed:2**30,memoryTotal:8*2**30,disk:30,updatedAt:Date.now()},ai:{backend:'connected',state:'idle',activated:true}})
- const v=render(<VisorApp api={api}/>);await waitFor(()=>assert.equal(v.container.querySelector('#cpu')?.textContent,'25%'));assert.ok(scheduled>0)
+ const v=render(<VisorApp api={api}/>);await waitFor(()=>assert.equal(v.container.querySelector('#cpu')?.textContent,'25%'));await waitFor(()=>assert.ok(scheduled>0))
  assert.equal(v.container.querySelector('#frame-right g')?.getAttribute('transform'),'translate(1200 0) scale(-1 1)')
  await act(async()=>{(globalThis as any).innerWidth=900;window.dispatchEvent(new dom.window.Event('resize'))});assert.equal(v.container.querySelector('#frame-right g')?.getAttribute('transform'),'translate(900 0) scale(-1 1)')
  await act(async()=>{query.matches=true;change()});assert.ok(v.container.querySelector('#visor')?.classList.contains('no-motion'));assert.ok(cancelled>0)

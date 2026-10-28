@@ -9,11 +9,11 @@ const {WorkspacePage}=await import('../src/renderer/react/pages.tsx')
 async function mount(page:string,snapshot:any,handler:any=async()=>{}){
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host),calls:any[]=[]
  const c={connected:true,everConnected:true,snapshot,command:async(m:any,p:any)=>{calls.push([m,p]);return handler(m,p)}}
- const props={page,c,run:async(fn:any)=>{try{await fn()}catch{}},api:{personal:{openArticle:async()=>{}}},discuss:async(...args:any[])=>calls.push(['discuss',...args]),startConversation:async(...args:any[])=>calls.push(['start',...args]),openTask:()=>{},openSettings:()=>{}}
+ const props:any={page,c,run:async(fn:any)=>{try{await fn()}catch{}},api:{personal:{openArticle:async()=>{}}},discuss:async(...args:any[])=>calls.push(['discuss',...args]),startConversation:async(...args:any[])=>calls.push(['start',...args]),openTask:()=>{},openSettings:()=>{}}
  await act(async()=>{root.render(<WorkspacePage {...props}/>)});
  const click=async(text:string,scope:Element=host)=>{const node=[...scope.querySelectorAll('button')].find(n=>n.textContent===text);assert.ok(node,`button ${text}`);await act(async()=>{node!.click()})}
  const input=async(label:string,value:string)=>{const node=host.querySelector(`[aria-label="${label}"]`) as HTMLInputElement;assert.ok(node,label);await act(async()=>{Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));node.dispatchEvent(new dom.window.Event('change',{bubbles:true}))})}
- return {host,c,calls,click,input,render:async()=>act(async()=>root.render(<WorkspacePage {...props}/>)),close:async()=>{await act(async()=>root.unmount());host.remove()}}
+ return {host,c,calls,click,input,api:props.api,props,render:async()=>act(async()=>root.render(<WorkspacePage {...props}/>)),close:async()=>{await act(async()=>root.unmount());host.remove()}}
 }
 const life={ideas:[{id:'i1',kind:'idea',title:'Existing',note:'Original',status:'active',version:4}],goals:[],todos:[],profile:{version:2,about:'Bio'}}
 test('idea edits carry expected version and survive failed save',async()=>{
@@ -30,9 +30,6 @@ test('profile and soul edits retain original versions when snapshot changes',asy
 })
 test('pending idea mutations stay single flight and unlock after rejection',async()=>{
  let reject:any;const wait=new Promise((_,r)=>{reject=r});const p=await mount('ideas',{life},async()=>wait);await p.click('编辑');await p.click('保存修改');const save=[...p.host.querySelectorAll('button')].find(b=>b.textContent==='保存修改')!;assert.equal(save.disabled,true);await act(async()=>save.click());assert.equal(p.calls.length,1);await act(async()=>reject(Error('version_conflict')));assert.equal(save.disabled,false);await p.close()
-})
-test('interest version conflicts preserve custom selection across snapshot refresh',async()=>{
- const p=await mount('profile',{life,news:{enabled:true,explore:false,interests:[{id:'i',text:'科学'}],profile_version:8}},async()=>{throw Error('version_conflict')});await p.click('调整兴趣');await p.input('自定义兴趣','音乐');await p.click('添加');p.calls.length=0;p.c.snapshot={...p.c.snapshot,news:{...p.c.snapshot.news,profile_version:9}};await p.render();await p.click('完成调整');assert.deepEqual(p.calls[0],['news.configure',{enabled:true,explore:false,interests:['科学','音乐'],expected_version:8}]);assert.ok(p.host.querySelector('[role="alert"]')?.textContent?.includes('调整已保留'));await p.close()
 })
 test('article conversion disables saving when the referenced content changes',async()=>{
  const item={id:'a1',title:'Article',content_hash:'hash1',source_id:'s',summary:'Summary'};const p=await mount('feeds',{life,news:{enabled:true,items:[item],saved:[],interests:[],sources:[]}});await p.click('转为个人事项');await p.input('个人事项标题','Keep my title');p.c.snapshot={...p.c.snapshot,news:{...p.c.snapshot.news,items:[{...item,content_hash:'hash2'}]}};await p.render();const save=[...p.host.querySelectorAll('button')].find(b=>b.textContent==='保存个人事项')!;assert.equal(save.disabled,true);assert.equal((p.host.querySelector('[aria-label="个人事项标题"]') as HTMLInputElement).value,'Keep my title');await p.close()
@@ -56,7 +53,7 @@ test('saved empty lists beside suggestions explain that suggestions require adop
  const p=await mount('ideas',{life:{...life,ideas:[]},workbench_context:{cards:[{id:'s1',tab:'ideas',title:'Suggestion',body:'Grounded suggestion'}]}});assert.equal(p.host.textContent?.includes('还没有保存想法'),false);assert.ok(p.host.textContent?.includes('不会自动加进来'));await p.close()
 })
 test('soul conflicts retain the role draft and show the specific stale message',async()=>{
- const p=await mount('profile',{life,soul:{available:true,role:'Helpful',version:5,assistant_name:'Nova'}},async()=>{throw Object.assign(Error('stale'),{refusal_code:'stale'})});const card=p.host.querySelector('.soul-card')!;await act(async()=>{([...card.querySelectorAll('button')].find(b=>b.textContent==='编辑') as HTMLButtonElement).click()});await p.input('角色设定','Direct and helpful');await act(async()=>{([...card.querySelectorAll('button')].find(b=>b.textContent==='保存') as HTMLButtonElement).click()});assert.deepEqual(p.calls[0],['soul.set',{role:'Direct and helpful',expected_version:5}]);assert.equal((p.host.querySelector('[aria-label="角色设定"]') as HTMLTextAreaElement).value,'Direct and helpful');assert.ok(p.host.querySelector('[role="alert"]')?.textContent?.includes('草稿还在'));await p.close()
+ const p=await mount('assistant',{life,soul:{available:true,role:'Helpful',version:5,assistant_name:'Nova'}},async()=>{throw Object.assign(Error('stale'),{refusal_code:'stale'})});const card=p.host.querySelector('.soul-card')!;await act(async()=>{([...card.querySelectorAll('button')].find(b=>b.textContent==='编辑') as HTMLButtonElement).click()});await p.input('角色设定','Direct and helpful');await act(async()=>{([...card.querySelectorAll('button')].find(b=>b.textContent==='保存') as HTMLButtonElement).click()});assert.deepEqual(p.calls[0],['soul.set',{role:'Direct and helpful',expected_version:5}]);assert.equal((p.host.querySelector('[aria-label="角色设定"]') as HTMLTextAreaElement).value,'Direct and helpful');assert.ok(p.host.querySelector('[role="alert"]')?.textContent?.includes('草稿还在'));await p.close()
 })
 test('reading articles records read state only after successful opening',async()=>{
  const article={id:'a1',title:'Article',content_hash:'hash1',source_id:'s',summary:'Summary',url:'https://example.com/news'};const p=await mount('feeds',{life,news:{enabled:true,items:[article],saved:[],interests:[],sources:[]}});await p.click('阅读原文');assert.deepEqual(p.calls[0],['news.action',{action:'read',id:'a1',value:true}]);await p.click('收藏',p.host.querySelector('.news-card')!);assert.deepEqual(p.calls[1],['news.action',{action:'save',id:'a1',value:true}]);await p.close()
@@ -87,7 +84,7 @@ test('published profile history is bounded and read-only beside the authoritativ
   assert.ok(history.textContent!.includes('时间未记录'))
   assert.equal(history.textContent!.includes('Archived portrait 9'),false)
   assert.equal(history.querySelector('button,input,textarea,select,img,script'),null)
-  assert.equal(p.host.querySelector('.interest-chips')!.textContent!.includes('Earlier interest'),false)
+  assert.equal(p.host.querySelector('.interest-chips'),null,'interest controls live in settings')
   assert.equal(p.calls.length,0,'reading history emits no mutation')
  }finally{await p.close()}
 })
@@ -112,4 +109,19 @@ test('manual daily suggestions refresh forces another run for unchanged inputs o
   const p=await mount(page,{life,workbench_context:{daily:true,status:'ready',cards:[]}})
   try{await p.click('重新整理');assert.deepEqual(p.calls,[['context.refresh',{force:true}]])}finally{await p.close()}
  }
+})
+
+test('personal profile contains neither assistant personality nor news preferences',async()=>{
+ const p=await mount('profile',{life,soul:{available:true,role:'Helpful',assistant_name:'Nova'},news:{enabled:true,interests:[{text:'科学'}]}});
+ assert.equal(p.host.querySelector('.soul-card'),null);assert.equal(p.host.querySelector('[aria-label="资讯兴趣"]'),null);assert.ok(p.host.querySelector('.profile-main'));await p.close()
+})
+
+test('assistant rename uses the existing local identity store and preserves a failed draft',async()=>{
+ const p=await mount('assistant',{life,soul:{available:true,role:'Helpful',assistant_name:'Nova'}});const writes:any[]=[];let fail=true;
+ (p.api as any).welcome={save:async(value:any)=>{writes.push(value);if(fail)throw Error('write_failed');return {profile:{assistantName:value.assistantName}}}};await p.render();
+ await p.click('改名字');await p.input('助手名字','小星');await p.click('保存名字');assert.equal((p.host.querySelector('[aria-label="助手名字"]') as HTMLInputElement).value,'小星');fail=false;await p.click('保存名字');assert.equal(p.host.querySelector('[aria-label="助手名字"]'),null);assert.deepEqual(writes,[{assistantName:'小星'},{assistantName:'小星'}]);assert.equal(p.calls.length,0);await p.close()
+})
+
+test('assistant display follows the real saved identity envelope while runtime soul metadata lags',async()=>{
+ const p=await mount('assistant',{life,soul:{available:true,role:'Helpful',assistant_name:'Old name'}});p.props.identity={profile:{assistantName:'小星'}};await p.render();assert.ok(p.host.querySelector('.soul-intro')?.textContent?.includes('我叫小星。'),'intro uses saved local identity');assert.equal(p.host.querySelector('.soul-row p')?.textContent,'小星');await p.close()
 })

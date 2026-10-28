@@ -62,3 +62,10 @@ test('Build directory IPC is translated and accepts only the workbench window', 
  assert.equal(await handler({sender:mainWindow.webContents}),'/project')
  assert.deepEqual(dialogs,[{owner:mainWindow,options:{title:'translated:选择本地 Build 项目目录',properties:['openDirectory']}}])
 })
+
+test('news settings IPC permits only configuration from the owned settings frame',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8'),block=source.slice(source.indexOf("  ipcMain.handle('nova:settings:personal'"),source.indexOf("  ipcMain.handle('nova:knowledge:action'"));
+ const sender={},calls=[];let receive;new Function('ipcMain','settingsWindow','backendControl','settingsGeneration',block)({handle:(_,fn)=>receive=fn},{webContents:sender},{request:async(method,params)=>{calls.push([method,params]);return {ok:true}}},1);
+ const params={enabled:true,explore:false,interests:['科学'],expected_version:8};await assert.rejects(receive({sender:{}},{method:'news.configure',params}),/rejected/);await receive({sender},{method:'news.configure',params});
+ await assert.rejects(receive({sender},{method:'news.refresh',params:{}}),/rejected/);assert.deepEqual(calls,[['news.configure',params]])
+})

@@ -4,7 +4,7 @@ import {Info,ExternalLink} from 'lucide-react'
 import {t} from '../../locale.mjs'
 import {sourceStatus} from './model'
 export {t}
-export type PageProps={page:string;delegate?:(text:string)=>any;continueChat?:(text:string)=>any;c:any;run:(action:()=>any)=>Promise<any>;api:any;discuss:(refs:any[],text?:string)=>any;startConversation?:(request:any)=>any;openTask:(id:string)=>any;openSettings:(category?:string)=>any}
+export type PageProps={page:string;identity?:any;delegate?:(text:string)=>any;continueChat?:(text:string)=>any;c:any;run:(action:()=>any)=>Promise<any>;api:any;discuss:(refs:any[],text?:string)=>any;startConversation?:(request:any)=>any;openTask:(id:string)=>any;openSettings:(category?:string)=>any}
 export const PageContext=createContext<any>(null)
 export function usePage(){return useContext(PageContext)}
 export function Action({children,action,actionKey,disabled=false,className='',...rest}:any){
