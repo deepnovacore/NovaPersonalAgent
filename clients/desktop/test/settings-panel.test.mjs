@@ -1760,3 +1760,30 @@ test('compatible speech presets save vendor path prefixes and reset sampling ext
   assert.equal(patch.compatibleTtsVoice,'tongtong')
   assert.equal(patch.compatibleTtsSendSampleRate,false)
 })
+
+test('native, StepFun and connector secrets retain boolean presence while plaintext stays write only', async () => {
+  const keys = ['minicpmRealtimeApiKey', 'personaplexRealtimeApiKey', 'stepfunApiKey', 'composioApiKey']
+  const plaintext = Object.fromEntries(keys.map(key => [key, `private-value-${key}`]))
+  const presence = Object.fromEntries(keys.map(key => [key, true]))
+  const sources = Object.fromEntries(keys.map(key => [key, 'environment']))
+  const calls = [], renders = []
+  const remote = publicView({...plaintext, secrets: plaintext, secretsPresent: presence, secretSources: sources})
+  const controller = createSettingsController({
+    api: {set: async patch => {calls.push(structuredClone(patch)); return remote}},
+    render: (view, drafts) => renders.push({view, drafts}), status() {},
+  })
+  controller.setView(remote)
+  assert.deepEqual(controller.snapshot().view.secretsPresent, presence)
+  assert.deepEqual(controller.snapshot().view.secretSources, sources)
+  controller.stage({...plaintext, secrets: plaintext})
+  assert.deepEqual(controller.snapshot().drafts, {})
+  assert.equal((await controller.save(plaintext)).saved, true)
+  assert.deepEqual(calls, [{secrets: plaintext}])
+  for (const snapshot of [...renders, controller.snapshot()]) {
+    assert.doesNotMatch(JSON.stringify(snapshot), /private-value-/)
+    for (const key of keys) assert.equal(Object.hasOwn(snapshot.view, key), false)
+    assert.equal(Object.hasOwn(snapshot.view, 'secrets'), false)
+  }
+  controller.syncView(publicView({secretsPresent: {...presence, stepfunApiKey: 'unsafe-plaintext', minicpmRealtimeApiKey: false}}))
+  assert.deepEqual(controller.snapshot().view.secretsPresent, {minicpmRealtimeApiKey:false,personaplexRealtimeApiKey:true,composioApiKey:true})
+})

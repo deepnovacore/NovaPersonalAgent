@@ -86,3 +86,14 @@ test('leaving an untouched idle input does not create a settings draft',async()=
  const b=bridge(base({autoHideSeconds:60}));const v=render(<SettingsApp bridge={b.bridge}/>);await waitFor(()=>assert.equal((v.container.querySelector('#auto-hide-seconds') as HTMLInputElement).value,'60'));
  fireEvent.focus(v.container.querySelector('#auto-hide-seconds')!);fireEvent.blur(v.container.querySelector('#auto-hide-seconds')!);assert.equal((v.container.querySelector('#settings-save') as HTMLButtonElement).disabled,true);
 })
+
+test('configured StepFun survives the real settings controller and is selectable only in supported lanes',async()=>{
+ const b=bridge(base({focusCategory:'models',modelCatalog:routeCatalog,secretsPresent:{stepfunApiKey:true}}));const v=render(<SettingsApp bridge={b.bridge}/>);
+ await waitFor(()=>assert.ok(v.container.querySelector('[data-lane-provider="support"]')));
+ for(const lane of ['support','fast','compressor','watch']){
+  const select=v.container.querySelector(`[data-lane-provider="${lane}"]`) as HTMLSelectElement;
+  const option=[...select.options].find(o=>o.value==='stepfun');assert.ok(option,`configured StepFun missing from ${lane}`);assert.equal(option.disabled,false);
+  fireEvent.change(select,{target:{value:'stepfun'}});assert.equal(select.value,'stepfun');
+ }
+ for(const lane of ['conversationText','embedding'])assert.ok(![...(v.container.querySelector(`[data-lane-provider="${lane}"]`) as HTMLSelectElement).options].some(o=>o.value==='stepfun'));
+})
