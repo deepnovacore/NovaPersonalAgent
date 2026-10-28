@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button } from '@radix-ui/themes';
-import { Check, ExternalLink, Eye, EyeOff, KeyRound, Loader2, ShieldCheck, SlidersHorizontal, Sparkles, Zap } from 'lucide-react';
+import { Badge, Button, Callout, Card, IconButton } from '@radix-ui/themes';
+import { Check, ExternalLink, Eye, EyeOff, KeyRound, Loader2, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react';
 import { t } from '../locale.mjs';
+import { createOrbVisualSafe } from '../orb-visual.mjs';
 const KEYS: any = { qwen: 'dashscopeApiKey', deepseek: 'deepseekApiKey', ark: 'arkApiKey' };
 const LABELS: any = { dashscopeApiKey: 'DashScope API Key', deepseekApiKey: 'DeepSeek API Key', arkApiKey: '火山方舟 API Key', doubaoBigmodelApiKey: '火山语音 API Key' };
 const LINKS: any = { dashscopeApiKey: 'https://bailian.console.aliyun.com/?apiKey=1&tab=model', deepseekApiKey: 'https://platform.deepseek.com/api_keys', arkApiKey: 'https://console.volcengine.com/ark/apiKey', doubaoBigmodelApiKey: 'https://console.volcengine.com/speech/new/setting/apikeys' };
@@ -11,6 +12,17 @@ const PATHS = [
     ['cascaded', '高级', '火山引擎语音识别与合成，搭配你选择的大模型。', SlidersHorizontal, false],
 ];
 const STEPS = ['选择语音方式', '连接模型服务', '开始对话'];
+function NovaOrb({ size = 176 }: { size?: number }) {
+    const canvas = useRef<HTMLCanvasElement>(null);
+    useEffect(() => { const node = canvas.current;
+        if (!node)
+            return;
+        const visual = createOrbVisualSafe(node, { size, palette: 'ember', reducedMotion: Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches), highContrast: Boolean(globalThis.matchMedia?.('(prefers-contrast: more)')?.matches) });
+        visual.setState('idle');
+        return () => visual.destroy();
+    }, [size]);
+    return <div className="setup-orb" aria-hidden="true"><canvas ref={canvas} width={size} height={size}/></div>;
+}
 const closeSetupWindow = () => window.close();
 export default function SetupApp({ api = (window as any).novaPersonalAgentDesktop?.setup, onClose = closeSetupWindow }: any) {
     const [view, setView] = useState<any>(null), [pipeline, setPipeline] = useState('integrated'), [provider, setProvider] = useState('deepseek'), [starting, setStarting] = useState(false), [status, setStatus] = useState(''), [tone, setTone] = useState(''), [results, setResults] = useState<any>({}), [resultTones, setResultTones] = useState<any>({}), [testing, setTesting] = useState<any>({}), [revealed, setRevealed] = useState<any>({}), [drafts, setDrafts] = useState<any>({});
@@ -97,8 +109,8 @@ export default function SetupApp({ api = (window as any).novaPersonalAgentDeskto
     const currentStep = starting || keysReady ? 2 : 1;
     return <div className="setup-shell">
         <aside className="setup-rail">
-            <div className="setup-brand"><span className="setup-brand-mark" aria-hidden="true"><Sparkles size={13}/></span><span>NOVA</span></div>
-            <div className="setup-orb" aria-hidden="true"><span className="setup-orb-core"/><span className="setup-orb-ring"/></div>
+            <div className="setup-brand">NOVA</div>
+            <NovaOrb/>
             <div className="setup-rail-copy">
                 <p className="setup-rail-eyebrow">{t('首次设置')}</p>
                 <h1>{t('你好，我是 Nova')}</h1>
@@ -117,23 +129,23 @@ export default function SetupApp({ api = (window as any).novaPersonalAgentDeskto
                 <div className="paths" role="radiogroup" aria-label={t('语音方式')}>{PATHS.map(([id, title, body, Icon, recommended]: any[]) => <label className="path" id={'path-' + id} key={id} data-selected={pipeline === id ? 'true' : 'false'}>
                     <input type="radio" name="pipeline" value={id} checked={pipeline === id} disabled={starting} onChange={() => setPipeline(id)}/>
                     <span className="path-icon" aria-hidden="true"><Icon size={18}/></span>
-                    <span className="path-copy"><span className="path-title">{t(title)}{recommended && <span className="path-badge">{t('推荐')}</span>}</span><span className="path-body">{t(body)}</span></span>
+                    <span className="path-copy"><span className="path-title">{t(title)}{recommended && <Badge className="path-badge" size="1" radius="full" variant="soft">{t('推荐')}</Badge>}</span><span className="path-body">{t(body)}</span></span>
                     <span className="path-check" aria-hidden="true"><Check size={13}/></span>
                 </label>)}</div>
                 {pipeline === 'cascaded' && <label className="llm-choice setup-provider"><span className="setup-field-label">{t('大模型')}</span><select id="llm-provider" value={provider} disabled={starting} onChange={e => setProvider(e.target.value)}><option value="deepseek">DeepSeek</option><option value="qwen">{t('通义千问（DashScope）')}</option><option value="ark">{t('豆包（火山方舟）')}</option></select></label>}
-                <section className="fields setup-keys" id={pipeline + '-fields'} aria-labelledby="setup-keys-title">
-                    <div className="setup-section-head"><div><h3 id="setup-keys-title">{t('连接模型服务')}</h3><p>{t('密钥只加密保存在本机。')}</p></div><span className="setup-secure"><ShieldCheck size={13} aria-hidden="true"/>{t('本机加密')}</span></div>
+                <Card className="fields setup-keys" id={pipeline + '-fields'} aria-labelledby="setup-keys-title" variant="surface">
+                    <div className="setup-section-head"><div><h3 id="setup-keys-title">{t('连接模型服务')}</h3><p>{t('密钥只加密保存在本机。')}</p></div><Badge className="setup-secure" size="1" variant="soft" color="gray"><ShieldCheck size={12} aria-hidden="true"/>{t('本机加密')}</Badge></div>
                     {Object.keys(LABELS).map(key => <div className="key-row" data-key={key} key={key} hidden={!active.includes(key)}>
                         <div className="key-label"><KeyRound size={14} aria-hidden="true"/><label htmlFor={key}>{t(LABELS[key])}</label></div>
                         <div className="key-input">
                             <input key={key} ref={el => { inputs.current[key] = el; }} id={key} type={revealed[key] ? 'text' : 'password'} autoComplete="off" spellCheck={false} onInput={() => { probeRevision.current[key] = (probeRevision.current[key] ?? 0) + 1; setResults((s: any) => ({ ...s, [key]: '' })); setResultTones((s: any) => ({ ...s, [key]: '' })); setDrafts((d: any) => ({ ...d, [key]: inputs.current[key]?.value ?? '' })); }} disabled={starting} placeholder={view?.secretsPresent?.[key] ? t('已保存，留空则继续使用') : key === 'dashscopeApiKey' ? 'sk-…' : ''}/>
-                            <button type="button" className="key-reveal" aria-label={t(revealed[key] ? '隐藏密钥' : '显示密钥')} aria-pressed={revealed[key] === true} disabled={starting} onClick={() => setRevealed((s: any) => ({ ...s, [key]: !s[key] }))}>{revealed[key] ? <EyeOff size={15}/> : <Eye size={15}/>}</button>
+                            <IconButton type="button" className="key-reveal" variant="soft" color="gray" size="2" aria-label={t(revealed[key] ? '隐藏密钥' : '显示密钥')} aria-pressed={revealed[key] === true} disabled={starting} onClick={() => setRevealed((s: any) => ({ ...s, [key]: !s[key] }))}>{revealed[key] ? <EyeOff size={15}/> : <Eye size={15}/>}</IconButton>
                             {key !== 'doubaoBigmodelApiKey' && <Button type="button" className="key-test" disabled={starting || testing[key]} onClick={() => void test(key)}>{testing[key] ? <Loader2 size={14} className="setup-spinner"/> : null}{t(testing[key] ? '测试中…' : '测试')}</Button>}
                         </div>
                         <p className="key-meta"><a href={LINKS[key]} target="_blank" rel="noopener noreferrer"><ExternalLink size={12} aria-hidden="true"/>{t('获取密钥 ↗')}</a><span className="key-result" aria-live="polite" data-status={resultTones[key] || (key === 'doubaoBigmodelApiKey' ? 'deferred' : '')}>{results[key] ?? (key === 'doubaoBigmodelApiKey' ? t(PROBE.deferred) : '')}</span></p>
                     </div>)}
-                </section>
-                <p className="note setup-note"><ShieldCheck size={15} aria-hidden="true"/><span>{t('密钥只加密保存在本机；对话和语音会发送给你选择的模型服务商。')}<span className="setup-note-extra">{t('联网搜索等能力可以稍后在设置中开启。')}</span></span></p>
+                </Card>
+                <Callout.Root className="setup-note" size="1" variant="soft" color="gray"><Callout.Icon><ShieldCheck size={15} aria-hidden="true"/></Callout.Icon><Callout.Text>{t('密钥只加密保存在本机；对话和语音会发送给你选择的模型服务商。')}<span className="setup-note-extra">{t('联网搜索等能力可以稍后在设置中开启。')}</span></Callout.Text></Callout.Root>
             </div>
             <footer className="setup-foot">
                 <div className="setup-status"><span className="setup-status-dot" data-tone={tone || (starting ? 'busy' : keysReady ? 'ready' : 'idle')} aria-hidden="true"/><span id="status" aria-live="polite" data-tone={tone}>{status || t(keysReady ? '密钥已就绪，可以开始了' : '填好密钥后即可开始')}</span></div>
