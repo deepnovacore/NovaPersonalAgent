@@ -1208,17 +1208,27 @@ test('tool-only output retains standby, while both mixed-output orders fail with
     await adapter.createResponse({kind: 'host_fact', item, task_summary: null, origin_spoken: false},
       new AbortController().signal)
     const events = await settleWithin(`tool scenario ${index}`, collecting)
+    // A cancel during narration can be settled after the terminal frame; let the late close land.
+    if (index === 1) await new Promise(resolve => setTimeout(resolve, 20))
     if (index === 0) {
       assert.equal(events.some(event => event.kind === 'tool_call_ready'), true)
       assert.equal(terminalStatus(events), 'completed')
+      assert.equal(ttsSession.cancelled, false)
+    } else if (index === 1) {
+      // Narration before a tool is withdrawn and the turn continues with the tool.
+      assert.equal(events.some(event => event.kind === 'tool_call_ready'), true)
+      assert.equal(terminalStatus(events), 'completed')
+      assert.deepEqual(events.filter(event => event.kind === 'response_transcript_final').map(event => event.text), [''])
+      assert.equal(ttsSession.cancelled, true)
+      assert.equal(ttsSession.closed, true, JSON.stringify(ttsSession.operations))
     } else {
+      // Text after a tool is still a protocol failure; the tool is never exposed.
       assert.equal(events.some(event => event.kind === 'tool_call_ready'), false)
       assert.equal(events.some(event => event.kind === 'provider_error'
         && event.code === 'cascaded_mixed_text_tool' && !event.recoverable), true)
       assert.equal(terminalStatus(events), 'failed')
+      assert.equal(ttsSession.cancelled, false)
     }
-    assert.equal(ttsSession.cancelled, index === 1)
-    assert.equal(ttsSession.closed, index === 1)
     assert.deepEqual(ttsSession.operations, index === 1
       ? ['open', 'send_text', 'cancel', 'close'] : ['open'])
     await adapter.close()
@@ -3025,7 +3035,7 @@ test('text-only previews stream without duplicate authority and retract before t
       const events=await settleWithin('preview response',collecting)
       assert.equal(llm.calls[0]?.previewText,true)
       assert.deepEqual(events.filter(e=>e.kind==='response_transcript_delta').map(e=>e.text),['hel','lo',...(['suffix','split'].includes(ending)?['!']:[])])
-      assert.deepEqual(events.filter(e=>e.kind==='response_transcript_final').map(e=>e.text),[ending==='tool'||ending==='failure'?'':ending==='split-failure'?'hel':ending==='mismatch'?'correct':['suffix','split'].includes(ending)?'hello!':'hello'])
+      assert.deepEqual(events.filter(e=>e.kind==='response_transcript_final').map(e=>e.text),[['tool','failure','split-failure'].includes(ending)?'':ending==='mismatch'?'correct':['suffix','split'].includes(ending)?'hello!':'hello'])
       assert.equal(events.some(e=>e.kind==='provider_error'&&e.code==='cascaded_mixed_text_tool'),false)
       if(ending==='tool')assert.equal(events.some(e=>e.kind==='tool_call_ready'),true)
     }finally{await adapter.close()}

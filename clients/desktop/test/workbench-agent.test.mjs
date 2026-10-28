@@ -19,31 +19,27 @@ function fixture(confirm){
  return {c,sent}
 }
 
-test('running Build switch waits for user decision, applies stop receipt and leaves drafts intact',async()=>{
- let approve=false,asked=0
- const {c,sent}=fixture(async()=>{asked++;return approve});c.draft='下一步要求'
- await c.select('chat:main');assert.equal(c.selectedId,'build');assert.equal(sent.length,0);assert.equal(c.draft,'下一步要求')
- approve=true;await c.select('chat:main');assert.equal(c.selectedId,'chat:main');assert.equal(asked,2)
- assert.deepEqual(sent.map(frame=>frame.method),['build.stop','conversations.select']);assert.equal(c.activeBuild,null);assert.equal(c.state('build').draft,'下一步要求')
- await c.select('build');assert.equal(asked,2,'paused sessions switch without another prompt')
+test('selecting another conversation leaves a running Build running',async()=>{
+ const {c,sent}=fixture();c.draft='下一步要求'
+ await c.select('chat:main');assert.equal(c.selectedId,'chat:main');assert.equal(c.activeBuild?.id,'build')
+ assert.deepEqual(sent.map(frame=>frame.method),['conversations.select']);assert.equal(c.state('build').draft,'下一步要求')
 })
 
-test('starting a conversation from a card never stops a running Build without confirmation',async()=>{
- let approve=false,asked=0
- const {c,sent}=fixture(async()=>{asked++;return approve}),request={title:'卡片',text:'聊聊',references:[{kind:'goal',id:'g',version:1}]}
- await assert.rejects(c.startConversationWithReference(request),/切换已取消/);assert.equal(asked,1);assert.deepEqual(sent,[],'cancelling sends nothing at all')
- approve=true;await c.startConversationWithReference(request)
- assert.deepEqual(sent.map(frame=>frame.method),['build.stop','conversations.start']);assert.deepEqual(sent[1].params,request)
+test('starting a conversation from a card leaves a running Build running',async()=>{
+ const {c,sent}=fixture(),request={title:'卡片',text:'聊聊',references:[{kind:'goal',id:'g',version:1}]}
+ await c.startConversationWithReference(request)
+ assert.deepEqual(sent.map(frame=>frame.method),['conversations.start']);assert.deepEqual(sent[0].params,request)
+ assert.equal(c.activeBuild?.id,'build')
 })
 
-test('switching from running Build to voice stops first and keeps voice in the same Build conversation',async()=>{
- const {c,sent}=fixture(async()=>true)
+test('starting voice during a running Build keeps the Build running',async()=>{
+ const {c,sent}=fixture()
  // Stop just before capture: this test checks routing without claiming microphone hardware coverage.
  c.start=async()=>{throw Error('capture fixture')}
  await assert.rejects(c.voice(),/capture fixture/)
- assert.equal(sent[0].method,'build.stop');assert.equal(c.selectedId,'build')
- assert.ok(sent.filter(frame=>frame.method==='conversations.voice').every(frame=>frame.params.id==='build'))
- assert.equal(sent.some(frame=>frame.method==='conversations.select'),false,'no detour through the main chat')
+ assert.equal(sent[0].method,'conversations.voice');assert.equal(sent[0].params.id,'build')
+ assert.equal(sent.some(frame=>frame.method==='build.stop'),false)
+ assert.equal(c.selectedId,'build')
 })
 
 test('local approval setting defaults to ask and is independent of executor approval',()=>{

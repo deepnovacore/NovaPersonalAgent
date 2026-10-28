@@ -265,63 +265,114 @@ test('Ark clears private chaining after a protocol failure and exposes only a sa
   assert.equal(requests.length, 3)
 })
 
-test('Ark semantic sessions reject both mixed text and tool orders without forwarding the conflict',
-  async () => {
-    const scenarios = [
-      {
-        name: 'text then tool',
-        events: [
-          {type: 'response.created', response: {id: 'ark-mixed-text-tool'}},
-          {type: 'response.output_text.delta', delta: 'private text'},
-          {type: 'response.output_item.done', item: {
-            type: 'function_call', id: 'item-1', call_id: 'call-1', name: 'private_tool',
-            arguments: '{"private":"argument"}',
-          }},
-          {type: 'response.completed', response: {id: 'ark-mixed-text-tool'}},
-        ],
-        responseId: 'ark-mixed-text-tool',
-        visibleKind: 'text_delta',
-        forbiddenKind: 'tool_call',
-      },
-      {
-        name: 'tool then text',
-        events: [
-          {type: 'response.created', response: {id: 'ark-mixed-tool-text'}},
-          {type: 'response.output_item.done', item: {
-            type: 'function_call', id: 'item-2', call_id: 'call-2', name: 'private_tool',
-            arguments: '{"private":"argument"}',
-          }},
-          {type: 'response.output_text.delta', delta: 'private text'},
-          {type: 'response.completed', response: {id: 'ark-mixed-tool-text'}},
-        ],
-        responseId: 'ark-mixed-tool-text',
-        visibleKind: null,
-        forbiddenKind: 'tool_call',
-      },
-    ] as const
+test('Ark accepts narration before a tool while still rejecting text after a tool', async () => {
+    const narration = createArkCascadedLlmFactory({
+      baseUrl: 'https://ark.example/api/v3', apiKey: 'ark-secret', model: 'ark-model',
+      instructions: 'instructions', fetchImpl: () => Promise.resolve(sse(
+        {type: 'response.created', response: {id: 'ark-mixed-text-tool'}},
+        {type: 'response.output_text.delta', delta: 'private text'},
+        {type: 'response.output_item.done', item: {
+          type: 'function_call', id: 'item-1', call_id: 'call-1', name: 'private_tool',
+          arguments: '{"private":"argument"}',
+        }},
+        {type: 'response.completed', response: {id: 'ark-mixed-text-tool'}},
+      )),
+    }).open()
+    const accepted = await collect(narration.stream({
+      inputs: [{kind: 'user_text', text: 'prompt secret'}], tools: [],
+      signal: new AbortController().signal,
+    }))
+    assert.deepEqual(accepted.at(-1), {kind: 'response_completed', response_id: 'ark-mixed-text-tool'})
+    assert.deepEqual(accepted.filter(event => event.kind === 'text_delta').map(event => event.text), ['private text'])
+    assert.equal(accepted.some(event => event.kind === 'tool_call' && event.call_id === 'call-1'), true)
+    assert.doesNotMatch(JSON.stringify(accepted), /ark-secret|prompt secret/u)
+    await narration.close()
 
-    for (const scenario of scenarios) {
-      const session = createArkCascadedLlmFactory({
-        baseUrl: 'https://ark.example/api/v3', apiKey: 'ark-secret', model: 'ark-model',
-        instructions: 'instructions', fetchImpl: () => Promise.resolve(sse(...scenario.events)),
-      }).open()
-      const events = await collect(session.stream({
-        inputs: [{kind: 'user_text', text: 'prompt secret'}], tools: [],
-        signal: new AbortController().signal,
-      }))
-      assert.deepEqual(events.at(-1), {
-        kind: 'response_failed', response_id: scenario.responseId, code: 'protocol',
-      }, scenario.name)
-      assert.equal(events.some(event => event.kind === scenario.forbiddenKind), false, scenario.name)
-      if (scenario.visibleKind !== null) {
-        assert.equal(events.some(event => event.kind === scenario.visibleKind), true, scenario.name)
-      } else {
-        assert.equal(events.some(event => event.kind === 'text_delta'), false, scenario.name)
-      }
-      assert.doesNotMatch(JSON.stringify(events), /private_tool|argument|ark-secret|prompt secret/u)
-      await session.close()
-    }
+    const inverted = createArkCascadedLlmFactory({
+      baseUrl: 'https://ark.example/api/v3', apiKey: 'ark-secret', model: 'ark-model',
+      instructions: 'instructions', fetchImpl: () => Promise.resolve(sse(
+        {type: 'response.created', response: {id: 'ark-mixed-tool-text'}},
+        {type: 'response.output_item.done', item: {
+          type: 'function_call', id: 'item-2', call_id: 'call-2', name: 'private_tool',
+          arguments: '{"private":"argument"}',
+        }},
+        {type: 'response.output_text.delta', delta: 'private text'},
+        {type: 'response.completed', response: {id: 'ark-mixed-tool-text'}},
+      )),
+    }).open()
+    const rejected = await collect(inverted.stream({
+      inputs: [{kind: 'user_text', text: 'prompt secret'}], tools: [],
+      signal: new AbortController().signal,
+    }))
+    assert.deepEqual(rejected.at(-1), {kind: 'response_failed', response_id: 'ark-mixed-tool-text', code: 'protocol'})
+    assert.equal(rejected.some(event => event.kind === 'tool_call'), false)
+    assert.equal(rejected.some(event => event.kind === 'text_delta'), false)
+    assert.doesNotMatch(JSON.stringify(rejected), /private_tool|argument|ark-secret|prompt secret/u)
+    await inverted.close()
   })
+
+test('Ark never publishes speakable text before a tool decision is known', async () => {
+  const tool = {name: 'lookup', description: 'lookup', parameters: {type: 'object'}}
+  const signal = new AbortController().signal
+  const withTool = createArkCascadedLlmFactory({
+    baseUrl: 'https://ark.example/api/v3', apiKey: 'ark-secret', model: 'ark-model',
+    instructions: 'instructions', fetchImpl: () => Promise.resolve(sse(
+      {type: 'response.created', response: {id: 'ark-narrated-tool'}},
+      {type: 'response.output_text.delta', delta: '我先查一下'},
+      {type: 'response.output_item.done', item: {
+        type: 'function_call', id: 'item-1', call_id: 'call-1', name: 'lookup', arguments: '{}',
+      }},
+      {type: 'response.completed', response: {id: 'ark-narrated-tool'}},
+    )),
+  }).open()
+  const narrated = await collect(withTool.stream({inputs: [{kind: 'user_text', text: 'go'}], tools: [tool], previewText: true, signal}))
+  assert.equal(narrated.some(event => event.kind === 'text_delta'), false, 'narration must not reach TTS')
+  assert.deepEqual(narrated.filter(event => event.kind === 'text_preview').map(event => event.text), ['我先查一下'])
+  assert.equal(narrated.some(event => event.kind === 'tool_call' && event.call_id === 'call-1'), true)
+  await withTool.close()
+
+  const voice = createArkCascadedLlmFactory({
+    baseUrl: 'https://ark.example/api/v3', apiKey: 'ark-secret', model: 'ark-model',
+    instructions: 'instructions', fetchImpl: () => Promise.resolve(sse(
+      {type: 'response.created', response: {id: 'ark-voice-tool'}},
+      {type: 'response.output_text.delta', delta: '先查一下'},
+      {type: 'response.output_item.done', item: {
+        type: 'function_call', id: 'item-2', call_id: 'call-2', name: 'lookup', arguments: '{}',
+      }},
+      {type: 'response.completed', response: {id: 'ark-voice-tool'}},
+    )),
+  }).open()
+  const silent = await collect(voice.stream({inputs: [{kind: 'user_text', text: 'go'}], tools: [tool], signal}))
+  assert.equal(silent.some(event => event.kind === 'text_delta' || event.kind === 'text_preview'), false, 'voice narration is withheld entirely')
+  assert.equal(silent.some(event => event.kind === 'tool_call' && event.call_id === 'call-2'), true)
+  await voice.close()
+
+  const textOnly = createArkCascadedLlmFactory({
+    baseUrl: 'https://ark.example/api/v3', apiKey: 'ark-secret', model: 'ark-model',
+    instructions: 'instructions', fetchImpl: () => Promise.resolve(sse(
+      {type: 'response.created', response: {id: 'ark-final-text'}},
+      {type: 'response.output_text.delta', delta: '最终回答'},
+      {type: 'response.completed', response: {id: 'ark-final-text'}},
+    )),
+  }).open()
+  const authoritative = await collect(textOnly.stream({inputs: [{kind: 'user_text', text: 'go'}], tools: [tool], signal}))
+  assert.equal(authoritative.some(event => event.kind === 'text_preview'), false)
+  assert.deepEqual(authoritative.filter(event => event.kind === 'text_delta').map(event => event.text), ['最终回答'])
+  await textOnly.close()
+
+  const previewed = createArkCascadedLlmFactory({
+    baseUrl: 'https://ark.example/api/v3', apiKey: 'ark-secret', model: 'ark-model',
+    instructions: 'instructions', fetchImpl: () => Promise.resolve(sse(
+      {type: 'response.created', response: {id: 'ark-preview-text'}},
+      {type: 'response.output_text.delta', delta: '最终回答'},
+      {type: 'response.completed', response: {id: 'ark-preview-text'}},
+    )),
+  }).open()
+  const preview = await collect(previewed.stream({inputs: [{kind: 'user_text', text: 'go'}], tools: [tool], previewText: true, signal}))
+  assert.deepEqual(preview.filter(event => event.kind === 'text_preview').map(event => event.text), ['最终回答'])
+  assert.deepEqual(preview.filter(event => event.kind === 'text_delta').map(event => event.text), ['最终回答'])
+  await previewed.close()
+})
 
 test('Ark original-image turn chains tools but the next turn uses text-only local history', async () => {
   const requests: Record<string, unknown>[] = []

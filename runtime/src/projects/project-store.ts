@@ -715,9 +715,11 @@ export class ProjectStore {
     try {
       return await this.#files.transaction(async state => {
         const binding = await validateRegisteredWorkspace(hostWorkspacePath(workspace))
+        // Keep the exact-path fast path first: a replaced directory at the same spelling is a
+        // boundary change, not a new alias that could coexist with the old record.
         const existing = [...state.workspaces.values()].find(
           record => record.canonical_path === binding.canonical,
-        )
+        ) ?? await this.#findWorkspaceByIdentity(state.workspaces, binding.identity)
         if (existing !== undefined) {
           const approved = existing.origin === 'managed'
             ? await this.#files.validateManagedWorkspaceBinding(existing.canonical_path)
@@ -756,9 +758,8 @@ export class ProjectStore {
         const binding = await validateRegisteredWorkspace(hostWorkspacePath(workspace))
         requireWorkspaceCapacity(state)
         requireUniqueWorkspaceName(state, name.normalized)
-        if ([...state.workspaces.values()].some(
-          record => record.canonical_path === binding.canonical,
-        )) {
+        if (await this.#findWorkspaceByIdentity(state.workspaces, binding.identity) !== undefined
+          || [...state.workspaces.values()].some(record => record.canonical_path === binding.canonical)) {
           throw new ProjectStateError('workspace_path_conflict')
         }
         const record = this.#newWorkspace(state, name, binding.canonical, 'registered')
@@ -1549,6 +1550,34 @@ export class ProjectStore {
       throw new ProjectStateError('workspace_boundary_changed')
     }
     this.#workspaceIdentities.set(workspaceId, identity)
+  }
+
+  /** Match a directory by device/inode so case aliases cannot register the same project twice. */
+  async #findWorkspaceByIdentity(
+    workspaces: ReadonlyMap<string, WorkspaceRecord>,
+    identity: FileIdentity,
+  ): Promise<WorkspaceRecord | undefined> {
+    for (const record of workspaces.values()) {
+      // Revalidate instead of trusting a pin: inodes can be reused after an external delete, and a
+      // stale pin would either false-conflict or return a workspace whose path no longer exists.
+      let current: FileIdentity
+      try {
+        const binding = record.origin === 'managed'
+          ? await this.#files.validateManagedWorkspaceBinding(record.canonical_path)
+          : await validateRegisteredWorkspace(record.canonical_path)
+        current = binding.identity
+      } catch {
+        continue
+      }
+      try {
+        this.#pinWorkspaceIdentity(record.workspace_id, current)
+      } catch {
+        // A record whose own path changed identity cannot match another path.
+        continue
+      }
+      if (sameFileIdentity(current, identity)) return record
+    }
+    return undefined
   }
 
   #advanceWorkspaceIdentity(

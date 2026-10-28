@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { preparePrivateDatabasePath } from '../storage/private-database.js';
 import { feedItemSchema, goalProgressSchema, personalSettingsSchema, type FeedItem, type GoalProgress, type PersonalSettings } from './contracts.js';
 export interface PersonalState {
+    schema_version: number;
     notification_intents: Record<string,NotificationInput>;
     notification_fingerprints: Record<string,string>;
     notifications_initialized: boolean;
@@ -32,9 +33,22 @@ export interface PersonalState {
         result: unknown;
     }>;
 }
-export const initialState = (): PersonalState => ({ notification_task_baseline:[],notification_intents:{},notification_fingerprints:{},notifications_initialized:false,conversations:initialConversations(), user_scope: null, revision: 0, feed: [], dedupe: [], brief_runs: {}, goal_progress: [], goal_proposal_rejections: [], goal_proposer: {last_run_date:null,consumed_through:null,last_outcome:null}, goal_checkins: {runs:{},last_at:{}}, settings: { discovery_enabled: true, discovery_interval_minutes: 30, proactive_daily_cap: 5, news_rank_fallback: true }, receipts: {} });
+export const initialState = (): PersonalState => ({ schema_version: STATE_SCHEMA_VERSION, notification_task_baseline:[],notification_intents:{},notification_fingerprints:{},notifications_initialized:false,conversations:initialConversations(), user_scope: null, revision: 0, feed: [], dedupe: [], brief_runs: {}, goal_progress: [], goal_proposal_rejections: [], goal_proposer: {last_run_date:null,consumed_through:null,last_outcome:null}, goal_checkins: {runs:{},last_at:{}}, settings: { discovery_enabled: true, discovery_interval_minutes: 30, proactive_daily_cap: 5, news_rank_fallback: true }, receipts: {} });
 // ponytail: bounded JSON ledger; move to the existing Worker if 10000 retained matters are needed.
 const MAX_STORE_BYTES = 16 * 1024 * 1024;
+/** Root state is versioned so a newer build can refuse to read a file it would silently rewrite. */
+export const STATE_SCHEMA_VERSION = 1;
+export type PersonalStoreErrorCode =
+    | 'personal_store_capacity'
+    | 'state_corrupt'
+    | 'state_version_unsupported'
+    | 'state_write_failed';
+export class PersonalStoreError extends Error {
+    constructor(readonly code: PersonalStoreErrorCode) {
+        super(code);
+        this.name = 'PersonalStoreError';
+    }
+}
 const WINDOWS_RENAME_RETRY_DELAYS_MS = [25, 50, 75, 100, 125, 150, 175, 200] as const;
 /** Windows can briefly deny replacing a file while another process closes its handle. */
 export async function renamePersonalStoreFile(
@@ -57,10 +71,11 @@ export async function renamePersonalStoreFile(
         }
     }
 }
-const stateSchema = z.object({ notification_task_baseline:z.array(z.string()).default([]),notification_intents:z.record(z.string(),notificationSchema).default({}),notification_fingerprints:z.record(z.string(),z.string()).default({}),notifications_initialized:z.boolean().default(false),conversations:conversationsStateSchema.default(initialConversations), user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), brief_runs:z.record(z.string().max(128),z.object({status:z.enum(['processing','success','failed','empty']),attempts:z.number().int().min(1).max(3),last_attempt_at:z.iso.datetime()})).default({}), goal_progress:z.array(goalProgressSchema).max(200).refine(rows=>new Set(rows.map(r=>r.goal_id)).size===rows.length).default([]), goal_proposal_rejections:z.array(z.object({topic_key:z.string().max(64),title:z.string().max(80),rejected_at:z.iso.datetime(),until:z.iso.datetime()}).strict()).max(200).default([]), goal_proposer:z.object({last_run_date:z.string().date().nullable(),consumed_through:z.iso.datetime().nullable(),last_outcome:z.enum(['processing','success','empty','failed']).nullable()}).strict().default({last_run_date:null,consumed_through:null,last_outcome:null}), goal_checkins:z.object({runs:z.record(z.string().date(),z.object({status:z.enum(['processing','success','failed','empty','invalidated','delivered']),attempts:z.number().int().min(0).max(3),last_attempt_at:z.iso.datetime(),feed_id:z.string().max(128).nullable()}).strict()).refine(r=>Object.keys(r).length<=31),last_at:z.record(z.string().max(512),z.iso.datetime()).refine(r=>Object.keys(r).length<=200)}).strict().default({runs:{},last_at:{}}), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
-const storedStateSchema=stateSchema.extend({conversations:z.object({...conversationsStateSchema.shape,items:z.array(z.union([conversationSchema,conversationSchema.extend({kind:z.literal('proactive')})])).min(1).max(192)}).strict().default(initialConversations)});
+const stateSchema = z.object({ schema_version:z.number().int().nonnegative().default(STATE_SCHEMA_VERSION), notification_task_baseline:z.array(z.string()).default([]),notification_intents:z.record(z.string(),notificationSchema).default({}),notification_fingerprints:z.record(z.string(),z.string()).default({}),notifications_initialized:z.boolean().default(false),conversations:conversationsStateSchema.default(initialConversations), user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), brief_runs:z.record(z.string().max(128),z.object({status:z.enum(['processing','success','failed','empty']),attempts:z.number().int().min(1).max(3),last_attempt_at:z.iso.datetime()})).default({}), goal_progress:z.array(goalProgressSchema).max(200).refine(rows=>new Set(rows.map(r=>r.goal_id)).size===rows.length).default([]), goal_proposal_rejections:z.array(z.object({topic_key:z.string().max(64),title:z.string().max(80),rejected_at:z.iso.datetime(),until:z.iso.datetime()}).strict()).max(200).default([]), goal_proposer:z.object({last_run_date:z.string().date().nullable(),consumed_through:z.iso.datetime().nullable(),last_outcome:z.enum(['processing','success','empty','failed']).nullable()}).strict().default({last_run_date:null,consumed_through:null,last_outcome:null}), goal_checkins:z.object({runs:z.record(z.string().date(),z.object({status:z.enum(['processing','success','failed','empty','invalidated','delivered']),attempts:z.number().int().min(0).max(3),last_attempt_at:z.iso.datetime(),feed_id:z.string().max(128).nullable()}).strict()).refine(r=>Object.keys(r).length<=31),last_at:z.record(z.string().max(512),z.iso.datetime()).refine(r=>Object.keys(r).length<=200)}).strict().default({runs:{},last_at:{}}), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
+const storedStateSchema=stateSchema.extend({schema_version:z.number().int().nonnegative().default(0),conversations:z.object({...conversationsStateSchema.shape,items:z.array(z.union([conversationSchema,conversationSchema.extend({kind:z.literal('proactive')})])).min(1).max(192)}).strict().default(initialConversations)});
 function parseStoredState(value:unknown):PersonalState {
     const state=storedStateSchema.parse(value), conversations=state.conversations;
+    if(state.schema_version>STATE_SCHEMA_VERSION)throw new PersonalStoreError('state_version_unsupported');
     const legacy=conversations.items.filter(item=>item.kind==='proactive');
     for(const item of legacy){
         // Keep historical messages as ordinary topics; deleting the old navigation must not delete history.
@@ -74,7 +89,22 @@ function parseStoredState(value:unknown):PersonalState {
         if(retained)conversations.items=conversations.items.map(other=>other===item?{...item,id,kind:'topic',messages:item.messages.map(message=>({...message,conversation_id:id}))}:other);
         else conversations.items=conversations.items.filter(other=>other!==item);
     }
+    state.schema_version=STATE_SCHEMA_VERSION;
     return stateSchema.parse(state);
+}
+function parseStateText(text:string):PersonalState {
+    let value:unknown;
+    try{value=JSON.parse(text)}catch{throw new PersonalStoreError('state_corrupt')}
+    // Check the version before the strict schema: a newer file may contain keys this build does not
+    // know yet, and it must fail closed as "unsupported" instead of being quarantined as corrupt.
+    if(value!==null&&typeof value==='object'&&!Array.isArray(value)){
+        const version=(value as {schema_version?:unknown}).schema_version
+        if(typeof version==='number'&&Number.isInteger(version)&&version>STATE_SCHEMA_VERSION)throw new PersonalStoreError('state_version_unsupported')
+    }
+    try{return parseStoredState(value)}catch(error){
+        if(error instanceof PersonalStoreError)throw error;
+        throw new PersonalStoreError('state_corrupt');
+    }
 }
 export class PersonalStore {
     constructor(readonly path: string) { }
@@ -82,13 +112,13 @@ export class PersonalStore {
         const path=this.path+'.before-schedules.json'
         // An empty backup (a truncating reset) is treated as missing and recreated below; any other invalid backup still fails.
         let empty=false
-        try{const saved=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await saved.stat();if(info.size>MAX_STORE_BYTES||(process.platform!=='win32'&&(info.mode&0o777)!==0o600))throw Error('invalid_schedule_backup');if(info.size===0&&info.isFile())empty=true;else{parseStoredState(JSON.parse(await saved.readFile('utf8')));return}}finally{await saved.close()}}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
+        try{const saved=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await saved.stat();if(info.size>MAX_STORE_BYTES)throw new PersonalStoreError('personal_store_capacity');if(process.platform!=='win32'&&(info.mode&0o777)!==0o600)throw Error('invalid_schedule_backup');if(info.size===0&&info.isFile())empty=true;else{parseStateText(await saved.readFile('utf8'));return}}finally{await saved.close()}}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
         if(empty)await unlink(path)
         const original=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW)
         let text:string
-        try{if((await original.stat()).size>MAX_STORE_BYTES)throw Error('personal_store_capacity');text=await original.readFile('utf8')}finally{await original.close()}
+        try{if((await original.stat()).size>MAX_STORE_BYTES)throw new PersonalStoreError('personal_store_capacity');text=await original.readFile('utf8')}finally{await original.close()}
         if(!text)text=JSON.stringify(initialState())
-        parseStoredState(JSON.parse(text))
+        parseStateText(text)
         const backup=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600)
         try{await backup.writeFile(text);await backup.sync()}finally{await backup.close()}
         const check=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW)
@@ -99,18 +129,34 @@ export class PersonalStore {
         const file = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW);
         try {
             if ((await file.stat()).size > MAX_STORE_BYTES)
-                throw Error('personal_store_capacity');
+                throw new PersonalStoreError('personal_store_capacity');
             const text = await file.readFile('utf8');
-            return text === '' ? initialState() : parseStoredState(JSON.parse(text));
+            return text === '' ? initialState() : parseStateText(text);
         }
         finally {
             await file.close();
         }
     }
+    /** Preserve an unreadable state (and its schedule backup) under a timestamped name. */
+    async quarantine(code: 'state_corrupt' | 'personal_store_capacity'): Promise<{readonly from: string; readonly to: string}> {
+        const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
+        const to = `${this.path}.${code}-${stamp}`;
+        await renamePersonalStoreFile(this.path, to);
+        const backup = this.path + '.before-schedules.json';
+        // The primary file is already safe. A backup that cannot be moved must not turn a
+        // recoverable corrupt state into a failed startup.
+        await renamePersonalStoreFile(backup, `${backup}.${code}-${stamp}`).catch(() => { /* leave the backup in place */ });
+        return {from: this.path, to};
+    }
     async write(state: PersonalState): Promise<void> {
-        const text = JSON.stringify(stateSchema.parse(state));
+        let text: string;
+        try {
+            text = JSON.stringify(stateSchema.parse(state));
+        } catch {
+            throw new PersonalStoreError('state_write_failed');
+        }
         if (Buffer.byteLength(text) > MAX_STORE_BYTES)
-            throw Error('personal_store_capacity');
+            throw new PersonalStoreError('personal_store_capacity');
         preparePrivateDatabasePath(this.path);
         const tmp = this.path + '.' + randomUUID() + '.tmp';
         const file = await open(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);

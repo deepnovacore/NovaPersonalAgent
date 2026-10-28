@@ -99,6 +99,7 @@ test('host and desktop text/voice children keep resolved support models paired a
       DOUBAO_BIGMODEL_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture',
       ...(scenario.generic ? {MODEL_API_KEY: 'fixture', MODEL_BASE_URL: 'https://generic.example/v1'} : {}),
     }, !!scenario.integrated)
+    const supportModel = configured.support_model
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-support-routing-'))
     let realtime: ReturnType<typeof buildCascadedRealtimeAssembly> | undefined
     try {
@@ -157,7 +158,7 @@ test('host and desktop text/voice children keep resolved support models paired a
         await realtime.stop()
         realtime = undefined
       }
-      assert.equal(configured.support_model, 'deepseek-flash', 'source settings remain unchanged')
+      assert.equal(configured.support_model, supportModel, 'source settings remain unchanged')
     } finally {
       globalThis.fetch = previous
       await realtime?.stop()

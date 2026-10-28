@@ -99,7 +99,7 @@ test('camera watch without its model credential is reported off instead of faili
   const registry = parseCapabilityRegistry({version: 1}, {})
   const vision = {WATCH_MODEL: 'qwen3-vl-plus'}
   // Without a vision preset the watch reuses the main model gateway and needs no extra key.
-  assert.equal(missingWatchModelCredential(loadSettings({})), null)
+  assert.equal(missingWatchModelCredential(loadSettings({PIPELINE_MODE:'cascaded',CASCADE_LLM_PROVIDER:'deepseek',DEEPSEEK_API_KEY:'k'})), null)
   assert.equal(missingWatchModelCredential(loadSettings({...vision, DASHSCOPE_API_KEY: 'k'})), null)
   assert.equal(missingWatchModelCredential(loadSettings(vision)), 'DASHSCOPE_API_KEY')
   assert.deepEqual(withoutUncredentialedModules(registry, loadSettings(vision)).modules.camera, {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})

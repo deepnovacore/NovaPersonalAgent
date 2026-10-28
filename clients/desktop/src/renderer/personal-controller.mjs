@@ -94,7 +94,6 @@ export class PersonalController {
   }
   async changePresentation(mode,{activate=true,request,reconcileOnly=false}={}){
     if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')
-    if(mode!=='workbench'&&this.activeBuild&&!await this.guardBuildSwitch())return
     if(this.presentationPending&&mode!=='background')throw new Error('正在切换模式，请稍候')
     // A fresh return to the workbench retires the last handback notice; reconciling an earlier exit may post a new one.
     if(!request&&mode==='workbench'&&!this.presentationPending)this.taskNotice=''
@@ -185,7 +184,6 @@ export class PersonalController {
   async command(method,params={},options={}){
     const notSent=message=>Object.assign(new Error(message),method==='tasks.input'?{input_status:'failed'}:{})
     if(!this.connected)throw notSent('尚未连接')
-    if(['conversations.clear','conversations.open_work','conversations.discuss','conversations.start'].includes(method)&&this.activeBuild&&!await this.guardBuildSwitch())throw notSent('切换已取消')
     if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state','tasks.get','tasks.list','conversations.approve'].includes(method))throw notSent('正在恢复显示模式，请稍候')
     if(this.pending.size>=32)throw notSent('请等待当前操作完成')
     const request_id=options.request_id??crypto.randomUUID()
@@ -195,17 +193,17 @@ export class PersonalController {
       if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(notSent('发送失败'))}
     })
   }
-  async select(id){if(id!==this.selectedId&&this.activeBuild&&!await this.guardBuildSwitch())return;const result=await this.command('conversations.select',{id});if(this.snapshot&&result?.selected_id===id&&conversationSnapshot(result)){this.snapshot={...this.snapshot,conversations:result};this.changed()}return result}
+  async select(id){const result=await this.command('conversations.select',{id});if(this.snapshot&&result?.selected_id===id&&conversationSnapshot(result)){this.snapshot={...this.snapshot,conversations:result};this.changed()}return result}
   async home(){if(this.selectedId!=='chat:main')await this.select('chat:main');if(this.selectedId!=='chat:main')throw Error('主对话尚未就绪，请稍后重试')}
-  async create(){if(this.activeBuild&&!await this.guardBuildSwitch())return;return this.command('conversations.create',{})}
-  /** One click opens a new conversation carrying the card reference; an in-progress Build is stopped only after the user confirms. A retry of the same request reuses its request id so the host never creates a second conversation. */
+  async create(){return this.command('conversations.create',{})}
+  /** One click opens a new conversation carrying the card reference. A retry of the same request reuses its request id so the host never creates a second conversation. */
   async startConversationWithReference({title,text,references}){
     const key=JSON.stringify([title,text,references]),request_id=this.startRequests.get(key)??crypto.randomUUID()
     this.startRequests.set(key,request_id)
     try{const result=await this.command('conversations.start',{title,text,references},{request_id});this.startRequests.delete(key);return result}
     catch(error){if(!error.outcome_unknown)this.startRequests.delete(key);throw error} // A host-reported failure is final; only an unknown outcome is retried under the same id.
   }
-  async openFeed(id,label){if(this.activeBuild&&!await this.guardBuildSwitch())return;return this.command('conversations.open_feed',{feed_id:id,label})}
+  async openFeed(id,label){return this.command('conversations.open_feed',{feed_id:id,label})}
   async text(){
     if(this.mode==='voice')return
     this.generation++;if(this.dictationId)this.send({type:'input.dictation',id:this.dictationId,action:'cancel',conversation_id:this.dictationConversationId})
@@ -220,7 +218,6 @@ export class PersonalController {
   // `wake:false` opens the microphone without leaving sleep, so a sleeping orb keeps listening for its wake word.
   async startCapture(options){this.capturePending=true;try{await this.start(options)}finally{this.capturePending=false}}
   async voice({wake=true}={}){
-    if(this.activeBuild&&!await this.guardBuildSwitch())return
     const id=this.selectedId
     if(!this.presentationReady||this.presentationMode==='background')throw new Error('请先切换到工作台或悬浮球')
     if(!id||!this.connected)throw new Error('尚未选择会话')

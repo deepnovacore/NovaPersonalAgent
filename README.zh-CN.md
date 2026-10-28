@@ -186,7 +186,7 @@ novapersonal doctor
 v0.4 开始使用 Nova Personal Agent 新包名。已发布的 v0.3.x 仍使用旧包名和 `novaaudio`；新包保留该命令别名，并继续读取原有数据与设置。迁移已有全局安装时，先运行 `npm uninstall --global nova-audio-agent nova-audio-agent-server`，避免命令链接冲突；这不会删除用户数据。
 
 
-升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-personal-agent@0.4.0`。升级保留设置与数据；降级前请备份 Nova 数据。
+升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-personal-agent@0.4.0`。升级保留设置与数据。状态文件带版本号，旧版本可能拒绝读取新文件；降级前请先备份，再运行 `novapersonal reset-state`。
 
 Ubuntu 22.04+ x64 无头服务：
 

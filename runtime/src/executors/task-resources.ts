@@ -1,6 +1,18 @@
 /** Host configured physical resources. Ownership outlives task/UI control changes. */
-/** Canonical native paths identify a project across executor and local Build operations. */
-export function projectResourceKey(path:string):string{return 'project:'+(process.platform==='win32'?path.toLowerCase():path)}
+import {statSync} from 'node:fs'
+/**
+ * Identity, not spelling, owns a project. Case-insensitive volumes and imported aliases resolve to
+ * the same device/inode, while a replaced directory gets a distinct key and therefore a new lock.
+ */
+export function projectResourceKey(path:string):string{
+  try{
+    const info=statSync(path,{bigint:true})
+    // Some Windows/network filesystems report a zero inode; falling back to the path avoids
+    // collapsing every unrelated project into one `project:0:0` lock.
+    if(info.dev!==0n||info.ino!==0n)return `project:${info.dev}:${info.ino}`
+  }catch{ /* a deleted/replaced path falls back to its spelling below */ }
+  return 'project:'+(process.platform==='win32'?path.toLowerCase():path)
+}
 const held=new Set<string>()
 const uncertain=new Set<string>()
 /** No provider stop/idle inspection is available: keep quarantine visible; no automatic unlock without provider stop evidence. */

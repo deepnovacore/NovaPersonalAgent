@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {fstatSync, lstatSync, mkdirSync, realpathSync, renameSync, symlinkSync} from 'node:fs'
+import {fstatSync, lstatSync, mkdirSync, realpathSync, renameSync, statSync, symlinkSync} from 'node:fs'
 import {chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {basename, join, relative} from 'node:path'
@@ -25,6 +25,7 @@ import {ManagedWorkspaceMaintenanceService} from '../src/projects/managed-worksp
 import {unsupportedNativeFileLocks, type NativeFileLockAuthority, type NativeFileLockResult} from '../src/storage/native-file-lock.js'
 import type {ProjectRootFileAuthority, ProjectRootFileCreateResult, ProjectRootFileResult} from '../src/projects/project-root-file.js'
 
+import {projectResourceKey} from '../src/executors/task-resources.js'
 import {projectStoreFixture, within, DescriptorLockAuthority, DescriptorRelativeRootFileAuthority, ToggleRemoveTreeRootFileAuthority, MaintenanceOrderRootFileAuthority, MaintenanceCollisionRootFileAuthority, MaintenanceDurabilityRootFileAuthority, FailNthMaintenanceMkdirAuthority, ReplaceCreatedLockRootFileAuthority, ReplaceHomeAfterMkdirRootFileAuthority, RecordingRootFileAuthority, FailTempCreateRootFileAuthority, ToggleTempCreateRootFileAuthority, ReplaceManagedRestoreAfterMkdirRootFileAuthority, FailManagedLookupRootFileAuthority, ExternalCleanupMkdirCollisionAuthority, PermissiveManagedMkdirRootFileAuthority, RejectLockMatchRootFileAuthority, SwapAroundDescriptorOperationsAuthority, isErrno, rootFilesForTest, CountingProtectRootFileAuthority, DeferredReleaseLockAuthority, BusyThenDescriptorLockAuthority, FailNextReleaseLockAuthority, AdvancingClock} from './project-store-fixture.js'
 
 
@@ -3326,5 +3327,29 @@ test('live recovery preserves Python v1 bytes and migrates recovered session ide
     )
   } finally {
     await storeFixture.close(store)
+  }
+})
+
+test('case aliases of one directory import as one workspace and take one path lock', async () => {
+  const f = await projectStoreFixture('nova-project-identity-')
+  const store = await f.open()
+  try {
+    const directory = join(f.root, 'workspace')
+    await mkdir(directory, {mode: 0o700})
+    const canonical = await realpath(directory)
+    const segments = canonical.split('/')
+    const alias = '/' + segments[1]!.toUpperCase() + canonical.slice(segments[1]!.length + 1)
+    assert.notEqual(alias, canonical)
+    const first = await store.ensureImported('alpha', hostWorkspaceForTest(canonical))
+    const second = await store.ensureImported('alias', hostWorkspaceForTest(alias))
+    assert.equal(second.workspace_id, first.workspace_id)
+    assert.equal(second.canonical_path, first.canonical_path)
+    assert.equal((await store.listWorkspaces()).length, 1)
+    await assert.rejects(store.registerWorkspace('other', hostWorkspaceForTest(alias)), /workspace_path_conflict/u)
+    const info = statSync(canonical, {bigint: true})
+    assert.equal(projectResourceKey(canonical), `project:${info.dev}:${info.ino}`)
+    assert.equal(projectResourceKey(alias), projectResourceKey(canonical))
+  } finally {
+    await f.close(store)
   }
 })

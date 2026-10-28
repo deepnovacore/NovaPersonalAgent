@@ -82,6 +82,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const startupNotice=el('p','','page-notice');startupNotice.id='startup-notice';startupNotice.setAttribute('role','status');startupNotice.hidden=true;novaColumn.append(startupNotice)
  const startupText=el('span');startupNotice.append(startupText);const startupSettings=button(t('打开设置'),()=>openSettings(),startupNotice);startupSettings.hidden=true
  const startup=createStartupNotice({render:text=>{startupText.textContent=text;startupNotice.hidden=!text}})
+ const stateNotice=el('p','','page-notice');stateNotice.setAttribute('role','status');stateNotice.hidden=true;novaColumn.append(stateNotice)
  const error=el('p','','page-error');error.setAttribute('role','alert');error.hidden=true;novaColumn.append(error)
  const taskNotice=el('p',undefined,'chat-notice');taskNotice.setAttribute('role','status');taskNotice.setAttribute('aria-live','polite');novaColumn.append(taskNotice)
  const waiting=el('div',undefined,'presentation-waiting');workspace.append(waiting)
@@ -179,6 +180,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   inspector?.setVisible(c.presentationMode==='workbench')
   for(const node of [taskNotice,orbNotice]){const text=t(c.taskNotice);if(node.textContent!==text)node.textContent=text;node.hidden=!text}
   const aggregate=summarizeTasks(c.snapshot?.tasks??[],[...viewedResults]),decision=(c.snapshot?.pending_approvals??[]).find(item=>item.task_id);orbTask.dataset.taskId=decision?.task_id??aggregate.task_id??'';orbTask.hidden=!orbTask.dataset.taskId;orbTask.disabled=!c.connected;orbTask.textContent=t('任务：{0} 进行中 · {1} 待处理 · {2} 新结果',aggregate.active,Math.max(aggregate.decisions,decision?1:0),aggregate.results)
+  const stateNoticeValue=c.snapshot?.conversations?.state_notice
+  if(stateNoticeValue&&c.presentationMode==='workbench'){stateNotice.textContent=t('状态文件无法读取（{0}），已从空状态启动。原文件：{1}；已保留备份：{2}。',stateNoticeValue.code,stateNoticeValue.original_path,stateNoticeValue.backup_path);stateNotice.hidden=false}
+  else stateNotice.hidden=true
   error.textContent=c.error;error.hidden=!c.error||c.presentationMode!=='workbench';orbError.textContent=c.error;orbError.hidden=!c.error||c.presentationMode!=='orb'
   syncOrbVoice()
   const pending=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]

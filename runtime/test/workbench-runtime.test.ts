@@ -243,10 +243,14 @@ test('Build requires approval before side effects, stops on denial and does not 
   await assert.rejects(readFile(join(f.root,'new.txt')))
   assert.equal((await f.raw('build.approve',{id,approval_id:view.approval!.id,approved:true},false)).ok,false)
   assert.equal((await f.raw('build.approve',{id,approval_id:'stale',approved:true})).ok,false)
-  assert.equal((await f.raw('conversations.create',{})).error,'build_stop_required')
-  const before=f.host.conversationSnapshot().items.length
-  assert.equal((await f.raw('conversations.start',{title:'x',text:'x',references:[{kind:'todo',id:'any-todo',version:1}]})).error,'build_stop_required')
-  assert.equal(f.host.conversationSnapshot().items.length,before);assert.equal(f.host.conversationSnapshot().selected_id,id)
+  assert.equal((await f.raw('conversations.create',{})).ok,true)
+  const created=f.host.conversationSnapshot()
+  assert.equal(created.items.some(item=>item.id!=='chat:main'&&item.kind==='chat'),true)
+  await f.command('conversations.select',{id})
+  const started=await f.raw('conversations.start',{title:'x',text:'x',references:[{kind:'todo',id:'any-todo',version:1}]})
+  assert.notEqual(started.error,'build_stop_required')
+  await f.command('conversations.select',{id})
+  assert.equal(f.host.conversationSnapshot().selected_id,id)
   await assert.rejects(f.host.submitConversationText(id,'double',undefined,undefined,{local_desktop:true}),/conversation_busy/)
   await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).reason,'approval_denied');await f.command('build.resume',{id});await f.host.waitConversation(id)
@@ -845,7 +849,7 @@ test('finished Build remains locked after restart',{skip:!supported},async()=>{
   try{
    await reopened.open()
    assert.equal(buildView(reopened,id).status,'finished');assert.equal(reopened.localBuildAuthorized(id),false)
-   await assert.rejects(reopened.submitConversationText(id,'run again'),/local_build_not_authorized/)
+   await assert.rejects(reopened.submitConversationText(id,'run again'),/build_finished/)
    await reopened.command({type:'personal.command',request_id:'finished-presentation',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'})
    const resumed=await reopened.command({type:'personal.command',request_id:'finished-resume',method:'build.resume',params:{id}},{client_id:'desktop:local'}) as {ok:boolean;error?:string}
    assert.equal(resumed.ok,false);assert.equal(resumed.error,'build_finished')
@@ -868,7 +872,11 @@ test('direct Build admits one concurrent request without a plan and retains proj
   assert.equal(buildView(f.host,id).plan_id,undefined)
   assert.deepEqual(JSON.parse(f.script.requests[0]!.workspaceContext!),{project:f.root})
   assert.equal((await f.raw('build.begin',{text:'duplicate',project:f.root})).error,'build_stop_required')
-  assert.equal((await f.raw('conversations.voice',{id,enabled:true})).error,'build_stop_required')
+  assert.notEqual((await f.raw('conversations.voice',{id,enabled:true})).error,'build_stop_required')
+  const other=await f.raw('conversations.select',{id:'chat:main'})
+  assert.equal(other.ok,true)
+  assert.equal(f.host.conversationSnapshot().selected_id,'chat:main')
+  await f.command('conversations.select',{id})
   await f.command('build.stop',{id})
  }finally{await f.close()}
 })
@@ -968,6 +976,27 @@ test('Plan and Build previews grow, retract at tool calls and persist only autho
  }
 })
 
+test('Plan and Build withdraw authoritative narration before a tool call', async () => {
+ for(const mode of ['plan','build'] as const){
+  const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
+  const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
+   for await(const event of base.stream(request)){yield event;if(event.kind==='response_started'&&round===0)yield {kind:'text_delta' as const,text:'narration before the tool'}}
+   round++
+  }}}}
+  const f=await fixture(()=>({}),'ask',factory)
+  try{
+   let id:string
+   if(mode==='build')id=await f.build()
+   else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
+   await f.host.waitConversation(id)
+   const captions=f.frames.filter(x=>x.type==='caption')
+   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],['',true],['final answer',false]])
+   assert.equal(f.frames.some(x=>x.type==='conversation.error'),false)
+   assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'final answer')
+  }finally{await f.close()}
+ }
+})
+
 test('managed workspace commands validate names, hide paths and resolve Build defaults and IDs', {skip:!supported},async()=>{
  const f=await fixture(()=>({text:'done'})),resolved:(string|undefined)[]=[],created:string[]=[]
  const workspace={workspace_id:'w-default',name:'default',is_default:true}
@@ -1000,6 +1029,43 @@ test('direct Build resolves a selected managed ID before canonical resource chec
  try{await f.command('build.begin',{text:'work',workspace_id:'selected'});await f.host.waitConversation(f.host.conversationSnapshot().selected_id);assert.deepEqual(resolved,['selected']);assert.equal(buildView(f.host,f.host.conversationSnapshot().selected_id).project,f.root)}finally{await f.close()}
 })
 
+
+test('a stopped completed Build accepts a new instruction without Resume',{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).status,'completed')
+  await f.command('build.stop',{id})
+  await f.host.submitConversationText(id,'Stop 后的新要求',undefined,undefined,{local_desktop:true})
+  await f.host.waitConversation(id)
+  assert.ok(f.host.conversationSnapshot().messages.some(message=>message.text==='Stop 后的新要求'))
+  assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'done')
+ }finally{await f.close()}
+})
+
+test('a completed Build accepts a new instruction after a restart',{skip:!supported},async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ const id=await f.build();await f.host.waitConversation(id)
+ assert.equal(buildView(f.host,id).status,'completed')
+ await f.host.close()
+ const host=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[],readonlyNames:[],origin:()=>Promise.resolve('memory:test-user'),invoke:()=>Promise.resolve(null)}
+ const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
+ const frames:Record<string,unknown>[]=[]
+ host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host,factory:f.script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=> 'never'}),frame=>frames.push(frame))
+ try{
+  await host.open();host.setWorkbenchExecutors(['codex'])
+  const shown=await host.command({type:'personal.command',request_id:'restart-workbench',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'}) as {ok:boolean}
+  assert.equal(shown.ok,true)
+  assert.equal(host.conversationSnapshot().selected_id,id)
+  await host.submitConversationText(id,'继续补充新的要求',undefined,undefined,{local_desktop:true})
+  await host.waitConversation(id)
+  const failed=await host.workbench.checkpoint(id,0)
+  assert.equal(buildView(host,id).status,'completed',JSON.stringify({reason:failed.reason,model_failure:failed.model_failure,frames:frames.filter(frame=>frame.type==='conversation.error')}))
+  assert.ok(host.conversationSnapshot().messages.some(message=>message.text==='继续补充新的要求'))
+  assert.equal(host.conversationSnapshot().messages.at(-1)!.text,'done')
+ }finally{await host.close();await f.close()}
+})
 
 for(const [status,reason] of [['paused','approval_denied'],['completed',null],['failed','model_timeout'],['outcome_unknown','cleanup_unknown'],['idle',null]] as const)test(`restart preserves the durable ${status} Build state`,{skip:!supported},async()=>{
  const f=await fixture(()=>({text:'done'}))

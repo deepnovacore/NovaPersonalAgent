@@ -88,3 +88,67 @@ test('close runs after every queued request and a worker failure rejects queued 
  await assert.rejects(inService,{code:'WORKER_EXITED'});await assert.rejects(waiting,{code:'WORKER_EXITED'})
  await other.close()
 })
+
+test('an aborted queued read never reaches the worker',async()=>{
+ const fake=heldWorker(),client=new MemoryLedgerClient(':memory:',{workerFactory:()=>fake.worker})
+ const inService=client.memory('list',{})
+ const controller=new AbortController()
+ const queued=client.memory('conversation_snapshot',{},{priority:'interactive',signal:controller.signal})
+ controller.abort()
+ await assert.rejects(queued,{code:'REQUEST_ABORTED'})
+ await fake.release();await inService
+ assert.deepEqual(fake.seen,['list'])
+ const closing=client.close()
+ await fake.release();await closing
+})
+
+test('a temporary auto-reopen failure is retried with bounded backoff',async()=>{
+ const workers:{messages:unknown[];respond:(id:number,code?:string)=>void;emitExit:()=>void;listeners:Map<string,(value:never)=>void>}[]=[]
+ const make=()=>{
+  const listeners=new Map<string,(value:never)=>void>(),messages:unknown[]=[]
+  const worker:MemoryLedgerWorker={postMessage(value){messages.push(value)},on(event:string,listener:(value:never)=>void){listeners.set(event,listener);return worker},terminate:()=>Promise.resolve(0)}
+  const entry={messages,listeners,respond:(id:number,code?:string)=>{listeners.get('message')!((code===undefined?{kind:'response',request_id:id,ok:true,result:null}:{kind:'response',request_id:id,ok:false,error_code:code}) as never)},emitExit:()=>listeners.get('exit')!(1 as never)}
+  workers.push(entry);return worker
+ }
+ const client=new MemoryLedgerClient(':memory:',{workerFactory:make})
+ const id=(index:number)=>Number((workers[index]!.messages[0] as {request_id:number}).request_id)
+ const opening=client.open()
+ workers[0]!.respond(id(0))
+ await opening
+ workers[0]!.emitExit()
+ await new Promise(resolve=>setTimeout(resolve,300))
+ assert.equal(workers.length,2,'recycle spawns a replacement immediately')
+ workers[1]!.respond(Number((workers[1]!.messages[0] as {request_id:number}).request_id),'STORE_READ_FAILED')
+ await new Promise(resolve=>setTimeout(resolve,700))
+ workers[1]!.respond(Number((workers[1]!.messages[1] as {request_id:number}).request_id))
+ await new Promise(resolve=>setTimeout(resolve,20))
+ const list=client.memory('list',{})
+ workers[1]!.respond(Number((workers[1]!.messages[2] as {request_id:number}).request_id))
+ assert.equal(await list,null)
+ const closing=client.close()
+ workers[1]!.respond(Number((workers[1]!.messages[3] as {request_id:number}).request_id))
+ await closing
+})
+
+test('an abandoned in-service read is dropped and its stuck worker replaced',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']})
+ const workers:ReturnType<typeof heldWorker>[]=[]
+ const client=new MemoryLedgerClient(':memory:',{workerFactory:()=>{const fake=heldWorker();workers.push(fake);return fake.worker}})
+ const controller=new AbortController()
+ const abandoned=client.memory('conversation_snapshot',{},{priority:'interactive',signal:controller.signal})
+ controller.abort()
+ await assert.rejects(abandoned,{code:'REQUEST_ABORTED'})
+ assert.equal(workers.length,1,'the worker is not replaced before the grace period')
+ t.mock.timers.tick(30_000)
+ assert.equal(workers.length,2,'a stuck worker is replaced after the grace period')
+ t.mock.timers.tick(250)
+ if(workers[1]!.seen[0]==='open')await workers[1]!.release()
+ const next=client.memory('list',{})
+ await workers[1]!.release()
+ assert.equal(await next,null)
+ assert.deepEqual(workers[0]!.seen,['conversation_snapshot'])
+ assert.deepEqual(workers[1]!.seen.filter(name=>name==='list'),['list'])
+ const closing=client.close()
+ await workers[1]!.release()
+ await closing
+})

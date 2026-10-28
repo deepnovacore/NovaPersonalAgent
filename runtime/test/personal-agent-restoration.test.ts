@@ -5,7 +5,7 @@ import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
-import {PersonalStore,initialState,acquirePersonalLock,renamePersonalStoreFile,type PersonalState} from '../src/personal-agent/store.js';
+import {PersonalStore,PersonalStoreError,initialState,acquirePersonalLock,renamePersonalStoreFile,type PersonalState} from '../src/personal-agent/store.js';
 import {createConversation} from '../src/personal-agent/conversations.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js';
@@ -64,9 +64,9 @@ test('direct persistence before open and after close cannot bypass ownership and
  finally{await host.close();await f.cleanup()}
 });
 
-test('failed read never replaces the damaged file and releases ownership',async()=>{
+test('a damaged state file is preserved under a backup name instead of being overwritten',async()=>{
  const f=await fixture(),host=f.make();await writeFile(f.path,'{invalid-json');
- try{await host.sourceChanged();await assert.rejects(host.open(),SyntaxError);await host.sourceChanged({revision:1,phase:'ready'});assert.equal(await readFile(f.path,'utf8'),'{invalid-json');const release=await acquirePersonalLock(f.path);await release()}
+ try{await host.sourceChanged();await host.open({deferBackground:true});const snapshot=host.conversationSnapshot();assert.equal(snapshot.state_notice?.code,'state_corrupt');assert.equal(await readFile(snapshot.state_notice.backup_path,'utf8'),'{invalid-json');await host.sourceChanged({revision:1,phase:'ready'})}
  finally{await host.close();await f.cleanup()}
 });
 
@@ -225,4 +225,58 @@ test('restoration does not schedule profile, digest or context generation before
   host.startBackgroundWork()
   assert.ok(entered.includes('profile'));assert.ok(entered.includes('context'))
  }finally{await host.close();await f.cleanup()}
+})
+
+test('an unreadable state file is preserved and the host starts empty with a notice',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-corrupt-')),path=join(dir,'personal.json')
+ const diagnostics:string[]=[]
+ await writeFile(path,'{"conversations":',{mode:0o600})
+ const host=new PersonalAgentHost({path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null,onDiagnostic:code=>diagnostics.push(code)})
+ try{
+  await host.open({deferBackground:true})
+  const snapshot=host.conversationSnapshot()
+  assert.equal(snapshot.state_notice?.code,'state_corrupt')
+  assert.equal(snapshot.state_notice?.original_path,path)
+  assert.match(snapshot.state_notice?.backup_path??'',/personal\.json\.state_corrupt-/u)
+  assert.ok(await readFile(snapshot.state_notice.backup_path,'utf8').then(text=>text==='{"conversations":'))
+  // The host may commit fresh empty state at the original path; the damaged bytes stay in the backup.
+  const current = await readFile(path,'utf8').catch(()=>null)
+  assert.ok(current===null || (JSON.parse(current) as {schema_version:number}).schema_version===1)
+  assert.ok(diagnostics.includes('state_recovered_state_corrupt'))
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a newer state version fails loudly without touching the file',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-version-')),path=join(dir,'personal.json')
+ const state={...initialState(),schema_version:2}
+ const text=JSON.stringify(state)
+ await writeFile(path,text,{mode:0o600})
+ const host=new PersonalAgentHost({path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{
+  await assert.rejects(host.open({deferBackground:true}),/state_version_unsupported/u)
+  assert.equal(await readFile(path,'utf8'),text)
+ }finally{await host.close().catch(()=>undefined);await rm(dir,{recursive:true,force:true})}
+})
+
+test('the personal store reports capacity, corruption and version with stable codes',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-store-codes-')),path=join(dir,'personal.json')
+ try{
+  const store=new PersonalStore(path)
+  await writeFile(path,Buffer.alloc(16*1024*1024+1,0x20),{mode:0o600})
+  await assert.rejects(store.read(),(error:unknown)=>error instanceof PersonalStoreError&&error.code==='personal_store_capacity')
+  const moved=await store.quarantine('personal_store_capacity')
+  assert.equal(moved.from,path);assert.match(moved.to,/personal_store_capacity-/u)
+  await writeFile(path,'not json',{mode:0o600})
+  await assert.rejects(store.read(),(error:unknown)=>error instanceof PersonalStoreError&&error.code==='state_corrupt')
+  await writeFile(path,JSON.stringify({...initialState(),schema_version:99}),{mode:0o600})
+  await assert.rejects(store.read(),(error:unknown)=>error instanceof PersonalStoreError&&error.code==='state_version_unsupported')
+  // A newer build may add keys this schema does not know; it must still be unsupported, not corrupt.
+  await writeFile(path,JSON.stringify({...initialState(),schema_version:2,goal_future:{}}),{mode:0o600})
+  await assert.rejects(store.read(),(error:unknown)=>error instanceof PersonalStoreError&&error.code==='state_version_unsupported')
+  const legacy:Record<string,unknown>={...initialState()};delete legacy.schema_version
+  await writeFile(path,JSON.stringify(legacy),{mode:0o600})
+  assert.equal((await store.read()).schema_version,1)
+  await store.write(await store.read())
+  assert.equal((JSON.parse(await readFile(path,'utf8')) as {schema_version:number}).schema_version,1)
+ }finally{await rm(dir,{recursive:true,force:true})}
 })
