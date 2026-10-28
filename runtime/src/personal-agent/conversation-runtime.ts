@@ -81,7 +81,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  options.host.setWorkbenchExecutors([...(options.agentDescriptors??[]),...(options.codexResource?.agentDescriptor?[options.codexResource.agentDescriptor]:[])].map(agent=>agent.name))
  return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution)=>{
   const workbenchVoice=mode==='voice'&&(conversation.kind==='build'||conversation.mode==='plan')&&!execution
-  const chatMode=!execution&&mode==='text'&&conversation.kind==='chat'&&(conversation.mode??'chat')==='chat'
+  const chatMode=!execution&&conversation.kind==='chat'&&(conversation.mode??'chat')==='chat'
   if((conversation.kind==='build'||conversation.mode==='plan')&&!execution&&mode==='text'){
    const workbenchMode=conversation.kind==='build'?'build':'plan'
    const reporter=bindUsageReporter(options.onUsage,{feature:'conversation',conversationId:conversation.id,trigger:'manual'})
@@ -346,13 +346,13 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   })
   const unsubscribeTaskCapture=options.host.subscribe(()=>{captureTaskResponse();const response=graph.playback.current?.response_id??currentResponse;if(response&&!options.host.localNotifications&&graph.service.isProactiveResponse(response))void graph.service.session.quarantineActiveOrAwaitingResponse().catch(()=>options.onDiagnostic?.('[runtime-diagnostic] notification_audio_fence_failed'))})
   let closed=false
-  const toolBridge=conversationToolBridge(core,graph,{chat:chatMode,onTool:event=>{
+  const toolBridge=conversationToolBridge(core,graph,{chat:chatMode,...(chatMode?{onTool:event=>{
    const index=turnToolTrace.findLastIndex(item=>item.name===event.name)
    if(index>=0)turnToolTrace[index]={name:event.name,state:event.state,summary:event.summary}
    else turnToolTrace.push({name:event.name,state:event.state,summary:event.summary})
    if(turnToolTrace.length>16)turnToolTrace.shift()
    emit({type:'conversation.tool',name:event.name,state:event.state,summary:event.summary,...(assistantTurnId?{turn_id:assistantTurnId}:{})})
-  }})
+  }}:{})})
   const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();unsubscribeTaskCapture();detachTaskRuntime();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
   const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {
