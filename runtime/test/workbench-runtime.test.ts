@@ -1120,7 +1120,7 @@ test('exhausted output-limit continuations pause with a readable label', async (
   const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
   assert.equal(checkpoint.status,'paused');assert.equal(checkpoint.reason,'model_output_limit')
   const message=f.host.conversationSnapshot().messages.at(-1)!
-  assert.match(message.text,/输出长度上限/u);assert.match(message.text,/Resume/u)
+  assert.match(message.text,/输出长度上限/u);assert.match(message.text,/发送新消息/u);assert.doesNotMatch(message.text,/Resume/u)
   assert.equal(f.frames.some(frame=>frame.type==='conversation.error'),false)
  }finally{await f.close()}
 })
@@ -1276,5 +1276,90 @@ test('restart repairs a previously overwritten pause reason from its durable che
   try{await reopened.open();assert.equal(buildView(reopened,id).reason,'approval_denied');assert.equal(buildView(reopened,id).status,'paused');assert.equal(reopened.localBuildAuthorized(id),false)}finally{await reopened.close()}
   assert.equal(f.script.requests.length,1)
   await assert.rejects(readFile(join(f.root,'denied.txt')), {code:'ENOENT'})
+ }finally{await f.close()}
+})
+
+
+test('Chat uses a restricted runtime while host plan dispatch is awaiting admission',async()=>{
+ const f=await fixture(()=>({text:'unused'})),used:string[]=[],closed:string[]=[]
+ let release!:()=>void,entered!:()=>void
+ const blocked=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+ let delegation:Promise<unknown>|undefined
+ try{
+  const plan=await f.plan(),invoke=f.bridge.invoke
+  f.bridge.invoke=async(...args)=>{entered();await blocked;return invoke(...args)}
+  f.host.setConversationRuntime((_c,_e,_m,_l,_r,_x,overrides)=>{
+   const kind=overrides?.chat===false?'host-only':'chat'
+   return Promise.resolve({...f.plain,runTurn:()=>{used.push(kind);return Promise.resolve({assistant:'race reply'})},close:()=>{closed.push(kind);return Promise.resolve()}})
+  },()=>{ /* no renderer */ })
+  delegation=f.command('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  await started
+  assert.equal(f.host.conversationSnapshot().items[0]!.mode,'chat')
+  await f.host.submitConversationText('chat:main','ordinary Chat turn');await f.host.waitConversation('chat:main')
+  assert.deepEqual(used,['chat'])
+  release();await delegation
+  assert.deepEqual(closed,['host-only'],'dispatch cleanup must leave the foreground Chat runtime open')
+  await f.host.submitConversationText('chat:main','another Chat turn');await f.host.waitConversation('chat:main')
+  assert.deepEqual(used,['chat','chat'])
+ }finally{release();await delegation?.catch(()=>undefined);await f.close()}
+})
+
+test('exhausted long output retains full text and a visible pause notice', {skip:!supported},async()=>{
+ let attempts=0
+ const f=await fixture(()=>({text:String(++attempts).repeat(17000),failure:{code:'output_limit',detail:'length'}}))
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.equal(attempts,3);assert.equal(message.full_text_ref,true)
+  const page=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:16000}) as {text:string}
+  assert.ok(page.text.length>0,'paused output must be durably readable')
+  assert.match(message.text,/输出长度上限/u);assert.match(message.text,/Resume/u)
+  const first=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:0}) as {text:string}
+  assert.ok(first.text.startsWith('1'.repeat(17000)))
+  const last=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:51000}) as {text:string}
+  assert.match(last.text,/Resume/u)
+ }finally{await f.close()}
+})
+
+
+test('refused plan dispatch preserves a concurrent user Chat turn and its restricted runtime',async()=>{
+ const f=await fixture(()=>({text:'unused'})),used:string[]=[],closed:string[]=[]
+ let release!:()=>void,entered!:()=>void
+ const blocked=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+ let delegation:Promise<unknown>|undefined
+ try{
+  const plan=await f.plan()
+  f.bridge.invoke=async()=>{entered();await blocked;return {accepted:false,delegate_id:null}}
+  f.host.setConversationRuntime((_c,_e,_m,_l,_r,_x,overrides)=>{
+   const kind=overrides?.chat===false?'host-only':'chat'
+   return Promise.resolve({...f.plain,runTurn:()=>{used.push(kind);return Promise.resolve({assistant:'Chat reply'})},close:()=>{closed.push(kind);return Promise.resolve()}})
+  },()=>{ /* no renderer */ })
+  delegation=f.command('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  await started
+  await f.host.submitConversationText('chat:main','I am continuing in Chat');await f.host.waitConversation('chat:main')
+  release();await assert.rejects(delegation,/plan_delegation_refused/u)
+  assert.equal(f.host.conversationSnapshot().items[0]!.mode,'chat','a refused older command must not undo the user continuing in Chat')
+  assert.deepEqual(closed,['host-only'])
+  await f.host.submitConversationText('chat:main','another Chat instruction');await f.host.waitConversation('chat:main')
+  assert.deepEqual(used,['chat','chat'])
+ }finally{release();await delegation?.catch(()=>undefined);await f.close()}
+})
+
+
+test('a long paused Plan keeps full output and directs the user to send another message',async()=>{
+ let attempts=0,limited=true
+ const f=await fixture(()=>limited?{text:String(++attempts).repeat(17000),failure:{code:'output_limit',detail:'length'}}:{text:'Plan continued'})
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','a long plan');await f.host.waitConversation('chat:main')
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.match(message.text,/发送新消息/u);assert.doesNotMatch(message.text,/Resume/u)
+  const first=await f.host.workbench.reply('chat:main',0,message.turn_id!,0)
+  assert.ok(first.text.startsWith('1'.repeat(17000)))
+  const last=await f.host.workbench.reply('chat:main',0,message.turn_id!,51000)
+  assert.match(last.text,/发送新消息/u)
+  limited=false;await f.host.submitConversationText('chat:main','continue the plan');await f.host.waitConversation('chat:main')
+  assert.ok(f.host.conversationSnapshot().messages.at(-1)!.text.endsWith('Plan continued'))
+  assert.equal((await f.host.workbench.checkpoint('chat:main',0)).status,'completed')
  }finally{await f.close()}
 })

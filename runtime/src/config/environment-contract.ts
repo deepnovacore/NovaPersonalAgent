@@ -174,6 +174,7 @@ const rows: readonly Row[] = [
   ['NOVA_HUB_URL', 'host_private', false, false, null, 'HTTPS origin of the sync Hub used by the hub command-line client.', 'Hub 命令行客户端使用的同步 Hub HTTPS 地址。'],
   ['NOVA_HUB_TOKEN', 'host_private', true, false, null, 'Device token for the sync Hub command-line client.', 'Hub 命令行客户端使用的设备令牌。'],
   ['DESKTOP_READY_ENDPOINT', 'host_private', false, false, null, 'Desktop readiness endpoint.', '桌面就绪端点。'],
+  ['NOVA_DESKTOP_RENDERER_OUTPUT_ROOT', 'host_private', false, false, null, 'Isolated renderer build output directory for an unpackaged desktop source run.', '未打包桌面源码运行使用的隔离渲染器构建输出目录。'],
   ['DEV_BACKEND_ENTRY', 'host_private', false, false, null, 'Unpackaged desktop backend entry override.', '未打包桌面的开发后端入口覆盖。'],
   ['DEV_START_MUTED', 'host_private', false, false, null, 'Start the unpackaged desktop with microphone muted.', '未打包桌面以闭麦状态启动。'],
   ['RELEASE_CAMERA_SMOKE', 'host_private', false, false, null, 'Packaged release camera capability sentinel.', '安装包发布相机能力哨兵。'],

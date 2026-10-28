@@ -116,7 +116,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     emit({type:'conversation.notice',code:'coding_target_unavailable',message:'之前选择的编程项目或会话已不可用，已清除默认目标。你仍可继续聊天；需要编程时请重新选择目标。'})
    }
   }
-  const ownsTask=()=>options.host.tasks.list().some(task=>task.conversation_id===conversation.id&&(task.conversation_generation??0)===conversation.generation&&task.phase!=='completed'&&task.phase!=='cancelled')
+  const ownsTask=()=>!chatMode&&options.host.tasks.list().some(task=>task.conversation_id===conversation.id&&(task.conversation_generation??0)===conversation.generation&&task.phase!=='completed'&&task.phase!=='cancelled')
   const history:{user:string;assistant:string}[]=[]
   let user:string|undefined
   for(const message of conversation.messages){if(message.schedule_ref?.run_id)continue;if(message.role==='user')user=message.text;else {if(message.delivery!==undefined&&message.delivery!=='completed'){user=undefined;continue;}const paired=message.reply_to?conversation.messages.find(item=>item.id===message.reply_to&&item.role==='user')?.text:user;if(paired!==undefined)history.push({user:paired,assistant:message.text});user=undefined}}
@@ -307,7 +307,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    return core.runtime.dispatchTaskExternal({executor:adapter.manifest.name,op:target.active?'steer':'run',origin_ref:grant.origin_ref,request:target.active?{instruction:text,project:target.project,session_id:target.session_id,work_id:target.work_id!}:{work_order:text,project:target.project,session_id:target.session_id,session:'latest'}},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,receipt)
   }
   const taskVerifier=core.taskVerifier??core.personalAgentConfig?.taskVerifier??new GatewayTaskVerifier({gateway:core.gateway,model:options.settings.support_model})
-  const detachTaskRuntime=options.host.attachTaskRuntime(conversation.id,conversation.generation,{
+  const detachTaskRuntime=chatMode?()=>{ /* Chat owns no task action graph. */ }:options.host.attachTaskRuntime(conversation.id,conversation.generation,{
    recover:async task=>{
     if(execution){try{if(task.id!==execution.task_id)throw Error('invalid_schedule_binding');options.host.scheduledRunGrant(execution.run_id,lifetime)}catch{return 'task_origin_unavailable'}}
     else{const [channel,sequence]=parseMemoryRef(task.origin_ref);if(!core.runtime.memory.channels.get(channel)?.getBySeq(sequence))return 'task_origin_unavailable'}

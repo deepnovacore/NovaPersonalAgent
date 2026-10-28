@@ -343,13 +343,16 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
         delete state.model_failure;await save();continue
        }
        state.status='paused';state.reason='model_output_limit'
-       await save()
        const modeLabel=build?'Build':'Plan',limitLabel=truncatedTool
         ?(en?'the tool call exceeded the model output limit and was not executed':`工具调用超出模型输出长度上限，未执行`)
         :(en?'the model reply exceeded its output limit':'模型回复超出输出长度上限')
-       // Append the pause notice to the turn instead of replacing it, so the opening paragraph
-       // the user already saw is never swallowed when continuations are exhausted.
-       return {assistant:mergeTurnText(turnText,en?`${modeLabel} paused: ${limitLabel}. Click Resume to continue; completed operations will not be replayed.`:`${modeLabel} 已暂停：${limitLabel}。点击 Resume 继续，已完成的操作不会重放。`),turn_id:turn}
+       const continuation=build?(en?'Click Resume to continue; completed operations will not be replayed.':'点击 Resume 继续，已完成的操作不会重放。'):(en?'Send another message to continue.':'发送新消息继续。')
+       const notice=en?`${modeLabel} paused: ${limitLabel}. ${continuation}`:`${modeLabel} 已暂停：${limitLabel}。${continuation}`
+       const fullReply=mergeTurnText(turnText,notice)
+       if(fullReply.length>16000)await store.saveReply(conversation.id,conversation.generation,turn,fullReply)
+       const visible=fullReply.length>16000?turnText.slice(0,16000-notice.length-2)+'\n\n'+notice:fullReply
+       state.assistant=visible;await save()
+       return {assistant:visible,...(fullReply.length>16000?{full_text_ref:true}:{}),turn_id:turn}
       }
       if(captionSent&&version===runVersion)options.emit({type:'caption',role:'assistant',text:'',full_text:'',turn_id:turn,final:true})
       state.model=before;await session?.close();session=undefined

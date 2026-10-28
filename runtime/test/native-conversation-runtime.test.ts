@@ -118,3 +118,25 @@ for(const mode of ['plan','build'] as const)test(`${mode} voice fails closed whe
   await assert.rejects(factory(conversation,()=>{ /* no renderer */ },'voice'),/voice_context_unavailable/);assert.equal(closed,true)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+
+test('a new readonly Chat preserves the delegated host task port and does not retain its tasks',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-chat-task-port-'))
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const unsupported=()=>Promise.reject(Error('unexpected provider operation'))
+ let runtime:Awaited<ReturnType<ReturnType<typeof conversationRuntimeFactory>>>|undefined
+ const provider:RealtimeProvider={capabilities:realtimeCapabilities.cascaded,connect:()=>Promise.resolve({epoch:1,provider_session_id:'fixture'}),sendAudio:unsupported,injectHostItem:()=>Promise.resolve(),createResponse:unsupported,cancelResponse:unsupported,
+  async *events(signal){await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true})});yield* []},close:()=>Promise.resolve()}
+ try{
+  await host.open()
+  const port={input:()=>Promise.resolve('accepted' as const),cancel:()=>{ /* no active delegate */ },dispatch:()=>Promise.resolve({accepted:true})}
+  host.attachTaskRuntime('chat:main',0,port)
+  const task=await host.tasks.delegate('host-task',{conversation_id:'chat:main',conversation_generation:0,goal:'Approved plan',acceptance:[],origin_ref:'conversation:1',execution_route:'codex'})
+  const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false}),gateway:{complete:unsupported,async *stream(){await Promise.resolve();throw Error('unexpected support model')}},createTextProvider:()=>provider,searchTransport:{search:unsupported}})
+  runtime=await factory(createConversation('chat','Test',null,'chat:main'),()=>{ /* no renderer */ })
+  assert.equal(host.taskRuntime(task.id),port,'ordinary Chat must not take over the delegated task graph')
+  assert.equal(runtime.retainTasks?.(),false)
+  await runtime.close()
+  assert.equal(host.taskRuntime(task.id),port,'closing Chat must leave task control available')
+ }finally{await runtime?.close();await host.close();await rm(dir,{recursive:true,force:true})}
+})

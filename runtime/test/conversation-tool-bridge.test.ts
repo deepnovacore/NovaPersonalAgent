@@ -14,15 +14,15 @@ function fixture() {
   const calls: unknown[] = []
   const core = {
     tools: {schemas, bindings, hidden: new Set()},
-    runtime: {executors: new Map(), observe: () => () => {}, cancelWork() {}},
+    runtime: {executors: new Map(), observe: () => () => { /* no observer cleanup */ }, cancelWork() { /* no work in the fixture */ }},
   }
   const graph = {
-    bridge: {acceptUserTranscript: async () => 'memory:origin'},
+    bridge: {acceptUserTranscript: () => Promise.resolve('memory:origin')},
     service: {
       session: {sessionEpoch: 1},
-      invokeConversationTool: async (event: unknown) => {
+      invokeConversationTool: (event: unknown) => {
         calls.push(event)
-        return {accepted: true, code: 'accepted', delegate_id: null, sync_result: false, host_item: {content: '{"accepted":true}'}}
+        return Promise.resolve({accepted: true, code: 'accepted', delegate_id: null, sync_result: false, host_item: {content: '{"accepted":true}'}})
       },
     },
   }

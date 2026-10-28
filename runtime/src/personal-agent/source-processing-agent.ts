@@ -35,16 +35,16 @@ export class SourceProcessingAgent{
  #account(){const feishu:unknown=this.host.snapshot().feishu;return typeof feishu==='object'&&feishu!==null&&'account_id' in feishu?feishu.account_id:undefined}
  snapshot(){const products=structuredClone(this.#products);products.suggestions=products.suggestions.filter(item=>item.kind!=='action'&&!this.#captured(item));return products}
  #presentationAccount:string|undefined
- setPresentationAccount(account:string|undefined){if(account!==this.#presentationAccount){this.#products=emptyUnderstanding();this.#presentationAccount=account}}
+ setPresentationAccount(account:string|undefined){if(account!==this.#presentationAccount){this.#products=emptyUnderstanding();this.#history=[];this.#refreshPending=false;this.#error=false;this.#revision++;this.#presentationAccount=account}}
  async reload(){
   if(!this.enabled)return
-  const revision=++this.#revision
   const account=this.#account()
+  const revision=++this.#revision
   try{const snapshot=await this.operation({action:'products',presentation:true,...(typeof account==='string'?{account_scope:account}: {})}) as UnderstandingSnapshot&{history?:ProfileHistoryItem[];refresh_pending?:boolean};const current=this.#account();if(revision!==this.#revision||current!==account)return
    const {history,refresh_pending,...products}=snapshot
    this.#products=products;this.#history=Array.isArray(history)?history:[];this.#refreshPending=refresh_pending===true;this.#presentationAccount=typeof account==='string'?account:undefined;this.#error=false
    if(products.news_cleanup_pending)try{await this.host.news.clearSeededInterests();await this.operation({action:'confirm_cleanup'});this.#products.news_cleanup_pending=false}catch{/* Durable marker survives a failed write; retry on the next wake. */}}
-  catch{if(revision!==this.#revision)return;const current=this.#account(),sameAccount=(typeof current==='string'?current:undefined)===this.#presentationAccount,retained=sameAccount?this.#products.last_success:null;this.#products={...emptyUnderstanding(),last_success:retained??null};this.#history=sameAccount?this.#history:[];this.#refreshPending=false;this.#error=true}
+  catch{const current=this.#account();if(revision!==this.#revision)return;const sameAccount=(typeof current==='string'?current:undefined)===this.#presentationAccount,retained=sameAccount?this.#products.last_success:null;this.#products={...emptyUnderstanding(),last_success:retained??null};this.#history=sameAccount?this.#history:[];this.#refreshPending=false;this.#error=true}
  }
  /** Read-only published versions, newest first; compact enough for every state projection. */
  #historyView(){return this.#history.map(item=>({generated_at:item.generated_at,generation_version:item.generation_version,about:item.draft.about?.text.slice(0,240)??null,work:item.draft.work.map(work=>work.title).slice(0,6),interests:item.draft.interests.map(interest=>interest.text).slice(0,8),unavailable_sources:item.unavailable_sources}))}
