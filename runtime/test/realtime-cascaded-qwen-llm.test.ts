@@ -115,6 +115,7 @@ test('Qwen Chat Completions request and text SSE stream use the semantic contrac
     stream: true,
     enable_thinking: false,
     stream_options: {include_usage: true},
+    max_tokens: 8192,
   })
   assert.doesNotMatch(body, /dash-secret/u)
 })
@@ -895,7 +896,10 @@ test('tool-enabled text previews are opt-in and preserve authoritative text and 
       const events=await collect(llm.stream(request))
       assert.deepEqual(events,[{kind:'response_started',response_id:'preview-response'},
         ...(previewText?[{kind:'text_preview',text:'hello '},{kind:'text_preview',text:'world'}]:[]),
-        ...(tool?[{kind:'tool_call',item_id:'call-preview',call_id:'call-preview',name:'lookup',arguments:{}}]:[{kind:'text_delta',text:'hello world'}]),
+        ...(tool?[
+          // Text-mode narration before a tool call is real turn text, not only a preview.
+          ...(previewText?[{kind:'text_delta' as const,text:'hello world'}]:[]),
+          {kind:'tool_call' as const,item_id:'call-preview',call_id:'call-preview',name:'lookup',arguments:{}}]:[{kind:'text_delta' as const,text:'hello world'}]),
         {kind:'response_completed',response_id:'preview-response'}])
       const checkpoint=llm.checkpoint!() as {pending:unknown;history:unknown[]}
       if(tool){assert.match(JSON.stringify(checkpoint.pending),/call-preview/u);assert.doesNotMatch(JSON.stringify(checkpoint.pending),/hello world/u)}

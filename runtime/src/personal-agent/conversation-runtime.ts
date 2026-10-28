@@ -20,8 +20,6 @@ import {createTurnDeadline} from './turn-deadline.js'
 import {CodingTargetController} from './coding-targets.js'
 import {ProjectResolutionError, type ProjectExecutorAdapter} from '../executors/coding-executor.js'
 import {projectExecutorEvent,type ExecutorProgress,type ExecutorResult} from '../desktop/desktop-progress.js'
-import {captureConversationFrame} from '../core/camera-session.js'
-import {supportsVision} from '../model/vision-capability.js'
 import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-config.js'
 import {prerecallContext} from '../memory/prerecall.js'
 import {ProjectConfirmationController} from '../projects/project-confirmation.js'
@@ -34,6 +32,7 @@ import {buildRealtimeAssembly,configuredMemoryConsumer,configuredTaskVerifierCon
 import {buildCascadedTextProvider} from '../cascaded-text-provider.js'
 import {configuredTextLlm} from '../cascaded-text-provider.js'
 import {BUILD_LLM_TRANSPORT,PLAN_LLM_TRANSPORT} from '../realtime/cascaded/llm-stream-limits.js'
+import {mergeTurnText} from '../realtime/cascaded/llm.js'
 import {conversationToolBridge} from './conversation-tool-bridge.js'
 import {createWorkbenchRuntime} from './workbench-runtime.js'
 import {workbenchInstructions} from './workbench-instructions.js'
@@ -121,8 +120,6 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   for(const message of conversation.messages){if(message.schedule_ref?.run_id)continue;if(message.role==='user')user=message.text;else {if(message.delivery!==undefined&&message.delivery!=='completed'){user=undefined;continue;}const paired=message.reply_to?conversation.messages.find(item=>item.id===message.reply_to&&item.role==='user')?.text:user;if(paired!==undefined)history.push({user:paired,assistant:message.text});user=undefined}}
   const recentHistory=history.filter(pair=>pair.user.length<=4000&&pair.assistant.length<=4000).slice(-32)
   if(mode==='voice'&&options.settings.pipeline_mode==='integrated'){while(recentHistory.length&&JSON.stringify(recentHistory).length>3000)recentHistory.shift()}
-  const selectedLlm=options.settings.conversation_vision_enabled&&!(mode==='voice'&&options.settings.pipeline_mode==='integrated'&&['minicpm-o','personaplex'].includes(options.settings.integrated_provider))?requireSelectedCascadedLlmConfig(options.settings):undefined
-  const captureFrame=!execution&&selectedLlm&&options.frameSource&&supportsVision(selectedLlm.provider,selectedLlm.config.model)?(signal:AbortSignal)=>captureConversationFrame(options.frameSource!,signal,core.mediaStore):undefined
   const suffix=createHash('sha256').update(execution?.namespace??conversation.id+':'+conversation.generation).digest('hex').slice(0,24)
   if(recovery&&options.host.tasks.list().some(task=>task.conversation_id===conversation.id&&task.conversation_generation===conversation.generation&&task.execution_route!=='nova'&&options.host.tasks.hasUnresolvedExecution(task.id))){
    if(options.codexResource?.mode==='project')(options.codexResource.adapter as ProjectExecutorAdapter).taskPort?.quarantineResources?.()
@@ -144,7 +141,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const broker=options.executorApproval??options.codexResource?.approvalController
   const approval=broker?scopeApprovalController(broker,view=>!!view.work&&core.runtime.inFlightDelegate(view.work.work_id)!==undefined):undefined
   const unsubscribeApproval=approval?.observe(view=>{options.host.recordTaskApproval(conversation.id,conversation.generation,view);notifyWaiting();if(view.work)void options.host.rememberWorkOwner(view.work.work_id,conversation.id,view.pending_approval_id).catch(()=>{ /* durable projection retried on work event */ });const identity=view.executorIdentity??{executor:options.codexResource?.adapter.manifest.name??'agent',display_name:options.codexResource?.adapter.manifest.display_name??'Agent'};emit(JSON.parse(executorApprovalMessage(view,core.runtime.clock.now(),identity)) as Record<string,unknown>)})
-   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,enterPlanMode:enterPlanModeAvailable,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,...(captureFrame?{captureFrame}:{}),executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&mode==='text'&&options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await graph.retrieval.recall(query,{scope:'any',limit:3,signal,consumer:memoryConsumerFingerprint??''});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await graph.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();return prerecallContext(query,current)}}}:{})})
+   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,enterPlanMode:enterPlanModeAvailable,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&mode==='text'&&options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await graph.retrieval.recall(query,{scope:'any',limit:3,signal,consumer:memoryConsumerFingerprint??''});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await graph.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();return prerecallContext(query,current)}}}:{})})
   if(provider.capabilities)emit({type:'conversation.capabilities',conversation_id:conversation.id,conversation_generation:conversation.generation,mode,capabilities:provider.capabilities})
   let pending:{resolve:(result:{assistant:string;turn_id?:string})=>void;reject:(error:unknown)=>void}|undefined
   const textOnly=mode==='text'
@@ -152,6 +149,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   let audioGeneration=0
   let assistant=''
   let assistantTurnId:string|undefined
+  // Text mode keeps one transcript per user turn: tool continuations append to it instead of
+  // replacing the opening paragraph that was already shown.
+  let turnTexts:string[]=[]
+  let turnTextResponse:string|undefined
   const captionIds=new Map<string,string>()
   const taskResponses=new Map<string,Map<string,TaskFence>>()
   const taskForegroundResponses=new Set<string>()
@@ -201,7 +202,26 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
     ...(telemetry?{telemetry}:{}),
    onDelivery:completion=>{if(mode==='voice'&&!taskToolResponses.has(completion.response_id))void settleTaskResponse(completion.response_id,completion.text,completion.disposition==='spoken').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)});const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({delivery_class:graph.service.isTaskContinuationResponse(completion.response_id)?'task_output':graph.service.isProactiveResponse(completion.response_id)?'proactive':'reply',type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
-   onCaption:frame=>{if(frame.role==='assistant'){assistant=frame.full_text??frame.text;assistantTurnId=frame.turn_id;if(frame.turn_id){const marker=frame.turn_id.indexOf(':assistant:');if(marker>=0)captionIds.set(frame.turn_id.slice(marker+11),frame.turn_id);if(captionIds.size>128)captionIds.delete(captionIds.keys().next().value!)}}emit({delivery_class:frame.role==='assistant'&&currentResponse?(graph.service.isTaskContinuationResponse(currentResponse)?'task_output':graph.service.isProactiveResponse(currentResponse)?'proactive':'reply'):'reply',type:'caption',...frame})},
+   onCaption:frame=>{
+    let outgoing=frame
+    if(frame.role==='assistant'){
+     const incoming=frame.full_text??frame.text
+     // Only a foreground response of the in-flight text turn belongs to this turn's transcript;
+     // background task output keeps its own caption identity.
+     if(textOnly&&pending!==undefined&&currentResponse!==undefined&&taskForegroundResponses.has(currentResponse)){
+      if(turnTextResponse!==currentResponse){turnTextResponse=currentResponse;turnTexts.push('')}
+      const index=turnTexts.length-1
+      turnTexts[index]=frame.final?incoming:mergeTurnText(turnTexts[index]??'',incoming)
+      assistant=turnTexts.filter(text=>text!=='').join('\n\n')
+      assistantTurnId??=frame.turn_id
+      outgoing={...frame,...(assistantTurnId===undefined?{}:{turn_id:assistantTurnId}),...(frame.final?{text:assistant.slice(0,160),full_text:assistant}:{full_text:assistant})}
+     }else{
+      assistant=incoming;assistantTurnId=frame.turn_id
+     }
+     if(frame.turn_id){const marker=frame.turn_id.indexOf(':assistant:');if(marker>=0)captionIds.set(frame.turn_id.slice(marker+11),frame.turn_id);if(captionIds.size>128)captionIds.delete(captionIds.keys().next().value!)}
+    }
+    emit({delivery_class:frame.role==='assistant'&&currentResponse?(graph.service.isTaskContinuationResponse(currentResponse)?'task_output':graph.service.isProactiveResponse(currentResponse)?'proactive':'reply'):'reply',type:'caption',...outgoing})
+   },
    onProviderEvent:event=>{
     if(event.kind==='provider_error'&&provider.capabilities?.model.nativeFullDuplex)emit({type:'conversation.notice',code:'native_session_ended',message:'原生语音连接已结束。请结束语音后重新开启；新连接不会恢复之前的对话上下文。'})
     // A recoverable error reconnects the provider before its old terminal can arrive.
@@ -210,7 +230,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     if(event.kind==='user_transcript_final'&&event.input_kind==='text'&&sourceTodo&&sourceOrigin===undefined)sourceOrigin=graph.service.taskTurnOrigin()
     if(event.kind==='tool_call_ready'&&currentResponse){taskToolResponses.add(currentResponse);taskTurnContinuing=true}
     if(event.kind==='response_started'){
-     assistant='';assistantTurnId=undefined;currentResponse=event.response_id
+     // A text turn keeps its accumulated transcript across tool continuations; runTurn already
+     // reset it for a new user turn.
+     if(!textOnly||pending===undefined){assistant='';assistantTurnId=undefined}
+     currentResponse=event.response_id
      const hostItems=graph.service.session.responseHostItemIds(event.response_id)
      const itemId=scheduledScope?scheduledScope.bind(graph.service.session.sessionEpoch,event.response_id,hostItems,graph.service.session.responseToolCallIds(event.response_id),new Set(taskHostItems.keys())):hostItems.find(id=>taskHostItems.has(id)),bound=itemId?taskHostItems.get(itemId):undefined
      if(bound&&itemId)taskResponseItems.set(event.response_id,itemId)
@@ -337,7 +360,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    },
    runTurn:async(text,callerSignal,context)=>{
     const deadline=createTurnDeadline({clock:core.runtime.clock,parent:callerSignal,isWaiting:()=>(approval?.pending===true||projectConfirmation?.pending===true),subscribe:listener=>{waitingListeners.add(listener);return()=>waitingListeners.delete(listener)}})
-    const signal=deadline.signal;signal.throwIfAborted();if(context?.source_todo){sourceTodo={...context.source_todo};sourceTodoTurns=SOURCE_TODO_TURNS}else if(context?.references?.length){sourceTodo=undefined;sourceTodoTurns=0}else if(sourceTodoTurns>1)sourceTodoTurns--;else sourceTodo=undefined;if(sourceTodo&&!sourceTodoCurrent())sourceTodo=undefined;sourceOrigin=undefined;assistant='';assistantTurnId=undefined
+    const signal=deadline.signal;signal.throwIfAborted();turnTexts=[];turnTextResponse=undefined;if(context?.source_todo){sourceTodo={...context.source_todo};sourceTodoTurns=SOURCE_TODO_TURNS}else if(context?.references?.length){sourceTodo=undefined;sourceTodoTurns=0}else if(sourceTodoTurns>1)sourceTodoTurns--;else sourceTodo=undefined;if(sourceTodo&&!sourceTodoCurrent())sourceTodo=undefined;sourceOrigin=undefined;assistant='';assistantTurnId=undefined
     const done=new Promise<{assistant:string;turn_id?:string}>((resolve,reject)=>{pending={resolve,reject}}),current=pending
     // Cancellation can reject while identity/context preparation is still awaiting.
     // Observe immediately; Promise.all below still propagates the original rejection.
