@@ -91,6 +91,6 @@ test('the orb HUD answers project confirmations only; executor approvals live in
   assert.match(source, /confirmationDecision\.decide\(true\)/u)
   assert.match(markup, /id="codex-confirm"[^>]*aria-label="确认工作区操作"/u)
   // The host pauses an approval's TTL until the renderer acknowledges it, so the dock surface must still report seen.
-  assert.match(source, /for\(const approval of c\.snapshot\?\.pending_approvals\?\?\[\]\)acknowledgeDecision\(c,'approval'/u)
+  assert.match(source, /for\(const approval of visibleApprovals\(c,document\)\)acknowledgeDecision\(c,'approval'/u)
   assert.match(source, /\{approval_id:active\.id/u)
 })

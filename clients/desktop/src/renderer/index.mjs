@@ -1,3 +1,4 @@
+import {visibleApprovals} from './visible-approvals.mjs'
 import {mountOrbIdle} from './idle-avatar.mjs'
 import {mountWelcomeFlow} from './welcome-flow.mjs'
 import {mountPersonalView} from './personal-view.mjs'
@@ -336,14 +337,14 @@ const seenPresentations = new Set()
 /**
  * Tells the host which decision is actually on screen. The host pauses an approval's TTL while the renderer cannot
  * present it, so every visible decision must be acknowledged exactly once. Project confirmations have their own
- * capsule; executor approvals render in the composer dock (or, collapsed, the orb task pill) since the HUD card was
- * removed, so they are acknowledged from the personal snapshot rather than the single HUD decision.
+ * capsule; executor approvals render in the composer dock or task inspector. Orb entry badges do not release
+ * presentation holds.
  */
 function acknowledgeVisibleConfirmation(state){
   const c=personalView?.controller
   if(!c?.presentationReady||c.presentationPending||c.presentationMode==='background'||document.visibilityState!=='visible'||!document.hasFocus())return
   if(state.confirmationVisible)acknowledgeDecision(c,'project',latestProjectConfirmation)
-  for(const approval of c.snapshot?.pending_approvals??[])acknowledgeDecision(c,'approval',approval?.approval_id?{id:approval.approval_id,conversationId:approval.conversation_id}:null)
+  for(const approval of visibleApprovals(c,document))acknowledgeDecision(c,'approval',approval)
 }
 function acknowledgeDecision(c,kind,active){
   if(!active?.id)return
@@ -357,6 +358,11 @@ function acknowledgeDecision(c,kind,active){
 }
 window.addEventListener('focus',()=>render())
 document.addEventListener('visibilitychange',()=>render())
+const acknowledgeApprovals=()=>acknowledgeVisibleConfirmation(deriveOrbState(axes))
+const approvalObserver=new window.MutationObserver(acknowledgeApprovals)
+approvalObserver.observe(document.getElementById('personal-root')??document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','disabled','data-approval-id','data-conversation-id']})
+document.addEventListener('scroll',acknowledgeApprovals,true)
+
 function render() {
   const state = deriveOrbState({...axes, tasks: taskBanner?.state().tasks ?? []})
   shell.dataset.state = state.name

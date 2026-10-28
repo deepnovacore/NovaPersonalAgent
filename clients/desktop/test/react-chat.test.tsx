@@ -88,3 +88,50 @@ test('full Build reply lazily loads all pages as safe Markdown',async()=>{
 test('a different published plan clears the previous plan editor draft',async()=>{
  const h=await mount();try{h.c.selectedConversation.mode='plan';h.c.selectedConversation.plan={id:'p1',version:1};h.c.command=async(m:any,p:any)=>m==='plans.get'?{title:p.plan_id,version:p.version,content:'Content '+p.plan_id,next_offset:null}:m==='conversations.targets'?{local_build_supported:true,executors:[],targets:[]}:[];const plan=()=> <PlanPreview c={h.c} run={async f=>{try{await f()}catch{}}}/>;await h.replace(plan());await h.click([...document.querySelectorAll('button')].find(n=>n.textContent==='修改计划'));const input=h.byLabel('计划内容');await act(async()=>{Object.getOwnPropertyDescriptor(h.dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(input,'Stale draft p1');input.dispatchEvent(new h.dom.window.Event('input',{bubbles:true}))});h.c.selectedConversation.plan={id:'p2',version:1};await h.replace(plan());assert.equal(Boolean(h.byLabel('计划内容')),false);assert.equal(document.querySelector('.workbench-plan-body')!.textContent,'Content p2')}finally{await h.close()}
 })
+
+
+test('chat traces render before captions, attach to a turn and retire to safe durable rows',async()=>{
+ const h=await mount();try{
+ const receive=(frame:any)=>act(async()=>h.ref.current.receive(frame));
+ await receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'running',summary:'Looking up',arguments:'PRIVATE'});
+ assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);
+ assert.equal(document.querySelector('.chat-tool-trace')!.getAttribute('data-live'),'true');
+ await receive({type:'caption',conversation_id:'chat:main',turn_id:'t',role:'assistant',text:'Reply',sequence:1});
+ await receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'ok',summary:'Found'});
+ assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);
+ assert.equal(document.querySelectorAll('.chat-tool-trace-item').length,1);
+ assert.equal(document.querySelector('.chat-tool-trace')!.getAttribute('data-state'),'ok');
+ const detail=document.querySelector('.chat-tool-trace') as HTMLDetailsElement;
+ await act(async()=>{detail.open=true;detail.dispatchEvent(new h.dom.window.Event('toggle'))});
+ h.c.snapshot.conversations.messages=[{id:'a',conversation_id:'chat:main',turn_id:'t',role:'assistant',text:'Reply',tool_trace:[{name:'memory__recall',state:'ok',summary:'Durable',arguments:'PRIVATE'}]}];
+ await receive({type:'personal.state',conversations:h.c.snapshot.conversations});
+ assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);
+ assert.equal(document.querySelector('.chat-tool-trace')!.getAttribute('data-live'),'false');
+ assert.equal(document.querySelector('.chat-tool-trace-item .chat-tool-trace-note')!.textContent,'Durable');
+ assert.equal(document.querySelector('[role=log]')!.textContent!.includes('PRIVATE'),false);
+ h.c.selectedId='other';await h.render();assert.equal(document.querySelectorAll('.chat-tool-trace').length,0);
+ h.c.selectedId='chat:main';await h.render();assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);
+ }finally{await h.close()}
+})
+test('late captions and retractions cannot replace newer text, and short durable replies preserve it',async()=>{
+ const h=await mount();try{
+ const receive=(frame:any)=>act(async()=>h.ref.current.receive({type:'caption',conversation_id:'chat:main',turn_id:'t',role:'assistant',...frame}));
+ await receive({full_text:'Opening paragraph. Full answer.',text:'answer.',sequence:3});
+ await receive({text:'Old short',sequence:2});
+ await receive({text:'',final:true,sequence:1});
+ assert.ok(document.querySelector('[role=log]')!.textContent!.includes('Opening paragraph. Full answer.'));
+ h.c.snapshot.conversations.messages=[{id:'a',conversation_id:'chat:main',turn_id:'t',role:'assistant',text:'Full answer.'}];
+ await act(async()=>h.ref.current.receive({type:'personal.state',conversations:h.c.snapshot.conversations}));
+ assert.equal(document.querySelectorAll('[role=log] .message').length,1);
+ assert.ok(document.querySelector('[role=log]')!.textContent!.includes('Opening paragraph. Full answer.'));
+ }finally{await h.close()}
+})
+test('legacy approval notifications do not duplicate the selected approval dock',async()=>{
+ const h=await mount();try{
+ h.c.snapshot.pending_approvals=[{approval_id:'a',conversation_id:'chat:main',summary:'Actual decision'}];
+ h.c.snapshot.conversations.messages=[{id:'notification:decision',conversation_id:'chat:main',role:'assistant',text:'需要你处理\nexecutor_admission_pending\n请在 Nova 中查看并处理。'},{id:'notification:progress',conversation_id:'chat:main',role:'assistant',text:'任务进展\nStarting task'},{id:'real',conversation_id:'chat:main',role:'assistant',text:'Real reply'}];
+ await h.render();assert.equal(document.querySelectorAll('[role=log] .message').length,1);
+ assert.equal(document.querySelectorAll('.approval-dock-card').length,1);
+ h.c.snapshot.pending_approvals=[];await h.render();assert.equal(document.querySelectorAll('[role=log] .message').length,2);
+ }finally{await h.close()}
+})

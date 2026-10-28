@@ -1,6 +1,7 @@
+import {visibleApprovals} from '../visible-approvals.mjs'
 import {t} from '../locale.mjs'
 import { WakeAudioRouter, canAutoSleep } from '../wake-audio.mjs'
-import {DESKTOP_ACTIVITY, CLOCK_PING, PLAYBACK_CLEAR, PLAYBACK_ALERT, PLAYBACK_TERMINAL, EXECUTOR_STATE, PROJECT_STATE, EXECUTOR_APPROVAL, CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULTS_RESET, EXECUTOR_RESULT, EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from '../wire-frame-types.mjs'
+import {DESKTOP_ACTIVITY, CLOCK_PING, PLAYBACK_CLEAR, PLAYBACK_ALERT, PLAYBACK_TERMINAL, EXECUTOR_STATE, PROJECT_STATE, CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULTS_RESET, EXECUTOR_RESULT, EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from '../wire-frame-types.mjs'
 import {
   activateCaptureMode,
   AlertTone,
@@ -34,10 +35,8 @@ import { createSkinVisual } from '../orb-skin-visual.mjs'
 import { OrbPaletteHoverController } from '../palette-hover.mjs'
 import { ConfirmationCountdown } from '../confirmation-countdown.mjs'
 import {
-  CodexApprovalDecisionController,
   ConfirmationDecisionController,
   ConfirmationPresentationController,
-  parseCodexApprovalMessage,
 } from '../confirmation-controls.mjs'
 import { deriveOrbState, orbDormant } from '../state.mjs'
 import { BackendReconnectController } from '../backend-reconnect.mjs'
@@ -237,10 +236,8 @@ const confirmationCountdown = new ConfirmationCountdown({
 })
 
 const confirmationDecision = new ConfirmationDecisionController({send})
-const codexApprovalDecision = new CodexApprovalDecisionController({send})
 const confirmationPresentation = new ConfirmationPresentationController()
 let latestProjectConfirmation = null
-let latestCodexApproval = null
 let lastReportedConfirmationMode = null
 let lastReportedDormant = null
 
@@ -327,17 +324,28 @@ const backendRecovery = new BackendReconnectController({
 const seenPresentations = new Set()
 function acknowledgeVisibleConfirmation(state){
   const c=personalView?.controller
-  if(!c?.presentationReady||c.presentationPending||c.presentationMode==='background'||!state.confirmationVisible||document.visibilityState!=='visible'||!document.hasFocus())return
-  const active=axes.pendingConfirmationKind==='codex'?latestCodexApproval:latestProjectConfirmation
+  if(!c?.presentationReady||c.presentationPending||c.presentationMode==='background'||document.visibilityState!=='visible'||!document.hasFocus())return
+  if(state.confirmationVisible)acknowledgeDecision(c,'project',latestProjectConfirmation)
+  for(const approval of visibleApprovals(c,document))acknowledgeDecision(c,'approval',approval)
+}
+function acknowledgeDecision(c,kind,active){
   if(!active?.id)return
-  const key=`${active.kind}:${active.id}`
+  const key=`${kind}:${active.id}`
   if(seenPresentations.has(key))return
   seenPresentations.add(key)
-  const params=active.kind==='codex'?{approval_id:active.id}:{proposal_id:active.id,...(active.conversationId?{conversation_id:active.conversationId}:{})}
+  const params=kind==='approval'
+    ? {approval_id:active.id,...(active.conversationId?{conversation_id:active.conversationId}:{})}
+    : {proposal_id:active.id,...(active.conversationId?{conversation_id:active.conversationId}:{})}
   void c.command('presentation.seen',params).catch(error=>{seenPresentations.delete(key);c.error=error.message;personalView.refresh()})
 }
 listen(window,'focus',()=>render())
 listen(document,'visibilitychange',()=>render())
+const acknowledgeApprovals=()=>acknowledgeVisibleConfirmation(deriveOrbState(axes))
+const approvalObserver=new window.MutationObserver(acknowledgeApprovals)
+approvalObserver.observe(document.getElementById('personal-root')??document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','disabled','data-approval-id','data-conversation-id']})
+document.addEventListener('scroll',acknowledgeApprovals,true)
+track(()=>{approvalObserver.disconnect();document.removeEventListener('scroll',acknowledgeApprovals,true)})
+
 function render() {
   if(disposed)return
   const state = deriveOrbState({...axes, tasks: taskBanner?.state().tasks ?? []})
@@ -359,10 +367,7 @@ function render() {
     window.novaPersonalAgentDesktop.windowLayout.setDormant?.(dormant)
     lastReportedDormant = dormant
   }
-  const activeDecision = axes.pendingConfirmationKind === 'codex'
-    ? codexApprovalDecision
-    : confirmationDecision
-  const decisionEnabled = activeDecision.enabled
+  const decisionEnabled = confirmationDecision.enabled
     && axes.connected
     && !axes.pendingConfirmationBusy
     && confirmationUnexpired()
@@ -372,8 +377,7 @@ function render() {
     activated:axes.activated,muted:axes.muted,outputMuted:axes.outputMuted,outputMutePending:axes.outputMutePending,
     cameraHidden:axes.cameraSource==='file',cameraDisabled:axes.booting||axes.cameraSource!=='local'||axes.camera==='requesting',
     decisionEnabled,confirmationActionsVisible:axes.pendingConfirmation&&axes.pendingConfirmationId!==null,
-    confirmHidden:axes.pendingConfirmationKind==='codex'&&!codexApprovalDecision.canAccept,
-    allowSessionVisible:axes.pendingConfirmationKind==='codex'&&codexApprovalDecision.canAcceptForSession,
+    confirmHidden:false,allowSessionVisible:false,
   }})
   window.novaPersonalAgentDesktop?.visor?.report({state:state.name,muted:axes.muted,activated:axes.activated})
   visual.setState(state.name, { codexWorking: axes.codex === 'working' })
@@ -393,7 +397,7 @@ function remainingConfirmationSeconds(deadline) {
 }
 
 function confirmationUnexpired() {
-  const active = axes.pendingConfirmationKind === 'codex' ? latestCodexApproval : latestProjectConfirmation
+  const active = latestProjectConfirmation
   return active !== null && remainingConfirmationSeconds(active.deadline) !== 0
 }
 
@@ -401,11 +405,7 @@ function applyConfirmationPresentation() {
   const previousKind = axes.pendingConfirmationKind
   const previousId = axes.pendingConfirmationId
   const activeKind = confirmationPresentation.activeKind
-  const active = activeKind === 'project'
-    ? latestProjectConfirmation
-    : activeKind === 'codex'
-      ? latestCodexApproval
-      : null
+  const active = activeKind === 'project' ? latestProjectConfirmation : null
   if (active === null) {
     axes.pendingConfirmation = false
     axes.pendingConfirmationKind = null
@@ -418,7 +418,7 @@ function applyConfirmationPresentation() {
     axes.pendingOperation = ''
     confirmationCountdown.stop()
     if (previousKind !== null) {
-      ui.set({announcement:previousKind === 'project' ? t("项目确认已结束。") : t("{0} 授权确认已结束。", axes.executorName || t("执行器"))})
+      ui.set({announcement:t("项目确认已结束。")})
     }
     return
   }
@@ -432,14 +432,12 @@ function applyConfirmationPresentation() {
   axes.pendingWorkspace = active.kind === 'project' ? active.workspace : ''
   axes.pendingSession = active.kind === 'project' ? active.session : ''
   axes.pendingExpiresInSeconds = remaining
-  axes.pendingOperation = active.kind === 'codex' ? active.operation : ''
+  axes.pendingOperation = ''
   if (remaining === null) confirmationCountdown.stop()
   else confirmationCountdown.start(remaining)
   if (previousKind !== active.kind || previousId !== active.id) {
     clearAssistantCaption()
-    const operation = active.kind === 'codex'
-      ? active.operation
-      : deriveOrbState(axes).confirmationOperation
+    const operation = deriveOrbState(axes).confirmationOperation
     ui.set({announcement:t("{0}；尚未执行，需要你的确认。", operation)})
   }
 }
@@ -996,31 +994,6 @@ async function handleControl(message) {
       confirmationPresentation.sync('project', pillPending)
       applyConfirmationPresentation()
     }
-  } else if (message.type === EXECUTOR_APPROVAL) {
-    const approval = parseCodexApprovalMessage(message)
-    if (approval !== null) {
-      axes.executorName = approval.display_name
-      axes.executorId = approval.executor
-      latestCodexApproval = approval.pending_approval
-        ? {
-            kind: 'codex',
-            id: approval.pending_approval_id,
-            busy: approval.pending_approval_busy,
-            operation: approval.operation,
-            deadline: confirmationDeadline(approval.expires_in_seconds),
-          }
-        : null
-      codexApprovalDecision.sync({
-        conversationId: approval.conversation_id,
-        pending: approval.pending_approval,
-        approvalId: approval.pending_approval ? approval.pending_approval_id : null,
-        executor: approval.executor,
-        busy: approval.pending_approval_busy,
-        allowedDecisions: approval.allowed_decisions,
-      })
-      confirmationPresentation.sync('codex', approval.pending_approval)
-      applyConfirmationPresentation()
-    }
   } else if (message.type === EXECUTOR_TASKS) {
     taskBanner.receive(message)
     personalView.refresh()
@@ -1107,7 +1080,6 @@ function resetRendererConnection(processReplaced, {closeSocket = true} = {}) {
   personalView.controller.disconnect()
   axes.error = ''
   confirmationDecision.deliveryLost()
-  codexApprovalDecision.deliveryLost()
   taskBanner.disconnect()
   void progressBubbles.clear()
   if (processReplaced) {
@@ -1421,21 +1393,11 @@ handlers['camera']= () => window.novaPersonalAgentDesktop.orbMenu.openSettings()
 handlers['sleep']= () => window.novaPersonalAgentDesktop.wakeWord.sleep()
 handlers['confirm']= () => {
   if (!confirmationUnexpired()) return
-  const decision = axes.pendingConfirmationKind === 'codex'
-    ? codexApprovalDecision
-    : confirmationDecision
-  if (decision.decide(true)) render()
+  if (confirmationDecision.decide(true)) render()
 }
 handlers['cancel']= () => {
   if (!confirmationUnexpired()) return
-  const decision = axes.pendingConfirmationKind === 'codex'
-    ? codexApprovalDecision
-    : confirmationDecision
-  if (decision.decide(false)) render()
-}
-handlers['allowSession']= () => {
-  if (!confirmationUnexpired()) return
-  if (axes.pendingConfirmationKind === 'codex' && codexApprovalDecision.decide(true, 'session')) render()
+  if (confirmationDecision.decide(false)) render()
 }
 handlers['result']= () => {
   if (!taskBanner.state().visible && taskBanner.restore()) return
