@@ -67,3 +67,49 @@ test('goal reminder cadence and deletion use the current record version',async()
 test('diary actions use versioned forgetting and retain pagination commands',async()=>{
  const p=await mount('profile',{life,capabilities:{memory:{diaries:true}},memory:{diaries:[{id:'d1',day:'2026-10-27',text:'Diary',version:4}],diary_before:'2026-10-27'}});await p.click('删除日记');assert.deepEqual(p.calls[0],['memory.forget',{id:'d1',expected_version:4}]);await p.click('最新日记');assert.deepEqual(p.calls[1],['memory.diaries',{}]);await p.close()
 })
+
+
+test('published profile history is bounded and read-only beside the authoritative current portrait',async()=>{
+ const historical='<img src=x onerror=alert(1)> Earlier portrait'
+ const p=await mount('profile',{life:{...life,profile:{version:0,about:''}},profile_preparation:{status:'ready',draft:{about:{text:'Current portrait',refs:[]},work:[],interests:[]},history:[
+  {generated_at:'2026-10-18T00:00:00Z',generation_version:'understanding-v8',about:historical,work:['Earlier work'],interests:['Earlier interest'],unavailable_sources:1},
+  ...Array.from({length:10},(_,i)=>({generated_at:i===0?'invalid':'2026-10-17T00:00:00Z',generation_version:'understanding-v7',about:`Archived portrait ${i}`,work:[],interests:[],unavailable_sources:0}))
+ ]}})
+ try{
+  assert.equal(p.host.querySelector('.profile-about')?.textContent,'Current portrait')
+  const history=p.host.querySelector('.profile-history');assert.ok(history,'history section')
+  assert.ok(history.textContent!.includes('历史版本'))
+  assert.equal(history.querySelectorAll('details').length,10)
+  const entry=history.querySelector('details')!
+  await act(async()=>{entry.open=true;entry.dispatchEvent(new dom.window.Event('toggle'))})
+  for(const text of [historical,'Earlier work','Earlier interest','understanding-v8','来源已不可用'])assert.ok(entry.textContent!.includes(text),text)
+  assert.ok(entry.querySelector('time[datetime="2026-10-18T00:00:00Z"]'))
+  assert.ok(history.textContent!.includes('时间未记录'))
+  assert.equal(history.textContent!.includes('Archived portrait 9'),false)
+  assert.equal(history.querySelector('button,input,textarea,select,img,script'),null)
+  assert.equal(p.host.querySelector('.interest-chips')!.textContent!.includes('Earlier interest'),false)
+  assert.equal(p.calls.length,0,'reading history emits no mutation')
+ }finally{await p.close()}
+})
+test('queued profile refresh shows its last attempt without presenting success or retry',async()=>{
+ const p=await mount('profile',{life,profile_preparation:{status:'queued',draft:null,history:[],last_attempt_at:'2026-10-18T12:00:00Z'}})
+ try{
+  const status=p.host.querySelector('.warmup-status');assert.ok(status,'queued refresh status')
+  assert.ok(status.textContent!.includes('已排队'))
+  assert.ok(status.textContent!.includes('上次尝试'))
+  assert.ok(status.querySelector('time[datetime="2026-10-18T12:00:00Z"]'))
+  assert.equal(status.getAttribute('aria-busy'),'false')
+  assert.equal(status.querySelector('button'),null)
+  assert.equal(p.calls.length,0)
+  p.c.snapshot={...p.c.snapshot,profile_preparation:{...p.c.snapshot.profile_preparation,status:'failed',last_attempt_at:'invalid'}}
+  await p.render()
+  assert.equal(p.host.querySelector('.warmup-status time'),null)
+  await p.click('重试');assert.deepEqual(p.calls,[['profile.refresh',{}]])
+ }finally{await p.close()}
+})
+test('manual daily suggestions refresh forces another run for unchanged inputs on ideas and goals',async()=>{
+ for(const page of ['ideas','goals']){
+  const p=await mount(page,{life,workbench_context:{daily:true,status:'ready',cards:[]}})
+  try{await p.click('重新整理');assert.deepEqual(p.calls,[['context.refresh',{force:true}]])}finally{await p.close()}
+ }
+})

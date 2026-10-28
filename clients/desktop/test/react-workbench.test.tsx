@@ -13,7 +13,7 @@ async function mount(){
  let view:any;const sent:any[]=[];const listeners=new Map<string,Function>();let stops=0
  const on=(name:string)=>(callback:Function)=>{listeners.set(name,callback);return()=>{stops++;listeners.delete(name)}}
  const api={personal:{onPresentationRequest:on('presentation'),onCollapsed:on('collapsed'),onMaximized:on('maximized'),setUnread:async()=>{}},orbMenu:{openSettings:()=>{}},windowControls:{},computerUse:{onStop:on('computer-stop'),overlay:()=>{},clear:()=>{}}}
- const send=(frame:any)=>{sent.push(frame);queueMicrotask(()=>{if(frame.type==='personal.command')view.receive({type:'personal.result',request_id:frame.request_id,ok:true,data:frame.method==='presentation.set'?{mode:frame.params.mode}:{}});if(frame.type==='input.text')view.receive({type:'input.text_result',request_id:frame.request_id,conversation_id:frame.conversation_id,ok:true})});return true}
+ const send=(frame:any)=>{sent.push(frame);queueMicrotask(()=>{if(frame.type==='personal.command')view.receive({type:'personal.result',request_id:frame.request_id,ok:true,data:frame.method==='presentation.set'?{mode:frame.params.mode}:frame.method==='conversations.select'?{...view.controller.snapshot.conversations,selected_id:frame.params.id}:{}});if(frame.type==='input.text')view.receive({type:'input.text_result',request_id:frame.request_id,conversation_id:frame.conversation_id,ok:true})});return true}
  await act(async()=>{view=mountPersonalView({api,send,start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[]});views.push(view);await view.controller.connect();view.receive({type:'client.ready',input_instance_id:'ui-test',capabilities:['text_input']});view.receive(personalState())})
  return {view,sent,listeners,stops:()=>stops}
 }
@@ -77,4 +77,39 @@ test('React theme sets the document language without translating user message co
  const {setLanguage}=await import('../src/renderer/locale.mjs')
  setLanguage('en')
  try{await mount();assert.equal(document.documentElement.lang,'en');assert.ok(document.querySelector('.chat-history')!.textContent!.includes('Help me plan a focused week.'))}finally{setLanguage('zh-CN')}
+})
+
+
+test('taskless executor approval entries reveal the selected workbench dock from both surfaces',async()=>{
+ const {view,sent}=await mount(),state=personalState(2)
+ state.pending_approvals=[{approval_id:'approval:taskless',conversation_id:'topic:review',summary:'Inspect a public file'}] as any
+ await act(async()=>view.receive(state))
+ const entry=document.querySelector<HTMLButtonElement>('.presentation-waiting button')!
+ await act(async()=>fireEvent.click(entry))
+ assert.equal(view.controller.selectedId,'topic:review')
+ assert.equal(view.controller.presentationMode,'workbench')
+ assert.equal((document.getElementById('chat-pane') as HTMLElement).hidden,false)
+ assert.ok(document.querySelector('.approval-dock [data-approval-id="approval:taskless"]'))
+ assert.equal(sent.some(frame=>frame.method==='conversations.approve'),false)
+ await act(async()=>view.controller.setPresentation('orb'))
+ const orb=document.querySelector<HTMLButtonElement>('#personal-orb-host .personal-orb-task')
+ assert.ok(orb,'an approval without a task still has an orb entry')
+ assert.ok(orb.textContent!.includes('Inspect a public file'))
+ assert.equal(document.querySelector('#personal-orb-host .approval-dock'),null)
+ await act(async()=>fireEvent.click(orb))
+ assert.equal(view.controller.presentationMode,'workbench')
+ assert.equal((document.getElementById('chat-pane') as HTMLElement).hidden,false)
+ const allow=[...document.querySelectorAll<HTMLButtonElement>('.approval-dock button')].find(button=>button.textContent==='允许')!
+ await act(async()=>fireEvent.click(allow))
+ const approvals=sent.filter(frame=>frame.method==='conversations.approve')
+ assert.equal(approvals.length,1)
+ assert.deepEqual(approvals[0].params,{id:'topic:review',approval_id:'approval:taskless',approved:true})
+})
+test('project confirmation entry keeps its separate orb route',async()=>{
+ const {view}=await mount(),state=personalState(2)
+ state.pending_confirmations=[{proposal_id:'proposal:project',conversation_id:'topic:review',workspace:'Demo',session:'Current',summary:'Confirm project'}] as any
+ await act(async()=>view.receive(state))
+ await act(async()=>fireEvent.click(document.querySelector('.presentation-waiting button')!))
+ assert.equal(view.controller.selectedId,'topic:review')
+ assert.equal(view.controller.presentationMode,'orb')
 })
