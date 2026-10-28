@@ -107,9 +107,14 @@ for (const cleanupThrows of [false,true]) test(`Connect fences expired authority
   t.after(() => rm(root, {recursive: true, force: true}))
   const backendUrl = pathToFileURL(join(root, 'backend.mjs')).href
   const deviceUrl = pathToFileURL(join(root, 'device.mjs')).href
-  const realDevice = new URL('../src/executors/computer-device.js', import.meta.url).href
+  const deviceSourceUrl = new URL('../src/executors/computer-device.js', import.meta.url)
+  const nativeProbeUrl = pathToFileURL(join(root,'native-probe.mjs')).href
+  await writeFile(join(root,'native-probe.mjs'),`export let probes=0;export function execFile(...args){probes++;args.at(-1)(Error('native foreground probe forbidden in this fixture'))}`)
+  const deviceSource=(await readFile(deviceSourceUrl,'utf8')).replace(/from ['"]([^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path==='node:child_process'?nativeProbeUrl:path.startsWith('.')?new URL(path,deviceSourceUrl).href:import.meta.resolve(path))}`)
+  await writeFile(join(root,'real-device.mjs'),deviceSource)
+  const realDevice = pathToFileURL(join(root,'real-device.mjs')).href
   await writeFile(join(root, 'backend.mjs'), `export let connects=0, closes=0;export async function startComputerBackend(){return {pid:1,listDisplays:async()=>[{id:'1'}],connect:async()=>{connects++},close:async()=>{closes++;if(${cleanupThrows})throw Error("lost cleanup");return true},device:{size:async()=>({width:800,height:600})}}}`)
-  await writeFile(join(root, 'device.mjs'), `export {connectComputerDevice,validComputerDisplayId} from ${JSON.stringify(realDevice)};export async function computerForeground(){return {target:'fixture',width:800,height:600}}`)
+  await writeFile(join(root, 'device.mjs'), `import {connectComputerDevice as connect} from ${JSON.stringify(realDevice)};export {validComputerDisplayId} from ${JSON.stringify(realDevice)};export let foregrounds=0;export async function computerForeground(){foregrounds++;return {target:'fixture',width:800,height:600}};export const connectComputerDevice=(backend,config,options)=>connect(backend,config,{...options,foreground:computerForeground})`)
   const sessionUrl = new URL('../src/personal-agent/computer-use/session.js', import.meta.url)
   const sessionSource=(await readFile(sessionUrl,'utf8')).replace(/from ['"]([^'"]+)['"]/gu,(_match,path:string)=>`from ${JSON.stringify(path.endsWith('/computer-backend.js')?backendUrl:path.endsWith('/computer-device.js')?deviceUrl:path.startsWith('.')?new URL(path,sessionUrl).href:import.meta.resolve(path))}`)
   await writeFile(join(root,'session.mjs'),sessionSource)
@@ -120,7 +125,12 @@ for (const cleanupThrows of [false,true]) test(`Connect fences expired authority
   let checked = 0
   const result = await runComputer({...loadComputerConfig(env),lockRoot:root}, 'tap center', {recordProcess:()=>Promise.resolve(),signal: new AbortController().signal, approve: () => Promise.resolve(true), progress: () => undefined, beforeWrite: () => {checked++; throw Error('superseded')}})
   const backend = await import(backendUrl) as {connects: number; closes: number}
-  assert.equal(checked, 1)
+  const probe = await import(nativeProbeUrl) as {probes:number}
+  const device = await import(deviceUrl) as {foregrounds:number}
+  const detail=JSON.stringify({result,foregrounds:device.foregrounds,native_probes:probe.probes})
+  assert.equal(probe.probes,0,detail)
+  assert.equal(device.foregrounds,2,detail)
+  assert.equal(checked, 1,detail)
   assert.equal(backend.connects, 0)
   assert.equal(backend.closes, 1)
   if(cleanupThrows)assert.equal(result.code,'cleanup_unknown')
