@@ -60,3 +60,11 @@ test('a positively newer durable assistant message can retire its anonymous look
  stream.receive({type:'personal.state',conversations:{messages:[{id:'current',conversation_id:'chat:main',role:'assistant',turn_id:'current',text:'Current answer',created_at}]}});
  assert.equal(stream.tools.size,0);
 })
+
+test('invalid explicit tool turn IDs do not create anonymous trace cards',()=>{
+ const stream=createChatStream(),frame={type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'running'}
+ for(const turn_id of ['',null,42])stream.receive({...frame,turn_id})
+ assert.equal(stream.tools.size,0)
+ stream.receive(frame)
+ assert.equal(stream.tools.size,1,'an omitted turn ID stays valid before a caption names its turn')
+})

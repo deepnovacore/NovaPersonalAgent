@@ -86,6 +86,7 @@ export function createChatStream(){
  /** Repeats of one tool name update its last row; a new call after a finished one appends. */
  function applyToolFrame(frame){
   if(typeof frame.conversation_id!=='string'||!frame.conversation_id)return
+  if(frame.turn_id!==undefined&&(typeof frame.turn_id!=='string'||!frame.turn_id))return
   const turnId=typeof frame.turn_id==='string'?frame.turn_id:''
   const item=normalizeToolTrace([frame])[0]
   if(!item)return
