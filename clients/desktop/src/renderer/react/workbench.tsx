@@ -12,7 +12,7 @@ import {WorkspacePage} from './pages'
 import {TasksPage,TaskDetail,ScheduledTasksPage,ExecutorFloat} from './tasks'
 import type {WorkbenchRuntime} from './personal-view'
 
-const PAGES=[{id:'timeline',label:'时间线',Icon:Clock3},{id:'ideas',label:'想法',Icon:Lightbulb},{id:'goals',label:'目标',Icon:Target},{id:'feeds',label:'资讯',Icon:Newspaper},{id:'tasks',label:'任务',Icon:Zap},{id:'profile',label:'个人资料',Icon:User},{id:'assistant',label:'nova',Icon:Bot}]
+const PAGES=[{id:'timeline',label:'时间线',Icon:Clock3},{id:'ideas',label:'想法',Icon:Lightbulb},{id:'goals',label:'目标',Icon:Target},{id:'feeds',label:'资讯',Icon:Newspaper},{id:'tasks',label:'任务',Icon:Zap},{id:'profile',label:'关于我',Icon:User},{id:'assistant',label:'nova',Icon:Bot}]
 function activeCount(c:any,work:any){const tasks=c.snapshot?.tasks??[],owned=new Set(tasks.flatMap((task:any)=>task.work_ids??[]));return tasks.filter((task:any)=>!task.trigger?.schedule_id?.startsWith('builtin-source-')&&['queued','running','verifying','waiting'].includes(task.phase)).length+(work?.tasks??[]).filter((task:any)=>!owned.has(task.work_id)&&['started','working'].includes(task.phase)).length}
 function WindowGrip({api}:{api:any}){
  const gesture=useMemo(()=>new OrbDragGesture(),[])

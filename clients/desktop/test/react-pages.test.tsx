@@ -26,7 +26,7 @@ test('news conversion draft survives conflict and retains article content hash',
  const p=await mount('feeds',{life,news:{enabled:true,items:[{id:'a1',title:'Article',content_hash:'hash1',source_id:'s',summary:'Summary'}],saved:[],interests:[],sources:[]}},async()=>{throw Error('version_conflict')});await p.click('转为个人事项');await p.input('个人事项标题','My idea');await p.click('保存个人事项');assert.equal((p.host.querySelector('[aria-label="个人事项标题"]') as HTMLInputElement).value,'My idea');assert.equal(p.calls[0][1].content_hash,'hash1');await p.close()
 })
 test('profile and soul edits retain original versions when snapshot changes',async()=>{
- const p=await mount('profile',{life,soul:{available:true,role:'Helpful',version:3,assistant_name:'Nova'},news:{enabled:false,interests:[],profile_version:1}},async()=>{throw Error('stale')});await p.click('编辑概览');await p.input('关于我','Revised bio');await p.click('保存介绍');assert.equal((p.host.querySelector('[aria-label="关于我"]') as HTMLTextAreaElement).value,'Revised bio');assert.equal(p.calls[0][1].expected_version,2);await p.close()
+ const p=await mount('profile',{life,soul:{available:true,role:'Helpful',version:3,assistant_name:'Nova'},news:{enabled:false,interests:[],profile_version:1}},async()=>{throw Error('stale')});await p.click('编辑介绍');await p.input('关于我','Revised bio');await p.click('保存介绍');assert.equal((p.host.querySelector('[aria-label="关于我"]') as HTMLTextAreaElement).value,'Revised bio');assert.equal(p.calls[0][1].expected_version,2);await p.close()
 })
 test('pending idea mutations stay single flight and unlock after rejection',async()=>{
  let reject:any;const wait=new Promise((_,r)=>{reject=r});const p=await mount('ideas',{life},async()=>wait);await p.click('编辑');await p.click('保存修改');const save=[...p.host.querySelectorAll('button')].find(b=>b.textContent==='保存修改')!;assert.equal(save.disabled,true);await act(async()=>save.click());assert.equal(p.calls.length,1);await act(async()=>reject(Error('version_conflict')));assert.equal(save.disabled,false);await p.close()
@@ -66,43 +66,37 @@ test('diary actions use versioned forgetting and retain pagination commands',asy
 })
 
 
-test('published profile history is bounded and read-only beside the authoritative current portrait',async()=>{
- const historical='<img src=x onerror=alert(1)> Earlier portrait'
- const p=await mount('profile',{life:{...life,profile:{version:0,about:''}},profile_preparation:{status:'ready',draft:{about:{text:'Current portrait',refs:[]},work:[],interests:[]},history:[
-  {generated_at:'2026-10-18T00:00:00Z',generation_version:'understanding-v8',about:historical,work:['Earlier work'],interests:['Earlier interest'],unavailable_sources:1},
-  ...Array.from({length:10},(_,i)=>({generated_at:i===0?'invalid':'2026-10-17T00:00:00Z',generation_version:'understanding-v7',about:`Archived portrait ${i}`,work:[],interests:[],unavailable_sources:0}))
- ]}})
+test('about me hides history and generation mechanics while preserving current content',async()=>{
+ const p=await mount('profile',{life:{...life,profile:{version:0,about:''}},profile_preparation:{status:'failed',needs_update:true,automatic_available:false,last_attempt_at:'2026-10-18T12:00:00Z',draft:{about:{text:'Current portrait',refs:[]},work:[],interests:[]},history:[{about:'Archived portrait'}]}})
  try{
+  assert.equal(p.host.querySelector('h2')?.textContent,'关于我')
   assert.equal(p.host.querySelector('.profile-about')?.textContent,'Current portrait')
-  const history=p.host.querySelector('.profile-history');assert.ok(history,'history section')
-  assert.ok(history.textContent!.includes('历史版本'))
-  assert.equal(history.querySelectorAll('details').length,10)
-  const entry=history.querySelector('details')!
-  await act(async()=>{entry.open=true;entry.dispatchEvent(new dom.window.Event('toggle'))})
-  for(const text of [historical,'Earlier work','Earlier interest','understanding-v8','来源已不可用'])assert.ok(entry.textContent!.includes(text),text)
-  assert.ok(entry.querySelector('time[datetime="2026-10-18T00:00:00Z"]'))
-  assert.ok(history.textContent!.includes('时间未记录'))
-  assert.equal(history.textContent!.includes('Archived portrait 9'),false)
-  assert.equal(history.querySelector('button,input,textarea,select,img,script'),null)
-  assert.equal(p.host.querySelector('.interest-chips'),null,'interest controls live in settings')
-  assert.equal(p.calls.length,0,'reading history emits no mutation')
+  for(const text of ['历史版本','只读','每天最多','上次尝试','资料需要更新','资料尚未更新','Archived portrait'])assert.equal(p.host.textContent!.includes(text),false,text)
+  assert.equal(p.host.querySelector('.profile-history'),null)
+  assert.equal(p.calls.length,0)
+  await p.click('更新一下');assert.deepEqual(p.calls,[['profile.refresh',{}]])
  }finally{await p.close()}
 })
-test('queued profile refresh shows its last attempt without presenting success or retry',async()=>{
- const p=await mount('profile',{life,profile_preparation:{status:'queued',draft:null,history:[],last_attempt_at:'2026-10-18T12:00:00Z'}})
+
+const savedPortrait={generated_at:'2026-10-15T11:24:55Z',read_only:true,unavailable_sources:1,draft:{about:{text:'Saved full portrait '.repeat(30),refs:[]},work:[{title:'Earlier project',text:'Complete saved work description',refs:[]}],interests:[]},sources:[]}
+test('saved full profile remains readable without a current recipe draft and never seeds editing',async()=>{
+ const p=await mount('profile',{life:{...life,profile:{version:0,about:''}},profile_preparation:{status:'failed',needs_update:true,draft:null,last_success:savedPortrait}})
  try{
-  const status=p.host.querySelector('.warmup-status');assert.ok(status,'queued refresh status')
-  assert.ok(status.textContent!.includes('已排队'))
-  assert.ok(status.textContent!.includes('上次尝试'))
-  assert.ok(status.querySelector('time[datetime="2026-10-18T12:00:00Z"]'))
-  assert.equal(status.getAttribute('aria-busy'),'false')
-  assert.equal(status.querySelector('button'),null)
+  const saved=p.host.querySelector('.profile-main');assert.ok(saved,'profile section')
+  assert.ok(saved.textContent!.includes(savedPortrait.draft.about.text),'complete saved about')
+  assert.ok(saved.textContent!.includes('Complete saved work description'),'complete work body')
+  assert.equal(saved.textContent!.includes('只读'),false)
+  assert.equal(saved.textContent!.includes('资料'),false)
+  assert.equal(saved.querySelector('input,textarea,select'),null)
+  await p.click('补充介绍');assert.equal((p.host.querySelector('[aria-label="关于我"]') as HTMLTextAreaElement).value,'')
   assert.equal(p.calls.length,0)
-  p.c.snapshot={...p.c.snapshot,profile_preparation:{...p.c.snapshot.profile_preparation,status:'failed',last_attempt_at:'invalid'}}
-  await p.render()
-  assert.equal(p.host.querySelector('.warmup-status time'),null)
-  await p.click('重试');assert.deepEqual(p.calls,[['profile.refresh',{}]])
  }finally{await p.close()}
+})
+test('current and manually cleared profiles do not fall back to archived prose',async()=>{
+ for(const profile of [{version:0,about:''},{version:2,about:''},{version:3,about:'Manual biography'}]){
+  const p=await mount('profile',{life:{...life,profile},profile_preparation:{status:'ready',draft:profile.version===0?{about:{text:'Current portrait',refs:[]},work:[],interests:[]}:null,last_success:savedPortrait}})
+  try{assert.equal(p.host.querySelector('.profile-about')?.textContent??'',profile.version===0?'Current portrait':profile.about);assert.equal(p.host.textContent!.includes(savedPortrait.draft.about.text),false)}finally{await p.close()}
+ }
 })
 test('manual daily suggestions refresh forces another run for unchanged inputs on ideas and goals',async()=>{
  for(const page of ['ideas','goals']){
