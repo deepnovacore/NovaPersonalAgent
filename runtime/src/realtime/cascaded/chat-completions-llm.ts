@@ -163,16 +163,16 @@ class Session implements CascadedLlmSession {
       active.reader = response.body.getReader()
       let started = false, text = '', sawText = false
       let reasoningCodepoints = 0, reasoningText = ''
-      // Thinking text is display-only and separately bounded; it never joins `content`.
-      // DeepSeek also requires the complete field back on a tool-call assistant message.
+      // The provider-private reasoning copy is complete (DeepSeek requires the whole
+      // field back); only the UI event is bounded by MAX_REASONING_CODEPOINTS.
       const reasoningDelta = (value: unknown): string | undefined => {
         if (typeof value !== 'string' || value === '') return undefined
+        reasoningText += value
         const left = MAX_REASONING_CODEPOINTS - reasoningCodepoints
         if (left <= 0) return undefined
         const points = [...value]
         const chunk = points.length <= left ? value : points.slice(0, left).join('')
         reasoningCodepoints += Math.min(points.length, left)
-        reasoningText += chunk
         return chunk
       }
       const fragments = new Map<number, Fragment>()
@@ -205,7 +205,7 @@ class Session implements CascadedLlmSession {
               if (fragments.size > 0) throw protocol('tool_finish_reason')
               // With tools enabled, wait for the response kind before publishing speech.
               if (input.tools.length > 0 && text !== '') yield {kind: 'text_delta', text}
-              this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text}].map(item => isToolObservation(item) ? item : withoutImage(item)))
+              this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text, ...(this.#provider === 'deepseek' && reasoningText !== '' ? {reasoning_content: reasoningText} : {})}].map(item => isToolObservation(item) ? item : withoutImage(item)))
               this.#unresolved = null; terminal = true
               yield {kind: 'response_completed', response_id: responseId}; return
             } else if (choice.finish_reason === 'tool_calls') {

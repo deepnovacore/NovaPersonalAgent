@@ -50,7 +50,7 @@ test('provider-volunteered reasoning is dropped when reasoning is disabled or ab
  }
 })
 
-test('reasoning_content and reasoning stream as reasoning_delta and never as text or history',async()=>{
+test('reasoning streams as reasoning_delta and keeps a provider-private copy in history',async()=>{
  const factory=createChatCompletionsLlmFactory({provider:'deepseek',apiKey:'synthetic',baseUrl:'https://example.test',model:'test',instructions:'Plan',fetchImpl:()=>Promise.resolve(sse([
   {id:'r1',choices:[{delta:{reasoning_content:'先想一'}}]},
   {id:'r1',choices:[{delta:{reasoning:'想二'}}]},
@@ -64,9 +64,10 @@ test('reasoning_content and reasoning stream as reasoning_delta and never as tex
   assert.equal(textEvents(events),'你好世界')
   assert.equal(events.at(-1)?.kind,'response_completed')
   assert.doesNotMatch(JSON.stringify(events.filter(event=>event.kind==='text_delta')),/先想|想二/u)
-  const history=(session.checkpoint!() as {history:{role:string;content:string}[][]}).history.flat()
-  assert.equal(history.filter(message=>message.role==='assistant').at(-1)?.content,'你好世界')
-  assert.doesNotMatch(JSON.stringify(session.checkpoint!()),/先想|想二/u)
+  const history=(session.checkpoint!() as {history:{role:string;content:string;reasoning_content?:string}[][]}).history.flat()
+  const assistant=history.filter(message=>message.role==='assistant').at(-1)
+  assert.equal(assistant?.content,'你好世界')
+  assert.equal(assistant?.reasoning_content,'先想一想二','the complete field stays on the provider-private assistant message')
  }finally{await session.close()}
 })
 
@@ -132,5 +133,47 @@ test('DeepSeek tool-call rounds return the complete reasoning_content on the nex
   assert.equal(assistant?.reasoning_content,'需要先读文件','the provider-private field survives the tool round')
   assert.equal(reasoningEvents(first),'需要先读文件')
   assert.doesNotMatch(JSON.stringify(first.filter(event=>event.kind==='text_delta')),/需要先读文件/u)
+ }finally{await session.close()}
+})
+
+test('a thinking final reply keeps its reasoning_content for the next user question',async()=>{
+ const requests:Record<string,unknown>[]=[];let step=0
+ const tools=[{name:'file_read',description:'Read a file',parameters:{type:'object',properties:{path:{type:'string'}},required:['path']}}]
+ const factory=createChatCompletionsLlmFactory({provider:'deepseek',apiKey:'synthetic',baseUrl:'https://example.test',model:'test',instructions:'Plan',fetchImpl:(_url,init)=>{
+  requests.push(JSON.parse(init!.body as string) as Record<string,unknown>)
+  if(step++===0)return Promise.resolve(sse([
+   {id:'r1',choices:[{delta:{reasoning_content:'完整思考一'}}]},
+   {id:'r1',choices:[{delta:{content:'最终答复'},finish_reason:'stop'}]},
+  ]))
+  return Promise.resolve(sse([{id:'r2',choices:[{delta:{content:'继续答复'},finish_reason:'stop'}]}]))
+ }}),session=factory.open()
+ try{
+  await collect(session.stream({inputs:[{kind:'user_text',text:'第一问'}],tools,reasoning:'enabled',signal}))
+  await collect(session.stream({inputs:[{kind:'user_text',text:'第二问'}],tools,reasoning:'enabled',signal}))
+  const messages=requests[1]!.messages as {role:string;content:string|null;reasoning_content?:string;tool_calls?:unknown[]}[]
+  const assistant=messages.find(message=>message.role==='assistant'&&message.content==='最终答复')
+  assert.equal(assistant?.reasoning_content,'完整思考一','a stop reply keeps the complete field on the next request')
+ }finally{await session.close()}
+})
+
+test('reasoning beyond the UI display bound is still returned complete on the tool round',async()=>{
+ const chunk='思'.repeat(70_000)
+ const requests:Record<string,unknown>[]=[];let step=0
+ const tools=[{name:'file_read',description:'Read a file',parameters:{type:'object',properties:{path:{type:'string'}},required:['path']}}]
+ const factory=createChatCompletionsLlmFactory({provider:'deepseek',apiKey:'synthetic',baseUrl:'https://example.test',model:'test',instructions:'Plan',fetchImpl:(_url,init)=>{
+  requests.push(JSON.parse(init!.body as string) as Record<string,unknown>)
+  if(step++===0)return Promise.resolve(sse([
+   {id:'r1',choices:[{delta:{reasoning_content:chunk}}]},
+   {id:'r1',choices:[{delta:{tool_calls:[{index:0,id:'call-long',type:'function',function:{name:'file_read',arguments:'{"path":"a"}'}}]},finish_reason:'tool_calls'}]},
+  ]))
+  return Promise.resolve(sse([{id:'r2',choices:[{delta:{content:'完成'},finish_reason:'stop'}]}]))
+ }}),session=factory.open()
+ try{
+  const first=await collect(session.stream({inputs:[{kind:'user_text',text:'长思考'}],tools,reasoning:'enabled',signal}))
+  assert.equal([...reasoningEvents(first)].length,MAX_REASONING_CODEPOINTS,'the UI event stays bounded')
+  await collect(session.stream({inputs:[{kind:'tool_result',call_id:'call-long',output:{status:'ok'}}],tools,reasoning:'enabled',signal}))
+  const messages=requests[1]!.messages as {role:string;reasoning_content?:string;tool_calls?:unknown[]}[]
+  const assistant=messages.find(message=>message.role==='assistant'&&Array.isArray(message.tool_calls))
+  assert.equal([...assistant!.reasoning_content!].length,chunk.length,'the provider-private copy is never truncated')
  }finally{await session.close()}
 })
