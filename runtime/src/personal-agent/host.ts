@@ -371,7 +371,7 @@ export class PersonalAgentHost {
         await pool.clear(source.id);
         try{
             // Prepare the existing dispatch implementation without changing the visible Plan until validation succeeds.
-            const runtime=await pool.prepare({...source,mode:'chat'}),bridge=runtime.toolBridge;
+            const runtime=await pool.prepare({...source,mode:'chat'},undefined,{chat:false}),bridge=runtime.toolBridge;
             const dispatch=bridge?.tools.find(tool=>tool.name==='dispatch'),names=(dispatch?.parameters.properties as {executor?:{enum?:unknown[]}}|undefined)?.executor?.enum??[];
             if(!bridge||!names.includes(executor))throw Error('executor_unavailable');
             if(!task){const origin=await bridge.origin('请执行已确认的计划：'+plan.title);task=await this.tasks.delegate('approved-plan:'+plan.id+':'+plan.version,{conversation_id:source.id,conversation_generation:source.generation,goal:plan.title,acceptance:[],origin_ref:origin,execution_route:executor,approved_plan:plan})}
@@ -395,7 +395,7 @@ export class PersonalAgentHost {
             // No dispatch was attempted: keep the selected plan available for correction/retry.
             if(!invoked)await pool.clear(source.id);
             throw error;
-        }
+        }finally{await pool.clear(source.id).catch(()=>undefined)}
     }
     readonly schedules:ScheduleService;
     readonly scheduledAuthority:ScheduledRunAuthority;

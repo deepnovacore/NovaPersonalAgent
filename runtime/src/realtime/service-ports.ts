@@ -183,6 +183,8 @@ export interface RealtimeServiceOptions {
   readonly taskHost?: TaskToolHost
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly toolGate?: (name:string)=>boolean
+  readonly onTool?: (event:{name:string;state:'running'|'ok'|'error';summary:string})=>void
   readonly validateScopedContext?:()=>Promise<boolean>
   readonly onProviderEvent?: (event: RealtimeProviderEvent) => void
   readonly intake?: Pick<

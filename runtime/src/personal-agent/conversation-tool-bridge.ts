@@ -44,11 +44,11 @@ export function conversationToolBridge(core:Assembly,graph:RealtimeAssembly,opti
  const invoke=async(text:Parameters<Invoke>[0],call:Parameters<Invoke>[1],signal:AbortSignal,task?:Parameters<Invoke>[3]):Promise<JsonValue>=>{
   if(!allowed.has(call.name))return {code:options.chat===true?'chat_tool_forbidden':'unknown_tool',state:'refused',message:options.chat===true?'请切换到 Plan 或 Build 后执行':'unknown tool'}
   signal.throwIfAborted()
-  options.onTool?.({name:call.name,state:'running',summary:''})
   const origin=await graph.bridge.acceptUserTranscript(text),epoch=graph.service.session.sessionEpoch
   const terminals=new Map<string,JsonValue>(),listeners=new Set<()=>void>()
   const unsubscribe=core.runtime.observe(event=>{if(event.kind==='handoff'||event.kind==='deadline'){const id=event.payload.delegate_id;if(typeof id==='string'){terminals.set(id,event.kind==='handoff'?{...event.payload}: {status:'timed_out',outcome:'unknown'});for(const listener of listeners)listener()}}})
   try{
+   options.onTool?.({name:call.name,state:'running',summary:''})
    const acceptance=await graph.service.invokeConversationTool({kind:'tool_call_ready',session_epoch:epoch,response_id:null,item_id:randomUUID(),call_id:call.id,name:call.name,arguments:call.arguments},{user:{text,epoch,origin_ref:origin},authority:{originRef:origin,sessionEpoch:epoch,acceptedUserInputRevision:0,stillWanted:()=>!signal.aborted},signal,...(task?{task}:{})})
    signal.throwIfAborted()
    if(acceptance.sync_result&&acceptance.delegate_id){

@@ -79,16 +79,16 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  try{const selected=requireSelectedCascadedLlmConfig(options.settings);options.host.setWorkbenchModel({provider:selected.provider,model:selected.config.model})}
  catch{options.host.setWorkbenchModel({provider:'',model:''})}
  options.host.setWorkbenchExecutors([...(options.agentDescriptors??[]),...(options.codexResource?.agentDescriptor?[options.codexResource.agentDescriptor]:[])].map(agent=>agent.name))
- return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution)=>{
+ return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution,overrides:{chat?:boolean}={})=>{
   const workbenchVoice=mode==='voice'&&(conversation.kind==='build'||conversation.mode==='plan')&&!execution
-  const chatMode=!execution&&conversation.kind==='chat'&&(conversation.mode??'chat')==='chat'
+  const chatMode=overrides?.chat!==false&&!execution&&conversation.kind==='chat'&&(conversation.mode??'chat')==='chat'
   if((conversation.kind==='build'||conversation.mode==='plan')&&!execution&&mode==='text'){
    const workbenchMode=conversation.kind==='build'?'build':'plan'
    const reporter=bindUsageReporter(options.onUsage,{feature:'conversation',conversationId:conversation.id,trigger:'manual'})
    const factory=configuredTextLlm({settings:options.settings,clock:options.clock??new RealClock(),idFactory:randomUUID,instructions:workbenchInstructions(workbenchMode,options.settings.language,!!conversation.build?.plan_id),transport:workbenchMode==='build'?BUILD_LLM_TRANSPORT:PLAN_LLM_TRANSPORT,...(reporter?{onUsage:reporter}:{})})
    const scopedEmit=(frame:Record<string,unknown>)=>emit({...frame,...(workbenchMode==='build'?{local_build:true}:{})})
    return createWorkbenchRuntime({conversation,host:options.host,factory,emit:scopedEmit,lifetime,language:options.settings.language,reasoning:options.settings.build_reasoning===true,approval:()=>options.host.localToolApproval??options.settings.local_tool_approval,...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
-    createBridge:()=>conversationRuntimeFactory(options)({...conversation,kind:'chat',mode:'chat'},scopedEmit,'text',lifetime,recovery),
+    createBridge:()=>conversationRuntimeFactory(options)({...conversation,kind:'chat',mode:'chat'},scopedEmit,'text',lifetime,recovery,undefined,{chat:false}),
    })
   }
   if(conversation.kind==='schedule'&&!execution)throw Error('scheduled_execution_required')
@@ -193,7 +193,14 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   // Chat may only retrieve context and touch the user's own memory; action tools are filtered
   // before the provider sees them and rejected again at invoke time.
   const chatToolNames=chatMode?(()=>{const readonly=new Set([...core.tools.bindings].filter(([,binding])=>binding.kind==='query'||(binding.executor!==null&&core.runtime.executors.get(binding.executor)?.manifest.ops.some(op=>op.name===binding.op&&op.readonly))).map(([name])=>name));return new Set(core.tools.schemas.flatMap(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&!core.tools.hidden.has(name)&&chatToolAllowed(name,core.tools.bindings.get(name),readonly)?[name]:[]}))})():undefined
-  const graph=buildRealtimeAssembly({core,provider,usageContext,...(chatToolNames?{providerToolView:tools=>({...tools,schemas:tools.schemas.filter(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&chatToolNames.has(name)})})}:{}),...(options.additionalAgentControllers?{additionalAgentControllers:options.additionalAgentControllers}:{}),...(!execution?{conversationContext:()=>options.host.scheduledConversationContext(conversation.id,conversation.generation,memoryConsumerFingerprint??null)}:{}),suppressMemoryAdaptation:!!execution,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
+  const recordToolEvent=(event:{name:string;state:'running'|'ok'|'error';summary:string})=>{
+   const index=turnToolTrace.findLastIndex(item=>item.name===event.name)
+   if(index>=0)turnToolTrace[index]={name:event.name,state:event.state,summary:event.summary}
+   else turnToolTrace.push({name:event.name,state:event.state,summary:event.summary})
+   if(turnToolTrace.length>16)turnToolTrace.shift()
+   emit({type:'conversation.tool',name:event.name,state:event.state,summary:event.summary,...(assistantTurnId?{turn_id:assistantTurnId}:{})})
+  }
+  const graph=buildRealtimeAssembly({core,provider,usageContext,...(chatToolNames?{providerToolView:tools=>({...tools,schemas:tools.schemas.filter(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&chatToolNames.has(name)})}),toolGate:name=>chatToolNames.has(name),onTool:recordToolEvent}:{}),...(options.additionalAgentControllers?{additionalAgentControllers:options.additionalAgentControllers}:{}),...(!execution?{conversationContext:()=>options.host.scheduledConversationContext(conversation.id,conversation.generation,memoryConsumerFingerprint??null)}:{}),suppressMemoryAdaptation:!!execution,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(execution?{scopedTool:event=>scheduledTools!.accept(event),validateScopedContext:()=>scheduledTools!.validateContext()}:{scheduleHost:new ScheduleAgentController(options.host,core.gateway,options.settings.support_model,conversation.id,conversation.generation)}),
    ...(execution?{providerToolView:tools=>{if(options.host.schedules.getRun(execution!.run_id).processing)return {...tools,schemas:tools.schemas.filter(schema=>(schema.function as {name?:string}|undefined)?.name==='source__process')};const context=options.host.schedules.getRun(execution!.run_id).definition.context;return {...tools,schemas:tools.schemas.filter(schema=>{const fn=schema.function;if(!fn||typeof fn!=='object'||Array.isArray(fn)||typeof fn.name!=='string')return false;const binding=tools.bindings.get(fn.name);return fn.name==='app__context'||(context.memory||context.knowledge)&&['memory__recall','memory__evidence'].includes(fn.name)||context.search&&binding?.executor==='search'&&core.runtime.executors.get('search')?.manifest.ops.some(op=>op.name===binding.op&&op.readonly)===true})}}}:{}),
    ...(workbenchVoice?{providerToolView:tools=>({...tools,schemas:[]}),scopedTool:event=>Promise.resolve(scheduledToolResult(event,{state:'refused',code:'workbench_voice_readonly',message:'Return to text mode to confirm execution.'},'workbench_voice_readonly',false))}:{}),
@@ -346,13 +353,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   })
   const unsubscribeTaskCapture=options.host.subscribe(()=>{captureTaskResponse();const response=graph.playback.current?.response_id??currentResponse;if(response&&!options.host.localNotifications&&graph.service.isProactiveResponse(response))void graph.service.session.quarantineActiveOrAwaitingResponse().catch(()=>options.onDiagnostic?.('[runtime-diagnostic] notification_audio_fence_failed'))})
   let closed=false
-  const toolBridge=conversationToolBridge(core,graph,{chat:chatMode,...(chatMode?{onTool:event=>{
-   const index=turnToolTrace.findLastIndex(item=>item.name===event.name)
-   if(index>=0)turnToolTrace[index]={name:event.name,state:event.state,summary:event.summary}
-   else turnToolTrace.push({name:event.name,state:event.state,summary:event.summary})
-   if(turnToolTrace.length>16)turnToolTrace.shift()
-   emit({type:'conversation.tool',name:event.name,state:event.state,summary:event.summary,...(assistantTurnId?{turn_id:assistantTurnId}:{})})
-  }}:{})})
+  const toolBridge=conversationToolBridge(core,graph,{chat:chatMode,...(chatMode?{onTool:recordToolEvent}:{})})
   const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();unsubscribeTaskCapture();detachTaskRuntime();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
   const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {

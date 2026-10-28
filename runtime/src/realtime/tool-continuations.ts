@@ -50,10 +50,23 @@ import {RealtimeDeliveryError, type RealtimeSession} from './session.js'
 import type {RealtimeTelemetry} from './telemetry.js'
 import type {UserOriginBindingLedger} from './user-origin-binding.js'
 const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirmation', state: 'refused'})
+function acceptanceSummary(acceptance: ToolAcceptance): string {
+  const content = acceptance.host_item?.content
+  if (typeof content !== 'string') return ''
+  try {
+    const value = JSON.parse(content) as {items?:unknown;results?:unknown;result?:{items?:unknown;results?:unknown}}
+    const inner = value.result && typeof value.result === 'object' ? value.result : value
+    if (Array.isArray(inner.items)) return `${inner.items.length} 条`
+    if (Array.isArray(inner.results)) return `${inner.results.length} 条`
+  } catch { /* non-JSON host results carry no safe summary */ }
+  return ''
+}
 interface ToolContinuationPorts {
   readonly taskHost?: TaskToolHost
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly toolGate?: (name:string)=>boolean
+  readonly onTool?: (event:{name:string;state:'running'|'ok'|'error';summary:string})=>void
   readonly validateScopedContext?:()=>Promise<boolean>
   readonly session: RealtimeSession
   readonly host: Pick<HostDelivery, 'bindContinuationAcknowledgement' | 'hasEligiblePreempt' | 'hasOriginDeliveryProof' | 'markOriginDelivered' | 'originCanReferenceProof' | 'originHasNonterminalReference' | 'releaseAcknowledgementReservation' | 'rendererPaused' | 'reserveSemanticAcknowledgement' | 'semanticAcknowledgement' | 'settleBackgroundAcknowledgement'>
@@ -95,6 +108,7 @@ export class ToolContinuations {
   /** Text loops share admission/execution with voice without manufacturing provider events. */
   async invokeStandalone(event:ToolCallReady,turn:StandaloneToolTurn):Promise<ToolAcceptance>{
     if(!this.#ports.tools.bindings.has(event.name)||this.#ports.tools.hidden.has(event.name))return this.#refusalAcceptance(event,'unknown_tool','{"code":"unknown_tool"}')
+    if(this.#ports.toolGate&&!this.#ports.toolGate(event.name))return this.#refusalAcceptance(event,'chat_tool_forbidden','{"code":"chat_tool_forbidden","state":"refused"}')
     turn.signal.throwIfAborted()
     const intercepted=await this.#interceptHost(event,turn.user.origin_ref,turn)
     if(intercepted)return intercepted
@@ -819,6 +833,7 @@ export class ToolContinuations {
       return
     }
 
+    this.#ports.onTool?.({name:call.name,state:'running',summary:''})
     const observedProviderResponseId = options.observedProviderResponseId ?? null
     const originRef = options.originRef ?? null
     const activeResponseId = this.session.activeProviderResponseId
@@ -911,6 +926,8 @@ export class ToolContinuations {
       acceptance = this.#overCapacityAcceptance(event)
     } else if (hidden) {
       acceptance = this.#refusalAcceptance(event, 'unknown_tool', '{"code":"unknown_tool","state":"refused"}')
+    } else if (this.#ports.toolGate && !this.#ports.toolGate(event.name)) {
+      acceptance = this.#refusalAcceptance(event, 'chat_tool_forbidden', '{"code":"chat_tool_forbidden","state":"refused"}')
     } else if (this.#ports.scopedTool) {
       acceptance = await this.#ports.scopedTool(event)
     } else if (personalRecall) {
@@ -979,6 +996,7 @@ export class ToolContinuations {
       }
     }
 
+    this.#ports.onTool?.({name:event.name,state:acceptance.accepted?'ok':'error',summary:acceptanceSummary(acceptance)})
     this.#recordToolAdmission({
       callId: event.call_id,
       logicalName: binding?.logical_name ?? null,
@@ -1114,6 +1132,7 @@ export class ToolContinuations {
         ? 'fulfilled'
         : 'rejected'
     input.state.sync = 'none'
+    this.#ports.onTool?.({name:input.event.name,state:input.state.acceptance.accepted?'ok':'error',summary:acceptanceSummary(input.state.acceptance)})
     this.#recordToolAdmission({
       callId: input.event.call_id,
       logicalName: input.state.logical_name,

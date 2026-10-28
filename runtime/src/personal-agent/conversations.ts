@@ -43,7 +43,7 @@ export interface ConversationRuntime {
  approvalDecision?(approvalId:string,approved:boolean):Promise<void>
  confirmationDecision?(proposalId:string,confirmed:boolean):Promise<void>
 }
-export type ConversationRuntimeFactory=(conversation:Readonly<Conversation>,emit:(frame:Record<string,unknown>)=>void,mode?:'text'|'voice',lifetime?:AbortSignal,recovery?:boolean,execution?:ScheduledRunGrant)=>Promise<ConversationRuntime>
+export type ConversationRuntimeFactory=(conversation:Readonly<Conversation>,emit:(frame:Record<string,unknown>)=>void,mode?:'text'|'voice',lifetime?:AbortSignal,recovery?:boolean,execution?:ScheduledRunGrant,overrides?:{chat?:boolean})=>Promise<ConversationRuntime>
 /** The global host owns resources; this pool owns only each conversation's scoped turn graph. */
 export class ConversationRuntimePool {
  readonly #modes=new Map<string,'text'|'voice'|'parked'>()
@@ -57,9 +57,9 @@ export class ConversationRuntimePool {
  #closed=false
  readonly #executions=new Map<string,string>()
  constructor(readonly create:ConversationRuntimeFactory,readonly emit:(frame:Record<string,unknown>)=>void){}
- async prepare(conversation:Conversation,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{return this.#prepare(conversation,false,execution)}
- async restore(conversation:Conversation,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{return this.#prepare(conversation,true,execution)}
- async #prepare(conversation:Conversation,recovery:boolean,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{
+ async prepare(conversation:Conversation,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{return this.#prepare(conversation,false,execution,overrides)}
+ async restore(conversation:Conversation,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{return this.#prepare(conversation,true,execution,overrides)}
+ async #prepare(conversation:Conversation,recovery:boolean,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{
   if(this.#closed)throw Error('conversation_runtime_closed')
   if(conversation.kind==='schedule'&&!execution)throw Error('scheduled_execution_required')
   if(execution&&conversation.kind!=='schedule')throw Error('invalid_scheduled_conversation')
@@ -67,7 +67,7 @@ export class ConversationRuntimePool {
   if(execution)this.#executions.set(conversation.id,execution.namespace)
   const id=conversation.id,existing=this.#runtimes.get(id);if(existing)return existing
   const lifetime=new AbortController();this.#lifetimes.set(id,lifetime);this.#modes.set(id,'text')
-  const promise=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,recovery,execution);this.#runtimes.set(id,promise)
+  const promise=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,recovery,execution,overrides);this.#runtimes.set(id,promise)
   try{const runtime=await promise;if(this.#closed||this.#lifetimes.get(id)!==lifetime){await runtime.close();throw Error('conversation_runtime_closed')}this.#ready.set(id,runtime);return runtime}catch(error){lifetime.abort();this.#runtimes.delete(id);this.#lifetimes.delete(id);this.#modes.delete(id);throw error}
  }
  run(conversation:Conversation,text:string,context?:ConversationTurnContext):Promise<{assistant:string;turn_id?:string;tool_trace?:readonly {name:string;state:'running'|'ok'|'error';summary:string}[]}>{
