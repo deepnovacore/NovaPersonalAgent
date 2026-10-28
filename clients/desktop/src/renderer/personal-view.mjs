@@ -47,7 +47,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   })
   return node
  }
- const run=async(action)=>{try{c.error='';await action()}catch(e){c.error=e.message==='version_conflict'?'内容已在其他操作中更新，请核对最新状态后重试。':e.message;if(c.presentationMode==='background')void api.personal.showPresentationError?.(c.error);update();if(/conflict|version/i.test(e.message)&&c.connected)await c.command('state').catch(()=>{})}update()}
+ const run=async(action)=>{try{c.error='';await action()}catch(e){c.error=e.message==='version_conflict'?'内容已在其他操作中更新，请核对最新状态后重试。':e.message;if(c.presentationMode==='background')void api.personal.showPresentationError?.(c.error);update();if((e.refusal_code==='version_conflict'||e.refusal_code?.endsWith('_conflict')||/conflict|version/i.test(e.message))&&c.connected)await c.command('state').catch(()=>{})}update()}
  const button=(label,action,parent,key=Symbol())=>{const b=el('button',label);b.type='button';bindPending(b,key,action);parent.append(b);return b}
  const chips=(parent,values)=>{const row=el('div',undefined,'chips');for(const value of values.filter(Boolean))row.append(el('span',value));parent.append(row)}
  let computerUse=null
@@ -59,17 +59,20 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  computerUse=createComputerUseIndicator({c,api})
  const openSettings=category=>api.orbMenu.openSettings?.(category)
  // The conversation and workspace keep independent state.
- let selected='timeline',previewPlan=false,lastPlanRef='',initialHome=false,inspector=null,inspectedId=null,returnFocus=null,openSequence=0
+ let selected='timeline',previewPlan=false,planPending=false,lastPlanRef='',initialHome=false,inspector=null,inspectedId=null,returnFocus=null,openSequence=0
+ // Each page keeps its own scroll offset, including the plan preview, so tab switches never lose place.
+ const pageScroll=new Map()
+ let renderedScrollKey=null
  // Viewed results survive restarts so an already-read result is not counted as new again.
  const VIEWED_KEY='nova:viewed-task-results',viewedStore=globalThis.localStorage
  const viewedCursors=new Map(),viewedResults=new Set((()=>{try{const saved=JSON.parse(viewedStore?.getItem(VIEWED_KEY)??'[]');return Array.isArray(saved)?saved.filter(id=>typeof id==='string').slice(-200):[]}catch{return []}})()),taskHistories=new Map()
  const saveViewed=()=>{try{viewedStore?.setItem(VIEWED_KEY,JSON.stringify([...viewedResults].slice(-200)))}catch{/* the count only resets on restart */}}
  const durableTasks=()=>({tasks:c.snapshot?.tasks??[]})
- function closeTask({restoreFocus=true}={}){const hadInspector=Boolean(inspector);openSequence++;inspector?.dispose();inspector=null;const originId=inspectedId,focus=returnFocus;returnFocus=null;inspectedId=null;root.dataset.taskDetail='false';renderPanel();if(!hadInspector||!restoreFocus)return;if(focus?.isConnected!==false)focus?.focus();else panel.querySelector?.(`[data-task-id="${originId}"] button`)?.focus()}
- async function openTask(id,approval=false){previewPlan=false;const sequence=++openSequence,originFocus=document.activeElement;if(c.presentationMode!=='workbench')await c.setPresentation('workbench');if(!taskHistories.has(id))taskHistories.set(id,{items:new Map(),cursor:0,incomplete:false,truncated:false});const history=taskHistories.get(id);const next=await c.command('tasks.get',{task_id:id,after:history.cursor});if(sequence!==openSequence)return;if(inspectedId!==id){inspector?.dispose();returnFocus=originFocus;panel.replaceChildren();const holder=el('section');panel.append(holder);inspector=mountTaskDetail(holder,{command:(...args)=>c.command(...args),onClose:closeTask,history,after:viewedCursors.get(id)??0,onViewed:(taskId,cursor,phase)=>{if(c.presentationMode==='workbench'&&taskId&&Number.isSafeInteger(cursor)){viewedCursors.set(taskId,cursor);if(phase==='completed'&&!viewedResults.has(taskId)){viewedResults.add(taskId);saveViewed();update()}}}});inspectedId=id}selected='tasks';root.dataset.taskDetail='true';syncLayout();pageTitle.textContent=t('任务详情');inspector.setVisible(c.presentationMode==='workbench');inspector.update(next);if(c.presentationMode==='workbench'){if(next.phase==='completed')viewedResults.add(id);saveViewed();if(approval)inspector.focusApproval();else inspector.focus()}}
+ function closeTask({restoreFocus=true}={}){const hadInspector=Boolean(inspector);openSequence++;inspector?.dispose();inspector=null;const originId=inspectedId,focus=returnFocus;returnFocus=null;inspectedId=null;root.dataset.taskDetail='false';if(hadInspector)renderedScrollKey=null;renderPanel();if(!hadInspector||!restoreFocus)return;if(focus?.isConnected!==false)focus?.focus();else panel.querySelector?.(`[data-task-id="${originId}"] button`)?.focus()}
+ async function openTask(id,approval=false){previewPlan=false;const sequence=++openSequence,originFocus=document.activeElement;if(c.presentationMode!=='workbench')await c.setPresentation('workbench');if(!taskHistories.has(id))taskHistories.set(id,{items:new Map(),cursor:0,incomplete:false,truncated:false});const history=taskHistories.get(id);const next=await c.command('tasks.get',{task_id:id,after:history.cursor});if(sequence!==openSequence)return;if(inspectedId!==id){inspector?.dispose();returnFocus=originFocus;if(renderedScrollKey!==null)pageScroll.set(renderedScrollKey,panel.scrollTop);renderedScrollKey=null;panel.replaceChildren();const holder=el('section');panel.append(holder);inspector=mountTaskDetail(holder,{command:(...args)=>c.command(...args),onClose:closeTask,history,after:viewedCursors.get(id)??0,onViewed:(taskId,cursor,phase)=>{if(c.presentationMode==='workbench'&&taskId&&Number.isSafeInteger(cursor)){viewedCursors.set(taskId,cursor);if(phase==='completed'&&!viewedResults.has(taskId)){viewedResults.add(taskId);saveViewed();update()}}}});inspectedId=id}selected='tasks';root.dataset.taskDetail='true';syncLayout();pageTitle.textContent=t('任务详情');inspector.setVisible(c.presentationMode==='workbench');inspector.update(next);if(c.presentationMode==='workbench'){if(next.phase==='completed')viewedResults.add(id);saveViewed();if(approval)inspector.focusApproval();else inspector.focus()}}
  const novaColumn=el('section',undefined,'nova-column');novaColumn.setAttribute('aria-label',t('Nova · 主对话'));root.append(novaColumn)
  const workspace=el('section',undefined,'workspace');workspace.setAttribute('aria-label',t('工作区'));root.append(workspace)
- const tabs=mountWorkspaceTabs(workspace,{onSelect:id=>{selected=id;previewPlan=false;closeTask({restoreFocus:false})}})
+ const tabs=mountWorkspaceTabs(workspace,{onSelect:id=>{selected=id;previewPlan=false;closeTask({restoreFocus:false});if(id==='tasks'&&planPending)openPlan(false)}})
  const pageTitle=el('h2','','page-title');pageTitle.hidden=true;workspace.append(pageTitle)
  const pageHead=el('header',undefined,'page-head');const status=el('span','正在连接','workbench-status');status.setAttribute('role','status')
  const presentation=el('select');presentation.setAttribute('aria-label',t('显示模式'));for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','隐藏']]){const option=el('option',t(label));option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
@@ -90,7 +93,8 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const planPreview=el('section',undefined,'workbench-plan-preview');planPreview.tabIndex=-1;planPreview.setAttribute('aria-label',t('计划预览'))
  const planHead=el('header',undefined,'workbench-plan-preview-head');planPreview.append(planHead);planHead.append(el('h2',t('计划预览')))
  const returnTasks=button('← '+t('返回任务列表'),()=>{previewPlan=false;taskTab='tasks';renderPanel()},planHead)
- function openPlan(focus=true){selected='tasks';previewPlan=true;closeTask({restoreFocus:false});panel.scrollTop=0;if(focus)planPreview.focus({preventScroll:true})}
+ /** Opens the published plan; the page's own scroll memory decides where it starts (top on first visit). */
+ function openPlan(focus=true){planPending=false;selected='tasks';previewPlan=true;closeTask({restoreFocus:false});tabs.pending('tasks',false);if(focus)planPreview.focus({preventScroll:true})}
  const chat=mountChatPane(novaColumn,{c,el,button,run,api,chips,openTask,openSchedule:id=>{previewPlan=false;selected='tasks';taskTab='schedules';scheduleLocal.selected=id;scheduleLocal.detail=null;renderPanel();void c.command('schedules.get',{id}).then(value=>{if(scheduleLocal.selected===id){scheduleLocal.detail=value;scheduleLocal.history=null;renderPanel()}}).catch(error=>{scheduleLocal.error=error.message;renderPanel()})},speakingLevel,onHome:showHome,planHost:planPreview,onPreviewPlan:()=>openPlan()})
  chat.setOpen(true)
  const executorFloat=mountExecutorFloat(root,{el,button,openTask,taskFor:work=>c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work))?.id??null})
@@ -121,6 +125,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
 
  const continueChat=text=>chat.focusDraft(`关于「${text}」：`)
  let renderedPageKey=null,sourceDetailsOpen=false
+ const scrollKey=()=>selected==='tasks'?(previewPlan?'tasks|plan':`tasks|${taskTab}`):selected
  const pageKey=()=>{
   const s=c.snapshot,sourceStates=s?.sources?.map(source=>[source.id,source.state,source.health,source.processing_consent_required])
   if(selected==='tasks'&&previewPlan)return JSON.stringify(['plan',lastPlanRef,c.connected,c.presentationReady])
@@ -136,6 +141,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const fields=[...panel.querySelectorAll('input,textarea,select')],focusIndex=focused?fields.indexOf(focused):-1
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
+ if(renderedScrollKey!==null)pageScroll.set(renderedScrollKey,panel.scrollTop)
   const sourceDetails=panel.querySelector('details.source-status');if(sourceDetails)sourceDetailsOpen=sourceDetails.open
 
   bodyObserver?.disconnect();disposeSources(panel);scheduleView?.dispose();scheduleView=null;panel.replaceChildren();tabs.select(selected);pageTitle.textContent=t(PAGE_TITLE[selected]??selected)
@@ -170,7 +176,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const nextSourceDetails=panel.querySelector('details.source-status');if(nextSourceDetails)nextSourceDetails.open=sourceDetailsOpen
   if(edit){const next=[...panel.querySelectorAll('input,textarea,select')],target=edit.key?next.find(node=>node.getAttribute?.('data-editor-key')===edit.key):next[edit.index];if(target&&(target.tagName??target.tag)===edit.tag&&target.getAttribute?.('aria-label')===edit.label&&!target.disabled){if(edit.tag!=='SELECT')target.value=edit.value;if(typeof edit.start==='number'&&typeof target.setSelectionRange==='function')target.setSelectionRange(edit.start,edit.end);else{target.selectionStart=edit.start;target.selectionEnd=edit.end}target.scrollTop=edit.scrollTop;target.focus?.({preventScroll:true})}}
   else if(focusBodyId||focusWorkId||focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select,summary')].find(node=>focusBodyId?node.dataset?.cardBodyId===focusBodyId:focusWorkId?node.getAttribute('data-task-result')===focusWorkId:focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
-  panel.scrollTop=panelScroll;renderedPageKey=pageKey()
+  const nextScrollKey=scrollKey(),switching=renderedScrollKey!==nextScrollKey
+ panel.scrollTop=switching?(pageScroll.get(nextScrollKey)??0):panelScroll
+ renderedScrollKey=nextScrollKey;renderedPageKey=pageKey()
  }
  function update(){
   document.body.dataset.personalCollapsed=String(c.collapsed)
@@ -186,12 +194,14 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   error.textContent=c.error;error.hidden=!c.error||c.presentationMode!=='workbench';orbError.textContent=c.error;orbError.hidden=!c.error||c.presentationMode!=='orb'
   syncOrbVoice()
   const pending=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
-  const nextWaitingKey=JSON.stringify([pending,c.connected]);if(nextWaitingKey!==waitingKey){waitingKey=nextWaitingKey;waiting.replaceChildren();for(const item of pending){const b=button(`处理审批：${item.summary}`,async()=>{if(item.task_id){await openTask(item.task_id,true);return}if(item.conversation_id&&item.conversation_id!==c.selectedId)await c.select(item.conversation_id);await c.setPresentation('orb')},waiting);b.disabled=!c.connected}}
+  const nextWaitingKey=JSON.stringify([pending,c.connected]);if(nextWaitingKey!==waitingKey){waitingKey=nextWaitingKey;waiting.replaceChildren();for(const item of pending){const b=button(t('处理审批：{0}',item.summary),async()=>{if(item.task_id){await openTask(item.task_id,true);return}if(item.conversation_id&&item.conversation_id!==c.selectedId)await c.select(item.conversation_id);await c.setPresentation('orb')},waiting);b.disabled=!c.connected}}
   const unreadTotal=(c.snapshot?.conversations?.items??[]).reduce((sum,item)=>sum+(item.unread_count??0),0)
   const unreadDot=document.querySelector('#unread-indicator');if(unreadDot)unreadDot.hidden=!unreadTotal
   if(!initialHome&&c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main')){initialHome=true;void run(()=>c.home())}
   const item=c.selectedConversation,planRef=item?.mode==='plan'&&item.plan?JSON.stringify([item.id,item.plan.id,item.plan.version]):''
-  if(planRef!==lastPlanRef){lastPlanRef=planRef;if(planRef)openPlan(false);else previewPlan=false}
+  // Never steal the panel: auto-open only the Tasks list, never the schedule sub-tab or a detail view.
+  if(planRef!==lastPlanRef){lastPlanRef=planRef;if(planRef){if(selected==='tasks'&&!inspector&&taskTab==='tasks'&&!previewPlan)openPlan(false);else planPending=true}else{previewPlan=false;planPending=false}}
+  tabs.pending('tasks',planPending)
   returnTasks.disabled=!c.connected
   syncLayout();chat.update();computerUse?.update()
   if(!c.connected)unreadProjection=null

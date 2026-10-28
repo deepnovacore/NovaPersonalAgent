@@ -56,3 +56,24 @@ test('the dock rebuilds only when the approvals change, so a focused button surv
  f.c.snapshot={pending_approvals:[]};f.dock.update()
  assert.equal(f.root.hidden,true)
 })
+
+test('a double click sends exactly one decision and exposes an in-flight state',async()=>{
+ const commands=[]
+ let release=null
+ const c={connected:true,selectedId:'chat:main',snapshot:{pending_approvals:[row()]},command:(method,params)=>new Promise(resolve=>{commands.push([method,params]);release=resolve})}
+ const parent=el('div'),dock=mountApprovalDock(parent,{c,el,button,run:callback=>callback()})
+ dock.update()
+ const card=all(parent).find(node=>node.name==='article')
+ const allow=all(parent).find(node=>node.textContent==='允许')
+ const deny=all(parent).find(node=>node.textContent==='拒绝')
+ const first=allow.listeners.click()
+ const second=allow.listeners.click()
+ await flush()
+ assert.equal(commands.length,1,'a double click must not send conversations.approve twice')
+ assert.equal(card.attributes['aria-busy'],'true')
+ assert.equal(allow.disabled,true);assert.equal(deny.disabled,true)
+ release({accepted:true});await first;await second;await flush()
+ assert.equal(card.attributes['aria-busy'],'false')
+ assert.equal(allow.disabled,false);assert.equal(deny.disabled,false)
+ assert.deepEqual(commands,[['conversations.approve',{id:'chat:main',approval_id:'a1',approved:true}]])
+})

@@ -218,3 +218,42 @@ test('Build status styles reserve a single row and ellipsize the readable reason
  assert.match(css,/\.workbench-build-reason\{[^}]*text-overflow:ellipsis;white-space:nowrap/)
  const source=await readFile(new URL('../src/renderer/workbench-agent.mjs',import.meta.url),'utf8');assert.ok(source.includes("resume=el('button',t('继续'))"));assert.ok(!source.includes("resume=el('button','Resume')"))
 })
+
+test('a failed approval preview falls back to host text, keeps the decision enabled and retries on demand',async()=>{
+ class Element{
+  constructor(name,text){this.name=name;this.textContent=text??'';this.children=[];this.listeners={};this.hidden=false;this.disabled=false;this.value='';this.attributes={}}
+  append(...children){this.children.push(...children)}
+  replaceChildren(...children){this.children=[...children]}
+  setAttribute(name,value){this.attributes[name]=value}
+  addEventListener(name,callback){this.listeners[name]=callback}
+  focus(){}
+ }
+ const previousDocument=globalThis.document
+ globalThis.document={createElement:name=>new Element(name),createTextNode:text=>new Element('#text',text)}
+ try{
+  const item={id:'build',kind:'build',build:{status:'running',approval:{id:'a1',name:'shell_execute',preview:'rm -rf tmp/demo',call_id:'call-1'}}}
+  let attempts=0
+  const c={state:()=>({}),connected:true,presentationReady:true,isVoiceConversation:false,selectedId:'build',selectedConversation:item,changed(){},async command(method){
+   if(method==='build.details'){attempts++;if(attempts===1)throw Error('details unavailable');return {text:'$ rm -rf tmp/demo',next_offset:null}}
+   return {}
+  }}
+  const parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}})
+  const walk=node=>[node,...node.children.flatMap(walk)]
+  const find=label=>walk(agent.element).find(node=>node.name==='button'&&node.textContent===label)
+  agent.update()
+  for(let tries=0;tries<50&&attempts<1;tries++)await new Promise(resolve=>setTimeout(resolve,0))
+  await new Promise(resolve=>setTimeout(resolve,0))
+  const preview=walk(agent.element).filter(node=>node.name==='pre').at(-1)
+  assert.equal(preview.textContent,'shell_execute\nrm -rf tmp/demo','the host fallback preview is shown')
+  const approve=find('允许本次'),always=find('始终允许'),retry=find('重试预览')
+  assert.equal(approve.disabled,false,'a failed preview must not block the decision')
+  assert.equal(always.disabled,false)
+  assert.equal(retry.hidden,false)
+  retry.listeners.click()
+  for(let tries=0;tries<50&&attempts<2;tries++)await new Promise(resolve=>setTimeout(resolve,0))
+  await new Promise(resolve=>setTimeout(resolve,0))
+  assert.equal(attempts,2,'the retry button refetches the preview')
+  assert.equal(preview.textContent,'$ rm -rf tmp/demo')
+  assert.equal(retry.hidden,true,'a successful preview hides the retry action')
+ }finally{globalThis.document=previousDocument}
+})

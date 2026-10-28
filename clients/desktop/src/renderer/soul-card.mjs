@@ -40,7 +40,7 @@ export function renderSoulCard(parent,{soul,command,button,local,rerender,openSe
   const actions=el('div',undefined,'preference-actions');role.append(actions)
   const save=button(t('保存'),async()=>{
    try{await command('soul.set',{role:draft.role,expected_version:draft.version});delete local.soul}
-   catch(error){draft.error=failureText(error?.message??'');}
+   catch(error){draft.error=failureText(error?.refusal_code??error?.message??'');}
    rerender()
   },actions,'soul:save');save.className='page-add';if(!soul.available)save.disabled=true
   button(t('取消'),()=>{delete local.soul;rerender()},actions,'soul:save')

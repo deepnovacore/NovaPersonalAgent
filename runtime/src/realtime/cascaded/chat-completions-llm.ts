@@ -22,6 +22,8 @@ import {
 
 export {MAX_CASCADED_LLM_HISTORY_CODEPOINTS, MAX_CASCADED_LLM_HISTORY_ITEMS} from './llm.js'
 const MAX_EVENT_BYTES = 512 * 1024
+/** Per-response bound for display-only thinking text; it never grows provider history. */
+export const MAX_REASONING_CODEPOINTS = 65_536
 
 export type ChatCompletionsLlmFailureCode = 'configuration' | 'aborted' | 'timeout' | 'protocol' | 'overflow' | 'closed' | 'network' | 'http'
 export class ChatCompletionsLlmFailure extends Error {
@@ -39,7 +41,7 @@ export interface ChatCompletionsLlmFactoryOptions extends LlmTransportOptions {
   readonly closeTimeoutMs?: number
 }
 interface Call { readonly id: string; readonly type: 'function'; readonly extra_content?: JsonObject; readonly function: {readonly name: string; readonly arguments: string} }
-interface Message { readonly role: 'system' | 'user' | 'assistant' | 'tool'; readonly content: string | readonly JsonObject[] | null; readonly tool_calls?: readonly Call[]; readonly tool_call_id?: string }
+interface Message { readonly role: 'system' | 'user' | 'assistant' | 'tool'; readonly content: string | readonly JsonObject[] | null; readonly tool_calls?: readonly Call[]; readonly tool_call_id?: string; /** Provider-private thinking returned with tool calls (DeepSeek requires it back). */ readonly reasoning_content?: string }
 interface Fragment { extra_content?: JsonObject; id: string | null; name: string; arguments: string }
 interface Active { completion: Promise<void> | null; usageDeadline: number | null; readonly controller: AbortController; reader: ReadableStreamDefaultReader<Uint8Array> | null; failureCode: ChatCompletionsLlmFailureCode | null }
 
@@ -85,6 +87,8 @@ class Session implements CascadedLlmSession {
   readonly #streamLimits:LlmStreamLimits
   readonly #toolCallLimit:number
   #started = false; #seeded = false
+  /** A provider that rejects the thinking flag is remembered so later rounds never ask again. */
+  #reasoningUnsupported = false;
   #history: Message[][] = []; #unresolved: Message[] | null = null; #closed = false; #closePromise: Promise<void> | null = null
   constructor(options: ChatCompletionsLlmFactoryOptions,history?:readonly CommittedConversationPair[]) {
     this.#provider = options.provider
@@ -96,7 +100,7 @@ class Session implements CascadedLlmSession {
     if(history!==undefined)this.#seed(history)
     if (!Number.isFinite(this.#idleTimeoutMs) || this.#idleTimeoutMs <= 0 || !Number.isFinite(this.#closeTimeoutMs) || this.#closeTimeoutMs <= 0) throw fail('configuration')
   }
-  async *stream(input: {readonly previewText?: boolean; readonly language?: PromptLanguage; readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
+  async *stream(input: {readonly previewText?: boolean; readonly language?: PromptLanguage; readonly reasoning?: 'enabled' | 'disabled'; readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
     if (this.#closed) throw fail('closed'); if (input.signal.aborted) throw fail('aborted')
     this.#started = true
     const current = wireMessages(input.inputs), unresolved = this.#unresolved
@@ -119,16 +123,21 @@ class Session implements CascadedLlmSession {
     const messages = this.#provider === 'self-hosted'
       ? [{role:'system' as const,content:[systemContent,...context.filter(item=>item.role==='system').map(item=>typeof item.content === 'string' ? item.content : '')].join('\n\n')},...context.filter(item=>item.role!=='system')]
       : [{role: 'system' as const, content: systemContent}, ...context]
-    const body: Record<string, JsonValue> = {model: this.#model, messages: messages as unknown as JsonValue, stream: true, stream_options: {include_usage: true}}
-    if (this.#provider === 'deepseek') body.thinking = {type: 'disabled'}
-    else if (this.#provider === 'qwen') body.enable_thinking = false
-    else if (this.#provider === 'openai') body.reasoning_effort = 'none'
-    if (input.tools.length > 0) { body.tools = input.tools.map(schema); if (this.#provider !== 'gemini') body.parallel_tool_calls = this.#toolCallLimit>1 }
+    const buildBody = (reasoning: 'enabled' | 'disabled'): Record<string, JsonValue> => {
+      const value: Record<string, JsonValue> = {model: this.#model, messages: messages as unknown as JsonValue, stream: true, stream_options: {include_usage: true}}
+      // Disabled keeps the historical per-provider shape; supported providers may opt in.
+      if (this.#provider === 'deepseek') value.thinking = {type: reasoning === 'enabled' ? 'enabled' : 'disabled'}
+      else if (this.#provider === 'qwen') value.enable_thinking = reasoning === 'enabled'
+      else if (this.#provider === 'openai') value.reasoning_effort = reasoning === 'enabled' ? 'low' : 'none'
+      if (input.tools.length > 0) { value.tools = input.tools.map(schema); if (this.#provider !== 'gemini') value.parallel_tool_calls = this.#toolCallLimit>1 }
+      return value
+    }
+    let reasoning: 'enabled' | 'disabled' = input.reasoning === 'enabled' && !this.#reasoningUnsupported ? 'enabled' : 'disabled'
     const active: Active = {completion: null, usageDeadline: null, controller: new AbortController(), reader: null, failureCode: null}
     const stop = (): void => { active.failureCode ??= 'aborted'; active.controller.abort(); void this.#cancel(active.reader) }
     input.signal.addEventListener('abort', stop, {once: true}); this.#active.add(active)
     let responseId: string | null = null, terminal = false
-    const finishUsage=beginModelUsage(this.#onUsage,this.#endpoint,this.#model,'llm',this.#provider==='self-hosted'||this.#provider==='openai-compatible'?'custom':this.#provider,this.#provider==='qwen'?'disabled':undefined)
+    let finishUsage: ReturnType<typeof beginModelUsage> | undefined
     let usage: Record<string, unknown> | undefined
     let events: AsyncIterator<Record<string, unknown>> | undefined
     const toolIndexes=new Set<number>()
@@ -136,13 +145,36 @@ class Session implements CascadedLlmSession {
       if (object(event.usage)) usage = mergeModelUsage(usage,event.usage)
     }
     try {
-      let response: Response
-      try { response = await this.#timed(this.#fetch(this.#endpoint, {method: 'POST', redirect: ['self-hosted','openai-compatible'].includes(this.#provider) ? 'error' : 'follow', headers: {...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}), 'content-type': 'application/json', accept: 'text/event-stream'}, body: JSON.stringify(body), signal: active.controller.signal}), active) }
-      catch (error) { if (error instanceof ChatCompletionsLlmFailure) throw error; throw fail(input.signal.aborted ? 'aborted' : this.#closed ? 'closed' : 'network') }
+      const request = (current: Record<string, JsonValue>): Promise<Response> => this.#timed(this.#fetch(this.#endpoint, {method: 'POST', redirect: ['self-hosted','openai-compatible'].includes(this.#provider) ? 'error' : 'follow', headers: {...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}), 'content-type': 'application/json', accept: 'text/event-stream'}, body: JSON.stringify(current), signal: active.controller.signal}), active)
+      const send = async (): Promise<Response> => {
+        try { return await request(buildBody(reasoning)) }
+        catch (error) { if (error instanceof ChatCompletionsLlmFailure) throw error; throw fail(input.signal.aborted ? 'aborted' : this.#closed ? 'closed' : 'network') }
+      }
+      let response = await send()
+      // A provider that rejects the thinking flag itself must not kill the round: retry once without it.
+      if (!response.ok && (response.status === 400 || response.status === 422) && reasoning === 'enabled') {
+        this.#reasoningUnsupported = true; reasoning = 'disabled'
+        try { await response.body?.cancel() } catch { /* the abandoned body needs no reader */ }
+        response = await send()
+      }
+      finishUsage = beginModelUsage(this.#onUsage,this.#endpoint,this.#model,'llm',this.#provider==='self-hosted'||this.#provider==='openai-compatible'?'custom':this.#provider,this.#provider==='qwen'?reasoning:undefined)
       if (!response.ok) throw new ChatCompletionsLlmFailure('http', response.status, await this.#accountFailure(response, active))
       if (response.body === null || !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) { await this.#cancel(response.body?.getReader() ?? null); throw fail('protocol') }
       active.reader = response.body.getReader()
       let started = false, text = '', sawText = false
+      let reasoningCodepoints = 0, reasoningText = ''
+      // The provider-private reasoning copy is complete (DeepSeek requires the whole
+      // field back); only the UI event is bounded by MAX_REASONING_CODEPOINTS.
+      const reasoningDelta = (value: unknown): string | undefined => {
+        if (typeof value !== 'string' || value === '') return undefined
+        reasoningText += value
+        const left = MAX_REASONING_CODEPOINTS - reasoningCodepoints
+        if (left <= 0) return undefined
+        const points = [...value]
+        const chunk = points.length <= left ? value : points.slice(0, left).join('')
+        reasoningCodepoints += Math.min(points.length, left)
+        return chunk
+      }
       const fragments = new Map<number, Fragment>()
       events = this.#events(active)[Symbol.asyncIterator]()
       while (true) {
@@ -159,6 +191,10 @@ class Session implements CascadedLlmSession {
           if (!object(choice) || !object(choice.delta)) throw protocol('choice_delta')
           const content = choice.delta.content, calls = choice.delta.tool_calls
           if (content !== undefined && content !== null && typeof content !== 'string') throw protocol('content_shape'); if (calls !== undefined && !Array.isArray(calls)) throw protocol('tool_calls_shape')
+          // Only requested thinking is surfaced: a provider that volunteers reasoning while the
+          // feature is off must never leak it into Build.
+          const thinking = reasoning === 'enabled' ? reasoningDelta(choice.delta.reasoning_content) ?? reasoningDelta(choice.delta.reasoning) : undefined
+          if (thinking !== undefined) yield {kind: 'reasoning_delta', text: thinking}
           if (!started && (((input.tools.length === 0 || input.previewText === true) && typeof content === 'string' && content !== '') || (choice.finish_reason !== undefined && choice.finish_reason !== null))) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
           if (typeof content === 'string' && content !== '') sawText = true
           if (typeof content === 'string' && content !== '') { text += content; if (input.tools.length === 0) yield {kind: 'text_delta', text: content}; else if (input.previewText === true) yield {kind: 'text_preview', text: content} }
@@ -169,13 +205,13 @@ class Session implements CascadedLlmSession {
               if (fragments.size > 0) throw protocol('tool_finish_reason')
               // With tools enabled, wait for the response kind before publishing speech.
               if (input.tools.length > 0 && text !== '') yield {kind: 'text_delta', text}
-              this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text}].map(item => isToolObservation(item) ? item : withoutImage(item)))
+              this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text, ...(this.#provider === 'deepseek' && reasoningText !== '' ? {reasoning_content: reasoningText} : {})}].map(item => isToolObservation(item) ? item : withoutImage(item)))
               this.#unresolved = null; terminal = true
               yield {kind: 'response_completed', response_id: responseId}; return
             } else if (choice.finish_reason === 'tool_calls') {
               if ((sawText && input.tools.length === 0) || fragments.size === 0) throw fail('protocol'); const callsOut = this.#calls(fragments)
               for (const call of callsOut) yield {kind: 'tool_call', item_id: call.id, call_id: call.id, name: call.function.name, arguments: JSON.parse(call.function.arguments) as JsonObject}
-              this.#unresolved = [...(unresolved ?? []), ...current, {role: 'assistant', content: null, tool_calls: callsOut}]
+              this.#unresolved = [...(unresolved ?? []), ...current, {role: 'assistant', content: null, tool_calls: callsOut, ...(this.#provider === 'deepseek' && reasoningText !== '' ? {reasoning_content: reasoningText} : {})}]
               terminal = true; yield {kind: 'response_completed', response_id: responseId}; return
             } else throw protocol(choice.finish_reason==='length'?'output_limit':'finish_reason')
           }
@@ -204,7 +240,7 @@ class Session implements CascadedLlmSession {
           active.usageDeadline = Date.now() + Math.min(this.#closeTimeoutMs, 1000)
           try { while (true) { const next = await events.next(); if (next.done) break; captureUsage(next.value) } } catch { /* Metering cannot change a completed response. */ }
         }
-        finishUsage(usage,terminal?'success':input.signal.aborted?'cancelled':'error',responseId)
+        finishUsage?.(usage,terminal?'success':input.signal.aborted?'cancelled':'error',responseId)
         input.signal.removeEventListener('abort', stop); await this.#cancel(active.reader); this.#active.delete(active)
       }
       if (terminal && this.#onUsage !== undefined) active.completion = finish()

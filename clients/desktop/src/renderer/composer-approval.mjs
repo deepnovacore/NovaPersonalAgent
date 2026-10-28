@@ -2,9 +2,11 @@ import {t} from './locale.mjs'
 
 const LABELS={ask:'Always ask',never:'Always approve'}
 const CAPTIONS={
+
  ask:'本地 Build 的写入和命令每次都需要你确认；点击改为自动批准',
  never:'本地 Build 的写入和命令自动批准；点击改为每次确认',
 }
+export const COMPOSER_APPROVAL_CAPTIONS=CAPTIONS
 
 /**
  * Switches how local Build tools are approved. The runtime applies it from the next tool call, so no restart

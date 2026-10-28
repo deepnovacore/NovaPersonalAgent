@@ -2,7 +2,7 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {setLanguage} from '../src/renderer/locale.mjs'
 import {mountWorkspaceTabs,workspaceTabForKey} from '../src/renderer/workbench-tabs.mjs'
-class Node{constructor(tag){this.tag=tag;this.children=[];this.listeners={};this.dataset={};this.attrs={};this.focused=0}append(...c){this.children.push(...c)}setAttribute(k,v){this.attrs[k]=v}addEventListener(k,v){this.listeners[k]=v}focus(){this.focused++}scrollIntoView(){this.scrolled=(this.scrolled??0)+1}}
+class Node{constructor(tag){this.tag=tag;this.children=[];this.listeners={};this.dataset={};this.attrs={};this.focused=0}append(...c){this.children.push(...c)}setAttribute(k,v){this.attrs[k]=v}getAttribute(k){return this.attrs[k]??null}addEventListener(k,v){this.listeners[k]=v}focus(){this.focused++}scrollIntoView(){this.scrolled=(this.scrolled??0)+1}}
 const dom={createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag)},all=n=>[n,...n.children.flatMap(all)]
 test('workspace tabs wrap horizontally and leave vertical arrow keys to the panel',()=>{
  assert.equal(workspaceTabForKey('timeline','ArrowLeft'),'profile');assert.equal(workspaceTabForKey('profile','ArrowRight'),'timeline');assert.equal(workspaceTabForKey('ideas','ArrowRight'),'goals')
@@ -27,4 +27,22 @@ test('English workspace navigation uses the same language for labels and accessi
   assert.deepEqual(buttons.map(b=>b.children.find(n=>n.className==='workspace-tab-label').textContent),['Timeline','Ideas','Goals','Feeds','Task','Profile'])
   assert(buttons.every(b=>!/[\u4e00-\u9fff]/u.test(b.attrs['aria-label'])))
  }finally{setLanguage('zh-CN')}
+})
+test('a pending plan renders a visible badge and an accessible tab name',()=>{
+ const root=new Node('body'),tabs=mountWorkspaceTabs(root,{document:dom,onSelect:()=>{}})
+ const tasks=all(root).find(n=>n.dataset.page==='tasks')
+ const badge=tasks.children.find(n=>n.className==='workspace-tab-plan-badge')
+ const base=tasks.attrs['aria-label']
+ assert.ok(badge,'the plan badge element exists')
+ assert.equal(badge.hidden,true)
+ tabs.pending('tasks',true)
+ tabs.pending('tasks',true)
+ assert.equal(tasks.dataset.plan,'true')
+ assert.equal(badge.hidden,false)
+ assert.equal((tasks.attrs['aria-label'].match(/有新计划/g)??[]).length,1,'repeated updates do not append duplicates')
+ tabs.pending('tasks',false)
+ tabs.pending('tasks',false)
+ assert.equal(tasks.dataset.plan,undefined)
+ assert.equal(badge.hidden,true)
+ assert.equal(tasks.attrs['aria-label'],base,'clearing restores the original label')
 })

@@ -54,6 +54,8 @@ export interface CascadedLlmTool {
 export type CascadedLlmEvent =
   | {readonly kind: 'response_started'; readonly response_id: string}
   | {readonly kind: 'text_delta'; readonly text: string}
+  /** Provider thinking text; display/diagnostics only, never speech, history or model input. */
+  | {readonly kind: 'reasoning_delta'; readonly text: string}
   /** Display-only speculative text; never committed to speech or history. */
   | {readonly kind: 'text_preview'; readonly text: string}
   | {readonly kind: 'tool_call'; readonly item_id: string; readonly call_id: string; readonly name: string; readonly arguments: JsonObject}
@@ -70,6 +72,8 @@ export interface CascadedLlmSession {
   stream(input: {
     readonly language?: PromptLanguage
     readonly previewText?: boolean
+    /** Opt-in provider thinking; implementations that cannot express it ignore the request. */
+    readonly reasoning?: 'enabled' | 'disabled'
     readonly inputs: readonly CascadedLlmInput[]
     readonly tools: readonly CascadedLlmTool[]
     /** Replaceable provider-visible context for this request; never committed to history. */

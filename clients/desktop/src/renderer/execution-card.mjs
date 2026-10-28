@@ -40,7 +40,7 @@ export function mountExecutionCard(parent,{el,command,submitText,run}){
  const decide=async confirmed=>{
   const proposal=current,id=conversation;pending=true;render()
   try{await command('conversations.confirm',{id,proposal_id:proposal.proposal_id,confirmed})}
-  catch(e){error.textContent=e.message==='confirmation_not_owned'?t('这个提议已在另一端处理'):t('操作失败，请重试');return false}
+  catch(e){error.textContent=(e.refusal_code??e.message)==='confirmation_not_owned'?t('这个提议已在另一端处理'):t('操作失败，请重试');return false}
   finally{pending=false;render()}
   return true
  }

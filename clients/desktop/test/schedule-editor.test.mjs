@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {ScheduleDraft} from '../src/renderer/schedule-editor.mjs'
+import {ScheduleDraft,scheduleError} from '../src/renderer/schedule-editor.mjs'
 const input={title:'Daily',goal:'Read priorities',acceptance:['Give an action'],rule:{kind:'daily',time:'09:00',timezone:'Asia/Shanghai'},context:{todos:true,goals:true,tasks:true,memory:false,knowledge:false,search:false}}
 test('only the newest preview can enable save, and invalid drafts never write',async()=>{
  const reads=[],writes=[],draft=new ScheduleDraft(input,(method,params)=>method==='schedules.preview'?new Promise(resolve=>reads.push({params,resolve})):(writes.push(params),Promise.resolve({id:'s'})))
@@ -17,4 +17,11 @@ test('lost acknowledgement keeps the exact draft and request identity until conf
 test('stale edit preserves user input and requires reloading the current revision',async()=>{
  const draft=new ScheduleDraft({...input,id:'s',revision:1},async method=>{if(method==='schedules.preview')return {next_slot:{scheduled_at:'2026-10-13T01:00:00Z'}};if(method==='schedules.get')return {...input,id:'s',revision:2};throw Error('stale_schedule')})
  await draft.preview();await assert.rejects(draft.save(),/stale_schedule/);assert.equal(draft.value.goal,input.goal);assert.equal(draft.conflict,true);assert.equal(draft.pending,null)
+})
+test('controller-decorated refusals keep the host code for stale handling and specific text',async()=>{
+ const decorated=Object.assign(new Error('操作没有完成，请检查当前状态后再试。'),{refusal_code:'stale_schedule'})
+ assert.equal(scheduleError(decorated),'规则已更新，请载入最新版本后再保存。')
+ const draft=new ScheduleDraft({...input,id:'s',revision:1},async method=>{if(method==='schedules.preview')return {next_slot:{scheduled_at:'2026-10-13T01:00:00Z'}};throw decorated})
+ await draft.preview();await assert.rejects(draft.save());assert.equal(draft.conflict,true);assert.equal(draft.pending,null)
+ assert.equal(draft.error,'规则已更新，请载入最新版本后再保存。')
 })

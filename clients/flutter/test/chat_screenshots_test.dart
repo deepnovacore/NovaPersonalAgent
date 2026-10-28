@@ -11,11 +11,32 @@ import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'package:nova_mobile/services/preferences.dart';
 import 'package:nova_mobile/ui/app.dart';
+import 'package:nova_mobile/ui/pet_avatar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 import 'support/fake_audio.dart';
 
 void main() {
+  /// Decodes the approved pet avatar at the sizes used by the title bar and
+  /// settings sheet before any golden capture, so the screenshots do not
+  /// depend on async image timing.
+  Future<void> precachePetAvatar(WidgetTester tester) async {
+    final context = tester.element(find.byType(NovaApp));
+    await tester.runAsync(() async {
+      for (final width in [30, 96]) {
+        await precacheImage(
+          ResizeImage.resizeIfNeeded(
+            width,
+            null,
+            const AssetImage(petAvatarAsset),
+          ),
+          context,
+        );
+      }
+    });
+    await tester.pumpAndSettle();
+  }
+
   setUpAll(() async {
     final config = File('.dart_tool/package_config.json');
     final packages =
@@ -85,6 +106,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await precachePetAvatar(tester);
       await expectLater(
         find.byType(NovaApp),
         matchesGoldenFile('goldens/chat-home-empty.png'),
@@ -124,7 +146,12 @@ void main() {
         find.byType(NovaApp),
         matchesGoldenFile('goldens/chat-conversation.png'),
       );
-      await tester.tap(find.text('Tasks'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomAppBarTabs),
+          matching: find.text('Tasks'),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'New task'));
       await tester.pumpAndSettle();

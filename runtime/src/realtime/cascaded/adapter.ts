@@ -1108,6 +1108,9 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           preview += event.text
           captionSent = true
           await this.#emit(owner, {kind:'response_transcript_delta',session_epoch:owner.epoch,response_id:active.id,text:event.text,full_text:preview})
+        } else if (event.kind === 'reasoning_delta') {
+          // Thinking tokens are display-only for the workbench; realtime speech never consumes them.
+          continue
         } else if (event.kind === 'text_delta') {
           if (toolSeen) throw new MixedResponseFailure()
           if (llmResponseId === null) throw new Error('LLM text before identity')

@@ -6,7 +6,7 @@ import {t} from './locale.mjs'
 export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'general', label: t("通用"), sections: Object.freeze([
     'language-section', 'startup-view-section', 'wake-word-section', 'notifications-section',
-    'intent-section', 'proactivity-section',
+    'intent-section', 'proactivity-section', 'display-section',
   ])}),
   Object.freeze({id: 'diary', label: t('日记与简报'), sections: Object.freeze(['diary-section'])}),
   Object.freeze({id: 'themes', label: t("主题"), sections: Object.freeze(['visor-section','orb-skin-section'])}),

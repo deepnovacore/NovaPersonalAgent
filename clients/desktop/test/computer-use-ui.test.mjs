@@ -5,7 +5,7 @@ import {setLanguage,t} from '../src/renderer/locale.mjs'
 import {computerOverlayDetail,computerOverlayFrame,computerOverlayMark} from '../src/renderer/computer-overlay-view.mjs'
 import {createComputerUseIndicator} from '../src/renderer/computer-use-indicator.mjs'
 import {mountComputerUseControl} from '../src/renderer/computer-use-control.mjs'
-import {computerCallTarget} from '../src/renderer/build-call-log.mjs'
+import {computerCallTarget} from '../src/renderer/build-steps.mjs'
 
 class Element{
  constructor(name,text){this.name=name;this.textContent=text??'';this.children=[];this.listeners={};this.hidden=false;this.disabled=false;this.attributes={}}

@@ -22,6 +22,9 @@ On 2026-10-19, the project owner explicitly approved the following exact version
 | `clients/desktop/src/renderer/assets/nova-idle.mp4` | `25ae979111e3334a8f08d54e7eb65b18c307834c506f8ae65e7cf7b9ee3ff33c` |
 | `clients/flutter/packages/nova_audio/android/src/main/res/drawable-nodpi/nova_orb_avatar.png` | `77fce72aae44c5da545f146c5a1162a05ccf13ed606f0c248e417400354fd1cf` |
 | `clients/flutter/packages/nova_audio/ios/nova_audio/Sources/nova_audio/Resources/nova_orb_avatar.png` (identical copy) | `77fce72aae44c5da545f146c5a1162a05ccf13ed606f0c248e417400354fd1cf` |
+| `clients/flutter/assets/pets/nova.png` (identical copy for the mobile pet avatar; same bytes, no new derivative) | `77fce72aae44c5da545f146c5a1162a05ccf13ed606f0c248e417400354fd1cf` |
+
+The mobile pet avatar asset added on 2026-10-27 is a byte-identical copy of the approved `nova_orb_avatar.png` above, registered as the Flutter default avatar and recorded here without re-encoding. It introduces no new character, outfit or animation, so the 2026-10-19 approval continues to cover these exact bytes. Users may replace the avatar locally with their own photo; that local file is never bundled, uploaded or synced.
 
 The owner also explicitly approved the following five UI regression screenshots on 2026-10-19. They contain generic controls and synthetic test copy, with no character media or organization data.
 
@@ -46,3 +49,20 @@ For the requested v1.0.0dev integration push, the following widget-test screensh
 | `clients/flutter/test/goldens/chat-task-draft.png` | `4d348ce713b62157f61272c67a65263c31252b5e875d8fdee4bcb01a88271f45` |
 | `clients/flutter/test/goldens/chat-tasks.png` | `b23eff5ae2da3f6c97f00b11caffcfe661c0f5d6c8807f9c35460145838c340e` |
 | `clients/flutter/test/goldens/workbench-nova.png` | `ae2c31b8a509e39411100d5fad7f2c51b80aad9751413919168c0fa9c816560e` |
+
+## UI polish screenshots (2026-10-27, pending owner review)
+
+The UI review polish merges the approved Nova avatar with the "Nova" app-bar title, removes the separate body avatar, and adds a pet-avatar settings sheet plus a "Pet avatar" settings row. The following widget-test goldens were regenerated from the same synthetic fixtures with the documented `flutter test --update-goldens` mechanism. They now contain the approved character media recorded above (no new character, outfit, animation or derivative) plus generic controls and synthetic copy, with no organization data. These exact versions are **pending the project owner's screenshot review** before any push that includes them; the previously reviewed versions remain listed above for history.
+
+| File | SHA-256 |
+| --- | --- |
+| `clients/flutter/test/goldens/chat-conversation.png` | `9071d3de054667d870eb27c41bd6abf1e31d9f0df25a5ea570e9cf74d47899df` |
+| `clients/flutter/test/goldens/chat-home-empty.png` | `12b07d016419c2101023c99674a358353ea70cba2f8538a54d6ab99b57f85388` |
+| `clients/flutter/test/goldens/chat-settings.png` | `2613180a6a7c6c07891102ed44a3109e0fb94f64f0e0fd3a834f0d3ac2ffef5d` |
+| `clients/flutter/test/goldens/chat-task-draft.png` | `4d348ce713b62157f61272c67a65263c31252b5e875d8fdee4bcb01a88271f45` |
+| `clients/flutter/test/goldens/chat-tasks.png` | `5aee5f3acbe7d9790a7377d53fa4fd7c5074e6de626d6eb880cc5e89a4215060` |
+| `clients/flutter/test/goldens/workbench-nova.png` | `12b07d016419c2101023c99674a358353ea70cba2f8538a54d6ab99b57f85388` |
+
+`chat-tasks.png` also reflects the Tasks-tab restyle (Tasks/Schedules segmented control, Today/Earlier sections and session-duration labels) added in the same polish pass; the fixture text is still synthetic and no character or organization data was added.
+
+`chat-home-empty.png` and `workbench-nova.png` share a hash because both capture the same empty Nova chat screen. `chat-task-draft.png` matches the 2026-10-19 approved version again: the task chat has no pet avatar in its app bar, and the old body avatar is gone. The pet avatar photo library permission string in `clients/flutter/ios/Runner/Info.plist` is generic; user-chosen photos stay in the app-support directory and are never bundled or synced.

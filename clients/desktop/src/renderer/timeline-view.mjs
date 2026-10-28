@@ -5,6 +5,7 @@ import {renderCardTags} from './card-tags.mjs'
 import {markOpensConversation} from './new-conversation-mark.mjs'
 const LABEL={overdue:'已过截止',current:'今天到期',soon:'接下来 7 天',later:'之后',waiting:'等待中 · 未设期限',unscheduled:'尚未安排',completed:'已完成'}
 const STATUS={open:'待开始',doing:'进行中',waiting:'等待回复'}
+export const TIMELINE_LABELS=LABEL,TIMELINE_STATUS_LABELS=STATUS
 export function timelineDate(snapshot,now=new Date()){return now.toLocaleDateString('en-CA',{timeZone:snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone})}
 export function timelineGroups(snapshot,now=new Date()){
  const currentDate=timelineDate(snapshot,now),week=new Date(Date.parse(currentDate+'T00:00:00Z')+7*86400000).toISOString().slice(0,10)
