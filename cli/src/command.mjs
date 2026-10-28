@@ -1,14 +1,16 @@
-import { ensureDesktop, inspectDoctor, launchDesktop } from './runtime.mjs'
+import { ensureDesktop, inspectDoctor, launchDesktop, resetPersonalState } from './runtime.mjs'
 import { PRODUCT_VERSION } from './target.mjs'
 
-export const HELP_TEXT = `Usage: novapersonal [start|config|doctor|--version|--help]
+export const HELP_TEXT = `Usage: novapersonal [start|config|doctor|reset-state|--version|--help]
 
   novapersonal          Install if needed and launch Nova Personal Agent
   novapersonal start    Install if needed and launch Nova Personal Agent
   novapersonal config   Open the desktop settings window
   novapersonal doctor   Inspect local installation and configuration status
   novapersonal doctor --online
-                     Also test voice keys set in the environment against their provider`
+                     Also test voice keys set in the environment against their provider
+  novapersonal reset-state
+                     Move an unreadable personal state aside (quit Nova first); prints both paths`
 
 const VOICE_KEY_SOURCES = Object.freeze({settings: 'saved in settings', environment: 'set in environment', missing: 'missing'})
 const VOICE_KEY_PROBES = Object.freeze({ok: 'valid', rejected: 'rejected by provider', network: 'could not reach provider', deferred: 'checked on first connection'})
@@ -18,6 +20,7 @@ export async function main(argv, {
   ensure = ensureDesktop,
   launch = launchDesktop,
   doctor = inspectDoctor,
+  reset = resetPersonalState,
 } = {}) {
   const command = argv[0] ?? 'start'
   const online = command === 'doctor' && argv.length === 2 && argv[1] === '--online'
@@ -64,6 +67,15 @@ export async function main(argv, {
       }
     }
     return report.supported && report.capabilities?.ok !== false && missingVoiceKeys.length === 0 && rejectedVoiceKeys.length === 0 ? 0 : 1
+  }
+  if (command === 'reset-state') {
+    const result = await reset({})
+    if (result.moved.length === 0) {
+      stdout.write(`No personal state found at ${result.statePath}\n`)
+      return 0
+    }
+    for (const item of result.moved) stdout.write(`Moved ${item.from}\n  to ${item.to}\n`)
+    return 0
   }
   if (command !== 'start' && command !== 'config') {
     stdout.write(`${HELP_TEXT}\n`)

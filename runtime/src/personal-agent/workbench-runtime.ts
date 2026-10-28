@@ -255,7 +255,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
      }
      if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
      const enabled=computerState(),tools=[...baseTools,...(enabled.enabled?computerTools(enabled.direct):[])]
-     const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[],turn=randomUUID();let assistant='',preview='',completed=false
+     const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[],turn=randomUUID();let assistant='',preview='',captionSent=false,completed=false
      try{
       for await(const event of llm.stream({language:options.language,previewText:true,inputs,tools,workspaceContext:enabled.enabled?[workspaceContext,computerUseSkill(enabled.direct)].filter(Boolean).join('\n'):workspaceContext,signal})){
        signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale')
@@ -264,9 +264,14 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
         else{assistant+=event.text;preview=''}
         // Keep progress frames compact; the complete final reply is durably paged to the UI.
         const text=assistant+preview,visible=text.slice(-4000)+(text.length>4000?'…':'')
+        captionSent=true
         options.emit({type:'caption',role:'assistant',text:visible,full_text:visible,turn_id:turn,final:false})
        }
-       else if(event.kind==='tool_call'){if(preview){const visible=assistant.slice(-4000)+(assistant.length>4000?'…':'');options.emit({type:'caption',role:'assistant',text:visible,full_text:visible,turn_id:turn,final:!assistant});preview=''}if(calls.some(call=>call.id===event.call_id))throw Error('duplicate_tool_call');calls.push({id:event.call_id,name:event.name,arguments:structuredClone(event.arguments),state:'prepared',created_at:new Date().toISOString(),...(context?.user_message_id?{message_id:context.user_message_id}:{})})}
+       else if(event.kind==='tool_call'){
+        // Narration before a tool call is display-only: withdraw it before the tool round so it
+        // neither stays on screen nor becomes the persisted Build reply.
+        if(preview||assistant||captionSent){options.emit({type:'caption',role:'assistant',text:'',full_text:'',turn_id:turn,final:true});preview='';assistant='';captionSent=false}
+        if(calls.some(call=>call.id===event.call_id))throw Error('duplicate_tool_call');calls.push({id:event.call_id,name:event.name,arguments:structuredClone(event.arguments),state:'prepared',created_at:new Date().toISOString(),...(context?.user_message_id?{message_id:context.user_message_id}:{})})}
        else if(event.kind==='response_completed')completed=true
        else if(event.kind==='response_failed'){
         const code=/^[a-z_]{1,64}$/u.test(event.code)?event.code:'unknown',detail=event.detail&&/^[a-z_]{1,64}$/u.test(event.detail)?event.detail:undefined,count=event.tool_call_count
@@ -281,7 +286,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
       state.assistant=assistant.slice(0,16000)
       for(const call of calls){const prior=state.calls.find(item=>item.id===call.id);if(prior){if(prior.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');state.pending_calls.push(prior)}else {state.calls.push(call);state.pending_calls.push(call)}}
       await save()
-     }catch(error){if(preview&&!signal.aborted&&version===runVersion)options.emit({type:'caption',role:'assistant',text:assistant.slice(-4000),full_text:assistant.slice(-4000),turn_id:turn,final:!assistant});state.model=before;await session?.close();session=undefined;if(error instanceof Error&&'code' in error&&typeof error.code==='string'){const detail='detail' in error&&typeof error.detail==='string'&&/^[a-z_]{1,64}$/u.test(error.detail)?'_'+error.detail:'';throw Error('model_'+error.code+detail,{cause:error})}throw error}
+     }catch(error){if(captionSent&&version===runVersion)options.emit({type:'caption',role:'assistant',text:'',full_text:'',turn_id:turn,final:true});state.model=before;await session?.close();session=undefined;if(error instanceof Error&&'code' in error&&typeof error.code==='string'){const detail='detail' in error&&typeof error.detail==='string'&&/^[a-z_]{1,64}$/u.test(error.detail)?'_'+error.detail:'';throw Error('model_'+error.code+detail,{cause:error})}throw error}
      if(!calls.length){state.status='completed';state.reason=null;await save();return {assistant,turn_id:turn}}
     }
    }catch(error){

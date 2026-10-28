@@ -2,7 +2,7 @@ import {memoryInspectionSchema} from '../src/memory/personal-memory-inspection.j
 import {MAX_BOARD_MESSAGE_BYTES} from '../src/realtime/memory-board.js'
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
-import {mkdtemp, realpath, rm, stat, symlink} from 'node:fs/promises'
+import {mkdtemp, readFile, realpath, rm, stat, symlink} from 'node:fs/promises'
 import {createServer} from 'node:http'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
@@ -265,4 +265,63 @@ test('mem0 routes extraction to its own connection while keeping embeddings sepa
   assert.ok(extraction.calls.length > 0)
   assert.equal(embedding.calls.length, 0, 'text extraction must never reach the embedding endpoint')
   assert.equal((await store.recall('likes apples')).hits.length, 1)
+})
+
+test('forget physically erases learned facts and source text from every sqlite file', {timeout: 20000}, async t => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-mem0-erase-'))
+  const endpoint = await provider()
+  const path = join(directory, 'personal.sqlite')
+  const store = createMem0PersonalMemory({path, userId: 'host-user',
+    embedding: {baseUrl: endpoint.baseUrl, apiKey: 'test-key', model: 'embedding', dimensions: 2}, extractionModel: 'extract'})
+  t.after(async () => {await store.close(); await endpoint.close(); await rm(directory, {recursive: true, force: true})})
+  await store.open()
+  await store.remember!(turn('apples', 'likes apples'))
+  await eventually(async () => (await store.recall('apples', {scope: 'any'})).hits.length > 0)
+  const base = userDirectory(path)
+  const files = ['ledger.db', 'vectors.db', 'vectors_entities.db'].flatMap(name => [join(base, name), join(base, name + '-wal')])
+  const contains = async (needle: string) => {
+    for (const file of files) {
+      const bytes = await readFile(file).catch(() => Buffer.alloc(0))
+      if (bytes.includes(Buffer.from(needle))) return true
+    }
+    return false
+  }
+  assert.equal(await contains('likes apples'), true, 'the learned fact is stored before deletion')
+  assert.deepEqual(await store.forget!('apples'), {state: 'deleted', sourceId: 'apples'})
+  for (let attempt = 0; attempt < 100 && await contains('likes apples'); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  await store.close()
+  assert.equal(await contains('likes apples'), false)
+})
+
+test('a forget interrupted before derived cleanup is finished after restart', {timeout: 25000}, async t => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-mem0-interrupted-'))
+  const endpoint = await provider()
+  const path = join(directory, 'personal.sqlite')
+  const options = {path, userId: 'host-user',
+    embedding: {baseUrl: endpoint.baseUrl, apiKey: 'test-key', model: 'embedding', dimensions: 2}, extractionModel: 'extract'}
+  let store = createMem0PersonalMemory(options)
+  t.after(async () => {await store.close(); await endpoint.close(); await rm(directory, {recursive: true, force: true})})
+  await store.open()
+  await store.remember!(turn('apples', 'likes apples'))
+  await eventually(async () => (await store.recall('apples', {scope: 'any'})).hits.length > 0)
+  await store.forget!('apples')
+  // Terminate before the drain can confirm derived-vector cleanup; the durable intent must survive.
+  await store.close()
+  store = createMem0PersonalMemory(options)
+  await store.open()
+  const base = userDirectory(path)
+  const files = ['ledger.db', 'vectors.db', 'vectors_entities.db'].flatMap(name => [join(base, name), join(base, name + '-wal')])
+  const contains = async (needle: string) => {
+    for (const file of files) {
+      const bytes = await readFile(file).catch(() => Buffer.alloc(0))
+      if (bytes.includes(Buffer.from(needle))) return true
+    }
+    return false
+  }
+  for (let attempt = 0; attempt < 150 && await contains('likes apples'); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  assert.equal(await contains('likes apples'), false, 'restart completes the interrupted physical deletion')
 })

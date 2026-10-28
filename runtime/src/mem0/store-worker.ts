@@ -59,6 +59,9 @@ async function execute(request: Request): Promise<unknown> {
   if (request.operation === 'remember') return remember(request)
   if (request.operation === 'forget') {
     if (!text(request.sourceId, 256)) throw new StoreError('STORE_INVALID_INPUT')
+    // The durable intent is written first: a crash before the tombstone leaves a harmless flag,
+    // while a crash after it must never lose the physical-cleanup obligation.
+    markCompactionPending()
     // Tombstone unknown ids too, so delayed admission cannot resurrect an explicitly deleted source.
     ledger.prepare(`INSERT INTO sources (id,payload,state,recorded_at,cleaned) VALUES (?, '', 'forgotten', ?, 0)
       ON CONFLICT(id) DO UPDATE SET payload='', state='forgotten', cleaned=0`).run(request.sourceId, new Date().toISOString())
@@ -91,6 +94,42 @@ async function inspect(request: Request): Promise<MemoryInspection> {
   return {engine: 'mem0', entries, next: rows.length > 10 ? rows[9]!.cursor : null}
 }
 
+const COMPACTION_KEY = 'compaction_pending'
+
+function pendingCompaction(): boolean {
+  return ledger?.prepare('SELECT value FROM meta WHERE key=?').get(COMPACTION_KEY)?.value === '1'
+}
+
+function markCompactionPending(): void {
+  ledger?.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+    .run(COMPACTION_KEY, '1')
+}
+
+function clearCompactionPending(): void {
+  ledger?.prepare('DELETE FROM meta WHERE key=?').run(COMPACTION_KEY)
+}
+
+/** A deleted row's bytes stay in free pages and the WAL until every database is rebuilt. */
+function compactStore(): void {
+  if (!ledger) return
+  ledger.exec('PRAGMA busy_timeout=5000; PRAGMA secure_delete=ON')
+  ledger.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()
+  ledger.exec('VACUUM')
+  for (const name of ['vectors.db', 'vectors_entities.db']) {
+    const path = join(data.path, name)
+    if (!existsSync(path)) continue
+    const database = new DatabaseSync(path)
+    try {
+      database.exec('PRAGMA busy_timeout=5000; PRAGMA secure_delete=ON')
+      database.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()
+      database.exec('VACUUM')
+    } finally {
+      database.close()
+    }
+  }
+  clearCompactionPending()
+}
+
 function open() {
   if (ledger || closed) throw new StoreError('STORE_CLOSED')
   for (const name of ['ledger.db', 'vectors.db', 'vectors_entities.db', 'learning-lock.db']) {
@@ -102,6 +141,7 @@ function open() {
     ledger = new DatabaseSync(join(data.path, 'ledger.db'))
     ledger.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS owner (user_id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, payload TEXT NOT NULL,
         state TEXT NOT NULL CHECK(state IN ('pending','learned','forgotten')), recorded_at TEXT NOT NULL, cleaned INTEGER NOT NULL DEFAULT 0);`)
     learningLock = new DatabaseSync(join(data.path, 'learning-lock.db'))
@@ -111,6 +151,8 @@ function open() {
     ledger.prepare('INSERT OR IGNORE INTO owner (user_id) VALUES (?)').run(data.userId)
     secureSidecar(join(data.path, 'ledger.db'), '-wal')
     secureSidecar(join(data.path, 'ledger.db'), '-shm')
+    // Compaction runs from the drain (after derived vectors are deleted), never on the open path:
+    // a synchronous VACUUM here can exceed the client's request deadline and leave it unopened.
     sdk = new Memory({
       disableHistory: true,
       embedder: {provider: 'openai', config: {baseURL: data.embedding.baseUrl, apiKey: data.embedding.apiKey,
@@ -235,6 +277,10 @@ function scheduleDrain() {
   })().catch(() => undefined).finally(() => {
     learningLock?.exec('ROLLBACK')
     draining = false
+    // Compact only after every forgotten source finished deleting its derived vectors.
+    if (pendingCompaction() && !ledger?.prepare("SELECT 1 FROM sources WHERE state='forgotten' AND cleaned=0 LIMIT 1").get()) {
+      try { compactStore() } catch { /* keep the durable intent for the next attempt */ }
+    }
   })
 }
 

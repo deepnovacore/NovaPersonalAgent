@@ -523,20 +523,86 @@ test('close is bounded and unreferences a worker whose terminate never settles',
 })
 
 
-test('a stalled worker request rejects at its deadline and terminates its owner', async t => {
+test('a stalled worker request rejects at its deadline without poisoning the client', async t => {
   t.mock.timers.enable({apis: ['setTimeout']})
   const {client: store, worker} = client()
   const opening = store.open()
   worker.respond(requestId(worker, 0), {response_adaptation: responseAdaptation()})
   await opening
-  const recalled = assert.rejects(store.recall('tea'), {code: 'WORKER_ERROR'})
+  const recalled = assert.rejects(store.recall('tea'), {code: 'WORKER_TIMEOUT'})
   t.mock.timers.tick(5_000)
   await recalled
-  assert.equal(worker.terminated, 1)
-  assert.equal(worker.referenced, false)
+  assert.equal(worker.terminated, 0, 'one slow request must not terminate the worker')
+  assert.equal(worker.referenced, true)
+  // The abandoned response is discarded; the next request still uses the same worker.
+  worker.respond(requestId(worker, 1), empty('recent'))
+  const again = store.recall('tea')
+  worker.respond(requestId(worker, 2), empty('recent'))
+  assert.equal((await again).state, 'empty')
+  t.mock.timers.reset()
   await store.close()
 })
 
+test('a crashed worker is respawned after a bounded backoff', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date']})
+  const workers: FakeWorker[] = []
+  const store = new PersonalMemoryStoreClient({
+    path: '/private/tmp/nova-personal-test/personal.sqlite',
+    userId: 'host-user',
+    embedding: {baseUrl: 'https://example.invalid/v1', apiKey: 'test-key', model: 'embed-test', dimensions: 2},
+    extractionModel: 'extract-test',
+    workerFactory: () => {
+      const worker = new FakeWorker()
+      workers.push(worker)
+      return worker
+    },
+  })
+  const opening = store.open()
+  workers[0]!.respond(requestId(workers[0]!, 0), {response_adaptation: responseAdaptation()})
+  await opening
+  workers[0]!.emit('exit', 1)
+  await assert.rejects(store.open(), {code: 'WORKER_UNAVAILABLE'})
+  t.mock.timers.setTime(Date.now() + 1_000)
+  const reopened = store.open()
+  assert.equal(workers.length, 2)
+  workers[1]!.respond(requestId(workers[1]!, 0), {response_adaptation: responseAdaptation()})
+  await reopened
+  assert.equal(workers[0]!.terminated, 1)
+  t.mock.timers.reset()
+  await store.close()
+})
+
+
+test('a timed-out first open replaces the worker so a retry can succeed', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date']})
+  const workers: FakeWorker[] = []
+  const store = new PersonalMemoryStoreClient({
+    path: '/private/tmp/nova-personal-test/personal.sqlite',
+    userId: 'host-user',
+    embedding: {baseUrl: 'https://example.invalid/v1', apiKey: 'test-key', model: 'embed-test', dimensions: 2},
+    extractionModel: 'extract-test',
+    workerFactory: () => {
+      const worker = new FakeWorker()
+      workers.push(worker)
+      return worker
+    },
+  })
+  const timedOut = store.open()
+  t.mock.timers.tick(30_000)
+  await assert.rejects(timedOut, {code: 'WORKER_TIMEOUT'})
+  assert.equal(workers[0]!.terminated, 1, 'a timed-out open must not leave a half-opened worker')
+  t.mock.timers.setTime(Date.now() + 1_000)
+  const retry = store.open()
+  assert.ok(workers.length >= 2)
+  const worker = workers.at(-1)!
+  worker.respond(requestId(worker, 0), {response_adaptation: responseAdaptation()})
+  await retry
+  assert.equal(worker.messages.length >= 1, true)
+  t.mock.timers.reset()
+  const closing = store.close()
+  worker.respond(requestId(worker, 1), null)
+  await closing
+})
 
 test('VoiceMem uses separate extraction and embedding transports', {timeout: 10000}, async t => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-voicemem-split-'))

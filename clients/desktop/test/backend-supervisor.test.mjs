@@ -352,6 +352,9 @@ test('backend classifier maps only stable public failure classes', () => {
   assert.deepEqual(classifyBackendFailure('private exception text'), {
     kind: 'recoverable', code: 'backend_disconnected',
   })
+  for (const code of ['personal_store_capacity', 'state_corrupt', 'state_version_unsupported']) {
+    assert.deepEqual(classifyBackendFailure(code), {kind: 'unavailable', code})
+  }
 })
 
 test('collector accepts split stable diagnostics and never returns raw stderr', () => {

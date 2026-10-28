@@ -166,7 +166,13 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
       case 'conversation_snapshot': {
         const q=z.object({entry_prefix:id,consumer:id}).strict().parse(value)
         const now=Date.now()
-        result=all(db).filter(row=>row.entry_id.startsWith(q.entry_prefix)&&row.op!=='tombstone'&&!fileDerivedInference(db,row)&&(row.valid_until===null||Date.parse(row.valid_until)>now)&&row.evidence_refs.every(ref=>effectiveEvidence(db,ref,{purpose:'conversation',provider:q.consumer})!==null))
+        // Range-scan the prefix instead of materialising every entry revision in the ledger.
+        const rows=db.prepare(`SELECT r.payload_json FROM memory_revisions r JOIN (
+          SELECT entry_id,MAX(revision) revision FROM memory_revisions
+          WHERE entry_id>=? AND entry_id<? GROUP BY entry_id) latest USING(entry_id,revision)
+          ORDER BY r.entry_id`).all(q.entry_prefix,q.entry_prefix+'\u{10ffff}')
+        result=rows.map(row=>EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))))
+          .filter(row=>row.entry_id.startsWith(q.entry_prefix)&&row.op!=='tombstone'&&!fileDerivedInference(db,row)&&(row.valid_until===null||Date.parse(row.valid_until)>now)&&row.evidence_refs.every(ref=>effectiveEvidence(db,ref,{purpose:'conversation',provider:q.consumer})!==null))
         break
       }
       case 'processing_stamp':{

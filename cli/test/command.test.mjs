@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
+import {mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 import {test} from 'node:test'
 
 import {HELP_TEXT, main} from '../src/command.mjs'
+import {resetPersonalState} from '../src/runtime.mjs'
 
 function output() {
   let value = ''
@@ -82,4 +86,56 @@ test('doctor --online forwards the flag and fails on a rejected key', async () =
   assert.match(sink.read(), /DEEPSEEK_API_KEY: set in environment \(rejected by provider\)/u)
   assert.match(sink.read(), /DOUBAO_BIGMODEL_API_KEY: set in environment \(checked on first connection\)/u)
   assert.equal(await main(['doctor', '--offline'], {stdout: output().stream, doctor: () => assert.fail('unexpected doctor')}), 2)
+})
+
+test('reset-state prints the moved state and backup paths', async () => {
+  const sink = output()
+  const code = await main(['reset-state'], {stdout: sink.stream, reset: async () => ({
+    statePath: '/state/personal.json',
+    moved: [{from: '/state/personal.json', to: '/state/personal.json.reset-2026-10-27T08-00-00-000Z'}],
+  })})
+  assert.equal(code, 0)
+  assert.match(sink.read(), /Moved \/state\/personal\.json\n {2}to \/state\/personal\.json\.reset-/u)
+  const empty = output()
+  assert.equal(await main(['reset-state'], {stdout: empty.stream, reset: async () => ({statePath: '/state/personal.json', moved: []})}), 0)
+  assert.match(empty.read(), /No personal state found at \/state\/personal\.json/u)
+})
+
+test('resetPersonalState moves a corrupt state and its backup without losing bytes', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nova-reset-state-'))
+  try {
+    const path = join(dir, 'blackboard.sqlite.personal.json')
+    await writeFile(path, '{"broken":', {mode: 0o600})
+    await writeFile(path + '.before-schedules.json', '{"backup":', {mode: 0o600})
+    const result = await resetPersonalState({
+      environment: {BLACKBOARD_PATH: join(dir, 'blackboard.sqlite')},
+      home: dir,
+      now: () => new Date('2026-10-27T08:00:00.000Z'),
+    })
+    assert.equal(result.statePath, path)
+    assert.equal(result.moved.length, 2)
+    assert.equal(result.moved[0].to, `${path}.reset-2026-10-27T08-00-00-000Z`)
+    assert.equal(result.moved[1].to, `${path}.before-schedules.json.reset-2026-10-27T08-00-00-000Z-before-schedules`)
+    assert.equal(await readFile(result.moved[0].to, 'utf8'), '{"broken":')
+    await assert.rejects(readFile(path, 'utf8'), /ENOENT/u)
+  } finally {
+    await rm(dir, {recursive: true, force: true})
+  }
+})
+
+test('resetPersonalState refuses symbolic links and reports a missing state', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nova-reset-link-'))
+  try {
+    const environment = {BLACKBOARD_PATH: join(dir, 'blackboard.sqlite')}
+    const target = join(dir, 'elsewhere.json')
+    await writeFile(target, '{}', {mode: 0o600})
+    const path = join(dir, 'blackboard.sqlite.personal.json')
+    await symlink(target, path)
+    await assert.rejects(resetPersonalState({environment, home: dir}), /refusing to move non-regular file/u)
+    await rm(path)
+    const missing = await resetPersonalState({environment, home: dir})
+    assert.deepEqual(missing.moved, [])
+  } finally {
+    await rm(dir, {recursive: true, force: true})
+  }
 })

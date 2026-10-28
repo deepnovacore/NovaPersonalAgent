@@ -31,6 +31,60 @@ export const STEPFUN_COMPATIBLE_BASE_URL = 'https://api.stepfun.com/v1'
 export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
 const STEPFUN_SUPPORT_MODEL = 'step-3.7-flash'
+/** One default for the schema, the environment parser and the documentation. */
+export const DEFAULT_CASCADED_LLM_PROVIDER = 'deepseek' as const
+
+interface AuxiliaryModelProfile {
+  readonly support: string
+  readonly fast: string
+  readonly compressor: string
+  readonly watch: string
+}
+
+/**
+ * Auxiliary models are a property of the provider, not of the schema: the support gateway talks to
+ * the selected provider's endpoint, so the model name must come from the same profile.
+ */
+const AUXILIARY_MODEL_PROFILES: Readonly<Record<'qwen' | 'stepfun' | 'openai' | 'gemini' | 'deepseek', AuxiliaryModelProfile>> = Object.freeze({
+  qwen: Object.freeze({support: 'qwen-flash', fast: 'qwen-flash', compressor: 'qwen-flash', watch: 'qwen3-vl-plus'}),
+  stepfun: Object.freeze({support: STEPFUN_SUPPORT_MODEL, fast: STEPFUN_SUPPORT_MODEL, compressor: STEPFUN_SUPPORT_MODEL, watch: STEPFUN_SUPPORT_MODEL}),
+  openai: Object.freeze({support: 'gpt-6-luna', fast: 'gpt-6-luna', compressor: 'gpt-6-luna', watch: 'gpt-6-luna'}),
+  gemini: Object.freeze({support: 'gemini-3.5-flash-lite', fast: 'gemini-3.5-flash-lite', compressor: 'gemini-3.5-flash-lite', watch: 'gemini-3.5-flash-lite'}),
+  deepseek: Object.freeze({support: 'deepseek-flash', fast: 'deepseek-flash', compressor: 'deepseek-flash', watch: 'deepseek-flash'}),
+})
+
+/** The model a cascaded provider uses when CASCADE_LLM_MODEL is not set. */
+export function defaultCascadedLlmModel(provider: string): string {
+  return provider === 'qwen' ? 'qwen-plus'
+    : provider === 'openai' ? 'gpt-6-luna'
+      : provider === 'gemini' ? 'gemini-3.5-flash-lite'
+        : provider === 'deepseek' ? 'deepseek-flash' : 'doubao-seed-2-0-pro-260215'
+}
+
+/** Compressor defaults that mean "follow the selected text model" in a cascaded assembly. */
+export function isProviderDefaultCompressor(model: string): boolean {
+  return model === 'deepseek-flash' || model === 'qwen-flash' || model === 'step-3.7-flash'
+    || model === 'gpt-6-luna' || model === 'gemini-3.5-flash-lite' || model === 'doubao-seed-2-0-pro-260215'
+}
+
+function auxiliaryModelProfile(
+  provider: string | undefined,
+  cascadeModel: string | null,
+): AuxiliaryModelProfile | undefined {
+  if (provider === undefined) return undefined
+  if (provider === 'self-hosted' || provider === 'openai-compatible') {
+    return cascadeModel === null ? undefined : {
+      support: cascadeModel, fast: cascadeModel, compressor: cascadeModel, watch: cascadeModel,
+    }
+  }
+  if (provider === 'ark') {
+    // The schema default pairs the Ark endpoint; an explicit SUPPORT_MODEL still wins.
+    const model = 'doubao-seed-2-0-pro-260215'
+    return {support: model, fast: model, compressor: model, watch: model}
+  }
+  if (provider === 'minicpm-o' || provider === 'personaplex') return undefined
+  return AUXILIARY_MODEL_PROFILES[provider as keyof typeof AUXILIARY_MODEL_PROFILES]
+}
 
 export const settingsSchema = z.object({
   model_base_url: z.url().default(DEEPSEEK_BASE_URL),
@@ -52,7 +106,7 @@ export const settingsSchema = z.object({
   native_realtime_voice: z.string().default(''),
   cascade_endpointing_provider: cascadedEndpointingProviderNameSchema.default('auto'),
   cascade_asr_provider: cascadedAsrProviderNameSchema.default('volcengine'),
-  cascade_llm_provider: cascadedLlmProviderNameSchema.default('deepseek'),
+  cascade_llm_provider: cascadedLlmProviderNameSchema.default(DEFAULT_CASCADED_LLM_PROVIDER),
   cascade_llm_model: z.string().nullable().default(null),
   openai_compatible_base_url: z.string().default(OPENAI_BASE_URL),
   openai_compatible_api_key: z.string().nullable().default(null),
@@ -301,11 +355,21 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ? null
     : configuredExecutor
   const executors = parseExecutors(environment.EXECUTORS, configuredExecutor ?? '')
-  // Explicit realtime providers may select their own support model; memory extraction is independent.
-  const stepfunSupport = !textConversations && integratedProvider === 'stepfun'
-    && (optionalSecret(environment.MODEL_API_KEY) ?? '').trim() === ''
-  const supportDefault = (value: string | undefined): string | undefined =>
-    value ?? (stepfunSupport ? STEPFUN_SUPPORT_MODEL : !textConversations && !(environment.MODEL_API_KEY ?? '').trim() && integratedProvider === 'openai' ? 'gpt-6-luna' : !textConversations && !(environment.MODEL_API_KEY ?? '').trim() && integratedProvider === 'gemini' ? 'gemini-3.5-flash-lite' : undefined)
+  // Text conversations on the desktop use the cascaded LLM even when the voice pipeline is
+  // integrated; auxiliary models must therefore follow whichever provider answers text.
+  // Inactive selectors stay unread: integrated runtimes never touch the cascaded slots.
+  const cascadeText = textConversations || pipelineMode === 'cascaded'
+  const effectiveTextProvider = cascadeText
+    ? parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER)
+    : integratedProvider
+  const configuredCascadeModel = cascadeText ? optionalString(environment.CASCADE_LLM_MODEL) ?? null : null
+  const cascadeModel = configuredCascadeModel
+    ?? (effectiveTextProvider === undefined || effectiveTextProvider === 'self-hosted' || effectiveTextProvider === 'openai-compatible'
+      ? null : defaultCascadedLlmModel(effectiveTextProvider))
+  const genericModelKey = (optionalSecret(environment.MODEL_API_KEY) ?? '').trim() !== ''
+  const auxiliary = genericModelKey ? undefined : auxiliaryModelProfile(effectiveTextProvider, cascadeModel)
+  const auxiliaryDefault = (value: string | undefined, key: keyof AuxiliaryModelProfile): string | undefined =>
+    value ?? auxiliary?.[key]
   const candidate = {
     coding_backend: optionalString(environment.CODING_BACKEND),
     openai_compatible_base_url: optionalString(environment.OPENAI_COMPATIBLE_BASE_URL),
@@ -348,8 +412,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     model_api_key: optionalSecret(environment.MODEL_API_KEY),
     openrouter_api_key: optionalSecret(environment.OPENROUTER_API_KEY),
     tavily_api_key: optionalSecret(environment.TAVILY_API_KEY),
-    fast_model: rawEnvironmentValue(environment.FAST_MODEL),
-    watch_model: supportDefault(emptyAsUnset(rawEnvironmentValue(environment.WATCH_MODEL))),
+    fast_model: auxiliaryDefault(rawEnvironmentValue(environment.FAST_MODEL), 'fast'),
+    watch_model: auxiliaryDefault(emptyAsUnset(rawEnvironmentValue(environment.WATCH_MODEL)), 'watch'),
     ...(supportsVision('qwen', environment.WATCH_MODEL ?? '')
       || environment.MEMORY_CONNECTION?.trim() === 'local'
       ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
@@ -358,8 +422,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
           volcengine_ark_base_url: rawEnvironmentValue(environment.VOLCENGINE_ARK_BASE_URL)} : {}),
     conversation_vision_enabled: optionalBoolean(environment.CONVERSATION_VISION_ENABLED),
     monitor_camera_device_id: optionalString(environment.MONITOR_CAMERA_DEVICE_ID),
-    support_model: supportDefault(rawEnvironmentValue(environment.SUPPORT_MODEL)),
-    compressor_model: supportDefault(undefined),
+    support_model: auxiliaryDefault(rawEnvironmentValue(environment.SUPPORT_MODEL), 'support'),
+    compressor_model: auxiliaryDefault(undefined, 'compressor'),
     language: parsePromptLanguageSetting(environment.PROMPT_LANGUAGE),
     news_language: parseSelector(promptLanguageSchema, environment.NEWS_LANGUAGE, 'en', 'NEWS_LANGUAGE'),
     pipeline_mode: pipelineMode,
@@ -510,6 +574,94 @@ export function resolveProactivityPreset(preset: ProactivityPreset): Proactivity
   return proactivityPresets[preset]
 }
 
+interface MemoryExtractionConnection {
+  readonly baseUrl: string
+  readonly apiKey: string
+  readonly model: string
+  /** The environment variable a local memory install still needs, or null when it can extract. */
+  readonly missing: string | null
+}
+
+function extractionCandidate(
+  settings: Settings,
+  provider: string,
+): {readonly baseUrl: string; readonly apiKey: string; readonly model: string} | null {
+  if (provider === 'qwen') return {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: stripLikePython(settings.dashscope_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.qwen.fast}
+  if (provider === 'stepfun') return {baseUrl: STEPFUN_COMPATIBLE_BASE_URL, apiKey: stripLikePython(settings.stepfun_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.stepfun.fast}
+  if (provider === 'openai') return {baseUrl: OPENAI_BASE_URL, apiKey: stripLikePython(settings.openai_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.openai.fast}
+  if (provider === 'gemini') return {baseUrl: GEMINI_BASE_URL, apiKey: stripLikePython(settings.gemini_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.gemini.fast}
+  if (provider === 'deepseek') return {baseUrl: DEEPSEEK_BASE_URL, apiKey: stripLikePython(settings.deepseek_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.deepseek.fast}
+  if (provider === 'ark') return {baseUrl: secureEndpoint(settings.volcengine_ark_base_url, 'https', 'VOLCENGINE_ARK_BASE_URL'), apiKey: stripLikePython(settings.ark_api_key ?? ''), model: settings.volcengine_ark_support_model}
+  if (provider === 'self-hosted') return {baseUrl: settings.self_hosted_llm_base_url, apiKey: stripLikePython(settings.self_hosted_llm_api_key ?? ''), model: settings.cascade_llm_model ?? settings.fast_model}
+  if (provider === 'openai-compatible') return {baseUrl: settings.openai_compatible_base_url, apiKey: stripLikePython(settings.openai_compatible_api_key ?? ''), model: settings.cascade_llm_model ?? settings.fast_model}
+  return null
+}
+
+function providerForFastModel(model: string): string | null {
+  for (const [provider, profile] of Object.entries(AUXILIARY_MODEL_PROFILES)) {
+    if (profile.fast === model) return provider
+  }
+  return null
+}
+
+/**
+ * Extraction must reach the same provider that answers text. The paired fast model names that
+ * provider; a custom fast model keeps its own name on the provider that owns the credential.
+ * The configured generic model connection always wins over provider profiles.
+ */
+function selectedTextProvider(settings: Settings): string {
+  // A local/compatible gateway is authoritative even if its model happens to share a public name.
+  if (settings.cascade_llm_provider === 'self-hosted' || settings.cascade_llm_provider === 'openai-compatible') {
+    return settings.cascade_llm_provider
+  }
+  const paired = providerForFastModel(settings.fast_model)
+  if (paired !== null) return paired
+  return settings.pipeline_mode === 'integrated' ? settings.integrated_provider : settings.cascade_llm_provider
+}
+
+/**
+ * Extraction must reach the same provider that answers text. A local gateway is never replaced by
+ * a cloud provider with a matching model name; a missing local key stays local (self-hosted may be
+ * keyless) instead of silently sending content elsewhere.
+ */
+export function resolveMemoryExtractionConnection(settings: Settings): MemoryExtractionConnection {
+  const genericKey = stripLikePython(settings.model_api_key ?? '')
+  if (genericKey !== '') return {baseUrl: secureEndpoint(settings.model_base_url, 'https', 'MODEL_BASE_URL'), apiKey: genericKey, model: settings.fast_model, missing: null}
+  const selected = selectedTextProvider(settings)
+  const primary = extractionCandidate(settings, selected)
+  const primaryBase = primary?.baseUrl ?? ''
+  if (primary !== null && primaryBase !== '' && (primary.apiKey !== '' || selected === 'self-hosted')) {
+    return {...primary, model: settings.fast_model, missing: null}
+  }
+  if (selected === 'self-hosted' || selected === 'openai-compatible') {
+    const missing = primaryBase === '' ? 'SELF_HOSTED_LLM_BASE_URL'
+      : selected === 'openai-compatible' && (primary?.apiKey ?? '') === '' ? 'OPENAI_COMPATIBLE_API_KEY'
+        : null
+    return {
+      baseUrl: primaryBase === '' ? settings.model_base_url : primaryBase,
+      apiKey: primary?.apiKey ?? '',
+      model: settings.fast_model,
+      missing,
+    }
+  }
+  for (const provider of [settings.cascade_llm_provider, settings.integrated_provider]) {
+    if (provider === selected) continue
+    const candidate = extractionCandidate(settings, provider)
+    if (candidate !== null && candidate.baseUrl !== '' && candidate.apiKey !== '') {
+      return {...candidate, missing: null}
+    }
+  }
+  const fallbackKey = resolveModelApiKey(settings) ?? ''
+  const missing = settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY'
+    : settings.model_base_url === DEEPSEEK_BASE_URL ? 'DEEPSEEK_API_KEY' : 'MODEL_API_KEY'
+  return {
+    baseUrl: secureEndpoint(settings.model_base_url, 'https', 'MODEL_BASE_URL'),
+    apiKey: stripLikePython(fallbackKey),
+    model: settings.fast_model,
+    missing: fallbackKey === '' ? missing : null,
+  }
+}
+
 export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig | null {
   const connection = resolveMemoryConnection(settings)
   if (connection === 'disabled') return null
@@ -518,15 +670,18 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
     url: requiredSetting(settings.memory_url, 'MEMORY_URL'),
     token: requiredCredential(settings.memory_token, 'MEMORY_TOKEN'),
   })
-  // Local memory is optional: without an embedding credential it stays off instead of blocking the voice pipeline.
+  // Local memory is optional: without its embedding and extraction credentials it stays off
+  // instead of blocking the voice pipeline or silently failing every extraction request.
   if (!resolveEmbeddingConnection(settings).apiKey) return null
+  const extraction = resolveMemoryExtractionConnection(settings)
+  if (extraction.missing !== null) return null
   return Object.freeze({
     connection: 'local',
     provider: settings.memory_provider ?? 'voicemem',
     path: requiredSetting(settings.memory_path, 'MEMORY_PATH'),
     userId: requiredSetting(settings.memory_user_id, 'MEMORY_USER_ID'),
-    extractionModel: requiredSetting(settings.fast_model, 'FAST_MODEL'),
-    extraction: {baseUrl: secureEndpoint(settings.model_base_url, 'https', 'MODEL_BASE_URL'), apiKey: resolveModelApiKey(settings) ?? ''},
+    extractionModel: extraction.model,
+    extraction: {baseUrl: extraction.baseUrl, apiKey: extraction.apiKey},
     embedding: Object.freeze({
       ...resolveEmbeddingConnection(settings),
       model: requiredSetting(settings.embedding_model, 'EMBEDDING_MODEL'),
@@ -534,13 +689,22 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
   })
 }
 
-/** Module status in the shape of `modules.search`; local memory is off without an embedding key. */
+/** Module status in the shape of `modules.search`; local memory is off without both credentials. */
 export function memoryStatus(settings: Settings): {enabled: boolean; reason: string | null; fallback: null} {
-  const connection = resolveMemoryConnection(settings)
-  if (connection === 'disabled') return {enabled: false, reason: 'disabled', fallback: null}
-  if (connection === 'local' && !resolveEmbeddingConnection(settings).apiKey) return {enabled: false,
-    reason: `missing_environment:${settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY'}`, fallback: null}
-  return {enabled: true, reason: null, fallback: null}
+  try {
+    const connection = resolveMemoryConnection(settings)
+    if (connection === 'disabled') return {enabled: false, reason: 'disabled', fallback: null}
+    if (connection === 'local' && !resolveEmbeddingConnection(settings).apiKey) return {enabled: false,
+      reason: `missing_environment:${settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY'}`, fallback: null}
+    if (connection === 'local') {
+      const extraction = resolveMemoryExtractionConnection(settings)
+      if (extraction.missing !== null) return {enabled: false, reason: `missing_environment:${extraction.missing}`, fallback: null}
+    }
+    return {enabled: true, reason: null, fallback: null}
+  } catch {
+    // Memory is optional: an invalid endpoint must not make the whole composition (and Settings) fail.
+    return {enabled: false, reason: 'invalid_configuration', fallback: null}
+  }
 }
 
 function resolveMemoryConnection(settings: Settings): z.infer<typeof memoryConnectionSchema> {
@@ -742,9 +906,7 @@ export function resolveSupportModelConnection(
 export function resolveCascadedSelection(settings: Settings): CascadedSelection {
   if (['self-hosted','openai-compatible'].includes(settings.cascade_llm_provider) && !settings.cascade_llm_model?.trim()) throw new ConfigurationError('缺少 CASCADE_LLM_MODEL')
   const llmModel = settings.cascade_llm_model === null
-    ? (settings.cascade_llm_provider === 'qwen'
-      ? 'qwen-plus'
-      : settings.cascade_llm_provider === 'openai' ? 'gpt-6-luna' : settings.cascade_llm_provider === 'gemini' ? 'gemini-3.5-flash-lite' : settings.cascade_llm_provider === 'deepseek' ? 'deepseek-flash' : 'doubao-seed-2-0-pro-260215')
+    ? defaultCascadedLlmModel(settings.cascade_llm_provider)
     : requiredSetting(settings.cascade_llm_model, 'CASCADE_LLM_MODEL')
   return Object.freeze({
     endpointingProvider: settings.cascade_endpointing_provider,
@@ -904,7 +1066,7 @@ function parseCascadedLlmProvider(value: string | undefined): CascadedLlmProvide
   return parseSelector(
     cascadedLlmProviderNameSchema,
     value,
-    'qwen',
+    DEFAULT_CASCADED_LLM_PROVIDER,
     'CASCADE_LLM_PROVIDER',
   )
 }

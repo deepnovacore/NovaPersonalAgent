@@ -147,6 +147,7 @@ class Session implements CascadedLlmSession {
   }
   async *stream(input: {
     readonly language?: PromptLanguage
+    readonly previewText?: boolean
     readonly inputs: readonly CascadedLlmInput[]
     readonly tools: readonly CascadedLlmTool[]
     readonly workspaceContext?: string | null
@@ -174,10 +175,11 @@ class Session implements CascadedLlmSession {
     trimToolImages([...this.#history.flat(),...current])
     if((this.#stateless||this.#portable) && (this.#turnItems.length>this.#historyLimits.items || codePointLengthLikePython(JSON.stringify(this.#turnItems.map(imageFreeMessage)))>this.#historyLimits.codepoints))throw fail('overflow')
     let outputText = ''
+    let authorityText = ''
     let responseId: string | null = null
     let terminal = false
-    let textSeen = false
     const pendingTools:Extract<CascadedLlmEvent,{kind:'tool_call'}>[]=[]
+    const toolsEnabled = input.tools.length > 0
     try {
       for await (const event of this.#gateway.stream({
         ...(input.language === undefined ? {} : {language: input.language}),
@@ -196,11 +198,21 @@ class Session implements CascadedLlmSession {
         } else if (event.kind === 'text_delta') {
           if (responseId === null) throw fail('protocol')
           if (pendingTools.length && !this.#stateless&&!this.#portable) throw fail('protocol')
-          textSeen = true
           outputText += event.text
-          yield event
+          if (!toolsEnabled) {
+            // No tool can follow, so the text is final and may be spoken immediately.
+            yield event
+          } else if (input.previewText === true) {
+            // Text-mode UI can show and retract speculative text without speaking it.
+            yield {kind: 'text_preview', text: event.text}
+            authorityText += event.text
+          } else {
+            // Tools are enabled: whether this is narration or the final reply is unknown until the
+            // response completes, so never hand it to TTS before that decision.
+            authorityText += event.text
+          }
         } else if (event.kind === 'tool_call') {
-          if(responseId===null||(textSeen&&!this.#stateless&&!this.#portable)||pendingTools.length>=this.#toolCallLimit||pendingTools.some(call=>call.call_id===event.call_id))throw fail('protocol')
+          if(responseId===null||pendingTools.length>=this.#toolCallLimit||pendingTools.some(call=>call.call_id===event.call_id))throw fail('protocol')
           pendingTools.push(structuredClone(event))
         } else if (event.kind === 'response_completed') {
           if (responseId === null || event.response_id !== responseId) throw fail('protocol')
@@ -219,6 +231,7 @@ class Session implements CascadedLlmSession {
           }
           terminal = true
           if(portableOutput)this.#turnItems.push(...structuredClone(event.outputItems))
+          if (!pendingTools.length && authorityText !== '') yield {kind:'text_delta', text:authorityText}
           for(const pendingTool of pendingTools) {
             if(!portableOutput) this.#turnItems.push({type: 'function_call', call_id: pendingTool.call_id, name: pendingTool.name, arguments: JSON.stringify(pendingTool.arguments)})
             yield pendingTool

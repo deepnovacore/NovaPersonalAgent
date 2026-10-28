@@ -26,7 +26,7 @@ DASHSCOPE_API_KEY=你的百炼密钥
 
 只填写需要更改的项，其他保持默认。密钥不要提交到 Git。
 
-直接启动运行时时，级联 LLM 默认选择 Qwen；显式设置 `CASCADE_LLM_PROVIDER=deepseek` 可与桌面默认选择一致。
+直接启动运行时时，级联 LLM 默认使用 DeepSeek；可通过 `CASCADE_LLM_PROVIDER` 选择其他提供方。
 
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | 变量 | 默认 | 用途 |
