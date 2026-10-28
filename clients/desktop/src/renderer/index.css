@@ -62,7 +62,7 @@ html, body {
   padding: 6px 12px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, .18);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: #13161f;
   color: #f5f5f7;
   font: 500 11px/1.5 system-ui, sans-serif;
@@ -71,7 +71,7 @@ html, body {
   pointer-events: auto;
 }
 .progress-bubble[data-level='milestone'] { border-color: rgba(137, 194, 175, .6); }
-.progress-bubble:focus-visible, #last-result:focus-visible { outline: 2px solid #a6d6ff; outline-offset: -2px; }
+.progress-bubble:focus-visible, #last-result:focus-visible { outline: var(--focus-ring-width) solid #a6d6ff; outline-offset: -2px; }
 #last-result[hidden] { display: none; }
 #shell[data-bubbles='true'] { display: block; }
 #shell[data-bubbles='true'] #orb {
@@ -262,7 +262,7 @@ body[data-opaque="1"] {
   transition: opacity 140ms ease;
 }
 
-#orb:focus-visible { outline: 2px solid #a6d6ff; outline-offset: 2px; }
+#orb:focus-visible { outline: var(--focus-ring-width) solid #a6d6ff; outline-offset: var(--focus-ring-offset); }
 
 /* Keyboard focus (:focus-visible) keeps the rail open; plain click focus must
    not, or one click would pin the rail visible after the pointer leaves. */
@@ -336,7 +336,7 @@ body:hover #orb-rail,
   white-space: nowrap;
   text-overflow: ellipsis;
   border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(23, 23, 29, .88);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
   color: #f5f5f7;
@@ -363,7 +363,7 @@ body:hover #orb-rail,
   cursor: pointer;
   border-color: rgba(255, 196, 120, .5);
 }
-#state-label[data-action='setup']:focus-visible { outline: 2px solid #a6d6ff; outline-offset: 1px; }
+#state-label[data-action='setup']:focus-visible { outline: var(--focus-ring-width) solid #a6d6ff; outline-offset: 1px; }
 #aec-label {
   color: #d6d6d6;
   font-size: 10px;
@@ -375,7 +375,7 @@ body:hover #orb-rail,
   max-width: 153px;
   padding: 3px 8px;
   border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(23, 23, 29, .88);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
   color: #f5f5f7;
@@ -626,7 +626,7 @@ body:hover #orb-rail,
   max-width: calc(100vw - 12px);
   padding: 3px 8px;
   border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(23, 23, 29, .88);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
   color: rgba(255, 255, 255, .82);
