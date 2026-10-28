@@ -17,6 +17,8 @@ import * as voiceChoice from '../src/renderer/voice-choice.mjs'
 import {moduleStatusNote} from '../src/renderer/capabilities-editor.mjs'
 import {memoryEmbeddingNote} from '../src/renderer/proactivity-panel.mjs'
 import * as viewPreferences from '../src/renderer/view-preferences.mjs'
+import * as iconSprite from '../src/renderer/icon-sprite.mjs'
+import {ICON_GLYPHS as iconSpriteGlyphs} from '../src/renderer/icon-artwork.mjs'
 const { createSettingsController, mergePatch, settingsButtonState } = settingsController
 
 const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
@@ -80,7 +82,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}, sandbox = {}) 
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    ...sandbox, NATIVE_VOICE_PROVIDERS, onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, ...viewPreferences, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage, moduleStatusNote,
+    ...sandbox, NATIVE_VOICE_PROVIDERS, onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, ...viewPreferences, ...iconSprite, createHubPanel: () => ({setActive() {}}), createPhonePanel, ...voicePreset, ...compatibleProviders, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage, moduleStatusNote,
     createSkinPanel: () => ({render() {}, destroy() {}}),
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
@@ -1218,6 +1220,35 @@ test('the sidebar renders one button per category with the first current', () =>
   assert.match(html, /id="category-general" data-category="general" aria-current="true">/)
   assert.equal((html.match(/class="nav-item"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length)
   assert.equal((html.match(/class="nav-item"[^>]*tabindex="-1"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length - 1)
+})
+
+test('sidebar and icon-button glyphs come from the shared sprite, injected at boot', () => {
+  // The static markup stays text-only: geometry and colour live in the sprite.
+  const nav = html.match(/<nav class="settings-nav"[\s\S]*?<\/nav>/)[0]
+  assert.doesNotMatch(nav, /<svg/, 'the static rail contains no icons')
+  assert.doesNotMatch(html, /--nav-icon/)
+  assert.doesNotMatch(css, /--nav-icon|nav-item::before/)
+  assert.match(css, /\.settings-nav \.nav-item \.ui-icon \{[^}]*width:\s*18px/)
+
+  // Boot installs the sprite once and prepends one <svg><use> per category.
+  assert.match(script, /import \{installIconSprite, icon\} from '\.\/icon-sprite\.mjs'/)
+  assert.match(script, /installIconSprite\(document\)/)
+  assert.match(script, /button\?\.dataset\?\.category/)
+  assert.match(script, /button\.prepend\(glyph\)/)
+  const mapping = script.match(/const NAV_GLYPHS = Object\.freeze\(\{([\s\S]*?)\}\)\n/)?.[1]
+  assert.ok(mapping, 'the rail keeps an explicit category-to-glyph table')
+  const glyphs = [...mapping.matchAll(/: '([a-z][a-z0-9-]*)'/g)].map(match => match[1])
+  for (const category of settingsCategories.SETTINGS_CATEGORIES) {
+    assert.match(mapping, new RegExp(`\\b${category.id}: '[a-z]`), `${category.id} gets a glyph`)
+  }
+  for (const glyph of glyphs) assert.ok(iconSpriteGlyphs.includes(glyph), `${glyph} exists in the sprite`)
+
+  // Decorative inline SVG is gone from settings.html; only the phone brand
+  // illustration stays inline, and #codex-rescan is filled by settings.mjs.
+  assert.equal((html.match(/<svg/g) || []).length, 1, 'only the phone illustration stays inline')
+  assert.match(html, /id="phone-illustration"[^>]*>\s*<svg/)
+  assert.match(html, /id="codex-rescan"[^>]*><\/button>/)
+  assert.doesNotMatch(html, /id="codex-rescan"[^>]*><svg/)
 })
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {

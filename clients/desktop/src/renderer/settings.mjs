@@ -13,8 +13,12 @@ import {createConnectionsPanel} from './connections-panel.mjs'
 import {createProactivityPanel, memoryEmbeddingNote} from './proactivity-panel.mjs'
 import {t, currentLanguage} from './locale.mjs'
 import {readDisplayPreferences, subscribeDisplayPreferences, writeDisplayPreferences} from './view-preferences.mjs'
+import {installIconSprite, icon} from './icon-sprite.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
+// Install the shared sprite before any panel renders an icon; the call is
+// idempotent, so lazy installs from iconNode() later stay no-ops.
+installIconSprite(document)
 import {createHubPanel} from './hub-panel.mjs'
 import {createPhonePanel} from './phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
@@ -214,6 +218,23 @@ displaySteps.addEventListener('change', () => writeDisplayPreferences({steps: di
 displayCollapse.addEventListener('change', () => writeDisplayPreferences({collapse: displayCollapse.value}))
 
 const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelector(`#category-${category.id}`))
+// One glyph per sidebar category, injected at boot so the static nav stays
+// text-only (readable without JS) while the sprite owns all icon geometry.
+const NAV_GLYPHS = Object.freeze({
+  general: 'gear', diary: 'calendar', themes: 'theme', usage: 'chart',
+  models: 'cube', skills: 'folder', capabilities: 'plus', connectors: 'chat',
+  permissions: 'lock', privacy: 'shield', knowledge: 'book', secrets: 'key',
+  hub: 'monitor', phone: 'phone', codex: 'code',
+})
+for (const [index, button] of categoryButtons.entries()) {
+  const category = button?.dataset?.category ?? SETTINGS_CATEGORIES[index].id
+  const glyph = icon(NAV_GLYPHS[category] ?? 'gear', {document, size: 18})
+  if (glyph) button.prepend(glyph)
+}
+{
+  const rescanGlyph = icon('refresh', {document, size: 18})
+  if (rescanGlyph) codexRescan.append(rescanGlyph)
+}
 let activeCategory = SETTINGS_CATEGORIES[0].id
 const skinPanel = createSkinPanel({document, stage: patch => controller.stage(patch), discard: () => controller.discardFields(['skinId', 'importedSkins'])})
 window.addEventListener('beforeunload', () => skinPanel.destroy(), {once: true})

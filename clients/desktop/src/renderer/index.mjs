@@ -3,6 +3,8 @@ import {mountWelcomeFlow} from './welcome-flow.mjs'
 import {mountPersonalView} from './personal-view.mjs'
 import {t} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
+import {installIconSprite} from './icon-sprite.mjs'
+installIconSprite(document)
 localizeDocument(document)
 import { WakeAudioRouter, canAutoSleep } from './wake-audio.mjs'
 import {DESKTOP_ACTIVITY, CLOCK_PING, PLAYBACK_CLEAR, PLAYBACK_ALERT, PLAYBACK_TERMINAL, EXECUTOR_STATE, PROJECT_STATE, CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULTS_RESET, EXECUTOR_RESULT, EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from './wire-frame-types.mjs'
