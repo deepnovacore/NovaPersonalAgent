@@ -820,3 +820,148 @@ test('the workbench waiting list sends a taskless approval to the dock instead o
   m.view.receive({type:'personal.result',request_id:present.request_id,ok:true,data:{mode:'workbench'}});await tick()
  }finally{c.disconnect();await tick()}
 })
+
+const traceState=(revision,messages)=>({type:'personal.state',revision,feed:[],memory:{entries:[]},tasks:[],conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat'}],messages,home_messages:[]}})
+const traceDetails=m=>m.all().filter(n=>n.className==='chat-tool-trace')
+
+test('a persisted tool trace renders as one collapsed card under its assistant turn',()=>{
+ setLanguage('en')
+ const m=mount({defaultHome:true})
+ try{
+  m.view.receive(traceState(1,[
+   {id:'u1',conversation_id:'chat:main',role:'user',text:'查一下我的安排',created_at:'2026-10-28T10:00:00Z'},
+   {id:'a1',conversation_id:'chat:main',role:'assistant',turn_id:'t1',text:'找到了两件事。',created_at:'2026-10-28T10:00:02Z',tool_trace:[
+    {name:'memory__recall',state:'ok',summary:'2 matching facts',args:{query:'secret query'},result:'raw result'},
+    {name:'search__search',state:'error',summary:'offline'},
+   ]},
+  ]))
+  const cards=traceDetails(m)
+  assert.equal(cards.length,1,'one card per assistant turn')
+  const card=cards[0]
+  assert.equal(card.tag,'details')
+  assert.equal(card.open,false,'the trace starts collapsed')
+  assert.equal(card.dataset.state,'error','an error stays visible in the aggregate dot')
+  assert.equal(card.dataset.live,'false')
+  const summary=card.children[0]
+  assert.equal(summary.children[0].className,'chat-tool-trace-dot')
+  assert.equal(summary.children[0].dataset.state,'error')
+  assert.equal(summary.children[1].textContent,'Tool calls · 2')
+  const rows=card.children[1].children
+  assert.equal(rows.length,2)
+  assert.equal(rows[0].dataset.state,'ok')
+  assert.equal(rows[0].children[1].textContent,'Search memory')
+  assert.equal(rows[0].children[2].textContent,'2 matching facts')
+  assert.equal(rows[1].children[1].textContent,'Web search')
+  assert.equal(rows[1].children[2].textContent,'offline')
+  const text=m.all().map(n=>n.textContent??'').join('\n')
+  assert.doesNotMatch(text,/secret query|raw result/,'arguments and results never render')
+  const article=m.all().find(n=>n.dataset.messageId==='a1')
+  const body=article.children.find(n=>n.className==='message-body')
+  assert.equal(body.children.at(-1),card,'the card sits under the reply text, not in the header')
+  const ids=m.all().filter(n=>n.dataset.messageId==='u1'||n.dataset.messageId==='a1').map(n=>n.dataset.messageId)
+  assert.deepEqual(ids,['u1','a1'],'existing message order is preserved')
+ }finally{setLanguage('zh-CN')}
+})
+
+test('live conversation.tool frames update one card per turn and retire when the reply is persisted',async()=>{
+ const m=mount({defaultHome:true})
+ const user={id:'u1',conversation_id:'chat:main',role:'user',text:'查一下我的安排',created_at:'2026-10-28T10:00:00Z'}
+ m.view.receive(traceState(1,[user]))
+ m.view.receive({type:'conversation.tool',conversation_id:'chat:main',turn_id:'t1',name:'memory__recall',state:'running',summary:'检索中',args:{query:'secret query'}})
+ await tick()
+ let cards=traceDetails(m)
+ assert.equal(cards.length,1,'retrieval shows before the first caption arrives')
+ assert.equal(cards[0].dataset.live,'true')
+ assert.equal(cards[0].dataset.state,'running')
+ assert.equal(cards[0].open,false)
+ assert.equal(cards[0].children[1].children.length,1)
+ const liveTurn=m.all().find(n=>typeof n.className==='string'&&n.className.includes('message-tool-trace-live'))
+ assert.ok(liveTurn,'the live trace opens its own assistant turn')
+ assert.doesNotMatch(m.all().map(n=>n.textContent??'').join('\n'),/secret query/,'frame extras never render')
+ m.view.receive({type:'conversation.tool',conversation_id:'chat:main',turn_id:'t1',name:'memory__recall',state:'ok',summary:'找到 2 条'})
+ await tick()
+ cards=traceDetails(m)
+ assert.equal(cards.length,1)
+ assert.equal(cards[0].dataset.state,'ok')
+ assert.equal(cards[0].children[1].children.length,1,'the same tool updates in place instead of duplicating')
+ assert.equal(cards[0].children[1].children[0].children[2].textContent,'找到 2 条')
+ m.view.receive({type:'conversation.tool',conversation_id:'chat:main',turn_id:'t1',name:'search__search',state:'running'})
+ await tick()
+ cards=traceDetails(m)
+ assert.equal(cards[0].children[1].children.length,2,'a second tool appends')
+ assert.equal(cards[0].children[0].children[1].textContent,'工具调用 · 2')
+ assert.equal(cards[0].dataset.state,'running','running outranks the finished call until it settles')
+ for(const frame of [
+  {type:'conversation.tool',conversation_id:'chat:main',turn_id:'t1',name:'',state:'ok'},
+  {type:'conversation.tool',conversation_id:'chat:main',turn_id:'t1',name:'memory__recall',state:'unknown'},
+  {type:'conversation.tool',conversation_id:'chat:main',turn_id:'',name:'memory__recall',state:'ok'},
+ ])m.view.receive(frame)
+ await tick()
+ assert.equal(traceDetails(m)[0].children[1].children.length,2,'malformed frames are ignored')
+ m.view.receive(traceState(2,[user,{id:'a1',conversation_id:'chat:main',role:'assistant',turn_id:'t1',text:'找到了两件事。',created_at:'2026-10-28T10:00:02Z',tool_trace:[
+  {name:'memory__recall',state:'ok',summary:'找到 2 条'},
+  {name:'search__search',state:'ok',summary:'2 results'},
+ ]}]))
+ await tick()
+ cards=traceDetails(m)
+ assert.equal(cards.length,1,'the durable reply replaces the live card instead of stacking on it')
+ assert.equal(cards[0].dataset.live,'false')
+ assert.equal(cards[0].dataset.state,'ok')
+ assert.equal(m.all().some(n=>typeof n.className==='string'&&n.className.includes('message-tool-trace-live')),false)
+})
+
+test('a live tool trace rides with its streamed caption instead of opening a second bubble',async()=>{
+ const m=mount({defaultHome:true})
+ const user={id:'u1',conversation_id:'chat:main',role:'user',text:'查一下我的安排',created_at:'2026-10-28T10:00:00Z'}
+ m.view.receive(traceState(1,[user]))
+ m.view.receive({type:'caption',role:'assistant',text:'我查一下。',full_text:'我查一下。',conversation_id:'chat:main',turn_id:'t1',final:false})
+ await tick()
+ m.view.receive({type:'conversation.tool',conversation_id:'chat:main',turn_id:'t1',name:'memory__recall',state:'running',summary:'检索中'})
+ await tick()
+ let cards=traceDetails(m)
+ assert.equal(cards.length,1)
+ assert.equal(m.all().some(n=>typeof n.className==='string'&&n.className.includes('message-tool-trace-live')),false,'the turn already has a caption bubble')
+ const bubble=m.all().find(n=>n!==cards[0]&&typeof n.className==='string'&&n.className.split(' ').includes('assistant')&&n.contains(cards[0]))
+ assert.ok(bubble,'the card sits inside the streaming reply bubble')
+ assert.ok(m.all().some(n=>String(n.textContent??'').includes('我查一下')||String(n.text??'').includes('我查一下')),'the swept caption is still the same bubble')
+ m.view.receive(traceState(2,[user,{id:'a1',conversation_id:'chat:main',role:'assistant',turn_id:'t1',text:'我查一下。找到了两件事。',created_at:'2026-10-28T10:00:02Z',tool_trace:[{name:'memory__recall',state:'ok',summary:'找到 2 条'}]}]))
+ await tick()
+ cards=traceDetails(m)
+ assert.equal(cards.length,1,'the persisted reply owns the turn; the caption and its live card retire together')
+ assert.equal(cards[0].dataset.live,'false')
+ assert.equal(m.all().some(n=>n.textContent==='我查一下。'||n.text==='我查一下。'),false,'the merged persisted text replaced the caption')
+ assert.ok(m.all().some(n=>String(n.text??'').includes('找到了两件事')),'the merged persisted reply is rendered')
+})
+
+test('a tool frame that arrives before its turn id is adopted by the turn instead of vanishing',async()=>{
+ const m=mount({defaultHome:true})
+ const user={id:'u1',conversation_id:'chat:main',role:'user',text:'查一下我的安排',created_at:'2026-10-28T10:00:00Z'}
+ m.view.receive(traceState(1,[user]))
+ // The runtime reports retrieval before the turn has streamed a caption, so no turn_id is available yet.
+ m.view.receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'running',summary:'检索中'})
+ await tick()
+ let cards=traceDetails(m)
+ assert.equal(cards.length,1)
+ assert.equal(cards[0].dataset.state,'running')
+ m.view.receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'ok',summary:'找到 2 条'})
+ await tick()
+ cards=traceDetails(m)
+ assert.equal(cards.length,1,'a completion without a turn id updates the same row')
+ assert.equal(cards[0].children[1].children.length,1)
+ m.view.receive({type:'caption',role:'assistant',text:'我查一下。',full_text:'我查一下。',conversation_id:'chat:main',turn_id:'t1',final:false})
+ await tick()
+ cards=traceDetails(m)
+ assert.equal(cards.length,1,'the announced turn adopts the anonymous card')
+ assert.equal(m.all().some(n=>typeof n.className==='string'&&n.className.includes('message-tool-trace-live')),false)
+ assert.equal(cards[0].children[1].children[0].children[1].textContent,'检索记忆')
+ m.view.receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'ok',summary:'找到 3 条'})
+ await tick()
+ cards=traceDetails(m)
+ assert.equal(cards.length,1)
+ assert.equal(cards[0].children[1].children[0].children[2].textContent,'找到 3 条','a late anonymous update still finds the adopted turn')
+ m.view.receive(traceState(2,[user,{id:'a1',conversation_id:'chat:main',role:'assistant',turn_id:'t1',text:'我查一下。找到了两件事。',created_at:'2026-10-28T10:00:02Z',tool_trace:[{name:'memory__recall',state:'ok',summary:'找到 3 条'}]}]))
+ await tick()
+ cards=traceDetails(m)
+ assert.equal(cards.length,1,'the durable reply takes over without a ghost card')
+ assert.equal(cards[0].dataset.live,'false')
+})
