@@ -97,6 +97,16 @@ test('a Feishu login whose link request fails leaves the phone signed out, not c
  try{assert.equal((await f.send('phone','login','connector.feishu',{action:'login'})).status,'rejected');
   const snap=f.space.snapshot('phone') as unknown as {host_feishu:Record<string,unknown>};assert.equal(snap.host_feishu.connected,false);
  }finally{await f.close()}
- const ok=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:true,state:'ready',account_id:'acct'}),command:()=>Promise.resolve({available:true,configured:true,state:'ready',account_id:'acct'}),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ const ok=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:true,state:'ready',signed_in:true,account_id:'acct'}),command:()=>Promise.resolve({available:true,configured:true,state:'ready',signed_in:true,account_id:'acct'}),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
  try{const r=await ok.send('phone','done','connector.feishu',{action:'complete'});assert.equal((r.result as Record<string,unknown>).connected,true);assert.equal(JSON.stringify(r.result).includes('acct'),false)}finally{await ok.close()}
+});
+
+test('after logout a failed re-login keeps the phone signed out though the account id is retained',async()=>{
+ let signed=true;const view=()=>({available:true,configured:true,state:signed?'ready':'paused',signed_in:signed,account_id:'acct'});
+ const f=await fixture({owner:'phone',feishuConnector:{snapshot:view,command:method=>{if(method==='feishu.disconnect'){signed=false;return Promise.resolve(view())}if(method==='feishu.login')return Promise.reject(Error('lark_cli_failed'));return Promise.resolve(view())},open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ try{assert.equal((f.space.snapshot('phone') as unknown as {host_feishu:{connected:boolean}}).host_feishu.connected,true);
+  assert.equal((await f.send('phone','out','connector.feishu',{action:'logout'})).status,'accepted');
+  assert.equal((await f.send('phone','in','connector.feishu',{action:'login'})).status,'rejected');
+  assert.equal((f.space.snapshot('phone') as unknown as {host_feishu:{connected:boolean}}).host_feishu.connected,false);
+ }finally{await f.close()}
 });
