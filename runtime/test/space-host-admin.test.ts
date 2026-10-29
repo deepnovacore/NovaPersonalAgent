@@ -8,13 +8,14 @@ import {SuggestionPool} from '../src/core/suggestions.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets} from '../src/space-host/host-admin.js';
 
-async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean}={}){
+async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0]}={}){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-admin-')),sent:Record<string,unknown>[]=[];const calls:string[]=[];
  const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone','other']};
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  if(options.feishu)host.setFeishu({snapshot:()=>({available:true,configured:true,state:'unauthorized',auth_issue:'login_required',account_id:'tenant-secret',app_setup:{state:'idle'}}),command:(method)=>{calls.push(method);return Promise.resolve({available:true,configured:true,state:'unauthorized',account_id:'tenant-secret',verification_url:method==='feishu.login'?'https://accounts.feishu.cn/device?code=x':'https://evil.example/x',chats:[]})},open:()=>Promise.resolve(),close:()=>Promise.resolve()});
+ if(options.feishuConnector)host.setFeishu(options.feishuConnector);
  const secrets=new HostSecretStore(join(dir,'config.json.secrets.json')),env=options.env??{};
- const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>options.owner,secrets,environment:env});
+ const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>options.owner,secrets,environment:env,feishuPollMs:10});
  await host.open({deferBackground:true});await space.open();
  const stamps=new Map<string,number>(),send=async(from:string,op_id:string,kind:string,input:Record<string,unknown>)=>{if(!stamps.has(op_id))stamps.set(op_id,Date.now());await space.receive(from,{v:1,type:'intent',op_id,kind,input,created_at:stamps.get(op_id)});return sent.filter(row=>row.type==='receipt'&&row.op_id===op_id).at(-1)!};
  return {dir,host,space,send,sent,calls,secrets,close:async()=>{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}};
@@ -62,5 +63,22 @@ test('connector.feishu routes to host commands and exposes only validated, secre
   const bad=await f.send('phone','st','connector.feishu',{action:'status'});assert.equal((bad.result as Record<string,unknown>).verification_url,undefined);
   assert.equal((await f.send('phone','x','connector.feishu',{action:'bind'})).status,'rejected');
   const snap=f.space.snapshot('phone') as unknown as {host_feishu:Record<string,unknown>};assert.equal(snap.host_feishu.auth_issue,'login_required');assert.equal(JSON.stringify(snap).includes('tenant-secret'),false);
+ }finally{await f.close()}
+});
+
+test('an untouched secrets file does not block the next Host start',async()=>{
+ const f=await fixture({owner:'phone'});
+ try{const path=join(f.dir,'config.json.secrets.json');assert.equal((await stat(path)).size,0);assert.deepEqual(overlaySpaceSecrets({A:'1'},join(f.dir,'config.json')),{A:'1'});
+  await f.space.close();await f.space.open();assert.equal((await f.send('phone','put','secret.put',{name:'OPENAI_API_KEY',value:'sk-after-restart'})).status,'accepted');
+ }finally{await f.close()}
+});
+
+test('Feishu app setup link generated after app.start reaches the owner snapshot',async()=>{
+ let polls=0;const url='https://open.feishu.cn/page/cli?code=late';
+ const view=(withUrl:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting',...(withUrl?{verification_url:url}:{})}});
+ const f=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting'}}),command:method=>Promise.resolve(method==='feishu.app.status'?view(++polls>=2):view(false)),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ try{const start=await f.send('phone','setup','connector.feishu',{action:'app.start'});assert.equal(start.status,'accepted');assert.equal(((start.result as Record<string,unknown>).app_setup as Record<string,unknown>).verification_url,undefined);
+  for(let i=0;i<100&&!f.sent.some(row=>row.type==='snapshot'&&JSON.stringify(row).includes('code=late'));i++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.ok(polls>=2);const snap=f.sent.filter(row=>row.type==='snapshot').at(-1) as {snapshot:{host_feishu:{app_setup:{verification_url:string}}}};assert.equal(snap.snapshot.host_feishu.app_setup.verification_url,url);
  }finally{await f.close()}
 });
