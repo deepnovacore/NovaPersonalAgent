@@ -49,12 +49,23 @@ test('headless pairing end to end: relay, controller, admin socket, CLI pair, re
  const args=(yesFingerprint?:string)=>({command:'pair' as const,configPath,timeoutSeconds:10,...yesFingerprint?{yesFingerprint}:{}});
  await assert.rejects(runSpacePair(args(),io([])),/space_pair_requires_tty/);
  await requestPairing();
- const wrong:string[]=[];assert.equal(await runSpacePair(args('wrong'),io(wrong)),1);assert.match(wrong.join(''),/未绑定/);assert.deepEqual((await spaceAdminRequest(socket,'status') as {clients:string[]}).clients,[]);
+ const wrong:string[]=[];assert.equal(await runSpacePair({...args('wrong'),timeoutSeconds:1},io(wrong)),1);assert.match(wrong.join(''),/未绑定/);assert.deepEqual((await spaceAdminRequest(socket,'status') as {clients:string[]}).clients,[]);
+ // An abandoned request from another phone stays pending; whichever order the relay lists them, the intended phone pairs.
+ const stale=await crypto.generateDeviceIdentity(),sp=make(stale);cleanup.push(()=>sp.stop());{const invitation=await spaceAdminRequest(socket,'invitation') as {id:string;secret:string};const input={v:1,purpose:'pair-request',invitationId:invitation.id,secret:invitation.secret,device:stale.device,signingPublicKey:stale.signingPublicKey,encryptionPublicKey:stale.encryptionPublicKey,business_versions:[1]};await sp.requestPairing({...input,proof:await crypto.signControl(input,stale.signingPrivateKey)})}
  const out:string[]=[];assert.equal(await runSpacePair(args(fingerprint),io(out)),0);assert.ok(out.join('').includes(fingerprint));
  assert.deepEqual((await spaceAdminRequest(socket,'status') as {clients:string[]}).clients,[phone.device]);
  assert.deepEqual(await main(['devices','--config',configPath]),0);
  await spaceAdminRequest(socket,'revoke',{device:phone.device});
  assert.deepEqual((await spaceAdminRequest(socket,'status') as {clients:string[]}).clients,[]);
+ // Interactive: rejecting an unrelated request skips it and keeps waiting for the right phone (relay order varies).
+ const decoy=await crypto.generateDeviceIdentity(),pd=make(decoy);cleanup.push(()=>pd.stop());
+ const second=await crypto.generateDeviceIdentity(),p2=make(second),secondFp=crypto.deviceFingerprint(second.signingPublicKey,second.encryptionPublicKey);cleanup.push(()=>p2.stop());
+ {const invitation=await spaceAdminRequest(socket,'invitation') as {id:string;secret:string};const input={v:1,purpose:'pair-request',invitationId:invitation.id,secret:invitation.secret,device:second.device,signingPublicKey:second.signingPublicKey,encryptionPublicKey:second.encryptionPublicKey,business_versions:[1]};await p2.requestPairing({...input,proof:await crypto.signControl(input,second.signingPrivateKey)})}
+ {const invitation=await spaceAdminRequest(socket,'invitation') as {id:string;secret:string};const input={v:1,purpose:'pair-request',invitationId:invitation.id,secret:invitation.secret,device:decoy.device,signingPublicKey:decoy.signingPublicKey,encryptionPublicKey:decoy.encryptionPublicKey,business_versions:[1]};await pd.requestPairing({...input,proof:await crypto.signControl(input,decoy.signingPrivateKey)})}
+ const interactive:string[]=[];
+ assert.equal(await runSpacePair(args(),{...io(interactive,()=>Promise.resolve(interactive.at(-1)!.includes(secondFp))),interactive:true}),0);
+ const text=interactive.join('');assert.equal(text.includes('已跳过该请求'),/指纹：(\S+)/.exec(text)![1]!==secondFp);assert.deepEqual((await spaceAdminRequest(socket,'status') as {clients:string[]}).clients,[second.device]);
+ await spaceAdminRequest(socket,'revoke',{device:second.device});
  const timeout:string[]=[];assert.equal(await runSpacePair({...args(fingerprint),timeoutSeconds:1},io(timeout)),1);assert.match(timeout.join(''),/超时/);
  await host.close();await assert.rejects(spaceAdminRequest(socket,'status'),/space_host_not_running/);
 });

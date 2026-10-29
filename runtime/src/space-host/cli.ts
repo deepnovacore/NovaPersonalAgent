@@ -55,17 +55,18 @@ export async function runSpacePair(options:SpaceAdminArgs,io:SpacePairIo):Promis
  if(!io.interactive&&!options.yesFingerprint)throw Error('space_pair_requires_tty');
  const invitation=await spaceAdminRequest(socket,'invitation');
  io.output.write('在手机 Nova 选择「连接 Host」→「扫描 Host 邀请码」，扫描下方二维码（一次性，Ctrl+C 取消）：\n'+await renderInvitationQr(invitation)+'等待手机发起配对…\n');
- const deadline=Date.now()+options.timeoutSeconds*1000;
+ const deadline=Date.now()+options.timeoutSeconds*1000,skipped=new Set<string>();
  while(!io.signal.aborted){
-  const request=pairingRows(await spaceAdminRequest(socket,'pairings'))[0];
+  // Older abandoned requests stay pending until expiry; never let one block the intended phone.
+  const rows=pairingRows(await spaceAdminRequest(socket,'pairings')).filter(row=>!skipped.has(row.id));
+  const request=options.yesFingerprint!==undefined?rows.find(row=>row.fingerprint===options.yesFingerprint):rows[0];
   if(request){
    io.output.write(`收到配对请求：设备 ${request.device}\n指纹：${request.fingerprint}\n`);
-   const matched=options.yesFingerprint!==undefined?options.yesFingerprint===request.fingerprint:await io.confirm('确认该手机指纹与手机上显示一致？[y/N] ');
-   if(!matched){io.output.write(options.yesFingerprint!==undefined?'指纹与 --yes-fingerprint 不一致，未绑定。\n':'已拒绝，未绑定。\n');return 1}
+   if(options.yesFingerprint===undefined&&!await io.confirm('确认该手机指纹与手机上显示一致？[y/N] ')){skipped.add(request.id);io.output.write('已跳过该请求，继续等待…\n');continue}
    await spaceAdminRequest(socket,'confirm_pairing',{id:request.id,fingerprint:request.fingerprint});
    io.output.write(`已绑定设备 ${request.device}\n`);return 0;
   }
-  if(Date.now()>=deadline){io.output.write('等待配对超时，请重新运行 pair。\n');return 1}
+  if(Date.now()>=deadline){io.output.write(options.yesFingerprint!==undefined&&skipped.size+rows.length>0?'没有指纹与 --yes-fingerprint 一致的请求，未绑定。\n':'等待配对超时，请重新运行 pair。\n');return 1}
   await delay(io.pollMs??2000,undefined,{signal:io.signal}).catch(()=>undefined);
  }
  io.output.write('已取消配对。\n');return 1;
