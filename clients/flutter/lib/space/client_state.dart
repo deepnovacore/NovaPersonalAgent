@@ -435,6 +435,10 @@ class SpaceClientState extends ChangeNotifier {
         'notifications',
         'chat',
         'processing_provider',
+        'owner',
+        'host_settings',
+        'host_credentials',
+        'host_feishu',
       ])
         if (value.containsKey(key)) key: value[key],
       if (processing is Map)
