@@ -65,7 +65,7 @@ class ProfileBudget {
         )) {
       throw const AgentFailure('profile_budget_model_unsupported');
     }
-    final body = modelRequestBody(model, messages, []);
+    final body = modelRequestBody(model, messages, [], disableThinking: true);
     // UTF-8 bytes bound text tokens; reserve extra framing and twice list price.
     final input =
         utf8.encode(jsonEncode(body)).length + 4096 + messages.length * 128;

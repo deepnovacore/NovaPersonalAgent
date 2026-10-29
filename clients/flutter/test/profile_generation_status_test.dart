@@ -170,4 +170,87 @@ void main() {
       c.dispose();
     },
   );
+
+  testWidgets(
+    'waiting hint replaces the default copy and offers an optional action',
+    (tester) async {
+      final c = ProfileGenerationCoordinator(
+        persistence: MemoryLifePersistence(),
+        autoSchedule: false,
+        inspect: () async => null,
+        generate:
+            ({required savedObservationsOnly, required maxNewBatches}) async =>
+                fail('UI test must not generate'),
+        cancel: () {},
+        failureCode: (e) => '$e',
+      );
+      var opened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProfileGenerationStatus(
+              generation: c,
+              waitingHint: '打开连接器并连接数据源，之后会自动整理到这里。',
+              onOpenConnectors: () => opened++,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('打开连接器并连接数据源，之后会自动整理到这里。'), findsOneWidget);
+      expect(find.text('消息同步后，会自动整理到这里'), findsNothing);
+      await tester.tap(find.text('打开连接器'));
+      expect(opened, 1);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ProfileGenerationStatus(generation: c)),
+        ),
+      );
+      expect(find.text('消息同步后，会自动整理到这里'), findsOneWidget);
+      expect(find.text('打开连接器'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    },
+  );
+
+  testWidgets('connect action is not shown outside the waiting phase', (
+    tester,
+  ) async {
+    final c = ProfileGenerationCoordinator(
+      persistence: MemoryLifePersistence(),
+      autoSchedule: false,
+      inspect: () async => null,
+      generate:
+          ({required savedObservationsOnly, required maxNewBatches}) async =>
+              fail('UI test must not generate'),
+      cancel: () {},
+      failureCode: (e) => '$e',
+    );
+    var opened = 0;
+    for (final phase in [
+      ProfileGenerationPhase.working,
+      ProfileGenerationPhase.ready,
+      ProfileGenerationPhase.paused,
+    ]) {
+      c.phase = phase;
+      if (phase == ProfileGenerationPhase.paused) {
+        c.code = 'profile_budget_exhausted';
+      }
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProfileGenerationStatus(
+              generation: c,
+              empty: true,
+              onOpenConnectors: () => opened++,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('打开连接器'), findsNothing, reason: '$phase');
+      await tester.pumpWidget(const SizedBox());
+    }
+    expect(opened, 0);
+    c.dispose();
+  });
 }

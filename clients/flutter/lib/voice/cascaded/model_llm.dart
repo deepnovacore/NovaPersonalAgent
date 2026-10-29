@@ -12,6 +12,7 @@ class ChatCompletionsCascadeLlm implements CascadeLlm {
            (() => ModelClient(
              maxOutputBytes: 32000,
              maxDuration: const Duration(minutes: 2),
+             disableThinking: true,
            ));
   final ModelConfiguration configuration;
   final ModelClient Function() clientFactory;

@@ -126,11 +126,11 @@ class _ConversationHomeState extends State<ConversationHome> {
               thumbColor: Nova.sheetCell,
               children: {
                 false: Text(
-                  t('任务', 'Tasks'),
+                  t('全部', 'All'),
                   style: const TextStyle(color: Nova.text, fontSize: 13),
                 ),
                 true: Text(
-                  t('定时', 'Schedules'),
+                  t('定时', 'Scheduled'),
                   style: const TextStyle(color: Nova.text, fontSize: 13),
                 ),
               },

@@ -126,7 +126,7 @@ test('the default settings are the documented schema', () => {
     clarificationDepth: 'balanced',
     planReadback: 'summary',
     generatePlan: true,
-    buildReasoning: false,
+    buildReasoning: true,
     profileParticipantMessages: false,
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
@@ -140,11 +140,12 @@ test('the default settings are the documented schema', () => {
   assert.deepEqual([...SECRET_KEYS], ALL_SECRET_KEYS)
 })
 
-test('buildReasoning is a boolean host switch that defaults off and survives a round trip', () => {
-  assert.equal(normalizeSettings({}).buildReasoning, false)
+test('buildReasoning is a boolean host switch that defaults on and survives a round trip', () => {
+  assert.equal(normalizeSettings({}).buildReasoning, true)
   assert.equal(normalizeSettings({buildReasoning: true}).buildReasoning, true)
-  assert.equal(normalizeSettings({buildReasoning: 'yes'}).buildReasoning, false)
-  assert.equal(normalizeSettings({buildReasoning: 1}).buildReasoning, false)
+  assert.equal(normalizeSettings({buildReasoning: 'yes'}).buildReasoning, true)
+  assert.equal(normalizeSettings({buildReasoning: 1}).buildReasoning, true)
+  assert.equal(normalizeSettings({buildReasoning: false}).buildReasoning, false)
   assert.equal(publicSettings({buildReasoning: true}).buildReasoning, true)
   assert.equal(publicSettings({buildReasoning: false}).buildReasoning, false)
 })
@@ -326,7 +327,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     clarificationDepth: 'balanced',
     planReadback: 'summary',
     generatePlan: true,
-    buildReasoning: false,
+    buildReasoning: true,
     profileParticipantMessages: false,
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',

@@ -131,6 +131,8 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     defer {
       if let id = value.spaceId, let file = try? folder(spaceId: id).appendingPathComponent(value.id + ".request") { try? FileManager.default.removeItem(at: file) }
     }
+    // Deliver already-parsed thinking even when the same batch ends in an error.
+    flush(value)
     NovaBackgroundExecution.modelTransferFinished(value.id)
     let result: Result<[String: Any], Error>
     do {
@@ -148,7 +150,7 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
       guard http.statusCode == 200 else { throw LocalAgentError("model_http_\(http.statusCode)") }
       if let parser = value.parser, task.response?.mimeType == "text/event-stream" {
         guard parser.finished else { throw LocalAgentError("model_stream_interrupted") }
-        flush(value); result = .success(parser.response())
+        result = .success(parser.response())
       } else {
       guard let object = try JSONSerialization.jsonObject(with: value.data) as? [String: Any], (object["error"] == nil || object["error"] is NSNull) else { throw LocalAgentError("invalid_model_response") }
       result = .success(object)

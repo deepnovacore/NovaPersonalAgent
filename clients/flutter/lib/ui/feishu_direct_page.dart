@@ -13,6 +13,7 @@ import '../agent_core/model_client.dart';
 import '../context/local_publication.dart';
 import '../context/profile_agent.dart';
 import '../context/profile_corrections.dart';
+import 'components.dart';
 import 'local_profile_results.dart';
 import 'theme.dart';
 import 'profile_generation_status.dart';
@@ -88,6 +89,13 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
   FeishuAuthorizationSession? session;
   bool _busy = false, polling = false, hasMoreChats = false;
   bool get busy => _busy || host.collection.running;
+
+  /// Page-owned connection actions (browser registration and manual binding)
+  /// must stay usable while a long sync is running; only the page's own
+  /// in-flight work and an open browser session block them.
+  bool get bindBusy => _busy || session != null;
+  bool manualBind = false;
+  String? bindError;
   bool registering = false;
   List<Map<String, dynamic>> get chats => host.collection.chats;
   Timer? timer;
@@ -191,6 +199,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
       MaterialPageRoute(
         builder: (routeContext) => StatefulBuilder(
           builder: (context, refresh) => Scaffold(
+            backgroundColor: Nova.ink,
             appBar: AppBar(
               title: Text(t('近况与个人信息', 'Updates and personal info')),
             ),
@@ -348,6 +357,47 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
     session = await host.auth.beginAppRegistration(brand);
     registering = true;
     await _openSession();
+  }
+
+  /// Manual binding for an app the user already created in the Feishu console.
+  /// It deliberately ignores [host.collection.running]: a long sync must not
+  /// keep credentials from being entered. Identity and collection state are
+  /// handed back to the host through [FeishuHost.synchronizeIdentity].
+  Future<void> _bindExisting() async {
+    if (_busy) return;
+    final appId = app.text.trim(), appSecret = secret.text.trim();
+    final invalid = !appId.startsWith('cli_')
+        ? t('应用 ID 需以 cli_ 开头。', 'App ID must start with cli_.')
+        : appSecret.isEmpty
+        ? t('请填写 App Secret。', 'Enter the App Secret.')
+        : null;
+    if (invalid != null) {
+      setState(() {
+        bindError = invalid;
+        error = null;
+      });
+      return;
+    }
+    setState(() {
+      _busy = true;
+      bindError = null;
+      error = null;
+    });
+    try {
+      await host.auth.bindApp(brand: brand, appId: appId, secret: appSecret);
+      secret.clear();
+      await host.synchronizeIdentity();
+      if (mounted) {
+        setState(() {
+          manualBind = false;
+          bindError = null;
+        });
+      }
+    } catch (failure) {
+      if (mounted) setState(() => bindError = _message(failure));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _openSession() async {
@@ -551,6 +601,9 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    // Opaque background: the page is pushed over the translucent shell, and a
+    // transparent Scaffold leaves the previous tab visible mid-transition.
+    backgroundColor: Nova.ink,
     appBar: AppBar(title: Text(t('飞书', 'Feishu'))),
     body: ListView(
       padding: const EdgeInsets.all(20),
@@ -563,58 +616,92 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
             ),
           ),
           const SizedBox(height: 16),
-        ],
-        if (!host.auth.configured) ...[
-          DropdownButtonFormField<String>(
-            initialValue: brand,
-            items: const [
-              DropdownMenuItem(value: 'feishu', child: Text('飞书')),
-              DropdownMenuItem(value: 'lark', child: Text('Lark')),
-            ],
-            onChanged: busy ? null : (value) => setState(() => brand = value!),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            t(
-              '前往飞书网页创建并绑定应用，无需复制密钥。已有应用可在下方手动绑定。',
-              'Create and connect an app on the Feishu website without copying keys. You can also connect an existing app below.',
-            ),
-          ),
-          FilledButton(
-            onPressed: busy || session != null ? null : () => _run(_register),
-            child: Text(t('前往飞书绑定应用', 'Connect an app in Feishu')),
-          ),
-          ExpansionTile(
-            title: Text(t('手动绑定已有应用', 'Connect an existing app manually')),
+          NovaSection(
+            margin: const EdgeInsets.only(bottom: 12),
+            header: t('连接应用', 'CONNECT AN APP'),
             children: [
-              TextField(
-                controller: app,
-                autocorrect: false,
-                decoration: const InputDecoration(labelText: 'App ID'),
+              NovaTile(
+                leading: const NovaIconTile(CupertinoIcons.add),
+                title: t('通过飞书网页绑定', 'Connect in Feishu'),
+                subtitle: Text(
+                  t(
+                    '在飞书网页创建新应用，或直接选择已有应用；无需复制密钥。',
+                    'Create a new app or choose an existing one in Feishu; no keys to copy.',
+                  ),
+                ),
+                trailing: const CupertinoListTileChevron(),
+                onTap: busy || session != null ? null : () => _run(_register),
               ),
-              TextField(
-                controller: secret,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: const InputDecoration(labelText: 'App Secret'),
-              ),
-              TextButton(
-                onPressed: busy || session != null
+              NovaTile(
+                leading: const NovaIconTile(CupertinoIcons.link),
+                title: t('手动绑定已有应用', 'Connect an existing app manually'),
+                subtitle: Text(
+                  t(
+                    '已有 App ID 和 App Secret 时使用。',
+                    'Use this when you already have an App ID and App Secret.',
+                  ),
+                ),
+                trailing: const CupertinoListTileChevron(),
+                onTap: bindBusy
                     ? null
-                    : () => _run(() async {
-                        await host.auth.bindApp(
-                          brand: brand,
-                          appId: app.text.trim(),
-                          secret: secret.text.trim(),
-                        );
-                        secret.clear();
-                        await host.synchronizeIdentity();
+                    : () => setState(() {
+                        manualBind = !manualBind;
+                        bindError = null;
                       }),
-                child: Text(t('绑定应用', 'Connect app')),
               ),
             ],
           ),
+          if (manualBind) ...[
+            Text(
+              t(
+                '在飞书开放平台的应用详情中，找到「凭证与基础信息」。',
+                'Find these under Credentials & Basic Info in the Feishu Open Platform app details.',
+              ),
+              style: const TextStyle(color: Nova.secondary, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: brand,
+              decoration: InputDecoration(labelText: t('应用品牌', 'App brand')),
+              items: const [
+                DropdownMenuItem(value: 'feishu', child: Text('飞书')),
+                DropdownMenuItem(value: 'lark', child: Text('Lark')),
+              ],
+              onChanged: bindBusy
+                  ? null
+                  : (value) => setState(() => brand = value!),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: app,
+              autocorrect: false,
+              enabled: !bindBusy,
+              decoration: const InputDecoration(labelText: 'App ID'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: secret,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              enabled: !bindBusy,
+              decoration: const InputDecoration(labelText: 'App Secret'),
+            ),
+            if (bindError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  bindError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: bindBusy ? null : _bindExisting,
+              child: Text(t('绑定应用', 'Connect app')),
+            ),
+            const SizedBox(height: 4),
+          ],
         ] else ...[
           ListTile(
             leading: const Icon(CupertinoIcons.chat_bubble_2),

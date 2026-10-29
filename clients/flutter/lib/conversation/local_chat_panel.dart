@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import '../ui/theme.dart';
 import '../ui/chat_activity.dart';
+import '../ui/thinking_block.dart';
 import 'phone_dictation.dart';
 import 'package:nova_audio/nova_audio.dart';
 import '../voice/voice_settings.dart';
@@ -745,8 +746,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       'The model provider connection was interrupted.',
     ),
     'model_output_limit' => t(
-      '作品源码超出本次输出长度，请让 Nova 分步完成。',
-      'The source exceeded this response limit. Ask Nova to build it in steps.',
+      '这次生成达到模型输出上限，请让 Nova 分步完成。',
+      'This generation reached the model output limit. Ask Nova to build it in steps.',
     ),
     'tool_round_limit' => t(
       '已达到本轮操作上限，可以继续对话。',
@@ -774,18 +775,19 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     }
   }
 
-  Widget _message(Map message) {
+  Widget _message(Map message, {Set<String>? seenPreviews}) {
     if (message['role'] == 'tool') {
       String status = '';
-      String? preview, title;
+      String? preview, title, previewKey;
       try {
         final result = jsonDecode(message['content'] as String) as Map;
         status = result['status'] as String? ?? '';
         final data = result['data'];
-        if (data is Map) {
+        if (data is Map && message['tool_name'] != 'file_read') {
           if (data['artifact'] is Map) {
             final artifact = data['artifact'] as Map;
             preview = artifact['id'] as String?;
+            previewKey = preview;
             title = artifact['title'] as String?;
           } else if (data['path'] is String &&
               RegExp(
@@ -793,6 +795,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                 caseSensitive: false,
               ).hasMatch(data['path'] as String)) {
             preview = data['url'] as String? ?? data['path'] as String;
+            previewKey = data['path'] as String;
             title = (data['path'] as String).split('/').last;
           }
         }
@@ -800,6 +803,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       if (status == 'completed' &&
           preview != null &&
           widget.host.tools?.registry.workspace != null) {
+        if (seenPreviews != null && !seenPreviews.add(previewKey!)) {
+          return const SizedBox.shrink();
+        }
         final target = preview;
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
@@ -830,9 +836,24 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       }
       return const SizedBox.shrink();
     }
-    if (message['tool_calls'] != null) return const SizedBox.shrink();
+    final reasoning =
+        message['role'] == 'assistant' && message['reasoning_content'] is String
+        ? (message['reasoning_content'] as String).trim()
+        : '';
+    if (message['tool_calls'] != null) {
+      if (reasoning.isEmpty) return const SizedBox.shrink();
+      // A tool-call turn has no visible answer, but its thinking is real.
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 24),
+        child: ThinkingBlock(
+          key: ValueKey('thinking:${message['time']}'),
+          text: reasoning,
+          language: widget.language,
+        ),
+      );
+    }
     final text = message['content'] as String;
-    if (text.isEmpty) return const SizedBox.shrink();
+    if (text.isEmpty && reasoning.isEmpty) return const SizedBox.shrink();
     final user = message['role'] == 'user';
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
@@ -853,16 +874,28 @@ class LocalChatPanelState extends State<LocalChatPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (user)
-                SelectableText(
-                  text,
-                  style: const TextStyle(fontSize: 16, height: 1.5),
-                )
-              else
-                DefaultTextStyle.merge(
-                  style: const TextStyle(fontSize: 16, height: 1.6),
-                  child: AssistantText(text, onArtifactLink: _openArtifact),
+              if (reasoning.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: ThinkingBlock(
+                    key: ValueKey('thinking:${message['time']}'),
+                    text: reasoning,
+                    language: widget.language,
+                  ),
                 ),
+              if (text.isNotEmpty)
+                user
+                    ? SelectableText(
+                        text,
+                        style: const TextStyle(fontSize: 16, height: 1.5),
+                      )
+                    : DefaultTextStyle.merge(
+                        style: const TextStyle(fontSize: 16, height: 1.6),
+                        child: AssistantText(
+                          text,
+                          onArtifactLink: _openArtifact,
+                        ),
+                      ),
               if (user &&
                   (message['voice_transcript_final'] == false ||
                       message['voice_input_origin_verified'] == false))
@@ -899,6 +932,16 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           host.busy && host.activeConversationId == widget.conversationId;
       final conversation = host.store.conversation(widget.conversationId);
       final messages = conversation['messages'] as List;
+      final messageWidgets = <Widget>[];
+      final seenPreviews = <String>{};
+      // Walk backwards so each user turn keeps its last successful preview.
+      for (final message in messages.reversed) {
+        if (message['role'] == 'user') seenPreviews.clear();
+        messageWidgets.add(
+          _message(message as Map, seenPreviews: seenPreviews),
+        );
+      }
+      final liveReasoning = host.reasoning.trim();
       return LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxHeight < 260;
@@ -971,8 +1014,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                               ScrollViewKeyboardDismissBehavior.onDrag,
                           padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
                           children: [
-                            for (final message in messages)
-                              _message(message as Map),
+                            ...messageWidgets.reversed,
                             if (host.pendingUserText.isNotEmpty &&
                                 host.activeConversationId ==
                                     widget.conversationId)
@@ -1017,11 +1059,35 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                         : t('正在回复', 'Writing the reply'),
                                   _ => t('正在处理', 'Working'),
                                 },
+                                summary: host.draft.isEmpty
+                                    ? thinkingSummary(liveReasoning)
+                                    : null,
                                 startedAt: host.turnStartedAt ?? DateTime.now(),
                                 language: widget.language,
                                 details: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    if (liveReasoning.isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 10,
+                                        ),
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxHeight: 320,
+                                          ),
+                                          child: SingleChildScrollView(
+                                            child: SelectableText(
+                                              liveReasoning,
+                                              style: const TextStyle(
+                                                color: Nova.secondary,
+                                                fontSize: 13,
+                                                height: 1.5,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     if (host.activeTool != null)
                                       Text(
                                         host.activeTool!,
@@ -1046,12 +1112,17 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                           ),
                                         ),
                                       )
-                                    else
+                                    else if (liveReasoning.isEmpty)
                                       Text(
-                                        t(
-                                          '正在等待模型输出；收到内容后会显示在这里。',
-                                          'Waiting for model output; received content will appear here.',
-                                        ),
+                                        host.draft.isEmpty
+                                            ? t(
+                                                '正在等待模型输出；收到内容后会显示在这里。',
+                                                'Waiting for model output; received content will appear here.',
+                                              )
+                                            : t(
+                                                '正在接收回复…',
+                                                'Receiving the reply…',
+                                              ),
                                         style: const TextStyle(
                                           color: Nova.secondary,
                                           fontSize: 13,

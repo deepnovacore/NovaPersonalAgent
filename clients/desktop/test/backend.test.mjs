@@ -314,7 +314,7 @@ test('plan generation settings override the parent environment and preserve expl
 })
 
 test('Build reasoning capture reaches the runtime as an explicit boolean', () => {
-  for (const [settings, expected] of [[undefined, 'false'], [{}, 'false'], [{buildReasoning: false}, 'false'], [{buildReasoning: true}, 'true']]) {
+  for (const [settings, expected] of [[undefined, 'true'], [{}, 'true'], [{buildReasoning: false}, 'false'], [{buildReasoning: true}, 'true']]) {
     const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152',
       parentEnv: {NOVA_BUILD_REASONING: 'true'}, settings})
     assert.equal(spec.env.NOVA_BUILD_REASONING, expected)

@@ -223,7 +223,7 @@ export const settingsSchema = z.object({
   local_tool_approval: z.enum(['ask','never']).default('ask'),
   clarification_depth: clarificationDepthSchema.default('balanced'),
   plan_readback: planReadbackSchema.default('summary'),
-  build_reasoning: z.boolean().default(false),
+  build_reasoning: z.boolean().default(true),
   generate_plan: z.boolean().default(true),
   progress_bubbles: progressBubblesSchema.default('milestones'),
   search_provider: searchProviderSchema.default('tavily'),

@@ -121,4 +121,80 @@ void main() {
       );
     },
   );
+  testWidgets(
+    'only the standalone page removes the inset already consumed by the strip',
+    (tester) async {
+      double? standaloneTop;
+      final standalone = SpaceRecord(
+        id: 'local',
+        name: 'Local',
+        mode: SpaceMode.standalone,
+      );
+      final standaloneCatalog = SpaceCatalog(
+        persistence: MemorySpacePersistence()
+          ..value = jsonEncode({
+            'selected': standalone.id,
+            'spaces': [standalone.toJson()],
+          }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(padding: EdgeInsets.only(top: 47)),
+            child: SpaceRoot(
+              catalog: standaloneCatalog,
+              standaloneBuilder: (_) => Builder(
+                builder: (context) {
+                  standaloneTop = MediaQuery.paddingOf(context).top;
+                  return const Text('Local runtime');
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // The strip's SafeArea consumed the inset; the page must not add it twice.
+      expect(standaloneTop, 0);
+      expect(find.text('Local runtime'), findsOneWidget);
+      expect(find.textContaining('独立运行'), findsOneWidget);
+
+      // Unmount before switching modes: the shell keeps one catalog per state.
+      await tester.pumpWidget(const SizedBox());
+      double? clientTop;
+      final client = SpaceRecord(
+        id: 'client',
+        name: 'Remote',
+        mode: SpaceMode.client,
+        remoteSpace: 'remote',
+      );
+      final clientCatalog = SpaceCatalog(
+        persistence: MemorySpacePersistence()
+          ..value = jsonEncode({
+            'selected': client.id,
+            'spaces': [client.toJson()],
+          }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(padding: EdgeInsets.only(top: 47)),
+            child: SpaceRoot(
+              catalog: clientCatalog,
+              standaloneBuilder: (_) => const SizedBox(),
+              clientBuilder: (_) => Builder(
+                builder: (context) {
+                  clientTop = MediaQuery.paddingOf(context).top;
+                  return const Text('Client UI');
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(clientTop, 47);
+      expect(find.text('Client UI'), findsOneWidget);
+    },
+  );
 }

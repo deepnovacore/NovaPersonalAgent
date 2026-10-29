@@ -9,11 +9,17 @@ class ProfileGenerationStatus extends StatelessWidget {
     this.language = 'zh',
     this.empty = false,
     this.emptyLabel,
+    this.waitingHint,
+    this.onOpenConnectors,
   });
   final ProfileGenerationCoordinator generation;
   final String language;
   final bool empty;
   final String? emptyLabel;
+
+  /// Replaces the default waiting copy with the reason that applies now.
+  final String? waitingHint;
+  final VoidCallback? onOpenConnectors;
   String t(String zh, String en) => language == 'zh' ? zh : en;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -39,7 +45,7 @@ class ProfileGenerationStatus extends StatelessWidget {
               : t('暂时无法继续整理', 'Updates paused'),
         ProfileGenerationPhase.ready =>
           emptyLabel ?? t('暂时没有可确认的内容', 'No confirmed updates yet'),
-        _ => t('消息同步后，会自动整理到这里', 'Waiting for sync'),
+        _ => waitingHint ?? t('消息同步后，会自动整理到这里', 'Waiting for sync'),
       };
       final detail = code == 'profile_timeline_invalid'
           ? t(
@@ -111,6 +117,12 @@ class ProfileGenerationStatus extends StatelessWidget {
                             : 'Retry',
                       ),
                     ),
+                  ),
+                if (phase == ProfileGenerationPhase.waiting &&
+                    onOpenConnectors != null)
+                  TextButton(
+                    onPressed: onOpenConnectors,
+                    child: Text(t('打开连接器', 'Open connectors')),
                   ),
               ],
             ),

@@ -49,6 +49,8 @@ void main() {
     await auth.open();
     final session = await auth.beginAppRegistration('lark');
     expect(session.verificationUri.host, 'open.larksuite.com');
+    expect(session.verificationUri.path, '/page/cli');
+    expect(session.verificationUri.queryParameters['from'], 'cli');
     expect(session.verificationUri.queryParameters['user_code'], 'A&B');
     expect(await auth.pollAppRegistration(), false);
     expect(calls, 3);
@@ -62,6 +64,60 @@ void main() {
     expect(auth.brand, 'lark');
     expect(jsonDecode(disk.value!)['app']['secret'], 'synthetic');
     expect(disk.value, isNot(contains('device_code')));
+  });
+
+  test(
+    'registration uses Feishu’s new-or-existing CLI configuration page',
+    () async {
+      final auth = FeishuAuth(
+        MemoryLifePersistence(),
+        FeishuApi(
+          transport: (m, u, h, b) async {
+            if (Uri.splitQueryString(b!)['action'] == 'begin') {
+              return const FeishuResponse(200, {
+                'device_code': 'fixture',
+                'user_code': 'U1',
+                'verification_uri_complete':
+                    'https://open.feishu.cn/page/launcher?user_code=U1',
+                'expire_in': 600,
+              });
+            }
+            return const FeishuResponse(400, {
+              'error': 'authorization_pending',
+            });
+          },
+        ),
+      );
+      await auth.open();
+      final session = await auth.beginAppRegistration('lark');
+      // The launcher is create-only; the CLI page carries the same device code
+      // and exposes "create new / choose existing". The server's host wins.
+      expect(session.verificationUri.host, 'open.feishu.cn');
+      expect(session.verificationUri.path, '/page/cli');
+      expect(session.verificationUri.queryParameters['from'], 'cli');
+      expect(session.verificationUri.queryParameters['user_code'], 'U1');
+    },
+  );
+
+  test('registration rejects an untrusted verification URL', () async {
+    final auth = FeishuAuth(
+      MemoryLifePersistence(),
+      FeishuApi(
+        transport: (m, u, h, b) async => const FeishuResponse(200, {
+          'device_code': 'fixture',
+          'user_code': 'U1',
+          'verification_uri_complete':
+              'https://evil.example/page/launcher?user_code=U1',
+          'expire_in': 600,
+        }),
+      ),
+    );
+    await auth.open();
+    await expectLater(
+      auth.beginAppRegistration('feishu'),
+      throwsA(isA<FeishuFailure>()),
+    );
+    expect(auth.configured, isFalse);
   });
 
   test('cancel rejects late registration credentials', () async {

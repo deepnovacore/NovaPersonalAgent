@@ -576,6 +576,7 @@ class ProfileAgent extends ChangeNotifier {
         final client = ModelClient(
           timeout: const Duration(minutes: 3),
           collectUsage: budget != null,
+          disableThinking: true,
         );
         _clients.add(client);
         var content = '';

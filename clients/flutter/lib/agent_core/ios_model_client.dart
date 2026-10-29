@@ -56,7 +56,12 @@ class IosModelClient extends ModelClient {
               ...configuration.toJson(),
               'endpoint': configuration.requestUri.toString(),
             },
-            'body': modelRequestBody(configuration, messages, tools),
+            'body': modelRequestBody(
+              configuration,
+              messages,
+              tools,
+              disableThinking: disableThinking,
+            ),
           },
         );
         if (_cancelled) throw const AgentFailure('cancelled');
@@ -75,9 +80,11 @@ class IosModelClient extends ModelClient {
           throw const AgentFailure('invalid_model_response');
         }
         final calls = message['tool_calls'] as List? ?? [];
+        final reasoning = message['reasoning_content'];
         controller.add({
           '_nova_replace': true,
           'content': message['content'] ?? '',
+          if (reasoning is String) 'reasoning_content': reasoning,
           if (message['_nova_response_items'] != null)
             '_nova_response_items': message['_nova_response_items'],
           if (calls.isNotEmpty)

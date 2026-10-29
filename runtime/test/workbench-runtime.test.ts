@@ -424,12 +424,13 @@ test('build.details steps merges thinking and tool steps chronologically',{skip:
  }finally{await f.close()}
 })
 
-test('NOVA_BUILD_REASONING is a boolean settings override with a false default',()=>{
- assert.equal(settingsSchema.parse({executors:[]}).build_reasoning,false)
- assert.equal(loadSettings({}).build_reasoning,false)
+test('NOVA_BUILD_REASONING is a boolean settings override enabled by default',()=>{
+ assert.equal(settingsSchema.parse({executors:[]}).build_reasoning,true)
+ assert.equal(loadSettings({}).build_reasoning,true)
  assert.equal(loadSettings({NOVA_BUILD_REASONING:'1'}).build_reasoning,true)
  assert.equal(loadSettings({NOVA_BUILD_REASONING:'true'}).build_reasoning,true)
  assert.equal(loadSettings({NOVA_BUILD_REASONING:'off'}).build_reasoning,false)
+ assert.equal(loadSettings({NOVA_BUILD_REASONING:'0'}).build_reasoning,false)
 })
 
 test('batched calls require separate approvals showing the actual pending arguments',{skip:!supported},async()=>{

@@ -114,6 +114,8 @@ class ConversationStore {
         recovered.add({
           'role': 'assistant',
           'content': active['draft'] is String ? active['draft'] : '',
+          if (active['reasoning'] is String)
+            'reasoning_content': active['reasoning'],
           'interrupted': true,
           'error': 'process_interrupted',
           'progress': active,

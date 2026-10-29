@@ -43,7 +43,7 @@ export const RUNTIME_DEFAULTS = Object.freeze({
   clarificationDepth: 'balanced',
   planReadback: 'summary',
   generatePlan: true,
-  buildReasoning: false,
+  buildReasoning: true,
   profileParticipantMessages: false,
   progressBubbles: 'milestones',
   embeddingProvider: 'dashscope',

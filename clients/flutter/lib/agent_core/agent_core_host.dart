@@ -36,6 +36,7 @@ class AgentCoreHost extends ChangeNotifier {
   bool busy = false;
   bool _cancelRequested = false;
   String draft = '';
+  String reasoning = '';
   String pendingUserText = '';
   String? error;
   String? activeTool;
@@ -111,6 +112,7 @@ class AgentCoreHost extends ChangeNotifier {
     receivedToolCharacters = 0;
     _cancelRequested = false;
     draft = '';
+    reasoning = '';
     error = null;
     lastTurnCompleted = false;
     _changed();
@@ -127,6 +129,7 @@ class AgentCoreHost extends ChangeNotifier {
       checkpoint = now;
       await store.checkpointTurn(conversationId, {
         'draft': draft,
+        'reasoning': reasoning,
         'tool': activeTool,
         'characters': receivedToolCharacters,
         'units': units,
@@ -191,6 +194,8 @@ class AgentCoreHost extends ChangeNotifier {
                   if (e['tool_calls'] != null) 'tool_calls': e['tool_calls'],
                   if (e['tool_call_id'] != null)
                     'tool_call_id': e['tool_call_id'],
+                  if (e['reasoning_content'] is String)
+                    'reasoning_content': e['reasoning_content'],
                 },
               ),
         ];
@@ -204,6 +209,7 @@ class AgentCoreHost extends ChangeNotifier {
         activeToolArguments = '';
         receivedToolCharacters = 0;
         draft = '';
+        reasoning = '';
         final roundUnits = units;
         if (_cancelRequested || _disposed) {
           throw const AgentFailure('cancelled');
@@ -221,6 +227,16 @@ class AgentCoreHost extends ChangeNotifier {
             draft = '';
             calls.clear();
             units = roundUnits;
+            // The native final frame carries the complete reasoning; keep the
+            // incremental copy when a provider omits it.
+            final finalReasoning = delta['reasoning_content'];
+            if (finalReasoning is String) {
+              reasoning = finalReasoning;
+            } else if (delta['reasoning'] is String) {
+              reasoning = delta['reasoning'] as String;
+            }
+          } else if (delta['reasoning'] is String) {
+            reasoning += delta['reasoning'] as String;
           }
           if (delta['content'] is String) draft += delta['content'] as String;
           for (final fragment in delta['tool_calls'] as List? ?? []) {
@@ -282,9 +298,11 @@ class AgentCoreHost extends ChangeNotifier {
           'role': 'assistant',
           'content': draft,
           if (calls.isNotEmpty) 'tool_calls': calls.values.toList(),
+          if (reasoning.isNotEmpty) 'reasoning_content': reasoning,
           '_nova_response_items': ?responseItems,
         });
         draft = '';
+        reasoning = '';
         if (calls.isEmpty) {
           delivered = true;
           return;
@@ -359,6 +377,7 @@ class AgentCoreHost extends ChangeNotifier {
           await store.append(conversationId, {
             'role': 'assistant',
             'content': draft,
+            if (reasoning.isNotEmpty) 'reasoning_content': reasoning,
             'interrupted': true,
             'error': error,
           });
@@ -387,6 +406,7 @@ class AgentCoreHost extends ChangeNotifier {
       activeToolArguments = '';
       receivedToolCharacters = 0;
       draft = '';
+      reasoning = '';
       _changed();
     }
   }

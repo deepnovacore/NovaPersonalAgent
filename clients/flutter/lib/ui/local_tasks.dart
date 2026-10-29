@@ -167,6 +167,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Nova.ink,
     appBar: AppBar(
       title: const Text('本机任务'),
       centerTitle: true,

@@ -91,8 +91,13 @@ class ModelClient {
     this.maxBytes = 16 * 1024 * 1024,
     this.maxOutputBytes = 512 * 1024,
     this.collectUsage = false,
+    this.disableThinking = false,
   });
   final bool collectUsage;
+
+  /// Background profile/voice turns skip thinking; chat explicitly enables it
+  /// on supported providers so visible reasoning can stream to the UI.
+  final bool disableThinking;
   CompletedModelUsage? completedUsage;
   final Duration timeout, maxDuration;
   final int maxBytes, maxOutputBytes;
@@ -141,7 +146,12 @@ class ModelClient {
       request.headers.set('Accept', 'text/event-stream');
       request.write(
         jsonEncode({
-          ...modelRequestBody(configuration, messages, tools),
+          ...modelRequestBody(
+            configuration,
+            messages,
+            tools,
+            disableThinking: disableThinking,
+          ),
           if (usage != null) 'stream_options': {'include_usage': true},
         }),
       );
@@ -212,6 +222,7 @@ class ModelClient {
           }
           usage?.add(root);
           final Map<String, dynamic> delta;
+          var reasoningBytes = 0;
           if (configuration.protocol != ModelProtocol.chatCompletions) {
             delta = responses.add(root);
           } else {
@@ -226,8 +237,19 @@ class ModelClient {
             delta = Map<String, dynamic>.from(
               (choices.single as Map)['delta'] as Map,
             );
+            final reasoning = delta['reasoning_content'] is String
+                ? delta['reasoning_content'] as String
+                : delta['reasoning'] is String
+                ? delta['reasoning'] as String
+                : null;
+            if (reasoning != null) {
+              delta['reasoning'] = reasoning;
+              reasoningBytes = utf8.encode(reasoning).length;
+            }
           }
-          outputSize += utf8.encode(delta['content'] as String? ?? '').length;
+          outputSize +=
+              utf8.encode(delta['content'] as String? ?? '').length +
+              reasoningBytes;
           for (final call in delta['tool_calls'] as List? ?? []) {
             final function = call['function'] as Map?;
             outputSize += utf8
@@ -340,23 +362,45 @@ Future<List<String>> listModels({
   }
 }
 
+/// Chat Completions history: provider-private thinking is replayed only to the
+/// host that requires it back, and internal bookkeeping never reaches the wire.
+Map<String, dynamic> _chatMessage(
+  ModelConfiguration config,
+  Map<String, dynamic> message,
+) {
+  final deepseek = config.requestUri.host == 'api.deepseek.com';
+  final value = Map<String, dynamic>.from(message)
+    ..remove('_nova_response_items')
+    ..remove('reasoning');
+  if (!deepseek) {
+    value.remove('reasoning_content');
+  } else if (value['role'] == 'assistant' &&
+      value['reasoning_content'] is! String) {
+    // Legacy turns predate visible thinking; DeepSeek still expects the field.
+    value['reasoning_content'] = '';
+  }
+  return value;
+}
+
 Map<String, dynamic> modelRequestBody(
   ModelConfiguration config,
   List<Map<String, dynamic>> messages,
-  List<Map<String, dynamic>> tools,
-) {
+  List<Map<String, dynamic>> tools, {
+  bool disableThinking = false,
+}) {
   if (config.protocol == ModelProtocol.chatCompletions) {
+    final deepseek = config.requestUri.host == 'api.deepseek.com';
     return {
       'model': config.model,
       'stream': true,
-      'max_tokens': 12000,
+      // DeepSeek shares this budget between thinking and generated tool source.
+      'max_tokens': deepseek && !disableThinking ? 65536 : 12000,
+      if (deepseek)
+        'thinking': {'type': disableThinking ? 'disabled' : 'enabled'},
       if (['qwen-flash', 'qwen3-vl-plus'].contains(config.model) &&
           config.requestUri.host == 'dashscope.aliyuncs.com')
-        'enable_thinking': false,
-      'messages': [
-        for (final m in messages)
-          Map<String, dynamic>.from(m)..remove('_nova_response_items'),
-      ],
+        'enable_thinking': !disableThinking,
+      'messages': [for (final m in messages) _chatMessage(config, m)],
       if (tools.isNotEmpty) 'tools': tools,
     };
   }
@@ -474,6 +518,20 @@ class ResponsesStream {
               },
             ],
           };
+        }
+        if (item['type'] == 'reasoning') {
+          // Encrypted reasoning has no human-readable text; never fabricate it.
+          final summary = item['summary'];
+          final text = summary is List
+              ? [
+                  for (final part in summary)
+                    if (part is Map &&
+                        part['text'] is String &&
+                        (part['text'] as String).isNotEmpty)
+                      part['text'] as String,
+                ].join('\n')
+              : '';
+          if (text.isNotEmpty) return {'reasoning': text};
         }
         return {};
       case 'response.completed':

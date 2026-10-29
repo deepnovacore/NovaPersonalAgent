@@ -12,6 +12,7 @@ import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/ui/feishu_direct_page.dart';
+import 'package:nova_mobile/ui/components.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 class FixtureModels extends ModelSettings {
@@ -27,6 +28,58 @@ class FixtureModels extends ModelSettings {
       key: 'synthetic',
     );
   }
+}
+
+/// Records the credentials the page passes to the real [FeishuAuth.bindApp].
+class RecordingAuth extends FeishuAuth {
+  RecordingAuth(super.persistence, super.api);
+  ({String brand, String appId, String secret})? bound;
+  @override
+  Future<void> bindApp({
+    required String brand,
+    required String appId,
+    required String secret,
+  }) {
+    bound = (brand: brand, appId: appId, secret: secret);
+    return super.bindApp(brand: brand, appId: appId, secret: secret);
+  }
+}
+
+/// Pumps the Feishu page with no app configured and a tall viewport so the
+/// whole manual-bind form stays built and hit-testable.
+Future<({FeishuHost host, RecordingAuth auth, MemoryLifePersistence disk})>
+_pumpUnconfigured(WidgetTester tester, {bool collectionRunning = false}) async {
+  tester.view.physicalSize = const Size(800, 1400);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+    (_) async => null,
+  );
+  final disk = MemoryLifePersistence();
+  final auth = RecordingAuth(disk, FeishuApi());
+  final host = FeishuHost(
+    auth: auth,
+    sources: SourceStore(MemoryLifePersistence()),
+  );
+  // A real long-running collection is surfaced by this flag; setting it before
+  // the first build keeps the page's sync state deterministic in tests.
+  host.collection.running = collectionRunning;
+  addTearDown(host.dispose);
+  final publication = LocalPublicationContext(MemoryLifePersistence());
+  await publication.open();
+  addTearDown(publication.dispose);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: FeishuDirectPage(
+        host: host,
+        models: ModelSettings(),
+        publication: publication,
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return (host: host, auth: auth, disk: disk);
 }
 
 void main() {
@@ -284,34 +337,105 @@ void main() {
     },
   );
   testWidgets(
-    'official web binding is primary and secret inputs are collapsed',
+    'unconfigured page offers create-new and connect-existing entry paths',
     (tester) async {
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-        (_) async => null,
-      );
-      final host = FeishuHost(
-        auth: FeishuAuth(MemoryLifePersistence(), FeishuApi()),
-        sources: SourceStore(MemoryLifePersistence()),
-      );
-      final publication = LocalPublicationContext(MemoryLifePersistence());
-      await publication.open();
-      await tester.pumpWidget(
-        MaterialApp(
-          home: FeishuDirectPage(
-            host: host,
-            models: ModelSettings(),
-            publication: publication,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('前往飞书绑定应用'), findsOneWidget);
+      final page = await _pumpUnconfigured(tester);
+      expect(page.host.auth.configured, isFalse);
+      expect(find.text('通过飞书网页绑定'), findsOneWidget);
+      expect(find.text('手动绑定已有应用'), findsOneWidget);
+      // Secret inputs stay collapsed until the existing-app path is chosen.
       expect(find.byType(TextField), findsNothing);
+      await tester.tap(find.text('手动绑定已有应用'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNWidgets(2));
+      expect(find.text('App ID'), findsOneWidget);
+      expect(find.text('App Secret'), findsOneWidget);
+      // The primary create-new path stays visible next to the manual form.
+      expect(find.text('通过飞书网页绑定'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
-      host.dispose();
-      publication.dispose();
+    },
+  );
+  testWidgets(
+    'manual binding validates the app id and secret before calling the host',
+    (tester) async {
+      final page = await _pumpUnconfigured(tester);
+      await tester.tap(find.text('手动绑定已有应用'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).at(0), 'not_a_cli_id');
+      await tester.enterText(find.byType(TextField).at(1), 'synthetic-secret');
+      await tester.tap(find.text('绑定应用'));
+      await tester.pumpAndSettle();
+      expect(find.text('应用 ID 需以 cli_ 开头。'), findsOneWidget);
+      expect(page.auth.bound, isNull);
+      expect(page.host.auth.configured, isFalse);
+      expect(find.text('通过飞书网页绑定'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).at(0), 'cli_fixture');
+      await tester.enterText(find.byType(TextField).at(1), '');
+      await tester.tap(find.text('绑定应用'));
+      await tester.pumpAndSettle();
+      expect(find.text('请填写 App Secret。'), findsOneWidget);
+      expect(page.auth.bound, isNull);
+      expect(page.host.auth.configured, isFalse);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets('manual binding stays enabled while message sync is running', (
+    tester,
+  ) async {
+    // A long collection run must not lock the user out of credentials.
+    final page = await _pumpUnconfigured(tester, collectionRunning: true);
+    expect(
+      tester.widget<NovaTile>(find.widgetWithText(NovaTile, '通过飞书网页绑定')).onTap,
+      isNull,
+    );
+    await tester.tap(find.text('手动绑定已有应用'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), 'cli_fixture');
+    await tester.enterText(find.byType(TextField).at(1), 'synthetic-secret');
+    await tester.tap(find.text('绑定应用'));
+    await tester.pumpAndSettle();
+    expect(page.auth.bound, (
+      brand: 'feishu',
+      appId: 'cli_fixture',
+      secret: 'synthetic-secret',
+    ));
+    expect(find.text('应用已绑定'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets(
+    'manual binding stores typed credentials and hands off to authorization',
+    (tester) async {
+      final page = await _pumpUnconfigured(tester);
+      await tester.tap(find.text('手动绑定已有应用'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      // The button keeps a hidden copy of every item; pick the open menu one.
+      await tester.tap(find.text('Lark').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).at(0), 'cli_fixture');
+      await tester.enterText(find.byType(TextField).at(1), 'synthetic-secret');
+      await tester.tap(find.text('绑定应用'));
+      await tester.pumpAndSettle();
+      expect(page.auth.bound, (
+        brand: 'lark',
+        appId: 'cli_fixture',
+        secret: 'synthetic-secret',
+      ));
+      final saved = jsonDecode(page.disk.value!) as Map<String, dynamic>;
+      expect((saved['app'] as Map)['brand'], 'lark');
+      expect((saved['app'] as Map)['app_id'], 'cli_fixture');
+      expect((saved['app'] as Map)['secret'], 'synthetic-secret');
+      // The existing configured page takes over and asks for user consent.
+      expect(find.text('应用已绑定'), findsOneWidget);
+      expect(find.text('前往飞书授权'), findsOneWidget);
+      expect(find.text('通过飞书网页绑定'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
     },
   );
 }

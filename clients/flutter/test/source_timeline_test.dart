@@ -34,10 +34,19 @@ class _ReadyHost extends FeishuHost {
   @override
   bool get ready => true;
   @override
+  bool get restored => true;
+  @override
   void dispose() {
     sources.removeListener(notifyListeners);
     super.dispose();
   }
+}
+
+/// Local data is open while Feishu authorization remains unavailable.
+class _RestoredOnlyHost extends _ReadyHost {
+  _RestoredOnlyHost(super.sources);
+  @override
+  bool get ready => false;
 }
 
 class _ControlledPersistence extends MemoryLifePersistence {
@@ -268,12 +277,12 @@ void main() {
       expect(find.text('还没有近况'), findsNothing);
       f.disk.pending!.completeError(StateError('locked'));
       await tester.pumpAndSettle();
-      expect(find.text('暂时无法加载近况'), findsOneWidget);
+      expect(find.text('无法读取此前生成的资料'), findsOneWidget);
       f.disk.pending = null;
       await tester.tap(find.text('重试'));
       await tester.pumpAndSettle();
       expect(find.text('还没有近况'), findsOneWidget);
-      expect(find.text('暂时无法加载近况'), findsNothing);
+      expect(find.text('无法读取此前生成的资料'), findsNothing);
       expect(find.text('独立的待办安排'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       f.dispose();
@@ -298,7 +307,7 @@ void main() {
         expect(find.text('Loading updates…'), findsOneWidget);
         f.disk.pending!.completeError(StateError('unavailable'));
         await tester.pumpAndSettle();
-        expect(find.text('Could not load updates'), findsOneWidget);
+        expect(find.text('Could not read your saved results'), findsOneWidget);
         expect(find.textContaining('解锁'), findsNothing);
         await tester.ensureVisible(find.text('Retry'));
         f.disk.pending = null;
@@ -338,6 +347,75 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       f.dispose();
+    },
+  );
+  testWidgets(
+    'saved timeline renders while local data is restored but Feishu is not ready',
+    (tester) async {
+      final f = _Fixture();
+      await f.open();
+      final host = _RestoredOnlyHost(f.sources);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: novaTheme(),
+          home: Scaffold(
+            body: TimelinePage(
+              store: f.life,
+              language: 'zh',
+              now: f.now,
+              sourceTimeline: LocalProfileResults(
+                host: host,
+                publication: f.publication,
+                repository: f.profile,
+                kind: 'timeline',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(host.ready, false);
+      expect(find.text('最新的项目进展：确认已完成的部分，并保留下一步尚待讨论的安排。'), findsOneWidget);
+      expect(find.text('还没有近况'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    },
+  );
+
+  testWidgets(
+    'timeline empty state renders the real reason and connect action',
+    (tester) async {
+      final f = _Fixture();
+      await f.open(publish: false);
+      final host = _RestoredOnlyHost(f.sources);
+      var opened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: novaTheme(),
+          home: Scaffold(
+            body: TimelinePage(
+              store: f.life,
+              language: 'zh',
+              now: f.now,
+              sourceTimeline: LocalProfileResults(
+                host: host,
+                publication: f.publication,
+                repository: f.profile,
+                kind: 'timeline',
+                emptyHint: '打开连接器并连接数据源，之后会自动整理到这里。',
+                onOpenConnectors: () => opened++,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('还没有近况'), findsOneWidget);
+      expect(find.text('打开连接器并连接数据源，之后会自动整理到这里。'), findsOneWidget);
+      await tester.tap(find.text('前往连接器'));
+      expect(opened, 1);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
     },
   );
 }

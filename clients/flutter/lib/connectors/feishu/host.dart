@@ -54,8 +54,24 @@ class FeishuHost extends ChangeNotifier {
   Future<void>? _opening;
   Future<void> _identityTail = Future.value();
   bool _disposed = false;
-  Future<void> open() =>
-      SpaceStorage.runScoped(_spaceScope, () => _opening ??= _open());
+  bool _restored = false, _listening = false;
+  Future<void> open() => SpaceStorage.runScoped(_spaceScope, _openOnce);
+
+  /// A failed setup is retryable: drop the cached future but keep its error for
+  /// every caller that was already waiting on it.
+  Future<void> _openOnce() async {
+    final opening = _opening;
+    if (opening != null) return opening;
+    final result = _open();
+    _opening = result;
+    try {
+      await result;
+    } catch (_) {
+      if (identical(_opening, result)) _opening = null;
+      rethrow;
+    }
+  }
+
   Future<void> _open() async {
     // Working model copies from an interrupted process are never resumed.
     await SecureContextPersistence(
@@ -67,8 +83,17 @@ class FeishuHost extends ChangeNotifier {
     await auth.open();
     await sources.open();
     await synchronizeIdentity();
-    auth.addListener(_authChanged);
-    sources.addListener(_notify);
+    // Local data is usable even without Feishu authorization; only the
+    // connector-dependent states need [ready].
+    if (!_restored) {
+      _restored = true;
+      _notify();
+    }
+    if (!_listening) {
+      _listening = true;
+      auth.addListener(_authChanged);
+      sources.addListener(_notify);
+    }
     await collection.restore();
   }
 
@@ -99,6 +124,10 @@ class FeishuHost extends ChangeNotifier {
     return result;
   }
 
+  /// Whether local persisted state (auth, sources, identity) has been opened.
+  /// Deliberately independent of [ready]: saved results stay readable while the
+  /// Feishu connector is unconfigured or unauthorized.
+  bool get restored => _restored;
   bool get ready =>
       auth.authorized &&
       sources.identity == auth.identityKey &&
@@ -128,8 +157,11 @@ class FeishuHost extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     collection.dispose();
-    auth.removeListener(_authChanged);
-    sources.removeListener(_notify);
+    if (_listening) {
+      _listening = false;
+      auth.removeListener(_authChanged);
+      sources.removeListener(_notify);
+    }
     auth.dispose();
     sources.dispose();
     super.dispose();
