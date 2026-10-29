@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../agent_core/model_client.dart';
 import '../agent_core/model_presets.dart';
 import '../ui/local_dialog.dart';
+import '../ui/provider_credentials_sheet.dart';
 import 'voice_settings.dart';
 
 Future<bool?> showVoiceSettings(
@@ -44,22 +45,22 @@ class _ServiceFields {
   _ServiceFields(VoiceServiceConfiguration config)
     : endpoint = TextEditingController(text: config.endpoint),
       model = TextEditingController(text: config.model),
-      voice = TextEditingController(text: config.voice) {
+      voice = TextEditingController(text: config.voice),
+      credentialId = config.credentialId {
     endpoint.addListener(_endpointChanged);
   }
   final TextEditingController endpoint, model, voice;
-  // Never populate form controllers with a stored secret.
-  final key = TextEditingController();
+  String? credentialId;
   final resourceId = TextEditingController();
   void _endpointChanged() {
-    key.clear();
+    credentialId = null;
     resourceId.clear();
   }
 
   VoiceServiceConfiguration get value => VoiceServiceConfiguration(
     endpoint: endpoint.text,
     model: model.text,
-    key: key.text,
+    credentialId: credentialId,
     voice: voice.text,
     resourceId: resourceId.text,
   );
@@ -67,8 +68,9 @@ class _ServiceFields {
     endpoint.text = config.endpoint;
     model.text = config.model;
     voice.text = config.voice;
-    key.clear();
+    credentialId = null;
     resourceId.clear();
+    credentialId = config.credentialId;
   }
 
   void dispose() {
@@ -76,7 +78,6 @@ class _ServiceFields {
     endpoint.dispose();
     model.dispose();
     voice.dispose();
-    key.dispose();
     resourceId.dispose();
   }
 }
@@ -85,8 +86,6 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
   late VoiceConfiguration _draft;
   late final _ServiceFields _asr, _tts, _llm;
   ModelPreset? _forebrainPreset;
-  // Never populate form controllers with a stored secret.
-  late final TextEditingController _integratedKey;
   bool _endpointRewritten = false;
   bool _saving = false;
   String? _error;
@@ -118,7 +117,6 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
         voice: voice,
       ),
     );
-    _integratedKey = TextEditingController();
     _asr = _ServiceFields(_draft.asr);
     _tts = _ServiceFields(_draft.tts);
     _llm = _ServiceFields(_draft.fastLlm);
@@ -130,7 +128,6 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     for (final fields in [_asr, _tts, _llm]) {
       fields.dispose();
     }
-    _integratedKey.dispose();
     super.dispose();
   }
 
@@ -152,7 +149,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
               endpoint: IntegratedVoiceCatalog.officialEndpoint(
                 _draft.integratedProfile,
               ),
-              key: _integratedKey.text,
+              key: '',
             ),
             asr: _asr.value,
             tts: _tts.value,
@@ -170,8 +167,8 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
                 (error.code == 'invalid_voice_settings' ||
                     error.code == 'invalid_model_settings')
             ? t(
-                '请检查服务地址、模型和凭据。地址须使用 HTTPS/WSS（本机开发地址除外），不能含查询参数、账号或片段。',
-                'Check the service address, model and credentials. Use HTTPS/WSS (except local development), without query parameters, account information or fragments.',
+                '请检查服务地址和模型，并到模型服务配置密钥。地址须使用 HTTPS/WSS（本机开发地址除外），不能含查询参数、账号或片段。',
+                'Check the service address and model, and configure credentials in Model provider. Use HTTPS/WSS (except local development), without query parameters, account information or fragments.',
               )
             : t(
                 '无法安全保存语音设置，请稍后重试。',
@@ -247,13 +244,79 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     );
   }
 
+  Widget _credentialControl(
+    String slot,
+    String endpoint, {
+    String? credentialId,
+    bool optional = false,
+    required ValueChanged<String> onConfigured,
+  }) => FutureBuilder(
+    future: endpoint.trim().isEmpty
+        ? Future.value(null)
+        : widget.settings.credentials.resolve(
+            endpoint,
+            credentialId: credentialId,
+          ),
+    builder: (context, snapshot) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          snapshot.hasError
+              ? t('暂时无法读取服务配置', 'Provider settings unavailable')
+              : snapshot.hasData
+              ? t('已使用模型服务中的密钥', 'Using saved provider credentials')
+              : optional
+              ? t(
+                  '服务需要认证时，请到模型服务配置',
+                  'Configure credentials if your service requires them',
+                )
+              : t('请先在模型服务中配置此服务', 'Configure this service in Model provider'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        TextButton(
+          key: ValueKey('$slot.credentials'),
+          onPressed: _saving || endpoint.trim().isEmpty
+              ? null
+              : () async {
+                  try {
+                    final id = await showProviderCredentials(
+                      context,
+                      widget.settings.credentials,
+                      endpoint: endpoint,
+                      credentialId: credentialId,
+                      language: widget.language,
+                      onChanged:
+                          widget.settings.modelSettings.refreshApiKeyProjection,
+                    );
+                    if (mounted && id != null) {
+                      setState(() {
+                        onConfigured(id);
+                        _error = null;
+                      });
+                    }
+                  } catch (_) {
+                    if (mounted) {
+                      setState(
+                        () => _error = t(
+                          '无法读取模型服务配置，请稍后重试。',
+                          'Could not read provider settings. Try again.',
+                        ),
+                      );
+                    }
+                  }
+                },
+          child: Text(t('去模型服务配置', 'Configure in Model provider')),
+        ),
+      ],
+    ),
+  );
+
   Widget _fields(
     String title,
     _ServiceFields fields, {
     String? label,
     bool heading = true,
     bool endpoint = true,
-    String? keyHelper,
     bool websocket = false,
     bool model = true,
     bool voice = false,
@@ -268,6 +331,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
           controller: fields.endpoint,
           enabled: !_saving,
           key: ValueKey('$title.endpoint'),
+          onChanged: (_) => setState(() {}),
           autocorrect: false,
           keyboardType: TextInputType.url,
           decoration: InputDecoration(
@@ -319,22 +383,12 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
                 : t('音色', 'Voice'),
           ),
         ),
-      TextField(
-        controller: fields.key,
-        enabled: !_saving,
-        key: ValueKey('$title.key'),
-        obscureText: true,
-        autocorrect: false,
-        enableSuggestions: false,
-        enableIMEPersonalizedLearning: false,
-        decoration: InputDecoration(
-          labelText: optionalKey
-              ? t('API 密钥（服务允许时可不填）', 'API key (optional if supported)')
-              : t('API 密钥', 'API key'),
-          helperText:
-              keyHelper ??
-              t('留空仅保留已保存的密钥', 'Leave blank to keep the saved key'),
-        ),
+      _credentialControl(
+        title,
+        fields.endpoint.text,
+        credentialId: fields.credentialId,
+        optional: optionalKey,
+        onConfigured: (id) => fields.credentialId = id,
       ),
     ];
     return Column(
@@ -493,7 +547,6 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
           key: '',
         ),
       );
-      _integratedKey.clear();
       _endpointRewritten = false;
     });
   }
@@ -583,24 +636,19 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
         const SizedBox(height: 12),
         Text(
           t(
-            '服务地址已切换为官方地址。旧地址保存的密钥不会沿用，请重新输入 API 密钥。',
-            'The service address was switched to the official endpoint. Keys saved for the old address are not reused; enter the API key again.',
+            '服务地址已切换为官方地址。旧地址保存的密钥不会沿用，请到模型服务配置密钥。',
+            'The service address was switched to the official endpoint. Keys saved for the old address are not reused; configure credentials in Model provider.',
           ),
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
       const SizedBox(height: 12),
-      TextField(
-        controller: _integratedKey,
-        enabled: !_saving,
-        key: const ValueKey('integrated.key'),
-        obscureText: true,
-        autocorrect: false,
-        enableSuggestions: false,
-        enableIMEPersonalizedLearning: false,
-        decoration: InputDecoration(
-          labelText: t('API 密钥', 'API key'),
-          helperText: t('留空仅保留已保存的密钥', 'Leave blank to keep the saved key'),
+      _credentialControl(
+        'integrated',
+        _draft.integrated.endpoint,
+        credentialId: _draft.integrated.credentialId,
+        onConfigured: (id) => _draft = _draft.copyWith(
+          integrated: _draft.integrated.copyWith(credentialId: id),
         ),
       ),
     ];
@@ -636,7 +684,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
               if (id == null) return;
               setState(() {
                 _forebrainPreset = ModelPreset.byId(id);
-                _llm.key.clear();
+                _llm.credentialId = null;
                 final preset = _forebrainPreset;
                 if (preset == null) return;
                 _llm.replace(
@@ -690,10 +738,6 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
       _llm,
       heading: false,
       endpoint: _forebrainPreset == null,
-      keyHelper: t(
-        '留空使用此地址已保存的语音或模型密钥',
-        'Leave blank to use the voice or model key saved for this endpoint',
-      ),
     ),
     Padding(
       padding: const EdgeInsets.only(top: 8),
@@ -780,8 +824,8 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
             ] else ...[
               Text(
                 t(
-                  '手机直连所选服务，密钥仅保存在本机。',
-                  'Connects directly to the selected service; keys stay on this device.',
+                  '手机直连所选服务，密钥统一在模型服务中配置。',
+                  'Connects directly to the selected service. Manage credentials in Model provider.',
                 ),
               ),
               const SizedBox(height: 16),

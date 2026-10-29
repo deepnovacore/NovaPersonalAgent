@@ -55,7 +55,8 @@ void main() {
           integrated: configured().integrated,
         ),
       );
-      expect(full.asr.key, 'asr-key');
+      expect(full.asr.key, isEmpty);
+      expect((await settings.readForDictation())!.asr.key, 'asr-key');
       expect((await settings.read())!.integrated.key, 'test-key');
     },
   );
@@ -79,7 +80,8 @@ void main() {
         asr: service.copyWith(key: '', resourceId: ''),
       );
       expect(retained.asr.toJson(), saved.asr.toJson());
-      expect(retained.integrated.toJson(), configured().integrated.toJson());
+      expect(retained.integrated.credentialId, saved.integrated.credentialId);
+      expect((await settings.read())!.integrated.key, 'test-key');
       await expectLater(
         settings.saveAsr(
           provider: SpeechProvider.volcengine,
@@ -195,7 +197,14 @@ void main() {
     expect((await settings.save(draft)).fastLlm.key, 'model-secret');
     expect((await settings.readDraft())!.fastLlm.key, isEmpty);
     expect((await settings.read())!.fastLlmConfiguration.key, 'model-secret');
-    await modelKey('rotated-secret');
+    final shared = (await settings.credentials.resolve(
+      draft.fastLlm.endpoint,
+    ))!;
+    await settings.credentials.save(
+      id: shared.id,
+      endpoint: shared.endpoint,
+      key: 'rotated-secret',
+    );
     expect((await settings.read())!.fastLlm.key, 'rotated-secret');
     for (final endpoint in [
       'https://different.example/v1',
@@ -209,6 +218,8 @@ void main() {
       );
     }
     await storage.delete(key: ModelSettings.storageKey);
+    expect((await settings.read())!.fastLlm.key, 'rotated-secret');
+    await settings.credentials.delete(shared.id);
     await expectLater(settings.read(), throwsA(isA<AgentFailure>()));
     final explicit = await settings.save(
       draft.copyWith(fastLlm: draft.fastLlm.copyWith(key: 'voice-secret')),
@@ -270,6 +281,11 @@ void main() {
       );
 
       await storage.delete(key: modelKeyA);
+      expect((await settingsA.read())!.fastLlm.key, 'a-secret');
+      final credentialA = (await settingsA.credentials.resolve(
+        draft.fastLlm.endpoint,
+      ))!;
+      await settingsA.credentials.delete(credentialA.id);
       await expectLater(settingsA.read(), throwsA(isA<AgentFailure>()));
       await expectLater(settingsA.save(draft), throwsA(isA<AgentFailure>()));
     },
@@ -370,36 +386,23 @@ void main() {
     expect(() => VoiceConfiguration.fromJson(value), throwsArgumentError);
   });
 
-  testWidgets(
-    'saved secrets stay out of controllers and provider change clears the key',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: VoiceSettingsSheet(
-              settings: VoiceSettings(),
-              initial: configured(),
-            ),
+  testWidgets('voice page never creates secret controllers', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: VoiceSettingsSheet(
+            settings: VoiceSettings(),
+            initial: configured(),
           ),
         ),
-      );
-      final keyFinder = find.byKey(const ValueKey('integrated.key'));
-      final field = tester.widget<TextField>(keyFinder);
-      expect(field.obscureText, isTrue);
-      expect(field.controller!.text, isEmpty);
-      expect(find.text('test-key'), findsNothing);
-      await tester.enterText(keyFinder, 'new-secret');
-      expect(field.controller!.text, 'new-secret');
-      // Switching providers resets the integrated defaults and key input.
-      final provider = find.byKey(const ValueKey('integrated.provider'));
-      await tester.ensureVisible(provider);
-      await tester.pumpAndSettle();
-      await tester.tap(provider);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('OpenAI').last);
-      await tester.pumpAndSettle();
-      expect(field.controller!.text, isEmpty);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('test-key'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('integrated.credentials')),
+      findsOneWidget,
+    );
+  });
 }

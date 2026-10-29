@@ -17,6 +17,7 @@ import '../agent_core/model_settings.dart';
 import '../agent_core/model_presets.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../ui/chatgpt_settings.dart';
+import '../ui/provider_credentials_sheet.dart';
 import '../agent_core/tool_registry.dart';
 import 'dart:convert';
 
@@ -79,12 +80,6 @@ Future<void> showLocalModelSettings(
 
           Future<void> loadModels() async {
             final revision = ++modelListRevision;
-            // A blank key reuses the saved one only while the URL is unchanged.
-            final usable = key.text.isNotEmpty
-                ? key.text
-                : (current != null && endpoint.text == current.endpoint
-                      ? current.key
-                      : '');
             setState(() {
               loadingModels = true;
               notice = null;
@@ -93,6 +88,10 @@ Future<void> showLocalModelSettings(
             var bad = false;
             var ids = <String>[];
             try {
+              final usable = key.text.isNotEmpty
+                  ? key.text
+                  : (await settings.credentials.resolve(endpoint.text))?.key ??
+                        '';
               ids = await listModels(endpoint: endpoint.text, key: usable);
               message = ids.isEmpty
                   ? t(
@@ -150,8 +149,8 @@ Future<void> showLocalModelSettings(
               helperText: current == null
                   ? null
                   : t(
-                      '不修改接口地址时，留空可保留现有密钥',
-                      'Leave blank to keep your current key if the API URL is unchanged',
+                      '留空使用此厂商已保存的密钥',
+                      'Leave blank to use this provider’s saved key',
                     ),
               helperMaxLines: 3,
             ),
@@ -210,6 +209,32 @@ Future<void> showLocalModelSettings(
                       '对话和任务所需内容会发送给所选模型服务。API 密钥仅保存在这台设备，保存在当前 Space 的安全存储中。',
                       'Content needed for conversations and tasks is sent to the selected model provider. Your API key stays on this device and is stored in the current Space secure storage.',
                     ),
+                  ),
+                  TextButton(
+                    key: const ValueKey('model.credentials'),
+                    onPressed: saving
+                        ? null
+                        : () async {
+                            try {
+                              await showProviderCredentials(
+                                context,
+                                settings.credentials,
+                                language: language,
+                                onChanged: settings.refreshApiKeyProjection,
+                              );
+                              if (context.mounted) setState(invalidateModels);
+                            } catch (_) {
+                              if (context.mounted) {
+                                setState(
+                                  () => error = t(
+                                    '无法读取服务配置，请重试。',
+                                    'Could not read provider settings. Try again.',
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                    child: Text(t('管理服务密钥', 'Manage provider credentials')),
                   ),
                   TextButton(
                     onPressed: saving

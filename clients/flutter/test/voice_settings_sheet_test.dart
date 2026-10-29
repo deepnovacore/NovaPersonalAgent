@@ -119,6 +119,20 @@ Future<void> _selectDropdown(
   await tester.pumpAndSettle();
 }
 
+Future<void> _configure(WidgetTester tester, String slot, String secret) async {
+  final button = find.byKey(ValueKey('$slot.credentials'));
+  await tester.ensureVisible(button);
+  await tester.tap(button);
+  await tester.pumpAndSettle();
+  expect(find.text('配置服务密钥'), findsOneWidget);
+  await tester.enterText(
+    find.byKey(const ValueKey('credential.secret')),
+    secret,
+  );
+  await tester.tap(find.text('保存').last);
+  await tester.pumpAndSettle();
+}
+
 TextField _textField(WidgetTester tester, Key key) =>
     tester.widget<TextField>(find.byKey(key));
 
@@ -146,7 +160,7 @@ void main() {
     expect(find.byKey(_providerKey), findsOneWidget);
     expect(find.byKey(_modelKey), findsOneWidget);
     expect(find.byKey(_voiceKey), findsOneWidget);
-    expect(find.byKey(_keyKey), findsOneWidget);
+    expect(find.byKey(_keyKey), findsNothing);
     expect(find.byKey(_asrProviderKey), findsNothing);
     expect(find.byKey(_fastLlmProtocolKey), findsNothing);
     // No endpoint field, no redundant section heading or status card copy.
@@ -187,7 +201,7 @@ void main() {
 
     await _switchTab(tester, _tabIntegrated);
     expect(find.byKey(_providerKey), findsOneWidget);
-    expect(find.byKey(_keyKey), findsOneWidget);
+    expect(find.byKey(_keyKey), findsNothing);
     expect(find.byKey(_asrProviderKey), findsNothing);
     expect(find.byKey(_ttsProviderKey), findsNothing);
   });
@@ -231,66 +245,72 @@ void main() {
     await _closeDropdown(tester);
   });
 
-  testWidgets('switching provider applies official defaults and clears key', (
-    tester,
-  ) async {
-    await _openSettings(tester);
-    await tester.enterText(find.byKey(_keyKey), 'entered-key');
-    expect(_textField(tester, _keyKey).controller!.text, 'entered-key');
+  testWidgets(
+    'switching provider uses official defaults and its centrally saved key',
+    (tester) async {
+      await _openSettings(tester);
+      expect(find.byType(TextField), findsNothing);
 
-    await _selectDropdown(tester, _providerKey, 'OpenAI');
-    expect(
-      find.text(IntegratedVoiceCatalog.openaiDefaultModel),
-      findsOneWidget,
-    );
-    expect(
-      find.text(IntegratedVoiceCatalog.openaiDefaultVoice),
-      findsOneWidget,
-    );
-    expect(_textField(tester, _keyKey).controller!.text, isEmpty);
+      await _selectDropdown(tester, _providerKey, 'OpenAI');
+      expect(
+        find.text(IntegratedVoiceCatalog.openaiDefaultModel),
+        findsOneWidget,
+      );
+      expect(
+        find.text(IntegratedVoiceCatalog.openaiDefaultVoice),
+        findsOneWidget,
+      );
+      expect(find.byKey(_keyKey), findsNothing);
 
-    await _selectDropdown(tester, _providerKey, 'Gemini Live');
-    expect(
-      find.text(IntegratedVoiceCatalog.geminiDefaultModel),
-      findsOneWidget,
-    );
-    expect(
-      find.text(IntegratedVoiceCatalog.geminiDefaultVoice),
-      findsOneWidget,
-    );
+      await _selectDropdown(tester, _providerKey, 'Gemini Live');
+      expect(
+        find.text(IntegratedVoiceCatalog.geminiDefaultModel),
+        findsOneWidget,
+      );
+      expect(
+        find.text(IntegratedVoiceCatalog.geminiDefaultVoice),
+        findsOneWidget,
+      );
 
-    await _selectDropdown(tester, _providerKey, 'StepFun');
-    expect(
-      find.text(IntegratedVoiceCatalog.stepfunDefaultModel),
-      findsOneWidget,
-    );
-    expect(
-      find.text(IntegratedVoiceCatalog.stepfunDefaultVoice),
-      findsOneWidget,
-    );
-    expect(find.text('WSS 服务地址'), findsNothing);
+      await _selectDropdown(tester, _providerKey, 'StepFun');
+      expect(
+        find.text(IntegratedVoiceCatalog.stepfunDefaultModel),
+        findsOneWidget,
+      );
+      expect(
+        find.text(IntegratedVoiceCatalog.stepfunDefaultVoice),
+        findsOneWidget,
+      );
+      expect(find.text('WSS 服务地址'), findsNothing);
 
-    // OpenAI's second model shares the catalog voices and keeps marin first.
-    await _selectDropdown(tester, _providerKey, 'OpenAI');
-    await _selectDropdown(tester, _modelKey, 'gpt-realtime-2.1');
-    expect(
-      find.text(IntegratedVoiceCatalog.openaiDefaultVoice),
-      findsOneWidget,
-    );
+      // OpenAI's second model shares the catalog voices and keeps marin first.
+      await _selectDropdown(tester, _providerKey, 'OpenAI');
+      await _selectDropdown(tester, _modelKey, 'gpt-realtime-2.1');
+      expect(
+        find.text(IntegratedVoiceCatalog.openaiDefaultVoice),
+        findsOneWidget,
+      );
 
-    // A provider switch saves that provider's official endpoint.
-    await _selectDropdown(tester, _providerKey, 'StepFun');
-    await tester.enterText(find.byKey(_keyKey), 'stepfun-key');
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
-    expect(find.byType(VoiceSettingsSheet), findsNothing);
-    final saved = (await VoiceSettings().readDraft())!;
-    expect(saved.integratedProfile, IntegratedVoiceService.stepfun);
-    expect(saved.integrated.endpoint, IntegratedVoiceCatalog.stepfunEndpoint);
-    expect(saved.integrated.model, IntegratedVoiceCatalog.stepfunDefaultModel);
-    expect(saved.integrated.voice, IntegratedVoiceCatalog.stepfunDefaultVoice);
-    expect(saved.integrated.key, 'stepfun-key');
-  });
+      // A provider switch saves that provider's official endpoint.
+      await _selectDropdown(tester, _providerKey, 'StepFun');
+      await _configure(tester, 'integrated', 'stepfun-key');
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(find.byType(VoiceSettingsSheet), findsNothing);
+      final saved = (await VoiceSettings().read())!;
+      expect(saved.integratedProfile, IntegratedVoiceService.stepfun);
+      expect(saved.integrated.endpoint, IntegratedVoiceCatalog.stepfunEndpoint);
+      expect(
+        saved.integrated.model,
+        IntegratedVoiceCatalog.stepfunDefaultModel,
+      );
+      expect(
+        saved.integrated.voice,
+        IntegratedVoiceCatalog.stepfunDefaultVoice,
+      );
+      expect(saved.integrated.key, 'stepfun-key');
+    },
+  );
 
   testWidgets('saved model and voice outside the catalog stay selectable', (
     tester,
@@ -350,7 +370,7 @@ void main() {
         findsNothing,
         reason: provider.name,
       );
-      final saved = (await VoiceSettings().readDraft())!;
+      final saved = (await VoiceSettings().read())!;
       expect(saved.integratedProfile, provider);
       expect(
         saved.integrated.endpoint,
@@ -381,11 +401,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(VoiceSettingsSheet), findsOneWidget);
     expect(find.textContaining('请检查服务地址'), findsOneWidget);
-    await tester.enterText(find.byKey(_keyKey), 'replacement-key');
+    await _configure(tester, 'integrated', 'replacement-key');
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(find.byType(VoiceSettingsSheet), findsNothing);
-    final saved = (await VoiceSettings().readDraft())!;
+    final saved = (await VoiceSettings().read())!;
     expect(saved.integrated.endpoint, IntegratedVoiceCatalog.qwenEndpoint);
     expect(saved.integrated.key, 'replacement-key');
     expect(saved.integrated.model, IntegratedVoiceCatalog.qwenDefaultModel);
@@ -410,7 +430,7 @@ void main() {
 
     await _switchTab(tester, _tabIntegrated);
     expect(find.byKey(_providerKey), findsOneWidget);
-    expect(find.byKey(_keyKey), findsOneWidget);
+    expect(find.byKey(_keyKey), findsNothing);
     expect(find.byKey(_asrProviderKey), findsNothing);
     expect(find.byKey(_ttsProviderKey), findsNothing);
   });
@@ -427,7 +447,7 @@ void main() {
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(find.byType(VoiceSettingsSheet), findsNothing);
-    var saved = (await VoiceSettings().readDraft())!;
+    var saved = (await VoiceSettings().read())!;
     expect(saved.pipeline, VoicePipeline.cascaded);
     expect(saved.asr.key, 'asr-key');
     expect(saved.tts.key, 'tts-key');
@@ -435,13 +455,14 @@ void main() {
 
     // The saved cascaded pipeline opens on tab 2; switching back to tab 1 and
     // saving must persist the integrated pipeline again.
-    await _openSettings(tester, initial: saved);
+    final stored = await const FlutterSecureStorage().readAll();
+    await _openSettings(tester, initial: saved, storageValues: stored);
     expect(find.byKey(_providerKey), findsNothing);
     await _switchTab(tester, _tabIntegrated);
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(find.byType(VoiceSettingsSheet), findsNothing);
-    saved = (await VoiceSettings().readDraft())!;
+    saved = (await VoiceSettings().read())!;
     expect(saved.pipeline, VoicePipeline.integrated);
     expect(saved.integrated.key, 'qwen-key');
   });
@@ -456,7 +477,8 @@ void main() {
     expect(find.text('Realtime service'), findsOneWidget);
     expect(find.text('Model'), findsOneWidget);
     expect(find.text('Voice'), findsOneWidget);
-    expect(find.text('API key'), findsOneWidget);
+    expect(find.text('API key'), findsNothing);
+    expect(find.text('Configure in Model provider'), findsOneWidget);
     expect(find.text('Standalone voice'), findsOneWidget);
     expect(find.text('WSS endpoint'), findsNothing);
     expect(find.text('高级：分步处理'), findsNothing);
@@ -504,25 +526,23 @@ void main() {
       await tester.tap(find.text('OpenAI').last);
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('fastLlm.endpoint')), findsNothing);
-      expect(
-        _textField(tester, const ValueKey('fastLlm.key')).controller!.text,
-        isEmpty,
-      );
+      expect(find.byKey(const ValueKey('fastLlm.key')), findsNothing);
       expect(find.text('saved-model-secret'), findsNothing);
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
       expect(find.byType(VoiceSettingsSheet), findsNothing);
-      final saved = (await VoiceSettings().readDraft())!;
+      final saved = (await VoiceSettings().read())!;
       expect(saved.fastLlm.endpoint, ModelPreset.byId('openai')!.endpoint);
-      expect(saved.fastLlm.key, isEmpty);
+      expect(saved.fastLlm.key, 'saved-model-secret');
       expect((await VoiceSettings().read())!.fastLlm.key, 'saved-model-secret');
 
       await _openSettings(tester, initial: initial);
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
+      expect((await VoiceSettings().read())!.fastLlm.key, initial.fastLlm.key);
       expect(
-        (await VoiceSettings().readDraft())!.fastLlm.toJson(),
-        initial.fastLlm.toJson(),
+        (await VoiceSettings().read())!.fastLlm.endpoint,
+        initial.fastLlm.endpoint,
       );
     },
   );

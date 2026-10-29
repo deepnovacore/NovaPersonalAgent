@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../agent_core/model_client.dart';
 import '../agent_core/model_settings.dart';
+import '../agent_core/provider_credentials.dart';
 
 enum VoicePipeline { integrated, cascaded }
 
@@ -149,8 +150,10 @@ class VoiceServiceConfiguration {
     this.key = '',
     this.voice = '',
     this.resourceId = '',
+    this.credentialId,
   });
   final String endpoint, model, key, voice, resourceId;
+  final String? credentialId;
 
   VoiceServiceConfiguration copyWith({
     String? endpoint,
@@ -158,12 +161,18 @@ class VoiceServiceConfiguration {
     String? key,
     String? voice,
     String? resourceId,
+    String? credentialId,
   }) => VoiceServiceConfiguration(
     endpoint: endpoint ?? this.endpoint,
     model: model ?? this.model,
     key: key ?? this.key,
     voice: voice ?? this.voice,
     resourceId: resourceId ?? this.resourceId,
+    credentialId:
+        credentialId ??
+        (endpoint == null || endpoint.trim() == this.endpoint.trim()
+            ? this.credentialId
+            : null),
   );
 
   Map<String, dynamic> toJson() => {
@@ -172,14 +181,16 @@ class VoiceServiceConfiguration {
     'key': key,
     'voice': voice,
     'resourceId': resourceId,
+    if (credentialId != null) 'credentialId': credentialId,
   };
   factory VoiceServiceConfiguration.fromJson(Map<String, dynamic> value) =>
       VoiceServiceConfiguration(
         endpoint: value['endpoint'] as String,
         model: value['model'] as String,
-        key: value['key'] as String,
+        key: value['key'] as String? ?? '',
         voice: value['voice'] as String,
         resourceId: value['resourceId'] as String? ?? '',
+        credentialId: value['credentialId'] as String?,
       );
 
   void validate({
@@ -428,17 +439,17 @@ class VoiceConfiguration {
 /// Independent of text settings and never projected to a other Spaces.
 class VoiceSettings {
   VoiceSettings({this.storage = const FlutterSecureStorage()})
-    : _modelSettings = ModelSettings(storage: storage);
+    : modelSettings = ModelSettings(storage: storage);
   final FlutterSecureStorage storage;
-  // Keep credentials pinned to the voice store's Space across active switches.
-  final ModelSettings _modelSettings;
+  final ModelSettings modelSettings;
+  ProviderCredentials get credentials => modelSettings.credentials;
   final String _scopedKey = SpaceStorage.secureKey(storageKey);
   static const storageKey = 'nova.voice.v1';
 
   Future<VoiceConfiguration?> read() async {
     try {
       final draft = await readDraft();
-      final config = draft == null ? null : await _resolveModelKey(draft);
+      final config = draft == null ? null : await _resolve(draft);
       config?.validate();
       return config;
     } catch (_) {
@@ -448,9 +459,16 @@ class VoiceSettings {
 
   /// Dictation needs only ASR, independent of conversation/LLM/TTS settings.
   Future<VoiceConfiguration?> readForDictation() async {
-    final config = await readDraft();
     try {
-      config?.validateAsr();
+      final draft = await readDraft();
+      if (draft == null) return null;
+      final config = draft.copyWith(
+        asr: await _resolveService(
+          draft.asr,
+          useDefault: draft.asrProvider != SpeechProvider.selfHosted,
+        ),
+      );
+      config.validateAsr();
       return config;
     } catch (_) {
       throw const AgentFailure('dictation_settings_required');
@@ -459,39 +477,70 @@ class VoiceSettings {
 
   Future<VoiceConfiguration?> readDraft() async {
     try {
+      await credentials.list();
       final raw = await storage.read(key: _scopedKey);
       if (raw == null) return null;
-      final config = VoiceConfiguration.fromJson(
+      final value = VoiceConfiguration.fromJson(
         jsonDecode(raw) as Map<String, dynamic>,
       );
-      return config;
+      if ([
+        value.integrated,
+        value.asr,
+        value.tts,
+        value.fastLlm,
+      ].any((s) => s.key.isNotEmpty)) {
+        throw const AgentFailure('voice_settings_unavailable');
+      }
+      return value;
     } catch (_) {
       throw const AgentFailure('voice_settings_unavailable');
     }
   }
 
   Future<VoiceConfiguration> save(VoiceConfiguration draft) async {
-    final old = await readDraft();
-    final value = _mergeDraft(draft, old);
-    final resolved = await _resolveModelKey(value);
+    final value = await _prepare(_mergeDraft(draft, await readDraft()));
+    final resolved = await _resolve(value);
     resolved.validate();
     await _write(value);
     return resolved;
   }
 
-  Future<VoiceConfiguration> _resolveModelKey(VoiceConfiguration value) async {
-    if (value.pipeline != VoicePipeline.cascaded ||
-        value.fastLlm.key.isNotEmpty) {
-      return value;
+  Future<VoiceServiceConfiguration> _resolveService(
+    VoiceServiceConfiguration service, {
+    bool useDefault = true,
+  }) async {
+    if (service.endpoint.isEmpty ||
+        service.key.isNotEmpty ||
+        (!useDefault && service.credentialId == null)) {
+      return service;
     }
-    final model = await _modelSettings.readApiKey();
-    if (model == null ||
-        compatibleEndpoint(model.endpoint, 'models') !=
-            compatibleEndpoint(value.fastLlm.endpoint.trim(), 'models')) {
-      return value;
+    final credential = await credentials.resolve(
+      service.endpoint,
+      credentialId: service.credentialId,
+    );
+    return service.copyWith(
+      key: credential?.key ?? '',
+      credentialId: credential?.id,
+    );
+  }
+
+  Future<VoiceConfiguration> _resolve(VoiceConfiguration value) async {
+    if (value.pipeline == VoicePipeline.integrated) {
+      return value.copyWith(
+        integrated: await _resolveService(value.integrated),
+      );
     }
-    // Resolve in memory so key rotation works without duplicating credentials.
-    return value.copyWith(fastLlm: value.fastLlm.copyWith(key: model.key));
+    return value.copyWith(
+      asr: await _resolveService(
+        value.asr,
+        useDefault: value.asrProvider != SpeechProvider.selfHosted,
+      ),
+      tts: await _resolveService(
+        value.tts,
+        useDefault: value.ttsProvider != SpeechProvider.selfHosted,
+      ),
+      fastLlm: await _resolveService(value.fastLlm),
+    );
   }
 
   Future<VoiceConfiguration> saveAsr({
@@ -503,9 +552,72 @@ class VoiceSettings {
       asrProvider: provider,
       asr: asr,
     );
-    final value = _mergeDraft(draft, old);
-    value.validateAsr();
-    return _write(value);
+    final value = await _prepare(_mergeDraft(draft, old), asrOnly: true);
+    final resolved = value.copyWith(
+      asr: await _resolveService(
+        value.asr,
+        useDefault: provider != SpeechProvider.selfHosted,
+      ),
+    );
+    resolved.validateAsr();
+    await _write(value);
+    return resolved;
+  }
+
+  Future<VoiceConfiguration> _prepare(
+    VoiceConfiguration value, {
+    bool asrOnly = false,
+  }) async {
+    Future<VoiceServiceConfiguration> prepare(
+      VoiceServiceConfiguration service,
+      bool useDefault,
+      bool active,
+    ) async {
+      if (service.endpoint.isEmpty) return service;
+      ProviderCredential? credential;
+      if (service.key.isNotEmpty) {
+        final referenced = service.credentialId == null
+            ? null
+            : await credentials.resolve(
+                service.endpoint,
+                credentialId: service.credentialId,
+              );
+        credential = await credentials.save(
+          id: referenced?.id,
+          endpoint: service.endpoint,
+          key: service.key,
+        );
+      } else if (active && (service.credentialId != null || useDefault)) {
+        credential = await credentials.resolve(
+          service.endpoint,
+          credentialId: service.credentialId,
+        );
+      }
+      return service.copyWith(key: '', credentialId: credential?.id);
+    }
+
+    return value.copyWith(
+      integrated: await prepare(
+        value.integrated,
+        true,
+        !asrOnly && value.pipeline == VoicePipeline.integrated,
+      ),
+      asr: await prepare(
+        value.asr,
+        value.asrProvider != SpeechProvider.selfHosted,
+        asrOnly || value.pipeline == VoicePipeline.cascaded,
+      ),
+      tts: await prepare(
+        value.tts,
+        value.ttsProvider != SpeechProvider.selfHosted,
+        !asrOnly && value.pipeline == VoicePipeline.cascaded,
+      ),
+      fastLlm: await prepare(
+        value.fastLlm,
+        true,
+        !asrOnly && value.pipeline == VoicePipeline.cascaded,
+      ),
+    );
   }
 
   VoiceConfiguration _mergeDraft(
@@ -517,29 +629,30 @@ class VoiceSettings {
       VoiceServiceConfiguration? previous,
       bool sameProvider,
     ) {
-      final trimmed = next.copyWith(
+      final sameEndpoint = next.endpoint.trim() == previous?.endpoint;
+      return VoiceServiceConfiguration(
         endpoint: next.endpoint.trim(),
         model: next.model.trim(),
         voice: next.voice.trim(),
-        resourceId: next.resourceId.trim(),
-      );
-      return trimmed.copyWith(
-        resourceId:
-            trimmed.resourceId.isEmpty &&
-                sameProvider &&
-                trimmed.endpoint == previous?.endpoint
+        resourceId: next.resourceId.isEmpty && sameProvider && sameEndpoint
             ? previous!.resourceId
-            : trimmed.resourceId,
-        key:
-            trimmed.key.isEmpty &&
-                sameProvider &&
-                trimmed.endpoint == previous?.endpoint
-            ? previous!.key
-            : trimmed.key,
+            : next.resourceId.trim(),
+        key: next.key,
+        credentialId: sameProvider && sameEndpoint
+            ? next.credentialId ?? previous?.credentialId
+            : next.credentialId == previous?.credentialId
+            ? null
+            : next.credentialId,
       );
     }
 
-    final value = draft.copyWith(
+    if (old != null &&
+        draft.integratedProfile != old.integratedProfile &&
+        draft.integrated.endpoint.trim() == old.integrated.endpoint &&
+        draft.integrated.key.isEmpty) {
+      throw const AgentFailure('invalid_voice_settings');
+    }
+    return draft.copyWith(
       integrated: merge(
         draft.integrated,
         old?.integrated,
@@ -547,21 +660,19 @@ class VoiceSettings {
       ),
       asr: merge(draft.asr, old?.asr, draft.asrProvider == old?.asrProvider),
       tts: merge(draft.tts, old?.tts, draft.ttsProvider == old?.ttsProvider),
-      fastLlm: merge(
-        draft.fastLlm,
-        old?.fastLlm,
-        draft.fastLlmProtocol == old?.fastLlmProtocol,
-      ),
+      fastLlm: merge(draft.fastLlm, old?.fastLlm, true),
     );
-    return value;
   }
 
-  Future<VoiceConfiguration> _write(VoiceConfiguration value) async {
+  Future<void> _write(VoiceConfiguration value) async {
     try {
-      await storage.write(key: _scopedKey, value: jsonEncode(value.toJson()));
+      final record = value.toJson();
+      for (final slot in ['integrated', 'asr', 'tts', 'fastLlm']) {
+        (record[slot] as Map).remove('key');
+      }
+      await storage.write(key: _scopedKey, value: jsonEncode(record));
     } catch (_) {
       throw const AgentFailure('voice_settings_save_failed');
     }
-    return value;
   }
 }

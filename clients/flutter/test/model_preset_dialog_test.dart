@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
@@ -35,10 +35,14 @@ class _Models extends ModelSettings {
 }
 
 Future<void> _open(WidgetTester tester, _Models models) async {
-  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-    const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-    (_) async => null,
-  );
+  FlutterSecureStorage.setMockInitialValues({
+    if (models.saved != null)
+      ModelSettings.storageKey: jsonEncode({
+        'endpoint': models.saved!.endpoint,
+        'model': models.saved!.model,
+        'key': models.saved!.key,
+      }),
+  });
   await tester.pumpWidget(
     MaterialApp(
       theme: novaTheme(),

@@ -81,8 +81,8 @@ void main() {
         expect(
           find.text(
             language == 'zh'
-                ? '不修改接口地址时，留空可保留现有密钥'
-                : 'Leave blank to keep your current key if the API URL is unchanged',
+                ? '留空使用此厂商已保存的密钥'
+                : 'Leave blank to use this provider’s saved key',
           ),
           findsOneWidget,
         );

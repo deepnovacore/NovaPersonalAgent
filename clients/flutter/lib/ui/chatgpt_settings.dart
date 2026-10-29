@@ -4,6 +4,7 @@ import '../agent_core/model_client.dart';
 import '../agent_core/model_settings.dart';
 import 'components.dart';
 import 'local_dialog.dart';
+import 'provider_credentials_sheet.dart';
 import 'theme.dart';
 
 enum _AccountNotice {
@@ -164,6 +165,19 @@ Future<void> showChatGptSettings(
                           ),
                       ],
                     ),
+                  TextButton(
+                    key: const ValueKey('model.credentials'),
+                    onPressed: busy
+                        ? null
+                        : () => run(() async {
+                            await showProviderCredentials(
+                              context,
+                              settings.credentials,
+                              onChanged: settings.refreshApiKeyProjection,
+                            );
+                          }),
+                    child: const Text('管理服务密钥'),
+                  ),
                   const SizedBox(height: 8),
                   FilledButton(
                     onPressed: busy
