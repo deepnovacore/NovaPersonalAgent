@@ -31,10 +31,10 @@ export class HostSecretStore {
 export const spaceSecretsPath=(configPath:string)=>configPath+'.secrets.json';
 /** Synchronous startup overlay: stored Space credentials fill only variables the operator left unset. */
 export function overlaySpaceSecrets(environment:NodeJS.ProcessEnv,configPath:string|undefined):NodeJS.ProcessEnv{
- if(!configPath)return environment;let parsed:SecretFile;
+ if(!configPath)return environment;
  let text:string;try{text=readFileSync(spaceSecretsPath(configPath),'utf8')}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return environment;throw error}
  // BoundedJsonStore leaves an empty private file until the first write.
- if(!text)return environment;parsed=fileSchema.parse(JSON.parse(text));
+ if(!text)return environment;const parsed=fileSchema.parse(JSON.parse(text));
  const next={...environment};for(const [name,value]of Object.entries(parsed.secrets))if(SPACE_SECRET_NAMES.includes(name)&&!environment[name]?.trim())next[name]=value;return next;
 }
 export function credentialsView(store:HostSecretStore|undefined,environment:NodeJS.ProcessEnv){
