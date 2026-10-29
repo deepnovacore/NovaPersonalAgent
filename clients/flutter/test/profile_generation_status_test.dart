@@ -190,15 +190,15 @@ void main() {
           home: Scaffold(
             body: ProfileGenerationStatus(
               generation: c,
-              waitingHint: '先连接飞书，之后会自动整理到这里。',
-              onOpenFeishu: () => opened++,
+              waitingHint: '打开连接器并连接数据源，之后会自动整理到这里。',
+              onOpenConnectors: () => opened++,
             ),
           ),
         ),
       );
-      expect(find.text('先连接飞书，之后会自动整理到这里。'), findsOneWidget);
+      expect(find.text('打开连接器并连接数据源，之后会自动整理到这里。'), findsOneWidget);
       expect(find.text('消息同步后，会自动整理到这里'), findsNothing);
-      await tester.tap(find.text('打开飞书设置'));
+      await tester.tap(find.text('打开连接器'));
       expect(opened, 1);
       await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(
@@ -207,7 +207,7 @@ void main() {
         ),
       );
       expect(find.text('消息同步后，会自动整理到这里'), findsOneWidget);
-      expect(find.text('打开飞书设置'), findsNothing);
+      expect(find.text('打开连接器'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
     },
@@ -242,12 +242,12 @@ void main() {
             body: ProfileGenerationStatus(
               generation: c,
               empty: true,
-              onOpenFeishu: () => opened++,
+              onOpenConnectors: () => opened++,
             ),
           ),
         ),
       );
-      expect(find.text('打开飞书设置'), findsNothing, reason: '$phase');
+      expect(find.text('打开连接器'), findsNothing, reason: '$phase');
       await tester.pumpWidget(const SizedBox());
     }
     expect(opened, 0);

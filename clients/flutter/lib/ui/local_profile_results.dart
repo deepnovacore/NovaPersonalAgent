@@ -27,7 +27,7 @@ class LocalProfileResults extends StatelessWidget
     this.excludeAbout = false,
     this.compact = false,
     this.language = 'zh',
-    this.onOpenFeishu,
+    this.onOpenConnectors,
     this.emptyHint,
     this.adoptTodo,
   });
@@ -40,7 +40,7 @@ class LocalProfileResults extends StatelessWidget
   final bool excludeAbout;
   final bool compact;
   final String language;
-  final VoidCallback? onOpenFeishu;
+  final VoidCallback? onOpenConnectors;
 
   /// The reason nothing can be shown right now, supplied by the shell so the
   /// empty state names the real cause instead of guessing.
@@ -126,11 +126,11 @@ class LocalProfileResults extends StatelessWidget
                   ),
                 ),
               ),
-            if (rows.isEmpty && onOpenFeishu != null)
+            if (rows.isEmpty && onOpenConnectors != null)
               TextButton(
                 style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                onPressed: onOpenFeishu,
-                child: Text(t('打开飞书设置', 'Open Feishu settings')),
+                onPressed: onOpenConnectors,
+                child: Text(t('打开连接器', 'Open connectors')),
               ),
             for (final key in ProfileCorrections.categories.keys)
               for (final row in rows.where((e) => e['key'] == key).take(1))
@@ -189,7 +189,7 @@ class LocalProfileResults extends StatelessWidget
                 ? t('暂时没有可确认的个人信息', 'No confirmed personal information yet')
                 : t('暂时没有可确认的近况', 'No confirmed updates yet'),
             waitingHint: emptyHint,
-            onOpenFeishu: onOpenFeishu,
+            onOpenConnectors: onOpenConnectors,
           );
         }
         if (kind == 'timeline') {
@@ -220,7 +220,7 @@ class LocalProfileResults extends StatelessWidget
                 ? t('暂时没有可确认的个人信息', 'No confirmed personal information yet')
                 : t('暂时没有可确认的近况', 'No confirmed updates yet'),
             waitingHint: emptyHint,
-            onOpenFeishu: onOpenFeishu,
+            onOpenConnectors: onOpenConnectors,
           );
         }
         return kind == 'timeline'
@@ -371,11 +371,11 @@ class LocalProfileResults extends StatelessWidget
             emptyHint!,
             style: const TextStyle(color: Nova.secondary, height: 1.5),
           ),
-          if (onOpenFeishu != null)
+          if (onOpenConnectors != null)
             TextButton(
               style: TextButton.styleFrom(padding: EdgeInsets.zero),
-              onPressed: onOpenFeishu,
-              child: Text(t('打开飞书设置', 'Open Feishu settings')),
+              onPressed: onOpenConnectors,
+              child: Text(t('打开连接器', 'Open connectors')),
             ),
         ],
       ),
@@ -487,10 +487,10 @@ class LocalProfileResults extends StatelessWidget
                 ),
               ),
             ],
-            if (onOpenFeishu != null)
+            if (onOpenConnectors != null)
               TextButton(
-                onPressed: onOpenFeishu,
-                child: Text(t('前往飞书设置', 'Open Feishu settings')),
+                onPressed: onOpenConnectors,
+                child: Text(t('前往连接器', 'Open connectors')),
               ),
           ],
         ],
@@ -505,9 +505,9 @@ class LocalProfileResults extends StatelessWidget
     Map<String, dynamic> value,
   ) {
     entries.sort(
-      (a, b) =>
-          DateTime.parse(b['observed_at'] as String)
-              .compareTo(DateTime.parse(a['observed_at'] as String)),
+      (a, b) => DateTime.parse(
+        b['observed_at'] as String,
+      ).compareTo(DateTime.parse(a['observed_at'] as String)),
     );
     final days = <DateTime, List<Map>>{};
     for (final entry in entries) {
@@ -1266,8 +1266,9 @@ class _ProfileScopeState extends State<_ProfileScope> {
               .toList()
             ..sort();
       if (dates.isNotEmpty) {
-        final end = DateTime.fromMillisecondsSinceEpoch(dates.first)
-            .add(const Duration(milliseconds: 1));
+        final end = DateTime.fromMillisecondsSinceEpoch(
+          dates.first,
+        ).add(const Duration(milliseconds: 1));
         expiry = Timer(end.difference(now), _changed);
       }
     }

@@ -47,12 +47,25 @@ extension FeishuAppRegistration on FeishuAuth {
     };
     final rawVerification =
         data['verification_uri_complete'] ?? data['verification_uri'];
-    final verification =
+    // The registration API's default /page/launcher only creates a new agent.
+    // Feishu's CLI configuration page serves the same device code and exposes
+    // the "create new / choose an existing app" choice; `from=cli` is part of
+    // that page's contract (mirrors the lark-cli one-click verification URL).
+    final serverUri =
         rawVerification is String && rawVerification.trim().isNotEmpty
         ? api.appRegistrationVerificationUri(rawVerification.trim())
-        : Uri.https(api.openHost(brand), '/page/launcher', {
-            'user_code': data['user_code'] as String,
-          });
+        : null;
+    final host = switch (serverUri?.host) {
+      'open.feishu.cn' => 'open.feishu.cn',
+      'open.larksuite.com' => 'open.larksuite.com',
+      _ => api.openHost(brand),
+    };
+    final verification = Uri.https(host, '/page/cli', {
+      'user_code': data['user_code'] as String,
+      'lpv': '1.0.97',
+      'ocv': '1.0.97',
+      'from': 'cli',
+    });
     return FeishuAuthorizationSession(
       verification,
       data['user_code'] as String,

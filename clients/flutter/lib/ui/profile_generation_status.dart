@@ -10,7 +10,7 @@ class ProfileGenerationStatus extends StatelessWidget {
     this.empty = false,
     this.emptyLabel,
     this.waitingHint,
-    this.onOpenFeishu,
+    this.onOpenConnectors,
   });
   final ProfileGenerationCoordinator generation;
   final String language;
@@ -19,7 +19,7 @@ class ProfileGenerationStatus extends StatelessWidget {
 
   /// Replaces the default waiting copy with the reason that applies now.
   final String? waitingHint;
-  final VoidCallback? onOpenFeishu;
+  final VoidCallback? onOpenConnectors;
   String t(String zh, String en) => language == 'zh' ? zh : en;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -119,10 +119,10 @@ class ProfileGenerationStatus extends StatelessWidget {
                     ),
                   ),
                 if (phase == ProfileGenerationPhase.waiting &&
-                    onOpenFeishu != null)
+                    onOpenConnectors != null)
                   TextButton(
-                    onPressed: onOpenFeishu,
-                    child: Text(t('打开飞书设置', 'Open Feishu settings')),
+                    onPressed: onOpenConnectors,
+                    child: Text(t('打开连接器', 'Open connectors')),
                   ),
               ],
             ),

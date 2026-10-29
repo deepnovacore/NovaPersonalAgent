@@ -58,7 +58,7 @@ const ink = Nova.ink, mint = Nova.mint;
 /// The real reason a saved profile/timeline cannot be shown right now.
 ///
 /// The shell computes this once per build so every empty state names the same
-/// cause; [connect] tells the UI whether opening Feishu settings can help.
+/// cause; [connect] tells the UI whether opening Connectors can help.
 ({String hint, bool connect}) profileEmptyHint({
   required bool restored,
   required bool configured,
@@ -73,24 +73,24 @@ const ink = Nova.ink, mint = Nova.mint;
   if (!configured) {
     return (
       hint: zh
-          ? '先连接飞书，之后会自动整理到这里。'
-          : 'Connect Feishu and your updates will appear here.',
+          ? '打开连接器并连接数据源，之后会自动整理到这里。'
+          : 'Connect a source in Connectors and your updates will appear here.',
       connect: true,
     );
   }
   if (!authorized) {
     return (
       hint: zh
-          ? '飞书授权已失效，重新连接后会自动整理。'
-          : 'Feishu access expired. Reconnect to resume organizing.',
+          ? '数据源授权已失效，重新连接后会自动整理。'
+          : 'A connected source expired. Reconnect to resume organizing.',
       connect: true,
     );
   }
   if (syncing) {
     return (
       hint: zh
-          ? '正在同步消息，完成后会自动整理。'
-          : 'Syncing messages; updates will appear when it finishes.',
+          ? '正在同步数据，完成后会自动整理。'
+          : 'Syncing data; updates will appear when it finishes.',
       connect: false,
     );
   }
@@ -670,8 +670,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               revision: _profileRevision,
               language: language,
               emptyHint: hint.hint,
-              onOpenFeishu: hint.connect
-                  ? () => unawaited(_openFeishu())
+              onOpenConnectors: hint.connect
+                  ? () => unawaited(_openConnectors())
                   : null,
             ),
     );
@@ -813,8 +813,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     revision: _profileRevision,
                                     excludeAbout: excludeAbout,
                                     emptyHint: hint.hint,
-                                    onOpenFeishu: hint.connect
-                                        ? () => unawaited(_openFeishu())
+                                    onOpenConnectors: hint.connect
+                                        ? () => unawaited(_openConnectors())
                                         : null,
                                   ),
                             onSettings: _settings,
@@ -1391,8 +1391,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                       language: language,
                                       revision: _profileRevision,
                                       emptyHint: profileHint.hint,
-                                      onOpenFeishu: profileHint.connect
-                                          ? () => unawaited(_openFeishu())
+                                      onOpenConnectors: profileHint.connect
+                                          ? () => unawaited(_openConnectors())
                                           : null,
                                     ),
                               onDiscuss: (text) => unawaited(_delegate(text)),

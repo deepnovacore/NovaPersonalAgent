@@ -85,7 +85,6 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
   late final _ServiceFields _asr, _tts, _llm;
   // Never populate form controllers with a stored secret.
   late final TextEditingController _integratedKey;
-  late final bool _advancedInitiallyExpanded;
   bool _endpointRewritten = false;
   bool _saving = false;
   String? _error;
@@ -117,7 +116,6 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
         voice: voice,
       ),
     );
-    _advancedInitiallyExpanded = initial.pipeline == VoicePipeline.cascaded;
     _integratedKey = TextEditingController();
     _asr = _ServiceFields(_draft.asr);
     _tts = _ServiceFields(_draft.tts);
@@ -180,9 +178,82 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     }
   }
 
+  void _selectPipeline(VoicePipeline value) {
+    if (_draft.pipeline == value) return;
+    setState(() => _draft = _draft.copyWith(pipeline: value));
+  }
+
+  Widget _pipelineTab(VoicePipeline value, String label) {
+    final selected = _draft.pipeline == value;
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        inMutuallyExclusiveGroup: true,
+        child: GestureDetector(
+          key: ValueKey('pipeline.tab.${value.name}'),
+          behavior: HitTestBehavior.opaque,
+          onTap: _saving ? null : () => _selectPipeline(value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            constraints: const BoxConstraints(minHeight: 56),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? scheme.secondaryContainer : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: selected
+                    ? scheme.onSecondaryContainer
+                    : scheme.onSurfaceVariant,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Two-tab pipeline selector. The selected tab is the pipeline and only that
+  /// pipeline's fields are shown below it.
+  Widget _pipelineTabs() {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('pipeline.tabs'),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _pipelineTab(
+            VoicePipeline.integrated,
+            t('实时语音（一体式）', 'Realtime (integrated)'),
+          ),
+          const SizedBox(width: 4),
+          _pipelineTab(
+            VoicePipeline.cascaded,
+            t('分步处理（识别 → 对话 → 合成）', 'Step-by-step (ASR → LLM → TTS)'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _fields(
     String title,
     _ServiceFields fields, {
+    String? label,
     bool websocket = false,
     bool model = true,
     bool voice = false,
@@ -190,13 +261,8 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     bool optionalVoice = false,
     bool geminiBase = false,
     bool resourceId = false,
-  }) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Padding(
-        padding: const EdgeInsets.only(top: 16),
-        child: Text(title, style: Theme.of(context).textTheme.titleSmall),
-      ),
+  }) {
+    final items = <Widget>[
       TextField(
         controller: fields.endpoint,
         enabled: !_saving,
@@ -235,8 +301,8 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
           decoration: InputDecoration(
             labelText: 'Resource ID',
             helperText: t(
-              '留空仅保留同一供应商、同一地址已保存的资源 ID',
-              'Leave blank to keep the saved resource ID only for the same provider and endpoint',
+              '留空仅保留已保存的资源 ID',
+              'Leave blank to keep the saved resource ID',
             ),
           ),
         ),
@@ -264,14 +330,27 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
           labelText: optionalKey
               ? t('API 密钥（服务允许时可不填）', 'API key (optional if supported)')
               : t('API 密钥', 'API key'),
-          helperText: t(
-            '留空仅保留同一供应商、同一地址已保存的密钥',
-            'Leave blank to keep the saved key only for the same provider and endpoint',
-          ),
+          helperText: t('留空仅保留已保存的密钥', 'Leave blank to keep the saved key'),
         ),
       ),
-    ],
-  );
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 16, bottom: 12),
+          child: Text(
+            label ?? title,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        for (var index = 0; index < items.length; index++) ...[
+          if (index > 0) const SizedBox(height: 12),
+          items[index],
+        ],
+      ],
+    );
+  }
 
   Widget _speechSelector({required bool asr}) {
     final selected = asr ? _draft.asrProvider : _draft.ttsProvider;
@@ -448,13 +527,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
         : savedVoice;
     final voices = _voiceOptions(model);
     return [
-      Padding(
-        padding: const EdgeInsets.only(top: 16),
-        child: Text(
-          t('实时语音', 'Realtime voice'),
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-      ),
+      const SizedBox(height: 12),
       DropdownButtonFormField<IntegratedVoiceService>(
         key: const ValueKey('integrated.provider'),
         initialValue: provider,
@@ -466,6 +539,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
         ],
         onChanged: _saving ? null : _selectIntegratedProvider,
       ),
+      const SizedBox(height: 12),
       // Reset the form-field state when the provider changes so the dropdown
       // displays the new provider's defaults.
       KeyedSubtree(
@@ -482,6 +556,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
           onChanged: _saving ? null : _selectIntegratedModel,
         ),
       ),
+      const SizedBox(height: 12),
       // Reset the form-field state when the model (or provider) changes so the
       // voice dropdown displays the model's default voice.
       KeyedSubtree(
@@ -498,17 +573,17 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
           onChanged: _saving ? null : _selectIntegratedVoice,
         ),
       ),
-      if (_endpointRewritten)
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            t(
-              '服务地址已切换为官方地址。旧地址保存的密钥不会沿用，请重新输入 API 密钥。',
-              'The service address was switched to the official endpoint. Keys saved for the old address are not reused; enter the API key again.',
-            ),
-            style: Theme.of(context).textTheme.bodySmall,
+      if (_endpointRewritten) ...[
+        const SizedBox(height: 12),
+        Text(
+          t(
+            '服务地址已切换为官方地址。旧地址保存的密钥不会沿用，请重新输入 API 密钥。',
+            'The service address was switched to the official endpoint. Keys saved for the old address are not reused; enter the API key again.',
           ),
+          style: Theme.of(context).textTheme.bodySmall,
         ),
+      ],
+      const SizedBox(height: 12),
       TextField(
         controller: _integratedKey,
         enabled: !_saving,
@@ -519,57 +594,16 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
         enableIMEPersonalizedLearning: false,
         decoration: InputDecoration(
           labelText: t('API 密钥', 'API key'),
-          helperText: t(
-            '留空仅保留同一供应商、同一官方地址已保存的密钥',
-            'Leave blank to keep the saved key only for the same provider and official endpoint',
-          ),
+          helperText: t('留空仅保留已保存的密钥', 'Leave blank to keep the saved key'),
         ),
       ),
     ];
   }
 
-  /// Compact replacement for the integrated section while the saved pipeline is
-  /// cascaded. The switch back to the integrated service lives in the advanced
-  /// area, which opens automatically for a saved cascaded pipeline.
-  Widget _cascadedStatus() => Padding(
-    padding: const EdgeInsets.only(top: 16),
-    child: Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.call_outlined,
-            size: 20,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  t('当前使用分步处理', 'Currently using step-by-step'),
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  t('识别 → 快速模型 → 合成', 'Recognition → fast model → synthesis'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-
   List<Widget> _cascadedFields() => [
+    const SizedBox(height: 12),
     ..._asrFields(),
+    const SizedBox(height: 12),
     DropdownButtonFormField<FastLlmProtocol>(
       key: const ValueKey('fastLlm.protocol'),
       initialValue: _draft.fastLlmProtocol,
@@ -602,12 +636,22 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
               }
             },
     ),
-    _fields('快速前脑模型', _llm),
-    Text(
-      _draft.fastLlmProtocol == FastLlmProtocol.arkResponses
-          ? '填写完整的 Ark /responses 地址。此模型负责语音对话，长任务仍交给手机后脑。'
-          : '填写 Base URL 或完整接口地址，协议由上方选项决定。此模型负责语音对话，长任务仍交给手机后脑。',
+    _fields('快速前脑模型', _llm, label: t('快速前脑模型', 'Fast model')),
+    Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text(
+        _draft.fastLlmProtocol == FastLlmProtocol.arkResponses
+            ? t(
+                '填写完整的 Ark /responses 地址。此模型负责语音对话，长任务仍交给手机后脑。',
+                'Use the full Ark /responses URL. This model handles voice chat; longer tasks stay with the phone brain.',
+              )
+            : t(
+                '填写 Base URL 或完整接口地址，协议由上方选项决定。此模型负责语音对话，长任务仍交给手机后脑。',
+                'Use a base URL or full endpoint; the protocol is set above. This model handles voice chat; longer tasks stay with the phone brain.',
+              ),
+      ),
     ),
+    const SizedBox(height: 12),
     _speechSelector(asr: false),
     _fields(
       'TTS',
@@ -623,73 +667,16 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     ),
     if (_draft.asrProvider == SpeechProvider.selfHosted ||
         _draft.ttsProvider == SpeechProvider.selfHosted)
-      const Text('自部署服务必须兼容 Nova 的 ASR WebSocket / TTS HTTP PCM 协议，并可由手机直接访问。'),
-  ];
-
-  Widget _advancedSection() {
-    final cascaded = _draft.pipeline == VoicePipeline.cascaded;
-    return ExpansionTile(
-      key: const ValueKey('voice.advanced'),
-      initiallyExpanded: _advancedInitiallyExpanded,
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: const EdgeInsets.only(bottom: 8),
-      title: Text(t('高级：分步处理', 'Advanced: step-by-step')),
-      subtitle: Text(
-        t(
-          '识别 → 快速模型 → 合成，可使用自建或第三方服务',
-          'Recognition → fast model → synthesis with self-hosted or third-party services',
+      Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Text(
+          t(
+            '自部署服务必须兼容 Nova 的 ASR WebSocket / TTS HTTP PCM 协议，并可由手机直接访问。',
+            'Self-hosted services must speak Nova’s ASR WebSocket / TTS HTTP PCM protocols and be reachable from this phone.',
+          ),
         ),
-        style: Theme.of(context).textTheme.bodySmall,
       ),
-      children: [
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            DropdownButtonFormField<VoicePipeline>(
-              key: const ValueKey('voice.pipeline'),
-              initialValue: _draft.pipeline,
-              isExpanded: true,
-              decoration: InputDecoration(labelText: t('语音模式', 'Voice mode')),
-              items: [
-                DropdownMenuItem(
-                  value: VoicePipeline.integrated,
-                  child: Text(t('实时语音（一体式）', 'Realtime voice (integrated)')),
-                ),
-                DropdownMenuItem(
-                  value: VoicePipeline.cascaded,
-                  child: Text(
-                    t(
-                      '分步处理（识别 → 对话 → 合成）',
-                      'Step-by-step (recognition → chat → synthesis)',
-                    ),
-                  ),
-                ),
-              ],
-              onChanged: _saving
-                  ? null
-                  : (value) {
-                      if (value == null || value == _draft.pipeline) return;
-                      setState(() => _draft = _draft.copyWith(pipeline: value));
-                    },
-            ),
-            if (cascaded)
-              ..._cascadedFields()
-            else
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  t(
-                    '当前使用实时语音；分步处理设置在切换到分步处理后才生效。',
-                    'Realtime voice is active; step-by-step settings apply only after switching to step-by-step mode.',
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
+  ];
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -724,17 +711,16 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
             ] else ...[
               Text(
                 t(
-                  '手机直接连接所选服务，在独立 Space 中使用。语音设置与文字模型独立，密钥仅保存在本机安全存储中。',
-                  'The phone connects directly to the selected service inside a standalone Space. Voice settings are independent of text models; credentials stay in this device’s secure storage.',
+                  '手机直连所选服务，密钥仅保存在本机。',
+                  'Connects directly to the selected service; keys stay on this device.',
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
+              _pipelineTabs(),
               if (_draft.pipeline == VoicePipeline.integrated)
                 ..._integratedFields()
               else
-                _cascadedStatus(),
-              const SizedBox(height: 8),
-              _advancedSection(),
+                ..._cascadedFields(),
             ],
             const SizedBox(height: 16),
             Text(

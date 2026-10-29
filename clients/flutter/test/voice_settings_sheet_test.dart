@@ -7,12 +7,17 @@ import 'package:nova_mobile/voice/voice_settings.dart';
 import 'package:nova_mobile/voice/voice_settings_sheet.dart';
 
 const _openButton = ValueKey('open-voice-settings');
+const _tabIntegrated = ValueKey('pipeline.tab.integrated');
+const _tabCascaded = ValueKey('pipeline.tab.cascaded');
 const _providerKey = ValueKey('integrated.provider');
 const _modelKey = ValueKey('integrated.model');
 const _voiceKey = ValueKey('integrated.voice');
 const _keyKey = ValueKey('integrated.key');
-const _advancedKey = ValueKey('voice.advanced');
-const _pipelineKey = ValueKey('voice.pipeline');
+const _asrProviderKey = ValueKey('asr.provider');
+const _ttsProviderKey = ValueKey('tts.provider');
+const _fastLlmProtocolKey = ValueKey('fastLlm.protocol');
+const _zhIntegratedTab = '实时语音（一体式）';
+const _zhCascadedTab = '分步处理（识别 → 对话 → 合成）';
 
 VoiceServiceConfiguration _builtIn(
   IntegratedVoiceService provider, {
@@ -27,6 +32,23 @@ VoiceServiceConfiguration _builtIn(
     model: model ?? defaults.model,
     voice: voice ?? defaults.voice,
     key: key,
+  );
+}
+
+/// Valid cascaded sub-configurations so the sheet can save in either mode.
+VoiceConfiguration _validCascaded({
+  VoicePipeline pipeline = VoicePipeline.cascaded,
+}) {
+  const defaults = VoiceConfiguration();
+  return defaults.copyWith(
+    pipeline: pipeline,
+    asr: defaults.asr.copyWith(key: 'asr-key'),
+    tts: defaults.tts.copyWith(key: 'tts-key'),
+    fastLlm: const VoiceServiceConfiguration(
+      endpoint: 'https://example.com/v1/chat/completions',
+      model: 'fast-model',
+      key: 'llm-key',
+    ),
   );
 }
 
@@ -66,6 +88,11 @@ Future<void> _openSettings(
   await tester.pumpAndSettle();
 }
 
+Future<void> _switchTab(WidgetTester tester, Key tab) async {
+  await tester.tap(find.byKey(tab));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _openDropdown(WidgetTester tester, Key key) async {
   final finder = find.byKey(key);
   await tester.ensureVisible(finder);
@@ -91,25 +118,39 @@ Future<void> _selectDropdown(
 TextField _textField(WidgetTester tester, Key key) =>
     tester.widget<TextField>(find.byKey(key));
 
+String _visibleText(WidgetTester tester) => tester
+    .widgetList<Text>(find.byType(Text))
+    .map((text) => text.data ?? '')
+    .join(' ');
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
-  testWidgets('integrated sheet only shows provider, model, voice and key', (
+  testWidgets('pipeline tabs only show the selected pipeline fields', (
     tester,
   ) async {
     await _openSettings(tester);
+    // Two-tab selector replaces the old advanced fold and mode dropdown.
+    expect(find.byKey(const ValueKey('pipeline.tabs')), findsOneWidget);
+    expect(find.byKey(_tabIntegrated), findsOneWidget);
+    expect(find.byKey(_tabCascaded), findsOneWidget);
+    expect(find.byType(ExpansionTile), findsNothing);
+    expect(find.text('高级：分步处理'), findsNothing);
+    expect(find.text('语音模式'), findsNothing);
+    // Default integrated pipeline: tab 1 fields only.
     expect(find.byKey(_providerKey), findsOneWidget);
     expect(find.byKey(_modelKey), findsOneWidget);
     expect(find.byKey(_voiceKey), findsOneWidget);
     expect(find.byKey(_keyKey), findsOneWidget);
-    // There is no endpoint or pipeline selector in the main view.
+    expect(find.byKey(_asrProviderKey), findsNothing);
+    expect(find.byKey(_fastLlmProtocolKey), findsNothing);
+    // No endpoint field, no redundant section heading or status card copy.
     expect(find.byKey(const ValueKey('实时模型.endpoint')), findsNothing);
-    expect(find.byKey(const ValueKey('WSS 服务地址')), findsNothing);
     expect(find.text('WSS 服务地址'), findsNothing);
     expect(find.text('实时模型'), findsNothing);
-    expect(find.byKey(_pipelineKey), findsNothing);
-    expect(find.byKey(const ValueKey('asr.provider')), findsNothing);
+    expect(find.text('实时语音'), findsNothing);
+    expect(find.text('当前使用分步处理'), findsNothing);
     // Model and voice are closed dropdowns, not free-text fields.
     expect(
       find.byWidgetPredicate(
@@ -130,14 +171,21 @@ void main() {
     expect(find.text('Qwen'), findsOneWidget);
     expect(find.text(IntegratedVoiceCatalog.qwenDefaultModel), findsOneWidget);
     expect(find.text(IntegratedVoiceCatalog.qwenDefaultVoice), findsOneWidget);
-    // Step-by-step is folded away and collapsed by default.
-    expect(find.text('高级：分步处理'), findsOneWidget);
-    await tester.tap(find.byKey(_advancedKey));
-    await tester.pumpAndSettle();
-    expect(find.byKey(_pipelineKey), findsOneWidget);
-    // Integrated mode keeps the step-by-step fields hidden.
-    expect(find.byKey(const ValueKey('asr.provider')), findsNothing);
-    expect(find.byKey(const ValueKey('fastLlm.protocol')), findsNothing);
+
+    // Switching tabs swaps the fields entirely.
+    await _switchTab(tester, _tabCascaded);
+    expect(find.byKey(_asrProviderKey), findsOneWidget);
+    expect(find.byKey(_fastLlmProtocolKey), findsOneWidget);
+    expect(find.byKey(_ttsProviderKey), findsOneWidget);
+    expect(find.byKey(_providerKey), findsNothing);
+    expect(find.byKey(_modelKey), findsNothing);
+    expect(find.byKey(_keyKey), findsNothing);
+
+    await _switchTab(tester, _tabIntegrated);
+    expect(find.byKey(_providerKey), findsOneWidget);
+    expect(find.byKey(_keyKey), findsOneWidget);
+    expect(find.byKey(_asrProviderKey), findsNothing);
+    expect(find.byKey(_ttsProviderKey), findsNothing);
   });
 
   testWidgets('Qwen catalog drives per-model default voices', (tester) async {
@@ -340,88 +388,104 @@ void main() {
     expect(saved.integrated.voice, IntegratedVoiceCatalog.qwenDefaultVoice);
   });
 
-  testWidgets(
-    'cascaded pipeline opens the advanced section and can switch back',
-    (tester) async {
-      final initial = const VoiceConfiguration().copyWith(
-        pipeline: VoicePipeline.cascaded,
-      );
-      await _openSettings(tester, initial: initial);
-      // Saved cascaded pipeline: advanced area starts expanded and the integrated
-      // section is replaced with a compact status row.
-      expect(find.byKey(_advancedKey), findsOneWidget);
-      expect(find.byKey(_pipelineKey), findsOneWidget);
-      expect(find.byKey(const ValueKey('asr.provider')), findsOneWidget);
-      expect(find.text('当前使用分步处理'), findsOneWidget);
-      expect(find.byKey(_providerKey), findsNothing);
-      expect(find.byKey(_modelKey), findsNothing);
-      expect(find.byKey(_keyKey), findsNothing);
+  testWidgets('saved cascaded pipeline opens on the step-by-step tab', (
+    tester,
+  ) async {
+    await _openSettings(tester, initial: _validCascaded());
+    // Saved cascaded pipeline starts on tab 2 and hides the integrated fields.
+    expect(find.byKey(_asrProviderKey), findsOneWidget);
+    expect(find.byKey(_fastLlmProtocolKey), findsOneWidget);
+    expect(find.byKey(_ttsProviderKey), findsOneWidget);
+    expect(find.byKey(_providerKey), findsNothing);
+    expect(find.byKey(_modelKey), findsNothing);
+    expect(find.byKey(_keyKey), findsNothing);
+    // No duplicate mode dropdown, status card or advanced heading.
+    expect(find.text('语音模式'), findsNothing);
+    expect(find.text('当前使用分步处理'), findsNothing);
+    expect(find.byType(ExpansionTile), findsNothing);
 
-      await _selectDropdown(tester, _pipelineKey, '实时语音（一体式）');
-      expect(find.byKey(_providerKey), findsOneWidget);
-      expect(find.byKey(_keyKey), findsOneWidget);
-      expect(find.text('当前使用分步处理'), findsNothing);
-      expect(find.byKey(const ValueKey('asr.provider')), findsNothing);
+    await _switchTab(tester, _tabIntegrated);
+    expect(find.byKey(_providerKey), findsOneWidget);
+    expect(find.byKey(_keyKey), findsOneWidget);
+    expect(find.byKey(_asrProviderKey), findsNothing);
+    expect(find.byKey(_ttsProviderKey), findsNothing);
+  });
 
-      await _selectDropdown(tester, _pipelineKey, '分步处理（识别 → 对话 → 合成）');
-      expect(find.byKey(_providerKey), findsNothing);
-      expect(find.byKey(const ValueKey('asr.provider')), findsOneWidget);
-      expect(find.text('当前使用分步处理'), findsOneWidget);
-    },
-  );
+  testWidgets('saving persists the selected tab pipeline', (tester) async {
+    // Start integrated (tab 1) with valid cascaded settings; switching to tab 2
+    // and saving must persist the cascaded pipeline.
+    final initial = _validCascaded(pipeline: VoicePipeline.integrated).copyWith(
+      integrated: _builtIn(IntegratedVoiceService.qwen, key: 'qwen-key'),
+    );
+    await _openSettings(tester, initial: initial);
+    expect(find.byKey(_providerKey), findsOneWidget);
+    await _switchTab(tester, _tabCascaded);
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.byType(VoiceSettingsSheet), findsNothing);
+    var saved = (await VoiceSettings().readDraft())!;
+    expect(saved.pipeline, VoicePipeline.cascaded);
+    expect(saved.asr.key, 'asr-key');
+    expect(saved.tts.key, 'tts-key');
+    expect(saved.fastLlmConfiguration.key, 'llm-key');
 
-  testWidgets('English labels cover the reworked integrated UI', (
+    // The saved cascaded pipeline opens on tab 2; switching back to tab 1 and
+    // saving must persist the integrated pipeline again.
+    await _openSettings(tester, initial: saved);
+    expect(find.byKey(_providerKey), findsNothing);
+    await _switchTab(tester, _tabIntegrated);
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.byType(VoiceSettingsSheet), findsNothing);
+    saved = (await VoiceSettings().readDraft())!;
+    expect(saved.pipeline, VoicePipeline.integrated);
+    expect(saved.integrated.key, 'qwen-key');
+  });
+
+  testWidgets('English labels cover the tabs and integrated pipeline', (
     tester,
   ) async {
     await _openSettings(tester, language: 'en');
+    // Tabs and integrated fields are bilingual; no hidden Chinese copy.
+    expect(find.text('Realtime (integrated)'), findsOneWidget);
+    expect(find.text('Step-by-step (ASR → LLM → TTS)'), findsOneWidget);
     expect(find.text('Realtime service'), findsOneWidget);
     expect(find.text('Model'), findsOneWidget);
     expect(find.text('Voice'), findsOneWidget);
     expect(find.text('API key'), findsOneWidget);
-    expect(find.text('Advanced: step-by-step'), findsOneWidget);
     expect(find.text('Standalone voice'), findsOneWidget);
     expect(find.text('WSS endpoint'), findsNothing);
-    final visible = tester
-        .widgetList<Text>(find.byType(Text))
-        .map((text) => text.data ?? '')
-        .join(' ');
-    expect(RegExp(r'[\u4e00-\u9fff]').hasMatch(visible), isFalse);
+    expect(find.text('高级：分步处理'), findsNothing);
+    expect(RegExp(r'[\u4e00-\u9fff]').hasMatch(_visibleText(tester)), isFalse);
   });
 
-  testWidgets('English labels cover the cascaded status and pipeline', (
-    tester,
-  ) async {
-    final initial = const VoiceConfiguration().copyWith(
-      pipeline: VoicePipeline.cascaded,
-    );
-    await _openSettings(tester, initial: initial, language: 'en');
-    expect(find.text('Currently using step-by-step'), findsOneWidget);
-    expect(find.text('Voice mode'), findsOneWidget);
-    expect(
-      find.text('Step-by-step (recognition → chat → synthesis)'),
-      findsOneWidget,
-    );
+  testWidgets('English labels cover the step-by-step tab', (tester) async {
+    await _openSettings(tester, initial: _validCascaded(), language: 'en');
+    expect(find.text('Speech recognition service'), findsOneWidget);
+    expect(find.text('Speech synthesis service'), findsOneWidget);
+    expect(find.text('Fast model protocol'), findsOneWidget);
+    expect(find.text('Fast model'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(RegExp(r'[\u4e00-\u9fff]').hasMatch(_visibleText(tester)), isFalse);
   });
 
-  testWidgets('integrated and cascaded layouts fit a narrow phone width', (
-    tester,
-  ) async {
+  testWidgets('tabs and fields fit a narrow phone width', (tester) async {
     // The real phone dialog is about 310 logical pixels wide.
     await _openSettings(tester, surfaceSize: const Size(390, 844));
-    expect(find.byKey(_providerKey), findsOneWidget);
-    expect(find.byKey(_modelKey), findsOneWidget);
-    expect(find.byKey(_voiceKey), findsOneWidget);
+    expect(find.byKey(_tabIntegrated), findsOneWidget);
+    expect(find.byKey(_tabCascaded), findsOneWidget);
+    expect(find.text(_zhIntegratedTab), findsOneWidget);
+    expect(find.text(_zhCascadedTab), findsOneWidget);
     // Long Qwen model ids must ellipsize instead of overflowing the row.
     await _openDropdown(tester, _modelKey);
     await tester.tap(find.text(IntegratedVoiceCatalog.qwenV31Model).last);
     await tester.pumpAndSettle();
     expect(find.text(IntegratedVoiceCatalog.qwenV31Voice), findsOneWidget);
-    // The advanced pipeline selector must fit as well.
-    await tester.ensureVisible(find.byKey(_advancedKey));
-    await tester.tap(find.byKey(_advancedKey));
-    await tester.pumpAndSettle();
-    await _selectDropdown(tester, _pipelineKey, '分步处理（识别 → 对话 → 合成）');
-    expect(find.byKey(const ValueKey('asr.provider')), findsOneWidget);
-    expect(find.text('当前使用分步处理'), findsOneWidget);
+    // Both tabs must fit without overflow at phone width.
+    await _switchTab(tester, _tabCascaded);
+    expect(find.byKey(_asrProviderKey), findsOneWidget);
+    expect(find.byKey(_fastLlmProtocolKey), findsOneWidget);
+    await _switchTab(tester, _tabIntegrated);
+    expect(find.byKey(_providerKey), findsOneWidget);
   });
 }

@@ -49,7 +49,8 @@ void main() {
     await auth.open();
     final session = await auth.beginAppRegistration('lark');
     expect(session.verificationUri.host, 'open.larksuite.com');
-    expect(session.verificationUri.path, '/page/launcher');
+    expect(session.verificationUri.path, '/page/cli');
+    expect(session.verificationUri.queryParameters['from'], 'cli');
     expect(session.verificationUri.queryParameters['user_code'], 'A&B');
     expect(await auth.pollAppRegistration(), false);
     expect(calls, 3);
@@ -66,7 +67,7 @@ void main() {
   });
 
   test(
-    'registration uses the official launcher URL returned by the server',
+    'registration uses Feishu’s new-or-existing CLI configuration page',
     () async {
       final auth = FeishuAuth(
         MemoryLifePersistence(),
@@ -89,10 +90,11 @@ void main() {
       );
       await auth.open();
       final session = await auth.beginAppRegistration('lark');
-      // The server's launcher can offer both "create new" and "choose existing";
-      // the Feishu host is authoritative even when the UI preferred Lark.
+      // The launcher is create-only; the CLI page carries the same device code
+      // and exposes "create new / choose existing". The server's host wins.
       expect(session.verificationUri.host, 'open.feishu.cn');
-      expect(session.verificationUri.path, '/page/launcher');
+      expect(session.verificationUri.path, '/page/cli');
+      expect(session.verificationUri.queryParameters['from'], 'cli');
       expect(session.verificationUri.queryParameters['user_code'], 'U1');
     },
   );

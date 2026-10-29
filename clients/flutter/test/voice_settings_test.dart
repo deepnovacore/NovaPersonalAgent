@@ -286,7 +286,10 @@ void main() {
       await tester.enterText(keyFinder, 'new-secret');
       expect(field.controller!.text, 'new-secret');
       // Switching providers resets the integrated defaults and key input.
-      await tester.tap(find.byKey(const ValueKey('integrated.provider')));
+      final provider = find.byKey(const ValueKey('integrated.provider'));
+      await tester.ensureVisible(provider);
+      await tester.pumpAndSettle();
+      await tester.tap(provider);
       await tester.pumpAndSettle();
       await tester.tap(find.text('OpenAI').last);
       await tester.pumpAndSettle();

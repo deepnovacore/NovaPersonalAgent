@@ -991,7 +991,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 confirmed.isEmpty &&
                 suggested.isEmpty
             ? t(
-                'Add your introduction here. Information from Feishu appears below.',
+                'Add your introduction here. Information from connected sources appears below.',
               )
             : t(
                 confirmed.isNotEmpty

@@ -375,49 +375,47 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(host.ready, false);
-      expect(
-        find.text('最新的项目进展：确认已完成的部分，并保留下一步尚待讨论的安排。'),
-        findsOneWidget,
-      );
+      expect(find.text('最新的项目进展：确认已完成的部分，并保留下一步尚待讨论的安排。'), findsOneWidget);
       expect(find.text('还没有近况'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       host.dispose();
     },
   );
 
-  testWidgets('timeline empty state renders the real reason and connect action', (
-    tester,
-  ) async {
-    final f = _Fixture();
-    await f.open(publish: false);
-    final host = _RestoredOnlyHost(f.sources);
-    var opened = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: novaTheme(),
-        home: Scaffold(
-          body: TimelinePage(
-            store: f.life,
-            language: 'zh',
-            now: f.now,
-            sourceTimeline: LocalProfileResults(
-              host: host,
-              publication: f.publication,
-              repository: f.profile,
-              kind: 'timeline',
-              emptyHint: '先连接飞书，之后会自动整理到这里。',
-              onOpenFeishu: () => opened++,
+  testWidgets(
+    'timeline empty state renders the real reason and connect action',
+    (tester) async {
+      final f = _Fixture();
+      await f.open(publish: false);
+      final host = _RestoredOnlyHost(f.sources);
+      var opened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: novaTheme(),
+          home: Scaffold(
+            body: TimelinePage(
+              store: f.life,
+              language: 'zh',
+              now: f.now,
+              sourceTimeline: LocalProfileResults(
+                host: host,
+                publication: f.publication,
+                repository: f.profile,
+                kind: 'timeline',
+                emptyHint: '打开连接器并连接数据源，之后会自动整理到这里。',
+                onOpenConnectors: () => opened++,
+              ),
             ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('还没有近况'), findsOneWidget);
-    expect(find.text('先连接飞书，之后会自动整理到这里。'), findsOneWidget);
-    await tester.tap(find.text('前往飞书设置'));
-    expect(opened, 1);
-    await tester.pumpWidget(const SizedBox());
-    host.dispose();
-  });
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('还没有近况'), findsOneWidget);
+      expect(find.text('打开连接器并连接数据源，之后会自动整理到这里。'), findsOneWidget);
+      await tester.tap(find.text('前往连接器'));
+      expect(opened, 1);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    },
+  );
 }

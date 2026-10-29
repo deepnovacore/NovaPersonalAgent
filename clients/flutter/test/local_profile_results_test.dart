@@ -274,7 +274,9 @@ void main() {
             addTearDown(tester.view.resetDevicePixelRatio);
             final sources = SourceStore(MemoryLifePersistence());
             final host = ReadyHost(sources);
-            final publication = LocalPublicationContext(MemoryLifePersistence());
+            final publication = LocalPublicationContext(
+              MemoryLifePersistence(),
+            );
             await publication.open();
             final repository = _RetainedProfile(
               MemoryLifePersistence(),
@@ -421,41 +423,40 @@ void main() {
     }
   }
 
-  testWidgets(
-    'restored local data renders while Feishu is not ready',
-    (tester) async {
-      final sources = SourceStore(MemoryLifePersistence());
-      final host = RestoredHost(sources);
-      final publication = LocalPublicationContext(MemoryLifePersistence());
-      await publication.open();
-      final repository = _RetainedProfile(
-        MemoryLifePersistence(),
-        publication,
-        sources,
-      );
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: SingleChildScrollView(
-              child: LocalProfileResults(
-                host: host,
-                publication: publication,
-                repository: repository,
-                kind: 'timeline',
-              ),
+  testWidgets('restored local data renders while Feishu is not ready', (
+    tester,
+  ) async {
+    final sources = SourceStore(MemoryLifePersistence());
+    final host = RestoredHost(sources);
+    final publication = LocalPublicationContext(MemoryLifePersistence());
+    await publication.open();
+    final repository = _RetainedProfile(
+      MemoryLifePersistence(),
+      publication,
+      sources,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: LocalProfileResults(
+              host: host,
+              publication: publication,
+              repository: repository,
+              kind: 'timeline',
             ),
           ),
         ),
-      );
-      await tester.pumpAndSettle();
-      expect(host.ready, false);
-      expect(find.text('Retained timeline content.'), findsOneWidget);
-      expect(find.text('还没有近况'), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-      host.dispose();
-      publication.dispose();
-    },
-  );
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(host.ready, false);
+    expect(find.text('Retained timeline content.'), findsOneWidget);
+    expect(find.text('还没有近况'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+    publication.dispose();
+  });
 
   testWidgets('an unrestored host hides saved content behind a loading state', (
     tester,
@@ -557,10 +558,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(
-        find.textContaining('此设备此前生成的资料无法显示'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('此设备此前生成的资料无法显示'), findsOneWidget);
       expect(find.text('还没有近况'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       host.dispose();
@@ -591,8 +589,9 @@ void main() {
               repository: repository,
               kind: 'timeline',
               language: 'en',
-              emptyHint: 'Connect Feishu and your updates will appear here.',
-              onOpenFeishu: () => opened++,
+              emptyHint:
+                  'Connect a source in Connectors and your updates will appear here.',
+              onOpenConnectors: () => opened++,
             ),
           ),
         ),
@@ -600,10 +599,12 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(
-      find.text('Connect Feishu and your updates will appear here.'),
+      find.text(
+        'Connect a source in Connectors and your updates will appear here.',
+      ),
       findsOneWidget,
     );
-    await tester.tap(find.text('Open Feishu settings'));
+    await tester.tap(find.text('Open connectors'));
     expect(opened, 1);
     await tester.pumpWidget(const SizedBox());
     host.dispose();
@@ -632,16 +633,16 @@ void main() {
             repository: repository,
             kind: 'profile',
             compact: true,
-            emptyHint: '先连接飞书，之后会自动整理到这里。',
-            onOpenFeishu: () => opened++,
+            emptyHint: '打开连接器并连接数据源，之后会自动整理到这里。',
+            onOpenConnectors: () => opened++,
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('还没有个人介绍'), findsOneWidget);
-    expect(find.text('先连接飞书，之后会自动整理到这里。'), findsOneWidget);
-    await tester.tap(find.text('打开飞书设置'));
+    expect(find.text('打开连接器并连接数据源，之后会自动整理到这里。'), findsOneWidget);
+    await tester.tap(find.text('打开连接器'));
     expect(opened, 1);
     await tester.pumpWidget(const SizedBox());
     host.dispose();
