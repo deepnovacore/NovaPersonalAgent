@@ -100,30 +100,84 @@ class _SpaceRootState extends State<SpaceRoot> {
         // 我的; only standalone mode still needs this strip.
         if (selected.mode == SpaceMode.standalone)
           Material(
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 6,
+            color: Nova.ink,
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: Nova.separator, width: .5),
                 ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.phone_android, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${selected.name} · 独立运行',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+              ),
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 10, 4),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        CupertinoIcons.device_phone_portrait,
+                        size: 18,
+                        color: Nova.secondary,
                       ),
-                    ),
-                    TextButton.icon(
-                      onPressed: () => catalog.select(null),
-                      icon: const Icon(Icons.swap_horiz),
-                      label: const Text('Space'),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: selected.name,
+                                style: const TextStyle(
+                                  color: Nova.text,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0,
+                                ),
+                              ),
+                              const TextSpan(
+                                text: '  ·  ',
+                                style: TextStyle(
+                                  color: Nova.tertiary,
+                                  fontSize: 12,
+                                  letterSpacing: 0,
+                                ),
+                              ),
+                              const TextSpan(
+                                text: '独立运行',
+                                style: TextStyle(
+                                  color: Nova.secondary,
+                                  fontSize: 12,
+                                  letterSpacing: 0,
+                                ),
+                              ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: () => catalog.select(null),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Nova.secondary,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                          textStyle: const TextStyle(
+                            fontFamily: 'CupertinoSystemText',
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0,
+                          ),
+                        ),
+                        icon: const Icon(CupertinoIcons.arrow_swap, size: 17),
+                        label: const Text('Space'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

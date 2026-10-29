@@ -68,10 +68,7 @@ const ink = Nova.ink, mint = Nova.mint;
 }) {
   final zh = language == 'zh';
   if (!restored) {
-    return (
-      hint: zh ? '正在读取本机资料…' : 'Opening local data…',
-      connect: false,
-    );
+    return (hint: zh ? '正在读取本机资料…' : 'Opening local data…', connect: false);
   }
   if (!configured) {
     return (
@@ -1107,6 +1104,51 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     super.dispose();
   }
 
+  /// The Nova home is the only tab with a branded title; every other tab is
+  /// already named by the bottom bar, so it gets no duplicate page title.
+  PreferredSizeWidget _novaBar() => AppBar(
+    toolbarHeight: 64,
+    centerTitle: true,
+    leadingWidth: 64,
+    automaticallyImplyLeading: false,
+    title: PetAvatarTitle(store: petAvatarStore, language: language),
+    actions: const [SizedBox(width: 10)],
+  );
+
+  /// An open task keeps only the back affordance; the tab bar says “Tasks”.
+  PreferredSizeWidget _taskBar() => AppBar(
+    toolbarHeight: 44,
+    centerTitle: true,
+    leadingWidth: 56,
+    automaticallyImplyLeading: false,
+    leading: IconButton(
+      tooltip: _t('所有任务', 'All tasks'),
+      icon: const Icon(CupertinoIcons.chevron_left, size: 23),
+      onPressed: () {
+        FocusManager.instance.primaryFocus?.unfocus();
+        setState(() {
+          _taskOpen = false;
+        });
+      },
+    ),
+    actions: const [SizedBox(width: 10)],
+  );
+
+  /// A compact gear-only bar; “Me” is already named by the bottom tab.
+  PreferredSizeWidget _meBar() => AppBar(
+    toolbarHeight: 44,
+    centerTitle: true,
+    automaticallyImplyLeading: false,
+    actions: [
+      IconButton(
+        tooltip: _t('设置', 'Settings'),
+        icon: const Icon(CupertinoIcons.gear_alt, size: 23),
+        onPressed: _settings,
+      ),
+      const SizedBox(width: 10),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final host = agentCore;
@@ -1114,6 +1156,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     final fullCall = _phoneVoiceExpanded && phoneVoice != null;
     final connector = feishu;
     final profileHint = _profileHint();
+    final appBar = _tab == 0
+        ? _novaBar()
+        : _tab == 1 && _taskOpen && host != null
+        ? _taskBar()
+        : _tab == 3
+        ? _meBar()
+        : null;
     return PopScope(
       canPop: !fullCall && (_tab == 0 || host == null),
       onPopInvokedWithResult: (didPop, _) {
@@ -1138,56 +1187,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               enabled: !fullCall,
               child: Scaffold(
                 backgroundColor: Nova.ink,
-                appBar: AppBar(
-                  toolbarHeight: 64,
-                  centerTitle: true,
-                  leadingWidth: 64,
-                  automaticallyImplyLeading: false,
-                  // Back to the conversation list only inside an open chat;
-                  // settings now has a single, fixed home on the right.
-                  leading: _tab == 1 && _taskOpen && host != null
-                      ? IconButton(
-                          tooltip: _t('所有任务', 'All tasks'),
-                          icon: const Icon(
-                            CupertinoIcons.chevron_left,
-                            size: 23,
-                          ),
-                          onPressed: () {
-                            FocusManager.instance.primaryFocus?.unfocus();
-                            setState(() {
-                              _taskOpen = false;
-                            });
-                          },
-                        )
-                      : null,
-                  title: _tab == 0
-                      ? PetAvatarTitle(
-                          store: petAvatarStore,
-                          language: language,
-                        )
-                      : Text(
-                          [
-                            '',
-                            _t('任务', 'Tasks'),
-                            _t('时间线', 'Timeline'),
-                            _t('我的', 'Me'),
-                          ][_tab],
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: -.5,
-                          ),
-                        ),
-                  actions: [
-                    if (_tab == 3)
-                      IconButton(
-                        tooltip: _t('设置', 'Settings'),
-                        icon: const Icon(CupertinoIcons.gear_alt, size: 23),
-                        onPressed: _settings,
-                      ),
-                    const SizedBox(width: 10),
-                  ],
-                ),
+                appBar: appBar,
                 bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
                     ? null
                     : BottomAppBarTabs(
@@ -1223,121 +1223,130 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           ),
                         ],
                       ),
-                body: Column(
-                  children: [
-                    if (_phoneVoiceShown &&
-                        phoneVoice != null &&
-                        !fullCall &&
-                        (phoneVoice!.active || phoneVoice!.connecting))
-                      PhoneVoicePanel(
-                        session: phoneVoice!,
-                        language: language,
-                        compact: true,
-                        onExpand: _expandPhoneVoice,
-                        onMinimize: _minimizePhoneVoice,
-                        onEnd: _dismissPhoneVoice,
-                        onSettings: () => unawaited(_voiceSettings()),
-                        onStart: () => unawaited(_startPhoneVoice()),
-                      ),
-                    Expanded(
-                      child: IndexedStack(
-                        index: host == null && _tab < 2
-                            ? 0
-                            : _tab == 0
-                            ? 1
-                            : _tab == 1
-                            ? (_taskOpen ? 1 : 0)
-                            : _tab,
-                        children: [
-                          if (host != null)
-                            ConversationHome(
-                              host: host,
-                              activeConversationId: taskChatId,
+                body: SafeArea(
+                  // A tab without a top bar owns the status-bar inset itself;
+                  // in standalone mode the Space strip already consumed it.
+                  top: appBar == null,
+                  bottom: false,
+                  child: Column(
+                    children: [
+                      if (_phoneVoiceShown &&
+                          phoneVoice != null &&
+                          !fullCall &&
+                          (phoneVoice!.active || phoneVoice!.connecting))
+                        PhoneVoicePanel(
+                          session: phoneVoice!,
+                          language: language,
+                          compact: true,
+                          onExpand: _expandPhoneVoice,
+                          onMinimize: _minimizePhoneVoice,
+                          onEnd: _dismissPhoneVoice,
+                          onSettings: () => unawaited(_voiceSettings()),
+                          onStart: () => unawaited(_startPhoneVoice()),
+                        ),
+                      Expanded(
+                        child: IndexedStack(
+                          index: host == null && _tab < 2
+                              ? 0
+                              : _tab == 0
+                              ? 1
+                              : _tab == 1
+                              ? (_taskOpen ? 1 : 0)
+                              : _tab,
+                          children: [
+                            if (host != null)
+                              ConversationHome(
+                                host: host,
+                                activeConversationId: taskChatId,
+                                language: language,
+                                schedules: localSchedules,
+                                onNew: _newChat,
+                                onOpen: (id) => setState(() {
+                                  taskChatId = id;
+                                  _taskOpen = true;
+                                }),
+                              )
+                            else
+                              Center(
+                                child: startupError == null
+                                    ? const CircularProgressIndicator()
+                                    : Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(startupError!),
+                                          TextButton(
+                                            onPressed: () {
+                                              setState(
+                                                () => startupError = null,
+                                              );
+                                              unawaited(_openAgentCore());
+                                            },
+                                            child: Text(_t('重试', 'Retry')),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            if (hasChat)
+                              LocalChatPanel(
+                                key: localConversation,
+                                onVoice: _openVoice,
+                                voiceBusy:
+                                    phoneVoice?.active == true ||
+                                    phoneVoice?.connecting == true,
+                                audioOwner: audioOwner,
+                                dictationAudio: audio,
+                                requestMicrophone: requestMicrophone,
+                                voiceSettings: voiceSettings,
+                                externalTaskBusy:
+                                    voiceDelegates?.busy == true &&
+                                    phoneVoice?.conversationId == chatId,
+                                onCancelExternalTask:
+                                    phoneVoice?.cancelDelegate,
+                                onVoiceText:
+                                    phoneVoice?.active == true &&
+                                        phoneVoice?.conversationId == chatId
+                                    ? phoneVoice!.submitText
+                                    : null,
+                                active:
+                                    (_tab == 0 || (_tab == 1 && _taskOpen)) &&
+                                    !fullCall,
+                                header: _taskContext(host),
+                                host: host,
+                                conversationId: chatId!,
+                                language: language,
+                                modelRevision: _modelRevision,
+                                onModelSettings: _settings,
+                              )
+                            else
+                              const SizedBox(),
+                            TimelinePage(
+                              store: lifeHost.store ?? emptyStore,
                               language: language,
-                              schedules: localSchedules,
-                              onNew: _newChat,
-                              onOpen: (id) => setState(() {
-                                taskChatId = id;
-                                _taskOpen = true;
-                              }),
-                            )
-                          else
-                            Center(
-                              child: startupError == null
-                                  ? const CircularProgressIndicator()
-                                  : Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(startupError!),
-                                        TextButton(
-                                          onPressed: () {
-                                            setState(() => startupError = null);
-                                            unawaited(_openAgentCore());
-                                          },
-                                          child: Text(_t('重试', 'Retry')),
-                                        ),
-                                      ],
+                              sourceTimeline: connector == null
+                                  ? null
+                                  : LocalProfileResults(
+                                      host: connector,
+                                      publication: lifeHost.publication,
+                                      kind: 'timeline',
+                                      repository: profileAgent?.repository,
+                                      generation: profileGeneration,
+                                      language: language,
+                                      revision: _profileRevision,
+                                      emptyHint: profileHint.hint,
+                                      onOpenFeishu: profileHint.connect
+                                          ? () => unawaited(_openFeishu())
+                                          : null,
                                     ),
+                              onDiscuss: (text) => unawaited(_delegate(text)),
+                              onStartTask: (todo) =>
+                                  unawaited(_startTodoTask(todo)),
                             ),
-                          if (hasChat)
-                            LocalChatPanel(
-                              key: localConversation,
-                              onVoice: _openVoice,
-                              voiceBusy:
-                                  phoneVoice?.active == true ||
-                                  phoneVoice?.connecting == true,
-                              audioOwner: audioOwner,
-                              dictationAudio: audio,
-                              requestMicrophone: requestMicrophone,
-                              voiceSettings: voiceSettings,
-                              externalTaskBusy:
-                                  voiceDelegates?.busy == true &&
-                                  phoneVoice?.conversationId == chatId,
-                              onCancelExternalTask: phoneVoice?.cancelDelegate,
-                              onVoiceText:
-                                  phoneVoice?.active == true &&
-                                      phoneVoice?.conversationId == chatId
-                                  ? phoneVoice!.submitText
-                                  : null,
-                              active:
-                                  (_tab == 0 || (_tab == 1 && _taskOpen)) &&
-                                  !fullCall,
-                              header: _taskContext(host),
-                              host: host,
-                              conversationId: chatId!,
-                              language: language,
-                              modelRevision: _modelRevision,
-                              onModelSettings: _settings,
-                            )
-                          else
-                            const SizedBox(),
-                          TimelinePage(
-                            store: lifeHost.store ?? emptyStore,
-                            language: language,
-                            sourceTimeline: connector == null
-                                ? null
-                                : LocalProfileResults(
-                                    host: connector,
-                                    publication: lifeHost.publication,
-                                    kind: 'timeline',
-                                    repository: profileAgent?.repository,
-                                    generation: profileGeneration,
-                                    language: language,
-                                    revision: _profileRevision,
-                                    emptyHint: profileHint.hint,
-                                    onOpenFeishu: profileHint.connect
-                                        ? () => unawaited(_openFeishu())
-                                        : null,
-                                  ),
-                            onDiscuss: (text) => unawaited(_delegate(text)),
-                            onStartTask: (todo) =>
-                                unawaited(_startTodoTask(todo)),
-                          ),
-                          _myPage(),
-                        ],
+                            _myPage(),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
