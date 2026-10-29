@@ -55,7 +55,7 @@ A machine without a desktop UI can be the Host: one service process runs the Spa
    # same thing: novapersonal-server space pair --config /private/new-space/config.json
    ```
 
-   The terminal shows a one-time QR; scan it with "Add Space" in the Nova app. When the phone sends its request, the terminal prints the full fingerprint; type `y` after checking it matches the phone. Without a TTY, pass `--yes-fingerprint <fingerprint>`, which must match the request exactly. `--timeout-seconds N` sets the wait (default 300); Ctrl+C cancels.
+   The terminal shows a one-time QR; in the Nova app choose "连接 Host" (Connect Host) → "扫描 Host 邀请码" (Scan Host invitation) and scan it. When the phone sends its request, the terminal prints the full fingerprint; type `y` after checking it matches the phone. Without a TTY, pass `--yes-fingerprint <fingerprint>`, which must match the request exactly. `--timeout-seconds N` sets the wait (default 300); Ctrl+C cancels.
 6. Manage devices: `nova-space-host devices --config ...` lists paired devices, `nova-space-host revoke --config ... --device DEVICE_ID` revokes one and rotates keys, `nova-space-host status --config ...` shows state. With the service stopped these commands fail with `space_host_not_running`.
 
 ## Notifications and phone tools

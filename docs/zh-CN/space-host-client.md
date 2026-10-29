@@ -55,7 +55,7 @@ npm run test:space -- --output-root /your/build-disk --run-id your-task
    # 等价：novapersonal-server space pair --config /private/new-space/config.json
    ```
 
-   终端显示一次性二维码，用手机 Nova 的“添加空间”扫描。手机发起请求后，终端打印完整指纹，核对与手机显示一致后输入 `y` 确认。无 TTY 的自动化场景需传入 `--yes-fingerprint <指纹>`，指纹必须与请求完全一致。`--timeout-seconds N` 调整等待时长（默认 300），Ctrl+C 取消。
+   终端显示一次性二维码，在手机 Nova 选择“连接 Host”→“扫描 Host 邀请码”扫描。手机发起请求后，终端打印完整指纹，核对与手机显示一致后输入 `y` 确认。无 TTY 的自动化场景需传入 `--yes-fingerprint <指纹>`，指纹必须与请求完全一致。`--timeout-seconds N` 调整等待时长（默认 300），Ctrl+C 取消。
 6. 管理设备：`nova-space-host devices --config ...` 列出已绑定设备，`nova-space-host revoke --config ... --device 设备ID` 撤销并轮换密钥，`nova-space-host status --config ...` 查看状态。服务未运行时这些命令报 `space_host_not_running`。
 
 ## 通知与手机工具

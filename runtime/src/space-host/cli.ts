@@ -54,7 +54,7 @@ export async function runSpacePair(options:SpaceAdminArgs,io:SpacePairIo):Promis
  const socket=adminSocketPath(options.configPath);
  if(!io.interactive&&!options.yesFingerprint)throw Error('space_pair_requires_tty');
  const invitation=await spaceAdminRequest(socket,'invitation');
- io.output.write('用手机 Nova 的「添加空间」扫描下方二维码（一次性，Ctrl+C 取消）：\n'+await renderInvitationQr(invitation)+'等待手机发起配对…\n');
+ io.output.write('在手机 Nova 选择「连接 Host」→「扫描 Host 邀请码」，扫描下方二维码（一次性，Ctrl+C 取消）：\n'+await renderInvitationQr(invitation)+'等待手机发起配对…\n');
  const deadline=Date.now()+options.timeoutSeconds*1000;
  while(!io.signal.aborted){
   const request=pairingRows(await spaceAdminRequest(socket,'pairings'))[0];
