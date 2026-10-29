@@ -71,13 +71,15 @@ body[data-personal-collapsed=true] .welcome-screen{display:none}
 .permission-icon svg{width:22px;height:22px}
 .permission-copy{flex:1;min-width:0}
 .permission-copy p{margin:0}
-.permission-aside{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:none}
+.permission-aside{display:flex;align-items:center;gap:8px;flex:none}
 .permission-state{display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 8px;border-radius:999px;background:#f6f1e8;color:#8a6f4a;font-size:11px}
 .permission-state:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
 .permission-state:empty{display:none}
 .permission-state[data-status=granted]{background:#e9f4ee;color:#3f7a5f}
 .permission-state[data-status=not_required],.permission-state[data-status=unsupported]{background:#f0eff3;color:#898592}
 .permission-row button{border-radius:999px;padding:7px 16px}
+.permission-row .permission-settings:not([hidden]){display:grid;place-items:center;width:32px;height:32px;padding:6px;border-radius:8px}
+.permission-settings svg{width:16px;height:16px}
 button.welcome-primary{border-radius:999px;padding:13px 22px}
 @media(max-height:740px){.welcome-hero{display:none}.permission-row{padding:12px 14px}}
 @media(prefers-color-scheme:dark){.welcome-hero{background:#33304a;border-color:#3e3a4b;color:#b9acec}.permission-icon{background:#322f44;color:#b9acec}.permission-state{background:#3a332a;color:#d9bd91}.permission-state[data-status=granted]{background:#25372c;color:#8fd0aa}.permission-state[data-status=not_required],.permission-state[data-status=unsupported]{background:#2d2c33;color:#a9a5b3}.identity-editor .assistant-portrait,.identity-editor .assistant-portrait:hover:not(:disabled){background:#2c2a36}.identity-editor .portrait-reset{background:#25242e;border-color:#3e3a4b;color:#cfc6ee}.identity-editor .identity-name-choices button{background:#2f2c3b;color:#cfc6ee}.identity-editor .identity-name-choices button[aria-pressed=true]{background:#786ba8;color:#fff}.portrait-badge{background:#786ba8}.identity-fields input:focus-visible{border-color:#b0a0df}}
