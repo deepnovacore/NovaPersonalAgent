@@ -86,6 +86,8 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
       t('尚未选择模型', 'No model selected');
   String? error, processingError, chatPage;
   String? provider;
+  StreamSubscription<void>? _modelChanges;
+  int _providerRead = 0;
   FeishuAuthorizationSession? session;
   bool _busy = false, polling = false, hasMoreChats = false;
   bool get busy => _busy || host.collection.running;
@@ -115,25 +117,38 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
     host.addListener(_changed);
     profile.addListener(_changed);
     widget.generation?.addListener(_changed);
+    _modelChanges = widget.models.changes.listen((_) => _loadProvider());
     _loadProvider();
     unawaited(profile.repository.open().then((_) => _changed()));
   }
 
   Future<void> _loadProvider() async {
+    final read = ++_providerRead;
     try {
-      final model = await widget.models.read();
-      if (mounted) {
+      final model = await widget.models.readForPurpose(ModelPurpose.support);
+      if (mounted && read == _providerRead) {
         setState(
           () => provider = model == null
               ? null
               : '${model.endpoint}|${model.model}',
         );
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted && read == _providerRead) setState(() => provider = null);
+    }
+  }
+
+  Future<void> _requireProvider(String expected) async {
+    final model = await widget.models.readForPurpose(ModelPurpose.support);
+    if (model == null || '${model.endpoint}|${model.model}' != expected) {
+      throw StateError('provider_changed');
+    }
   }
 
   Future<void> _correctProfile(String category) async {
-    if (provider == null) throw StateError('model_required');
+    await _loadProvider();
+    if (!mounted || provider == null) throw StateError('model_required');
+    final selectedProvider = provider!;
     final value = TextEditingController(
       text:
           profile.corrections.values(
@@ -179,11 +194,12 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
         ),
       );
       if (accepted == true) {
+        await _requireProvider(selectedProvider);
         await profile.corrections.correct(
           profile.repository.correctionScope,
           category,
           value.text,
-          provider!,
+          selectedProvider,
         );
       }
     } finally {
@@ -497,6 +513,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
   Future<void> _processing() async {
     await _loadProvider();
     if (!mounted || provider == null) throw StateError('model_required');
+    final selectedProvider = provider!;
     final accepted = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -523,7 +540,8 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
       ),
     );
     if (accepted == true) {
-      await host.sources.grantProcessing(provider!, 'profile', true);
+      await _requireProvider(selectedProvider);
+      await host.sources.grantProcessing(selectedProvider, 'profile', true);
     }
   }
 
@@ -1124,6 +1142,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
     profile.removeListener(_changed);
     if (widget.profileAgent == null) profile.dispose();
     timer?.cancel();
+    unawaited(_modelChanges?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     host.removeListener(_changed);
     app.dispose();

@@ -43,6 +43,11 @@ Future<void> showChatGptSettings(
                 : _AccountNotice.operationFailed;
           } finally {
             try {
+              await settings.refreshApiKeyProjection();
+            } catch (_) {
+              message = _AccountNotice.settingsUnavailable;
+            }
+            try {
               data = await accounts.metadata();
             } catch (_) {
               message = _AccountNotice.settingsUnavailable;

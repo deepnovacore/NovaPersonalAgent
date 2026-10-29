@@ -260,18 +260,43 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     builder: (context, snapshot) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          snapshot.hasError
-              ? t('暂时无法读取服务配置', 'Provider settings unavailable')
-              : snapshot.hasData
-              ? t('已使用模型服务中的密钥', 'Using saved provider credentials')
-              : optional
-              ? t(
-                  '服务需要认证时，请到模型服务配置',
-                  'Configure credentials if your service requires them',
-                )
-              : t('请先在模型服务中配置此服务', 'Configure this service in Model provider'),
-          style: Theme.of(context).textTheme.bodySmall,
+        Semantics(
+          liveRegion: true,
+          child: Row(
+            children: [
+              Icon(
+                snapshot.hasData
+                    ? Icons.check_circle_outline
+                    : Icons.info_outline,
+                size: 16,
+                color: snapshot.hasData
+                    ? Colors.green
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  snapshot.connectionState != ConnectionState.done
+                      ? t('正在读取配置…', 'Checking saved credentials…')
+                      : snapshot.hasError
+                      ? t('配置读取失败，请重试', 'Could not read credentials')
+                      : snapshot.hasData
+                      ? t('密钥已配置', 'Key configured')
+                      : optional
+                      ? t(
+                          '未配置密钥（服务允许时可不填）',
+                          'No key saved (optional if supported)',
+                        )
+                      : t('密钥未配置', 'Key not configured'),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: snapshot.hasData
+                        ? Colors.green
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
         TextButton(
           key: ValueKey('$slot.credentials'),

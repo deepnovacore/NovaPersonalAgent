@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import '../ui/theme.dart';
 import '../ui/chat_activity.dart';
 import '../ui/thinking_block.dart';
+import '../ui/tool_step.dart';
 import 'phone_dictation.dart';
 import 'package:nova_audio/nova_audio.dart';
 import '../voice/voice_settings.dart';
@@ -26,14 +27,27 @@ Future<void> showLocalModelSettings(
   BuildContext context,
   ModelSettings settings, {
   String language = 'zh',
+  bool support = false,
 }) async {
   String t(String zh, String en) => language == 'zh' ? zh : en;
-  if (await settings.chatGpt.active() != null) {
+  if (!support && await settings.chatGpt.active() != null) {
     if (context.mounted) await showChatGptSettings(context, settings);
     return;
   }
   if (!context.mounted) return;
-  final current = await settings.read();
+  final supportDraft = support ? await settings.readSupportDraft() : null;
+  final current = !support
+      ? await settings.read()
+      : supportDraft == null
+      ? null
+      : ModelConfiguration(
+          endpoint: supportDraft['endpoint'] as String,
+          model: supportDraft['model'] as String,
+          protocol: ModelProtocol.values.byName(
+            supportDraft['protocol'] as String? ?? 'chatCompletions',
+          ),
+          key: 'draft',
+        );
   if (!context.mounted) return;
   final endpoint = TextEditingController(
     text: current?.endpoint ?? ModelPreset.byId('openrouter')!.endpoint,
@@ -199,7 +213,11 @@ Future<void> showLocalModelSettings(
               ? null
               : (language == 'zh' ? preset!.noteZh : preset!.noteEn);
           return AlertDialog(
-            title: Text(t('模型服务', 'Model provider')),
+            title: Text(
+              support
+                  ? t('辅助与后台模型', 'Background model')
+                  : t('模型服务', 'Model provider'),
+            ),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -236,18 +254,48 @@ Future<void> showLocalModelSettings(
                           },
                     child: Text(t('管理服务密钥', 'Manage provider credentials')),
                   ),
-                  TextButton(
-                    onPressed: saving
-                        ? null
-                        : () async {
-                            await showChatGptSettings(context, settings);
-                            if (context.mounted &&
-                                await settings.chatGpt.active() != null) {
-                              if (context.mounted) Navigator.pop(context);
-                            }
-                          },
-                    child: Text(t('使用 ChatGPT 登录', 'Continue with ChatGPT')),
-                  ),
+                  if (!support)
+                    TextButton(
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              await showChatGptSettings(context, settings);
+                              if (context.mounted &&
+                                  await settings.chatGpt.active() != null) {
+                                if (context.mounted) Navigator.pop(context);
+                              }
+                            },
+                      child: Text(t('使用 ChatGPT 登录', 'Continue with ChatGPT')),
+                    ),
+                  if (support) ...[
+                    Text(
+                      t(
+                        '用于飞书整理和个人近况生成；默认跟随对话模型。',
+                        'Used for Feishu processing and profile updates; follows the chat model by default.',
+                      ),
+                    ),
+                    TextButton(
+                      key: const ValueKey('support.follow'),
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              try {
+                                await settings.resetSupport();
+                                if (context.mounted) Navigator.pop(context);
+                              } catch (_) {
+                                if (context.mounted) {
+                                  setState(
+                                    () => error = t(
+                                      '无法保存，请重试。',
+                                      'Could not save. Try again.',
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                      child: Text(t('跟随对话模型', 'Follow chat model')),
+                    ),
+                  ],
                   Text(
                     t('或使用 API', 'Or use an API'),
                     style: const TextStyle(color: Nova.secondary, fontSize: 13),
@@ -291,7 +339,7 @@ Future<void> showLocalModelSettings(
                           ),
                         ),
                       ),
-                    keyField,
+                    if (!support) keyField,
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton(
@@ -349,7 +397,7 @@ Future<void> showLocalModelSettings(
                     const SizedBox(height: 16),
                     modelField,
                     const SizedBox(height: 16),
-                    keyField,
+                    if (!support) keyField,
                     const SizedBox(height: 8),
                     loadModelsButton,
                   ],
@@ -397,12 +445,35 @@ Future<void> showLocalModelSettings(
                           error = null;
                         });
                         try {
-                          await settings.save(
-                            endpoint: endpoint.text,
-                            model: model.text,
-                            key: key.text,
-                            protocol: protocol,
-                          );
+                          if (support) {
+                            final credential = await settings.credentials
+                                .resolve(
+                                  endpoint.text,
+                                  credentialId:
+                                      supportDraft?['endpoint'] == endpoint.text
+                                      ? (supportDraft?['credentialId']
+                                            as String?)
+                                      : null,
+                                );
+                            if (credential == null) {
+                              throw const AgentFailure(
+                                'invalid_model_settings',
+                              );
+                            }
+                            await settings.saveSupport(
+                              endpoint: endpoint.text,
+                              model: model.text,
+                              credentialId: credential.id,
+                              protocol: protocol,
+                            );
+                          } else {
+                            await settings.save(
+                              endpoint: endpoint.text,
+                              model: model.text,
+                              key: key.text,
+                              protocol: protocol,
+                            );
+                          }
                           if (context.mounted) Navigator.pop(context);
                         } catch (failure) {
                           if (context.mounted) {
@@ -825,58 +896,57 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           }
         }
       } catch (_) {}
+      final step = ToolStep(
+        name: message['tool_name'] as String? ?? '',
+        status: status,
+        language: widget.language,
+      );
       if (status == 'completed' &&
           preview != null &&
           widget.host.tools?.registry.workspace != null) {
         if (seenPreviews != null && !seenPreviews.add(previewKey!)) {
-          return const SizedBox.shrink();
+          return step;
         }
         final target = preview;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Material(
-            color: Nova.cell,
-            borderRadius: BorderRadius.circular(18),
-            child: ListTile(
-              shape: RoundedRectangleBorder(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            step,
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Material(
+                color: Nova.cell,
                 borderRadius: BorderRadius.circular(18),
+                child: ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  leading: const Icon(
+                    CupertinoIcons.doc_richtext,
+                    color: Nova.mint,
+                  ),
+                  title: Text(
+                    title ?? t('打开页面', 'Open page'),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(t('已保存 · 点此打开', 'Saved · Tap to open')),
+                  trailing: const Icon(
+                    CupertinoIcons.arrow_up_right_square,
+                    size: 20,
+                  ),
+                  onTap: () => _openArtifact(target),
+                ),
               ),
-              leading: const Icon(
-                CupertinoIcons.doc_richtext,
-                color: Nova.mint,
-              ),
-              title: Text(
-                title ?? t('打开页面', 'Open page'),
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(t('已保存 · 点此打开', 'Saved · Tap to open')),
-              trailing: const Icon(
-                CupertinoIcons.arrow_up_right_square,
-                size: 20,
-              ),
-              onTap: () => _openArtifact(target),
             ),
-          ),
+          ],
         );
       }
-      return const SizedBox.shrink();
+      return step;
     }
     final reasoning =
         message['role'] == 'assistant' && message['reasoning_content'] is String
         ? (message['reasoning_content'] as String).trim()
         : '';
-    if (message['tool_calls'] != null) {
-      if (reasoning.isEmpty) return const SizedBox.shrink();
-      // A tool-call turn has no visible answer, but its thinking is real.
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 24),
-        child: ThinkingBlock(
-          key: ValueKey('thinking:${message['time']}'),
-          text: reasoning,
-          language: widget.language,
-        ),
-      );
-    }
     final text = message['content'] as String;
     if (text.isEmpty && reasoning.isEmpty) return const SizedBox.shrink();
     final user = message['role'] == 'user';

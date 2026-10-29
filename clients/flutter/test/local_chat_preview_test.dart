@@ -118,6 +118,8 @@ void main() {
     'only the latest saved preview per target and user turn is shown',
     (tester) async {
       tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.view.resetPhysicalSize);
       final workspace = PreviewWorkspace();
       final store = ConversationStore(MemoryPersistence());

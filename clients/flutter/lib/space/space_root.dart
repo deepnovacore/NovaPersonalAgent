@@ -24,10 +24,12 @@ class SpaceRoot extends StatefulWidget {
     required this.standaloneBuilder,
     this.catalog,
     this.clientBuilder,
+    this.standalonePageBuilder,
   });
   final Widget Function(SpaceRecord) standaloneBuilder;
   final SpaceCatalog? catalog;
   final Widget Function(SpaceRecord)? clientBuilder;
+  final Widget Function(SpaceRecord, VoidCallback)? standalonePageBuilder;
   @override
   State<SpaceRoot> createState() => _SpaceRootState();
 }
@@ -98,89 +100,11 @@ class _SpaceRootState extends State<SpaceRoot> {
       children: [
         // A Host client has its own title bar and keeps Space switching under
         // 我的; only standalone mode still needs this strip.
-        if (selected.mode == SpaceMode.standalone)
-          Material(
-            color: Nova.ink,
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(color: Nova.separator, width: .5),
-                ),
-              ),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 10, 4),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        CupertinoIcons.device_phone_portrait,
-                        size: 18,
-                        color: Nova.secondary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text.rich(
-                          TextSpan(
-                            children: [
-                              TextSpan(
-                                text: selected.name,
-                                style: const TextStyle(
-                                  color: Nova.text,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0,
-                                ),
-                              ),
-                              const TextSpan(
-                                text: '  ·  ',
-                                style: TextStyle(
-                                  color: Nova.tertiary,
-                                  fontSize: 12,
-                                  letterSpacing: 0,
-                                ),
-                              ),
-                              const TextSpan(
-                                text: '独立运行',
-                                style: TextStyle(
-                                  color: Nova.secondary,
-                                  fontSize: 12,
-                                  letterSpacing: 0,
-                                ),
-                              ),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: () => catalog.select(null),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Nova.secondary,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          visualDensity: VisualDensity.compact,
-                          textStyle: const TextStyle(
-                            fontFamily: 'CupertinoSystemText',
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0,
-                          ),
-                        ),
-                        icon: const Icon(CupertinoIcons.arrow_swap, size: 17),
-                        label: const Text('Space'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+        if (selected.mode == SpaceMode.standalone &&
+            widget.standalonePageBuilder == null)
+          StandaloneSpaceBar(
+            space: selected,
+            onSwitch: () => catalog.select(null),
           ),
         Expanded(
           child: FutureBuilder<void>(
@@ -198,11 +122,15 @@ class _SpaceRootState extends State<SpaceRoot> {
                     // The strip above already consumed the status-bar inset
                     // through its own SafeArea; the standalone page must not
                     // apply the same top padding a second time.
-                    ? MediaQuery.removePadding(
-                        context: context,
-                        removeTop: true,
-                        child: widget.standaloneBuilder(selected),
-                      )
+                    ? widget.standalonePageBuilder?.call(
+                            selected,
+                            () => catalog.select(null),
+                          ) ??
+                          MediaQuery.removePadding(
+                            context: context,
+                            removeTop: true,
+                            child: widget.standaloneBuilder(selected),
+                          )
                     : widget.clientBuilder?.call(selected) ??
                           SpaceClientScreen(
                             space: selected,
@@ -1248,13 +1176,12 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           ),
         ),
         actions: [
-          if (tab == 3)
-            IconButton(
-              tooltip: '设置',
-              icon: const Icon(CupertinoIcons.gear_alt, size: 23),
-              onPressed: () => _openPersonalPage('设置', () => _settings(c)),
-            )
-          else
+          IconButton(
+            tooltip: '设置',
+            icon: const Icon(CupertinoIcons.gear_alt, size: 23),
+            onPressed: () => _openPersonalPage('设置', () => _settings(c)),
+          ),
+          if (tab != 3)
             IconButton(
               onPressed: () => c.sync(),
               icon: const Icon(CupertinoIcons.arrow_clockwise, size: 23),
@@ -1327,4 +1254,107 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     if (error.contains('revoked')) return '此设备已被撤销。请创建新 Space 后重新配对。';
     return '连接暂不可用，将在恢复后补拉。';
   }
+}
+
+class StandaloneSpaceBar extends StatelessWidget {
+  const StandaloneSpaceBar({
+    super.key,
+    required this.space,
+    required this.onSwitch,
+    this.onSettings,
+    this.settingsLabel = '设置',
+  });
+  final SpaceRecord space;
+  final VoidCallback onSwitch;
+  final VoidCallback? onSettings;
+  final String settingsLabel;
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Nova.ink,
+    child: DecoratedBox(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Nova.separator, width: .5)),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 10, 4),
+          child: Row(
+            children: [
+              const Icon(
+                CupertinoIcons.device_phone_portrait,
+                size: 18,
+                color: Nova.secondary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: space.name,
+                        style: const TextStyle(
+                          color: Nova.text,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0,
+                        ),
+                      ),
+                      const TextSpan(
+                        text: '  ·  ',
+                        style: TextStyle(
+                          color: Nova.tertiary,
+                          fontSize: 12,
+                          letterSpacing: 0,
+                        ),
+                      ),
+                      const TextSpan(
+                        text: '独立运行',
+                        style: TextStyle(
+                          color: Nova.secondary,
+                          fontSize: 12,
+                          letterSpacing: 0,
+                        ),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (onSettings != null)
+                IconButton(
+                  key: const ValueKey('global.settings'),
+                  tooltip: settingsLabel,
+                  onPressed: onSettings,
+                  icon: const Icon(CupertinoIcons.gear_alt, size: 23),
+                ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: onSwitch,
+                style: TextButton.styleFrom(
+                  foregroundColor: Nova.secondary,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  textStyle: const TextStyle(
+                    fontFamily: 'CupertinoSystemText',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0,
+                  ),
+                ),
+                icon: const Icon(CupertinoIcons.arrow_swap, size: 17),
+                label: const Text('Space'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

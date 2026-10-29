@@ -91,10 +91,14 @@ void main() {
       expect(find.text('Tasks'), findsOneWidget);
       expect(find.text('All'), findsOneWidget);
       expect(find.text('Scheduled'), findsOneWidget);
-      expect(find.byType(AppBar), findsNothing);
+      expect(find.byType(AppBar), findsOneWidget);
+      expect(find.byTooltip('Settings'), findsOneWidget);
+      expect(tester.widget<AppBar>(find.byType(AppBar)).title, isNull);
       await tab(tester, 'Timeline');
       expect(find.text('Timeline'), findsOneWidget);
-      expect(find.byType(AppBar), findsNothing);
+      expect(find.byType(AppBar), findsOneWidget);
+      expect(find.byTooltip('Settings'), findsOneWidget);
+      expect(tester.widget<AppBar>(find.byType(AppBar)).title, isNull);
       await tab(tester, 'Me');
       expect(find.text('Me'), findsOneWidget);
       expect(find.byTooltip('Settings'), findsOneWidget);
@@ -104,22 +108,21 @@ void main() {
     },
   );
 
-  testWidgets(
-    'settings opens the connectors page with Feishu grouped there',
-    (tester) async {
-      await openChat(tester);
-      await tab(tester, 'Me');
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
-      expect(find.text('Connectors'), findsOneWidget);
-      await tester.tap(find.text('Connectors'));
-      await tester.pumpAndSettle();
-      expect(find.text('Feishu'), findsOneWidget);
-      expect(find.text('Calendar & reminders'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+  testWidgets('settings opens the connectors page with Feishu grouped there', (
+    tester,
+  ) async {
+    await openChat(tester);
+    await tab(tester, 'Me');
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Connectors'), findsOneWidget);
+    await tester.tap(find.text('Connectors'));
+    await tester.pumpAndSettle();
+    expect(find.text('Feishu'), findsOneWidget);
+    expect(find.text('Calendar & reminders'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets(
     'Nova is durable home; task drafts and Me destinations stay separate',

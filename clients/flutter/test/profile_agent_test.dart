@@ -33,46 +33,53 @@ class DelayedModels extends ModelSettings {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('persisted failure codes never contain arbitrary provider text or observation details', () {
-    expect(
-      profileRunErrorCode(const AgentFailure('api-key-and-private-message')),
-      'profile_run_failed',
-    );
-    expect(
-      profileRunErrorCode(StateError('private source prose')),
-      'profile_run_failed',
-    );
-    expect(
-      profileRunErrorCode(const FormatException('private source prose')),
-      'profile_run_failed',
-    );
-    expect(
-      profileRunErrorCode(const AgentFailure('model_http_429')),
-      'model_http_429',
-    );
-    expect(
-      profileRunErrorCode(const AgentFailure('model_http_429 private')),
-      'profile_run_failed',
-    );
-  });
-  test('preflight failure replaces old receipt with a safe code and empty current coverage', () async {
-    FlutterSecureStorage.setMockInitialValues({
-      ProfileAgent.receiptKey:
-          '{"status":"completed","coverage":{"eligible_records":999}}',
-    });
-    final host = FeishuHost();
-    final publication = LocalPublicationContext(MemoryLifePersistence());
-    final agent = ProfileAgent(host, publication, FailingModels());
-    await expectLater(agent.run(), throwsStateError);
-    final raw = await SecureContextPersistence(ProfileAgent.receiptKey)
-        .read();
-    final receipt = jsonDecode(raw!) as Map;
-    expect(receipt['status'], 'interrupted');
-    expect(receipt['error_code'], 'profile_run_failed');
-    expect(receipt['coverage'], isEmpty);
-    expect(raw, isNot(contains('private-api-key')));
-    host.dispose();
-  });
+  test(
+    'persisted failure codes never contain arbitrary provider text or observation details',
+    () {
+      expect(
+        profileRunErrorCode(const AgentFailure('api-key-and-private-message')),
+        'profile_run_failed',
+      );
+      expect(
+        profileRunErrorCode(StateError('private source prose')),
+        'profile_run_failed',
+      );
+      expect(
+        profileRunErrorCode(const FormatException('private source prose')),
+        'profile_run_failed',
+      );
+      expect(
+        profileRunErrorCode(const AgentFailure('model_http_429')),
+        'model_http_429',
+      );
+      expect(
+        profileRunErrorCode(const AgentFailure('model_http_429 private')),
+        'profile_run_failed',
+      );
+    },
+  );
+  test(
+    'preflight failure replaces old receipt with a safe code and empty current coverage',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({
+        ProfileAgent.receiptKey:
+            '{"status":"completed","coverage":{"eligible_records":999}}',
+      });
+      final host = FeishuHost();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      final agent = ProfileAgent(host, publication, FailingModels());
+      await expectLater(agent.run(), throwsStateError);
+      final raw = await SecureContextPersistence(
+        ProfileAgent.receiptKey,
+      ).read();
+      final receipt = jsonDecode(raw!) as Map;
+      expect(receipt['status'], 'interrupted');
+      expect(receipt['error_code'], 'profile_run_failed');
+      expect(receipt['coverage'], isEmpty);
+      expect(raw, isNot(contains('private-api-key')));
+      host.dispose();
+    },
+  );
   for (final scenario in [
     'cancel',
     'deadline',
@@ -81,6 +88,7 @@ void main() {
     'publication',
     'source',
     'model_error_cancel',
+    'support_route',
   ]) {
     final deadline = scenario == 'deadline' || scenario == 'consent_deadline';
     final paused = scenario == 'cancel' || scenario == 'deadline';
@@ -90,6 +98,7 @@ void main() {
       'consent' || 'consent_deadline' => 'processing_consent_required',
       'publication' => 'local_host_required',
       'source' => 'stale_inputs',
+      'support_route' => 'provider_changed',
       _ => 'invalid_model_settings',
     };
     test(
@@ -201,6 +210,16 @@ void main() {
           publication.dispose();
         } else if (scenario == 'source') {
           await sources.setAllAccessible(false);
+        } else if (scenario == 'support_route') {
+          final credential = await models.credentials.save(
+            endpoint: models.configuration.endpoint,
+            key: 'support-key',
+          );
+          await models.saveSupport(
+            endpoint: models.configuration.endpoint,
+            model: 'different-support',
+            credentialId: credential.id,
+          );
         } else if (!deadline) {
           agent.cancel();
         }

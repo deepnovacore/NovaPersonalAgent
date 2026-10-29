@@ -350,6 +350,7 @@ class AgentCoreHost extends ChangeNotifier {
             'tool_call_id': call['id'],
             'tool_name': call['function']['name'],
           });
+          _changed();
           if (result['status'] != 'completed') {
             if (!stop) {
               error = 'tool_${result['status']}';

@@ -135,18 +135,26 @@ class NovaApp extends StatelessWidget {
             lifeHost: lifeHost,
             agentCore: agentCore,
           )
-        : SpaceRoot(standaloneBuilder: (_) => const _WorkbenchShell()),
+        : SpaceRoot(
+            standaloneBuilder: (_) => const _WorkbenchShell(),
+            standalonePageBuilder: (space, onSwitch) =>
+                _WorkbenchShell(space: space, onSwitchSpace: onSwitch),
+          ),
   );
 }
 
 class _WorkbenchShell extends StatefulWidget {
   const _WorkbenchShell({
+    this.space,
+    this.onSwitchSpace,
     this.audio,
     this.requestMicrophone,
     this.preferences,
     this.lifeHost,
     this.agentCore,
   });
+  final SpaceRecord? space;
+  final VoidCallback? onSwitchSpace;
   final AudioPort? audio;
   final Future<bool> Function()? requestMicrophone;
   final Preferences? preferences;
@@ -968,6 +976,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   CupertinoIcons.sparkles,
                 ),
                 (
+                  'support_model',
+                  _t('辅助与后台模型', 'Background model'),
+                  CupertinoIcons.sparkles,
+                ),
+                (
                   'devices',
                   _t('设备', 'Devices'),
                   CupertinoIcons.desktopcomputer,
@@ -1012,12 +1025,14 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         }
       case 'connectors':
         await _openConnectors();
+      case 'support_model':
       case 'model':
         try {
           await showLocalModelSettings(
             context,
             agentCore?.settings ?? ModelSettings(),
             language: language,
+            support: choice == 'support_model',
           );
           if (mounted) setState(() => _modelRevision++);
           profileGeneration?.wake();
@@ -1170,7 +1185,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     leadingWidth: 64,
     automaticallyImplyLeading: false,
     title: PetAvatarTitle(store: petAvatarStore, language: language),
-    actions: const [SizedBox(width: 10)],
+    actions: [
+      if (widget.space == null) _settingsButton(),
+      const SizedBox(width: 10),
+    ],
   );
 
   /// An open task keeps only the back affordance; the tab bar says “Tasks”.
@@ -1189,22 +1207,22 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         });
       },
     ),
-    actions: const [SizedBox(width: 10)],
-  );
-
-  /// A compact gear-only bar; “Me” is already named by the bottom tab.
-  PreferredSizeWidget _meBar() => AppBar(
-    toolbarHeight: 44,
-    centerTitle: true,
-    automaticallyImplyLeading: false,
     actions: [
-      IconButton(
-        tooltip: _t('设置', 'Settings'),
-        icon: const Icon(CupertinoIcons.gear_alt, size: 23),
-        onPressed: _settings,
-      ),
+      if (widget.space == null) _settingsButton(),
       const SizedBox(width: 10),
     ],
+  );
+
+  Widget _settingsButton() => IconButton(
+    key: const ValueKey('global.settings'),
+    tooltip: _t('设置', 'Settings'),
+    icon: const Icon(CupertinoIcons.gear_alt, size: 23),
+    onPressed: _settings,
+  );
+  PreferredSizeWidget _pageBar() => AppBar(
+    automaticallyImplyLeading: false,
+    toolbarHeight: 44,
+    actions: [_settingsButton(), const SizedBox(width: 10)],
   );
 
   @override
@@ -1218,10 +1236,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         ? _novaBar()
         : _tab == 1 && _taskOpen && host != null
         ? _taskBar()
-        : _tab == 3
-        ? _meBar()
+        : widget.space == null
+        ? _pageBar()
         : null;
-    return PopScope(
+    final page = PopScope(
       canPop: !fullCall && (_tab == 0 || host == null),
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
@@ -1424,6 +1442,24 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             ),
         ],
       ),
+    );
+    if (widget.space == null || fullCall) return page;
+    return Column(
+      children: [
+        StandaloneSpaceBar(
+          space: widget.space!,
+          onSwitch: widget.onSwitchSpace!,
+          onSettings: _settings,
+          settingsLabel: _t('设置', 'Settings'),
+        ),
+        Expanded(
+          child: MediaQuery.removePadding(
+            context: context,
+            removeTop: true,
+            child: page,
+          ),
+        ),
+      ],
     );
   }
 }

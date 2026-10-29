@@ -192,7 +192,7 @@ class ProfileAgent extends ChangeNotifier {
         throw AgentFailure(failure);
       }
     }
-    final model = await models.read();
+    final model = await models.readForPurpose(ModelPurpose.support);
     if (model == null) throw const AgentFailure('model_required');
     final provider = '${model.endpoint}|${model.model}';
     if (connector.sources.sources.isEmpty) return null;
@@ -407,7 +407,7 @@ class ProfileAgent extends ChangeNotifier {
     required bool savedObservationsOnly,
     int? maxNewBatches,
   }) async {
-    final model = await models.read();
+    final model = await models.readForPurpose(ModelPurpose.support);
     if (model == null) throw const AgentFailure('model_required');
     if (!connector.ready) throw const AgentFailure('connector_unavailable');
     final provider = '${model.endpoint}|${model.model}';
@@ -453,7 +453,7 @@ class ProfileAgent extends ChangeNotifier {
     Future<void> validate({bool ignoreCancellation = false}) async {
       checkRun(ignoreCancellation: ignoreCancellation);
       await corrections.open();
-      final current = await models.read();
+      final current = await models.readForPurpose(ModelPurpose.support);
       checkRun(ignoreCancellation: ignoreCancellation);
       if (corrections.context(repository.correctionScope, provider) !=
           correctionContext) {
@@ -461,7 +461,8 @@ class ProfileAgent extends ChangeNotifier {
       }
       if (current == null ||
           '${current.endpoint}|${current.model}' != provider ||
-          current.protocol != model.protocol) {
+          current.protocol != model.protocol ||
+          current.key != model.key) {
         throw StateError('provider_changed');
       }
       validateSourceScope();
@@ -635,6 +636,17 @@ class ProfileAgent extends ChangeNotifier {
     await journalDisk.write('{"schema_version":1,"records":{}}');
     connector.addListener(changed);
     publication.addListener(changed);
+    var activeRun = true;
+    final modelChanges = models.changes.listen((_) async {
+      try {
+        await validate();
+      } catch (error) {
+        if (activeRun) {
+          _invalidationFailure ??= error;
+          _stopClients();
+        }
+      }
+    });
     var outcome = 'interrupted';
     String? failureCode;
     late final ProfileWriter writer;
@@ -828,6 +840,8 @@ class ProfileAgent extends ChangeNotifier {
       lastPipelineValidation = pipeline?.validationDiagnostics;
       connector.removeListener(changed);
       publication.removeListener(changed);
+      activeRun = false;
+      await modelChanges.cancel();
       _stopClients();
       await receipt.write(
         jsonEncode({

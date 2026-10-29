@@ -96,8 +96,91 @@ class InjectedWebModel extends ModelClient {
   }
 }
 
+class HeldAfterTool extends ModelClient {
+  final entered = Completer<void>(), release = Completer<void>();
+  int round = 0;
+  @override
+  Stream<Map<String, dynamic>> stream(
+    ModelConfiguration configuration,
+    List<Map<String, dynamic>> messages, {
+    List<Map<String, dynamic>> tools = const [],
+  }) async* {
+    if (round++ == 0) {
+      yield {
+        'tool_calls': [
+          {
+            'index': 0,
+            'id': 'read',
+            'function': {
+              'name': 'web_fetch',
+              'arguments': '{"url":"https://example.com"}',
+            },
+          },
+        ],
+      };
+    } else {
+      entered.complete();
+      await release.future;
+      yield {'content': 'Done'};
+    }
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'completed tools notify while the next model response is stalled',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      final settings = ModelSettings(native: FakeNative());
+      await settings.save(
+        endpoint: 'https://example.com',
+        model: 'm',
+        key: 'secret',
+      );
+      final model = HeldAfterTool();
+      final host = AgentCoreHost(
+        store: store,
+        settings: settings,
+        clientFactory: () => model,
+        tools: ToolRunner(
+          registry: ToolRegistry(
+            snapshot: emptyLife,
+            hasConflict: () => false,
+            mutate: (input, {required operationId}) async => {},
+            fetch: (_) async => {'content': 'ok'},
+            allowedWebDomains: {'example.com'},
+          ),
+          journal: journal,
+        ),
+      );
+      addTearDown(host.dispose);
+      final id = await store.create();
+      var sawCompletion = false;
+      host.addListener(() {
+        final messages = store.conversation(id)['messages'] as List;
+        if (messages.isNotEmpty &&
+            messages.last['role'] == 'tool' &&
+            host.activeTool == null) {
+          sawCompletion = true;
+        }
+      });
+      final run = host.send(
+        id,
+        'Read this webpage',
+        approve: (_) async => true,
+      );
+      await model.entered.future;
+      expect(sawCompletion, isTrue);
+      expect(host.busy, isTrue);
+      model.release.complete();
+      await run;
+    },
+  );
   for (final fail in [false, true]) {
     testWidgets(
       'sent message renders before persistence and restores failed draft ($fail)',
@@ -158,7 +241,7 @@ void main() {
     );
   }
   testWidgets(
-    'chat shows final answer without internal tool narration or receipts',
+    'chat interleaves tool status and explanation without raw receipts',
     (tester) async {
       final store = ConversationStore(MemoryPersistence());
       await store.open();
@@ -194,8 +277,20 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('执行结果待核实'), findsNothing);
-      expect(find.byType(ExpansionTile), findsNothing);
-      expect(find.text('internal tool plan', findRichText: true), findsNothing);
+      expect(find.byType(ExpansionTile), findsNWidgets(2));
+      expect(
+        find.text('internal tool plan', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.textContaining('raw tool receipt'), findsNothing);
+      expect(
+        tester
+            .getTopLeft(find.text('internal tool plan', findRichText: true))
+            .dy,
+        lessThan(
+          tester.getTopLeft(find.text('已搜索今天天气。', findRichText: true)).dy,
+        ),
+      );
       expect(find.text('操作返回结果'), findsNothing);
       expect(find.text('已搜索今天天气。', findRichText: true), findsOneWidget);
       expect(store.conversation(id)['messages'], hasLength(4));

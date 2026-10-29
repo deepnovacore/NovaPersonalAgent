@@ -1,10 +1,13 @@
 import '../space/space_storage.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../agent/local_agent.dart';
 import 'model_client.dart';
 import 'chatgpt_accounts.dart';
 import 'provider_credentials.dart';
+
+enum ModelPurpose { conversationText, support }
 
 class ModelSettings {
   ModelSettings({
@@ -27,6 +30,7 @@ class ModelSettings {
 
   Future<void> useApiKey() async {
     await chatGpt.useApiKey();
+    _changed();
     await clearNativeChatGpt();
     final config = await readApiKey();
     if (config != null) {
@@ -35,6 +39,93 @@ class ModelSettings {
   }
 
   final String _scopedKey = SpaceStorage.secureKey(storageKey);
+  final String _supportKey = SpaceStorage.secureKey(supportStorageKey);
+  static const supportStorageKey = 'nova.model-support.v1';
+  static final _changes = StreamController<String>.broadcast(sync: true);
+  Stream<void> get changes =>
+      _changes.stream.where((key) => key == _scopedKey).map((_) {});
+  void _changed() => _changes.add(_scopedKey);
+
+  /// An unset support route follows the current conversation, including OAuth.
+  Future<ModelConfiguration?> readForPurpose(ModelPurpose purpose) async {
+    if (purpose == ModelPurpose.conversationText) return read();
+    final draft = await readSupportDraft();
+    if (draft == null) return read();
+    try {
+      final protocol = ModelProtocol.values.byName(draft['protocol'] as String);
+      if (protocol == ModelProtocol.chatgptResponses) {
+        throw const AgentFailure('invalid_model_settings');
+      }
+      final credential = await credentials.resolve(
+        draft['endpoint'] as String,
+        credentialId: draft['credentialId'] as String,
+      );
+      if (credential == null) {
+        throw const AgentFailure('provider_credential_missing');
+      }
+      return ModelConfiguration(
+        endpoint: draft['endpoint'] as String,
+        model: draft['model'] as String,
+        key: credential.key,
+        protocol: protocol,
+      );
+    } on AgentFailure {
+      rethrow;
+    } catch (_) {
+      throw const AgentFailure('model_settings_unavailable');
+    }
+  }
+
+  /// This editable selection contains references only, never API or OAuth keys.
+  Future<Map<String, dynamic>?> readSupportDraft() async {
+    try {
+      final raw = await storage.read(key: _supportKey);
+      return raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      throw const AgentFailure('model_settings_unavailable');
+    }
+  }
+
+  Future<void> saveSupport({
+    required String endpoint,
+    required String model,
+    required String credentialId,
+    ModelProtocol protocol = ModelProtocol.chatCompletions,
+  }) async {
+    if (protocol == ModelProtocol.chatgptResponses) {
+      throw const AgentFailure('invalid_model_settings');
+    }
+    final address = endpoint.trim();
+    final credential = await credentials.resolve(
+      address,
+      credentialId: credentialId,
+    );
+    if (credential == null) {
+      throw const AgentFailure('provider_credential_missing');
+    }
+    final value = ModelConfiguration(
+      endpoint: address,
+      model: model.trim(),
+      key: credential.key,
+      protocol: protocol,
+    );
+    await storage.write(
+      key: _supportKey,
+      value: jsonEncode({
+        'endpoint': value.endpoint,
+        'model': value.model,
+        'protocol': value.protocol.name,
+        'credentialId': credential.id,
+      }),
+    );
+    _changed();
+  }
+
+  Future<void> resetSupport() async {
+    await storage.delete(key: _supportKey);
+    _changed();
+  }
+
   static const storageKey = 'nova.dart-model.v1';
 
   Future<ModelConfiguration?> read() async {
@@ -123,6 +214,7 @@ class ModelSettings {
 
   /// Credential edits do not change the selected conversation or OAuth mode.
   Future<void> refreshApiKeyProjection([String? changedCredentialId]) async {
+    _changed();
     if (headless || await chatGpt.active() != null) return;
     if (changedCredentialId != null &&
         (await _readRecord())?['credentialId'] != changedCredentialId) {
@@ -174,6 +266,7 @@ class ModelSettings {
       );
       await chatGpt.useApiKey();
       _projection = null;
+      _changed();
       await _projectApiKey(value);
     } catch (_) {
       throw const AgentFailure('model_settings_projection_failed');

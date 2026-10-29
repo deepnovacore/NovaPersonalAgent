@@ -34,7 +34,11 @@ class _Models extends ModelSettings {
   }
 }
 
-Future<void> _open(WidgetTester tester, _Models models) async {
+Future<void> _open(
+  WidgetTester tester,
+  _Models models, {
+  bool support = false,
+}) async {
   FlutterSecureStorage.setMockInitialValues({
     if (models.saved != null)
       ModelSettings.storageKey: jsonEncode({
@@ -49,7 +53,8 @@ Future<void> _open(WidgetTester tester, _Models models) async {
       home: Scaffold(
         body: Builder(
           builder: (context) => TextButton(
-            onPressed: () => showLocalModelSettings(context, models),
+            onPressed: () =>
+                showLocalModelSettings(context, models, support: support),
             child: const Text('Open'),
           ),
         ),
@@ -61,6 +66,27 @@ Future<void> _open(WidgetTester tester, _Models models) async {
 }
 
 void main() {
+  testWidgets(
+    'support editor saves a separate route using a saved provider key',
+    (tester) async {
+      final models = _Models(null);
+      await _open(tester, models, support: true);
+      await models.credentials.save(
+        endpoint: 'https://openrouter.ai/api/v1',
+        key: 'support-key',
+      );
+      expect(find.text('辅助与后台模型'), findsOneWidget);
+      expect(find.byKey(const ValueKey('support.follow')), findsOneWidget);
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(
+        (await models.readSupportDraft())!['model'],
+        'openai/gpt-4.1-mini',
+      );
+      expect(models.last, isNull);
+    },
+  );
+
   testWidgets('a new user sees a preset form: key only, no URL field', (
     tester,
   ) async {
