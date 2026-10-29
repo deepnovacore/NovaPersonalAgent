@@ -38,8 +38,8 @@ class ConnectorsPage extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
             child: Text(
               t(
-                'Nova 只读取你授权的数据，用于近况、时间线和个人资料；不会修改、发送或代替你操作。',
-                'Nova only reads the data you authorize for updates, timeline and personal info. It never edits, sends or acts on your behalf.',
+                '飞书连接仅读取你授权的数据，用于近况、时间线和个人资料。',
+                'The Feishu connector only reads authorized data for updates, timeline and personal info.',
               ),
               style: const TextStyle(
                 color: Nova.secondary,
@@ -75,11 +75,11 @@ class ConnectorsPage extends StatelessWidget {
                 title: t('日历与提醒事项', 'Calendar & reminders'),
                 subtitle: Text(
                   t(
-                    '首次在聊天中用到时询问权限；Nova 只读取，不会修改。',
-                    'Permission is requested the first time chat needs it. Nova only reads; it never edits.',
+                    '授权后可读取，并按你的请求创建或更新日历与提醒事项。系统权限可在手机设置中管理。',
+                    'With permission, Nova can read, create and update events and reminders at your request. Manage permissions in your phone settings.',
                   ),
                 ),
-                trailing: NovaStatusChip(t('只读', 'Read-only')),
+                trailing: NovaStatusChip(t('系统授权', 'System permission')),
               ),
             ],
           ),
@@ -87,8 +87,8 @@ class ConnectorsPage extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: Text(
               t(
-                '所有连接均为只读授权，可随时关闭。更多连接器会逐步开放。',
-                'All access is read-only and can be turned off at any time. More connectors are coming.',
+                '你可以随时在相应服务或系统设置中关闭授权。更多连接器会逐步开放。',
+                'You can revoke access in the service or system settings at any time. More connectors are coming.',
               ),
               style: const TextStyle(
                 color: Nova.tertiary,

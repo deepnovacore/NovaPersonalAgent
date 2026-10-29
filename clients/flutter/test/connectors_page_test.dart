@@ -99,7 +99,7 @@ void main() {
     expect(opened, 1);
   });
 
-  testWidgets('calendar and reminders are read-only and the footer explains '
+  testWidgets('calendar and reminders explain requested writes and revocable '
       'authorization', (tester) async {
     var opened = 0;
     await tester.pumpWidget(
@@ -116,13 +116,16 @@ void main() {
           .onTap,
       isNull,
     );
-    expect(find.text('首次在聊天中用到时询问权限；Nova 只读取，不会修改。'), findsOneWidget);
-    expect(find.text('只读'), findsOneWidget);
+    expect(
+      find.text('授权后可读取，并按你的请求创建或更新日历与提醒事项。系统权限可在手机设置中管理。'),
+      findsOneWidget,
+    );
+    expect(find.text('系统授权'), findsOneWidget);
     await tester.tap(title);
     await tester.pump();
     expect(opened, 0);
-    expect(find.textContaining('只读取你授权的数据'), findsOneWidget);
-    expect(find.text('所有连接均为只读授权，可随时关闭。更多连接器会逐步开放。'), findsOneWidget);
+    expect(find.textContaining('仅读取你授权的数据'), findsOneWidget);
+    expect(find.text('你可以随时在相应服务或系统设置中关闭授权。更多连接器会逐步开放。'), findsOneWidget);
   });
 
   testWidgets('has Chinese and English copy', (tester) async {
@@ -133,7 +136,7 @@ void main() {
     expect(find.text('手机系统'), findsOneWidget);
     expect(find.text('飞书'), findsOneWidget);
     expect(find.text('日历与提醒事项'), findsOneWidget);
-    expect(find.text('所有连接均为只读授权，可随时关闭。更多连接器会逐步开放。'), findsOneWidget);
+    expect(find.text('你可以随时在相应服务或系统设置中关闭授权。更多连接器会逐步开放。'), findsOneWidget);
 
     await tester.pumpWidget(_app(status: _enStatus, language: 'en'));
     await tester.pumpAndSettle();
@@ -145,15 +148,15 @@ void main() {
     expect(find.text('Not connected'), findsOneWidget);
     expect(
       find.text(
-        'All access is read-only and can be turned off at any time. '
+        'You can revoke access in the service or system settings at any time. '
         'More connectors are coming.',
       ),
       findsOneWidget,
     );
     expect(
       find.text(
-        'Nova only reads the data you authorize for updates, timeline and '
-        'personal info. It never edits, sends or acts on your behalf.',
+        'The Feishu connector only reads authorized data for updates, timeline '
+        'and personal info.',
       ),
       findsOneWidget,
     );
