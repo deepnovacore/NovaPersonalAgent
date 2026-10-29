@@ -56,7 +56,7 @@ function safeUrl(value:unknown,setup:boolean):string|undefined{
 export function feishuView(raw:unknown){
  const view=(typeof raw==='object'&&raw!==null?raw:{}) as Record<string,unknown>,setup=(typeof view.app_setup==='object'&&view.app_setup!==null?view.app_setup:undefined) as Record<string,unknown>|undefined;
  const login=safeUrl(view.verification_url,false),setupUrl=safeUrl(setup?.verification_url,true);
- // beginLogin pauses the connector, so a pending device-flow link outranks the paused state.
- return {available:view.available===true,configured:view.configured===true,connected:!login&&(view.state==='ready'||view.state==='paused'),...(login?{login_pending:true}:{}),state:typeof view.state==='string'?view.state:'unauthorized',...(typeof view.auth_issue==='string'?{auth_issue:view.auth_issue}:{}),
+ // beginLogin pauses the connector before it has a link (and stays paused if that fails): paused alone never means signed in.
+ return {available:view.available===true,configured:view.configured===true,connected:!login&&typeof view.account_id==='string'&&view.auth_issue===undefined&&(view.state==='ready'||view.state==='paused'),...(login?{login_pending:true}:{}),state:typeof view.state==='string'?view.state:'unauthorized',...(typeof view.auth_issue==='string'?{auth_issue:view.auth_issue}:{}),
   ...(setup&&typeof setup.state==='string'?{app_setup:{state:setup.state,...(setupUrl?{verification_url:setupUrl}:{}),...(typeof setup.error==='string'?{error:setup.error.slice(0,200)}:{})}}:{}),...(login?{verification_url:login}:{})};
 }

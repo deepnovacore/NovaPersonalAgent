@@ -102,6 +102,25 @@ void main() {
     await tester.pump();
     expect(state.pending.last['kind'], 'secret.clear');
     expect(state.pending.last['input'], {'name': 'OPENAI_API_KEY'});
+    // Queued offline name edits carry only their own field so neither reverts the other.
+    await tester.tap(find.byKey(const ValueKey('host.assistant_name')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Nova2');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('host.user_name')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Bea');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    final identity = state.pending
+        .where((op) => (op['input'] as Map)['method'] == 'identity.configure')
+        .map((op) => (op['input'] as Map)['params'])
+        .toList();
+    expect(identity, [
+      {'assistant_name': 'Nova2'},
+      {'user_name': 'Bea'},
+    ]);
   });
 
   testWidgets('Feishu card opens the Host verification URL and completes', (

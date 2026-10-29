@@ -150,10 +150,7 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                   '${identity['assistant_name'] ?? ''}',
                 );
                 if (v != null) {
-                  await _patch('identity.configure', {
-                    'assistant_name': v,
-                    'user_name': identity['user_name'] ?? '',
-                  });
+                  await _patch('identity.configure', {'assistant_name': v});
                 }
               },
               key: const ValueKey('host.assistant_name'),
@@ -164,10 +161,7 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
               () async {
                 final v = await _ask('你的称呼', '${identity['user_name'] ?? ''}');
                 if (v != null) {
-                  await _patch('identity.configure', {
-                    'assistant_name': identity['assistant_name'] ?? 'nova',
-                    'user_name': v,
-                  });
+                  await _patch('identity.configure', {'user_name': v});
                 }
               },
               key: const ValueKey('host.user_name'),

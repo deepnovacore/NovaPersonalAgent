@@ -35,6 +35,8 @@ test('settings.patch runs allowlisted host methods only and snapshot projects th
   assert.equal((await f.send('phone','badparams','settings.patch',{method:'identity.configure',params:{evil:1}})).status,'rejected');
   const snap=f.space.snapshot('phone') as unknown as {owner:boolean;host_settings:{identity:{assistant_name:string};discovery:{proactive_daily_cap:number}}};assert.equal(snap.owner,true);assert.equal(snap.host_settings.identity.assistant_name,'Nova2');assert.equal(snap.host_settings.discovery.proactive_daily_cap,3);
   const again=await f.send('phone','id','settings.patch',{method:'identity.configure',params:{assistant_name:'Nova2',user_name:'Ann'}});assert.equal(again.status,'accepted');
+  // Single-field edits queued offline apply in order without reverting each other.
+  assert.equal((await f.send('phone','n1','settings.patch',{method:'identity.configure',params:{assistant_name:'Nova3'}})).status,'accepted');assert.equal((await f.send('phone','n2','settings.patch',{method:'identity.configure',params:{user_name:'Bea'}})).status,'accepted');assert.deepEqual(f.host.identity(),{assistant_name:'Nova3',user_name:'Bea'});
  }finally{await f.close()}
 });
 
@@ -88,4 +90,13 @@ test('a pending Feishu login is never projected as connected, even though beginL
  try{const r=await f.send('phone','login','connector.feishu',{action:'login'});const view=r.result as Record<string,unknown>;assert.deepEqual([view.connected,view.login_pending,view.verification_url],[false,true,'https://accounts.feishu.cn/device?code=p']);
   const snap=f.space.snapshot('phone') as unknown as {host_feishu:Record<string,unknown>};assert.equal(snap.host_feishu.connected,false);
  }finally{await f.close()}
+});
+
+test('a Feishu login whose link request fails leaves the phone signed out, not connected',async()=>{
+ const f=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:true,state:'paused',auth_issue:'login_required'}),command:()=>Promise.reject(Error('lark_cli_failed')),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ try{assert.equal((await f.send('phone','login','connector.feishu',{action:'login'})).status,'rejected');
+  const snap=f.space.snapshot('phone') as unknown as {host_feishu:Record<string,unknown>};assert.equal(snap.host_feishu.connected,false);
+ }finally{await f.close()}
+ const ok=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:true,state:'ready',account_id:'acct'}),command:()=>Promise.resolve({available:true,configured:true,state:'ready',account_id:'acct'}),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ try{const r=await ok.send('phone','done','connector.feishu',{action:'complete'});assert.equal((r.result as Record<string,unknown>).connected,true);assert.equal(JSON.stringify(r.result).includes('acct'),false)}finally{await ok.close()}
 });
