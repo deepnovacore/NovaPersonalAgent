@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../agent_core/model_client.dart';
+import '../agent_core/model_settings.dart';
 
 enum VoicePipeline { integrated, cascaded }
 
@@ -426,14 +427,18 @@ class VoiceConfiguration {
 
 /// Independent of text settings and never projected to a other Spaces.
 class VoiceSettings {
-  VoiceSettings({this.storage = const FlutterSecureStorage()});
+  VoiceSettings({this.storage = const FlutterSecureStorage()})
+    : _modelSettings = ModelSettings(storage: storage);
   final FlutterSecureStorage storage;
+  // Keep credentials pinned to the voice store's Space across active switches.
+  final ModelSettings _modelSettings;
   final String _scopedKey = SpaceStorage.secureKey(storageKey);
   static const storageKey = 'nova.voice.v1';
 
   Future<VoiceConfiguration?> read() async {
-    final config = await readDraft();
     try {
+      final draft = await readDraft();
+      final config = draft == null ? null : await _resolveModelKey(draft);
       config?.validate();
       return config;
     } catch (_) {
@@ -468,8 +473,25 @@ class VoiceSettings {
   Future<VoiceConfiguration> save(VoiceConfiguration draft) async {
     final old = await readDraft();
     final value = _mergeDraft(draft, old);
-    value.validate();
-    return _write(value);
+    final resolved = await _resolveModelKey(value);
+    resolved.validate();
+    await _write(value);
+    return resolved;
+  }
+
+  Future<VoiceConfiguration> _resolveModelKey(VoiceConfiguration value) async {
+    if (value.pipeline != VoicePipeline.cascaded ||
+        value.fastLlm.key.isNotEmpty) {
+      return value;
+    }
+    final model = await _modelSettings.readApiKey();
+    if (model == null ||
+        compatibleEndpoint(model.endpoint, 'models') !=
+            compatibleEndpoint(value.fastLlm.endpoint.trim(), 'models')) {
+      return value;
+    }
+    // Resolve in memory so key rotation works without duplicating credentials.
+    return value.copyWith(fastLlm: value.fastLlm.copyWith(key: model.key));
   }
 
   Future<VoiceConfiguration> saveAsr({

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_mobile/agent_core/model_presets.dart';
+import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/voice/voice_settings.dart';
 import 'package:nova_mobile/voice/voice_settings_sheet.dart';
 
@@ -16,8 +18,8 @@ const _keyKey = ValueKey('integrated.key');
 const _asrProviderKey = ValueKey('asr.provider');
 const _ttsProviderKey = ValueKey('tts.provider');
 const _fastLlmProtocolKey = ValueKey('fastLlm.protocol');
-const _zhIntegratedTab = '实时语音（一体式）';
-const _zhCascadedTab = '分步处理（识别 → 对话 → 合成）';
+const _zhIntegratedTab = '端到端';
+const _zhCascadedTab = '级联';
 
 VoiceServiceConfiguration _builtIn(
   IntegratedVoiceService provider, {
@@ -57,12 +59,14 @@ Future<void> _openSettings(
   VoiceConfiguration? initial,
   String language = 'zh',
   Size surfaceSize = const Size(1000, 1800),
+  Map<String, String> storageValues = const {},
 }) async {
   tester.view.physicalSize = surfaceSize;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   FlutterSecureStorage.setMockInitialValues({
+    ...storageValues,
     if (initial != null) VoiceSettings.storageKey: jsonEncode(initial.toJson()),
   });
   await tester.pumpWidget(
@@ -447,8 +451,8 @@ void main() {
   ) async {
     await _openSettings(tester, language: 'en');
     // Tabs and integrated fields are bilingual; no hidden Chinese copy.
-    expect(find.text('Realtime (integrated)'), findsOneWidget);
-    expect(find.text('Step-by-step (ASR → LLM → TTS)'), findsOneWidget);
+    expect(find.text('End-to-end'), findsOneWidget);
+    expect(find.text('Cascaded'), findsOneWidget);
     expect(find.text('Realtime service'), findsOneWidget);
     expect(find.text('Model'), findsOneWidget);
     expect(find.text('Voice'), findsOneWidget);
@@ -463,11 +467,65 @@ void main() {
     await _openSettings(tester, initial: _validCascaded(), language: 'en');
     expect(find.text('Speech recognition service'), findsOneWidget);
     expect(find.text('Speech synthesis service'), findsOneWidget);
-    expect(find.text('Fast model protocol'), findsOneWidget);
-    expect(find.text('Fast model'), findsOneWidget);
+    expect(find.text('API protocol'), findsOneWidget);
+    expect(find.text('Forebrain'), findsOneWidget);
     expect(find.text('Cancel'), findsOneWidget);
     expect(RegExp(r'[\u4e00-\u9fff]').hasMatch(_visibleText(tester)), isFalse);
   });
+
+  testWidgets(
+    'forebrain presets reuse configured keys and preserve custom URLs',
+    (tester) async {
+      final initial = _validCascaded();
+      await _openSettings(
+        tester,
+        initial: initial,
+        storageValues: {
+          ModelSettings.storageKey: jsonEncode({
+            'endpoint': ModelPreset.byId('openai')!.endpoint,
+            'model': 'text-model',
+            'key': 'saved-model-secret',
+          }),
+        },
+      );
+      expect(find.text('语音识别服务'), findsOneWidget);
+      expect(find.text('ASR'), findsNothing);
+      expect(find.byKey(const ValueKey('ASR.endpoint')), findsOneWidget);
+      expect(find.text('前脑'), findsOneWidget);
+      expect(find.text('快速前脑模型'), findsNothing);
+      expect(
+        _textField(tester, const ValueKey('fastLlm.endpoint')).controller!.text,
+        initial.fastLlm.endpoint,
+      );
+      await _openDropdown(tester, const ValueKey('fastLlm.provider'));
+      for (final preset in modelPresets) {
+        expect(find.text(preset.name), findsWidgets);
+      }
+      await tester.tap(find.text('OpenAI').last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('fastLlm.endpoint')), findsNothing);
+      expect(
+        _textField(tester, const ValueKey('fastLlm.key')).controller!.text,
+        isEmpty,
+      );
+      expect(find.text('saved-model-secret'), findsNothing);
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(find.byType(VoiceSettingsSheet), findsNothing);
+      final saved = (await VoiceSettings().readDraft())!;
+      expect(saved.fastLlm.endpoint, ModelPreset.byId('openai')!.endpoint);
+      expect(saved.fastLlm.key, isEmpty);
+      expect((await VoiceSettings().read())!.fastLlm.key, 'saved-model-secret');
+
+      await _openSettings(tester, initial: initial);
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(
+        (await VoiceSettings().readDraft())!.fastLlm.toJson(),
+        initial.fastLlm.toJson(),
+      );
+    },
+  );
 
   testWidgets('tabs and fields fit a narrow phone width', (tester) async {
     // The real phone dialog is about 310 logical pixels wide.

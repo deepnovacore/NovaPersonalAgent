@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../agent_core/model_client.dart';
+import '../agent_core/model_presets.dart';
 import '../ui/local_dialog.dart';
 import 'voice_settings.dart';
 
@@ -83,6 +84,7 @@ class _ServiceFields {
 class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
   late VoiceConfiguration _draft;
   late final _ServiceFields _asr, _tts, _llm;
+  ModelPreset? _forebrainPreset;
   // Never populate form controllers with a stored secret.
   late final TextEditingController _integratedKey;
   bool _endpointRewritten = false;
@@ -120,6 +122,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     _asr = _ServiceFields(_draft.asr);
     _tts = _ServiceFields(_draft.tts);
     _llm = _ServiceFields(_draft.fastLlm);
+    _forebrainPreset = ModelPreset.forEndpoint(_draft.fastLlm.endpoint);
   }
 
   @override
@@ -236,15 +239,9 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _pipelineTab(
-            VoicePipeline.integrated,
-            t('实时语音（一体式）', 'Realtime (integrated)'),
-          ),
+          _pipelineTab(VoicePipeline.integrated, t('端到端', 'End-to-end')),
           const SizedBox(width: 4),
-          _pipelineTab(
-            VoicePipeline.cascaded,
-            t('分步处理（识别 → 对话 → 合成）', 'Step-by-step (ASR → LLM → TTS)'),
-          ),
+          _pipelineTab(VoicePipeline.cascaded, t('级联', 'Cascaded')),
         ],
       ),
     );
@@ -254,6 +251,9 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     String title,
     _ServiceFields fields, {
     String? label,
+    bool heading = true,
+    bool endpoint = true,
+    String? keyHelper,
     bool websocket = false,
     bool model = true,
     bool voice = false,
@@ -263,24 +263,25 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     bool resourceId = false,
   }) {
     final items = <Widget>[
-      TextField(
-        controller: fields.endpoint,
-        enabled: !_saving,
-        key: ValueKey('$title.endpoint'),
-        autocorrect: false,
-        keyboardType: TextInputType.url,
-        decoration: InputDecoration(
-          labelText: websocket
-              ? t('WSS 服务地址', 'WSS endpoint')
-              : t('HTTPS 服务地址', 'HTTPS endpoint'),
-          helperText: geminiBase
-              ? t(
-                  'Gemini API 基础地址，例如 https://generativelanguage.googleapis.com/v1beta',
-                  'Gemini API base URL, e.g. https://generativelanguage.googleapis.com/v1beta',
-                )
-              : null,
+      if (endpoint)
+        TextField(
+          controller: fields.endpoint,
+          enabled: !_saving,
+          key: ValueKey('$title.endpoint'),
+          autocorrect: false,
+          keyboardType: TextInputType.url,
+          decoration: InputDecoration(
+            labelText: websocket
+                ? t('WSS 服务地址', 'WSS endpoint')
+                : t('HTTPS 服务地址', 'HTTPS endpoint'),
+            helperText: geminiBase
+                ? t(
+                    'Gemini API 基础地址，例如 https://generativelanguage.googleapis.com/v1beta',
+                    'Gemini API base URL, e.g. https://generativelanguage.googleapis.com/v1beta',
+                  )
+                : null,
+          ),
         ),
-      ),
       if (model)
         TextField(
           controller: fields.model,
@@ -330,20 +331,23 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
           labelText: optionalKey
               ? t('API 密钥（服务允许时可不填）', 'API key (optional if supported)')
               : t('API 密钥', 'API key'),
-          helperText: t('留空仅保留已保存的密钥', 'Leave blank to keep the saved key'),
+          helperText:
+              keyHelper ??
+              t('留空仅保留已保存的密钥', 'Leave blank to keep the saved key'),
         ),
       ),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 16, bottom: 12),
-          child: Text(
-            label ?? title,
-            style: Theme.of(context).textTheme.titleSmall,
+        if (heading)
+          Padding(
+            padding: const EdgeInsets.only(top: 16, bottom: 12),
+            child: Text(
+              label ?? title,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
           ),
-        ),
         for (var index = 0; index < items.length; index++) ...[
           if (index > 0) const SizedBox(height: 12),
           items[index],
@@ -433,9 +437,11 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
 
   List<Widget> _asrFields() => [
     _speechSelector(asr: true),
+    const SizedBox(height: 12),
     _fields(
       'ASR',
       _asr,
+      heading: false,
       websocket:
           _draft.asrProvider == SpeechProvider.selfHosted ||
           _draft.asrProvider == SpeechProvider.volcengine,
@@ -600,47 +606,104 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     ];
   }
 
-  List<Widget> _cascadedFields() => [
-    const SizedBox(height: 12),
-    ..._asrFields(),
-    const SizedBox(height: 12),
-    DropdownButtonFormField<FastLlmProtocol>(
-      key: const ValueKey('fastLlm.protocol'),
-      initialValue: _draft.fastLlmProtocol,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: t('快速模型协议', 'Fast model protocol'),
+  List<Widget> _forebrainFields() => [
+    Padding(
+      padding: const EdgeInsets.only(top: 16, bottom: 12),
+      child: Text(
+        t('前脑', 'Forebrain'),
+        style: Theme.of(context).textTheme.titleSmall,
       ),
-      items: const [
+    ),
+    DropdownButtonFormField<String>(
+      key: const ValueKey('fastLlm.provider'),
+      initialValue: _forebrainPreset?.id ?? 'custom',
+      isExpanded: true,
+      decoration: InputDecoration(labelText: t('模型厂商', 'Provider')),
+      items: [
+        for (final preset in modelPresets)
+          DropdownMenuItem(
+            value: preset.id,
+            child: Text(preset.name, overflow: TextOverflow.ellipsis),
+          ),
         DropdownMenuItem(
-          value: FastLlmProtocol.responses,
-          child: Text('Responses'),
-        ),
-        DropdownMenuItem(
-          value: FastLlmProtocol.chatCompletions,
-          child: Text('Chat Completions'),
-        ),
-        DropdownMenuItem(
-          value: FastLlmProtocol.arkResponses,
-          child: Text('Ark Responses'),
+          value: 'custom',
+          child: Text(t('自定义（OpenAI 兼容）', 'Custom (OpenAI-compatible)')),
         ),
       ],
       onChanged: _saving
           ? null
-          : (value) {
-              if (value != null && value != _draft.fastLlmProtocol) {
-                setState(() {
-                  _draft = _draft.copyWith(fastLlmProtocol: value);
-                  _llm.replace(const VoiceServiceConfiguration());
-                });
-              }
+          : (id) {
+              if (id == null) return;
+              setState(() {
+                _forebrainPreset = ModelPreset.byId(id);
+                _llm.key.clear();
+                final preset = _forebrainPreset;
+                if (preset == null) return;
+                _llm.replace(
+                  VoiceServiceConfiguration(
+                    endpoint: preset.endpoint,
+                    model: preset.recommendedModels.firstOrNull ?? '',
+                  ),
+                );
+                _draft = _draft.copyWith(
+                  fastLlmProtocol: preset.protocol == ModelProtocol.responses
+                      ? FastLlmProtocol.responses
+                      : FastLlmProtocol.chatCompletions,
+                );
+              });
             },
     ),
-    _fields('快速前脑模型', _llm, label: t('快速前脑模型', 'Fast model')),
+    const SizedBox(height: 12),
+    if (_forebrainPreset == null)
+      DropdownButtonFormField<FastLlmProtocol>(
+        key: const ValueKey('fastLlm.protocol'),
+        initialValue: _draft.fastLlmProtocol,
+        isExpanded: true,
+        decoration: InputDecoration(labelText: t('API 协议', 'API protocol')),
+        items: const [
+          DropdownMenuItem(
+            value: FastLlmProtocol.responses,
+            child: Text('Responses'),
+          ),
+          DropdownMenuItem(
+            value: FastLlmProtocol.chatCompletions,
+            child: Text('Chat Completions'),
+          ),
+          DropdownMenuItem(
+            value: FastLlmProtocol.arkResponses,
+            child: Text('Ark Responses'),
+          ),
+        ],
+        onChanged: _saving
+            ? null
+            : (value) {
+                if (value != null && value != _draft.fastLlmProtocol) {
+                  setState(() {
+                    _draft = _draft.copyWith(fastLlmProtocol: value);
+                    _llm.replace(const VoiceServiceConfiguration());
+                  });
+                }
+              },
+      ),
+    _fields(
+      'fastLlm',
+      _llm,
+      heading: false,
+      endpoint: _forebrainPreset == null,
+      keyHelper: t(
+        '留空使用此地址已保存的语音或模型密钥',
+        'Leave blank to use the voice or model key saved for this endpoint',
+      ),
+    ),
     Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Text(
-        _draft.fastLlmProtocol == FastLlmProtocol.arkResponses
+        _forebrainPreset != null
+            ? t(
+                '前脑负责语音对话，长任务仍交给手机后脑。',
+                'The forebrain handles voice chat; longer tasks stay with the phone brain.',
+              )
+            : _draft.fastLlmProtocol == FastLlmProtocol.arkResponses
             ? t(
                 '填写完整的 Ark /responses 地址。此模型负责语音对话，长任务仍交给手机后脑。',
                 'Use the full Ark /responses URL. This model handles voice chat; longer tasks stay with the phone brain.',
@@ -651,6 +714,12 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
               ),
       ),
     ),
+  ];
+
+  List<Widget> _cascadedFields() => [
+    const SizedBox(height: 12),
+    ..._asrFields(),
+    ..._forebrainFields(),
     const SizedBox(height: 12),
     _speechSelector(asr: false),
     _fields(
