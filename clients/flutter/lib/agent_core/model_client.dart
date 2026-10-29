@@ -95,8 +95,8 @@ class ModelClient {
   });
   final bool collectUsage;
 
-  /// Only background profile/voice turns ask providers to skip thinking; chat
-  /// keeps the provider default so visible reasoning streams to the UI.
+  /// Background profile/voice turns skip thinking; chat explicitly enables it
+  /// on supported providers so visible reasoning can stream to the UI.
   final bool disableThinking;
   CompletedModelUsage? completedUsage;
   final Duration timeout, maxDuration;
@@ -389,14 +389,17 @@ Map<String, dynamic> modelRequestBody(
   bool disableThinking = false,
 }) {
   if (config.protocol == ModelProtocol.chatCompletions) {
+    final deepseek = config.requestUri.host == 'api.deepseek.com';
     return {
       'model': config.model,
       'stream': true,
-      'max_tokens': 12000,
-      if (disableThinking &&
-          ['qwen-flash', 'qwen3-vl-plus'].contains(config.model) &&
+      // DeepSeek shares this budget between thinking and generated tool source.
+      'max_tokens': deepseek && !disableThinking ? 65536 : 12000,
+      if (deepseek)
+        'thinking': {'type': disableThinking ? 'disabled' : 'enabled'},
+      if (['qwen-flash', 'qwen3-vl-plus'].contains(config.model) &&
           config.requestUri.host == 'dashscope.aliyuncs.com')
-        'enable_thinking': false,
+        'enable_thinking': !disableThinking,
       'messages': [for (final m in messages) _chatMessage(config, m)],
       if (tools.isNotEmpty) 'tools': tools,
     };

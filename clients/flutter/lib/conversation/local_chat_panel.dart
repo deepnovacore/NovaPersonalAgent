@@ -746,8 +746,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       'The model provider connection was interrupted.',
     ),
     'model_output_limit' => t(
-      '作品源码超出本次输出长度，请让 Nova 分步完成。',
-      'The source exceeded this response limit. Ask Nova to build it in steps.',
+      '这次生成达到模型输出上限，请让 Nova 分步完成。',
+      'This generation reached the model output limit. Ask Nova to build it in steps.',
     ),
     'tool_round_limit' => t(
       '已达到本轮操作上限，可以继续对话。',
@@ -886,7 +886,10 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                       )
                     : DefaultTextStyle.merge(
                         style: const TextStyle(fontSize: 16, height: 1.6),
-                        child: AssistantText(text, onArtifactLink: _openArtifact),
+                        child: AssistantText(
+                          text,
+                          onArtifactLink: _openArtifact,
+                        ),
                       ),
               if (user &&
                   (message['voice_transcript_final'] == false ||

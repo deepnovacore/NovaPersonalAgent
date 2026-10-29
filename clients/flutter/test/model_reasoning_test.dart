@@ -15,43 +15,42 @@ void main() {
     key: 'synthetic',
   );
 
-  test('chat bodies never disable thinking unless a Qwen opt-out is explicit', () {
-    // DeepSeek has no thinking flag in chat: reasoning is the provider default.
-    for (final disableThinking in [false, true]) {
-      final body = modelRequestBody(deepseek, [], [], disableThinking: disableThinking);
-      expect(body.containsKey('thinking'), false);
-      expect(body.containsKey('enable_thinking'), false);
-    }
-    // Chat Completions leaves Qwen thinking on unless asked otherwise.
-    expect(modelRequestBody(qwen, [], []).containsKey('enable_thinking'), false);
-    expect(
-      modelRequestBody(qwen, [], [], disableThinking: true)['enable_thinking'],
-      false,
-    );
-    // The explicit opt-out only targets the priced DashScope models.
-    final remote = ModelConfiguration(
-      endpoint: 'https://example.com/v1',
-      model: 'qwen-flash',
-      key: 'synthetic',
-    );
-    expect(
-      modelRequestBody(remote, [], [], disableThinking: true).containsKey(
-        'enable_thinking',
-      ),
-      false,
-    );
-    final otherQwen = ModelConfiguration(
-      endpoint: qwen.endpoint,
-      model: 'qwen-plus',
-      key: 'synthetic',
-    );
-    expect(
-      modelRequestBody(otherQwen, [], [], disableThinking: true).containsKey(
-        'enable_thinking',
-      ),
-      false,
-    );
-  });
+  test(
+    'chat explicitly enables supported provider thinking and leaves room for code',
+    () {
+      final body = modelRequestBody(deepseek, [], []);
+      expect(body['thinking'], {'type': 'enabled'});
+      // Thinking and tool source share the provider's output budget.
+      expect(body['max_tokens'], 65536);
+      final background = modelRequestBody(
+        deepseek,
+        [],
+        [],
+        disableThinking: true,
+      );
+      expect(background['thinking'], {'type': 'disabled'});
+      expect(background['max_tokens'], 12000);
+      expect(modelRequestBody(qwen, [], [])['enable_thinking'], true);
+      expect(
+        modelRequestBody(
+          qwen,
+          [],
+          [],
+          disableThinking: true,
+        )['enable_thinking'],
+        false,
+      );
+      final remote = ModelConfiguration(
+        endpoint: 'https://example.com/v1',
+        model: 'qwen-flash',
+        key: 'synthetic',
+      );
+      final generic = modelRequestBody(remote, [], []);
+      expect(generic.containsKey('thinking'), false);
+      expect(generic.containsKey('enable_thinking'), false);
+      expect(generic['max_tokens'], 12000);
+    },
+  );
 
   test('DeepSeek replays stored reasoning and fills the legacy empty field', () {
     final messages = <Map<String, dynamic>>[
@@ -170,7 +169,10 @@ void main() {
     addTearDown(() => server.close(force: true));
     server.listen((request) async {
       await request.drain<void>();
-      request.response.headers.contentType = ContentType('text', 'event-stream');
+      request.response.headers.contentType = ContentType(
+        'text',
+        'event-stream',
+      );
       final event = jsonEncode({
         'choices': [
           {
