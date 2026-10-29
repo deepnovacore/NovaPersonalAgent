@@ -330,6 +330,10 @@ class ProfileRepository {
     return result;
   }
 
+  /// Whether this device holds a stored projection at all, even when [value]
+  /// hides it because it belongs to another Space, device or identity.
+  bool get hasStoredResult => _value != null;
+
   static String _evidenceFingerprint(Map original) => lifeFingerprint({
     for (final entry in original.entries)
       if (entry.key != 'fetched_at') entry.key: entry.value,

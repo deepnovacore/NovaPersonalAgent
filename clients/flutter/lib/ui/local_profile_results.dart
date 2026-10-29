@@ -28,6 +28,7 @@ class LocalProfileResults extends StatelessWidget
     this.compact = false,
     this.language = 'zh',
     this.onOpenFeishu,
+    this.emptyHint,
     this.adoptTodo,
   });
   final ProfileGenerationCoordinator? generation;
@@ -40,6 +41,10 @@ class LocalProfileResults extends StatelessWidget
   final bool compact;
   final String language;
   final VoidCallback? onOpenFeishu;
+
+  /// The reason nothing can be shown right now, supplied by the shell so the
+  /// empty state names the real cause instead of guessing.
+  final String? emptyHint;
   String t(String zh, String en) => language == 'zh' ? zh : en;
   String sourceTime(String value) {
     final date = DateTime.parse(value).toLocal();
@@ -63,6 +68,9 @@ class LocalProfileResults extends StatelessWidget
   /// this reports zero and the page simply omits the brief count.
   @override
   int todayBriefCount(DateTime now) {
+    // Before the host has opened local state, any stored value is not yet
+    // trustworthy for this Space/device; report nothing rather than a guess.
+    if (!host.restored) return 0;
     final value = repository?.value;
     final entries = value?['entries'];
     if (entries is! List) return 0;
@@ -106,6 +114,24 @@ class LocalProfileResults extends StatelessWidget
                 t('还没有个人介绍', 'No introduction yet'),
                 style: const TextStyle(fontSize: 14, color: Nova.secondary),
               ),
+            if (rows.isEmpty && emptyHint != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  emptyHint!,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Nova.secondary,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+            if (rows.isEmpty && onOpenFeishu != null)
+              TextButton(
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                onPressed: onOpenFeishu,
+                child: Text(t('打开飞书设置', 'Open Feishu settings')),
+              ),
             for (final key in ProfileCorrections.categories.keys)
               for (final row in rows.where((e) => e['key'] == key).take(1))
                 Padding(
@@ -148,20 +174,34 @@ class LocalProfileResults extends StatelessWidget
           ],
         );
       }
-      if (generation != null && value == null) {
-        return ProfileGenerationStatus(
-          generation: generation!,
-          language: language,
-          empty: true,
-          emptyLabel: kind == 'profile'
-              ? t('暂时没有可确认的个人信息', 'No confirmed personal information yet')
-              : t('暂时没有可确认的近况', 'No confirmed updates yet'),
-        );
+      if (value == null) {
+        // A failed local read is its own state; generation status must not hide
+        // it, because retrying the read is the only useful action.
+        if (failed) return _readFailure(retry);
+        if (!host.restored) return _loadingState();
+        if (profile.hasStoredResult) return _blockedNote();
+        if (generation != null) {
+          return ProfileGenerationStatus(
+            generation: generation!,
+            language: language,
+            empty: true,
+            emptyLabel: kind == 'profile'
+                ? t('暂时没有可确认的个人信息', 'No confirmed personal information yet')
+                : t('暂时没有可确认的近况', 'No confirmed updates yet'),
+            waitingHint: emptyHint,
+            onOpenFeishu: onOpenFeishu,
+          );
+        }
+        if (kind == 'timeline') {
+          return _timelineState(
+            loading: loading,
+            failed: failed,
+            retry: retry,
+            emptyHint: emptyHint,
+          );
+        }
+        return _emptyHintState();
       }
-      if (kind == 'timeline' && value == null) {
-        return _timelineState(loading: loading, failed: failed, retry: retry);
-      }
-      if (value == null) return const SizedBox.shrink();
       final entries = (value['entries'] as List)
           .cast<Map>()
           .where(
@@ -179,10 +219,17 @@ class LocalProfileResults extends StatelessWidget
             emptyLabel: kind == 'profile'
                 ? t('暂时没有可确认的个人信息', 'No confirmed personal information yet')
                 : t('暂时没有可确认的近况', 'No confirmed updates yet'),
+            waitingHint: emptyHint,
+            onOpenFeishu: onOpenFeishu,
           );
         }
         return kind == 'timeline'
-            ? _timelineState(loading: false, failed: false, retry: retry)
+            ? _timelineState(
+                loading: false,
+                failed: false,
+                retry: retry,
+                emptyHint: emptyHint,
+              )
             : const SizedBox.shrink();
       }
       return Column(
@@ -273,6 +320,68 @@ class LocalProfileResults extends StatelessWidget
     },
   );
 
+  Widget _readFailure(VoidCallback retry) => Padding(
+    padding: const EdgeInsets.only(bottom: 24),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          t('无法读取此前生成的资料', 'Could not read your saved results'),
+          style: const TextStyle(color: Nova.secondary, height: 1.5),
+        ),
+        TextButton(
+          style: TextButton.styleFrom(padding: EdgeInsets.zero),
+          onPressed: retry,
+          child: Text(t('重试', 'Retry')),
+        ),
+      ],
+    ),
+  );
+
+  // Deliberately static: some screens are built before the host is opened, and
+  // an indeterminate indicator would animate forever if it never is.
+  Widget _loadingState() => Padding(
+    padding: const EdgeInsets.only(bottom: 24),
+    child: Text(
+      t('正在读取本机资料…', 'Opening local data…'),
+      style: const TextStyle(color: Nova.secondary, height: 1.5),
+    ),
+  );
+
+  /// Stored data exists but was produced for another Space, device or identity.
+  Widget _blockedNote() => Padding(
+    padding: const EdgeInsets.only(bottom: 24),
+    child: Text(
+      t(
+        '此设备此前生成的资料无法显示。它们属于其他账号或设备；重新连接或切回原 Space 后可能恢复。',
+        'Saved results on this device cannot be shown here. They belong to another account or device; reconnect or switch back to the original Space to restore them.',
+      ),
+      style: const TextStyle(color: Nova.secondary, height: 1.5),
+    ),
+  );
+
+  Widget _emptyHintState() {
+    if (emptyHint == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            emptyHint!,
+            style: const TextStyle(color: Nova.secondary, height: 1.5),
+          ),
+          if (onOpenFeishu != null)
+            TextButton(
+              style: TextButton.styleFrom(padding: EdgeInsets.zero),
+              onPressed: onOpenFeishu,
+              child: Text(t('打开飞书设置', 'Open Feishu settings')),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _coverage(Map<String, dynamic> value) {
     final coverage = value['coverage'];
     final notes = <String>[
@@ -327,6 +436,7 @@ class LocalProfileResults extends StatelessWidget
     required bool loading,
     required bool failed,
     required VoidCallback retry,
+    String? emptyHint,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 24),
     child: Column(
@@ -366,6 +476,17 @@ class LocalProfileResults extends StatelessWidget
                 height: 1.5,
               ),
             ),
+            if (emptyHint != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                emptyHint,
+                style: const TextStyle(
+                  color: Nova.secondary,
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
+            ],
             if (onOpenFeishu != null)
               TextButton(
                 onPressed: onOpenFeishu,
@@ -1128,7 +1249,9 @@ class _ProfileScopeState extends State<_ProfileScope> {
 
   @override
   Widget build(BuildContext context) {
-    final value = widget.host.ready ? profile.value : null;
+    // Saved results are readable once local state is opened, even while the
+    // Feishu connector itself is unconfigured or unauthorized.
+    final value = widget.host.restored ? profile.value : null;
     expiry?.cancel();
     if (value != null) {
       final now = widget.host.sources.now();

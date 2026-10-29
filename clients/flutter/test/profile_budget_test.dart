@@ -24,7 +24,9 @@ void main() {
       {'role': 'user', 'content': ''},
     ];
     final overhead =
-        utf8.encode(jsonEncode(modelRequestBody(vision, empty, []))).length +
+        utf8.encode(
+          jsonEncode(modelRequestBody(vision, empty, [], disableThinking: true)),
+        ).length +
         4096 +
         128;
     return [
@@ -33,7 +35,15 @@ void main() {
   }
 
   test('VL Plus uses mainland list prices and explicitly disables thinking', () {
-    expect(modelRequestBody(vision, messages, [])['enable_thinking'], false);
+    expect(
+      modelRequestBody(
+        vision,
+        messages,
+        [],
+        disableThinking: true,
+      )['enable_thinking'],
+      false,
+    );
     // Byte/framing upper bounds, 12K reserved output, twice Beijing list price.
     expect(ProfileBudget.requestCost(vision, visionInputBound(32000)), 304000);
     expect(ProfileBudget.requestCost(vision, visionInputBound(32001)), 456003);
@@ -149,7 +159,15 @@ void main() {
       final reopened = ProfileBudget(disk);
       await reopened.reserve(model, messages);
       expect(reopened.reservedMicroyuan, cost * 3);
-      expect(modelRequestBody(model, messages, [])['enable_thinking'], false);
+      expect(
+        modelRequestBody(
+          model,
+          messages,
+          [],
+          disableThinking: true,
+        )['enable_thinking'],
+        false,
+      );
       expect(
         cost,
         greaterThan(36000),

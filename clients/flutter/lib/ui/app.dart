@@ -55,6 +55,56 @@ import '../conversation/local_conversation_store.dart';
 
 const ink = Nova.ink, mint = Nova.mint;
 
+/// The real reason a saved profile/timeline cannot be shown right now.
+///
+/// The shell computes this once per build so every empty state names the same
+/// cause; [connect] tells the UI whether opening Feishu settings can help.
+({String hint, bool connect}) profileEmptyHint({
+  required bool restored,
+  required bool configured,
+  required bool authorized,
+  required bool syncing,
+  required String language,
+}) {
+  final zh = language == 'zh';
+  if (!restored) {
+    return (
+      hint: zh ? '正在读取本机资料…' : 'Opening local data…',
+      connect: false,
+    );
+  }
+  if (!configured) {
+    return (
+      hint: zh
+          ? '先连接飞书，之后会自动整理到这里。'
+          : 'Connect Feishu and your updates will appear here.',
+      connect: true,
+    );
+  }
+  if (!authorized) {
+    return (
+      hint: zh
+          ? '飞书授权已失效，重新连接后会自动整理。'
+          : 'Feishu access expired. Reconnect to resume organizing.',
+      connect: true,
+    );
+  }
+  if (syncing) {
+    return (
+      hint: zh
+          ? '正在同步消息，完成后会自动整理。'
+          : 'Syncing messages; updates will appear when it finishes.',
+      connect: false,
+    );
+  }
+  return (
+    hint: zh
+        ? '还没有可显示的近况。资料按 Space 隔离，其他 Space 的记录不会出现在这里。'
+        : 'No updates available yet. Data is per-Space; records from other Spaces are not shown here.',
+    connect: false,
+  );
+}
+
 class NovaApp extends StatelessWidget {
   const NovaApp({
     super.key,
@@ -323,8 +373,19 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     }
   }
 
-  Future<void> _openProfileGeneration() =>
-      _profileOpening ??= _startProfileGeneration();
+  /// A failed start stays retryable instead of caching its error forever.
+  Future<void> _openProfileGeneration() async {
+    final opening = _profileOpening;
+    if (opening != null) return opening;
+    final result = _startProfileGeneration();
+    _profileOpening = result;
+    try {
+      await result;
+    } catch (_) {
+      if (identical(_profileOpening, result)) _profileOpening = null;
+      rethrow;
+    }
+  }
 
   Future<void> _startProfileGeneration() async {
     await lifeHost.open();
@@ -445,6 +506,14 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   }
 
   String _t(String zh, String en) => language == 'zh' ? zh : en;
+
+  ({String hint, bool connect}) _profileHint() => profileEmptyHint(
+    restored: feishu?.restored ?? false,
+    configured: feishu?.auth.configured ?? false,
+    authorized: feishu?.auth.authorized ?? false,
+    syncing: feishu?.collection.running ?? false,
+    language: language,
+  );
 
   /// Created on first use so the settings sheet and the chat avatar share one
   /// store without blocking startup.
@@ -580,28 +649,36 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     );
   }
 
-  Widget _myPage() => MyOverview(
-    life: lifeHost.store?.snapshot?.object('life') ?? {},
-    draft:
-        (lifeHost.store?.snapshot?.object('profile_preparation')['draft']
-                as Map?)
-            ?.cast<String, dynamic>() ??
-        {},
-    language: language,
-    onOpen: _workspace,
-    generatedProfile: feishu == null
-        ? null
-        : LocalProfileResults(
-            host: feishu!,
-            publication: lifeHost.publication,
-            kind: 'profile',
-            compact: true,
-            repository: profileAgent?.repository,
-            generation: profileGeneration,
-            revision: _profileRevision,
-            language: language,
-          ),
-  );
+  Widget _myPage() {
+    final connector = feishu;
+    final hint = _profileHint();
+    return MyOverview(
+      life: lifeHost.store?.snapshot?.object('life') ?? {},
+      draft:
+          (lifeHost.store?.snapshot?.object('profile_preparation')['draft']
+                  as Map?)
+              ?.cast<String, dynamic>() ??
+          {},
+      language: language,
+      onOpen: _workspace,
+      generatedProfile: connector == null
+          ? null
+          : LocalProfileResults(
+              host: connector,
+              publication: lifeHost.publication,
+              kind: 'profile',
+              compact: true,
+              repository: profileAgent?.repository,
+              generation: profileGeneration,
+              revision: _profileRevision,
+              language: language,
+              emptyHint: hint.hint,
+              onOpenFeishu: hint.connect
+                  ? () => unawaited(_openFeishu())
+                  : null,
+            ),
+    );
+  }
 
   void _openVoice() {
     if (phoneVoice?.active == true || phoneVoice?.connecting == true) {
@@ -714,6 +791,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             listenable: Listenable.merge([lifeHost, _profileChanges]),
             builder: (context, _) {
               final store = lifeHost.store;
+              final connector = feishu;
+              final hint = _profileHint();
               return Column(
                 children: [
                   Expanded(
@@ -724,10 +803,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                             page: page,
                             language: language,
                             showHeading: false,
-                            localProfile: page != 5 || feishu == null
+                            localProfile: page != 5 || connector == null
                                 ? null
                                 : (excludeAbout) => LocalProfileResults(
-                                    host: feishu!,
+                                    host: connector,
                                     publication: lifeHost.publication,
                                     kind: 'profile',
                                     language: language,
@@ -735,6 +814,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     generation: profileGeneration,
                                     revision: _profileRevision,
                                     excludeAbout: excludeAbout,
+                                    emptyHint: hint.hint,
+                                    onOpenFeishu: hint.connect
+                                        ? () => unawaited(_openFeishu())
+                                        : null,
                                   ),
                             onSettings: _settings,
                             onDelegate: _delegate,
@@ -751,6 +834,49 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         ),
       ),
     );
+  }
+
+  /// Shared Feishu settings entry used by the settings switch and empty states.
+  Future<void> _openFeishu() async {
+    try {
+      final connector = feishu ??= FeishuHost();
+      await connector.open();
+      if (!mounted) return;
+      await lifeHost.open();
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => FeishuDirectPage(
+            host: connector,
+            language: language,
+            models: agentCore?.settings ?? ModelSettings(),
+            profileAgent: profileAgent,
+            generation: profileGeneration,
+            publication: lifeHost.publication,
+            adoptTodo: (input, operation) =>
+                lifeHost.mutate(input, operationId: operation),
+          ),
+        ),
+      );
+      if (!mounted) return;
+      // Reconnecting may unblock a start that failed earlier; a second failure
+      // must not crash the settings flow.
+      await _openProfileGeneration().catchError((Object _) {});
+      if (mounted) setState(() => _profileRevision++);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t(
+                '无法打开安全存储，请解锁手机后重试。',
+                'Unlock the phone and retry secure storage.',
+              ),
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _settings() async {
@@ -830,41 +956,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           );
         }
       case 'feishu':
-        try {
-          final connector = feishu ??= FeishuHost();
-          await connector.open();
-          if (!mounted) return;
-          await lifeHost.open();
-          if (!mounted) return;
-          await Navigator.of(context).push<void>(
-            MaterialPageRoute(
-              builder: (_) => FeishuDirectPage(
-                host: connector,
-                language: language,
-                models: agentCore?.settings ?? ModelSettings(),
-                profileAgent: profileAgent,
-                generation: profileGeneration,
-                publication: lifeHost.publication,
-                adoptTodo: (input, operation) =>
-                    lifeHost.mutate(input, operationId: operation),
-              ),
-            ),
-          );
-          if (mounted) setState(() => _profileRevision++);
-        } catch (_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  _t(
-                    '无法打开安全存储，请解锁手机后重试。',
-                    'Unlock the phone and retry secure storage.',
-                  ),
-                ),
-              ),
-            );
-          }
-        }
+        await _openFeishu();
       case 'model':
         try {
           await showLocalModelSettings(
@@ -1020,6 +1112,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     final host = agentCore;
     final hasChat = host != null && chatId != null;
     final fullCall = _phoneVoiceExpanded && phoneVoice != null;
+    final connector = feishu;
+    final profileHint = _profileHint();
     return PopScope(
       canPop: !fullCall && (_tab == 0 || host == null),
       onPopInvokedWithResult: (didPop, _) {
@@ -1220,16 +1314,20 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           TimelinePage(
                             store: lifeHost.store ?? emptyStore,
                             language: language,
-                            sourceTimeline: feishu == null
+                            sourceTimeline: connector == null
                                 ? null
                                 : LocalProfileResults(
-                                    host: feishu!,
+                                    host: connector,
                                     publication: lifeHost.publication,
                                     kind: 'timeline',
                                     repository: profileAgent?.repository,
                                     generation: profileGeneration,
                                     language: language,
                                     revision: _profileRevision,
+                                    emptyHint: profileHint.hint,
+                                    onOpenFeishu: profileHint.connect
+                                        ? () => unawaited(_openFeishu())
+                                        : null,
                                   ),
                             onDiscuss: (text) => unawaited(_delegate(text)),
                             onStartTask: (todo) =>

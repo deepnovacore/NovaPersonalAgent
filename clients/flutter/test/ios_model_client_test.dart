@@ -98,6 +98,36 @@ void main() {
       );
     },
   );
+  test('native final frame forwards reasoning_content for the thinking UI', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'request');
+      final args = call.arguments as Map;
+      expect(args['configuration']['endpoint'], 'https://api.deepseek.com/v1/chat/completions');
+      return {
+        'choices': [
+          {
+            'finish_reason': 'stop',
+            'message': {'content': '答案', 'reasoning_content': '先思考再回答'},
+          },
+        ],
+      };
+    });
+    final deltas = await IosModelClient()
+        .stream(
+          ModelConfiguration(
+            endpoint: 'https://api.deepseek.com/v1',
+            model: 'deepseek-reasoner',
+            key: 'synthetic',
+          ),
+          [
+            {'role': 'user', 'content': 'hello'},
+          ],
+        )
+        .toList();
+    expect(deltas.single['_nova_replace'], true);
+    expect(deltas.single['content'], '答案');
+    expect(deltas.single['reasoning_content'], '先思考再回答');
+  });
   test(
     'native deltas appear before completion; final snapshot replaces the preview',
     () async {

@@ -39,6 +39,10 @@ Future<void> openLibrary(WidgetTester tester, String page) async {
     matching: find.text(page == 'Todos' ? 'To-dos' : page),
   );
   await tester.ensureVisible(entry);
+  // The compact profile card can push a library row below the fold; advance the
+  // scroll started by ensureVisible before tapping its reveal position. Avoid
+  // pumpAndSettle: the shell legitimately keeps a progress animation running.
+  await tester.pump(const Duration(milliseconds: 400));
   await tester.tap(entry);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 500));

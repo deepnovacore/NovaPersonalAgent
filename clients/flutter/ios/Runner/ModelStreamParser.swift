@@ -4,7 +4,7 @@ import Foundation
 final class ModelStreamParser {
   private var buffer = Data(), lines = [String]()
   private var wireBytes = 0, outputBytes = 0
-  private var content = "", tools = [Int: [String: Any]]()
+  private var content = "", reasoning = "", tools = [Int: [String: Any]]()
   private let responses: Bool
   private var responseItems = [[String:Any]]()
   private let emit: ([String: Any]) -> Void
@@ -35,6 +35,10 @@ final class ModelStreamParser {
     guard choices.count == 1 else { throw LocalAgentError("invalid_model_response") }
     if choices[0]["finish_reason"] as? String == "length" { throw LocalAgentError("model_output_limit") }
     let delta = choices[0]["delta"] as? [String: Any] ?? [:]
+    var reasoningChunk: String? = nil
+    if let value = (delta["reasoning_content"] as? String) ?? (delta["reasoning"] as? String) {
+      reasoning += value; outputBytes += value.utf8.count; reasoningChunk = value
+    }
     if let value = delta["content"] as? String { content += value; outputBytes += value.utf8.count }
     for fragment in delta["tool_calls"] as? [[String: Any]] ?? [] {
       guard let index = fragment["index"] as? Int, (0..<8).contains(index) else { throw LocalAgentError("invalid_tool_calls") }
@@ -47,7 +51,11 @@ final class ModelStreamParser {
       tool["function"] = function; tools[index] = tool
     }
     guard outputBytes <= 512 * 1024 else { throw LocalAgentError("model_response_too_large") }
-    if !delta.isEmpty { emit(delta) }
+    if !delta.isEmpty {
+      var out = delta
+      if let reasoningChunk = reasoningChunk { out["reasoning"] = reasoningChunk }
+      emit(out)
+    }
   }
   private func responseEvent(_ root: [String:Any]) throws {
     switch root["type"] as? String {
@@ -66,6 +74,14 @@ final class ModelStreamParser {
         tools[index] = call
         var delta = call; delta["index"] = index; emit(["tool_calls":[delta]])
       }
+      if type == "reasoning" {
+        // Encrypted reasoning has no human-readable text; never fabricate it.
+        let summary = (item["summary"] as? [[String:Any]] ?? []).compactMap { $0["text"] as? String }.filter { !$0.isEmpty }
+        if !summary.isEmpty {
+          let text = summary.joined(separator: "\n")
+          reasoning += text; emit(["reasoning":text])
+        }
+      }
     case "response.completed":
       guard let response = root["response"] as? [String:Any], response["status"] == nil || response["status"] as? String == "completed" else { throw LocalAgentError("model_stream_interrupted") }
       finished = true
@@ -79,6 +95,7 @@ final class ModelStreamParser {
   }
   func response() -> [String: Any] {
     var message: [String: Any] = ["content":content]
+    if !reasoning.isEmpty { message["reasoning_content"] = reasoning }
     if responses { message["_nova_response_items"] = responseItems }
     if !tools.isEmpty { message["tool_calls"] = tools.keys.sorted().map { tools[$0]! } }
     return ["choices":[["finish_reason":tools.isEmpty ? "stop" : "tool_calls", "message":message]], "_nova_streamed":true]

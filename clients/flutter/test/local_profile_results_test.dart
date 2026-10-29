@@ -21,10 +21,63 @@ class ReadyHost extends FeishuHost {
   @override
   bool get ready => true;
   @override
+  bool get restored => true;
+  @override
   void dispose() {
     sources.removeListener(notifyListeners);
     super.dispose();
   }
+}
+
+/// Local data is open, but Feishu itself is not connected or authorized.
+class RestoredHost extends ReadyHost {
+  RestoredHost(super.sources);
+  @override
+  bool get ready => false;
+}
+
+/// Feishu claims to be ready while local state has not been opened yet.
+class UnrestoredHost extends ReadyHost {
+  UnrestoredHost(super.sources);
+  @override
+  bool get restored => false;
+}
+
+class _FlakyProfile extends ProfileRepository {
+  _FlakyProfile(super.persistence, super.publication, super.sources);
+  bool fail = true;
+  @override
+  Future<void> open() async {
+    if (fail) throw StateError('locked');
+  }
+}
+
+/// A projection is stored on this device but cannot be shown for the current
+/// Space, device or identity.
+class _StoredElsewhereProfile extends ProfileRepository {
+  _StoredElsewhereProfile(super.persistence, super.publication, super.sources);
+  @override
+  Future<void> open() async {}
+  @override
+  bool get hasStoredResult => true;
+}
+
+class _BriefProfile extends ProfileRepository {
+  _BriefProfile(super.persistence, super.publication, super.sources, this.now);
+  final DateTime now;
+  @override
+  Map<String, dynamic> get value => {
+    'entries': [
+      {
+        'key': 'event',
+        'kind': 'timeline',
+        'text': 'brief',
+        'brief': {'title': 'brief'},
+        'observed_at': now.toIso8601String(),
+        'evidence_ids': <String>[],
+      },
+    ],
+  };
 }
 
 class _RetainedProfile extends ProfileRepository {
@@ -367,6 +420,269 @@ void main() {
       }
     }
   }
+
+  testWidgets(
+    'restored local data renders while Feishu is not ready',
+    (tester) async {
+      final sources = SourceStore(MemoryLifePersistence());
+      final host = RestoredHost(sources);
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
+      final repository = _RetainedProfile(
+        MemoryLifePersistence(),
+        publication,
+        sources,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: LocalProfileResults(
+                host: host,
+                publication: publication,
+                repository: repository,
+                kind: 'timeline',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(host.ready, false);
+      expect(find.text('Retained timeline content.'), findsOneWidget);
+      expect(find.text('还没有近况'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+      publication.dispose();
+    },
+  );
+
+  testWidgets('an unrestored host hides saved content behind a loading state', (
+    tester,
+  ) async {
+    final sources = SourceStore(MemoryLifePersistence());
+    final host = UnrestoredHost(sources);
+    final publication = LocalPublicationContext(MemoryLifePersistence());
+    await publication.open();
+    final repository = _RetainedProfile(
+      MemoryLifePersistence(),
+      publication,
+      sources,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: LocalProfileResults(
+              host: host,
+              publication: publication,
+              repository: repository,
+              kind: 'timeline',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Retained timeline content.'), findsNothing);
+    expect(find.text('正在读取本机资料…'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+    publication.dispose();
+  });
+
+  testWidgets('a failed local read shows its own error and retry', (
+    tester,
+  ) async {
+    final sources = SourceStore(MemoryLifePersistence());
+    final host = RestoredHost(sources);
+    final publication = LocalPublicationContext(MemoryLifePersistence());
+    await publication.open();
+    final repository = _FlakyProfile(
+      MemoryLifePersistence(),
+      publication,
+      sources,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: LocalProfileResults(
+              host: host,
+              publication: publication,
+              repository: repository,
+              kind: 'timeline',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('无法读取此前生成的资料'), findsOneWidget);
+    expect(find.text('还没有近况'), findsNothing);
+    repository.fail = false;
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
+    expect(find.text('无法读取此前生成的资料'), findsNothing);
+    expect(find.text('还没有近况'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+    publication.dispose();
+  });
+
+  testWidgets(
+    'stored results for another Space or account explain why they are hidden',
+    (tester) async {
+      final sources = SourceStore(MemoryLifePersistence());
+      final host = RestoredHost(sources);
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
+      final repository = _StoredElsewhereProfile(
+        MemoryLifePersistence(),
+        publication,
+        sources,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: LocalProfileResults(
+                host: host,
+                publication: publication,
+                repository: repository,
+                kind: 'timeline',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('此设备此前生成的资料无法显示'),
+        findsOneWidget,
+      );
+      expect(find.text('还没有近况'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+      publication.dispose();
+    },
+  );
+
+  testWidgets('timeline empty state shows the supplied hint and action', (
+    tester,
+  ) async {
+    final sources = SourceStore(MemoryLifePersistence());
+    final host = RestoredHost(sources);
+    final publication = LocalPublicationContext(MemoryLifePersistence());
+    await publication.open();
+    final repository = ProfileRepository(
+      MemoryLifePersistence(),
+      publication,
+      sources,
+    );
+    var opened = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: LocalProfileResults(
+              host: host,
+              publication: publication,
+              repository: repository,
+              kind: 'timeline',
+              language: 'en',
+              emptyHint: 'Connect Feishu and your updates will appear here.',
+              onOpenFeishu: () => opened++,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Connect Feishu and your updates will appear here.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Open Feishu settings'));
+    expect(opened, 1);
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+    publication.dispose();
+  });
+
+  testWidgets('compact empty state shows the supplied hint and action', (
+    tester,
+  ) async {
+    final sources = SourceStore(MemoryLifePersistence());
+    final host = RestoredHost(sources);
+    final publication = LocalPublicationContext(MemoryLifePersistence());
+    await publication.open();
+    final repository = ProfileRepository(
+      MemoryLifePersistence(),
+      publication,
+      sources,
+    );
+    var opened = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalProfileResults(
+            host: host,
+            publication: publication,
+            repository: repository,
+            kind: 'profile',
+            compact: true,
+            emptyHint: '先连接飞书，之后会自动整理到这里。',
+            onOpenFeishu: () => opened++,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('还没有个人介绍'), findsOneWidget);
+    expect(find.text('先连接飞书，之后会自动整理到这里。'), findsOneWidget);
+    await tester.tap(find.text('打开飞书设置'));
+    expect(opened, 1);
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+    publication.dispose();
+  });
+
+  test('today brief count waits for restored local data', () async {
+    final sources = SourceStore(MemoryLifePersistence());
+    final restored = RestoredHost(SourceStore(MemoryLifePersistence()));
+    final unrestored = UnrestoredHost(SourceStore(MemoryLifePersistence()));
+    final publication = LocalPublicationContext(MemoryLifePersistence());
+    await publication.open();
+    final now = DateTime(2026, 10, 19, 9);
+    final repository = _BriefProfile(
+      MemoryLifePersistence(),
+      publication,
+      sources,
+      now,
+    );
+    expect(
+      LocalProfileResults(
+        host: restored,
+        publication: publication,
+        repository: repository,
+        kind: 'timeline',
+      ).todayBriefCount(now),
+      1,
+    );
+    expect(
+      LocalProfileResults(
+        host: unrestored,
+        publication: publication,
+        repository: repository,
+        kind: 'timeline',
+      ).todayBriefCount(now),
+      0,
+    );
+    restored.dispose();
+    unrestored.dispose();
+    publication.dispose();
+  });
 
   testWidgets('an explicitly cleared introduction suppresses inferred about', (
     tester,

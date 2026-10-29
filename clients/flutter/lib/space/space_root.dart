@@ -141,7 +141,14 @@ class _SpaceRootState extends State<SpaceRoot> {
               return KeyedSubtree(
                 key: ValueKey(selected.id),
                 child: selected.mode == SpaceMode.standalone
-                    ? widget.standaloneBuilder(selected)
+                    // The strip above already consumed the status-bar inset
+                    // through its own SafeArea; the standalone page must not
+                    // apply the same top padding a second time.
+                    ? MediaQuery.removePadding(
+                        context: context,
+                        removeTop: true,
+                        child: widget.standaloneBuilder(selected),
+                      )
                     : widget.clientBuilder?.call(selected) ??
                           SpaceClientScreen(
                             space: selected,
@@ -184,6 +191,16 @@ class _SpaceChooser extends StatelessWidget {
                 style: TextStyle(
                   color: Nova.secondary,
                   fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
+              SizedBox(height: 6),
+              Text(
+                '新建 Space 从空白开始，旧 Space 的历史资料不会迁移到这里。\n'
+                'New Spaces start empty; saved data from older Spaces is not migrated.',
+                style: TextStyle(
+                  color: Nova.secondary,
+                  fontSize: 13,
                   height: 1.4,
                 ),
               ),
