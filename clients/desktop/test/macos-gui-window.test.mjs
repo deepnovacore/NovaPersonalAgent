@@ -35,7 +35,18 @@ check(owner(3, links: [3:4], parents: [3:1]) == nil, "foreign explicit owner mus
 check(owner(5, parents: [5:6,6:5]) == nil, "parent cycle refused")
 let deep = Dictionary(uniqueKeysWithValues: (10...50).map {($0, $0+1)})
 check(owningGUIWindow(10, pid: 7, process: {_ in 7}, windowID: {$0 == 51 ? 8 : nil}, window: {_ in nil}, parent: {deep[$0]}) == nil, "bounded parent walk")
-print("14 window policy checks passed")
+var reads=0,pauses=0
+check(confirmedGUIReadback({reads+=1;return reads==3},pause:{pauses+=1}), "asynchronous AX readback must settle without another write")
+check(reads==3 && pauses==2, "only pending reads wait")
+reads=0;pauses=0
+check(!confirmedGUIReadback({reads+=1;return false},pause:{pauses+=1}), "nonmatching readback stays unconfirmed")
+check(reads==50 && pauses==49, "readback wait is bounded")
+enum Changed: Error {case target}
+reads=0;pauses=0
+var refused=false
+do {_ = try confirmedGUIReadback({reads+=1;throw Changed.target},pause:{pauses+=1})}catch {refused=true}
+check(refused && reads==1 && pauses==0, "target or editor change aborts immediately")
+print("19 window/readback policy checks passed")
 `)
   const build=spawnSync('/usr/bin/swiftc',['-module-cache-path',join(root,'cache'),fileURLToPath(new URL('../native/macos_gui_window.swift',import.meta.url)),harness,'-o',binary],{encoding:'utf8',timeout:180000})
   assert.equal(build.status,0,build.error?.message??build.stderr)

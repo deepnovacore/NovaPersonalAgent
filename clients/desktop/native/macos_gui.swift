@@ -174,6 +174,10 @@ private struct Binding: Equatable {
     private static func editNative(_ binding: Binding,_ text: String?,selectAll: Bool=false,replace: Bool=false) throws -> Bool {
         let element=try receiver(binding)
         let textAttribute=kAXValueAttribute
+        func sameEditor() throws {
+            guard try bind(["pid":binding.pid,"windowId":binding.windowID])==binding,!IsSecureEventInputEnabled(),
+                  CFEqual(try receiver(binding),element) else {try reject("screen_changed")}
+        }
         guard let current=attribute(element,kAXValueAttribute) as? String,
               let selection=attribute(element,kAXSelectedTextRangeAttribute),CFGetTypeID(selection)==AXValueGetTypeID() else {return false}
         var range=CFRange()
@@ -190,12 +194,22 @@ private struct Binding: Equatable {
             let write=AXUIElementSetAttributeValue(element,textAttribute as CFString,next as CFString)
             if write == .attributeUnsupported || write == .notImplemented {return false}
             guard write == .success else {try reject("editor_write_rejected") }
-            guard CFEqual(try receiver(binding),element),attribute(element,kAXValueAttribute) as? String==next else {try reject("editor_readback_changed")}
+            guard try confirmedGUIReadback({
+                try sameEditor()
+                guard let value=attribute(element,kAXValueAttribute) as? String else {return false}
+                if value==next {return true}
+                guard value==current else {try reject("editor_readback_changed")}
+                return false
+            },pause:{usleep(10000)}) else {try reject("editor_readback_changed")}
             range=CFRange(location:(replace ? 0 : range.location)+replacement.utf16.count,length:0)
         }
         guard CFEqual(try receiver(binding),element),let value=AXValueCreate(.cfRange,&range),
               AXUIElementSetAttributeValue(element,kAXSelectedTextRangeAttribute as CFString,value) == .success else {try reject("action_failed")}
-        guard let readback=attribute(element,kAXSelectedTextRangeAttribute),CFEqual(value,readback) else {try reject("action_failed")}
+        guard try confirmedGUIReadback({
+            try sameEditor()
+            guard let readback=attribute(element,kAXSelectedTextRangeAttribute) else {return false}
+            return CFEqual(value,readback)
+        },pause:{usleep(10000)}) else {try reject("action_failed")}
         return true
     }
     private static func metadata(_ binding: Binding) -> [String: Any] {

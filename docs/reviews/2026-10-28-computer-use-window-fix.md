@@ -19,3 +19,11 @@ Validation:
 Operational recovery is separate: an old quarantined device owner was verified dead together with its recorded worker PID and process group, then its lock directory was atomically archived with unchanged owner/quarantine hashes. Its task outcome remains unknown and no action was replayed. Private device/task identifiers and evidence remain outside this repository.
 
 Not checked: real Calculator/Bilibili task after the fix, full runtime/desktop suites, Windows/Android/iOS GUI effects, packaged application installation. This branch is not merged into the shared checkout; earlier release acceptance applies to its recorded base candidate only.
+
+## AX readback follow-up (2026-10-29)
+
+The real Bilibili run passed screenshot and background search-field click, then stopped with `editor_readback_changed` after a value write. A later independent AX observation found the expected text; raising the window showed it and search suggestions. The write had applied asynchronously, after the immediate confirmation. The old task remains unknown and was not replayed.
+
+Value and selection confirmations now poll read-only after one AX write, preserving process generation/window geometry, key-window, same-editor and secure-input checks on every sample. A nonoriginal/nonexpected value still refuses immediately; expiry remains unconfirmed. The poll has a monotonic 500ms deadline and at most50 samples, but cannot interrupt an in-flight synchronous AX call; the outer RPC timeout remains the hard bound. No fallback input or repeated write is attempted.
+
+The asynchronous readback regression failed before the change; the final Swift harness passes19 assertions and the full helper compile/malformed-target test passes. Independent source review found no important remaining issue. Real search completion after this follow-up is still pending, separate from these unit results.

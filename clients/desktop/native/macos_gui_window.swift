@@ -22,3 +22,14 @@ func owningGUIWindow<Node: Equatable>(_ element: Node, pid: Int32,
     }
     return nil
 }
+
+// AX setters may acknowledge before the remote application's readback catches up.
+func confirmedGUIReadback(_ read: () throws -> Bool, pause: () -> Void) rethrows -> Bool {
+    let deadline=ContinuousClock.now.advanced(by:.milliseconds(500))
+    for attempt in 0..<50 {
+        if try read() { return true }
+        if attempt==49 || ContinuousClock.now>=deadline { return false }
+        pause()
+    }
+    return false
+}
