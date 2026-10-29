@@ -14,8 +14,8 @@ export const rendererEntries=Object.freeze({
 })
 const titles={index:'Nova Personal Agent Desktop',settings:'设置 · Nova',setup:'开始使用 · Nova','memory-board':'记忆 · Nova',visor:'Nova Visor'}
 const css={index:['design-tokens.css','controls.css','index.css','task-banner.css','workbench.css','welcome.css'],settings:['controls.css','settings.css','skills.css'],setup:['controls.css','setup.css'],visor:['visor.css'],'visor-controls':['controls.css','visor-controls.css'],'computer-bar':['computer-overlay.css'],'computer-edge':['computer-overlay.css'],'memory-board':['controls.css','memory-board.css'],'release-camera':[]}
-export async function buildRenderer({outputRoot=process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT, sourcemap=false}={}){
- assert.ok(outputRoot,'Set NOVA_DESKTOP_RENDERER_OUTPUT_ROOT or pass --outdir to an isolated external build directory')
+export async function buildRenderer({outputRoot=process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT ?? resolve(desktopRoot,'build/renderer'), sourcemap=false}={}){
+ assert.ok(outputRoot,'Renderer output directory must not be empty')
  const out=resolve(outputRoot),path=relative(sourceRoot,out)
  assert.ok(path.startsWith('..'+sep)||path==='..','Renderer output must be outside the source directory')
  await mkdir(out,{recursive:true})

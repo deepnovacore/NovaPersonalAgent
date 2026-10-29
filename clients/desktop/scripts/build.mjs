@@ -15,7 +15,6 @@ import { generateSourceHostResourceManifest } from './native-resource-contract.m
 import {buildRenderer} from './build-renderer.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-assert.ok(process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT, 'Set NOVA_DESKTOP_RENDERER_OUTPUT_ROOT to an isolated external build directory before building')
 
 const runtimeEntry = resolve(root, '../../runtime/dist/src/desktop-entry.js')
 const npmCli = process.env.npm_execpath

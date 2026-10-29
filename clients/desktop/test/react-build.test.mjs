@@ -1,9 +1,27 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp, readFile, mkdir, writeFile, rm} from 'node:fs/promises'
+import {cp, mkdtemp, readFile, mkdir, symlink, writeFile, rm} from 'node:fs/promises'
+import {spawnSync} from 'node:child_process'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import {fileURLToPath} from 'node:url'
 import {buildRenderer, rendererEntries} from '../scripts/build-renderer.mjs'
+
+test('renderer builds at the desktop startup default without an output override',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'nova-renderer-default-'))
+ try{
+  await mkdir(join(directory,'scripts'))
+  await cp(new URL('../scripts/build-renderer.mjs',import.meta.url),join(directory,'scripts/build-renderer.mjs'))
+  await cp(new URL('../src/renderer',import.meta.url),join(directory,'src/renderer'),{recursive:true})
+  await symlink(fileURLToPath(new URL('../../../node_modules',import.meta.url)),join(directory,'node_modules'),process.platform==='win32'?'junction':'dir')
+  const env={...process.env}
+  delete env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT
+  const result=spawnSync(process.execPath,[join(directory,'scripts/build-renderer.mjs')],{env,encoding:'utf8'})
+  assert.equal(result.status,0,result.stderr)
+  assert.match(await readFile(join(directory,'build/renderer/index.html'),'utf8'),/react\/index\.mjs/)
+  assert.ok((await readFile(join(directory,'build/renderer/react/index.mjs'),'utf8')).length>0)
+ }finally{await rm(directory,{recursive:true,force:true})}
+})
 
 test('renderer entry manifest covers every desktop window with stable URLs',()=>{
  assert.deepEqual(Object.keys(rendererEntries).sort(), ['computer-bar','computer-edge','index','memory-board','release-camera','settings','setup','visor','visor-controls'].sort())
