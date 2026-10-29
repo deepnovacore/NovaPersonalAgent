@@ -115,6 +115,126 @@ void main() {
   });
 
   testWidgets(
+    'only the latest saved preview per target and user turn is shown',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      addTearDown(tester.view.resetPhysicalSize);
+      final workspace = PreviewWorkspace();
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      await store.append(id, {'role': 'user', 'content': 'Build a game'});
+      for (final (step, name) in [
+        'file_write',
+        'file_edit',
+        'file_edit',
+        'file_read',
+      ].indexed) {
+        await store.append(id, {
+          'role': 'tool',
+          'tool_name': name,
+          'content': jsonEncode({
+            'status': 'completed',
+            'data': {
+              'path': '/workspace/index.html',
+              'url': 'nova-file:///workspace/index.html',
+            },
+          }),
+        });
+        if (step == 1) {
+          await store.append(id, {
+            'role': 'assistant',
+            'content': 'First edit checked',
+          });
+        }
+      }
+      await store.append(id, {
+        'role': 'tool',
+        'tool_name': 'file_write',
+        'content': jsonEncode({
+          'status': 'completed',
+          'data': {
+            'path': '/workspace/other.html',
+            'url': 'nova-file:///workspace/other.html',
+          },
+        }),
+      });
+      await store.append(id, {
+        'role': 'tool',
+        'tool_name': 'file_read',
+        'content': jsonEncode({
+          'status': 'completed',
+          'data': {
+            'path': '/workspace/read-only.html',
+            'url': 'nova-file:///workspace/read-only.html',
+          },
+        }),
+      });
+      await store.append(id, {'role': 'user', 'content': 'Update the game'});
+      for (final status in ['completed', 'rejected']) {
+        await store.append(id, {
+          'role': 'tool',
+          'tool_name': 'file_edit',
+          'content': jsonEncode({
+            'status': status,
+            'data': {
+              'path': '/workspace/index.html',
+              'url': 'nova-file:///workspace/index.html',
+            },
+          }),
+        });
+      }
+      final originalMessages = jsonEncode(store.conversation(id)['messages']);
+      final host = AgentCoreHost(
+        store: store,
+        settings: FixtureSettings(),
+        tools: ToolRunner(
+          registry: ToolRegistry(
+            snapshot: () => {},
+            mutate: (input, {required operationId}) async => {},
+            hasConflict: () => false,
+            fetch: (_) async => {},
+            workspace: workspace,
+          ),
+          journal: ToolJournal(MemoryPersistence()),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(
+              host: host,
+              conversationId: id,
+              language: 'en',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('index.html'), findsNWidgets(2));
+      expect(
+        tester.getTopLeft(find.text('index.html').first).dy,
+        greaterThan(
+          tester
+              .getBottomLeft(
+                find.text('First edit checked', findRichText: true),
+              )
+              .dy,
+        ),
+      );
+      expect(find.text('other.html'), findsOneWidget);
+      expect(find.text('read-only.html'), findsNothing);
+      expect(find.text('Saved · Tap to open'), findsNWidgets(3));
+      await tester.tap(find.text('index.html').last);
+      await tester.pumpAndSettle();
+      expect(workspace.opened, ['nova-file:///workspace/index.html']);
+      expect(jsonEncode(store.conversation(id)['messages']), originalMessages);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    },
+  );
+
+  testWidgets(
     'new HTML files and stored legacy artifacts render working preview cards',
     (tester) async {
       final workspace = PreviewWorkspace();

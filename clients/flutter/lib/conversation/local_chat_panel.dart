@@ -775,18 +775,19 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     }
   }
 
-  Widget _message(Map message) {
+  Widget _message(Map message, {Set<String>? seenPreviews}) {
     if (message['role'] == 'tool') {
       String status = '';
-      String? preview, title;
+      String? preview, title, previewKey;
       try {
         final result = jsonDecode(message['content'] as String) as Map;
         status = result['status'] as String? ?? '';
         final data = result['data'];
-        if (data is Map) {
+        if (data is Map && message['tool_name'] != 'file_read') {
           if (data['artifact'] is Map) {
             final artifact = data['artifact'] as Map;
             preview = artifact['id'] as String?;
+            previewKey = preview;
             title = artifact['title'] as String?;
           } else if (data['path'] is String &&
               RegExp(
@@ -794,6 +795,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                 caseSensitive: false,
               ).hasMatch(data['path'] as String)) {
             preview = data['url'] as String? ?? data['path'] as String;
+            previewKey = data['path'] as String;
             title = (data['path'] as String).split('/').last;
           }
         }
@@ -801,6 +803,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       if (status == 'completed' &&
           preview != null &&
           widget.host.tools?.registry.workspace != null) {
+        if (seenPreviews != null && !seenPreviews.add(previewKey!)) {
+          return const SizedBox.shrink();
+        }
         final target = preview;
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
@@ -927,6 +932,15 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           host.busy && host.activeConversationId == widget.conversationId;
       final conversation = host.store.conversation(widget.conversationId);
       final messages = conversation['messages'] as List;
+      final messageWidgets = <Widget>[];
+      final seenPreviews = <String>{};
+      // Walk backwards so each user turn keeps its last successful preview.
+      for (final message in messages.reversed) {
+        if (message['role'] == 'user') seenPreviews.clear();
+        messageWidgets.add(
+          _message(message as Map, seenPreviews: seenPreviews),
+        );
+      }
       final liveReasoning = host.reasoning.trim();
       return LayoutBuilder(
         builder: (context, constraints) {
@@ -1000,8 +1014,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                               ScrollViewKeyboardDismissBehavior.onDrag,
                           padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
                           children: [
-                            for (final message in messages)
-                              _message(message as Map),
+                            ...messageWidgets.reversed,
                             if (host.pendingUserText.isNotEmpty &&
                                 host.activeConversationId ==
                                     widget.conversationId)
