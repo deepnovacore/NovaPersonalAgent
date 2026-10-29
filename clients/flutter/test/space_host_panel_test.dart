@@ -1,0 +1,128 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_mobile/space/client_state.dart';
+import 'package:nova_mobile/space/host_panel.dart';
+import 'space_client_test.dart' show MemorySpacePersistence;
+import 'support/space_client_fixture.dart';
+
+SpaceClientState stateWith(Map<String, dynamic> extra) {
+  final state = SpaceClientState(MemorySpacePersistence());
+  state.snapshot = {'schema_version': 1, 'revision': 1, ...extra};
+  return state;
+}
+
+Future<void> pump(
+  WidgetTester tester,
+  SpaceClientState state, {
+  List<Uri>? opened,
+}) async {
+  tester.view.physicalSize = const Size(800, 6000);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: ListView(
+          children: [
+            SpaceHostPanel(
+              state: state,
+              onSync: () async {},
+              openUrl: (uri) async => opened?.add(uri),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+void main() {
+  setUpAll(loadSpaceTestFonts);
+
+  testWidgets('hidden for a non-owner device', (tester) async {
+    await pump(
+      tester,
+      stateWith({
+        'owner': false,
+        'host_credentials': [
+          {'name': 'OPENAI_API_KEY', 'configured': false, 'source': null},
+        ],
+      }),
+    );
+    expect(find.text('Host 设置'), findsNothing);
+    expect(find.text('OPENAI_API_KEY'), findsNothing);
+  });
+
+  testWidgets('owner edits enqueue settings.patch and credential intents', (
+    tester,
+  ) async {
+    final state = stateWith({
+      'owner': true,
+      'host_settings': {
+        'identity': {'assistant_name': 'nova', 'user_name': 'Ann'},
+        'soul': {'available': false},
+        'discovery': {'discovery_enabled': false},
+        'news': {'interests': [], 'explore': true, 'profile_version': 0},
+      },
+      'host_credentials': [
+        {
+          'name': 'OPENAI_API_KEY',
+          'configured': true,
+          'source': 'space',
+          'fingerprint': 'abcd1234',
+        },
+        {'name': 'GEMINI_API_KEY', 'configured': false, 'source': null},
+      ],
+      'host_feishu': {'configured': true, 'connected': false},
+    });
+    await pump(tester, state);
+    await tester.tap(find.byKey(const ValueKey('host.discovery')).last);
+    await tester.tap(find.byType(Switch));
+    await tester.pump();
+    expect(state.pending.single['kind'], 'settings.patch');
+    expect(state.pending.single['input'], {
+      'method': 'discovery.configure',
+      'params': {'enabled': true},
+    });
+    await tester.tap(
+      find.byKey(const ValueKey('host.credential.GEMINI_API_KEY')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'g-secret');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(state.pending.last['kind'], 'secret.put');
+    expect(state.pending.last['input'], {
+      'name': 'GEMINI_API_KEY',
+      'value': 'g-secret',
+    });
+    await tester.tap(
+      find.byKey(const ValueKey('host.credential.clear.OPENAI_API_KEY')),
+    );
+    await tester.pump();
+    expect(state.pending.last['kind'], 'secret.clear');
+    expect(state.pending.last['input'], {'name': 'OPENAI_API_KEY'});
+  });
+
+  testWidgets('Feishu card opens the Host verification URL and completes', (
+    tester,
+  ) async {
+    final opened = <Uri>[];
+    final state = stateWith({
+      'owner': true,
+      'host_feishu': {
+        'configured': true,
+        'connected': false,
+        'verification_url': 'https://accounts.feishu.cn/device?code=x',
+      },
+    });
+    await pump(tester, state, opened: opened);
+    await tester.tap(find.byKey(const ValueKey('host.feishu.open')));
+    await tester.pump();
+    expect(opened.single.host, 'accounts.feishu.cn');
+    await tester.tap(find.byKey(const ValueKey('host.feishu.complete')));
+    await tester.pump();
+    expect(state.pending.single['kind'], 'connector.feishu');
+    expect(state.pending.single['input'], {'action': 'complete'});
+  });
+}

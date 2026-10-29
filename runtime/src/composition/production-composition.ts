@@ -29,6 +29,7 @@ import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from '../config/capability-registry.js'
 import type {CodingBackendId} from '../config/coding-backends.js'
 import {prepareExternalMcp} from '../executors/mcp.js'
+import {overlaySpaceSecrets} from '../space-host/host-admin.js'
 import {loadSettings, memoryStatus, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
 import {requireSelectedCascadedLlmConfig, requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
 import {remoteClientMedia} from '../server/server-config.js'
@@ -45,7 +46,7 @@ import {createRealtimeTelemetry} from '../realtime/telemetry.js'
 import type {ApprovalView as ExecutorApprovalView} from '../core/approval-port.js'
 import {buildIntegratedRealtimeAssembly, type IntegratedProviderRegistry} from './cascaded-realtime-assembly.js'
 
-export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage: publishUsage, environment = process.env, deviceRuntimeEnabled = false}: {
+export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage: publishUsage, environment: operatorEnvironment = process.env, deviceRuntimeEnabled = false}: {
   /** Receives the live coding resource so the desktop host can change the new-session default. */
   readonly onCoding?: (coding: {updateDefaultBackend?(backend: CodingBackendId): void}) => void
   /** Programmatic opt-in only; no device storage or imports when disabled. */
@@ -61,6 +62,8 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   readonly integratedProviders?: IntegratedProviderRegistry
   readonly createServer?: (options: Parameters<NonNullable<DesktopRealtimeOptions['createServer']>>[0], media?: ClientMedia) => ReturnType<NonNullable<DesktopRealtimeOptions['createServer']>>
 }) {
+  // Credentials a Space owner stored from a phone fill only variables the operator left unset.
+  const environment = overlaySpaceSecrets(operatorEnvironment, operatorEnvironment.NOVA_SPACE_HOST_CONFIG ? resolve(operatorEnvironment.NOVA_SPACE_HOST_CONFIG) : undefined)
   const baseSettings = loadSettings(environment, !remote)
   const spaceConfigPath=environment.NOVA_SPACE_HOST_CONFIG?resolve(environment.NOVA_SPACE_HOST_CONFIG):undefined
   const spaceConfig=spaceConfigPath?readHostSpaceConfig(spaceConfigPath):undefined
