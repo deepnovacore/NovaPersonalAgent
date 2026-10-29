@@ -82,3 +82,10 @@ test('Feishu app setup link generated after app.start reaches the owner snapshot
   assert.ok(polls>=2);const snap=f.sent.filter(row=>row.type==='snapshot').at(-1) as {snapshot:{host_feishu:{app_setup:{verification_url:string}}}};assert.equal(snap.snapshot.host_feishu.app_setup.verification_url,url);
  }finally{await f.close()}
 });
+
+test('a pending Feishu login is never projected as connected, even though beginLogin pauses the connector',async()=>{
+ const f=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:true,state:'paused',verification_url:'https://accounts.feishu.cn/device?code=p'}),command:()=>Promise.resolve({available:true,configured:true,state:'paused',verification_url:'https://accounts.feishu.cn/device?code=p'}),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ try{const r=await f.send('phone','login','connector.feishu',{action:'login'});const view=r.result as Record<string,unknown>;assert.deepEqual([view.connected,view.login_pending,view.verification_url],[false,true,'https://accounts.feishu.cn/device?code=p']);
+  const snap=f.space.snapshot('phone') as unknown as {host_feishu:Record<string,unknown>};assert.equal(snap.host_feishu.connected,false);
+ }finally{await f.close()}
+});
