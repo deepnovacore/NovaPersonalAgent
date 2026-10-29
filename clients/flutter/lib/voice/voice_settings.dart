@@ -27,6 +27,119 @@ enum SpeechProvider {
 
 enum FastLlmProtocol { chatCompletions, arkResponses, responses }
 
+/// Official realtime endpoints and built-in model/voice catalog for the
+/// integrated (realtime) voice service. The phone app only connects to these
+/// official endpoints, so historical custom endpoints are replaced on load and
+/// the settings sheet never exposes an endpoint field. Keys remain user supplied
+/// and are stored in the device secure storage.
+class IntegratedVoiceCatalog {
+  const IntegratedVoiceCatalog._();
+
+  static const qwenEndpoint = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
+  static const stepfunEndpoint = 'wss://api.stepfun.com/v1/realtime';
+  static const openaiEndpoint = 'wss://api.openai.com/v1/realtime';
+  static const geminiEndpoint =
+      'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+
+  static const qwenDefaultModel = 'qwen-audio-3.0-realtime-plus';
+  static const qwenDefaultVoice = 'longanqian';
+  static const qwenV31Model = 'qwen-audio-3.1-realtime-plus';
+  static const qwenV31Voice = 'longanqian_v3.1';
+  static const qwenOmniVoice = 'Ethan';
+  static const stepfunDefaultModel = 'stepaudio-3-realtime-preview';
+  static const stepfunDefaultVoice = 'default';
+  static const openaiDefaultModel = 'gpt-realtime-2.1-mini';
+  static const openaiDefaultVoice = 'marin';
+  static const geminiDefaultModel = 'gemini-3.8-live';
+  static const geminiDefaultVoice = 'Kore';
+
+  static const _qwenModels = <String>[
+    qwenV31Model,
+    qwenDefaultModel,
+    'qwen-audio-3.0-realtime-flash',
+    'qwen3.5-omni-flash-realtime',
+    'qwen3.5-omni-plus-realtime',
+  ];
+  static const _qwenStandardVoices = <String>[
+    qwenDefaultVoice,
+    'longanlingxin',
+    'longanlingxi',
+    'longanxiaoxin',
+    'longanlufeng',
+  ];
+  static const _stepfunModels = <String>[stepfunDefaultModel];
+  static const _stepfunVoices = <String>[stepfunDefaultVoice];
+  static const _openaiModels = <String>[openaiDefaultModel, 'gpt-realtime-2.1'];
+  static const _openaiVoices = <String>[
+    openaiDefaultVoice,
+    'cedar',
+    'alloy',
+    'coral',
+  ];
+  static const _geminiModels = <String>[geminiDefaultModel];
+  static const _geminiVoices = <String>[
+    geminiDefaultVoice,
+    'Puck',
+    'Aoede',
+    'Charon',
+    'Fenrir',
+  ];
+
+  static String officialEndpoint(IntegratedVoiceService provider) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen => qwenEndpoint,
+        IntegratedVoiceService.stepfun => stepfunEndpoint,
+        IntegratedVoiceService.openai => openaiEndpoint,
+        IntegratedVoiceService.gemini => geminiEndpoint,
+      };
+
+  static List<String> models(IntegratedVoiceService provider) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen => _qwenModels,
+        IntegratedVoiceService.stepfun => _stepfunModels,
+        IntegratedVoiceService.openai => _openaiModels,
+        IntegratedVoiceService.gemini => _geminiModels,
+      };
+
+  /// The default model is a product decision per provider, not the first entry
+  /// of the dropdown catalog (newest Qwen models are listed first).
+  static String defaultModel(IntegratedVoiceService provider) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen => qwenDefaultModel,
+        IntegratedVoiceService.stepfun => stepfunDefaultModel,
+        IntegratedVoiceService.openai => openaiDefaultModel,
+        IntegratedVoiceService.gemini => geminiDefaultModel,
+      };
+
+  /// Model-specific voices. Unknown saved models keep the general Qwen voice
+  /// list so historical values remain selectable.
+  static List<String> voices(IntegratedVoiceService provider, String model) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen =>
+          model == qwenV31Model
+              ? const [qwenV31Voice]
+              : model.startsWith('qwen3.5-omni-')
+              ? const [qwenOmniVoice]
+              : _qwenStandardVoices,
+        IntegratedVoiceService.stepfun => _stepfunVoices,
+        IntegratedVoiceService.openai => _openaiVoices,
+        IntegratedVoiceService.gemini => _geminiVoices,
+      };
+
+  static String defaultVoice(IntegratedVoiceService provider, String model) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen =>
+          model == qwenV31Model
+              ? qwenV31Voice
+              : model.startsWith('qwen3.5-omni-')
+              ? qwenOmniVoice
+              : qwenDefaultVoice,
+        IntegratedVoiceService.stepfun => stepfunDefaultVoice,
+        IntegratedVoiceService.openai => openaiDefaultVoice,
+        IntegratedVoiceService.gemini => geminiDefaultVoice,
+      };
+}
+
 /// Drafts may have empty credentials. Validate the selected pipeline before use.
 class VoiceServiceConfiguration {
   const VoiceServiceConfiguration({
@@ -108,9 +221,9 @@ class VoiceConfiguration {
     this.pipeline = VoicePipeline.integrated,
     this.integratedProfile = IntegratedVoiceService.qwen,
     this.integrated = const VoiceServiceConfiguration(
-      endpoint: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
-      model: 'qwen-audio-3.0-realtime-plus',
-      voice: 'longanqian',
+      endpoint: IntegratedVoiceCatalog.qwenEndpoint,
+      model: IntegratedVoiceCatalog.qwenDefaultModel,
+      voice: IntegratedVoiceCatalog.qwenDefaultVoice,
     ),
     this.asrProvider = SpeechProvider.gemini,
     this.asr = const VoiceServiceConfiguration(
@@ -136,24 +249,14 @@ class VoiceConfiguration {
   // service, preset or credential is bundled with the phone application.
   static VoiceServiceConfiguration integratedDefaults(
     IntegratedVoiceService p,
-  ) => switch (p) {
-    IntegratedVoiceService.qwen => const VoiceConfiguration().integrated,
-    IntegratedVoiceService.stepfun => const VoiceServiceConfiguration(
-      endpoint: 'wss://api.stepfun.com/v1/realtime',
-      model: 'stepaudio-3-realtime-preview',
-    ),
-    IntegratedVoiceService.openai => const VoiceServiceConfiguration(
-      endpoint: 'wss://api.openai.com/v1/realtime',
-      model: 'gpt-realtime-2.1-mini',
-      voice: 'marin',
-    ),
-    IntegratedVoiceService.gemini => const VoiceServiceConfiguration(
-      endpoint:
-          'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent',
-      model: 'gemini-3.8-live',
-      voice: 'Kore',
-    ),
-  };
+  ) {
+    final model = IntegratedVoiceCatalog.defaultModel(p);
+    return VoiceServiceConfiguration(
+      endpoint: IntegratedVoiceCatalog.officialEndpoint(p),
+      model: model,
+      voice: IntegratedVoiceCatalog.defaultVoice(p, model),
+    );
+  }
 
   static VoiceServiceConfiguration speechDefaults(
     SpeechProvider provider, {

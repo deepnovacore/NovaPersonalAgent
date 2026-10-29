@@ -266,7 +266,7 @@ void main() {
   });
 
   testWidgets(
-    'saved secrets stay out of controllers and edited address clears entered key',
+    'saved secrets stay out of controllers and provider change clears the key',
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -278,16 +278,18 @@ void main() {
           ),
         ),
       );
-      final keyFinder = find.byKey(const ValueKey('实时模型.key'));
+      final keyFinder = find.byKey(const ValueKey('integrated.key'));
       final field = tester.widget<TextField>(keyFinder);
       expect(field.obscureText, isTrue);
       expect(field.controller!.text, isEmpty);
       expect(find.text('test-key'), findsNothing);
       await tester.enterText(keyFinder, 'new-secret');
-      await tester.enterText(
-        find.byKey(const ValueKey('实时模型.endpoint')),
-        'wss://another.example/realtime',
-      );
+      expect(field.controller!.text, 'new-secret');
+      // Switching providers resets the integrated defaults and key input.
+      await tester.tap(find.byKey(const ValueKey('integrated.provider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OpenAI').last);
+      await tester.pumpAndSettle();
       expect(field.controller!.text, isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());
     },

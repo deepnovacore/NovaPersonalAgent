@@ -45,11 +45,17 @@ extension FeishuAppRegistration on FeishuAuth {
       'next': now(),
       'polling': false,
     };
+    final rawVerification =
+        data['verification_uri_complete'] ?? data['verification_uri'];
+    final verification =
+        rawVerification is String && rawVerification.trim().isNotEmpty
+        ? api.appRegistrationVerificationUri(rawVerification.trim())
+        : Uri.https(api.openHost(brand), '/page/launcher', {
+            'user_code': data['user_code'] as String,
+          });
     return FeishuAuthorizationSession(
-      Uri.https(api.openHost(brand), '/page/cli', {
-        'user_code': data['user_code'],
-      }),
-      data['user_code'],
+      verification,
+      data['user_code'] as String,
       expires,
     );
   }

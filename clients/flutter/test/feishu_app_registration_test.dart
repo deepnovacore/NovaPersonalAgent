@@ -49,6 +49,7 @@ void main() {
     await auth.open();
     final session = await auth.beginAppRegistration('lark');
     expect(session.verificationUri.host, 'open.larksuite.com');
+    expect(session.verificationUri.path, '/page/launcher');
     expect(session.verificationUri.queryParameters['user_code'], 'A&B');
     expect(await auth.pollAppRegistration(), false);
     expect(calls, 3);
@@ -62,6 +63,59 @@ void main() {
     expect(auth.brand, 'lark');
     expect(jsonDecode(disk.value!)['app']['secret'], 'synthetic');
     expect(disk.value, isNot(contains('device_code')));
+  });
+
+  test(
+    'registration uses the official launcher URL returned by the server',
+    () async {
+      final auth = FeishuAuth(
+        MemoryLifePersistence(),
+        FeishuApi(
+          transport: (m, u, h, b) async {
+            if (Uri.splitQueryString(b!)['action'] == 'begin') {
+              return const FeishuResponse(200, {
+                'device_code': 'fixture',
+                'user_code': 'U1',
+                'verification_uri_complete':
+                    'https://open.feishu.cn/page/launcher?user_code=U1',
+                'expire_in': 600,
+              });
+            }
+            return const FeishuResponse(400, {
+              'error': 'authorization_pending',
+            });
+          },
+        ),
+      );
+      await auth.open();
+      final session = await auth.beginAppRegistration('lark');
+      // The server's launcher can offer both "create new" and "choose existing";
+      // the Feishu host is authoritative even when the UI preferred Lark.
+      expect(session.verificationUri.host, 'open.feishu.cn');
+      expect(session.verificationUri.path, '/page/launcher');
+      expect(session.verificationUri.queryParameters['user_code'], 'U1');
+    },
+  );
+
+  test('registration rejects an untrusted verification URL', () async {
+    final auth = FeishuAuth(
+      MemoryLifePersistence(),
+      FeishuApi(
+        transport: (m, u, h, b) async => const FeishuResponse(200, {
+          'device_code': 'fixture',
+          'user_code': 'U1',
+          'verification_uri_complete':
+              'https://evil.example/page/launcher?user_code=U1',
+          'expire_in': 600,
+        }),
+      ),
+    );
+    await auth.open();
+    await expectLater(
+      auth.beginAppRegistration('feishu'),
+      throwsA(isA<FeishuFailure>()),
+    );
+    expect(auth.configured, isFalse);
   });
 
   test('cancel rejects late registration credentials', () async {

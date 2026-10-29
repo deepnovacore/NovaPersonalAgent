@@ -82,7 +82,11 @@ class _ServiceFields {
 
 class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
   late VoiceConfiguration _draft;
-  late final _ServiceFields _integrated, _asr, _tts, _llm;
+  late final _ServiceFields _asr, _tts, _llm;
+  // Never populate form controllers with a stored secret.
+  late final TextEditingController _integratedKey;
+  late final bool _advancedInitiallyExpanded;
+  bool _endpointRewritten = false;
   bool _saving = false;
   String? _error;
   String t(String zh, String en) => widget.language == 'zh' ? zh : en;
@@ -90,8 +94,31 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
   @override
   void initState() {
     super.initState();
-    _draft = widget.initial ?? const VoiceConfiguration();
-    _integrated = _ServiceFields(_draft.integrated);
+    final initial = widget.initial ?? const VoiceConfiguration();
+    final provider = initial.integratedProfile;
+    // The integrated service only talks to the provider's official endpoint.
+    // Historical custom endpoints are replaced instead of shown or kept.
+    final endpoint = IntegratedVoiceCatalog.officialEndpoint(provider);
+    _endpointRewritten =
+        initial.integrated.endpoint.trim().isNotEmpty &&
+        initial.integrated.endpoint.trim() != endpoint;
+    final savedModel = initial.integrated.model.trim();
+    final model = savedModel.isEmpty
+        ? IntegratedVoiceCatalog.defaultModel(provider)
+        : savedModel;
+    final savedVoice = initial.integrated.voice.trim();
+    final voice = savedVoice.isEmpty
+        ? IntegratedVoiceCatalog.defaultVoice(provider, model)
+        : savedVoice;
+    _draft = initial.copyWith(
+      integrated: initial.integrated.copyWith(
+        endpoint: endpoint,
+        model: model,
+        voice: voice,
+      ),
+    );
+    _advancedInitiallyExpanded = initial.pipeline == VoicePipeline.cascaded;
+    _integratedKey = TextEditingController();
     _asr = _ServiceFields(_draft.asr);
     _tts = _ServiceFields(_draft.tts);
     _llm = _ServiceFields(_draft.fastLlm);
@@ -99,9 +126,10 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
 
   @override
   void dispose() {
-    for (final fields in [_integrated, _asr, _tts, _llm]) {
+    for (final fields in [_asr, _tts, _llm]) {
       fields.dispose();
     }
+    _integratedKey.dispose();
     super.dispose();
   }
 
@@ -119,7 +147,12 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
       } else {
         await widget.settings.save(
           _draft.copyWith(
-            integrated: _integrated.value,
+            integrated: _draft.integrated.copyWith(
+              endpoint: IntegratedVoiceCatalog.officialEndpoint(
+                _draft.integratedProfile,
+              ),
+              key: _integratedKey.text,
+            ),
             asr: _asr.value,
             tts: _tts.value,
             fastLlm: _llm.value,
@@ -245,6 +278,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     return DropdownButtonFormField<SpeechProvider>(
       key: ValueKey(asr ? 'asr.provider' : 'tts.provider'),
       initialValue: selected,
+      isExpanded: true,
       decoration: InputDecoration(
         labelText: asr
             ? t('语音识别服务', 'Speech recognition service')
@@ -335,6 +369,328 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
     ),
   ];
 
+  String _providerLabel(IntegratedVoiceService provider) => switch (provider) {
+    IntegratedVoiceService.qwen => 'Qwen',
+    IntegratedVoiceService.stepfun => 'StepFun',
+    IntegratedVoiceService.openai => 'OpenAI',
+    IntegratedVoiceService.gemini => 'Gemini Live',
+  };
+
+  List<String> _modelOptions() {
+    final models = IntegratedVoiceCatalog.models(_draft.integratedProfile);
+    final saved = _draft.integrated.model;
+    return saved.isEmpty || models.contains(saved)
+        ? models
+        : [...models, saved];
+  }
+
+  List<String> _voiceOptions(String model) {
+    final voices = IntegratedVoiceCatalog.voices(
+      _draft.integratedProfile,
+      model,
+    );
+    final saved = _draft.integrated.voice;
+    return saved.isEmpty || voices.contains(saved)
+        ? voices
+        : [...voices, saved];
+  }
+
+  void _selectIntegratedProvider(IntegratedVoiceService? value) {
+    if (value == null || value == _draft.integratedProfile) return;
+    final model = IntegratedVoiceCatalog.defaultModel(value);
+    setState(() {
+      _draft = _draft.copyWith(
+        integratedProfile: value,
+        integrated: _draft.integrated.copyWith(
+          endpoint: IntegratedVoiceCatalog.officialEndpoint(value),
+          model: model,
+          voice: IntegratedVoiceCatalog.defaultVoice(value, model),
+          key: '',
+        ),
+      );
+      _integratedKey.clear();
+      _endpointRewritten = false;
+    });
+  }
+
+  void _selectIntegratedModel(String? value) {
+    if (value == null || value == _draft.integrated.model) return;
+    setState(() {
+      _draft = _draft.copyWith(
+        integrated: _draft.integrated.copyWith(
+          model: value,
+          voice: IntegratedVoiceCatalog.defaultVoice(
+            _draft.integratedProfile,
+            value,
+          ),
+        ),
+      );
+    });
+  }
+
+  void _selectIntegratedVoice(String? value) {
+    if (value == null || value == _draft.integrated.voice) return;
+    setState(() {
+      _draft = _draft.copyWith(
+        integrated: _draft.integrated.copyWith(voice: value),
+      );
+    });
+  }
+
+  /// Provider, model, voice and key for the built-in realtime service. There is
+  /// no endpoint field: the app always uses the provider's official endpoint.
+  List<Widget> _integratedFields() {
+    final provider = _draft.integratedProfile;
+    final model = _draft.integrated.model;
+    final savedVoice = _draft.integrated.voice;
+    final voice = savedVoice.isEmpty
+        ? IntegratedVoiceCatalog.defaultVoice(provider, model)
+        : savedVoice;
+    final voices = _voiceOptions(model);
+    return [
+      Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: Text(
+          t('实时语音', 'Realtime voice'),
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+      ),
+      DropdownButtonFormField<IntegratedVoiceService>(
+        key: const ValueKey('integrated.provider'),
+        initialValue: provider,
+        isExpanded: true,
+        decoration: InputDecoration(labelText: t('实时服务', 'Realtime service')),
+        items: [
+          for (final value in IntegratedVoiceService.values)
+            DropdownMenuItem(value: value, child: Text(_providerLabel(value))),
+        ],
+        onChanged: _saving ? null : _selectIntegratedProvider,
+      ),
+      // Reset the form-field state when the provider changes so the dropdown
+      // displays the new provider's defaults.
+      KeyedSubtree(
+        key: ValueKey('integrated.model.rebuild.${provider.name}'),
+        child: DropdownButtonFormField<String>(
+          key: const ValueKey('integrated.model'),
+          initialValue: model,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: t('模型', 'Model')),
+          items: [
+            for (final value in _modelOptions())
+              DropdownMenuItem(value: value, child: Text(value)),
+          ],
+          onChanged: _saving ? null : _selectIntegratedModel,
+        ),
+      ),
+      // Reset the form-field state when the model (or provider) changes so the
+      // voice dropdown displays the model's default voice.
+      KeyedSubtree(
+        key: ValueKey('integrated.voice.rebuild.${provider.name}.$model'),
+        child: DropdownButtonFormField<String>(
+          key: const ValueKey('integrated.voice'),
+          initialValue: voice,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: t('音色', 'Voice')),
+          items: [
+            for (final value in voices)
+              DropdownMenuItem(value: value, child: Text(value)),
+          ],
+          onChanged: _saving ? null : _selectIntegratedVoice,
+        ),
+      ),
+      if (_endpointRewritten)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            t(
+              '服务地址已切换为官方地址。旧地址保存的密钥不会沿用，请重新输入 API 密钥。',
+              'The service address was switched to the official endpoint. Keys saved for the old address are not reused; enter the API key again.',
+            ),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      TextField(
+        controller: _integratedKey,
+        enabled: !_saving,
+        key: const ValueKey('integrated.key'),
+        obscureText: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        enableIMEPersonalizedLearning: false,
+        decoration: InputDecoration(
+          labelText: t('API 密钥', 'API key'),
+          helperText: t(
+            '留空仅保留同一供应商、同一官方地址已保存的密钥',
+            'Leave blank to keep the saved key only for the same provider and official endpoint',
+          ),
+        ),
+      ),
+    ];
+  }
+
+  /// Compact replacement for the integrated section while the saved pipeline is
+  /// cascaded. The switch back to the integrated service lives in the advanced
+  /// area, which opens automatically for a saved cascaded pipeline.
+  Widget _cascadedStatus() => Padding(
+    padding: const EdgeInsets.only(top: 16),
+    child: Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.call_outlined,
+            size: 20,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  t('当前使用分步处理', 'Currently using step-by-step'),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  t('识别 → 快速模型 → 合成', 'Recognition → fast model → synthesis'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  List<Widget> _cascadedFields() => [
+    ..._asrFields(),
+    DropdownButtonFormField<FastLlmProtocol>(
+      key: const ValueKey('fastLlm.protocol'),
+      initialValue: _draft.fastLlmProtocol,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: t('快速模型协议', 'Fast model protocol'),
+      ),
+      items: const [
+        DropdownMenuItem(
+          value: FastLlmProtocol.responses,
+          child: Text('Responses'),
+        ),
+        DropdownMenuItem(
+          value: FastLlmProtocol.chatCompletions,
+          child: Text('Chat Completions'),
+        ),
+        DropdownMenuItem(
+          value: FastLlmProtocol.arkResponses,
+          child: Text('Ark Responses'),
+        ),
+      ],
+      onChanged: _saving
+          ? null
+          : (value) {
+              if (value != null && value != _draft.fastLlmProtocol) {
+                setState(() {
+                  _draft = _draft.copyWith(fastLlmProtocol: value);
+                  _llm.replace(const VoiceServiceConfiguration());
+                });
+              }
+            },
+    ),
+    _fields('快速前脑模型', _llm),
+    Text(
+      _draft.fastLlmProtocol == FastLlmProtocol.arkResponses
+          ? '填写完整的 Ark /responses 地址。此模型负责语音对话，长任务仍交给手机后脑。'
+          : '填写 Base URL 或完整接口地址，协议由上方选项决定。此模型负责语音对话，长任务仍交给手机后脑。',
+    ),
+    _speechSelector(asr: false),
+    _fields(
+      'TTS',
+      _tts,
+      websocket: _draft.ttsProvider == SpeechProvider.volcengine,
+      resourceId: _draft.ttsProvider == SpeechProvider.volcengine,
+      model:
+          _draft.ttsProvider != SpeechProvider.selfHosted &&
+          _draft.ttsProvider != SpeechProvider.volcengine,
+      voice: _draft.ttsProvider != SpeechProvider.selfHosted,
+      optionalKey: _draft.ttsProvider == SpeechProvider.selfHosted,
+      geminiBase: _draft.ttsProvider == SpeechProvider.gemini,
+    ),
+    if (_draft.asrProvider == SpeechProvider.selfHosted ||
+        _draft.ttsProvider == SpeechProvider.selfHosted)
+      const Text('自部署服务必须兼容 Nova 的 ASR WebSocket / TTS HTTP PCM 协议，并可由手机直接访问。'),
+  ];
+
+  Widget _advancedSection() {
+    final cascaded = _draft.pipeline == VoicePipeline.cascaded;
+    return ExpansionTile(
+      key: const ValueKey('voice.advanced'),
+      initiallyExpanded: _advancedInitiallyExpanded,
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      title: Text(t('高级：分步处理', 'Advanced: step-by-step')),
+      subtitle: Text(
+        t(
+          '识别 → 快速模型 → 合成，可使用自建或第三方服务',
+          'Recognition → fast model → synthesis with self-hosted or third-party services',
+        ),
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<VoicePipeline>(
+              key: const ValueKey('voice.pipeline'),
+              initialValue: _draft.pipeline,
+              isExpanded: true,
+              decoration: InputDecoration(labelText: t('语音模式', 'Voice mode')),
+              items: [
+                DropdownMenuItem(
+                  value: VoicePipeline.integrated,
+                  child: Text(t('实时语音（一体式）', 'Realtime voice (integrated)')),
+                ),
+                DropdownMenuItem(
+                  value: VoicePipeline.cascaded,
+                  child: Text(
+                    t(
+                      '分步处理（识别 → 对话 → 合成）',
+                      'Step-by-step (recognition → chat → synthesis)',
+                    ),
+                  ),
+                ),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      if (value == null || value == _draft.pipeline) return;
+                      setState(() => _draft = _draft.copyWith(pipeline: value));
+                    },
+            ),
+            if (cascaded)
+              ..._cascadedFields()
+            else
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  t(
+                    '当前使用实时语音；分步处理设置在切换到分步处理后才生效。',
+                    'Realtime voice is active; step-by-step settings apply only after switching to step-by-step mode.',
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: Text(
@@ -366,136 +722,19 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
                   ),
                 ),
             ] else ...[
-              const Text('手机直接连接所选服务，在独立 Space 中使用。语音设置与文字模型独立，密钥仅保存在本机安全存储中。'),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<VoicePipeline>(
-                key: const ValueKey('voice.pipeline'),
-                initialValue: _draft.pipeline,
-                decoration: const InputDecoration(labelText: '语音模式'),
-                items: const [
-                  DropdownMenuItem(
-                    value: VoicePipeline.integrated,
-                    child: Text('实时语音（一体式）'),
-                  ),
-                  DropdownMenuItem(
-                    value: VoicePipeline.cascaded,
-                    child: Text('分步处理（识别 → 对话 → 合成）'),
-                  ),
-                ],
-                onChanged: _saving
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          setState(
-                            () => _draft = _draft.copyWith(pipeline: value),
-                          );
-                        }
-                      },
+              Text(
+                t(
+                  '手机直接连接所选服务，在独立 Space 中使用。语音设置与文字模型独立，密钥仅保存在本机安全存储中。',
+                  'The phone connects directly to the selected service inside a standalone Space. Voice settings are independent of text models; credentials stay in this device’s secure storage.',
+                ),
               ),
-              if (_draft.pipeline == VoicePipeline.integrated) ...[
-                DropdownButtonFormField<IntegratedVoiceService>(
-                  key: const ValueKey('integrated.provider'),
-                  initialValue: _draft.integratedProfile,
-                  decoration: const InputDecoration(labelText: '实时服务'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: IntegratedVoiceService.qwen,
-                      child: Text('Qwen'),
-                    ),
-                    DropdownMenuItem(
-                      value: IntegratedVoiceService.stepfun,
-                      child: Text('StepFun'),
-                    ),
-                    DropdownMenuItem(
-                      value: IntegratedVoiceService.openai,
-                      child: Text('OpenAI'),
-                    ),
-                    DropdownMenuItem(
-                      value: IntegratedVoiceService.gemini,
-                      child: Text('Gemini Live'),
-                    ),
-                  ],
-                  onChanged: _saving
-                      ? null
-                      : (value) {
-                          if (value == null ||
-                              value == _draft.integratedProfile) {
-                            return;
-                          }
-                          setState(() {
-                            _draft = _draft.copyWith(integratedProfile: value);
-                            _integrated.replace(
-                              VoiceConfiguration.integratedDefaults(value),
-                            );
-                          });
-                        },
-                ),
-                _fields(
-                  '实时模型',
-                  _integrated,
-                  websocket: true,
-                  voice: true,
-                  optionalVoice:
-                      _draft.integratedProfile ==
-                      IntegratedVoiceService.stepfun,
-                ),
-              ] else ...[
-                ..._asrFields(),
-                DropdownButtonFormField<FastLlmProtocol>(
-                  key: const ValueKey('fastLlm.protocol'),
-                  initialValue: _draft.fastLlmProtocol,
-                  decoration: const InputDecoration(labelText: '快速模型协议'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: FastLlmProtocol.responses,
-                      child: Text('Responses'),
-                    ),
-                    DropdownMenuItem(
-                      value: FastLlmProtocol.chatCompletions,
-                      child: Text('Chat Completions'),
-                    ),
-                    DropdownMenuItem(
-                      value: FastLlmProtocol.arkResponses,
-                      child: Text('Ark Responses'),
-                    ),
-                  ],
-                  onChanged: _saving
-                      ? null
-                      : (value) {
-                          if (value != null &&
-                              value != _draft.fastLlmProtocol) {
-                            setState(() {
-                              _draft = _draft.copyWith(fastLlmProtocol: value);
-                              _llm.replace(const VoiceServiceConfiguration());
-                            });
-                          }
-                        },
-                ),
-                _fields('快速前脑模型', _llm),
-                Text(
-                  _draft.fastLlmProtocol == FastLlmProtocol.arkResponses
-                      ? '填写完整的 Ark /responses 地址。此模型负责语音对话，长任务仍交给手机后脑。'
-                      : '填写 Base URL 或完整接口地址，协议由上方选项决定。此模型负责语音对话，长任务仍交给手机后脑。',
-                ),
-                _speechSelector(asr: false),
-                _fields(
-                  'TTS',
-                  _tts,
-                  websocket: _draft.ttsProvider == SpeechProvider.volcengine,
-                  resourceId: _draft.ttsProvider == SpeechProvider.volcengine,
-                  model:
-                      _draft.ttsProvider != SpeechProvider.selfHosted &&
-                      _draft.ttsProvider != SpeechProvider.volcengine,
-                  voice: _draft.ttsProvider != SpeechProvider.selfHosted,
-                  optionalKey: _draft.ttsProvider == SpeechProvider.selfHosted,
-                  geminiBase: _draft.ttsProvider == SpeechProvider.gemini,
-                ),
-                if (_draft.asrProvider == SpeechProvider.selfHosted ||
-                    _draft.ttsProvider == SpeechProvider.selfHosted)
-                  const Text(
-                    '自部署服务必须兼容 Nova 的 ASR WebSocket / TTS HTTP PCM 协议，并可由手机直接访问。',
-                  ),
-              ],
+              const SizedBox(height: 12),
+              if (_draft.pipeline == VoicePipeline.integrated)
+                ..._integratedFields()
+              else
+                _cascadedStatus(),
+              const SizedBox(height: 8),
+              _advancedSection(),
             ],
             const SizedBox(height: 16),
             Text(

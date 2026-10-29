@@ -29,7 +29,6 @@ import 'my_overview.dart';
 import 'local_tasks.dart';
 import '../agent_core/model_settings.dart';
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:nova_audio/channel_audio.dart';
@@ -40,6 +39,7 @@ import 'package:nova_audio/nova_audio.dart';
 import 'devices_page.dart';
 import 'workbench_page.dart';
 import 'components.dart';
+import 'connectors_page.dart';
 import 'pet_avatar.dart';
 import 'theme.dart';
 import 'local_workspace.dart';
@@ -776,6 +776,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     await Navigator.of(context).push<void>(
       CupertinoPageRoute(
         builder: (_) => Scaffold(
+          backgroundColor: Nova.sheet,
           appBar: AppBar(
             title: Text(
               _t(
@@ -876,6 +877,63 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     }
   }
 
+  Future<void> _openConnectors() async {
+    final connector = feishu;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ListenableBuilder(
+          listenable: Listenable.merge([?connector, ?profileGeneration]),
+          builder: (context, _) => ConnectorsPage(
+            language: language,
+            feishuStatus: _feishuConnectorStatus(),
+            onOpenFeishu: () => unawaited(_openFeishu()),
+          ),
+        ),
+      ),
+    );
+  }
+
+  FeishuConnectorStatus _feishuConnectorStatus() {
+    final connector = feishu;
+    final subtitle = _t(
+      '读取你授权的飞书消息，用于近况与时间线。',
+      'Read authorized Feishu messages for updates and timeline.',
+    );
+    if (connector == null || !connector.restored) {
+      return (
+        label: _t('正在读取本机资料…', 'Reading local data…'),
+        subtitle: subtitle,
+        tone: NovaTone.neutral,
+      );
+    }
+    if (!connector.auth.configured) {
+      return (
+        label: _t('未连接', 'Not connected'),
+        subtitle: subtitle,
+        tone: NovaTone.neutral,
+      );
+    }
+    if (!connector.auth.authorized) {
+      return (
+        label: _t('等待授权', 'Waiting for authorization'),
+        subtitle: subtitle,
+        tone: NovaTone.warning,
+      );
+    }
+    if (connector.collection.running) {
+      return (
+        label: _t('正在同步消息', 'Syncing messages'),
+        subtitle: subtitle,
+        tone: NovaTone.active,
+      );
+    }
+    return (
+      label: _t('已连接', 'Connected'),
+      subtitle: subtitle,
+      tone: NovaTone.success,
+    );
+  }
+
   Future<void> _settings() async {
     final choice = await showModalBottomSheet<String>(
       context: context,
@@ -921,7 +979,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 ),
               ]),
               _settingGroup(context, _t('更多', 'More'), [
-                ('feishu', _t('飞书', 'Feishu'), CupertinoIcons.link),
+                ('connectors', _t('连接器', 'Connectors'), CupertinoIcons.link),
                 ('voice', _t('语音设置', 'Voice settings'), CupertinoIcons.mic),
                 ('language', _t('语言', 'Language'), CupertinoIcons.globe),
                 (
@@ -952,8 +1010,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             ),
           );
         }
-      case 'feishu':
-        await _openFeishu();
+      case 'connectors':
+        await _openConnectors();
       case 'model':
         try {
           await showLocalModelSettings(
@@ -1384,60 +1442,53 @@ class BottomAppBarTabs extends StatelessWidget {
   @override
   // iOS tab bar labels keep a fixed size; Dynamic Type applies to content.
   Widget build(BuildContext context) => MediaQuery.withNoTextScaling(
-    child: ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: DecoratedBox(
-          decoration: const BoxDecoration(
-            color: Color(0xfaffffff),
-            border: Border(top: BorderSide(color: Nova.separator, width: .5)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: SizedBox(
-              height: 54,
-              child: Row(
-                children: [
-                  for (final (i, item) in items.indexed)
-                    Expanded(
-                      child: Semantics(
-                        selected: i == index,
-                        button: true,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => onTap(i),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Badge(
-                                isLabelVisible: item.$4 > 0,
-                                backgroundColor: Nova.red,
-                                label: Text(
-                                  item.$4 > 99 ? '99+' : '${item.$4}',
-                                ),
-                                child: Icon(
-                                  i == index ? item.$2 : item.$1,
-                                  size: 25,
-                                  color: i == index ? Nova.mint : Nova.tertiary,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                item.$3,
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w500,
-                                  color: i == index ? Nova.mint : Nova.tertiary,
-                                ),
-                              ),
-                            ],
+    child: DecoratedBox(
+      decoration: const BoxDecoration(
+        color: Nova.ink,
+        border: Border(top: BorderSide(color: Nova.separator, width: .5)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 54,
+          child: Row(
+            children: [
+              for (final (i, item) in items.indexed)
+                Expanded(
+                  child: Semantics(
+                    selected: i == index,
+                    button: true,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onTap(i),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Badge(
+                            isLabelVisible: item.$4 > 0,
+                            backgroundColor: Nova.red,
+                            label: Text(item.$4 > 99 ? '99+' : '${item.$4}'),
+                            child: Icon(
+                              i == index ? item.$2 : item.$1,
+                              size: 25,
+                              color: i == index ? Nova.mint : Nova.tertiary,
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 3),
+                          Text(
+                            item.$3,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w500,
+                              color: i == index ? Nova.mint : Nova.tertiary,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                ],
-              ),
-            ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
