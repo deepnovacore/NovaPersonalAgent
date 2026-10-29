@@ -26,6 +26,16 @@ novapersonal-server --env-file "$HOME/.nova-remote/server.env" pair wss://your-h
 
 Scan the one-use QR with Nova on iPhone. SSH needs a TTY (`ssh -t`); Ctrl+C cancels the invitation without stopping the service. No desktop session or local microphone is required for remote phone audio.
 
+## Space Host
+
+The same service can be a Space Host for the Nova phone Client. Set `NOVA_SPACE_HOST_CONFIG` to a config created with `nova-space-host init`, start the service, then pair from a second interactive terminal:
+
+```sh
+nova-space-host pair --config /private/new-space/config.json
+```
+
+`nova-space-host` (also `novapersonal-server space ...`) provides `init`, `resume`, `status`, `pair`, `devices` and `revoke`. See the [Space guide](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/docs/en/space-host-client.md#headless-hostlinuxmacos).
+
 ## Upgrading
 
 Install or update with `npm install --global nova-personal-agent-server@latest`, or pin `nova-personal-agent-server@0.4.0`. Stop the service and back up its data before upgrading; installing a different version changes the executable, not the persisted data.

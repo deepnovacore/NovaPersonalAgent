@@ -31,6 +31,33 @@ npm run test:space -- --output-root /your/build-disk --run-id your-task
 4. 手机选择“Client”，扫描二维码；在手机与桌面核对指纹后由桌面确认。Client 等待密钥投递后补拉展示数据。Host 离线时状态修改显示等待，聊天立即失败，不会等 Host 上线后悄悄发送。
 5. 在手机创建其他 Space 可选独立模式或另一 Host 的 Client；每个 Space 的凭据、缓存、意图和工具执行记录相互隔离。桌面切到另一个 Host Space 需使用另一份独立配置启动。
 
+## 无桌面 Host（Linux / macOS）
+
+没有桌面界面的机器可以直接作为 Host：同一个服务进程运行 Space Host，配对在终端完成。
+
+1. 构建（见上）并按 [relay 部署说明](../../relay/README.md) 启动 relay。
+2. 用 `init` 创建 Host Space（命令见“运行顺序”第 2 步，`nova-space-host` 即 `cli.js`；安装服务端 npm 包后可直接使用 `nova-space-host` 命令）。
+3. 在私有（`0600`）环境文件中设置：
+
+   ```sh
+   NOVA_SPACE_HOST_CONFIG=/private/new-space/config.json
+   SERVER_PORT=19876
+   SERVER_TOKEN_FILE=/private/nova/client-token
+   # 以及模型凭据、流水线和绝对工作区路径
+   ```
+
+   `SERVER_MEDIA_MODE=relay` 是手机语音的音频中继，与 Space relay 无关，不需要为 Space 配置它。
+4. 启动服务：`novapersonal-server --env-file /private/nova/server.env start`。服务运行期间，配置文件旁会出现 `config.json.admin.sock`（权限 `0600`，随服务退出删除）；能读取 Host 私有配置的同一系统用户即可使用它，没有额外口令。
+5. 在第二个终端配对（SSH 需要 `ssh -t`）：
+
+   ```sh
+   nova-space-host pair --config /private/new-space/config.json
+   # 等价：novapersonal-server space pair --config /private/new-space/config.json
+   ```
+
+   终端显示一次性二维码，用手机 Nova 的“添加空间”扫描。手机发起请求后，终端打印完整指纹，核对与手机显示一致后输入 `y` 确认。无 TTY 的自动化场景需传入 `--yes-fingerprint <指纹>`，指纹必须与请求完全一致。`--timeout-seconds N` 调整等待时长（默认 300），Ctrl+C 取消。
+6. 管理设备：`nova-space-host devices --config ...` 列出已绑定设备，`nova-space-host revoke --config ... --device 设备ID` 撤销并轮换密钥，`nova-space-host status --config ...` 查看状态。服务未运行时这些命令报 `space_host_not_running`。
+
 ## 通知与手机工具
 
 锁屏通知另需部署 [push gateway](../../push-gateway/README.md) 和厂商配置。Host 私有配置的 `push_gateway_url` 固定为所信任的 HTTPS gateway；手机首次启用通知时输入运营端签发的一次性邀请，兑换本安装独有的凭据，再直接向同一 gateway 登记令牌；运营端签名密钥不得编译进 App。手机只把随机句柄和受限凭据交给 Host，安装凭据不交给 Host。固定期限的句柄由 Client 在到期前轮换，详见 gateway 部署说明。App 内数据补拉不依赖推送成功。小米公信使用通用文案且受配额限制。
