@@ -3,8 +3,11 @@ import {constants} from 'node:fs';
 import {open,mkdir} from 'node:fs/promises';
 import {dirname,isAbsolute,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {createInterface} from 'node:readline/promises';
+import {setTimeout as delay} from 'node:timers/promises';
 import {initializeHostSpace,resumeHostSpaceRegistration} from './config.js';
-const usage='usage: nova-space-host init --config /new/space/config.json --data /new/space/personal.json --relay https://relay.example --bootstrap-file /private/operator-token\n       nova-space-host resume --config /existing/space/config.json --bootstrap-file /private/operator-token';
+import {adminSocketPath,spaceAdminRequest} from './admin-socket.js';
+const usage='usage: nova-space-host init --config /new/space/config.json --data /new/space/personal.json --relay https://relay.example --bootstrap-file /private/operator-token\n       nova-space-host resume --config /existing/space/config.json --bootstrap-file /private/operator-token\n       nova-space-host status|devices --config /existing/space/config.json\n       nova-space-host pair --config /existing/space/config.json [--timeout-seconds 300] [--yes-fingerprint FINGERPRINT]\n       nova-space-host revoke --config /existing/space/config.json --device DEVICE_ID\nstatus, pair, devices and revoke talk to the running Host (novapersonal-server start, or the desktop) through <config>.admin.sock.';
 export function parseSpaceInit(args:readonly string[]):{configPath:string;personalPath:string;relayUrl:string;bootstrapFile:string}{
  if(args[0]!=='init'||args.length!==9)throw Error(usage);
  const values=new Map<string,string>();
@@ -26,7 +29,62 @@ export function parseSpaceResume(args:readonly string[]):{configPath:string;boot
  if(resolve(configPath)===resolve(bootstrapFile))throw Error('space_paths_must_be_distinct');
  return {configPath,bootstrapFile};
 }
+export interface SpaceAdminArgs {command:'status'|'pair'|'devices'|'revoke';configPath:string;timeoutSeconds:number;device?:string;yesFingerprint?:string}
+export function parseSpaceAdmin(args:readonly string[]):SpaceAdminArgs{
+ const command=args[0];if(command!=='status'&&command!=='pair'&&command!=='devices'&&command!=='revoke')throw Error(usage);
+ const allowed=['--config',...command==='pair'?['--timeout-seconds','--yes-fingerprint']:[],...command==='revoke'?['--device']:[]];
+ const values=new Map<string,string>();
+ if(args.length%2===0)throw Error(usage);
+ for(let i=1;i<args.length;i+=2){const key=args[i]!,value=args[i+1]!;if(!allowed.includes(key)||values.has(key)||!value||value.startsWith('--'))throw Error(usage);values.set(key,value)}
+ const configPath=values.get('--config');if(!configPath||command==='revoke'&&!values.get('--device'))throw Error(usage);
+ const seconds=values.has('--timeout-seconds')?Number(values.get('--timeout-seconds')):300;if(!Number.isInteger(seconds)||seconds<1||seconds>3600)throw Error(usage);
+ return {command,configPath:resolve(configPath),timeoutSeconds:seconds,...values.has('--device')?{device:values.get('--device')!}:{},...values.has('--yes-fingerprint')?{yesFingerprint:values.get('--yes-fingerprint')!}:{}};
+}
+/** Same bytes the desktop encodes: the invitation JSON without any rendered image. Compact renderer plus a four-module quiet zone. */
+export async function renderInvitationQr(invitation:unknown):Promise<string>{
+ const value=JSON.stringify(invitation);if(value.length>8192)throw Error('pairing_payload_too_large');
+ const name='qrcode',{default:QRCode}=await import(name) as {default:{create(data:unknown,options:unknown):{modules:{size:number}};toString(data:unknown,options:unknown):Promise<string>}},data=[{data:value,mode:'byte' as const}],options={type:'terminal' as const,small:true,errorCorrectionLevel:'M' as const};
+ const width=QRCode.create(data,options).modules.size+8,white='\x1b[47m',reset='\x1b[0m',border=white+' '.repeat(width)+reset+'\n';
+ const rows=(await QRCode.toString(data,options)).split('\n').slice(0,-1);
+ return border.repeat(2)+rows.map((row:string)=>white+'   '+row+white+'   '+reset+'\n').join('')+border.repeat(2);
+}
+export interface SpacePairIo {output:{write(text:string):unknown;isTTY?:boolean};interactive:boolean;confirm(question:string):Promise<boolean>;signal:AbortSignal;pollMs?:number}
+const pairingRows=(value:unknown)=>Array.isArray(value)?value as {id:string;device:string;fingerprint:string}[]:[];
+export async function runSpacePair(options:SpaceAdminArgs,io:SpacePairIo):Promise<number>{
+ const socket=adminSocketPath(options.configPath);
+ if(!io.interactive&&!options.yesFingerprint)throw Error('space_pair_requires_tty');
+ const invitation=await spaceAdminRequest(socket,'invitation');
+ io.output.write('用手机 Nova 的「添加空间」扫描下方二维码（一次性，Ctrl+C 取消）：\n'+await renderInvitationQr(invitation)+'等待手机发起配对…\n');
+ const deadline=Date.now()+options.timeoutSeconds*1000;
+ while(!io.signal.aborted){
+  const request=pairingRows(await spaceAdminRequest(socket,'pairings'))[0];
+  if(request){
+   io.output.write(`收到配对请求：设备 ${request.device}\n指纹：${request.fingerprint}\n`);
+   const matched=options.yesFingerprint!==undefined?options.yesFingerprint===request.fingerprint:await io.confirm('确认该手机指纹与手机上显示一致？[y/N] ');
+   if(!matched){io.output.write(options.yesFingerprint!==undefined?'指纹与 --yes-fingerprint 不一致，未绑定。\n':'已拒绝，未绑定。\n');return 1}
+   await spaceAdminRequest(socket,'confirm_pairing',{id:request.id,fingerprint:request.fingerprint});
+   io.output.write(`已绑定设备 ${request.device}\n`);return 0;
+  }
+  if(Date.now()>=deadline){io.output.write('等待配对超时，请重新运行 pair。\n');return 1}
+  await delay(io.pollMs??2000,undefined,{signal:io.signal}).catch(()=>undefined);
+ }
+ io.output.write('已取消配对。\n');return 1;
+}
+async function adminMain(args:readonly string[]):Promise<number>{
+ const options=parseSpaceAdmin(args),socket=adminSocketPath(options.configPath);
+ if(options.command==='pair'){
+  const stop=new AbortController(),cancel=()=>stop.abort(),signals=['SIGINT','SIGTERM','SIGHUP'] as const;for(const name of signals)process.on(name,cancel);
+  const interactive=!!process.stdin.isTTY&&!!process.stdout.isTTY;
+  try{return await runSpacePair(options,{output:process.stdout,interactive,signal:stop.signal,confirm:async question=>{const rl=createInterface({input:process.stdin,output:process.stdout});const abort=()=>rl.close();stop.signal.addEventListener('abort',abort,{once:true});try{return /^y(es)?$/i.test((await rl.question(question)).trim())}catch{return false}finally{stop.signal.removeEventListener('abort',abort);rl.close()}}})}
+  finally{for(const name of signals)process.off(name,cancel)}
+ }
+ const status=await spaceAdminRequest(socket,options.command==='revoke'?'revoke':'status',options.command==='revoke'?{device:options.device!}:undefined) as {space:string;epoch:number;clients:string[];relay_url:string;pairing_pending:boolean;revocation_pending:boolean};
+ if(options.command==='devices')process.stdout.write(status.clients.length?status.clients.join('\n')+'\n':'尚未配对任何手机。\n');
+ else process.stdout.write(`Space ${status.space}\nRelay ${status.relay_url}\nEpoch ${status.epoch}\nDevices ${status.clients.length}${status.pairing_pending?'\nPairing pending':''}${status.revocation_pending?'\nRevocation pending':''}\n`);
+ return 0;
+}
 export async function main(args:readonly string[]):Promise<number>{
+ if(['status','pair','devices','revoke'].includes(args[0]??''))return adminMain(args);
  if(args.length===1&&args[0]==='--help'){process.stdout.write(usage+'\nHost loss means Space loss. A new mode always requires a new Space.\n');return 0}
  const options=args[0]==='resume'?{mode:'resume' as const,...parseSpaceResume(args)}:{mode:'init' as const,...parseSpaceInit(args)};
  const file=await open(options.bootstrapFile,constants.O_RDONLY|constants.O_NOFOLLOW);
@@ -37,6 +95,6 @@ export async function main(args:readonly string[]):Promise<number>{
   await mkdir(dirname(options.configPath),{recursive:true,mode:0o700});await mkdir(dirname(options.personalPath),{recursive:true,mode:0o700});
   result=await initializeHostSpace({...options,bootstrapToken});
  }else result=await resumeHostSpaceRegistration({...options,bootstrapToken});
- process.stdout.write(`Registered Host Space ${result.space}\nStart the desktop with NOVA_SPACE_HOST_CONFIG=${result.configPath}\nOpen Settings > Connections > Space and phones to pair a Client.\n`);return 0;
+ process.stdout.write(`Registered Host Space ${result.space}\nSet NOVA_SPACE_HOST_CONFIG=${result.configPath} for the Host.\nDesktop: open Settings > Connections > Space and pair a phone.\nHeadless: run novapersonal-server start, then nova-space-host pair --config ${result.configPath}\n`);return 0;
 }
 if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){try{process.exitCode=await main(process.argv.slice(2))}catch(error){process.stderr.write(`nova-space-host: ${error instanceof Error?error.message:'initialization_failed'}\n`);process.exitCode=1}}
