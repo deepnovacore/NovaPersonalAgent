@@ -3,7 +3,7 @@ import type {RelaySdkClient,SignedEnvelope} from '../src/space-host/relay-transp
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {realpath,mkdtemp,rm} from 'node:fs/promises';
+import {realpath,mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
@@ -113,4 +113,35 @@ test('source intent text is never retained in the Host journal before or after l
  const memory={open:()=>Promise.resolve(),close:()=>Promise.resolve(),receiveSpaceSourceInput:async()=>{const admitted=await readFile(journalPath,'utf8');assert.equal(admitted.includes(secret),false);inspected=true;return {evidence_id:'evidence',retained:true}}} as unknown as PersonalMemoryResource;
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null});const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),stream:()=>Promise.resolve(),send:()=>Promise.resolve()};const space=new SpaceHost({path:journalPath,space:'s',host,transport});
  try{await host.open({deferBackground:true});await space.open();await space.receive('phone',{v:1,type:'intent',op_id:'source',kind:'source.input',created_at:Date.now(),input:{kind:'source_fact',source_id:'calendar',grant_revision:1,resource_id:'event',source_version:'v1',text:secret,relation:'self',occurred_at:'2026-10-23T00:00:00.000Z'}});assert.equal(inspected,true);assert.equal((await readFile(journalPath,'utf8')).includes(secret),false)}finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
+});
+
+test('a caller flush returns without chasing rows queued after it started, and the next pass delivers them',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-flush-window-')),journalPath=join(dir,'space.json'),delivered:Record<string,unknown>[]=[];
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ let initial:Promise<void>|undefined,followUp:Promise<void>|undefined,held=false,chase=false,release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});
+ /** Rows only reach the journal once their notification is recorded, so this shows what a pass would see in the outbox. */
+ const queued=async()=>{try{const saved=JSON.parse(await readFile(journalPath,'utf8')) as {outbox:{body:Record<string,unknown>}[]};return saved.outbox.map(row=>String(row.body.id))}catch{return [] as string[]}};
+ const within=async<T>(work:Promise<T>,ms:number,detail:string)=>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([work,new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>reject(Error(detail)),ms)})])}finally{if(timer)clearTimeout(timer)}};
+ // A real enqueue that happens while the first pass is running. Its flush is never awaited here, so the test builds no promise ring of its own.
+ const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),stream:()=>Promise.resolve(),clients:()=>['phone'],send:async(_to,body)=>{
+  if(body.id==='trigger'&&!chase){chase=true;followUp=space.notify({v:1,type:'notification',title:'later',body:'later'},'follow-up').catch(()=>undefined);
+   for(let i=0;i<800&&!(await queued()).includes('follow-up');i++)await new Promise(resolve=>setTimeout(resolve,5));
+   assert.equal((await queued()).includes('follow-up'),true,'the follow-up row must be queued while the first pass is still running')}
+  if(body.id==='follow-up'){held=true;await gate}
+  delivered.push(body)
+ }};
+ const space=new SpaceHost({path:journalPath,space:'s',host,transport});
+ try{
+  await host.open({deferBackground:true});await space.open();
+  initial=space.notify({v:1,type:'notification',title:'first',body:'first'},'trigger');
+  // The caller must not wait for a row that was queued after its own pass started.
+  await within(initial,4000,'a caller flush must not wait for rows queued after it started');
+  for(let i=0;i<800&&!held;i++)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(held,true,'the follow-up row must be picked up by a later pass');
+  assert.equal(delivered.some(row=>row.id==='follow-up'),false,'the follow-up send is still held by its own pass');
+  release();
+  await within(followUp!,4000,'the follow-up pass must deliver the queued row');
+  assert.equal(delivered.some(row=>row.id==='follow-up'),true);
+  assert.deepEqual(await queued(),[],'the journal outbox must be empty once the follow-up row was delivered');
+ }finally{release();await Promise.race([Promise.allSettled([initial,followUp]),new Promise(resolve=>setTimeout(resolve,2000))]);await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
 });
