@@ -89,3 +89,32 @@ test('a body that could not be read leaves the stored message and its text untou
   assert.deepEqual(after.objects[0]?.current_evidence_ids,read.objects[0]?.current_evidence_ids)
  }finally{await manager.close();await memory.close();await rm(root,{recursive:true,force:true})}
 })
+
+test('an unread body protects every stored message, not only the one that sorts first',async()=>{
+ const {MacMailClient}=await import('../src/connectors/macos/mail.js')
+ const {ComposioConnector}=await import('../src/connectors/composio/index.js')
+ const {SubstrateMemoryResource}=await import('../src/memory-substrate/resource.js')
+ const {MemoryLedgerClient}=await import('../src/memory-ledger/store-client.js')
+ const root=await mkdtemp(join(tmpdir(),'nova-local-mail-two-unread-'));let unread=false
+ const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'fixture',model:'fixture',gateway:{async *stream(){await Promise.resolve();throw Error('unexpected model call')},complete(){throw Error('unexpected model call')}}})
+ const mail=new MacMailClient('/fixture')
+ // Two messages with a real body first: only the lowest object key could be found by a LIMIT-then-filter lookup.
+ const messages=()=>['one','two'].map((id,index)=>{const received=new Date(Date.now()-60_000-index*1000).toISOString();return {account:'a',mailbox:'box',id,messageId:id+'@example.test',subject:'Task '+id,sender:'sender',recipients:[],received,sent:received,content:'Body '+id,...(unread?{body_unavailable:true}:{}),read:false,flagged:false}})
+ mail.request=(input:unknown)=>{
+  const request=input as {command:string}
+  if(request.command==='status')return Promise.resolve({status:'granted'})
+  return Promise.resolve({status:'granted',messages:messages(),complete:true,capped:false,cursor:null})
+ }
+ const manager=new ComposioConnector({memory:()=>memory,client:null,mail,automatic:false,onChange:()=>{ /* inspected below */ }})
+ try{
+  await memory.open();await manager.open();const {id}=await manager.command('connector.mail_connect') as {id:string}
+  const objects=async()=>(await memory.options.client.memory('source_pending',{id})) as {objects:{semantic_hash:string;current_evidence_ids:string[];metadata:{remote_id:string;body_unavailable?:boolean}}[]}
+  const signature=(rows:{semantic_hash:string;current_evidence_ids:string[];metadata:{remote_id:string}}[])=>rows.map(row=>[row.metadata.remote_id,row.semantic_hash,row.current_evidence_ids]).sort()
+  await manager.command('connector.configure',{id,scope:{kind:'macos_mail',mailboxes:['box'],pastDays:30},processingConsent:false})
+  await manager.syncOnce(id)
+  const read=await objects();assert.equal(read.objects.length,2);for(const row of read.objects)assert.equal(row.metadata.body_unavailable,undefined)
+  unread=true;await manager.syncOnce(id)
+  const after=await objects()
+  assert.deepEqual(signature(after.objects),signature(read.objects),'an unread body must not overwrite any stored message')
+ }finally{await manager.close();await memory.close();await rm(root,{recursive:true,force:true})}
+})

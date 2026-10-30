@@ -155,8 +155,10 @@ export function sourceOperation(db:LedgerDatabase,operation:string,input:unknown
  if(operation==='source_pending'){
   const q=z.object({id:sourceIdSchema,after:sourceIdSchema.optional(),object_key:sourceIdSchema.optional(),limit:z.number().int().min(1).max(200).default(200)}).strict().parse(v)
   const c=readConnection(db,q.id);if(!c)throw Error('STORE_NOT_FOUND')
+  // An exact key must be filtered before LIMIT: a caller asking for one object must not receive whichever key sorts first.
+  if(q.object_key!==undefined){const row=db.prepare('SELECT payload_json FROM source_objects WHERE connection_id=? AND generation=? AND object_key=?').get(q.id,c.fence.generation,q.object_key);return {connection:c,objects:row?[sourceObjectSchema.parse(JSON.parse(String(row.payload_json)))]:[],next:null}}
   const objects=db.prepare('SELECT payload_json FROM source_objects WHERE connection_id=? AND generation=? AND object_key>? ORDER BY object_key LIMIT ?').all(q.id,c.fence.generation,q.after??'',q.limit+1).map(row=>sourceObjectSchema.parse(JSON.parse(String(row.payload_json))))
-  return {connection:c,objects:objects.slice(0,q.limit).filter(o=>!q.object_key||o.object_key===q.object_key),next:objects.length>q.limit?objects[q.limit-1]!.object_key:null}
+  return {connection:c,objects:objects.slice(0,q.limit),next:objects.length>q.limit?objects[q.limit-1]!.object_key:null}
  }
  if(operation==='source_apply_page'){
   if(Buffer.byteLength(JSON.stringify(v))>5*1024*1024)throw Error('STORE_INVALID_OPERATION')
