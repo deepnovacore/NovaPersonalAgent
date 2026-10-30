@@ -19,6 +19,7 @@ const configurationLifecycle = source.slice(
   source.indexOf('function beginConfigurationAttempt('),
   source.indexOf('async function refreshManagedWorkspaceCapabilities('),
 )
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 function configurationContext(overrides = {}) {
   const published = []
@@ -102,6 +103,69 @@ test('a result that arrives after its attempt lost ownership is handed to cleanu
   assert.deepEqual(late, [{health: 'ready'}])
 })
 
+test('aborting an owner rejects an unsettled wait immediately as superseded', async () => {
+  const coordinator = createLifecycleCoordinator()
+  const attempt = createConfigurationAttempt()
+  const started = Date.now()
+  const pending = coordinator.run('startup', () => runConfigurationStage(
+    attempt, 'settings', () => new Promise(() => {}), {onStage: () => {}, timeoutMs: 5_000},
+  ))
+  await sleep(10)
+  attempt.abort()
+  await assert.rejects(pending, error => error.code === 'configuration_superseded')
+  assert.ok(Date.now() - started < 1_000)
+  assert.equal(coordinator.busy, false)
+})
+
+test('async late-cleanup failures never escape as unhandled rejections', async () => {
+  const attempt = createConfigurationAttempt()
+  const seen = []
+  const onUnhandled = reason => seen.push(reason)
+  process.on('unhandledRejection', onUnhandled)
+  try {
+    let release
+    const pending = runConfigurationStage(attempt, 'capabilities', () => new Promise(resolve => { release = resolve }), {
+      onStage: () => {},
+      timeoutMs: 5,
+      onLateResult: () => Promise.reject(new Error('late cleanup failed')),
+    })
+    await assert.rejects(pending, error => error.code === 'configuration_timeout')
+    release({health: 'ready'})
+    await sleep(20)
+    assert.deepEqual(seen, [])
+  } finally {
+    process.off('unhandledRejection', onUnhandled)
+  }
+})
+
+test('a maintenance service opened after the stage deadline is closed, not installed', async () => {
+  let releaseOpen
+  let closed = 0
+  const {context, published} = configurationContext({
+    projectNativeHost: {},
+    currentSettings: {},
+    process: {env: {}},
+    homedir: () => '/home/test',
+    path: {sep: '/'},
+    mkdir: async () => {},
+    prepareDesktopStartup: async () => ({config: {stateRoot: '/state', managedRoot: '/managed'}, codexStatus: {}}),
+    ManagedWorkspaceMaintenanceService: {
+      openFromDesktop: () => new Promise(resolve => { releaseOpen = resolve }),
+    },
+    runConfigurationStage: (attempt, stage, operation, options = {}) => runConfigurationStage(
+      attempt, stage, operation, {...options, timeoutMs: 20},
+    ),
+  })
+  const attempt = context.beginConfigurationAttempt()
+  const pending = context.prepareDesktopConfiguration(attempt)
+  await assert.rejects(pending, error => error.code === 'configuration_timeout' && error.stage === 'maintenance')
+  assert.equal(context.managedWorkspaceMaintenance, null)
+  releaseOpen({close: async () => { closed += 1 }})
+  for (let index = 0; index < 50 && closed === 0; index += 1) await sleep(5)
+  assert.equal(closed, 1)
+  assert.deepEqual(published.map(entry => entry[1]), ['configuration_wait_maintenance'])
+})
+
 test('normal startup commits the current attempt and observes recovery once', async () => {
   const observed = []
   const {context, published} = configurationContext({
@@ -157,17 +221,46 @@ test('a superseded attempt cannot install configuration or keep its maintenance 
   assert.equal(context.managedWorkspaceMaintenance, null)
   assert.equal(closed, 1)
   assert.deepEqual(observed, [])
-  assert.match(configurationLifecycle, /onLateResult: service => \{ void closeMaintenanceBounded\(service\) \}/)
 })
 
-test('preparation reports the workspace, directory and Codex waits as stages', async () => {
+test('each preparation wait has its own budget instead of sharing one settings deadline', async () => {
   const stages = []
+  const attempt = createConfigurationAttempt()
   const {posix} = await import('node:path')
-  await prepareDesktopStartup({
-    settings: {}, environment: {}, home: '/home/test', platform: 'linux', arch: 'x64', pathApi: posix,
-    canonicalizePath: value => value, canonicalizeExecutable: () => null, canonicalizeInvocation: () => null,
-    mkdir: async () => {}, inspectCodex: () => null, ensureDirectories: async () => {},
-    onStage: stage => stages.push(stage),
+  const runStage = (stage, operation) => runConfigurationStage(attempt, stage, operation, {
+    onStage: name => stages.push(name),
+    timeoutMs: 40,
   })
-  assert.deepEqual(stages, ['directories', 'codex'])
+  const prepared = await prepareDesktopStartup({
+    settings: {codexWorkspace: '/home/test/ws'}, environment: {}, home: '/home/test',
+    platform: 'linux', arch: 'x64', pathApi: posix,
+    canonicalizePath: value => value, canonicalizeExecutable: () => null, canonicalizeInvocation: () => null,
+    mkdir: async () => {}, inspectCodex: () => null,
+    inspectWorkspace: async () => { await sleep(25); return {isDirectory: () => true} },
+    ensureDirectories: async () => { await sleep(25) },
+    runStage,
+  })
+  assert.deepEqual(stages, ['workspace', 'directories', 'codex'])
+  assert.ok(prepared.config)
+})
+
+test('a preparation timeout names the stage it actually constrained, not settings', async () => {
+  const stages = []
+  const attempt = createConfigurationAttempt()
+  const {posix} = await import('node:path')
+  const runStage = (stage, operation) => runConfigurationStage(attempt, stage, operation, {
+    onStage: name => stages.push(name),
+    timeoutMs: 40,
+  })
+  await assert.rejects(prepareDesktopStartup({
+    settings: {codexWorkspace: '/home/test/ws'}, environment: {}, home: '/home/test',
+    platform: 'linux', arch: 'x64', pathApi: posix,
+    canonicalizePath: value => value, canonicalizeExecutable: () => null, canonicalizeInvocation: () => null,
+    mkdir: async () => {}, inspectCodex: () => null,
+    inspectWorkspace: async () => { await sleep(25); return {isDirectory: () => true} },
+    ensureDirectories: async () => { await sleep(200) },
+    runStage,
+  }), error => error.code === 'configuration_timeout' && error.stage === 'directories')
+  assert.deepEqual(stages, ['workspace', 'directories'])
+  assert.equal(attempt.current(), false)
 })
