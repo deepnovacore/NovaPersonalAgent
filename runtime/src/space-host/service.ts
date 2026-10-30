@@ -2,7 +2,7 @@ import {notificationSchema,type NotificationInput} from '../notifications/contra
 import {applySpaceSourceInput} from './context-input.js';
 import type {SpacePushDelivery} from './push.js';
 import {constants} from 'node:fs';
-import {link,mkdir,open as openFile,readFile,rm,unlink} from 'node:fs/promises';
+import {link,mkdir,open as openFile,rm,unlink} from 'node:fs/promises';
 import {createHash,createHmac,randomBytes,randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import {z} from 'zod';
@@ -27,6 +27,8 @@ type Journal=z.infer<typeof journalSchema>;
 const ADMIN_KINDS=new Set(['settings.patch','secret.put','secret.clear','connector.feishu']);
 const SECRET_KINDS=new Set<SpaceIntent['kind']>(['secret.put','secret.clear']);
 const fingerprint=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
+/** Key-file failures carry their code as a property too, so startup diagnostics do not have to parse the message. */
+const keyError=(code:string)=>Object.assign(Error(code),{code});
 export class SpaceHost {
  readonly #store;#state:Journal;#raw=new Map<string,string>();#tail:Promise<unknown>=Promise.resolve();#stop:(()=>void|Promise<void>)|undefined;#unsubscribe:(()=>void)|undefined;#chats=new Map<string,Promise<void>>();#feishuPolls=new Map<string,{abort:AbortController;task:Promise<void>}>();#flush:Promise<void>|undefined;#opened=false;#snapshotTimer:ReturnType<typeof setTimeout>|undefined;#secretKey:string|undefined;
 /** `feishuPollMs` is the interval between Feishu app-setup status polls and `feishuSetupTimeoutMs` bounds them to the connector's 300s config operation, so a link that appears late still reaches the phone. */
@@ -66,11 +68,24 @@ export class SpaceHost {
   }finally{await rm(temp,{force:true}).catch(()=>{ /* A leftover temp file is never read as the key. */ })}
   return this.#secretKey=await this.#readSecretKey(path)
  }
+ /** Read the tag key through a handle: a symlinked or group-readable key file must never supply the tag key. */
  async #readSecretKey(path:string):Promise<string>{
-  const text=(await readFile(path,'utf8')).trim()
-  if(!text)throw Object.assign(Error('space_secret_key_empty'),{code:'space_secret_key_empty'})
-  if(!/^[a-f0-9]{64}$/u.test(text))throw Error('space_secret_key_invalid')
-  return text
+  const opened=await openFile(path,constants.O_RDONLY|constants.O_NOFOLLOW).catch((error:NodeJS.ErrnoException)=>{
+   // O_NOFOLLOW reports a symlinked key as ELOOP instead of following it to a file someone else controls.
+   if(error.code==='ELOOP')throw keyError('space_secret_key_symlink')
+   throw error
+  })
+  try{
+   const stats=await opened.stat()
+   if(!stats.isFile())throw keyError('space_secret_key_invalid')
+   // Another account could read a 0644 key and forge the tags that guard secret replays.
+   if((stats.mode&0o077)!==0)throw keyError('space_secret_key_permissions')
+   if(stats.size===0)throw keyError('space_secret_key_empty')
+   if(stats.size!==64)throw keyError('space_secret_key_invalid')
+   const {buffer,bytesRead}=await opened.read(Buffer.alloc(64),0,64,0),text=buffer.toString('utf8',0,bytesRead)
+   if(!/^[a-f0-9]{64}$/u.test(text))throw keyError('space_secret_key_invalid')
+   return text
+  }finally{await opened.close()}
  }
  #secretTag(key:string,raw:string):string{return createHmac('sha256',this.#secretKey!).update(key+'\n'+raw).digest('hex')}
  #owner(){return this.options.owner?.()}

@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {realpath,mkdtemp,readdir,rm,readFile,stat,writeFile} from 'node:fs/promises';
+import {chmod,realpath,mkdtemp,readdir,rm,readFile,stat,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
@@ -239,6 +239,32 @@ test('a zero-length key left by an interrupted publish is replaced instead of bl
   for(const row of started.rows.slice(1)){await row.space.receive('phone',secretRaceIntent('sk-repaired-value'));assert.equal(receipt().error,undefined)}
   await started.rows[1]!.space.receive('phone',secretRaceIntent('sk-repaired-changed'));assert.equal(receipt().error,'op_id_conflict');
  }finally{await started.close();await rm(dir,{recursive:true,force:true})}
+});
+
+test('a symlinked key file is refused instead of supplying the tag key',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-link-')),sent:Record<string,unknown>[]=[],key=randomUUID().replaceAll('-','')+'a'.repeat(32),keyFile=join(dir,'space.json.key');
+ try{
+  // A 0600 file elsewhere in the directory tree is still not the key this journal expects.
+  await writeFile(join(dir,'elsewhere.key'),key,{mode:0o600});await symlink(join(dir,'elsewhere.key'),keyFile);
+  const linked=await concurrentStarters(dir,sent,1);
+  try{await assert.rejects(linked.rows[0]!.space.open(),(error:NodeJS.ErrnoException)=>error.code==='space_secret_key_symlink')}finally{await linked.close()}
+  await rm(keyFile);await writeFile(keyFile,key,{mode:0o600});
+  const direct=await concurrentStarters(dir,sent,1);
+  try{await direct.rows[0]!.space.open();assert.equal((await stat(keyFile)).mode&0o777,0o600)}finally{await direct.close()}
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
+
+test('a key file readable by other accounts or of the wrong length is refused',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-mode-')),sent:Record<string,unknown>[]=[],keyFile=join(dir,'space.json.key'),key='b'.repeat(64);
+ try{
+  await writeFile(keyFile,key,{mode:0o644});
+  const wide=await concurrentStarters(dir,sent,1);
+  try{await assert.rejects(wide.rows[0]!.space.open(),(error:NodeJS.ErrnoException)=>error.code==='space_secret_key_permissions')}finally{await wide.close()}
+  await chmod(keyFile,0o600);const narrow=await concurrentStarters(dir,sent,1);
+  try{await narrow.rows[0]!.space.open()}finally{await narrow.close()}
+  await writeFile(keyFile,key.slice(0,63),{mode:0o600});const short=await concurrentStarters(dir,sent,1);
+  try{await assert.rejects(short.rows[0]!.space.open(),(error:NodeJS.ErrnoException)=>error.code==='space_secret_key_invalid')}finally{await short.close()}
+ }finally{await rm(dir,{recursive:true,force:true})}
 });
 
 test('Feishu app setup link generated after app.start reaches the owner snapshot',async()=>{
