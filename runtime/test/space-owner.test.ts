@@ -10,12 +10,12 @@ import {SpaceHostController,type HostSpaceConfig} from '../src/space-host/config
 import {runSpacePair} from '../src/space-host/cli.js';
 import {adminSocketPath,spaceAdminRequest} from '../src/space-host/admin-socket.js';
 
-test('Space owner is the first confirmed phone, survives later pairings, and is never promoted implicitly',{skip:process.platform==='win32'},async t=>{
+test('Space owner is the first phone on a fresh Host and is never promoted onto a Host that already has members',{skip:process.platform==='win32'},async t=>{
  const {RelayServer,RelayClient,crypto}=await loadRelayFixture();
  const dir=await mkdtemp(join(await realpath(tmpdir()),'cli-'));const cleanup:(()=>void|Promise<void>)[]=[()=>rm(dir,{recursive:true,force:true})];
  t.after(async()=>{for(const close of cleanup.reverse())await close()});
  const relay=new RelayServer({securityPath:':memory:',mailboxPath:':memory:',bootstrapToken:'operator-only-bootstrap-secret',bootstrapPerMinute:200,requestsPerMinute:5000});cleanup.push(()=>relay.close());const url=await relay.listen();
- const identity=await crypto.generateDeviceIdentity(),a=await crypto.generateDeviceIdentity(),b=await crypto.generateDeviceIdentity(),third=await crypto.generateDeviceIdentity(),space=crypto.spaceId(identity.signingPublicKey);
+ const identity=await crypto.generateDeviceIdentity(),a=await crypto.generateDeviceIdentity(),b=await crypto.generateDeviceIdentity(),third=await crypto.generateDeviceIdentity(),fourth=await crypto.generateDeviceIdentity(),space=crypto.spaceId(identity.signingPublicKey);
  const make=(who:typeof identity)=>new RelayClient({url,space,device:who.device,pollIntervalMs:30,reconnectMinMs:20,signChallenge:c=>crypto.signControl({v:1,purpose:'relay-login',challengeId:c.id,nonce:c.nonce,space:c.space,device:c.device,epoch:c.epoch,expiresAt:c.expiresAt},who.signingPrivateKey)});
  const h=make(identity),record={device:identity.device,signingPublicKey:identity.signingPublicKey,encryptionPublicKey:identity.encryptionPublicKey};cleanup.push(()=>h.stop());
  await h.createSpace({space,host:record,proof:await crypto.signControl({v:1,purpose:'space-create',space,host:record},identity.signingPrivateKey)},'operator-only-bootstrap-secret');
@@ -26,9 +26,16 @@ test('Space owner is the first confirmed phone, survives later pairings, and is 
  const socket=adminSocketPath(configPath),io={output:{write:()=>undefined},interactive:false,confirm:()=>Promise.resolve(false),signal:new AbortController().signal,pollMs:20};
  const pair=async(phone:typeof identity)=>{const client=make(phone);cleanup.push(()=>client.stop());const invitation=await spaceAdminRequest(socket,'invitation') as {id:string;secret:string};const input={v:1,purpose:'pair-request',invitationId:invitation.id,secret:invitation.secret,device:phone.device,signingPublicKey:phone.signingPublicKey,encryptionPublicKey:phone.encryptionPublicKey,business_versions:[1]};await client.requestPairing({...input,proof:await crypto.signControl(input,phone.signingPrivateKey)});
   assert.equal(await runSpacePair({command:'pair',configPath,timeoutSeconds:10,yesFingerprint:crypto.deviceFingerprint(phone.signingPublicKey,phone.encryptionPublicKey)},io),0)};
+ // A fresh Host has no members, so the first confirmed phone owns credential control.
  await pair(a);assert.equal(config.owner_device,a.device);
  await pair(b);assert.equal(config.owner_device,a.device);
+ // Revoking the owner leaves other members: the next pairing must not inherit credential control.
  await spaceAdminRequest(socket,'revoke',{device:a.device});assert.equal(config.owner_device,undefined);
  assert.equal(controller.service!.snapshot(b.device).owner,false);
- await pair(third);assert.equal(config.owner_device,third.device);
+ await pair(third);assert.equal(config.owner_device,undefined);
+ assert.equal(controller.service!.snapshot(third.device).owner,false);
+ // Revoking down to zero members makes the Host fresh again, so the next pairing becomes owner.
+ await spaceAdminRequest(socket,'revoke',{device:b.device});
+ await spaceAdminRequest(socket,'revoke',{device:third.device});assert.deepEqual(config.members,[]);
+ await pair(fourth);assert.equal(config.owner_device,fourth.device);
 });

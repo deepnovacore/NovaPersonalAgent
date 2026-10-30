@@ -22,8 +22,8 @@ async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boo
 }
 
 test('admin intents are rejected for non-owner senders and when no owner exists',async()=>{
- for(const owner of [undefined,'other']){const f=await fixture({...(owner?{owner}:{})});
-  try{for(const [kind,input] of [['settings.patch',{method:'soul.set',params:{role:'x'}}],['secret.put',{name:'OPENAI_API_KEY',value:'sk-test-1'}],['secret.clear',{name:'OPENAI_API_KEY'}],['connector.feishu',{action:'status'}]] as const){const r=await f.send('phone','op-'+kind,kind,input);assert.deepEqual([r.status,r.error],['rejected','owner_required'])};
+ for(const [owner,error] of [[undefined,'owner_unassigned'],['other','owner_required']] as const){const f=await fixture({...(owner?{owner}:{})});
+  try{for(const [kind,input] of [['settings.patch',{method:'soul.set',params:{role:'x'}}],['secret.put',{name:'OPENAI_API_KEY',value:'sk-test-1'}],['secret.clear',{name:'OPENAI_API_KEY'}],['connector.feishu',{action:'status'}]] as const){const r=await f.send('phone','op-'+kind,kind,input);assert.deepEqual([r.status,r.error],['rejected',error])};
    assert.equal((f.space.snapshot('phone') as unknown as {owner:boolean}).owner,false);assert.equal('host_credentials' in f.space.snapshot('phone'),false)}finally{await f.close()}}
 });
 

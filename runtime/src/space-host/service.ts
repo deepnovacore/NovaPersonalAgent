@@ -55,7 +55,7 @@ export class SpaceHost {
    let authorityCommitted=false;
    try{
     if(intent.expires_at!==undefined&&intent.expires_at<=this.#now())throw Error('expired');
-    if(ADMIN_KINDS.has(intent.kind)&&!this.#hostAdmin(sender))throw Error('owner_required');
+    if(ADMIN_KINDS.has(intent.kind)&&!this.#hostAdmin(sender))throw Error(this.#owner()===undefined?'owner_unassigned':'owner_required');
     if(intent.kind==='life.mutate'){
      const input=structuredClone(intent.input),maps=this.#state.remaps[sender]??{};for(const field of ['id','goal_id','idea_id'])if(typeof input[field]==='string'&&Object.hasOwn(maps,input[field]))input[field]=maps[input[field]];
      if(input.op!=='create'){if(intent.base_version===undefined)throw Error('base_version_required');input.expected_version=intent.base_version}
