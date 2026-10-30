@@ -529,6 +529,11 @@ class SpaceClientState extends ChangeNotifier {
     } else if (event['status'] == 'conflict' || event['status'] == 'rejected') {
       item['status'] = event['status'];
       item['error'] = event['error'];
+      // A refused key is never resent, so the phone keeps neither its plaintext nor its envelope.
+      if (item['kind'] == 'secret.put') {
+        item['input'] = _copy(item['input'] as Map)..remove('value');
+        item.remove('envelope');
+      }
     }
   }
 
