@@ -227,17 +227,17 @@ test('concurrent starters publish one complete key file and every starter reads 
  }finally{await started.close();await rm(dir,{recursive:true,force:true})}
 });
 
-test('a zero-length key left by an interrupted publish is replaced instead of blocking startup',async()=>{
- const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-empty-')),sent:Record<string,unknown>[]=[],receipt=()=>sent.filter(row=>row.type==='receipt'&&row.op_id==='raced-secret').at(-1)!,keyFile=join(dir,'space.json.key');
- // The old writer created the key file and then wrote it, so a crash in between left exactly this.
+test('a zero-length key is refused by every starter and the file is left in place',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-empty-')),sent:Record<string,unknown>[]=[],keyFile=join(dir,'space.json.key');
+ // An older build could create the key file before writing it, so a crash in between left exactly this.
  await writeFile(keyFile,'',{mode:0o600});
- const started=await concurrentStarters(dir,sent,3);
+ const started=await concurrentStarters(dir,sent,4);
  try{
-  await Promise.all(started.rows.map(row=>row.space.open()));
-  const key=await readFile(keyFile,'utf8');assert.match(key,/^[a-f0-9]{64}$/u);assert.equal((await stat(keyFile)).mode&0o777,0o600);
-  await started.rows[0]!.space.receive('phone',secretRaceIntent('sk-repaired-value'));assert.equal(receipt().status,'accepted');
-  for(const row of started.rows.slice(1)){await row.space.receive('phone',secretRaceIntent('sk-repaired-value'));assert.equal(receipt().error,undefined)}
-  await started.rows[1]!.space.receive('phone',secretRaceIntent('sk-repaired-changed'));assert.equal(receipt().error,'op_id_conflict');
+  // Empty is a damaged key like a bad length: fail closed, because this file may be the only copy that can still authenticate existing tags.
+  for(const row of started.rows)await assert.rejects(row.space.open(),(error:NodeJS.ErrnoException)=>error.code==='space_secret_key_empty');
+  // Concurrent starters must not delete or replace it behind each other's back; an operator inspects these exact bytes.
+  assert.equal(await readFile(keyFile,'utf8'),'');assert.equal((await stat(keyFile)).mode&0o777,0o600);
+  assert.deepEqual((await readdir(dir)).filter(name=>name.endsWith('.tmp')),[],'refusing must not publish a new key');
  }finally{await started.close();await rm(dir,{recursive:true,force:true})}
 });
 

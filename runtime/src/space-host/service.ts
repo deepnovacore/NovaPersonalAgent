@@ -2,7 +2,7 @@ import {notificationSchema,type NotificationInput} from '../notifications/contra
 import {applySpaceSourceInput} from './context-input.js';
 import type {SpacePushDelivery} from './push.js';
 import {constants} from 'node:fs';
-import {link,mkdir,open as openFile,rm,unlink} from 'node:fs/promises';
+import {link,mkdir,open as openFile,rm} from 'node:fs/promises';
 import {createHash,createHmac,randomBytes,randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import {z} from 'zod';
@@ -42,12 +42,8 @@ export class SpaceHost {
  async #loadSecretKey():Promise<string>{
   const cached=this.#secretKey;if(cached)return cached
   const path=this.options.path+'.key'
-  const existing=await this.#readSecretKey(path).catch(async(error:NodeJS.ErrnoException)=>{
-   if(error.code==='ENOENT')return undefined
-   if(error.code!=='space_secret_key_empty')throw error
-   // A zero-length key was left by an interrupted publish and never authenticated a tag, so it is replaced instead of trusted.
-   await unlink(path).catch((unlinkError:NodeJS.ErrnoException)=>{if(unlinkError.code!=='ENOENT')throw unlinkError});return undefined
-  })
+  // Only a missing key is created. A damaged key fails closed and is never deleted or replaced: it may be the last copy that can still authenticate existing tags, and a starter that recovers "late" must not remove the complete key another starter just published.
+  const existing=await this.#readSecretKey(path).catch((error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return undefined;throw error})
   if(existing!==undefined)return this.#secretKey=existing
   return this.#publishSecretKey(path)
  }
