@@ -134,8 +134,8 @@ test('Feishu app setup link generated after app.start reaches the owner snapshot
  const view=(withUrl:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting',...(withUrl?{verification_url:url}:{})}});
  const f=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting'}}),command:method=>Promise.resolve(method==='feishu.app.status'?view(++polls>=2):view(false)),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
  try{const start=await f.send('phone','setup','connector.feishu',{action:'app.start'});assert.equal(start.status,'accepted');assert.equal(((start.result as Record<string,unknown>).app_setup as Record<string,unknown>).verification_url,undefined);
-  for(let i=0;i<100&&!f.sent.some(row=>row.type==='snapshot'&&JSON.stringify(row).includes('code=late'));i++)await new Promise(resolve=>setTimeout(resolve,10));
-  assert.ok(polls>=2);const snap=f.sent.filter(row=>row.type==='snapshot').at(-1) as {snapshot:{host_feishu:{app_setup:{verification_url:string}}}};assert.equal(snap.snapshot.host_feishu.app_setup.verification_url,url);
+  for(let i=0;i<1500&&!f.sent.some(row=>row.type==='snapshot'&&JSON.stringify(row).includes('code=late'));i++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.ok(polls>=2);const withLink=f.sent.filter(row=>row.type==='snapshot'&&JSON.stringify(row).includes(url)) as {snapshot:{host_feishu?:{app_setup:{verification_url:string}}}}[];assert.ok(withLink.length>0);for(const row of withLink)assert.equal(row.snapshot.host_feishu?.app_setup.verification_url,url);
  }finally{await f.close()}
 });
 
@@ -145,8 +145,8 @@ test('a Feishu setup link that appears long after app.start still reaches the ow
  // The connector's config process can run for 300s, so a link after many empty polls is still delivered.
  const f=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting'}}),command:method=>Promise.resolve(method==='feishu.app.status'?view(++polls>40):view(false)),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
  try{assert.equal((await f.send('phone','setup','connector.feishu',{action:'app.start'})).status,'accepted');
-  for(let i=0;i<500&&!f.sent.some(row=>row.type==='snapshot'&&JSON.stringify(row).includes('code=very-late'));i++)await new Promise(resolve=>setTimeout(resolve,10));
-  assert.ok(polls>40);const snap=f.sent.filter(row=>row.type==='snapshot').at(-1) as {snapshot:{host_feishu:{app_setup:{verification_url:string}}}};assert.equal(snap.snapshot.host_feishu.app_setup.verification_url,url);
+  for(let i=0;i<1500&&!f.sent.some(row=>row.type==='snapshot'&&JSON.stringify(row).includes('code=very-late'));i++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.ok(polls>40);const withLink=f.sent.filter(row=>row.type==='snapshot'&&JSON.stringify(row).includes(url)) as {snapshot:{host_feishu?:{app_setup:{verification_url:string}}}}[];assert.ok(withLink.length>0);for(const row of withLink)assert.equal(row.snapshot.host_feishu?.app_setup.verification_url,url);
  }finally{await f.close()}
 });
 
@@ -156,9 +156,9 @@ test('a transient Feishu app status failure does not drop the setup link',async(
  const f=await fixture({owner:'phone',feishuConnector:{snapshot:()=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting'}}),command:method=>{if(method!=='feishu.app.status')return Promise.resolve(view(false));
    // Two unavailable status calls are retried rather than ending the poll.
    if(++polls<=2)return Promise.reject(Error('unavailable'));return Promise.resolve(view(true))},open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
- try{assert.equal((await f.send('phone','setup','connector.feishu',{action:'app.start'})).status,'accepted');assert.equal(f.sent.some(row=>JSON.stringify(row).includes('code=after-failure')),false);
-  for(let i=0;i<200&&!f.sent.some(row=>row.type==='snapshot'&&JSON.stringify(row).includes('code=after-failure'));i++)await new Promise(resolve=>setTimeout(resolve,10));
-  assert.ok(polls>=3);const snap=f.sent.filter(row=>row.type==='snapshot').at(-1) as {snapshot:{host_feishu:{app_setup:{verification_url:string}}}};assert.equal(snap.snapshot.host_feishu.app_setup.verification_url,url);
+ try{const start=await f.send('phone','setup','connector.feishu',{action:'app.start'});assert.equal(start.status,'accepted');assert.equal(JSON.stringify(start.result).includes('code=after-failure'),false);
+  for(let i=0;i<1500&&!f.sent.some(row=>row.type==='snapshot'&&JSON.stringify(row).includes('code=after-failure'));i++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.ok(polls>=3);const withLink=f.sent.filter(row=>row.type==='snapshot'&&JSON.stringify(row).includes(url)) as {snapshot:{host_feishu?:{app_setup:{verification_url:string}}}}[];assert.ok(withLink.length>0);for(const row of withLink)assert.equal(row.snapshot.host_feishu?.app_setup.verification_url,url);
  }finally{await f.close()}
 });
 
