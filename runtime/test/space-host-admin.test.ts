@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
-import {realpath,mkdtemp,rm,readFile,stat,writeFile} from 'node:fs/promises';
+import {createHash,randomUUID} from 'node:crypto';
+import {realpath,mkdtemp,readdir,rm,readFile,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
@@ -198,6 +198,47 @@ test('a secret op journalled before tags existed replays without a cross-algorit
   const ops=(JSON.parse(await readFile(file,'utf8')) as {ops:Record<string,unknown>}).ops;
   assert.equal(Object.keys(ops).length,1,'a legacy replay is the same operation, not a second one');
  }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
+});
+
+/** Starters share one journal and key file, so they race on the same `.key` while each keeps its own personal store. */
+function recordingTransport(sent:Record<string,unknown>[]):SpaceHostTransport{
+ return {start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone']};
+}
+async function concurrentStarters(dir:string,sent:Record<string,unknown>[],count:number){
+ const transport=recordingTransport(sent),make=async()=>{const host=new PersonalAgentHost({path:join(dir,'personal-'+randomUUID()+'.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});await host.open({deferBackground:true});return {host,space:new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>'phone',secrets:new HostSecretStore(join(dir,'config-'+randomUUID()+'.secrets.json')),environment:{}})}};
+ const rows=await Promise.all(Array.from({length:count},make));
+ return {rows,close:async()=>{await Promise.all(rows.map(async row=>{await row.space.close();await row.host.close()}))}};
+}
+function secretRaceIntent(value:string){return {v:1,type:'intent',op_id:'raced-secret',kind:'secret.put',created_at:Date.now(),input:{name:'OPENAI_API_KEY',value}}}
+
+test('concurrent starters publish one complete key file and every starter reads the same key',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-race-')),sent:Record<string,unknown>[]=[],receipt=()=>sent.filter(row=>row.type==='receipt'&&row.op_id==='raced-secret').at(-1)!;
+ const started=await concurrentStarters(dir,sent,8);
+ try{
+  // No starter may observe a half-written key: the name only appears once its contents are complete.
+  await Promise.all(started.rows.map(row=>row.space.open()));
+  const keyFile=join(dir,'space.json.key'),key=await readFile(keyFile,'utf8');
+  assert.match(key,/^[a-f0-9]{64}$/u);assert.equal((await stat(keyFile)).mode&0o777,0o600);
+  assert.deepEqual((await readdir(dir)).filter(name=>name.endsWith('.tmp')),[],'publishing must not leave a temp file behind');
+  await started.rows[0]!.space.receive('phone',secretRaceIntent('sk-raced-value'));assert.equal(receipt().status,'accepted');
+  // A starter that lost the race tags the same operation identically only if it read the winner's key.
+  for(const row of started.rows.slice(1)){await row.space.receive('phone',secretRaceIntent('sk-raced-value'));assert.equal(receipt().error,undefined)}
+  await started.rows[1]!.space.receive('phone',secretRaceIntent('sk-raced-changed'));assert.equal(receipt().error,'op_id_conflict');
+ }finally{await started.close();await rm(dir,{recursive:true,force:true})}
+});
+
+test('a zero-length key left by an interrupted publish is replaced instead of blocking startup',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-empty-')),sent:Record<string,unknown>[]=[],receipt=()=>sent.filter(row=>row.type==='receipt'&&row.op_id==='raced-secret').at(-1)!,keyFile=join(dir,'space.json.key');
+ // The old writer created the key file and then wrote it, so a crash in between left exactly this.
+ await writeFile(keyFile,'',{mode:0o600});
+ const started=await concurrentStarters(dir,sent,3);
+ try{
+  await Promise.all(started.rows.map(row=>row.space.open()));
+  const key=await readFile(keyFile,'utf8');assert.match(key,/^[a-f0-9]{64}$/u);assert.equal((await stat(keyFile)).mode&0o777,0o600);
+  await started.rows[0]!.space.receive('phone',secretRaceIntent('sk-repaired-value'));assert.equal(receipt().status,'accepted');
+  for(const row of started.rows.slice(1)){await row.space.receive('phone',secretRaceIntent('sk-repaired-value'));assert.equal(receipt().error,undefined)}
+  await started.rows[1]!.space.receive('phone',secretRaceIntent('sk-repaired-changed'));assert.equal(receipt().error,'op_id_conflict');
+ }finally{await started.close();await rm(dir,{recursive:true,force:true})}
 });
 
 test('Feishu app setup link generated after app.start reaches the owner snapshot',async()=>{

@@ -2,7 +2,7 @@ import {notificationSchema,type NotificationInput} from '../notifications/contra
 import {applySpaceSourceInput} from './context-input.js';
 import type {SpacePushDelivery} from './push.js';
 import {constants} from 'node:fs';
-import {mkdir,open as openFile,readFile} from 'node:fs/promises';
+import {link,mkdir,open as openFile,readFile,rm,unlink} from 'node:fs/promises';
 import {createHash,createHmac,randomBytes,randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import {z} from 'zod';
@@ -38,18 +38,39 @@ export class SpaceHost {
  #journalIntent(intent:SpaceIntent):SpaceIntent{if(intent.kind==='source.input')return {...intent,input:{}};if(intent.kind==='secret.put'||intent.kind==='secret.clear')return {...intent,input:{name:intent.input.name}};if(intent.kind==='push.register'){const {credential:_credential,...rest}=intent.input;return {...intent,input:rest}}return intent}
  /** The journal is a portable backup; its secret tags are useless without this separate 0600 key. */
  async #loadSecretKey():Promise<string>{
-  if(this.#secretKey)return this.#secretKey
-  const path=this.options.path+'.key',valid=(text:string)=>/^[a-f0-9]{64}$/u.test(text)
-  try{const text=(await readFile(path,'utf8')).trim();if(!valid(text))throw Error('space_secret_key_invalid');this.#secretKey=text;return text}
-  catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
-  const key=randomBytes(32).toString('hex')
+  const cached=this.#secretKey;if(cached)return cached
+  const path=this.options.path+'.key'
+  const existing=await this.#readSecretKey(path).catch(async(error:NodeJS.ErrnoException)=>{
+   if(error.code==='ENOENT')return undefined
+   if(error.code!=='space_secret_key_empty')throw error
+   // A zero-length key was left by an interrupted publish and never authenticated a tag, so it is replaced instead of trusted.
+   await unlink(path).catch((unlinkError:NodeJS.ErrnoException)=>{if(unlinkError.code!=='ENOENT')throw unlinkError});return undefined
+  })
+  if(existing!==undefined)return this.#secretKey=existing
+  return this.#publishSecretKey(path)
+ }
+ /** Publish only a complete key: write and fsync a private temp file, then link it into place without replacing a key another starter already published. */
+ async #publishSecretKey(path:string):Promise<string>{
+  const key=randomBytes(32).toString('hex'),temp=path+'.'+randomUUID()+'.tmp'
   await mkdir(dirname(path),{recursive:true,mode:0o700})
-  try{const file=await openFile(path,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);try{await file.writeFile(key);await file.sync()}finally{await file.close()}}
-  catch(error){
-   if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error
-   const text=(await readFile(path,'utf8')).trim();if(!valid(text))throw Error('space_secret_key_invalid');this.#secretKey=text;return text
-  }
-  this.#secretKey=key;return key
+  let publishing=false
+  try{
+   const file=await openFile(temp,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600)
+   try{await file.writeFile(key);await file.sync()}finally{await file.close()}
+   publishing=true;await link(temp,path);
+   // Node cannot fsync directories on Windows; the key itself was synced before it was linked.
+   if(process.platform!=='win32'){const dir=await openFile(dirname(path),constants.O_RDONLY);try{await dir.sync()}finally{await dir.close()}}
+  }catch(error){
+   // A starter that lost the race adopts the winner's complete key below instead of trusting its own.
+   if(!publishing||(error as NodeJS.ErrnoException).code!=='EEXIST')throw error
+  }finally{await rm(temp,{force:true}).catch(()=>{ /* A leftover temp file is never read as the key. */ })}
+  return this.#secretKey=await this.#readSecretKey(path)
+ }
+ async #readSecretKey(path:string):Promise<string>{
+  const text=(await readFile(path,'utf8')).trim()
+  if(!text)throw Object.assign(Error('space_secret_key_empty'),{code:'space_secret_key_empty'})
+  if(!/^[a-f0-9]{64}$/u.test(text))throw Error('space_secret_key_invalid')
+  return text
  }
  #secretTag(key:string,raw:string):string{return createHmac('sha256',this.#secretKey!).update(key+'\n'+raw).digest('hex')}
  #owner(){return this.options.owner?.()}
