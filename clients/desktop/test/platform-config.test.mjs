@@ -29,7 +29,6 @@ test('desktop configuration lets the explicit process binary override saved disc
       codexBinaryPath: 'C:\\Tools\\codex.exe',
       codexWorkspace: 'C:\\Work\\Nova',
       codexManagedRoot: '',
-      modelBaseUrl: 'https://settings.example/v1',
       startListeningOnLaunch: true,
     },
     environment: {
@@ -37,7 +36,6 @@ test('desktop configuration lets the explicit process binary override saved disc
       CODEX_WORKSPACE: 'C:\\Env\\Workspace',
       CODEX_MANAGED_ROOT: 'C:\\Env\\Managed',
       CODEX_PROJECT_STATE_ROOT: 'C:\\Env\\State',
-      MODEL_BASE_URL: 'https://env.example/v1',
     },
     home: 'C:\\Users\\nova',
     platform: 'win32',
@@ -56,8 +54,6 @@ test('desktop configuration lets the explicit process binary override saved disc
     codexBinaryMode: 'manual',
     codexBinaryPath: 'C:\\Env\\codex.exe',
     codexConfigurationError: null,
-    modelBaseUrl: 'https://settings.example/v1',
-    modelConfigurationError: null,
     startListeningOnLaunch: true,
   })
   assert.deepEqual(canonicalized, [
@@ -113,19 +109,11 @@ test('an environment Codex binary fills a saved empty manual path', () => {
   assert.equal(resolved.codexConfigurationError, null)
 })
 
-test('environment model URL uses the same safety validator as Settings', () => {
-  const invalid = resolveDesktopConfig({
-    settings: {}, environment: {MODEL_BASE_URL: 'http://models.example/v1'},
-    home: '/home/nova', platform: 'linux', pathApi: posix, canonicalize: value => value,
-  })
-  assert.equal(invalid.modelBaseUrl, '')
-  assert.equal(invalid.modelConfigurationError, 'model_base_url_invalid')
-  const loopback = resolveDesktopConfig({
-    settings: {}, environment: {MODEL_BASE_URL: 'http://127.0.0.1:8080/v1'},
-    home: '/home/nova', platform: 'linux', pathApi: posix, canonicalize: value => value,
-  })
-  assert.equal(loopback.modelBaseUrl, 'http://127.0.0.1:8080/v1')
-  assert.equal(loopback.modelConfigurationError, null)
+test('desktop startup accepts both pipeline modes without voice credentials',()=>{
+ for(const pipelineMode of ['integrated','cascaded']){
+  const config=resolveDesktopConfig({settings:{pipelineMode},environment:{},home:'/home/nova',platform:'darwin',pathApi:posix})
+  assert.equal(config.codexConfigurationError,null)
+ }
 })
 
 test('startup creates every application-owned default directory before spawn', async () => {
@@ -154,7 +142,7 @@ test('startup creates every application-owned default directory before spawn', a
 
 test('desktop startup model preflight accepts both modes without voice credentials',()=>{
  for(const pipelineMode of ['integrated','cascaded']){
-  const config=resolveDesktopConfig({settings:{pipelineMode,modelBaseUrl:'https://api.example.com/v1'},environment:{},home:'/home/nova',platform:'darwin',pathApi:posix})
-  assert.equal(config.modelConfigurationError,null)
+  const config=resolveDesktopConfig({settings:{pipelineMode},environment:{},home:'/home/nova',platform:'darwin',pathApi:posix})
+  assert.equal(config.codexConfigurationError,null)
  }
 })

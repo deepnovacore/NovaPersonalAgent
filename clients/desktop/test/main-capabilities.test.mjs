@@ -33,12 +33,6 @@ test('actual main prelaunch registry failures stop the supervisor without schedu
     await supervisor.stop()
   }
 })
-for (const acceptance of [null, {}]) test(`actual main preserves model errors with Coding disabled (acceptance=${!!acceptance})`, async () => {
-  const context = vm.createContext({acceptance, readCapabilityDocument: () => ({modules: {coding: {enabled: false}}}), classifyBackendFailure,
-    currentSettings: {}, process: {env: {}}, desktopConfig: {modelConfigurationError: 'model_base_url_invalid', codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'unavailable'}})
-  vm.runInContext(launch, context)
-  await assert.rejects(context.launchBackend(), error => error.kind === 'configuration_required' && error.code === 'model_base_url_invalid')
-})
 test('actual main turns Coding off instead of blocking on an unfinished manual Codex path', async () => {
   const specs = []
   const context = vm.createContext({acceptance: null, readCapabilityDocument: () => ({version: 1}), classifyBackendFailure,

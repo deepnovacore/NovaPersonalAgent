@@ -90,6 +90,50 @@ test('malformed MODEL_ROUTES is one configuration error instead of partial routi
   }
 })
 
+test('explicit routes read each provider model URL while embedding stays independent', () => {
+  const settings = loadSettings({
+    MODEL_ROUTES: dense({
+      support: {provider: 'deepseek', model: 'deepseek-chat'},
+      fast: {provider: 'qwen', model: 'qwen-flash'},
+      compressor: {provider: 'openai', model: 'gpt-6-luna'},
+      watch: {provider: 'stepfun', model: 'step-3.7-flash'},
+      embedding: {provider: 'dashscope', model: 'text-embedding-v4'},
+    }),
+    DASHSCOPE_MODEL_BASE_URL: 'https://qwen-model.example/v1',
+    DEEPSEEK_MODEL_BASE_URL: 'https://deepseek-model.example/v1',
+    OPENAI_MODEL_BASE_URL: 'https://openai-model.example/v1',
+    STEPFUN_MODEL_BASE_URL: 'https://stepfun-model.example/v1',
+    DASHSCOPE_API_KEY: 'dash-key',
+    DEEPSEEK_API_KEY: 'deepseek-key',
+    OPENAI_API_KEY: 'openai-key',
+    STEPFUN_API_KEY: 'stepfun-key',
+  })
+  assert.deepEqual(resolveModelRoute(settings, 'support'), {
+    provider: 'deepseek', model: 'deepseek-chat', baseUrl: 'https://deepseek-model.example/v1',
+    apiKey: 'deepseek-key', missing: null,
+  })
+  assert.deepEqual(resolveModelRoute(settings, 'fast'), {
+    provider: 'qwen', model: 'qwen-flash', baseUrl: 'https://qwen-model.example/v1',
+    apiKey: 'dash-key', missing: null,
+  })
+  assert.deepEqual(resolveModelRoute(settings, 'compressor'), {
+    provider: 'openai', model: 'gpt-6-luna', baseUrl: 'https://openai-model.example/v1',
+    apiKey: 'openai-key', missing: null,
+  })
+  assert.deepEqual(resolveModelRoute(settings, 'watch'), {
+    provider: 'stepfun', model: 'step-3.7-flash', baseUrl: 'https://stepfun-model.example/v1',
+    apiKey: 'stepfun-key', missing: null,
+  })
+  // The DashScope embedding lane is not the Qwen model endpoint.
+  assert.deepEqual(resolveModelRoute(settings, 'embedding'), {
+    provider: 'dashscope', model: 'text-embedding-v4', baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
+    apiKey: 'dash-key', missing: null,
+  })
+  assert.deepEqual(resolveEmbeddingConnection(settings), {
+    baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'dash-key',
+  })
+})
+
 test('MODEL_ROUTES overrides each lane model and gates the routed provider credentials', () => {
   const settings = loadSettings({
     PIPELINE_MODE: 'integrated',

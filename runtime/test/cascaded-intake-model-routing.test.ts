@@ -66,9 +66,9 @@ test('host and desktop text/voice children keep resolved support models paired a
     {provider: 'deepseek', model: 'deepseek-flash', endpoint: 'https://api.deepseek.com/chat/completions'},
     {provider: 'ark', model: 'ark-selected', endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'},
     {provider: 'qwen', model: 'qwen-turbo', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'},
-    {provider: 'deepseek', model: 'deepseek-flash', endpoint: 'https://generic.example/v1/chat/completions', generic: true},
+    {provider: 'deepseek', model: 'deepseek-flash', endpoint: 'https://deepseek-model.example/v1/chat/completions', modelBaseUrl: 'https://deepseek-model.example/v1'},
+    {provider: 'qwen', model: 'qwen-turbo', endpoint: 'https://qwen-model.example/v1/chat/completions', modelBaseUrl: 'https://qwen-model.example/v1'},
     {provider: 'qwen', model: 'qwen-turbo', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', integrated: true},
-    {provider: 'qwen', model: 'qwen-turbo', endpoint: 'https://generic.example/v1/chat/completions', integrated: true, generic: true},
   ]) {
     contexts.length = 0
     const records: {endpoint: string; model: string}[] = []
@@ -76,7 +76,7 @@ test('host and desktop text/voice children keep resolved support models paired a
     globalThis.fetch = (url, init) => {
       assert.equal(typeof init?.body, 'string')
       const body = JSON.parse(init!.body as string) as {model: string; thinking?: unknown; messages: {role:string;content:string}[]}
-      assert.deepEqual(body.thinking, scenario.provider === 'deepseek' && !scenario.generic ? {type: 'disabled'} : undefined)
+      assert.deepEqual(body.thinking, scenario.provider === 'deepseek' ? {type: 'disabled'} : undefined)
       records.push({endpoint: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url, model: body.model})
       const system = body.messages.find(message=>message.role==='system')?.content ?? ''
       const missing = {state:'missing',note:''}
@@ -97,7 +97,9 @@ test('host and desktop text/voice children keep resolved support models paired a
       MEMORY_CONNECTION: 'disabled',
       DEEPSEEK_API_KEY: 'fixture', ARK_API_KEY: 'fixture', DASHSCOPE_API_KEY: 'fixture',
       DOUBAO_BIGMODEL_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture',
-      ...(scenario.generic ? {MODEL_API_KEY: 'fixture', MODEL_BASE_URL: 'https://generic.example/v1'} : {}),
+      ...(scenario.modelBaseUrl === undefined ? {} : {
+        [scenario.provider === 'qwen' ? 'DASHSCOPE_MODEL_BASE_URL' : `${scenario.provider.toUpperCase()}_MODEL_BASE_URL`]: scenario.modelBaseUrl,
+      }),
     }, !!scenario.integrated)
     const supportModel = configured.support_model
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-support-routing-'))
@@ -121,10 +123,10 @@ test('host and desktop text/voice children keep resolved support models paired a
           await models.plan({}, new AbortController().signal)
           assert.equal(await models.targets.resolveWork('stop task',[{work_id:'running-work',project:'project',title:'task'}],new AbortController().signal),'running-work')
           assert.deepEqual(records, [
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'deepseek-flash' : scenario.model},
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'deepseek-flash' : scenario.model},
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'deepseek-flash' : scenario.model},
-            {endpoint: scenario.endpoint, model: scenario.generic ? 'deepseek-flash' : scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.model},
           ], scenario.provider)
         }
         await checkRequests()

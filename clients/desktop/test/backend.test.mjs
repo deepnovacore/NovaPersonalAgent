@@ -218,7 +218,7 @@ test('Node launch uses the compiled utility-process entry and no writable stdin'
   }), /absolute Node resource root/)
 })
 
-test('resolved desktop settings override inherited Codex and model configuration', () => {
+test('resolved desktop settings override inherited Codex configuration and keep provider model URLs', () => {
   const spec = nodeLaunchSpec({
     nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
     nodeResourcesPath: '/repo/clients/desktop/build',
@@ -230,7 +230,9 @@ test('resolved desktop settings override inherited Codex and model configuration
       CODEX_PREFIX_ARGS: '["/environment/shim.js"]',
       CODEX_MANAGED_ROOT: '/environment/managed',
       CODEX_PROJECT_STATE_ROOT: '/environment/state',
-      MODEL_BASE_URL: 'https://environment.example/v1',
+      DASHSCOPE_MODEL_BASE_URL: 'https://environment-model.example/v1',
+      MODEL_BASE_URL: 'https://retired.example/v1',
+      MODEL_API_KEY: 'retired-key',
     },
     resolvedConfig: {
       workspace: '/settings/workspace',
@@ -238,7 +240,6 @@ test('resolved desktop settings override inherited Codex and model configuration
       codexBinaryPrefixArgs: ['/settings/node_modules/@openai/codex/bin/codex.js'],
       managedRoot: '/settings/managed',
       stateRoot: '/settings/state',
-      modelBaseUrl: 'https://settings.example/v1',
     },
   })
 
@@ -250,7 +251,9 @@ test('resolved desktop settings override inherited Codex and model configuration
   )
   assert.equal(spec.env.CODEX_MANAGED_ROOT, '/settings/managed')
   assert.equal(spec.env.CODEX_PROJECT_STATE_ROOT, '/settings/state')
-  assert.equal(spec.env.MODEL_BASE_URL, 'https://settings.example/v1')
+  assert.equal(spec.env.DASHSCOPE_MODEL_BASE_URL, 'https://environment-model.example/v1')
+  assert.equal('MODEL_BASE_URL' in spec.env, false)
+  assert.equal('MODEL_API_KEY' in spec.env, false)
 })
 
 test('launch spec forwards explicit v4 settings for runtime validation and omits empty overrides', () => {
@@ -373,7 +376,6 @@ test('resolved desktop configuration removes an invalid inherited Codex binary',
       codexBinaryPath: '',
       managedRoot: '/managed',
       stateRoot: '/state',
-      modelBaseUrl: '',
     },
   })
 
@@ -585,7 +587,6 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
     decryptedSecrets: {
       dashscopeApiKey: 'dash-key',
       tavilyApiKey: 'tavily-key',
-      modelApiKey: 'model-key',
       codexApiKey: 'codex-key',
       arkApiKey: 'ark-key',
       doubaoBigmodelApiKey: 'doubao-key',
@@ -594,7 +595,7 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
 
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'dash-key')
   assert.equal(spec.env.TAVILY_API_KEY, 'tavily-key')
-  assert.equal(spec.env.MODEL_API_KEY, 'model-key')
+  assert.equal('MODEL_API_KEY' in spec.env, false)
   assert.equal(spec.env.CODEX_API_KEY, 'codex-key')
   assert.equal('ARK_API_KEY' in spec.env, false)
   assert.equal('DOUBAO_BIGMODEL_API_KEY' in spec.env, false)
@@ -680,7 +681,6 @@ test('launch spec omits a decrypted secret carrying a control character', () => 
     parentEnv: { DASHSCOPE_API_KEY: 'from-dotenv' },
     decryptedSecrets: {
       dashscopeApiKey: 'sk-\u0000poison',
-      modelApiKey: 'mk-\u001bpoison',
       tavilyApiKey: 'tvly-clean',
     },
   })
@@ -690,7 +690,6 @@ test('launch spec omits a decrypted secret carrying a control character', () => 
   // injection loop is the last line of defence: drop the value, keep the rest,
   // and let the parent environment's own value stand.
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'from-dotenv')
-  assert.equal('MODEL_API_KEY' in spec.env, false)
   assert.equal(spec.env.TAVILY_API_KEY, 'tvly-clean')
   for (const value of Object.values(spec.env)) {
     assert.doesNotMatch(String(value), /poison/, 'no poisoned value survives into env')
@@ -701,7 +700,6 @@ test('integrated launch rejects raw boundary controls in every active secret ove
   const parentEnv = {
     DASHSCOPE_API_KEY: 'parent-dash',
     TAVILY_API_KEY: 'parent-tavily',
-    MODEL_API_KEY: 'parent-model',
     CODEX_API_KEY: 'parent-codex',
   }
   const spec = nodeLaunchSpec({
@@ -713,14 +711,12 @@ test('integrated launch rejects raw boundary controls in every active secret ove
     decryptedSecrets: {
       dashscopeApiKey: '\ndash-override',
       tavilyApiKey: 'tavily-override\r',
-      modelApiKey: '\tmodel-override',
       codexApiKey: 'codex-override\u007f',
     },
   })
 
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'parent-dash')
   assert.equal(spec.env.TAVILY_API_KEY, 'parent-tavily')
-  assert.equal(spec.env.MODEL_API_KEY, 'parent-model')
   assert.equal(spec.env.CODEX_API_KEY, 'parent-codex')
 })
 

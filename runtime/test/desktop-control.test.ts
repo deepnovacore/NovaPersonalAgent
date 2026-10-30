@@ -39,7 +39,7 @@ test('real final compilation failure preserves exact N/B over private startup st
       announce: () => Promise.reject(new Error('budget failure must precede readiness')), onDiagnostic: () => { /* bounded diagnostics are asserted through the private status instead */ },
       onStartupFailure: error => {status = desktopBudgetFailure(error); control.publish()},
       construct: () => {
-        buildProductionRealtimeAssembly({settings: {...loadSettings({MEMORY_CONNECTION: 'disabled', MODEL_API_KEY: 'fixture', DASHSCOPE_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture'}), executors: []},
+        buildProductionRealtimeAssembly({settings: {...loadSettings({MEMORY_CONNECTION: 'disabled', DASHSCOPE_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture'}), executors: []},
           capabilities: parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {camera: {enabled: false}, coding: {enabled: false}, search: {enabled: true}}}, {TAVILY_API_KEY: 'fixture'})})
         throw new Error('expected final compilation budget failure')
       },

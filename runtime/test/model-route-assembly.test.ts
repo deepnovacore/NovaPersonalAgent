@@ -18,7 +18,6 @@ function settings(overrides: Record<string, unknown> = {}): Settings {
   return settingsSchema.parse({
     executors: [],
     tavily_api_key: 'tavily-key',
-    model_api_key: 'legacy-key',
     ...overrides,
   })
 }

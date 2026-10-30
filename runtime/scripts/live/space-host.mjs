@@ -36,11 +36,11 @@ try{
  const {SubstrateMemoryResource}=await load('src/memory-substrate/resource.js')
  const {OpenAIModelGateway}=await load('src/model/model-gateway.js')
  const {RealClock}=await load('src/core/clock.js')
- const baseUrl=process.env.NOVA_AUDIO_AGENT_MODEL_BASE_URL??process.env.MODEL_BASE_URL??'https://dashscope.aliyuncs.com/compatible-mode/v1'
- const apiKey=process.env.MODEL_API_KEY??process.env.DASHSCOPE_API_KEY
+ const baseUrl=process.env.NOVA_AUDIO_AGENT_MODEL_BASE_URL??process.env.SELF_HOSTED_LLM_BASE_URL??'https://dashscope.aliyuncs.com/compatible-mode/v1'
+ const apiKey=process.env.DASHSCOPE_API_KEY
  assert.ok(apiKey,'configured_model_credential_required')
  const model=process.env.NOVA_AUDIO_AGENT_FAST_MODEL??process.env.CASCADE_LLM_MODEL??process.env.FAST_MODEL??'qwen-plus'
- const settings=loadSettings({PIPELINE_MODE:'cascaded',CASCADE_LLM_PROVIDER:'self-hosted',CASCADE_LLM_MODEL:model,SELF_HOSTED_LLM_BASE_URL:baseUrl,SELF_HOSTED_LLM_API_KEY:apiKey,MODEL_BASE_URL:baseUrl,MODEL_API_KEY:apiKey,FAST_MODEL:model,SUPPORT_MODEL:model,COMPRESSOR_MODEL:model,MEMORY_CONNECTION:'disabled',BLACKBOARD_PATH:join(directory,'blackboard.sqlite'),EXECUTORS:'',CAMERA_MODULE_ENABLED:'false',MEMORY_PRERECALL_ENABLED:'false'},true)
+ const settings=loadSettings({PIPELINE_MODE:'cascaded',CASCADE_LLM_PROVIDER:'self-hosted',CASCADE_LLM_MODEL:model,SELF_HOSTED_LLM_BASE_URL:baseUrl,SELF_HOSTED_LLM_API_KEY:apiKey,FAST_MODEL:model,SUPPORT_MODEL:model,COMPRESSOR_MODEL:model,MEMORY_CONNECTION:'disabled',BLACKBOARD_PATH:join(directory,'blackboard.sqlite'),EXECUTORS:'',CAMERA_MODULE_ENABLED:'false',MEMORY_PRERECALL_ENABLED:'false'},true)
  const selected=requireSelectedCascadedLlmConfig(settings)
  report.provider=selected.provider;report.model=selected.config.model
  report.endpoint=new URL(selected.config.baseUrl).origin

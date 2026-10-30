@@ -1224,7 +1224,6 @@ async function launchBackend(smokeChannel, onExit) {
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
   catch { throw classifyBackendFailure('configuration_required') }
   const codingEnabled = !acceptance && launchDocument?.modules?.coding?.enabled !== false
-  if (desktopConfig?.modelConfigurationError) throw classifyBackendFailure(desktopConfig.modelConfigurationError)
   // Coding is optional: without a usable Codex CLI, including an unfinished manual path,
   // the runtime starts with the coding module off.
   const codingUnavailable = codingEnabled

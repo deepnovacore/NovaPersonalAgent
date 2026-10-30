@@ -29,14 +29,14 @@ function dotenv() {
 
 const file = dotenv()
 const setting = name => process.env[name] ?? file[name]
-const apiKey = setting('DASHSCOPE_API_KEY') ?? setting('MODEL_API_KEY')
+const apiKey = setting('DASHSCOPE_API_KEY')
 if (!apiKey) {
-  console.error('missing DASHSCOPE_API_KEY or MODEL_API_KEY')
+  console.error('missing DASHSCOPE_API_KEY')
   process.exit(2)
 }
 
 const gateway = new OpenAIModelGateway({
-  baseUrl: setting('MODEL_BASE_URL') ?? DASHSCOPE_COMPATIBLE_BASE_URL,
+  baseUrl: setting('DASHSCOPE_MODEL_BASE_URL') ?? DASHSCOPE_COMPATIBLE_BASE_URL,
   apiKey,
   clock: new VirtualClock(0),
   requestTimeout: 45,

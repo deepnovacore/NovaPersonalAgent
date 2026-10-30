@@ -9,7 +9,7 @@
         "codex_managed_root": "/fixture/managed",
         "codex_prewarm": false,
         "codex_project_state_root": "/fixture/state",
-        "codex_working_interval": 5.0,
+        "codex_working_interval": 5,
         "codex_workspace": "/fixture/workspace",
         "compressor_model": "qwen-flash",
         "dashscope_api_key_present": true,
@@ -28,8 +28,6 @@
         ],
         "fast_model": "fast-astral-😀",
         "fresh_window": 9.25,
-        "model_api_key_present": true,
-        "model_base_url": "https://model.example/v1",
         "proactivity": {
           "cooldown": 7.5,
           "fresh_window": 9.25
@@ -54,7 +52,12 @@
         "volcengine_vad_silence_end_ms": 600,
         "volcengine_vad_speech_pad_ms": 40,
         "volcengine_vad_threshold": 0.75,
-        "watch_model": "watch-😀"
+        "watch_model": "watch-😀",
+        "dashscope_model_base_url": "https://qwen-model.example/v1",
+        "deepseek_model_base_url": "https://deepseek-model.example/v1",
+        "openai_model_base_url": "https://openai-model.example/v1",
+        "gemini_model_base_url": "https://gemini-model.example/v1",
+        "stepfun_model_base_url": "https://stepfun-model.example/v1"
       }
     },
     "bom_is_not_python_whitespace": {
@@ -66,7 +69,7 @@
         "codex_managed_root": "~/.nova-audio-agent/workspaces",
         "codex_prewarm": true,
         "codex_project_state_root": "~/.nova-audio-agent",
-        "codex_working_interval": 30.0,
+        "codex_working_interval": 30,
         "codex_workspace": null,
         "compressor_model": "qwen-flash",
         "dashscope_api_key_present": false,
@@ -82,11 +85,9 @@
         "executors": [],
         "fast_model": "﻿fast﻿",
         "fresh_window": null,
-        "model_api_key_present": false,
-        "model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "proactivity": {
-          "cooldown": 60.0,
-          "fresh_window": 30.0
+          "cooldown": 60,
+          "fresh_window": 30
         },
         "proactivity_preset": "balanced",
         "qwen_controlled_guard_reconnect": false,
@@ -108,7 +109,12 @@
         "volcengine_vad_silence_end_ms": 300,
         "volcengine_vad_speech_pad_ms": 30,
         "volcengine_vad_threshold": 0.5,
-        "watch_model": "﻿watch﻿"
+        "watch_model": "﻿watch﻿",
+        "dashscope_model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "deepseek_model_base_url": "https://api.deepseek.com",
+        "openai_model_base_url": "https://api.openai.com/v1",
+        "gemini_model_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "stepfun_model_base_url": "https://api.stepfun.com/v1"
       }
     },
     "defaults": {
@@ -120,7 +126,7 @@
         "codex_managed_root": "~/.nova-audio-agent/workspaces",
         "codex_prewarm": true,
         "codex_project_state_root": "~/.nova-audio-agent",
-        "codex_working_interval": 30.0,
+        "codex_working_interval": 30,
         "codex_workspace": null,
         "compressor_model": "qwen-flash",
         "dashscope_api_key_present": false,
@@ -136,11 +142,9 @@
         "executors": [],
         "fast_model": "qwen3-vl-plus",
         "fresh_window": null,
-        "model_api_key_present": false,
-        "model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "proactivity": {
-          "cooldown": 60.0,
-          "fresh_window": 30.0
+          "cooldown": 60,
+          "fresh_window": 30
         },
         "proactivity_preset": "balanced",
         "qwen_controlled_guard_reconnect": false,
@@ -162,7 +166,12 @@
         "volcengine_vad_silence_end_ms": 300,
         "volcengine_vad_speech_pad_ms": 30,
         "volcengine_vad_threshold": 0.5,
-        "watch_model": null
+        "watch_model": null,
+        "dashscope_model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "deepseek_model_base_url": "https://api.deepseek.com",
+        "openai_model_base_url": "https://api.openai.com/v1",
+        "gemini_model_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "stepfun_model_base_url": "https://api.stepfun.com/v1"
       }
     },
     "desktop_video_absolute": {
@@ -182,7 +191,7 @@
         "codex_managed_root": "~/.nova-audio-agent/workspaces",
         "codex_prewarm": true,
         "codex_project_state_root": "~/.nova-audio-agent",
-        "codex_working_interval": 600.0,
+        "codex_working_interval": 600,
         "codex_workspace": null,
         "compressor_model": "qwen-flash",
         "dashscope_api_key_present": false,
@@ -200,12 +209,10 @@
           "codex"
         ],
         "fast_model": "qwen3-vl-plus",
-        "fresh_window": 0.0,
-        "model_api_key_present": false,
-        "model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "fresh_window": 0,
         "proactivity": {
-          "cooldown": 0.0,
-          "fresh_window": 0.0
+          "cooldown": 0,
+          "fresh_window": 0
         },
         "proactivity_preset": "balanced",
         "qwen_controlled_guard_reconnect": false,
@@ -215,7 +222,7 @@
         "qwen_realtime_url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
         "qwen_realtime_voice": "longanqian",
         "realtime_provider": "qwen",
-        "suggestion_cooldown": 0.0,
+        "suggestion_cooldown": 0,
         "surrogate_model": "qwen-flash",
         "tavily_api_key_present": false,
         "volcengine_ark_base_url": "https://ark.cn-beijing.volces.com/api/v3",
@@ -227,7 +234,12 @@
         "volcengine_vad_silence_end_ms": 300,
         "volcengine_vad_speech_pad_ms": 30,
         "volcengine_vad_threshold": 0.5,
-        "watch_model": null
+        "watch_model": null,
+        "dashscope_model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "deepseek_model_base_url": "https://api.deepseek.com",
+        "openai_model_base_url": "https://api.openai.com/v1",
+        "gemini_model_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "stepfun_model_base_url": "https://api.stepfun.com/v1"
       }
     },
     "numeric_out_of_bounds": {
@@ -245,7 +257,7 @@
         "codex_managed_root": "~/.nova-audio-agent/workspaces",
         "codex_prewarm": true,
         "codex_project_state_root": "~/.nova-audio-agent",
-        "codex_working_interval": 30.0,
+        "codex_working_interval": 30,
         "codex_workspace": null,
         "compressor_model": "qwen-flash",
         "dashscope_api_key_present": false,
@@ -264,11 +276,9 @@
         ],
         "fast_model": "\u001cfast",
         "fresh_window": null,
-        "model_api_key_present": false,
-        "model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "proactivity": {
-          "cooldown": 60.0,
-          "fresh_window": 30.0
+          "cooldown": 60,
+          "fresh_window": 30
         },
         "proactivity_preset": "balanced",
         "qwen_controlled_guard_reconnect": false,
@@ -290,7 +300,12 @@
         "volcengine_vad_silence_end_ms": 300,
         "volcengine_vad_speech_pad_ms": 30,
         "volcengine_vad_threshold": 0.5,
-        "watch_model": "\u001cwatch"
+        "watch_model": "\u001cwatch",
+        "dashscope_model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "deepseek_model_base_url": "https://api.deepseek.com",
+        "openai_model_base_url": "https://api.openai.com/v1",
+        "gemini_model_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "stepfun_model_base_url": "https://api.stepfun.com/v1"
       }
     },
     "python_only_whitespace": {
@@ -305,67 +320,6 @@
         "QWEN_CONTROLLED_GUARD_RECONNECT"
       ],
       "ok": false
-    },
-    "qwen_fallback_key": {
-      "ok": true,
-      "provider": {
-        "key_present": true,
-        "model": "qwen-audio-3.0-realtime-plus",
-        "provider": "qwen",
-        "url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
-        "voice": "longanqian"
-      },
-      "settings": {
-        "ark_api_key_present": false,
-        "codex_api_key_present": false,
-        "codex_bin": "codex",
-        "codex_managed_root": "~/.nova-audio-agent/workspaces",
-        "codex_prewarm": true,
-        "codex_project_state_root": "~/.nova-audio-agent",
-        "codex_working_interval": 30.0,
-        "codex_workspace": null,
-        "compressor_model": "qwen-flash",
-        "dashscope_api_key_present": false,
-        "doubao_asr_chunk_ms": 200,
-        "doubao_asr_endpoint": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
-        "doubao_asr_resource_id": "volc.seedasr.sauc.duration",
-        "doubao_bigmodel_api_key_present": false,
-        "doubao_tts_endpoint": "wss://openspeech.bytedance.com/api/v3/tts/bidirection",
-        "doubao_tts_output_sample_rate": 24000,
-        "doubao_tts_resource_id": "seed-tts-2.0",
-        "doubao_tts_voice": "zh_female_vv_uranus_bigtts",
-        "executor": null,
-        "executors": [],
-        "fast_model": "qwen3-vl-plus",
-        "fresh_window": null,
-        "model_api_key_present": true,
-        "model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "proactivity": {
-          "cooldown": 60.0,
-          "fresh_window": 30.0
-        },
-        "proactivity_preset": "balanced",
-        "qwen_controlled_guard_reconnect": false,
-        "qwen_guard_history_pairs": 4,
-        "qwen_guard_history_recovery": "none",
-        "qwen_realtime_model": "qwen-audio-3.0-realtime-plus",
-        "qwen_realtime_url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
-        "qwen_realtime_voice": "longanqian",
-        "realtime_provider": "qwen",
-        "suggestion_cooldown": null,
-        "surrogate_model": "qwen-flash",
-        "tavily_api_key_present": false,
-        "volcengine_ark_base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "volcengine_ark_model": "doubao-seed-2-0-pro-260215",
-        "volcengine_ark_support_model": "doubao-seed-2-0-pro-260215",
-        "volcengine_vad_max_utterance_ms": 60000,
-        "volcengine_vad_min_speech_ms": 250,
-        "volcengine_vad_pre_roll_ms": 260,
-        "volcengine_vad_silence_end_ms": 300,
-        "volcengine_vad_speech_pad_ms": 30,
-        "volcengine_vad_threshold": 0.5,
-        "watch_model": null
-      }
     },
     "qwen_history_does_not_strip": {
       "fields": [
@@ -404,7 +358,7 @@
         "codex_managed_root": "~/.nova-audio-agent/workspaces",
         "codex_prewarm": true,
         "codex_project_state_root": "~/.nova-audio-agent",
-        "codex_working_interval": 30.0,
+        "codex_working_interval": 30,
         "codex_workspace": null,
         "compressor_model": "qwen-flash",
         "dashscope_api_key_present": false,
@@ -420,11 +374,9 @@
         "executors": [],
         "fast_model": "qwen3-vl-plus",
         "fresh_window": null,
-        "model_api_key_present": false,
-        "model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "proactivity": {
-          "cooldown": 60.0,
-          "fresh_window": 30.0
+          "cooldown": 60,
+          "fresh_window": 30
         },
         "proactivity_preset": "balanced",
         "qwen_controlled_guard_reconnect": false,
@@ -446,12 +398,81 @@
         "volcengine_vad_silence_end_ms": 300,
         "volcengine_vad_speech_pad_ms": 30,
         "volcengine_vad_threshold": 0.5,
-        "watch_model": null
+        "watch_model": null,
+        "dashscope_model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "deepseek_model_base_url": "https://api.deepseek.com",
+        "openai_model_base_url": "https://api.openai.com/v1",
+        "gemini_model_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "stepfun_model_base_url": "https://api.stepfun.com/v1"
       }
     },
     "volcengine_secure_endpoint_rejected": {
       "fields": [],
       "ok": false
+    },
+    "qwen_provider_key": {
+      "ok": true,
+      "provider": {
+        "key_present": true,
+        "model": "qwen-audio-3.0-realtime-plus",
+        "provider": "qwen",
+        "url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+        "voice": "longanqian"
+      },
+      "settings": {
+        "ark_api_key_present": false,
+        "codex_api_key_present": false,
+        "codex_bin": "codex",
+        "codex_managed_root": "~/.nova-audio-agent/workspaces",
+        "codex_prewarm": true,
+        "codex_project_state_root": "~/.nova-audio-agent",
+        "codex_working_interval": 30,
+        "codex_workspace": null,
+        "compressor_model": "qwen-flash",
+        "dashscope_api_key_present": true,
+        "doubao_asr_chunk_ms": 200,
+        "doubao_asr_endpoint": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+        "doubao_asr_resource_id": "volc.seedasr.sauc.duration",
+        "doubao_bigmodel_api_key_present": false,
+        "doubao_tts_endpoint": "wss://openspeech.bytedance.com/api/v3/tts/bidirection",
+        "doubao_tts_output_sample_rate": 24000,
+        "doubao_tts_resource_id": "seed-tts-2.0",
+        "doubao_tts_voice": "zh_female_vv_uranus_bigtts",
+        "executor": null,
+        "executors": [],
+        "fast_model": "qwen3-vl-plus",
+        "fresh_window": null,
+        "proactivity": {
+          "cooldown": 60,
+          "fresh_window": 30
+        },
+        "proactivity_preset": "balanced",
+        "qwen_controlled_guard_reconnect": false,
+        "qwen_guard_history_pairs": 4,
+        "qwen_guard_history_recovery": "none",
+        "qwen_realtime_model": "qwen-audio-3.0-realtime-plus",
+        "qwen_realtime_url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+        "qwen_realtime_voice": "longanqian",
+        "realtime_provider": "qwen",
+        "suggestion_cooldown": null,
+        "surrogate_model": "qwen-flash",
+        "tavily_api_key_present": false,
+        "volcengine_ark_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "volcengine_ark_model": "doubao-seed-2-0-pro-260215",
+        "volcengine_ark_support_model": "doubao-seed-2-0-pro-260215",
+        "volcengine_vad_max_utterance_ms": 60000,
+        "volcengine_vad_min_speech_ms": 250,
+        "volcengine_vad_pre_roll_ms": 260,
+        "volcengine_vad_silence_end_ms": 300,
+        "volcengine_vad_speech_pad_ms": 30,
+        "volcengine_vad_threshold": 0.5,
+        "watch_model": null,
+        "dashscope_model_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "deepseek_model_base_url": "https://api.deepseek.com",
+        "openai_model_base_url": "https://api.openai.com/v1",
+        "gemini_model_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "stepfun_model_base_url": "https://api.stepfun.com/v1"
+      }
     }
   },
   "schema_version": 1
