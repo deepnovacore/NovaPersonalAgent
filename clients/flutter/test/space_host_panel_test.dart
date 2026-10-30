@@ -44,9 +44,12 @@ void main() {
       tester,
       stateWith({
         'owner': false,
-        'host_credentials': [
-          {'name': 'OPENAI_API_KEY', 'configured': false, 'source': null},
-        ],
+        'host_credentials': {
+          'damaged': false,
+          'credentials': [
+            {'name': 'OPENAI_API_KEY', 'configured': false, 'source': null},
+          ],
+        },
       }),
     );
     expect(find.text('Host 设置'), findsNothing);
@@ -64,15 +67,18 @@ void main() {
         'discovery': {'discovery_enabled': false},
         'news': {'interests': [], 'explore': true, 'profile_version': 0},
       },
-      'host_credentials': [
-        {
-          'name': 'OPENAI_API_KEY',
-          'configured': true,
-          'source': 'space',
-          'fingerprint': 'abcd1234',
-        },
-        {'name': 'GEMINI_API_KEY', 'configured': false, 'source': null},
-      ],
+      'host_credentials': {
+        'damaged': false,
+        'credentials': [
+          {
+            'name': 'OPENAI_API_KEY',
+            'configured': true,
+            'source': 'space',
+            'fingerprint': 'abcd1234',
+          },
+          {'name': 'GEMINI_API_KEY', 'configured': false, 'source': null},
+        ],
+      },
       'host_feishu': {'configured': true, 'connected': false},
     });
     await pump(tester, state);
@@ -121,6 +127,26 @@ void main() {
       {'assistant_name': 'Nova2'},
       {'user_name': 'Bea'},
     ]);
+  });
+
+  testWidgets('a damaged Host credential file asks the owner to re-enter keys', (
+    tester,
+  ) async {
+    final state = stateWith({
+      'owner': true,
+      'host_credentials': {
+        'damaged': true,
+        'credentials': [
+          {'name': 'OPENAI_API_KEY', 'configured': false, 'source': null},
+        ],
+      },
+    });
+    await pump(tester, state);
+    expect(
+      find.text('Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'),
+      findsOneWidget,
+    );
+    expect(find.text('未配置'), findsOneWidget);
   });
 
   testWidgets('Feishu card opens the Host verification URL and completes', (

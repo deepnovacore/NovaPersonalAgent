@@ -63,7 +63,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   readonly createServer?: (options: Parameters<NonNullable<DesktopRealtimeOptions['createServer']>>[0], media?: ClientMedia) => ReturnType<NonNullable<DesktopRealtimeOptions['createServer']>>
 }) {
   // Credentials a Space owner stored from a phone fill only variables the operator left unset.
-  const environment = overlaySpaceSecrets(operatorEnvironment, operatorEnvironment.NOVA_SPACE_HOST_CONFIG ? resolve(operatorEnvironment.NOVA_SPACE_HOST_CONFIG) : undefined)
+  const environment = overlaySpaceSecrets(operatorEnvironment, operatorEnvironment.NOVA_SPACE_HOST_CONFIG ? resolve(operatorEnvironment.NOVA_SPACE_HOST_CONFIG) : undefined, onDiagnostic)
   const baseSettings = loadSettings(environment, !remote)
   const spaceConfigPath=environment.NOVA_SPACE_HOST_CONFIG?resolve(environment.NOVA_SPACE_HOST_CONFIG):undefined
   const spaceConfig=spaceConfigPath?readHostSpaceConfig(spaceConfigPath):undefined

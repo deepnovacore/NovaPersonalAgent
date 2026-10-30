@@ -47,7 +47,7 @@ test('secrets: allowlist, 0600 store, env wins, snapshot has fingerprints only, 
   const g=await f.send('phone','put2','secret.put',{name:'GEMINI_API_KEY',value:'phone-gem'});assert.equal(g.shadowed_by_environment,true);
   assert.equal((await f.send('phone','bad','secret.put',{name:'DESKTOP_TOKEN',value:'x'})).status,'rejected');
   const path=join(f.dir,'config.json.secrets.json');assert.equal((await stat(path)).mode&0o777,0o600);
-  const snap=JSON.stringify(f.space.snapshot('phone')),creds=(f.space.snapshot('phone') as unknown as {host_credentials:{name:string;source:string;fingerprint:string}[]}).host_credentials;
+  const snap=JSON.stringify(f.space.snapshot('phone')),creds=(f.space.snapshot('phone') as unknown as {host_credentials:{credentials:{name:string;source:string;fingerprint:string}[]}}).host_credentials.credentials;
   assert.equal(snap.includes(secret),false);assert.equal(snap.includes('phone-gem'),false);assert.equal(creds.find(c=>c.name==='OPENAI_API_KEY')!.source,'space');assert.equal(creds.find(c=>c.name==='GEMINI_API_KEY')!.source,'environment');assert.match(creds.find(c=>c.name==='OPENAI_API_KEY')!.fingerprint,/^[0-9a-f]{8}$/);
   await f.send('phone','reg','push.register',{handle:'h',credential:'push-credential-xyz'}).catch(()=>undefined);
   assert.equal(JSON.stringify(f.sent).includes(secret),false);
@@ -80,11 +80,25 @@ test('an untouched secrets file does not block the next Host start',async()=>{
  }finally{await f.close()}
 });
 
-test('a damaged secrets file stops startup with an error naming the file',async()=>{
+test('a damaged secrets file is dropped with a diagnostic instead of stopping startup',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secrets-'));
- try{for(const text of ['{','{"v":2,"secrets":{}}','\n']){await writeFile(join(dir,'config.json.secrets.json'),text,{mode:0o600});
-   assert.throws(()=>overlaySpaceSecrets({},join(dir,'config.json')),/space_secrets_invalid: .*config\.json\.secrets\.json/)}
+ try{for(const text of ['{','{"v":2,"secrets":{}}','\n']){const path=join(dir,'config.json.secrets.json');await writeFile(path,text,{mode:0o600});
+   const diagnostics:string[]=[];
+   assert.deepEqual(overlaySpaceSecrets({A:'1'},join(dir,'config.json'),code=>diagnostics.push(code)),{A:'1'});
+   assert.deepEqual(diagnostics,['space_secrets_invalid_dropped']);
+   // The damaged bytes stay for the operator; nothing silently deletes them.
+   assert.equal(await readFile(path,'utf8'),text)}
  }finally{await rm(dir,{recursive:true,force:true})}
+});
+
+test('a damaged secrets file marks the owner projection and a re-entered key clears it',async()=>{
+ const f=await fixture({owner:'phone'});
+ try{await f.space.close();await writeFile(join(f.dir,'config.json.secrets.json'),'{',{mode:0o600});await f.space.open();
+  const view=()=>(f.space.snapshot('phone') as unknown as {host_credentials:{damaged:boolean;credentials:{name:string;configured:boolean}[]}}).host_credentials;
+  assert.equal(view().damaged,true);assert.equal(view().credentials.every(row=>!row.configured),true);
+  assert.equal((await f.send('phone','put','secret.put',{name:'OPENAI_API_KEY',value:'sk-after-damage'})).status,'accepted');
+  assert.equal(view().damaged,false);assert.equal(view().credentials.find(row=>row.name==='OPENAI_API_KEY')!.configured,true);
+ }finally{await f.close()}
 });
 
 test('Feishu app setup link generated after app.start reaches the owner snapshot',async()=>{

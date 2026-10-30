@@ -118,10 +118,12 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
     final news = _map(settings['news']);
     final feishu = _map(snapshot['host_feishu']);
     final setup = _map(feishu['app_setup']);
-    final credentials = (snapshot['host_credentials'] as List? ?? [])
+    final credentialView = _map(snapshot['host_credentials']);
+    final credentials = (credentialView['credentials'] as List? ?? [])
         .whereType<Map>()
         .map((v) => Map<String, dynamic>.from(v))
         .toList();
+    final credentialsDamaged = credentialView['damaged'] == true;
     final connected = feishu['connected'] == true;
     final setupUrl = setup['verification_url'] as String?;
     final loginUrl = feishu['verification_url'] as String?;
@@ -206,7 +208,9 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
         ),
         NovaSection(
           header: 'Host 模型密钥',
-          footer: '密钥只发送给 Host，不会回显；写入后需重启 Host 生效，Host 环境变量中已设置的密钥优先。',
+          footer: credentialsDamaged
+              ? 'Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'
+              : '密钥只发送给 Host，不会回显；写入后需重启 Host 生效，Host 环境变量中已设置的密钥优先。',
           children: [
             for (final c in credentials)
               NovaTile(

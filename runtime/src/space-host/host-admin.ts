@@ -18,28 +18,30 @@ export const feishuMethod=(action:keyof typeof feishuActions)=>feishuActions[act
 export const secretFingerprint=(value:string)=>createHash('sha256').update(value).digest('hex').slice(0,8);
 const fileSchema=z.object({v:z.literal(1),secrets:z.record(z.string(),z.string())});
 type SecretFile=z.infer<typeof fileSchema>;
-/** Credentials a Space owner sent from a phone. Operator environment always wins; changes apply on the next Host start. */
+/** Credentials a Space owner sent from a phone. Operator environment always wins; changes apply on the next Host start. A damaged file is dropped rather than blocking startup, and the owner projection asks the phone to enter the keys again. */
 export class HostSecretStore {
- readonly #store;#state:SecretFile={v:1,secrets:{}};#tail:Promise<unknown>=Promise.resolve();
+ readonly #store;#state:SecretFile={v:1,secrets:{}};#tail:Promise<unknown>=Promise.resolve();#damaged=false;
  constructor(readonly path:string){this.#store=new BoundedJsonStore(path,fileSchema,1024*1024)}
- async open(){try{this.#state=await this.#store.read(this.#state)}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}}
+ get damaged(){return this.#damaged}
+ async open(){try{this.#state=await this.#store.read(this.#state)}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;this.#damaged=true}}
  #serial<T>(work:()=>Promise<T>):Promise<T>{const run=this.#tail.then(work);this.#tail=run.catch(()=>{ /* Keep the serial queue usable after a caller-visible failure. */ });return run}
- put(name:string,value:string){return this.#serial(async()=>{const next={v:1 as const,secrets:{...this.#state.secrets,[name]:value}};await this.#store.write(next);this.#state=next})}
- clear(name:string){return this.#serial(async()=>{const {[name]:_removed,...rest}=this.#state.secrets;const next={v:1 as const,secrets:rest};await this.#store.write(next);this.#state=next})}
+ put(name:string,value:string){return this.#serial(async()=>{const next={v:1 as const,secrets:{...this.#state.secrets,[name]:value}};await this.#store.write(next);this.#state=next;this.#damaged=false})}
+ clear(name:string){return this.#serial(async()=>{const {[name]:_removed,...rest}=this.#state.secrets;const next={v:1 as const,secrets:rest};await this.#store.write(next);this.#state=next;this.#damaged=false})}
  value(name:string):string|undefined{return this.#state.secrets[name]}
 }
 export const spaceSecretsPath=(configPath:string)=>configPath+'.secrets.json';
-/** Synchronous startup overlay: stored Space credentials fill only variables the operator left unset. */
-export function overlaySpaceSecrets(environment:NodeJS.ProcessEnv,configPath:string|undefined):NodeJS.ProcessEnv{
+/** Synchronous startup overlay: stored Space credentials fill only variables the operator left unset. A damaged file is ignored, keeps its bytes for the operator and never blocks the Host. */
+export function overlaySpaceSecrets(environment:NodeJS.ProcessEnv,configPath:string|undefined,onDiagnostic?:(code:string)=>void):NodeJS.ProcessEnv{
  if(!configPath)return environment;
  let text:string;try{text=readFileSync(spaceSecretsPath(configPath),'utf8')}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return environment;throw error}
  // BoundedJsonStore leaves an empty private file until the first write.
  if(!text)return environment;let parsed:z.infer<typeof fileSchema>;
- try{parsed=fileSchema.parse(JSON.parse(text))}catch{throw Error(`space_secrets_invalid: ${spaceSecretsPath(configPath)}`)}
+ try{parsed=fileSchema.parse(JSON.parse(text))}catch{onDiagnostic?.('space_secrets_invalid_dropped');return environment}
  const next={...environment};for(const [name,value]of Object.entries(parsed.secrets))if(SPACE_SECRET_NAMES.includes(name)&&!environment[name]?.trim())next[name]=value;return next;
 }
+/** Never projects values. `damaged` tells the phone that a stored file was ignored, so it can prompt for the keys again. */
 export function credentialsView(store:HostSecretStore|undefined,environment:NodeJS.ProcessEnv){
- return SPACE_SECRET_NAMES.map(name=>{const operator=environment[name]?.trim()?environment[name]:undefined,stored=store?.value(name),value=operator??stored;return {name,configured:value!==undefined,source:operator!==undefined?'environment' as const:stored!==undefined?'space' as const:null,...(value!==undefined?{fingerprint:secretFingerprint(value)}:{})}});
+ return {damaged:store?.damaged===true,credentials:SPACE_SECRET_NAMES.map(name=>{const operator=environment[name]?.trim()?environment[name]:undefined,stored=store?.value(name),value=operator??stored;return {name,configured:value!==undefined,source:operator!==undefined?'environment' as const:stored!==undefined?'space' as const:null,...(value!==undefined?{fingerprint:secretFingerprint(value)}:{})}})};
 }
 export function settingsView(host:PersonalAgentHost){
  const state=host.snapshot(),s=state.settings,soul=state.soul,news=state.news;
