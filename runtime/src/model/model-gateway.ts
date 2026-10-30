@@ -359,7 +359,7 @@ export class OpenAIModelGateway implements ModelGateway {
       }
       const choice = payload.choices[0]!
       finishReason = choice.finish_reason ?? null
-      return {text: choice.message.content ?? '', finish_reason: finishReason}
+      return {text: choice.message.content ?? '', ...(finishReason === null ? {} : {finish_reason: finishReason})}
     } catch (error) {
       errorType = classify(error)
       throw new GatewayError(errorType)
