@@ -6,7 +6,8 @@ import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
-import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets} from '../src/space-host/host-admin.js';
+import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets,secretClearSchema,secretPutSchema} from '../src/space-host/host-admin.js';
+import {environmentContract} from '../src/config/environment-contract.js';
 
 async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown}={}){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-admin-')),sent:Record<string,unknown>[]=[];const calls:string[]=[];
@@ -38,6 +39,14 @@ test('settings.patch runs allowlisted host methods only and snapshot projects th
   // Single-field edits queued offline apply in order without reverting each other.
   assert.equal((await f.send('phone','n1','settings.patch',{method:'identity.configure',params:{assistant_name:'Nova3'}})).status,'accepted');assert.equal((await f.send('phone','n2','settings.patch',{method:'identity.configure',params:{user_name:'Bea'}})).status,'accepted');assert.deepEqual(f.host.identity(),{assistant_name:'Nova3',user_name:'Bea'});
  }finally{await f.close()}
+});
+
+test('the writable secret list is an explicit allowlist of contract secrets',async()=>{
+ const secretNames=environmentContract.filter(row=>row.secret).map(row=>row.name);
+ for(const name of SPACE_SECRET_NAMES){assert.ok(secretNames.includes(name),`${name} is not a contract secret`);assert.equal(secretPutSchema.safeParse({name,value:'x'}).success,true,name)}
+ // A secret added to the contract later stays Host-only until someone reviews and lists it.
+ for(const name of secretNames.filter(name=>!SPACE_SECRET_NAMES.includes(name)))assert.equal(secretClearSchema.safeParse({name}).success,false,name);
+ for(const name of ['COMPOSIO_API_KEY','EXECUTOR_API_KEY','TAVILY_API_KEY','DESKTOP_TOKEN','MEMORY_TOKEN','SERVER_TOKEN_FILE','NATIVE_REALTIME_API_KEY'])assert.equal(SPACE_SECRET_NAMES.includes(name),false,name);
 });
 
 test('secrets: allowlist, 0600 store, env wins, snapshot has fingerprints only, journal has no secret bytes',async()=>{
