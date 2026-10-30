@@ -78,7 +78,7 @@ test('Windows native path resolution accepts UNC and rejects drive-relative ambi
 })
 
 test('local shell retains development environment while stripping product secrets and controls',()=>{
- const environment=localShellEnvironment({PATH:'tools',HOME:'/users/test',DEVELOPER_DIR:'/xcode',VIRTUAL_ENV:'venv',TEMP:'tmp',OPENAI_API_KEY:'private',DESKTOP_TOKEN:'private',SERVER_TOKEN_FILE:'private',COMPOSIO_API_KEY:'private',MODEL_API_KEY:'private',NOVA_LOCAL_TOOL_APPROVAL:'never',NODE_OPTIONS:'bad'})
+ const environment=localShellEnvironment({PATH:'tools',HOME:'/users/test',DEVELOPER_DIR:'/xcode',VIRTUAL_ENV:'venv',TEMP:'tmp',OPENAI_API_KEY:'private',DESKTOP_TOKEN:'private',SERVER_TOKEN_FILE:'private',COMPOSIO_API_KEY:'private',NOVA_LOCAL_TOOL_APPROVAL:'never',NODE_OPTIONS:'bad'})
  assert.deepEqual(environment,{PATH:'tools',HOME:'/users/test',DEVELOPER_DIR:'/xcode',VIRTUAL_ENV:'venv',TEMP:'tmp'})
 })
 

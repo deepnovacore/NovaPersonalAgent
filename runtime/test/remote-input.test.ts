@@ -36,7 +36,7 @@ async function serviceHarness(t: TestContext, provider: RealtimeProvider) {
   let launches = 0
   const finished = deferred<void>()
   const sent: string[] = []
-  const core = buildAssembly({settings: settingsSchema.parse({executors: ['slow_sim'], model_api_key: 'fixture'}),
+  const core = buildAssembly({settings: settingsSchema.parse({executors: ['slow_sim'], deepseek_api_key: 'fixture'}),
     capabilities: parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false}}}),
     clock: new VirtualClock(),
     gateway: {

@@ -1076,7 +1076,7 @@ function text(frame: ReceivedFrame): string {
 test('production composition serves compact boards on debug sockets without disturbing voice', async t => {
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1152,7 +1152,7 @@ test('authenticated fake-provider loopback uses one service for duplex audio and
   const provider = new ScriptedProvider(trace)
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1292,7 +1292,6 @@ test('selected integrated Qwen assembly uses the authenticated provider-neutral 
         settings: loadSettings({MEMORY_CONNECTION: 'disabled',
           PIPELINE_MODE: 'integrated',
           DASHSCOPE_API_KEY: 'dash-key',
-          MODEL_API_KEY: 'model-key',
           TAVILY_API_KEY: 'search-key',
         }),
         connector: () => Promise.resolve(providerSocket),
@@ -1538,7 +1537,7 @@ test('composition posts only audible delivery events into the exact runtime and 
   const clock = new VirtualClock(12.5)
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     clock,
     gateway: new NeverGateway(),
@@ -1617,7 +1616,7 @@ test('captured composition callbacks preserve clear alert Codex project clock an
   }
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     clock,
     gateway: new NeverGateway(),
@@ -1689,7 +1688,7 @@ test('captured composition callbacks preserve clear alert Codex project clock an
 test('composition rejects output callbacks fired before the desktop bridge exists', () => {
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1730,7 +1729,7 @@ test('composition rejects synchronous delivery before the realtime holder exists
 test('composition camera transport rejects construction-time use with a fixed non-TDZ error', async () => {
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1762,7 +1761,7 @@ test('composition camera transport rejects construction-time use with a fixed no
 test('composition camera transport is one stable proxy to the final desktop server owner', async () => {
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1813,7 +1812,7 @@ test('composition camera transport is one stable proxy to the final desktop serv
 
 
 test('shared phone endpoint publishes one host revision and cannot interrupt desktop audio on reconnect', async () => {
-  const core=buildAssembly({settings:settingsSchema.parse({executors:['fast_sim'],model_api_key:'key',tavily_api_key:'key'}),gateway:new NeverGateway(),searchTransport:{search:()=>Promise.reject(Error('unexpected'))}})
+  const core=buildAssembly({settings:settingsSchema.parse({executors:['fast_sim'],deepseek_api_key:'key',tavily_api_key:'key'}),gateway:new NeverGateway(),searchTransport:{search:()=>Promise.reject(Error('unexpected'))}})
   const stop=new AbortController()
   let revision=0, voice:string|null=null, disconnects=0, discarded=0, onsets=0
   let voiceStart:Promise<void>|undefined
