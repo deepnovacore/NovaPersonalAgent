@@ -13,7 +13,11 @@ const PROBE_ENV_KEYS = Object.freeze([
   'PATH', 'PATHEXT', 'SystemRoot', 'WINDIR', 'HOME', 'USERPROFILE', 'TMP', 'TEMP',
 ])
 
-/** Each configuration wait must settle, even when an OS/filesystem call never returns. */
+/**
+ * Budget for one asynchronous configuration wait. A JS timer cannot preempt a
+ * synchronous native/fs call that blocks the event loop, so this deadline covers
+ * waits that yield; it does not claim every OS call is guaranteed to settle.
+ */
 export const CONFIGURATION_STAGE_TIMEOUT_MS = 20_000
 
 const STAGE_NAME = /^[a-z_]{1,32}$/u
@@ -53,9 +57,10 @@ export function createConfigurationAttempt() {
 }
 
 /**
- * Bounds one wait and reports which stage is waiting. The race keeps ownership
- * local: a late value is handed to `onLateResult` for cleanup instead of being
- * allowed to continue into the caller's commit.
+ * Bounds one wait and reports the stage that owns it. Aborting the attempt
+ * rejects immediately, and the race keeps ownership local: a late value is
+ * handed to `onLateResult` for cleanup instead of being allowed to continue
+ * into the caller's commit.
  */
 export async function runConfigurationStage(attempt, stage, operation, {
   onStage = () => {},
@@ -69,9 +74,7 @@ export async function runConfigurationStage(attempt, stage, operation, {
   let settled = false
   let timer = null
   const work = Promise.resolve().then(operation).then(value => {
-    if (settled && !attempt.current()) {
-      try { onLateResult(value) } catch { /* late cleanup is best effort */ }
-    }
+    if (settled && !attempt.current()) disposeLateResult(onLateResult, value)
     return value
   })
   let onAbort = null
@@ -87,7 +90,7 @@ export async function runConfigurationStage(attempt, stage, operation, {
   try {
     const value = await Promise.race([work, deadline, aborted])
     if (!attempt.current()) {
-      try { onLateResult(value) } catch { /* late cleanup is best effort */ }
+      disposeLateResult(onLateResult, value)
       throw configurationSuperseded()
     }
     return value
@@ -99,6 +102,11 @@ export async function runConfigurationStage(attempt, stage, operation, {
     if (timer !== null) cancel(timer)
     if (onAbort !== null) attempt.signal.removeEventListener('abort', onAbort)
   }
+}
+
+function disposeLateResult(onLateResult, value) {
+  // Late cleanup may be async or throw. Neither may surface as an unhandled rejection.
+  Promise.resolve().then(() => onLateResult(value)).catch(() => {})
 }
 
 export function inspectCodexVersion(invocation, { environment = {}, run }) {
