@@ -32,7 +32,6 @@ const ALL_SECRET_KEYS = Object.freeze([
   'geminiApiKey',
   'tavilyApiKey',
   'openrouterApiKey',
-  'modelApiKey',
   'codexApiKey',
   'arkApiKey',
   'deepseekApiKey',
@@ -100,7 +99,6 @@ test('the default settings are the documented schema', () => {
     codexBinaryPath: '',
     codexWorkspace: '',
     codexManagedRoot: '',
-    modelBaseUrl: '',
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
@@ -165,7 +163,6 @@ test('version 3 migrates to v4 defaults while preserving existing desktop fields
   assert.equal(Object.hasOwn(migrated, 'codexProjectsEnabled'), false)
   assert.equal(migrated.codexWorkspace, '')
   assert.equal(migrated.codexManagedRoot, '')
-  assert.equal(migrated.modelBaseUrl, '')
   assert.equal(migrated.startListeningOnLaunch, false)
   assert.equal(migrated.codexApprovalMode, 'ask')
   assert.equal(migrated.clarificationDepth, 'balanced')
@@ -225,22 +222,10 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
   assert.equal(Object.hasOwn(invalid, 'searchProvider'), false)
 })
 
-test('model base URL accepts HTTPS and loopback HTTP but refuses unsafe schemes', () => {
-  assert.equal(
-    normalizeSettings({ modelBaseUrl: ' https://models.example/v1 ' }).modelBaseUrl,
-    'https://models.example/v1',
-  )
-  assert.equal(
-    normalizeSettings({ modelBaseUrl: 'http://127.0.0.1:8080/v1' }).modelBaseUrl,
-    'http://127.0.0.1:8080/v1',
-  )
-  for (const modelBaseUrl of [
-    'ftp://models.example/v1',
-    'http://models.example/v1',
-    'https://user:password@models.example/v1',
-  ]) {
-    assert.equal(normalizeSettings({ modelBaseUrl }).modelBaseUrl, '')
-  }
+test('normalizeSettings keeps the current provider model configuration unchanged', () => {
+  const normalized = normalizeSettings({})
+  assert.equal(normalized.pipelineMode, 'integrated')
+  assert.equal(normalized.cascadedLlmProvider, 'deepseek')
 })
 
 test('normalizeSettings rebuilds defaults from nothing at all', () => {
@@ -261,7 +246,6 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     codexBinaryPath: '',
     codexWorkspace: '',
     codexManagedRoot: '',
-    modelBaseUrl: '',
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
@@ -301,7 +285,6 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     codexBinaryPath: '',
     codexWorkspace: '',
     codexManagedRoot: '',
-    modelBaseUrl: '',
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
@@ -416,7 +399,6 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'localToolApproval',
     'memoryPrerecallEnabled',
     'minicpmRealtimeUrl',
-    'modelBaseUrl',
     'modelRoutes',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
@@ -556,7 +538,7 @@ test('normalizeSettings keeps only well-formed secret entries', () => {
     secrets: {
       dashscopeApiKey: { enc: 'safeStorage', data: 'c2VhbGVk' },
       tavilyApiKey: { enc: 'none', data: 'aGk=' },
-      modelApiKey: { enc: 'rot13', data: 'aGk=' },
+      deepseekApiKey: { enc: 'rot13', data: 'aGk=' },
       codexApiKey: { enc: 'none', data: 'not base64!' },
       arkApiKey: { enc: 'safeStorage', data: 'YXJr' },
       doubaoBigmodelApiKey: { enc: 'none', data: 'ZG91YmFv' },
@@ -577,7 +559,7 @@ test('normalizeSettings rejects secret entries that are not objects or lack data
     secrets: {
       dashscopeApiKey: 'plaintext-would-be-a-bug',
       tavilyApiKey: { enc: 'none' },
-      modelApiKey: { enc: 'none', data: '' },
+      deepseekApiKey: { enc: 'none', data: '' },
       codexApiKey: null,
       arkApiKey: [],
       doubaoBigmodelApiKey: { enc: 'none', data: 'not base64!' },
@@ -630,7 +612,6 @@ test('publicSettings never carries the secrets object', () => {
     'localToolApproval',
     'memoryPrerecallEnabled',
     'minicpmRealtimeUrl',
-    'modelBaseUrl',
     'modelRoutes',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
@@ -659,7 +640,6 @@ test('orb settings expose only renderer-owned appearance and activation fields',
     palette: 'graphite',
     startListeningOnLaunch: true,
     codexBinaryPath: 'C:\\private\\codex.exe',
-    modelBaseUrl: 'https://private.example/v1',
   }), {progressBubbles: 'milestones', codingProgressNarration: 'smart', language: 'zh-CN', palette: 'graphite', skinId: 'nova', importedSkins: [], companionForm: 'pet', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
 })
 
@@ -681,7 +661,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     geminiApiKey: false,
     tavilyApiKey: false,
     openrouterApiKey: false,
-    modelApiKey: false,
     codexApiKey: true,
     arkApiKey: false,
     deepseekApiKey: false,
@@ -699,7 +678,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     geminiApiKey: false,
     tavilyApiKey: false,
     openrouterApiKey: false,
-    modelApiKey: false,
     codexApiKey: false,
     arkApiKey: false,
     deepseekApiKey: false,
@@ -742,20 +720,20 @@ test('applySettingsUpdate seals plaintext through the codec and round-trips it b
     'sealed:tvly-secret',
   )
   assert.equal(readSecret(updated, 'tavilyApiKey', codec), 'tvly-secret')
-  assert.equal(readSecret(updated, 'modelApiKey', codec), null)
+  assert.equal(readSecret(updated, 'deepseekApiKey', codec), null)
 })
 
 test('applySettingsUpdate falls back to enc:none when no keyring is available', () => {
   const codec = fakeCodec({ available: false })
   const updated = applySettingsUpdate(DEFAULT_SETTINGS, {
-    secrets: { modelApiKey: 'sk-plain' },
+    secrets: { deepseekApiKey: 'sk-plain' },
   }, codec)
 
-  assert.deepEqual(updated.secrets.modelApiKey, {
+  assert.deepEqual(updated.secrets.deepseekApiKey, {
     enc: 'none',
     data: Buffer.from('sk-plain', 'utf8').toString('base64'),
   })
-  assert.equal(readSecret(updated, 'modelApiKey', codec), 'sk-plain')
+  assert.equal(readSecret(updated, 'deepseekApiKey', codec), 'sk-plain')
 })
 
 test('the safeStorage codec refuses linux basic_text, which is not protected storage', () => {
@@ -793,12 +771,12 @@ test('the safeStorage codec refuses linux basic_text, which is not protected sto
 test('a secret saved under linux basic_text is stored as plaintext and says so', () => {
   const codec = createSafeStorageCodec(fakeSafeStorage({ backend: 'basic_text' }), 'linux')
   const updated = applySettingsUpdate(DEFAULT_SETTINGS, {
-    secrets: { modelApiKey: 'sk-linux' },
+    secrets: { deepseekApiKey: 'sk-linux' },
   }, codec)
 
-  assert.equal(updated.secrets.modelApiKey.enc, 'none')
+  assert.equal(updated.secrets.deepseekApiKey.enc, 'none')
   assert.equal(hasPlaintextSecret(updated), true, 'the panel warning must be on')
-  assert.equal(readSecret(updated, 'modelApiKey', codec), 'sk-linux')
+  assert.equal(readSecret(updated, 'deepseekApiKey', codec), 'sk-linux')
 })
 
 test('hasPlaintextSecret answers for what is stored, not for the codec of the moment', () => {
@@ -928,9 +906,9 @@ test('a secret carrying a NUL or other control character is refused, not stored'
   // total success.
   assert.deepEqual(patched.rejectedSecrets, ['dashscopeApiKey'])
   for (const bad of ['\u0000', 'sk-\u0000x', 'sk-\u001bx', 'sk\nx', 'sk\tx', 'sk\u007fx']) {
-    const attempt = applySettingsUpdate(DEFAULT_SETTINGS, { secrets: { modelApiKey: bad } }, codec)
+    const attempt = applySettingsUpdate(DEFAULT_SETTINGS, { secrets: { deepseekApiKey: bad } }, codec)
     assert.deepEqual(attempt.secrets, {}, `${JSON.stringify(bad)} never reaches the store`)
-    assert.deepEqual(attempt.rejectedSecrets, ['modelApiKey'], `${JSON.stringify(bad)} is named as rejected`)
+    assert.deepEqual(attempt.rejectedSecrets, ['deepseekApiKey'], `${JSON.stringify(bad)} is named as rejected`)
   }
 })
 
@@ -1137,7 +1115,7 @@ test('saveSettings normalizes before writing so junk can never reach disk', asyn
 test('the next save rewrites a plaintext entry on disk as ciphertext', async () => {
   await withTempDirectory(async directory => {
     const file = join(directory, 'nova-audio-agent-desktop-settings.json')
-    await saveSettings(file, { secrets: { modelApiKey: plaintextEntry('sk-stale') } })
+    await saveSettings(file, { secrets: { deepseekApiKey: plaintextEntry('sk-stale') } })
 
     // An unrelated field changes; the stale entry rides along with that write,
     // so the migration is atomic with the save rather than a separate rewrite.
@@ -1157,7 +1135,7 @@ test('the next save rewrites a plaintext entry on disk as ciphertext', async () 
     )
     const reloaded = await loadSettings(file)
     assert.equal(reloaded.integratedVoice, 'longcheng')
-    assert.equal(readSecret(reloaded, 'modelApiKey', fakeCodec()), 'sk-stale')
+    assert.equal(readSecret(reloaded, 'deepseekApiKey', fakeCodec()), 'sk-stale')
   })
 })
 
@@ -1333,7 +1311,7 @@ test('startup presentation persists, validates and does not restart the backend'
 })
 
 test('presentation writes preserve secrets without opening the keychain and remain ordered', async () => {
-  let current = normalizeSettings({secrets: {modelApiKey: plaintextEntry('keep')}})
+  let current = normalizeSettings({secrets: {deepseekApiKey: plaintextEntry('keep')}})
   const original = current.secrets
   const write = createSettingsWriter({getCurrent: () => current, commit: next => {current = next}, save: async () => {}, codec: {available() {assert.fail('presentation opened keychain')}}})
   await Promise.all([
