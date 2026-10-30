@@ -125,6 +125,9 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
     final connected = feishu['connected'] == true;
     final setupUrl = setup['verification_url'] as String?;
     final loginUrl = feishu['verification_url'] as String?;
+    // A second login request would replace the code the browser is confirming.
+    final loginPending =
+        !connected && (feishu['login_pending'] == true || loginUrl != null);
     return Column(
       children: [
         NovaSection(
@@ -235,7 +238,11 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
           children: [
             NovaTile(
               key: const ValueKey('host.feishu.status'),
-              title: connected ? '已连接' : '未连接',
+              title: connected
+                  ? '已连接'
+                  : loginPending
+                  ? '等待在授权页确认'
+                  : '未连接',
               subtitle: Text(
                 feishu['configured'] == true ? '应用已配置' : '尚未配置飞书应用',
               ),
@@ -252,7 +259,7 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                 title: '打开配置页面',
                 onTap: () => _open(setupUrl),
               ),
-            if (feishu['configured'] == true && !connected)
+            if (feishu['configured'] == true && !connected && !loginPending)
               NovaTile(
                 key: const ValueKey('host.feishu.login'),
                 title: '登录飞书',

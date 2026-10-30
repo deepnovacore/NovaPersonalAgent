@@ -136,6 +136,8 @@ void main() {
       },
     });
     await pump(tester, state, opened: opened);
+    expect(find.text('等待在授权页确认'), findsOneWidget);
+    expect(find.byKey(const ValueKey('host.feishu.login')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('host.feishu.open')));
     await tester.pump();
     expect(opened.single.host, 'accounts.feishu.cn');
