@@ -137,7 +137,8 @@ void main() {
     });
     await pump(tester, state, opened: opened);
     expect(find.text('等待在授权页确认'), findsOneWidget);
-    expect(find.byKey(const ValueKey('host.feishu.login')), findsNothing);
+    expect(find.text('登录飞书'), findsNothing);
+    expect(find.text('重新开始登录'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('host.feishu.open')));
     await tester.pump();
     expect(opened.single.host, 'accounts.feishu.cn');
@@ -145,6 +146,24 @@ void main() {
     await tester.pump();
     expect(state.pending.single['kind'], 'connector.feishu');
     expect(state.pending.single['input'], {'action': 'complete'});
+  });
+
+  testWidgets('an expired Feishu link can be restarted from the phone', (
+    tester,
+  ) async {
+    final state = stateWith({
+      'owner': true,
+      'host_feishu': {
+        'configured': true,
+        'connected': false,
+        'login_pending': true,
+        'verification_url': 'https://accounts.feishu.cn/device?code=old',
+      },
+    });
+    await pump(tester, state);
+    await tester.tap(find.byKey(const ValueKey('host.feishu.login')));
+    await tester.pump();
+    expect(state.pending.single['input'], {'action': 'login'});
   });
 
   test('conflict retry refreshes the version Host checks', () {

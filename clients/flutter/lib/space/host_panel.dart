@@ -125,7 +125,8 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
     final connected = feishu['connected'] == true;
     final setupUrl = setup['verification_url'] as String?;
     final loginUrl = feishu['verification_url'] as String?;
-    // A second login request would replace the code the browser is confirming.
+    // A new login replaces the code the browser is confirming, so while one is pending
+    // it is offered only as an explicit restart for an expired or failed link.
     final loginPending =
         !connected && (feishu['login_pending'] == true || loginUrl != null);
     return Column(
@@ -259,10 +260,13 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                 title: '打开配置页面',
                 onTap: () => _open(setupUrl),
               ),
-            if (feishu['configured'] == true && !connected && !loginPending)
+            if (feishu['configured'] == true && !connected)
               NovaTile(
                 key: const ValueKey('host.feishu.login'),
-                title: '登录飞书',
+                title: loginPending ? '重新开始登录' : '登录飞书',
+                subtitle: loginPending
+                    ? const Text('授权页过期或确认失败时使用，之前的授权链接会失效')
+                    : null,
                 onTap: () => _send('connector.feishu', {'action': 'login'}),
               ),
             if (loginUrl != null && !connected)

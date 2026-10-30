@@ -70,7 +70,7 @@ The first phone the Host confirms becomes the owner. After the owner is revoked,
 
 Model keys go only to the Host and are stored in a private file next to its config; the phone shows only whether each key is set and its fingerprint. A key takes effect after the Host restarts. A key of the same name already set in the Host's startup environment wins, and the phone marks it as coming from the Host environment.
 
-Feishu authorization happens on the Host. Tap Sign in to Feishu, confirm on the authorization page the Host provides, then tap Done. While the Host waits for that confirmation the phone shows it as waiting instead of offering a second sign-in. The phone's own Feishu tokens are never passed to the Host.
+Feishu authorization happens on the Host. Tap Sign in to Feishu, confirm on the authorization page the Host provides, then tap Done. While the Host waits for that confirmation the phone shows it as waiting. If the authorization page expires or confirmation fails, tap Restart sign-in; the earlier authorization link stops working. The phone's own Feishu tokens are never passed to the Host.
 
 ## Acceptance boundary
 
