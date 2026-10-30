@@ -47,7 +47,6 @@ export const SECRET_KEYS = Object.freeze([
   'geminiApiKey',
   'tavilyApiKey',
   'openrouterApiKey',
-  'modelApiKey',
   'codexApiKey',
   'arkApiKey',
   'deepseekApiKey',
@@ -93,7 +92,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
   codexBinaryPath: '',
   codexWorkspace: '',
   codexManagedRoot: '',
-  modelBaseUrl: '',
   startListeningOnLaunch: false,
   wakeWordEnabled: false,
   autoHideSeconds: 60,
@@ -202,22 +200,6 @@ function validDesktopString(value) {
   return [...trimmed].length <= MAX_DESKTOP_SETTING_LENGTH ? trimmed : null
 }
 
-export function validModelBaseUrl(value) {
-  const normalized = validDesktopString(value)
-  if (normalized === null || normalized === '') return normalized
-  try {
-    const parsed = new URL(normalized)
-    if (parsed.username !== '' || parsed.password !== '') return null
-    if (parsed.protocol === 'https:') return normalized
-    if (parsed.protocol !== 'http:') return null
-    return ['127.0.0.1', '[::1]', 'localhost'].includes(parsed.hostname)
-      ? normalized
-      : null
-  } catch {
-    return null
-  }
-}
-
 function normalizeModelRoute(lane, raw) {
   if (!isRecord(raw)) return null
   const provider = raw.provider
@@ -314,7 +296,6 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     codexBinaryPath: pick(source.codexBinaryPath, fallback.codexBinaryPath, DEFAULT_SETTINGS.codexBinaryPath, validDesktopString),
     codexWorkspace: pick(source.codexWorkspace, fallback.codexWorkspace, DEFAULT_SETTINGS.codexWorkspace, validDesktopString),
     codexManagedRoot: pick(source.codexManagedRoot, fallback.codexManagedRoot, DEFAULT_SETTINGS.codexManagedRoot, validDesktopString),
-    modelBaseUrl: pick(source.modelBaseUrl, fallback.modelBaseUrl, DEFAULT_SETTINGS.modelBaseUrl, validModelBaseUrl),
     wakeWordEnabled: pick(
       source.wakeWordEnabled,
       fallback.wakeWordEnabled, false, validBoolean,
@@ -410,7 +391,6 @@ export function publicSettings(settings) {
     codexBinaryPath: normalized.codexBinaryPath,
     codexWorkspace: normalized.codexWorkspace,
     codexManagedRoot: normalized.codexManagedRoot,
-    modelBaseUrl: normalized.modelBaseUrl,
     startListeningOnLaunch: normalized.startListeningOnLaunch,
     wakeWordEnabled: normalized.wakeWordEnabled,
     autoHideSeconds: normalized.autoHideSeconds,

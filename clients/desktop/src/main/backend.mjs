@@ -31,7 +31,6 @@ export const SECRET_ENV_MAP = Object.freeze({
   geminiApiKey: 'GEMINI_API_KEY',
   tavilyApiKey: 'TAVILY_API_KEY',
   openrouterApiKey: 'OPENROUTER_API_KEY',
-  modelApiKey: 'MODEL_API_KEY',
   codexApiKey: 'CODEX_API_KEY',
   arkApiKey: 'ARK_API_KEY',
   deepseekApiKey: 'DEEPSEEK_API_KEY',
@@ -62,7 +61,6 @@ const ALWAYS_ACTIVE_SECRET_KEYS = Object.freeze([
   'openrouterApiKey',
   'composioApiKey',
   'tavilyApiKey',
-  'modelApiKey',
   'codexApiKey',
 ])
 
@@ -254,7 +252,6 @@ export function backendLaunchSpec({
     delete env.CODEX_PREFIX_ARGS
     delete env.CODEX_MANAGED_ROOT
     delete env.CODEX_PROJECT_STATE_ROOT
-    delete env.MODEL_BASE_URL
     if (typeof resolvedConfig.codexBinaryPath === 'string' && resolvedConfig.codexBinaryPath) {
       env.CODEX_BIN = resolvedConfig.codexBinaryPath
     }
@@ -270,10 +267,9 @@ export function backendLaunchSpec({
     if (typeof resolvedConfig.stateRoot === 'string' && resolvedConfig.stateRoot) {
       env.CODEX_PROJECT_STATE_ROOT = resolvedConfig.stateRoot
     }
-    if (typeof resolvedConfig.modelBaseUrl === 'string' && resolvedConfig.modelBaseUrl) {
-      env.MODEL_BASE_URL = resolvedConfig.modelBaseUrl
-    }
   }
+  // The generic cross-provider model overrides are retired; never forward them to the runtime.
+  for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY']) delete env[name]
   const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
   Object.assign(env, {
     CASCADE_LLM_PROVIDER: llmProvider,
@@ -659,6 +655,8 @@ export async function shutdownBackendBestEffort(child, options) {
 /** Shared by registry validation and the actual child launch. */
 export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}, document) {
   const env = {...parentEnv}
+  // Retired generic model overrides never reach the child, whichever launch path builds it.
+  for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY']) delete env[name]
   const pipelineMode = settings?.pipelineMode ?? SETTINGS_DEFAULTS.pipelineMode
   {
     decryptedSecrets = decryptedSecrets && typeof decryptedSecrets === 'object' ? decryptedSecrets : {}

@@ -308,8 +308,7 @@ export function classifyBackendFailure(code) {
   if (code === 'backend_start_timeout') {
     return Object.freeze({kind: 'recoverable', code})
   }
-  if (code === 'configuration_required' || code === 'manual_path_required'
-    || code === 'model_base_url_invalid') {
+  if (code === 'configuration_required' || code === 'manual_path_required') {
     return Object.freeze({kind: 'configuration_required', code})
   }
   if (code === 'authentication_failed') {

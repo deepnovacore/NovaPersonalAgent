@@ -59,7 +59,6 @@ const SECRET_KEY_NAMES = [
   'stepfunApiKey',
   'tavilyApiKey',
   'openrouterApiKey',
-  'modelApiKey',
   'codexApiKey',
   'arkApiKey',
   'deepseekApiKey',
