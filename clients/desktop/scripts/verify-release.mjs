@@ -173,7 +173,7 @@ async function smoke(executable, scratch, diagnosticsDir) {
     QWEN_REALTIME_VOICE: 'release-smoke-voice',
     CODEX_WORKSPACE: home,
     EXECUTOR: 'fast_sim', EXECUTORS: 'fast_sim',
-    DASHSCOPE_API_KEY: 'public-release-smoke-key', MODEL_API_KEY: 'public-release-smoke-key',
+    DASHSCOPE_API_KEY: 'public-release-smoke-key',
     TAVILY_API_KEY: 'public-release-smoke-key',
   })
   const child = spawn(executable, [`--user-data-dir=${home}`, '--open-settings', ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : [])], {

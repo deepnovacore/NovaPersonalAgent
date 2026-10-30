@@ -14,7 +14,7 @@ test('Space live acceptance reaches the mock provider with a symlinked TMPDIR', 
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
  const base=`http://127.0.0.1:${server.address().port}/v1`
  try {
-  const child=spawn(process.execPath,[resolve(import.meta.dirname,'space-host.mjs'),`--build-dir=${process.env.NOVA_TEST_DIST??resolve(import.meta.dirname,'../../dist')}`,`--output=${output}`],{env:{...process.env,TMPDIR:alias,TMP:alias,TEMP:alias,NOVA_AUDIO_AGENT_MODEL_BASE_URL:base,MODEL_BASE_URL:base,MODEL_API_KEY:'synthetic-test-key',DASHSCOPE_API_KEY:'synthetic-test-key',HTTPS_PROXY:'',https_proxy:'',HTTP_PROXY:'',http_proxy:'',ALL_PROXY:'',all_proxy:''},stdio:['ignore','pipe','pipe']})
+  const child=spawn(process.execPath,[resolve(import.meta.dirname,'space-host.mjs'),`--build-dir=${process.env.NOVA_TEST_DIST??resolve(import.meta.dirname,'../../dist')}`,`--output=${output}`],{env:{...process.env,TMPDIR:alias,TMP:alias,TEMP:alias,NOVA_AUDIO_AGENT_MODEL_BASE_URL:base,DASHSCOPE_API_KEY:'synthetic-test-key',HTTPS_PROXY:'',https_proxy:'',HTTP_PROXY:'',http_proxy:'',ALL_PROXY:'',all_proxy:''},stdio:['ignore','pipe','pipe']})
   let log='';child.stdout.on('data',data=>{log+=data});child.stderr.on('data',data=>{log+=data})
   const timer=setTimeout(()=>child.kill('SIGKILL'),35000)
   try {await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',resolve)})} finally {clearTimeout(timer)}
