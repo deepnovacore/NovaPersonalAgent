@@ -35,7 +35,7 @@ function record(value: unknown): Record<string, unknown> {
 function settings(overrides: Partial<Settings> = {}): Settings {
   return settingsSchema.parse({
     executors: ['fast_sim'],
-    deepseek_api_key: 'assembly-test-key',
+    dashscope_api_key: 'assembly-test-key',
     tavily_api_key: 'tavily-test-key',
     ...overrides,
   })
@@ -153,7 +153,7 @@ test('a configured executor with no adapter fails at startup, not at first dispa
 
 test('a missing model credential is refused without echoing configuration', () => {
   assert.throws(
-    () => buildAssembly({settings: settings({fast_model: 'qwen-flash'})}),
+    () => buildAssembly({settings: settings({fast_model: 'qwen-flash', dashscope_api_key: null})}),
     (error: unknown) => {
       assert.ok(error instanceof AssemblyError)
       assert.match(error.message, /DASHSCOPE_API_KEY/u)
@@ -167,7 +167,7 @@ test('a missing model credential is refused without echoing configuration', () =
 test('model credential validation wins when both production credentials are absent', () => {
   assert.throws(
     () => buildAssembly({
-      settings: settings({fast_model: 'qwen-flash', tavily_api_key: null}),
+      settings: settings({fast_model: 'qwen-flash', dashscope_api_key: null, tavily_api_key: null}),
     }),
     (error: unknown) => error instanceof AssemblyError
       && error.message === '缺少 DASHSCOPE_API_KEY',
@@ -175,7 +175,10 @@ test('model credential validation wins when both production credentials are abse
 })
 
 test('production search without Tavily or DashScope is left out instead of blocking startup', () => {
-  const assembly = buildAssembly({settings: settings({tavily_api_key: null})})
+  const assembly = buildAssembly({
+    settings: settings({tavily_api_key: null, dashscope_api_key: null}),
+    gateway: new ScriptedGateway([]),
+  })
   assert.equal(assembly.manifests.some(manifest => manifest.name === 'search'), false)
   assert.equal([...assembly.tools.bindings.keys()].includes('search__search'), false)
 })

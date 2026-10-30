@@ -118,7 +118,7 @@ test('acceptance capability projection removes actual search and camera assembly
  const {buildAssembly}=await import('../src/composition/assembly.js')
  const configured=parseCapabilityRegistry({version:1,modules:{search:{enabled:true},camera:{enabled:true}}},{TAVILY_API_KEY:'synthetic'})
  const capabilities=acceptanceCapabilityRegistry(configured,true)
- const core=buildAssembly({settings:settingsSchema.parse({memory_connection:'disabled',executors:[],deepseek_api_key:'synthetic'}),capabilities})
+ const core=buildAssembly({settings:settingsSchema.parse({memory_connection:'disabled',executors:[],dashscope_api_key:'synthetic'}),capabilities})
  try{
   assert.equal(core.runtime.executors.has('search'),false)
   assert.equal(core.tools.bindings.has('search__search'),false)

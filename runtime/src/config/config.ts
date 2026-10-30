@@ -779,30 +779,23 @@ function extractionCandidate(
   return {...connection, model}
 }
 
-function providerForFastModel(model: string): string | null {
-  for (const [provider, profile] of Object.entries(AUXILIARY_MODEL_PROFILES)) {
-    if (profile.fast === model) return provider
-  }
-  return null
-}
-
 /**
- * Extraction must reach the same provider that answers text. The paired fast model names that
- * provider; a custom fast model keeps its own name on the provider that owns the credential.
+ * The provider that answers text and support. An explicit fast route is a separate lane and must
+ * not retarget support; model names never guess a provider. Text mode is the cascaded graph, or an
+ * integrated runtime with a configured cascaded text model (desktop text conversations set it).
  */
-function selectedTextProvider(settings: Settings): string {
-  // A local/compatible gateway is authoritative even if its model happens to share a public name.
-  if (settings.cascade_llm_provider === 'self-hosted' || settings.cascade_llm_provider === 'openai-compatible') {
-    return settings.cascade_llm_provider
+function effectiveTextProvider(settings: Settings): string {
+  if (settings.pipeline_mode !== 'cascaded' && settings.cascade_llm_model === null) {
+    return settings.integrated_provider
   }
-  const paired = providerForFastModel(settings.fast_model)
-  if (paired !== null) return paired
-  return settings.pipeline_mode === 'integrated' ? settings.integrated_provider : settings.cascade_llm_provider
+  const routed = settings.model_routes.conversationText
+  if (routed !== undefined && routed !== null) return routed.provider
+  return settings.cascade_llm_provider
 }
 
 /** The selected text provider's own model endpoint and credential; null for native realtime only. */
 export function resolveSelectedModelConnection(settings: Settings): ProviderModelConnection | null {
-  return resolveProviderModelConnection(settings, selectedTextProvider(settings))
+  return resolveProviderModelConnection(settings, effectiveTextProvider(settings))
 }
 
 /**
@@ -821,7 +814,7 @@ export function resolveMemoryExtractionConnection(settings: Settings): MemoryExt
       missing: fastRoute.missing,
     }
   }
-  const primary = extractionCandidate(settings, selectedTextProvider(settings))
+  const primary = extractionCandidate(settings, effectiveTextProvider(settings))
   if (primary === null) {
     // Native realtime providers have no model channel of their own; extraction needs an explicit lane.
     return {baseUrl: '', apiKey: '', model: settings.fast_model, missing: 'MODEL_ROUTES'}
