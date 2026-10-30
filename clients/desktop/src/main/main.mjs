@@ -1007,56 +1007,59 @@ async function closeMaintenanceBounded(maintenance) {
 }
 
 async function prepareDesktopConfiguration(attempt = beginConfigurationAttempt()) {
-  const prepared = await runConfigurationStage(attempt, 'settings', async () => {
-    if (projectNativeHost === undefined) {
-      const projectNativeLoad = inspectProjectNativeHostFromResources({
-        resourcesPath: app.isPackaged ? process.resourcesPath : realpathSync(resolve(packageRoot, 'build')),
-        platform: process.platform,
-        arch: process.arch,
-        electronAbi: process.versions.modules,
-      })
-      projectNativeHost = projectNativeLoad.host
-      projectNativeAuthorityPresent = projectNativeLoad.status !== 'absent'
-    }
-    return prepareDesktopStartup({
-      settings: currentSettings,
-      environment: process.env,
-      home: homedir(),
+  // Loading the native host is synchronous and cannot be preempted by a JS timer.
+  if (projectNativeHost === undefined) {
+    const projectNativeLoad = inspectProjectNativeHostFromResources({
+      resourcesPath: app.isPackaged ? process.resourcesPath : realpathSync(resolve(packageRoot, 'build')),
+      platform: process.platform,
+      arch: process.arch,
+      electronAbi: process.versions.modules,
+    })
+    projectNativeHost = projectNativeLoad.host
+    projectNativeAuthorityPresent = projectNativeLoad.status !== 'absent'
+  }
+  const prepared = await prepareDesktopStartup({
+    settings: currentSettings,
+    environment: process.env,
+    home: homedir(),
+    platform: process.platform,
+    arch: process.arch,
+    pathApi: path,
+    canonicalizePath: value => resolve(value),
+    canonicalizeExecutable: value => canonicalInstalledExecutable(value, {
+      platform: process.platform,
+      realpath: realpathSync,
+      stat: statSync,
+      access: executable => accessSync(executable, constants.X_OK),
+    }),
+    canonicalizeInvocation: candidate => canonicalInstalledInvocation(candidate, {
       platform: process.platform,
       arch: process.arch,
       pathApi: path,
-      canonicalizePath: value => resolve(value),
-      canonicalizeExecutable: value => canonicalInstalledExecutable(value, {
-        platform: process.platform,
-        realpath: realpathSync,
-        stat: statSync,
-        access: executable => accessSync(executable, constants.X_OK),
-      }),
-      canonicalizeInvocation: candidate => canonicalInstalledInvocation(candidate, {
-        platform: process.platform,
-        arch: process.arch,
-        pathApi: path,
-        realpath: realpathSync,
-        stat: statSync,
-        access: executable => accessSync(executable, constants.X_OK),
-        readFile: readFileSync,
-      }),
+      realpath: realpathSync,
+      stat: statSync,
+      access: executable => accessSync(executable, constants.X_OK),
+      readFile: readFileSync,
+    }),
+    mkdir,
+    inspectCodex: invocation => inspectCodexVersion(invocation, {
+      environment: process.env,
+      run: spawnSync,
+    }),
+    ensureDirectories: config => ensurePrivateProjectDirectories({
+      config,
+      home: homedir(),
+      platform: process.platform,
+      nativeHost: projectNativeHost,
+      pathApi: path,
       mkdir,
-      inspectCodex: invocation => inspectCodexVersion(invocation, {
-        environment: process.env,
-        run: spawnSync,
-      }),
-      ensureDirectories: config => ensurePrivateProjectDirectories({
-        config,
-        home: homedir(),
-        platform: process.platform,
-        nativeHost: projectNativeHost,
-        pathApi: path,
-        mkdir,
-      }),
-      onStage: stage => { if (configurationAttemptCurrent(attempt)) publishConfigurationStage(stage) },
-    })
-  }, {onStage: publishConfigurationStage})
+    }),
+    // Each real wait boundary runs through the same attempt and budget, so the
+    // displayed stage, the deadline being enforced, and error.stage all agree.
+    runStage: (stage, operation) => runConfigurationStage(attempt, stage, operation, {
+      onStage: publishConfigurationStage,
+    }),
+  })
   const maintenance = projectNativeHost === null
     ? null
     : await runConfigurationStage(attempt, 'maintenance', () =>
@@ -1068,7 +1071,7 @@ async function prepareDesktopConfiguration(attempt = beginConfigurationAttempt()
       onStage: publishConfigurationStage,
       // A store opened after the attempt lost ownership is closed here, so it cannot
       // keep a transaction lock or be installed as the active maintenance service.
-      onLateResult: service => { void closeMaintenanceBounded(service) },
+      onLateResult: service => closeMaintenanceBounded(service),
     })
   return Object.freeze({...prepared, maintenance, attempt})
 }

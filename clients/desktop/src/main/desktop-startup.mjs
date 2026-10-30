@@ -232,7 +232,7 @@ export async function prepareDesktopStartup({
   inspectCodex,
   inspectWorkspace = stat,
   ensureDirectories = config => ensureProductDirectories(config, { mkdir, pathApi }),
-  onStage = () => {},
+  runStage = (stage, operation) => operation(),
 }) {
   const config = resolveDesktopConfig({
     settings,
@@ -243,19 +243,18 @@ export async function prepareDesktopStartup({
     canonicalize: canonicalizePath,
   })
   if (settings.codexWorkspace?.trim() || environment.CODEX_WORKSPACE?.trim()) {
-    onStage('workspace')
-    let workspace
-    try { workspace = await inspectWorkspace(config.workspace) }
-    catch (error) {
-      if (['ENOENT', 'ENOTDIR'].includes(error?.code)) throw Object.assign(new Error('workspace_not_found'), {code: 'workspace_not_found'})
-      throw error
-    }
-    if (!workspace.isDirectory()) throw Object.assign(new Error('workspace_invalid'), {code: 'workspace_invalid'})
+    await runStage('workspace', async () => {
+      let workspace
+      try { workspace = await inspectWorkspace(config.workspace) }
+      catch (error) {
+        if (['ENOENT', 'ENOTDIR'].includes(error?.code)) throw Object.assign(new Error('workspace_not_found'), {code: 'workspace_not_found'})
+        throw error
+      }
+      if (!workspace.isDirectory()) throw Object.assign(new Error('workspace_invalid'), {code: 'workspace_invalid'})
+    })
   }
-  onStage('directories')
-  await ensureDirectories(config)
-  onStage('codex')
-  const { config: resolved, status } = await resolveDesktopCodex({
+  await runStage('directories', () => ensureDirectories(config))
+  const { config: resolved, status } = await runStage('codex', () => resolveDesktopCodex({
     config,
     automaticCandidates: codexCandidates({
       platform,
@@ -270,7 +269,7 @@ export async function prepareDesktopStartup({
       return command === null ? null : {command, prefixArgs: candidate.prefixArgs}
     }),
     inspect: inspectCodex,
-  })
+  }))
   return Object.freeze({ config: resolved, codexStatus: status })
 }
 
