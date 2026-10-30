@@ -1,10 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {realpath,mkdtemp,rm,readFile,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
+import {canonicalJson} from '../src/text/canonical-json.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets,secretClearSchema,secretPutSchema} from '../src/space-host/host-admin.js';
 import {environmentContract} from '../src/config/environment-contract.js';
@@ -107,6 +109,23 @@ test('a damaged secrets file marks the owner projection and a re-entered key cle
   assert.equal(view().damaged,true);assert.equal(view().credentials.every(row=>!row.configured),true);
   assert.equal((await f.send('phone','put','secret.put',{name:'OPENAI_API_KEY',value:'sk-after-damage'})).status,'accepted');
   assert.equal(view().damaged,false);assert.equal(view().credentials.find(row=>row.name==='OPENAI_API_KEY')!.configured,true);
+ }finally{await f.close()}
+});
+
+test('the journal hashes the redacted intent, so a stored hash never confirms a secret value',async()=>{
+ const f=await fixture({owner:'phone'});const secret='sk-journal-oracle-value';
+ try{const intent={v:1,type:'intent',op_id:'oracle',kind:'secret.put',created_at:Date.now(),input:{name:'OPENAI_API_KEY',value:secret}};
+  await f.space.receive('phone',intent);assert.equal(f.sent.filter(row=>row.type==='receipt').at(-1)!.status,'accepted');
+  // A replay of the same operation stays idempotent; the same op id with another value conflicts.
+  await f.space.receive('phone',intent);assert.equal(f.sent.filter(row=>row.type==='receipt').at(-1)!.error,undefined);
+  await f.space.receive('phone',{...intent,input:{name:'OPENAI_API_KEY',value:'sk-a-different-value'}});
+  assert.equal(f.sent.filter(row=>row.type==='receipt').at(-1)!.error,'op_id_conflict');
+  await f.space.close();
+  const journal=await readFile(join(f.dir,'space.json'),'utf8'),rawHash=createHash('sha256').update(canonicalJson(intent)).digest('hex');
+  assert.equal(journal.includes(secret),false);assert.equal(journal.includes(rawHash),false);
+  assert.equal(journal.includes(createHash('sha256').update(secret).digest('hex')),false);
+  const saved=JSON.parse(journal) as {ops:Record<string,{hash:string}>};
+  assert.equal(Object.values(saved.ops)[0]!.hash,createHash('sha256').update(canonicalJson({...intent,input:{name:'OPENAI_API_KEY'}})).digest('hex'));
  }finally{await f.close()}
 });
 
