@@ -25,3 +25,31 @@ test('outbound-only identity can send full multipart body with collection paused
  account='ou_someone_else';const rejected=await adapter.send(parts[0]!,{binding,idempotency_key:'old',notification:message,signal:new AbortController().signal});assert.equal(rejected.kind,'blocked');assert.equal(contents.length,parts.length+1)
  }finally{await connector.close();await rm(dir,{recursive:true,force:true})}
 })
+test('a notification-only identity recovers from a transient verification failure by itself, without a manual command',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-notify-feishu-transient-'));let offline=false
+ const user=()=>offline
+  ?{openId:'ou_me',status:'verify_failed',available:false,verified:false,tokenStatus:'valid',message:'User identity: verify failed: server rejected token: dial tcp 127.0.0.1:1: connect: connection refused',scopes:['offline_access']}
+  :{openId:'ou_me',status:'authenticated',scopes:['offline_access']}
+ // What an observer such as the notification service sees: it rebinds on a readiness edge.
+ const observed:boolean[]=[],settle=()=>new Promise<void>(resolve=>setImmediate(resolve))
+ const connector=new FeishuConnector({executable:'unused',credentialRoot:dir,statePath:join(dir,'state.json'),ingest:()=>Promise.resolve(),deleteSource:()=>Promise.resolve(),onAction:()=>Promise.resolve(),onChange:snapshot=>{observed.push(snapshot.notification_ready===true)},run:async(args,options)=>{
+  if(args[0]==='--version')return '1.0.69'
+  if(args[1]==='status')return JSON.stringify({appId:'cli_test',...(offline?{}:{verified:true}),identities:{user:user()}})
+  if(args[1]==='login'&&args.includes('--scope'))return JSON.stringify({verification_url:'https://accounts.feishu.cn/device',device_code:'code',expires_in:900})
+  if(args[1]==='login')return '{}'
+  if(args[1]==='consume')return new Promise<string>(resolve=>options?.signal?.addEventListener('abort',()=>resolve(''),{once:true}))
+  return '{}'
+ }})
+ try{
+  await connector.open();await connector.command('feishu.notification.login');await connector.completeLogin();await connector.command('feishu.notification.configure',{enabled:true});await connector.pause()
+  assert.equal(connector.notificationBinding('u')?.status,'ready')
+  await settle();assert.equal(observed.at(-1),true,'observers start from a ready identity')
+  offline=true;await connector.command('feishu.status');await settle()
+  assert.notEqual(connector.notificationBinding('u')?.status,'ready','notifications are fenced while the login cannot be verified')
+  assert.equal(observed.at(-1),false,'a command-driven outage is published, so observers cannot miss the fence')
+  offline=false;await connector.sync();await settle()
+  assert.equal(connector.notificationBinding('u')?.status,'ready','the background tick re-verifies and reopens notifications')
+  assert.equal(observed.at(-1),true,'recovery is published, so observers rebind without a manual command')
+  assert.equal(connector.snapshot().error,undefined)
+ }finally{await connector.close();await rm(dir,{recursive:true,force:true})}
+})

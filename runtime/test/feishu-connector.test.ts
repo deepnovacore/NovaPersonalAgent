@@ -111,6 +111,56 @@ test('expired Feishu authorization preserves app binding and clears after login'
   } finally {await connector.close();await rm(directory,{recursive:true,force:true});}
 });
 
+test('a transient Feishu verification failure keeps the connection and resumes by itself, a real expiry still disconnects', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-transient-'));
+  let mode:'ready'|'offline'|'rejected'|'expired'='ready';let listCalls=0;let sends=0;let nonce='';const actions:string[]=[];
+  const user=()=>({openId:'ou_fixture',name:'Fixture',scope:FEISHU_SCOPES.join(' '),
+    ...(mode==='ready'?{status:'ready',available:true,verified:true,tokenStatus:'valid'}
+      // The CLI reports a blocked network as verify_failed while the stored token is still valid, wording it as a rejection.
+      :mode==='offline'?{status:'verify_failed',available:false,verified:false,tokenStatus:'valid',message:'User identity: verify failed: server rejected token: Get "https://open.feishu.cn/open-apis/authen/v1/user_info": proxyconnect tcp: dial tcp 127.0.0.1:1: connect: connection refused'}
+      // A real server rejection carries the same status and a still-valid cached token, but no transport error.
+      :mode==='rejected'?{status:'verify_failed',available:false,verified:false,tokenStatus:'valid',message:'User identity: verify failed: server rejected token: HTTP 401 invalid access token'}
+      :{status:'missing',available:false,verified:false,tokenStatus:'expired'})});
+  const connector=new FeishuConnector({executable:'unused',credentialRoot:directory,statePath:join(directory,'state.json'),now:()=>new Date('2026-09-12T12:00:00.000Z'),
+    ingest:()=>Promise.resolve(),deleteSource:()=>Promise.resolve(),onAction:action=>{actions.push(action.event_id);return Promise.resolve()},
+    run:async(args)=>{
+      await Promise.resolve();
+      if(args[0]==='--version')return 'lark-cli 1.0.69';
+      if(args[1]==='status')return JSON.stringify({appId:'cli_fixture',...(mode==='ready'?{verified:true}:{}),identities:{user:user()}});
+      if(args[1]==='+messages-send'){sends++;nonce=args[args.indexOf('--idempotency-key')+1]!;return JSON.stringify({data:{message_id:'om_card',chat_id:'oc_private'}})}
+      if(args[1]==='login'&&args.includes('--no-wait'))return JSON.stringify({verification_url:'https://accounts.feishu.cn/device',device_code:'PRIVATE_DEVICE',expires_in:900});
+      if(args[1]==='+chat-list')return JSON.stringify({data:{items:[{chat_id:'oc_selected',name:'项目'}],has_more:false}});
+      if(args[1]==='+chat-messages-list'){listCalls++;return JSON.stringify({data:{messages:[],has_more:false}})}
+      return '{}';
+    }});
+  const saved=async()=>JSON.parse(await readFile(join(directory,'state.json'),'utf8')) as {connected:boolean;paused:boolean};
+  try{
+    await connector.open();await connector.beginLogin();await connector.completeLogin();await connector.listChats();await connector.configure(['oc_selected'],true);
+    assert.equal(connector.snapshot().state,'ready');assert.equal((await saved()).connected,true);assert.equal(connector.snapshot().notification_ready,true);
+    await connector.command('feishu.bot.configure',{enabled:true});
+    assert(await connector.sendReminder({id:'p1',title:'评审',body:'周五前回复'}));assert.equal(sends,1);
+    const card=()=>({type:'card.action.trigger',event_id:'e'+actions.length+Math.random(),operator_id:'ou_fixture',chat_id:'oc_private',message_id:'om_card',action_value:JSON.stringify({proposal_id:'p1',nonce,action:'snooze'})});
+    mode='offline';
+    const blocked=await connector.command('feishu.status');
+    assert.equal(await connector.sendReminder({id:'p2',title:'另一条',body:'x'}),false);assert.equal(sends,1,'no bot send while the login cannot be verified');
+    assert.equal(await connector.acceptAction(card()),false);assert.deepEqual(actions,[],'no card callback is accepted while the login cannot be verified');
+    assert.notEqual(blocked.state,'unauthorized');assert.equal((blocked as unknown as {auth_issue?:string}).auth_issue,undefined);
+    assert.equal((await saved()).connected,true,'a failed verification must not drop the connection');
+    assert.equal(blocked.notification_ready,false,'notification sends and callbacks stay fenced while the login cannot be verified');
+    const before=listCalls;await connector.sync();assert.equal(listCalls,before,'nothing is collected while the login cannot be verified');
+    mode='ready';
+    await connector.sync();assert.equal(connector.snapshot().state,'ready');assert(listCalls>before,'collection resumes without reconfiguring');
+    assert.equal(connector.snapshot().notification_ready,true);assert.equal(connector.snapshot().error,undefined);
+    assert.equal(await connector.acceptAction(card()),true);assert.equal(actions.length,1,'callbacks work again after recovery');
+    mode='rejected';
+    const rejected=await connector.command('feishu.status');
+    assert.equal(rejected.state,'unauthorized');assert.equal((rejected as unknown as {auth_issue:string}).auth_issue,'login_required');assert.equal((await saved()).connected,false,'a server rejection is not a transient failure');
+    mode='expired';
+    const expired=await connector.command('feishu.status');
+    assert.equal(expired.state,'unauthorized');assert.equal((expired as unknown as {auth_issue:string}).auth_issue,'expired');assert.equal((await saved()).connected,false);
+  }finally{await connector.close();await rm(directory,{recursive:true,force:true})}
+});
+
 test('verified automatic token refresh does not require another Feishu login', async () => {
   const directory=await mkdtemp(join(tmpdir(),'nova-feishu-refresh-'));
   const connector=new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:(args)=>Promise.resolve(args[0]==='--version'?'1.0.97':JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{openId:'ou_fixture',status:'needs_refresh',available:true,verified:true,tokenStatus:'needs_refresh',scope:FEISHU_SCOPES.join(' ')}}}))});

@@ -107,7 +107,15 @@ final class MailErrors:NSObject,SBApplicationDelegate {
    guard let id=m.value(forKey:"id") as? NSNumber,let sent=m.value(forKey:"dateSent") as? Date,let read=m.value(forKey:"readStatus") as? Bool,let flagged=m.value(forKey:"flaggedStatus") as? Bool else {fail("invalid_contract")}
    let recipients=list(m,"recipients");guard recipients.count<=200 else {fail("response_too_large")}
    var addresses:[String]=[];for i in 0..<recipients.count {addresses.append(string(object(recipients,i),"address"))}
-   let item:[String:Any]=["account":account,"mailbox":selected[boxIndex],"id":id.stringValue,"messageId":string(m,"messageId"),"subject":string(m,"subject"),"sender":string(m,"sender"),"recipients":addresses,"received":iso.string(from:received),"sent":iso.string(from:sent),"content":string(m,"content"),"read":read,"flagged":flagged]
+   let meta:[String:Any]=["account":account,"mailbox":selected[boxIndex],"id":id.stringValue,"messageId":string(m,"messageId"),"subject":string(m,"subject"),"sender":string(m,"sender"),"recipients":addresses,"received":iso.string(from:received),"sent":iso.string(from:sent),"read":read,"flagged":flagged]
+   // The body stalls while Mail downloads it. Keep the metadata with a placeholder body and advance the cursor,
+   // so one slow message cannot pin the whole mailbox at the same position forever.
+   let slow=meta.merging(["content":"[正文暂未能读取]"]){_,new in new}
+   errors.onTimeout={
+    let atEnd=offset>=boxes[boxIndex].2,nextBox=atEnd ? boxIndex+1 : boxIndex,nextOffset=atEnd ? 0 : offset,done=nextBox==boxes.count
+    emit(["status":"granted","messages":messages+[slow],"complete":done,"capped":true,"cursor":done ? NSNull() : ["box":nextBox,"offset":nextOffset,"fingerprints":fingerprints]])
+   }
+   let item=meta.merging(["content":string(m,"content")]){_,new in new}
    totalBytes+=(try? JSONSerialization.data(withJSONObject:item).count) ?? 2000000;guard totalBytes<1900000 else {fail("response_too_large")};messages.append(item)
   }
   if boxIndex<boxes.count && offset>=boxes[boxIndex].2 {boxIndex+=1;offset=0}

@@ -286,11 +286,19 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     onAudioFrame:frame=>composition.audioBridge()?.onAudioFrame(frame),onAudioClear:(id,epoch)=>composition.audioBridge()?.onAudioClear(id,epoch),onAudioAlert:(id,epoch)=>composition.audioBridge()?.onAudioAlert(id,epoch),onAudioTerminal:(id,epoch)=>composition.audioBridge()?.onAudioTerminal(id,epoch),
   }),frame=>composition.publishPersonal(frame))
   host.setConnectors(new ComposioConnector({...(process.platform==='darwin'&&environment.CODEX_RESOURCES_PATH?{local:new MacCalendarClient(environment.CODEX_RESOURCES_PATH),mail:new MacMailClient(environment.CODEX_RESOURCES_PATH)}:{}),memory:()=>{const memory=composition.realtime.personalMemory;return memory instanceof SubstrateMemoryResource?memory:undefined},client:environment.COMPOSIO_API_KEY?new ComposioClient(environment.COMPOSIO_API_KEY):null,onChange:()=>{void host.connectionChanged()}}))
+  let notificationReady = false
   const feishu = new FeishuConnector({
     executable: environment.FEISHU_CLI_PATH ?? 'lark-cli',
     credentialRoot: join(host.path + '.feishu', 'credentials'),
     statePath: join(host.path + '.feishu', 'state.json'),
-    onChange:()=>host.connectionChanged(),
+    onChange:snapshot=>{
+      host.connectionChanged()
+      // A transient verification failure leaves the notification service without a ready binding; refresh it
+      // as soon as the background check recovers, without waiting for another Feishu command.
+      const ready=snapshot.notification_ready===true
+      if(ready&&!notificationReady)void syncNotificationBinding().catch(()=>undefined)
+      notificationReady=ready
+    },
     processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
     get processingConsentTransition():FeishuOptions['processingConsentTransition']{
       const memory=composition.realtime.personalMemory;
