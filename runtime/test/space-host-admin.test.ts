@@ -155,6 +155,51 @@ test('a secret replayed with another value conflicts after a SpaceHost restart',
  }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
 });
 
+test('a secret op recorded while a dependency is pending keeps its tag, so the retry stays idempotent',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-pending-')),sent:Record<string,unknown>[]=[];
+ const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone']};
+ const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ const makeSpace=(host:PersonalAgentHost)=>new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>'phone',secrets:new HostSecretStore(join(dir,'config.json.secrets.json')),environment:{}});
+ const stamp=Date.now(),put=(value:string)=>({v:1,type:'intent',op_id:'pending-secret',kind:'secret.put',created_at:stamp,depends_on:['dep'],input:{name:'OPENAI_API_KEY',value}});
+ const receipt=(id:string)=>sent.filter(row=>row.type==='receipt'&&row.op_id===id).at(-1)!;
+ let host=make(),space=makeSpace(host);
+ try{
+  await host.open({deferBackground:true});await space.open();
+  await space.receive('phone',put('sk-pending-value'));assert.deepEqual([receipt('pending-secret').status,receipt('pending-secret').error],['pending','dependency_pending']);
+  // The early pending record carries the salted tag, not just the redacted hash.
+  const ops=(JSON.parse(await readFile(join(dir,'space.json'),'utf8')) as {ops:Record<string,{tag?:string}>}).ops;
+  assert.match(Object.values(ops)[0]!.tag??'',/^[a-f0-9]{64}$/);
+  await space.close();await host.close();
+  // A fresh instance has no in-memory fingerprint, so only the stored tag can prove the retry is the same operation.
+  host=make();space=makeSpace(host);await host.open({deferBackground:true});await space.open();
+  await space.receive('phone',{v:1,type:'intent',op_id:'dep',kind:'snapshot.request',created_at:stamp,input:{}});assert.equal(receipt('dep').status,'accepted');
+  await space.receive('phone',put('sk-pending-value'));assert.equal(receipt('pending-secret').status,'accepted',String(receipt('pending-secret').error));assert.equal(receipt('pending-secret').error,undefined);
+  await space.receive('phone',put('sk-other-value'));assert.equal(receipt('pending-secret').error,'op_id_conflict');
+ }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
+});
+
+test('a secret op journalled before tags existed replays without a cross-algorithm conflict',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-legacy-')),sent:Record<string,unknown>[]=[];
+ const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone']};
+ const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ const makeSpace=(host:PersonalAgentHost)=>new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>'phone',secrets:new HostSecretStore(join(dir,'config.json.secrets.json')),environment:{}});
+ const stamp=Date.now(),intent={v:1,type:'intent',op_id:'legacy-secret',kind:'secret.put',created_at:stamp,input:{name:'OPENAI_API_KEY',value:'sk-legacy-value'}};
+ const receipt=()=>sent.filter(row=>row.type==='receipt'&&row.op_id==='legacy-secret').at(-1)!;
+ let host=make(),space=makeSpace(host);
+ try{
+  await host.open({deferBackground:true});await space.open();await space.receive('phone',intent);assert.equal(receipt().status,'accepted');
+  await space.close();await host.close();
+  // An older build stored the redacted hash without a tag; rewriting the journal back to that shape must stay replayable.
+  const file=join(dir,'space.json'),journal=JSON.parse(await readFile(file,'utf8')) as {ops:Record<string,{tag?:string}>};
+  for(const op of Object.values(journal.ops))delete op.tag;
+  await writeFile(file,JSON.stringify(journal));
+  host=make();space=makeSpace(host);await host.open({deferBackground:true});await space.open();
+  await space.receive('phone',intent);assert.equal(receipt().status,'accepted');assert.equal(receipt().error,undefined);
+  const ops=(JSON.parse(await readFile(file,'utf8')) as {ops:Record<string,unknown>}).ops;
+  assert.equal(Object.keys(ops).length,1,'a legacy replay is the same operation, not a second one');
+ }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
+});
+
 test('Feishu app setup link generated after app.start reaches the owner snapshot',async()=>{
  let polls=0;const url='https://open.feishu.cn/page/cli?code=late';
  const view=(withUrl:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting',...(withUrl?{verification_url:url}:{})}});
