@@ -29,8 +29,6 @@
         "EXECUTORS": "slow_sim,codex",
         "FAST_MODEL": "fast-astral-😀",
         "FRESH_WINDOW": "9.25",
-        "MODEL_API_KEY": "fixture-model-key",
-        "MODEL_BASE_URL": "https://model.example/v1",
         "PROACTIVITY_PRESET": "eager",
         "QWEN_CONTROLLED_GUARD_RECONNECT": "true",
         "QWEN_GUARD_HISTORY_PAIRS": "2",
@@ -51,7 +49,12 @@
         "VOLCENGINE_VAD_SPEECH_PAD_MS": "40",
         "VOLCENGINE_VAD_THRESHOLD": "0.75",
         "WATCH_MODEL": "watch-😀",
-        "TAVILY_API_KEY": "fixture-tavily-key"
+        "TAVILY_API_KEY": "fixture-tavily-key",
+        "DASHSCOPE_MODEL_BASE_URL": "https://qwen-model.example/v1",
+        "DEEPSEEK_MODEL_BASE_URL": "https://deepseek-model.example/v1",
+        "OPENAI_MODEL_BASE_URL": "https://openai-model.example/v1",
+        "GEMINI_MODEL_BASE_URL": "https://gemini-model.example/v1",
+        "STEPFUN_MODEL_BASE_URL": "https://stepfun-model.example/v1"
       },
       "id": "all_preserved_overrides"
     },
@@ -88,9 +91,9 @@
     {
       "action": "provider",
       "environment": {
-        "MODEL_API_KEY": "fixture-model-key"
+        "DASHSCOPE_API_KEY": "fixture-model-key"
       },
-      "id": "qwen_fallback_key"
+      "id": "qwen_provider_key"
     },
     {
       "action": "provider",

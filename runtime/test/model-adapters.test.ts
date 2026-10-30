@@ -201,6 +201,19 @@ test('discovery uses bounded Proactive gateway without speech or execution', asy
   await assert.rejects(conflicted.select(emptyView),/契约/)
 })
 
+test('discovery treats an unusable proposal as silence instead of failing the caller, and still returns a valid one',async()=>{
+ // Discovery is optional: a model that returns string memory_refs, an over-long summary or non-JSON text must not
+ // throw into the source pipeline that awaits it. A well-formed proposal is returned unchanged.
+ const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'Asia/Shanghai',memory:[],evidence_refs:['conversation:1'],recent_delivery:[]}
+ const discover=(text:string)=>new GatewayProactivity({gateway:new ScriptedGateway([],text),model:'m',proactivityPreset:'balanced'}).discover(snapshot,new AbortController().signal)
+ const base={kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}
+ assert.equal(await discover(JSON.stringify({proposal:{...base,memory_refs:['entry-1']}})),null)
+ assert.equal(await discover(JSON.stringify({proposal:{...base,summary:'x'.repeat(201)}})),null)
+ assert.equal(await discover('not json at all'),null)
+ assert.equal(await discover(JSON.stringify({proposal:{...base,extra:true}})),null)
+ assert.deepEqual(await discover(JSON.stringify({proposal:base})),base)
+})
+
 test('read-only preparation makes one completion and rejects invented or stale snapshot references',async()=>{
  const snapshot={user_scope:'local',local_date:'2026-09-14',weekday:'Monday',timezone:'Asia/Shanghai',memory:[],evidence_refs:['file:allowed'],recent_delivery:[]}
  const proposal={kind:'question' as const,summary:'Review project',why_now:'meeting today',evidence_refs:['file:allowed'],memory_refs:[]}
@@ -502,6 +515,55 @@ test('Profile restores exact original references and keeps review notes out of n
  assert.deepEqual(result.about?.refs,[{entry_id:original.id,version:original.version}]);assert.equal(result.about?.text,'你在设计语音助手。');assert(!prompt.includes(original.id));assert(!prompt.includes(original.version))
 })
 
+test('a profile review that comes back empty under reasoning is retried without reasoning and starts with room for an answer',async()=>{
+ // Providers without a thinking budget (DeepSeek) count reasoning against max_tokens, so an exhausted allowance
+ // returns an empty answer. Repeating the same request fails the same way, so the retry must change the cause.
+ const reviews:CompleteRequest[]=[];const inner=profileFixtureGateway(()=>profileProse('你在设计语音助手。',['e0']))
+ const gateway={complete:(request:CompleteRequest)=>{
+  if(!request.system.includes('独立审查整份画像草稿'))return inner.complete(request)
+  reviews.push(request)
+  return Promise.resolve({text:reviews.length===1&&request.reasoning==='enabled'?'':JSON.stringify({review_notes:[]})})
+ }} as unknown as ModelGateway
+ const original={id:'source:'+('a'.repeat(64)),version:'b'.repeat(64),content:'我在设计语音助手',origin:'stated' as const}
+ const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([original],new AbortController().signal)
+ assert.equal(result.about?.text,'你在设计语音助手。')
+ assert.equal(reviews.length,2);assert.equal(reviews[0]!.reasoning,'enabled');assert.equal(reviews[1]!.reasoning,'disabled')
+ assert.ok((reviews[0]!.maxTokens??0)>=8192,'the first review leaves room for an answer after its reasoning')
+})
+
+test('a profile reply cut off anywhere is retried without reasoning, not treated as a malformed answer',async()=>{
+ // JSON.parse wording depends on V8 and on where the token cap stopped the text, so the cut is detected from the
+ // answer's shape rather than a message prefix: mid-string, after a comma, and mid-array are all the same cause.
+ for(const cut of ['{"review_notes":["尚未完成','{"review_notes":["已核对标题",','{"review_notes":[']){
+  const reviews:CompleteRequest[]=[];const inner=profileFixtureGateway(()=>profileProse('你在设计语音助手。',['e0']))
+  const gateway={complete:(request:CompleteRequest)=>{
+   if(!request.system.includes('独立审查整份画像草稿'))return inner.complete(request)
+   reviews.push(request)
+   return Promise.resolve({text:reviews.length===1&&request.reasoning==='enabled'?cut:JSON.stringify({review_notes:[]})})
+  }} as unknown as ModelGateway
+  const original={id:'source:'+('a'.repeat(64)),version:'b'.repeat(64),content:'我在设计语音助手',origin:'stated' as const}
+  const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([original],new AbortController().signal)
+  assert.equal(result.about?.text,'你在设计语音助手。',cut)
+  assert.equal(reviews.length,2,cut);assert.equal(reviews[1]!.reasoning,'disabled',cut)
+ }
+})
+
+test('a profile reply stopped at the token cap is retried without reasoning even when the surviving text still parses',async()=>{
+ // A length stop is authoritative even when the fragment happens to be valid JSON of the wrong shape.
+ const reviews:CompleteRequest[]=[];const inner=profileFixtureGateway(()=>profileProse('你在设计语音助手。',['e0']))
+ const gateway={complete:(request:CompleteRequest)=>{
+  if(!request.system.includes('独立审查整份画像草稿'))return inner.complete(request)
+  reviews.push(request)
+  return Promise.resolve(reviews.length===1
+   ?{text:JSON.stringify({review_notes:'被截断的一半'}),finish_reason:'length'}
+   :{text:JSON.stringify({review_notes:[]}),finish_reason:'stop'})
+ }} as unknown as ModelGateway
+ const original={id:'source:'+('a'.repeat(64)),version:'b'.repeat(64),content:'我在设计语音助手',origin:'stated' as const}
+ const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([original],new AbortController().signal)
+ assert.equal(result.about?.text,'你在设计语音助手。')
+ assert.equal(reviews.length,2);assert.equal(reviews[1]!.reasoning,'disabled')
+})
+
 test('Profile carries time, author, recipients and reply links while screening explicit credentials',async()=>{
  const requests:CompleteRequest[]=[];const gateway=profileFixtureGateway(request=>{requests.push(request);return profileProse('你考虑请同事协助部署。',['e0'])},request=>{requests.push(request);return (JSON.parse(request.prompt) as {profile:ProfileProse}).profile})
  await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([{id:'msg',version:1,origin:'inferred',content:'@Alex请协助部署。 password=test-only-secret',observed_at:'2026-10-10T00:00:00Z',source:{kind:'im',project:'IM',document:'消息',sender_id:'self',sender_name:'Self',relation:'self',thread_id:'thread',message_id:'message',parent_id:'outside',mention_ids:['alex']}}],new AbortController().signal)
@@ -750,6 +812,16 @@ test('timeline normalizes array and double encoded wrappers without changing car
   const result=await new GatewayPersonalWriter({gateway:new ScriptedGateway([],body),model:'fixture'}).generateTimeline([{id:'alert',version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
   assert.equal(result.cards.length,1);assert.equal(result.cards[0]!.facts[0]!.ref,'alert')
  }
+})
+
+test('timeline keeps at most one next step per card and tells the model what is too small to suggest',async()=>{
+ const step=(title:string)=>({title,detail:'确认后再处理'})
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered',why_now:'The latest report records recovery',facts:[{text:'Alert recovered',quote:'Alert recovered',ref:'e0'}],next_steps:[step('核对一'),step('检查二'),step('查看三')],uncertainty:'',actions:[],refs:['e0']}
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[card]}))
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline([{id:'a',version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.cards[0]!.next_steps!.length,1)
+ const system=gateway.completions[0]!.system??''
+ assert.match(system,/next_steps最多1条/);assert.match(system,/不输出文件路径/)
 })
 
 test('timeline prose does not expose evidence keys while exact quotes and references survive',async()=>{

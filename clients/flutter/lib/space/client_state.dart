@@ -435,6 +435,10 @@ class SpaceClientState extends ChangeNotifier {
         'notifications',
         'chat',
         'processing_provider',
+        'owner',
+        'host_settings',
+        'host_credentials',
+        'host_feishu',
       ])
         if (value.containsKey(key)) key: value[key],
       if (processing is Map)
@@ -525,6 +529,11 @@ class SpaceClientState extends ChangeNotifier {
     } else if (event['status'] == 'conflict' || event['status'] == 'rejected') {
       item['status'] = event['status'];
       item['error'] = event['error'];
+      // A refused key is never resent, so the phone keeps neither its plaintext nor its envelope.
+      if (item['kind'] == 'secret.put') {
+        item['input'] = _copy(item['input'] as Map)..remove('value');
+        item.remove('envelope');
+      }
     }
   }
 

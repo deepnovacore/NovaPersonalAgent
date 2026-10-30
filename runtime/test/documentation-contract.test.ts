@@ -84,7 +84,7 @@ test('configuration guides share a concise public subset and env example stays c
     const block = generatedBlock(await readFile(resolve(repositoryRoot, file), 'utf8'))
     const names = [...block.matchAll(/^\| `([A-Z0-9_]+)` \|/gmu)].map(match => match[1]!)
     assert.equal(new Set(names).size, names.length, file)
-    assert.ok(names.length <= 24 && names.length > 0, file)
+    assert.ok(names.length <= 28 && names.length > 0, file)
     for (const name of names) assert.ok(publicNames.has(name), `${file}: ${name}`)
     for (const essential of ['NOVA_SPACE_HOST_CONFIG', 'DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'PIPELINE_MODE', 'MEMORY_CONNECTION']) {
       assert.ok(names.includes(essential), `${file}: ${essential}`)
@@ -128,13 +128,22 @@ test('the v4 settings environment additions are classified as public overrides',
   ].every(name => publicNames.has(name)), true)
 })
 
-test('the generic model credential is an optional support-model override only', () => {
-  const entry = environmentContract.find(candidate =>
-    candidate.name === 'MODEL_API_KEY')
-  assert.ok(entry !== undefined)
-  assert.match(entry.descriptionEn, /optional generic support-model.*override/iu)
-  assert.match(entry.descriptionZh, /可选.*通用.*辅助模型.*覆盖/u)
-  assert.doesNotMatch(`${entry.descriptionEn}\n${entry.descriptionZh}`, /Qwen.*fallback|Qwen 回退/iu)
+test('each model provider documents its own endpoint and keeps other channels separate', () => {
+  for (const name of [
+    'DASHSCOPE_MODEL_BASE_URL',
+    'DEEPSEEK_MODEL_BASE_URL',
+    'OPENAI_MODEL_BASE_URL',
+    'GEMINI_MODEL_BASE_URL',
+    'STEPFUN_MODEL_BASE_URL',
+  ]) {
+    const entry = environmentContract.find(candidate => candidate.name === name)
+    assert.ok(entry !== undefined, name)
+    assert.equal(entry.owner !== 'core' && entry.owner !== 'host_private', true, name)
+    assert.equal(entry.secret, false, name)
+    assert.match(entry.descriptionEn, /model endpoint/iu, name)
+    assert.match(entry.descriptionZh, /模型地址/u, name)
+  }
+  assert.equal(environmentContract.some(entry => ['MODEL_BASE_URL', 'MODEL_API_KEY'].includes(entry.name)), false)
 })
 
 function generatedBlock(document: string): string {

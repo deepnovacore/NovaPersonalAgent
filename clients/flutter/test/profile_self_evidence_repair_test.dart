@@ -49,6 +49,7 @@ void main() {
                 'facts': [
                   {
                     'text': '【事】本人提出计划，同事汇报进展',
+                    'relevance': 'ongoing_work',
                     'refs': ['e1', 'e2'],
                   },
                 ],
@@ -109,6 +110,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】同事汇报完成',
+                  'relevance': 'ongoing_work',
                   'refs': ['e2'],
                 },
               ],
@@ -161,6 +163,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】协作讨论',
+                  'relevance': 'ongoing_work',
                   'refs': ['e1', 'e2'],
                 },
               ],

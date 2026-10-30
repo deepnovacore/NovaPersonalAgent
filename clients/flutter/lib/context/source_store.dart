@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../connectors/feishu/message_text.dart';
 import 'package:flutter/foundation.dart';
 import '../personal/local_life.dart';
 import '../personal/life_reducer.dart';
@@ -12,6 +13,89 @@ DateTime sourceAccessExpiry(Map message) => DateTime.fromMillisecondsSinceEpoch(
   isUtc: true,
 ).add(const Duration(days: 30));
 
+Map<String, dynamic> _copySourceMessage(Map<String, dynamic> message) =>
+    message.values.any((value) => value is Map || value is List)
+    ? copyJson(message)
+    : Map<String, dynamic>.from(message);
+
+Map<String, dynamic> _decodeSourceSnapshot(String raw) {
+  final value = jsonDecode(raw) as Map<String, dynamic>;
+  if (value['version'] != 1) throw StateError('source_schema');
+  return value;
+}
+
+bool _largeSourceSnapshot(Map<String, dynamic> data) {
+  var count = 0, characters = 0;
+  for (final message in (data['messages'] as Map).values) {
+    final text = message['text'];
+    if (text is String) characters += text.length;
+    if (++count >= 256 || characters >= 65536) return true;
+  }
+  return false;
+}
+
+({
+  String? encoded,
+  String previousEncoded,
+  int revision,
+  bool processingChanged,
+  bool permissionChanged,
+})
+_prepareSourceWrite(
+  ({Map<String, dynamic> previous, Map<String, dynamic> next, int maxBytes})
+  input,
+) {
+  final previous = input.previous, next = input.next;
+  if (lifeFingerprint(next) == lifeFingerprint(previous)) {
+    return (
+      encoded: null,
+      previousEncoded: '',
+      revision: previous['revision'] as int,
+      processingChanged: false,
+      permissionChanged: false,
+    );
+  }
+  final processingChanged =
+      SourceStore._processingFingerprint(next) !=
+      SourceStore._processingFingerprint(previous);
+  final permissionChanged =
+      SourceStore._processingFingerprint({...next, 'messages': {}}) !=
+      SourceStore._processingFingerprint({...previous, 'messages': {}});
+  final revision = (previous['revision'] as int) + (processingChanged ? 1 : 0);
+  final encoded = jsonEncode({...next, 'revision': revision});
+  if (utf8.encode(encoded).length > input.maxBytes) {
+    throw StateError('source_storage_full');
+  }
+  return (
+    encoded: encoded,
+    previousEncoded: jsonEncode(previous),
+    revision: revision,
+    processingChanged: processingChanged,
+    permissionChanged: permissionChanged,
+  );
+}
+
+List<Map<String, dynamic>> _readSourceEvidence(
+  ({Map<String, dynamic> data, int cutoff}) input,
+) {
+  final selected = input.data['sources'] as Map;
+  final byChat = <String, List<Map<String, dynamic>>>{};
+  for (final message in (input.data['messages'] as Map).values) {
+    if (message['status'] != 'available' ||
+        !selected.containsKey(message['chat_id']) ||
+        sourceAccessTime(message) <= input.cutoff) {
+      continue;
+    }
+    byChat
+        .putIfAbsent(message['chat_id'] as String, () => [])
+        .add(_copySourceMessage(message as Map<String, dynamic>));
+  }
+  // Preserve the previous input order for equal timestamps and run aliases.
+  return <Map<String, dynamic>>[
+    for (final id in selected.keys) ...?byChat[id],
+  ]..sort((a, b) => (a['created_at'] as int).compareTo(b['created_at'] as int));
+}
+
 /// Bounded encrypted snapshots in production. A page and checkpoint commit
 /// together; storage exhaustion stops ingestion without advancing the cursor.
 class SourceStore extends ChangeNotifier {
@@ -19,9 +103,11 @@ class SourceStore extends ChangeNotifier {
     this.persistence, {
     DateTime Function()? now,
     this.onInvalidated,
+    this.onContentChanged,
     this.maxBytes = 16 * 1024 * 1024,
   }) : now = now ?? DateTime.now;
   final Future<void> Function()? onInvalidated;
+  final Future<void> Function()? onContentChanged;
   final LifePersistence persistence;
   final int maxBytes;
   final DateTime Function() now;
@@ -53,9 +139,9 @@ class SourceStore extends ChangeNotifier {
   Future<void> open() async {
     final raw = await persistence.read();
     if (raw != null) {
-      final value = jsonDecode(raw) as Map<String, dynamic>;
-      if (value['version'] != 1) throw StateError('source_schema');
-      _data = value;
+      _data = raw.length >= 65536
+          ? await compute(_decodeSourceSnapshot, raw)
+          : _decodeSourceSnapshot(raw);
     }
     await _write((data) {
       if (data['history_policy'] == 'fetch-v1') return;
@@ -91,6 +177,11 @@ class SourceStore extends ChangeNotifier {
       'seen_pages',
       'history_refresh_pending',
       'scope_revision',
+      'head',
+      'order',
+      'invalid_records',
+      'metadata_revision',
+      'metadata',
     };
     view['sources'] = {
       for (final entry in (data['sources'] as Map).entries)
@@ -115,10 +206,15 @@ class SourceStore extends ChangeNotifier {
   Future<void> _write(
     void Function(Map<String, dynamic>) change, {
     bool refreshExpired = false,
+    void Function()? authorize,
   }) {
     final result = _tail.then((_) async {
       if (_disposed) throw StateError('source_disposed');
-      final next = copyJson(_data);
+      authorize?.call();
+      final metadata = Map<String, dynamic>.from(_data)..remove('messages');
+      // Stored rows are replaced whole, never mutated; outgoing reads copy them.
+      final next = copyJson(metadata)
+        ..['messages'] = Map<String, dynamic>.from(_data['messages'] as Map);
       // Pin legacy selection boundaries before any cursor advances. The old
       // fingerprint uses this same fallback, so migration preserves paid work.
       for (final source in (next['sources'] as Map).values) {
@@ -126,17 +222,31 @@ class SourceStore extends ChangeNotifier {
       }
       change(next);
       _prune(next, refreshExpired: refreshExpired);
-      if (lifeFingerprint(next) == lifeFingerprint(_data)) return;
-      final processingChanged =
-          _processingFingerprint(next) != _processingFingerprint(_data);
-      if (processingChanged) next['revision'] = (next['revision'] as int) + 1;
-      final encoded = jsonEncode(next);
-      if (utf8.encode(encoded).length > maxBytes) {
-        throw StateError('source_storage_full');
-      }
+      final input = (previous: _data, next: next, maxBytes: maxBytes);
+      final prepared = _largeSourceSnapshot(_data) || _largeSourceSnapshot(next)
+          ? await compute(_prepareSourceWrite, input)
+          : _prepareSourceWrite(input);
+      if (_disposed) throw StateError('source_disposed');
+      authorize?.call();
+      final encoded = prepared.encoded;
+      if (encoded == null) return;
+      next['revision'] = prepared.revision;
       await persistence.write(encoded);
+      try {
+        authorize?.call();
+      } catch (error, stack) {
+        // The queue still owns the prior snapshot; never publish a page whose
+        // authorization changed while encrypted storage was writing it.
+        await persistence.write(prepared.previousEncoded);
+        Error.throwWithStackTrace(error, stack);
+      }
       _data = next;
-      if (processingChanged) await onInvalidated?.call();
+      if (prepared.processingChanged) {
+        await (prepared.permissionChanged
+                ? onInvalidated
+                : onContentChanged ?? onInvalidated)
+            ?.call();
+      }
       if (!_disposed) notifyListeners();
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
@@ -162,6 +272,7 @@ class SourceStore extends ChangeNotifier {
     int? expectedGeneration,
     bool requireAllAccessible = false,
     bool updateRange = false,
+    void Function()? authorize,
   }) => _write((data) {
     if ((expectedGeneration != null &&
             (data['identity'] != expectedIdentity ||
@@ -198,6 +309,7 @@ class SourceStore extends ChangeNotifier {
       'from': from.toUtc().toIso8601String(),
       'history_from': from.toUtc().toIso8601String(),
       'full_history': requireAllAccessible,
+      'metadata_revision': existing == null ? 1 : existing['metadata_revision'],
       'seen_pages': <String>[],
       'page_token': null,
       'window_end': null,
@@ -205,7 +317,7 @@ class SourceStore extends ChangeNotifier {
     };
     data['grants'] = {};
     data['processing_revision'] = (data['processing_revision'] as int) + 1;
-  });
+  }, authorize: authorize);
   Future<void> pause(String id, bool paused) => _write((data) {
     final source = data['sources'][id];
     if (source == null) throw StateError('source_missing');
@@ -226,18 +338,77 @@ class SourceStore extends ChangeNotifier {
     return copyJson(source);
   }
 
-  Map<String, dynamic> fence(String id) {
+  Future<void> prepareWindow(
+    String id,
+    DateTime end, {
+    bool head = false,
+    void Function()? authorize,
+  }) => _write((data) {
+    final source = data['sources'][id];
+    if (source == null ||
+        source['paused'] == true ||
+        data['identity'] == null) {
+      throw StateError('source_paused');
+    }
+    if (source['metadata_revision'] != 1) {
+      final boundary = DateTime.parse(source['history_from'] ?? source['from']);
+      final recent = end.subtract(const Duration(days: 14));
+      source['metadata'] ??= {
+        'from': (recent.isBefore(boundary) ? boundary : recent)
+            .toUtc()
+            .toIso8601String(),
+        'page_token': null,
+        'window_end': end.toUtc().toIso8601String(),
+        'seen_pages': <String>[],
+        'order': 'desc',
+      };
+      return;
+    }
+    if (head && source['head'] == null) {
+      final base = source['read_through'] ?? source['window_end'];
+      if (base == null) throw StateError('source_missing_window');
+      final overlap = DateTime.parse(base).subtract(const Duration(minutes: 1));
+      final boundary = DateTime.parse(source['history_from'] ?? source['from']);
+      source['head'] = {
+        'from': (overlap.isBefore(boundary) ? boundary : overlap)
+            .toUtc()
+            .toIso8601String(),
+        'page_token': null,
+        'window_end': null,
+        'seen_pages': <String>[],
+        'order': 'desc',
+      };
+    }
+    final cursor = head ? source['head'] : source;
+    // Existing opaque tokens are tied to their original ascending window.
+    cursor['order'] = cursor['window_end'] == null
+        ? 'desc'
+        : cursor['order'] ?? 'asc';
+    cursor['window_end'] ??= end.toUtc().toIso8601String();
+  }, authorize: authorize);
+
+  Map<String, dynamic> fence(String id, {bool head = false}) {
     final source = checkpoint(id);
     if (source['paused'] == true || identity == null) {
       throw StateError('source_paused');
     }
+    final metadata = source['metadata'] != null;
+    final cursor = metadata
+        ? source['metadata'] as Map
+        : head
+        ? source['head'] as Map
+        : source;
     return {
       'identity': identity,
       'generation': generation,
       'chat_id': id,
       'scope_revision': source['scope_revision'],
-      'page_token': source['page_token'],
-      'from': source['from'],
+      'head': head,
+      'metadata': metadata,
+      'page_token': cursor['page_token'],
+      'from': cursor['from'],
+      'window_end': cursor['window_end'],
+      'order': cursor['order'],
     };
   }
 
@@ -246,13 +417,21 @@ class SourceStore extends ChangeNotifier {
     Map<String, dynamic> expected,
   ) {
     final source = data['sources'][expected['chat_id']];
+    final cursor = expected['metadata'] == true
+        ? (source?['metadata'])
+        : expected['head'] == true
+        ? (source?['head'])
+        : source;
     if (data['identity'] != expected['identity'] ||
         data['generation'] != expected['generation'] ||
         source == null ||
+        cursor == null ||
         source['paused'] == true ||
         source['scope_revision'] != expected['scope_revision'] ||
-        source['page_token'] != expected['page_token'] ||
-        source['from'] != expected['from']) {
+        cursor['page_token'] != expected['page_token'] ||
+        cursor['from'] != expected['from'] ||
+        cursor['window_end'] != expected['window_end'] ||
+        cursor['order'] != expected['order']) {
       throw StateError('stale_source');
     }
   }
@@ -262,41 +441,56 @@ class SourceStore extends ChangeNotifier {
     List<dynamic> messages, {
     required String? nextPage,
     required DateTime windowEnd,
+    void Function()? authorize,
   }) => _write((data) {
     _validateFence(data, expected);
+    final source = data['sources'][expected['chat_id']];
+    final cursor = expected['metadata'] == true
+        ? source['metadata']
+        : expected['head'] == true
+        ? source['head']
+        : source;
     if (messages.length > 50 ||
         nextPage == '' ||
         (nextPage != null &&
             (nextPage == expected['page_token'] ||
-                (data['sources'][expected['chat_id']]['seen_pages'] as List? ??
-                        [])
-                    .contains(nextPage)))) {
+                (cursor['seen_pages'] as List? ?? []).contains(nextPage)))) {
       throw StateError('invalid_page');
     }
     for (final raw in messages) {
+      if (raw is Map &&
+          raw['chat_id'] != null &&
+          raw['chat_id'] != expected['chat_id']) {
+        throw StateError('invalid_message_chat');
+      }
       if (raw is! Map ||
           raw['message_id'] is! String ||
           (raw['message_id'] as String).isEmpty) {
-        throw StateError('invalid_message');
+        source['invalid_records'] =
+            (source['invalid_records'] as int? ?? 0) + 1;
+        continue;
       }
       final timestamp = int.tryParse('${raw['create_time']}');
-      if (timestamp == null) throw StateError('invalid_message_time');
-      if (timestamp < 0 ||
+      if (timestamp == null ||
+          timestamp < 0 ||
           timestamp >
               now().add(const Duration(minutes: 5)).millisecondsSinceEpoch) {
-        throw StateError('invalid_message_time');
+        source['invalid_records'] =
+            (source['invalid_records'] as int? ?? 0) + 1;
+        continue;
       }
       String? text;
-      if (raw['deleted'] != true && raw['msg_type'] == 'text') {
+      var tooLarge = false;
+      if (raw['deleted'] != true) {
         try {
-          final content = jsonDecode(raw['body']['content'] as String);
-          if (content['text'] is String) text = content['text'] as String;
-        } catch (_) {
-          /* Explicit missing-body state below. */
+          text = feishuMessageText(raw);
+        } on FormatException catch (error) {
+          tooLarge = const {
+            'feishu_message_too_large',
+            'feishu_message_structure_limit',
+          }.contains(error.message);
         }
       }
-      final tooLarge = text != null && text.length > 16000;
-      if (tooLarge) text = null;
       final id = lifeFingerprint({
         'identity': identity,
         'chat_id': expected['chat_id'],
@@ -307,6 +501,33 @@ class SourceStore extends ChangeNotifier {
           sender?['id_type'] == 'open_id' && sender?['id'] is String
           ? sender!['id'] as String
           : null;
+      final senderType = const ['user', 'app'].contains(sender?['sender_type'])
+          ? sender!['sender_type'] as String
+          : 'unknown';
+      final self = senderId != null && senderId == identity?.split(':').last;
+      final mentions = raw['mentions'];
+      final mentionIds = mentions is List
+          ? mentions
+                .whereType<Map>()
+                .map((item) => item['id'])
+                .whereType<String>()
+                .where((id) => id.startsWith('ou_'))
+                .take(50)
+                .toList()
+          : <String>[];
+      final mention = self
+          ? 'none'
+          : mentions is! List
+          ? 'unknown'
+          : mentions.whereType<Map>().any(
+              (item) =>
+                  (item['id_type'] == null || item['id_type'] == 'open_id') &&
+                  item['id'] == identity?.split(':').last,
+            )
+          ? 'direct'
+          : mentions.whereType<Map>().any((item) => item['id'] == 'all')
+          ? 'all'
+          : 'none';
       data['messages'][id] = {
         'evidence_id': id,
         'identity': identity,
@@ -316,35 +537,81 @@ class SourceStore extends ChangeNotifier {
         'fetched_at': now().millisecondsSinceEpoch,
         'text': text,
         'sender_id': senderId,
-        'relation': senderId == null
-            ? 'unknown'
-            : senderId == identity?.split(':').last
+        'sender_type': senderType,
+        'mention': mention,
+        'mention_ids': mentionIds,
+        for (final key in [
+          'parent_id',
+          'root_id',
+          'thread_id',
+          'upper_message_id',
+        ])
+          if (raw[key] is String &&
+              (raw[key] as String).isNotEmpty &&
+              (raw[key] as String).length <= 256)
+            key: raw[key],
+        'relation': senderType == 'app'
+            ? 'app'
+            : self
             ? 'self'
-            : 'participant',
+            : mention == 'direct'
+            ? 'addressed'
+            : senderId != null
+            ? 'participant'
+            : 'unknown',
         'status': raw['deleted'] == true
             ? 'deleted'
             : tooLarge
             ? 'too_large'
             : text != null
             ? 'available'
-            : raw['msg_type'] == 'text'
+            : const [
+                'text',
+                'post',
+                'interactive',
+              ].contains(raw['msg_type'] ?? raw['message_type'])
             ? 'missing_body'
             : 'unsupported_type',
       };
     }
-    final source = data['sources'][expected['chat_id']];
-    final seen = List<String>.from(source['seen_pages'] as List? ?? []);
+    final seen = List<String>.from(cursor['seen_pages'] as List? ?? []);
     if (nextPage != null) seen.add(nextPage);
-    source['seen_pages'] = nextPage == null ? <String>[] : seen;
-    source['page_token'] = nextPage;
-    source['window_end'] = nextPage == null
+    cursor['seen_pages'] = nextPage == null ? <String>[] : seen;
+    cursor['page_token'] = nextPage;
+    cursor['window_end'] = nextPage == null
         ? null
         : windowEnd.toUtc().toIso8601String();
     if (nextPage == null) {
-      source['read_through'] = windowEnd.toUtc().toIso8601String();
-      source['from'] = windowEnd.toUtc().toIso8601String();
+      cursor['read_through'] = windowEnd.toUtc().toIso8601String();
+      if (expected['metadata'] == true) {
+        source['metadata_revision'] = 1;
+        source.remove('metadata');
+      } else if (expected['head'] == true) {
+        final overlap = windowEnd.subtract(const Duration(minutes: 1));
+        final boundary = DateTime.parse(
+          source['history_from'] ?? source['from'],
+        );
+        cursor['from'] = (overlap.isBefore(boundary) ? boundary : overlap)
+            .toUtc()
+            .toIso8601String();
+        if (source['page_token'] == null &&
+            source['window_end'] == null &&
+            windowEnd.isAfter(DateTime.parse(source['from']))) {
+          source['from'] = windowEnd.toUtc().toIso8601String();
+          source['read_through'] = source['from'];
+        }
+      } else {
+        final headThrough = DateTime.tryParse(
+          source['head']?['read_through'] as String? ?? '',
+        );
+        final through = headThrough != null && headThrough.isAfter(windowEnd)
+            ? headThrough
+            : windowEnd;
+        source['read_through'] = through.toUtc().toIso8601String();
+        source['from'] = source['read_through'];
+      }
     }
-  });
+  }, authorize: authorize);
   void _prune(Map<String, dynamic> data, {bool refreshExpired = false}) {
     final cutoff = now()
         .subtract(const Duration(days: 30))
@@ -380,23 +647,42 @@ class SourceStore extends ChangeNotifier {
 
   Future<void> prune() => _write((_) {}, refreshExpired: true);
 
-  Map<String, int> get statusCounts {
-    final counts = <String, int>{};
-    for (final message in sources.expand(messages)) {
+  ({Map<String, int> byStatus, Map<String, int> byChat}) get messageCounts {
+    final counts = <String, int>{}, byChat = <String, int>{};
+    final selected = _data['sources'] as Map;
+    final invalid = selected.values.fold<int>(
+      0,
+      (sum, source) => sum + (source['invalid_records'] as int? ?? 0),
+    );
+    if (invalid > 0) counts['invalid_record'] = invalid;
+    final cutoff = now()
+        .subtract(const Duration(days: 30))
+        .millisecondsSinceEpoch;
+    for (final message in (_data['messages'] as Map).values) {
+      if (!selected.containsKey(message['chat_id']) ||
+          sourceAccessTime(message) <= cutoff) {
+        continue;
+      }
       final status = message['status'] as String;
-      counts.update(status, (count) => count + 1, ifAbsent: () => 1);
+      final chat = message['chat_id'] as String;
+      counts[status] = (counts[status] ?? 0) + 1;
+      byChat[chat] = (byChat[chat] ?? 0) + 1;
     }
-    return counts;
+    return (byStatus: counts, byChat: byChat);
   }
 
-  String get skippedSummary {
+  Map<String, int> get statusCounts => messageCounts.byStatus;
+
+  String get skippedSummary => skippedSummaryFor(statusCounts);
+
+  String skippedSummaryFor(Map<String, int> counts) {
     const reasons = {
       'too_large': '正文超过16000字',
       'missing_body': '正文不可用',
       'unsupported_type': '非文本消息',
       'deleted': '消息已删除',
+      'invalid_record': '消息记录格式异常',
     };
-    final counts = statusCounts;
     return reasons.entries
         .where((entry) => (counts[entry.key] ?? 0) > 0)
         .map((entry) => '${counts[entry.key]} 条${entry.value}')
@@ -411,7 +697,7 @@ class SourceStore extends ChangeNotifier {
             sourceAccessTime(m) >
                 now().subtract(const Duration(days: 30)).millisecondsSinceEpoch,
       )
-      .map((m) => copyJson(m))
+      .map((m) => _copySourceMessage(m))
       .toList();
 
   /// Resolve only the referenced originals, rechecking access on every read.
@@ -428,7 +714,7 @@ class SourceStore extends ChangeNotifier {
           message['evidence_id'] == id &&
           selected.containsKey(message['chat_id']) &&
           sourceAccessTime(message) > cutoff) {
-        result.add(copyJson(message));
+        result.add(_copySourceMessage(message));
       }
     }
     return result;
@@ -480,13 +766,39 @@ class SourceStore extends ChangeNotifier {
     String purpose,
   ) {
     validateProcessing(provider, purpose, processingRevision);
-    return sources
-        .expand(messages)
-        .where((m) => m['status'] == 'available')
-        .toList()
-      ..sort(
-        (a, b) => (a['created_at'] as int).compareTo(b['created_at'] as int),
-      );
+    return _readSourceEvidence((
+      data: _data,
+      cutoff: now().subtract(const Duration(days: 30)).millisecondsSinceEpoch,
+    ));
+  }
+
+  Future<List<Map<String, dynamic>>> readAuthorizedEvidenceAsync(
+    String provider,
+    String purpose,
+  ) async {
+    final expectedIdentity = identity,
+        expectedGeneration = generation,
+        expectedRevision = revision,
+        consent = processingRevision;
+    validateProcessing(provider, purpose, consent);
+    final input = (
+      data: _data,
+      cutoff: now().subtract(const Duration(days: 30)).millisecondsSinceEpoch,
+    );
+    final rows = _largeSourceSnapshot(_data)
+        ? await compute(_readSourceEvidence, input)
+        : _readSourceEvidence(input);
+    validateProcessing(provider, purpose, consent);
+    if (_disposed ||
+        identity != expectedIdentity ||
+        generation != expectedGeneration ||
+        revision != expectedRevision) {
+      throw StateError('stale_inputs');
+    }
+    final cutoff = now()
+        .subtract(const Duration(days: 30))
+        .millisecondsSinceEpoch;
+    return rows.where((message) => sourceAccessTime(message) > cutoff).toList();
   }
 
   @override

@@ -78,7 +78,9 @@ class LocalProfileResults extends StatelessWidget
     return entries.whereType<Map>().where((entry) {
       if ((entry['kind'] ?? 'profile') != 'timeline') return false;
       if (entry['brief'] is! Map) return false;
-      final at = DateTime.tryParse('${entry['observed_at'] ?? ''}')?.toLocal();
+      final at = DateTime.tryParse(
+        '${(entry['time'] as Map?)?['anchor_date'] ?? entry['observed_at'] ?? ''}',
+      )?.toLocal();
       return at != null &&
           at.year == day.year &&
           at.month == day.month &&
@@ -505,13 +507,23 @@ class LocalProfileResults extends StatelessWidget
     Map<String, dynamic> value,
   ) {
     entries.sort(
-      (a, b) => DateTime.parse(
-        b['observed_at'] as String,
-      ).compareTo(DateTime.parse(a['observed_at'] as String)),
+      (a, b) =>
+          DateTime.parse(
+            (b['time'] as Map?)?['anchor_date'] as String? ??
+                b['observed_at'] as String,
+          ).compareTo(
+            DateTime.parse(
+              (a['time'] as Map?)?['anchor_date'] as String? ??
+                  a['observed_at'] as String,
+            ),
+          ),
     );
     final days = <DateTime, List<Map>>{};
     for (final entry in entries) {
-      final date = DateTime.parse(entry['observed_at'] as String).toLocal();
+      final date = DateTime.parse(
+        (entry['time'] as Map?)?['anchor_date'] as String? ??
+            entry['observed_at'] as String,
+      ).toLocal();
       days
           .putIfAbsent(DateTime(date.year, date.month, date.day), () => [])
           .add(entry);
@@ -1131,7 +1143,13 @@ class LocalProfileResults extends StatelessWidget
                     ),
                   for (final m in messages) ...[
                     Text(
-                      '${sourceTime(DateTime.fromMillisecondsSinceEpoch(m['created_at']).toIso8601String())} · ${m['relation'] == 'self' ? t('我', 'You') : t('其他参与者', 'Another participant')}',
+                      '${sourceTime(DateTime.fromMillisecondsSinceEpoch(m['created_at']).toIso8601String())} · ${switch (m['relation']) {
+                        'self' => t('我', 'You'),
+                        'addressed' => t('直接@你', 'Directly mentions you'),
+                        'participant' => t('其他参与者', 'Another participant'),
+                        'app' => t('应用或机器人', 'App or bot'),
+                        _ => t('未知', 'Unknown'),
+                      }}',
                     ),
                     SelectableText(
                       m['text'] as String? ?? t('正文不可用', 'Message unavailable'),
@@ -1195,6 +1213,20 @@ class _ProfileScopeState extends State<_ProfileScope> {
   bool loaded = false;
   bool failed = false;
   int readGeneration = 0;
+  Object? _lastScope;
+  Object get _scope => (
+    profile.revision,
+    widget.host.sources.revision,
+    widget.host.sources.processingRevision,
+    widget.host.sources.identity,
+    widget.host.sources.generation,
+    widget.host.restored,
+    widget.host.ready,
+    widget.publication.canPublish,
+    widget.changes is ProfileGenerationCoordinator
+        ? (widget.changes as ProfileGenerationCoordinator).phase
+        : null,
+  );
   @override
   void initState() {
     super.initState();
@@ -1244,11 +1276,17 @@ class _ProfileScopeState extends State<_ProfileScope> {
   }
 
   void _changed() {
+    if (!mounted || _lastScope == _scope) return;
+    setState(() => _lastScope = _scope);
+  }
+
+  void _expired() {
     if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
+    _lastScope = _scope;
     // Saved results are readable once local state is opened, even while the
     // Feishu connector itself is unconfigured or unauthorized.
     final value = widget.host.restored ? profile.value : null;
@@ -1269,7 +1307,7 @@ class _ProfileScopeState extends State<_ProfileScope> {
         final end = DateTime.fromMillisecondsSinceEpoch(
           dates.first,
         ).add(const Duration(milliseconds: 1));
-        expiry = Timer(end.difference(now), _changed);
+        expiry = Timer(end.difference(now), _expired);
       }
     }
     return widget.builder(

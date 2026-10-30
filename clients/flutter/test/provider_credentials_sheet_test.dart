@@ -54,8 +54,10 @@ void main() {
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
       expect(find.text('chat-secret'), findsNothing);
+      expect(find.text('已配置 · 点此修改'), findsOneWidget);
       await tester.tap(find.text('添加服务'));
       await tester.pumpAndSettle();
+      expect(find.text('API 密钥：未配置'), findsOneWidget);
       await tester.enterText(
         find.byKey(const ValueKey('credential.secret')),
         'voice-secret',
@@ -75,6 +77,7 @@ void main() {
         find.byKey(const ValueKey('credential.secret')),
       );
       expect(field.controller!.text, isEmpty);
+      expect(find.text('API 密钥：已配置'), findsOneWidget);
       expect(field.obscureText, isTrue);
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
@@ -83,6 +86,64 @@ void main() {
         key: ModelSettings.storageKey,
       );
       expect(jsonDecode(raw!)['key'], isNull);
+    },
+  );
+  testWidgets(
+    'editing the custom URL keeps a typed key for the same provider',
+    (tester) async {
+      tester.view.physicalSize = const Size(480, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final settings = ModelSettings(native: _Native());
+      await settings.credentials.save(
+        endpoint: 'https://api.example.test/v1',
+        key: 'saved-secret',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () =>
+                    showProviderCredentials(context, settings.credentials),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('添加服务'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('credential.provider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('自定义服务').last);
+      await tester.pumpAndSettle();
+      const endpoint = ValueKey('credential.endpoint');
+      const secret = ValueKey('credential.secret');
+      await tester.enterText(find.byKey(endpoint), 'https://api.other.test/v1');
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(secret), 'typed-secret');
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(endpoint), 'https://api.other.test/v2');
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byKey(secret)).controller!.text,
+        'typed-secret',
+        reason: 'The URL still belongs to the same unsaved provider.',
+      );
+      await tester.enterText(
+        find.byKey(endpoint),
+        'https://api.example.test/v1',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byKey(secret)).controller!.text,
+        isEmpty,
+        reason: 'A typed key must not carry over to another saved credential.',
+      );
     },
   );
   testWidgets('central editor fits a small phone with large text', (

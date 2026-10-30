@@ -9,7 +9,7 @@ import {createGeminiAsrFactory,createGeminiTtsFactory} from '../realtime/cascade
 import type {GeminiSpeechConfig} from '../config/cascaded-realtime-config.js'
 import {createOpenAIWireProfile} from '../realtime/openai-wire-profile.js'
 import {GeminiLiveAdapter} from '../realtime/gemini.js'
-import {OPENAI_BASE_URL,GEMINI_BASE_URL,isProviderDefaultCompressor} from '../config/config.js'
+import {isProviderDefaultCompressor} from '../config/config.js'
 import type {CommittedConversationPair} from '../realtime/history.js'
 import {transcribeDraft} from '../realtime/cascaded/transcribe.js'
 import type {PromptLanguage} from '../realtime/prompt-language.js'
@@ -17,12 +17,10 @@ import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {usageReporterForEndpoint, type UsageReporter} from '../realtime/usage.js'
 import {
   capabilitiesFromSettings,
-  resolveSupportModelConnection,
+  resolveProviderModelConnection,
   type CascadedEndpointingProviderName,
   type CascadedLlmProviderName,
   type Settings,
-  DASHSCOPE_COMPATIBLE_BASE_URL,
-  STEPFUN_COMPATIBLE_BASE_URL,
   requireQwenRealtime,
   type QwenRealtimeConfig,
   ConfigurationError,
@@ -408,23 +406,19 @@ function supportComposition(
   if (options.supportGateway !== undefined) {
     return {settings: options.settings, gateway: options.supportGateway}
   }
-  const connection = resolveSupportModelConnection(options.settings, {
-    baseUrl: selectedBaseUrl,
-    apiKey: llmApiKey,
-  })
-  const gateway = provider === 'openai-compatible' && connection.source === 'selected_provider' && options.settings.openai_compatible_protocol === 'responses'
+  const connection = {baseUrl: selectedBaseUrl, apiKey: llmApiKey}
+  const gateway = provider === 'openai-compatible' && options.settings.openai_compatible_protocol === 'responses'
     ? new ResponsesModelGateway({...connection,...(options.onUsage?{onUsage:options.onUsage}:{})})
     : new OpenAIModelGateway({
     ...(options.onUsage?{onUsage:options.onUsage}:{}),
     baseUrl: connection.baseUrl,
     apiKey: connection.apiKey,
-    allowAnonymous: provider === 'self-hosted' && connection.source === 'selected_provider',
-    redirect: ['self-hosted','openai-compatible'].includes(provider) && connection.source === 'selected_provider' ? 'error' : 'follow',
-    ...(connection.source !== 'generic' && (provider === 'deepseek'||provider === 'openai'||provider === 'qwen') ? {thinkingControl: provider} : {}),
+    allowAnonymous: provider === 'self-hosted',
+    redirect: ['self-hosted','openai-compatible'].includes(provider) ? 'error' : 'follow',
+    ...(provider === 'deepseek'||provider === 'openai'||provider === 'qwen' ? {thinkingControl: provider} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
-  if (connection.source === 'generic') return {settings: options.settings, gateway}
   // A provider-derived default must never overwrite a lane the desktop routed explicitly.
   const routed = options.settings.model_routes
   const watchModel = stripLikePython(options.settings.watch_model ?? '')
@@ -575,23 +569,20 @@ export function buildQwenRealtimeAssembly(
   options = filterDisabledCoding(options)
   validateCodingResource(options)
   const qwen = options.qwenConfig ?? requireQwenRealtime(options.settings)
-  // StepFun support models default in loadSettings; only the endpoint is chosen here.
-  const stepfunOwnSupport = options.settings.integrated_provider === 'stepfun'
-    && (options.settings.model_api_key ?? '').trim() === ''
+  const integratedProvider = options.settings.integrated_provider
+  const nativeProvider = integratedProvider === 'minicpm-o' || integratedProvider === 'personaplex'
+  const supportConnection = nativeProvider ? null : resolveProviderModelConnection(options.settings, integratedProvider)
   const createPersonalMemory = options.createPersonalMemory
     ?? personalMemoryFactory(options.settings)
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
-  const support = resolveSupportModelConnection(options.settings, {
-    baseUrl: options.settings.integrated_provider === 'openai' ? OPENAI_BASE_URL : options.settings.integrated_provider === 'gemini' ? GEMINI_BASE_URL : stepfunOwnSupport ? STEPFUN_COMPATIBLE_BASE_URL : DASHSCOPE_COMPATIBLE_BASE_URL,
-    // A local serving credential must never become a cloud support-model credential.
-    apiKey: options.settings.integrated_provider === 'minicpm-o' || options.settings.integrated_provider === 'personaplex' ? '' : qwen.apiKey,
-  })
-  const gateway = ['minicpm-o','personaplex'].includes(options.settings.integrated_provider) && support.source !== 'generic' ? unconfiguredModelGateway : new OpenAIModelGateway({
+  // The support gateway stays on the selected provider: its own model URL and the credential the
+  // host resolved for that same provider. A local serving key never becomes a cloud key.
+  const gateway = nativeProvider || supportConnection === null ? unconfiguredModelGateway : new OpenAIModelGateway({
     ...(options.onUsage?{onUsage:options.onUsage}:{}),
-    baseUrl: support.baseUrl,
-    apiKey: support.apiKey,
-    ...(support.source === 'selected_provider' && (options.settings.integrated_provider === 'openai' || options.settings.integrated_provider === 'qwen') ? {thinkingControl: options.settings.integrated_provider} : {}),
+    baseUrl: supportConnection.baseUrl,
+    apiKey: qwen.apiKey,
+    ...(integratedProvider === 'openai' || integratedProvider === 'qwen' ? {thinkingControl: integratedProvider} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })

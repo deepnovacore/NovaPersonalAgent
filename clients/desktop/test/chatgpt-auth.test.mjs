@@ -51,8 +51,8 @@ test('ChatGPT broker shapes Responses tools and excludes unsupported fields',()=
  assert.equal(body.store,false);assert.equal(body.stream,true);assert.equal(body.input[0].role,'developer');assert.equal(body.tools[0].type,'namespace')
  assert.ok(!('max_output_tokens'in body));assert.ok(!('previous_response_id'in body));assert.ok(!('temperature'in body))
  assert.throws(()=>chatGptRequest({model:'m',input:[],tools:[{type:'computer_use_preview'}]}))
- const env={MODEL_API_KEY:'old'};applyChatGptEnvironment(env,{useModels:true,useCodex:true,model:'m'},{baseUrl:'http://127.0.0.1:1234/v1',secret:'local'})
- assert.equal(env.MODEL_API_KEY,'');assert.equal(env.OPENAI_COMPATIBLE_PROTOCOL,'responses');assert.equal(env.CODEX_API_KEY,'local')
+ const env={};applyChatGptEnvironment(env,{useModels:true,useCodex:true,model:'m'},{baseUrl:'http://127.0.0.1:1234/v1',secret:'local'})
+ assert.equal('MODEL_API_KEY' in env,false);assert.equal(env.OPENAI_COMPATIBLE_PROTOCOL,'responses');assert.equal(env.CODEX_API_KEY,'local')
 })
 
 test('broker authenticates local caller and forwards only to official endpoint with fresh grant',async t=>{
@@ -78,8 +78,8 @@ test('switching accounts keeps ChatGPT routing enabled and invalid patches are a
  assert.equal(accounts.view().useModels,true)
  const view=await accounts.configure({active:'b'})
  assert.equal(view.useModels,true);assert.equal(view.useCodex,true);assert.equal(view.model,'')
- const env={MODEL_API_KEY:'paid'};applyChatGptEnvironment(env,view,{baseUrl:'http://127.0.0.1:1234/v1',secret:'local'})
- assert.equal(env.OPENAI_COMPATIBLE_API_KEY,'local');assert.equal(env.MODEL_API_KEY,'');assert.equal(env.CASCADE_LLM_PROVIDER,'openai-compatible')
+ const env={};applyChatGptEnvironment(env,view,{baseUrl:'http://127.0.0.1:1234/v1',secret:'local'})
+ assert.equal(env.OPENAI_COMPATIBLE_API_KEY,'local');assert.equal('MODEL_API_KEY' in env,false);assert.equal(env.CASCADE_LLM_PROVIDER,'openai-compatible')
 })
 
 test('account panel clears stale model catalog on switch',async t=>{

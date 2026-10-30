@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_evidence.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
+import 'package:nova_mobile/context/timeline_time.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/context/local_publication.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
@@ -59,6 +60,7 @@ void main() {
         (index) => <String, dynamic>{
           'key': 'event_$index',
           'kind': 'timeline',
+          'policy_revision': 2,
           'text': originals[refs[index]]!['text'],
           'evidence_ids': [refs[index]],
           'observed_at': now.toIso8601String(),
@@ -89,6 +91,15 @@ void main() {
         );
       }
 
+      await expectLater(
+        publish([
+          {
+            ...entries.first,
+            'time': {'anchor_date': []},
+          },
+        ]),
+        throwsA(isA<StateError>()),
+      );
       await publish(entries);
       expect(repo.value!['entries'], entries);
       final before = disk.value;
@@ -118,6 +129,27 @@ void main() {
       final reopened = ProfileRepository(disk, publication, source);
       await reopened.open();
       expect(reopened.value!['entries'], entries);
+      // Old revisions must disappear from reads and preserved history alike.
+      final obsolete = jsonDecode(disk.value!) as Map<String, dynamic>;
+      for (final entry in obsolete['entries'] as List) {
+        (entry as Map).remove('policy_revision');
+      }
+      disk.value = jsonEncode(obsolete);
+      final upgraded = ProfileRepository(disk, publication, source);
+      await upgraded.open();
+      expect(upgraded.value!['entries'], isEmpty);
+      await upgraded.publish(
+        jsonEncode([
+          {...entries.first, 'policy_revision': 1},
+          entries.last,
+        ]),
+        sourceRevision: source.revision,
+        consentRevision: source.processingRevision,
+        provider: 'p',
+        mergeTimelineHistory: true,
+      );
+      expect(upgraded.value!['entries'], [entries.last]);
+      expect(source.messages('chat'), hasLength(101));
       publication.dispose();
     },
   );
@@ -153,12 +185,17 @@ void main() {
       await publication.open();
       final disk = MemoryLifePersistence();
       final repo = ProfileRepository(disk, publication, source);
-      Future<void> publish(List<String> refs, String text) async {
+      Future<void> publish(
+        List<String> refs,
+        String text, {
+        String key = 'event',
+      }) async {
         await repo.publish(
           jsonEncode([
             {
-              'key': 'event',
+              'key': key,
               'kind': 'timeline',
+              'policy_revision': 2,
               'text': text,
               'evidence_ids': refs,
               'observed_at': now.toIso8601String(),
@@ -173,7 +210,7 @@ void main() {
       }
 
       final oldRef = source.messages('chat').single['evidence_id'] as String;
-      await publish([oldRef], '第一天完成第一步');
+      await publish([oldRef], '第一天完成第一步', key: 'old_event');
       final oldDate = now.toIso8601String();
       final oldFingerprint = repo.value!['evidence_fingerprints'][oldRef];
       now = now.add(const Duration(days: 1));
@@ -207,13 +244,18 @@ void main() {
         history,
       );
       expect(replayed.map((entry) => entry['key']).toSet(), hasLength(2));
+      // The same trusted key replaces its old state even when its refs change.
+      await publish([newRefs.first], '同一事项后续状态');
+      final revised = repo.value!['entries'] as List;
+      expect(revised, hasLength(2));
+      expect(revised.singleWhere((e) => e['key'] == 'event')['evidence_ids'], [
+        newRefs.first,
+      ]);
+      expect(revised.singleWhere((e) => e['key'] == 'old_event'), history);
       final reopened = ProfileRepository(disk, publication, source);
       await reopened.open();
-      expect(reopened.value!['entries'], replayed);
-      expect(
-        reopened.value!['available_evidence_ids'],
-        unorderedEquals(newRefs),
-      );
+      expect(reopened.value!['entries'], revised);
+      expect(reopened.value!['available_evidence_ids'], [newRefs.first]);
       publication.dispose();
     },
   );
@@ -272,6 +314,7 @@ void main() {
         {
           'key': 'event',
           'kind': 'timeline',
+          'policy_revision': 2,
           'text': '原先计划验收',
           'evidence_ids': [oldRef],
           'observed_at': now.toIso8601String(),
@@ -321,6 +364,7 @@ void main() {
         {
           'key': 'new_event',
           'kind': 'timeline',
+          'policy_revision': 2,
           'text': '接口验收完成',
           'evidence_ids': [newRef],
           'observed_at': now.toIso8601String(),
@@ -368,6 +412,7 @@ void main() {
         {
           'key': 'other_event',
           'kind': 'timeline',
+          'policy_revision': 2,
           'text': '新账号自己的进展',
           'evidence_ids': [otherRef],
           'observed_at': now.toIso8601String(),
@@ -394,6 +439,7 @@ void main() {
       final item = {
         'key': 'event',
         'kind': 'timeline',
+        'policy_revision': 2,
         'text': '接口验收已完成',
         'evidence_ids': ['e1'],
         'observed_at': '2026-10-19T00:00:00Z',
@@ -416,6 +462,7 @@ void main() {
         {
           'key': 'event',
           'kind': 'timeline',
+          'policy_revision': 2,
           'text': '接口验收已完成\n接口验收已完成。',
           'evidence_ids': ['source'],
           'observed_at': '2026-10-19T00:00:00Z',
@@ -445,6 +492,52 @@ void main() {
       );
     },
   );
+  test('publication revalidates temporal claims and derived time', () {
+    final sourceDate = DateTime(2026, 10, 19);
+    final temporal = {
+      'kind': 'event',
+      'dates': [
+        {
+          'role': 'occurred',
+          'date': '2026-10-18',
+          'ref': 'source',
+          'quote': '昨天接口验收已完成',
+        },
+      ],
+    };
+    final original = <String, dynamic>{
+      'evidence_id': 'source',
+      'text': '昨天接口验收已完成',
+      'relation': 'self',
+      'local_date': '2026-10-19',
+      'created_at': sourceDate.millisecondsSinceEpoch,
+    };
+    final time = resolveTimelineTime(temporal, [
+      original,
+    ], localDate: '2026-10-19')!;
+    final entries = [
+      {
+        'key': 'event',
+        'kind': 'timeline',
+        'policy_revision': 2,
+        'text': '接口验收已完成\n接口验收已完成。',
+        'evidence_ids': ['source'],
+        'observed_at': sourceDate.toUtc().toIso8601String(),
+        'brief': {...brief('source'), 'temporal': temporal},
+        'time': time,
+      },
+    ];
+    // SourceStore originals omit local_date; publication derives the device date.
+    original.remove('local_date');
+    final originals = {'source': original};
+    expect(() => validateProfileEntries(entries, originals), returnsNormally);
+    time['anchor_date'] = '2026-10-17';
+    expect(() => validateProfileEntries(entries, originals), throwsStateError);
+    time['anchor_date'] = '2026-10-18';
+    original['text'] =
+        '接口验收已完成'; // Facts still grounded, temporal quote no longer is.
+    expect(() => validateProfileEntries(entries, originals), throwsStateError);
+  });
   test(
     'zero meaningful updates retains previous success and records checked recipe without clearing history',
     () async {
@@ -472,7 +565,11 @@ void main() {
       final publication = LocalPublicationContext(MemoryLifePersistence());
       await publication.open();
       final disk = MemoryLifePersistence(),
-          repo = ProfileRepository(MemoryLifePersistence(), publication, source);
+          repo = ProfileRepository(
+            MemoryLifePersistence(),
+            publication,
+            source,
+          );
       final actual = ProfileRepository(disk, publication, source);
       final ref = source.messages('chat').single['evidence_id'];
       Future<Map<String, dynamic>> publish(List entries, String scope) =>
@@ -488,6 +585,7 @@ void main() {
         {
           'key': 'event',
           'kind': 'timeline',
+          'policy_revision': 2,
           'text': '已有真实结果',
           'evidence_ids': [ref],
           'observed_at': now.toIso8601String(),

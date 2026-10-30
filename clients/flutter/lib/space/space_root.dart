@@ -14,6 +14,7 @@ import 'space_storage.dart';
 import 'native_scope.dart';
 import 'push_client.dart';
 import 'notification_router.dart';
+import 'host_panel.dart';
 import 'source_panel.dart';
 import 'space_dialog.dart';
 import 'chat_message.dart';
@@ -703,9 +704,10 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
                     if (action == 'discard') {
                       await state.discard(p['op_id'] as String);
                     } else {
-                      final input = Map<String, dynamic>.from(
-                        p['input'] as Map,
-                      );
+                      var input = Map<String, dynamic>.from(p['input'] as Map);
+                      if (p['kind'] == 'settings.patch') {
+                        input = refreshSettingsPatch(input, state.snapshot);
+                      }
                       final kind = input['kind'] as String?;
                       final current = kind == null
                           ? (state.snapshot['profile'] as Map?)
@@ -1134,6 +1136,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           ],
         ),
         SpaceSourcePanel(state: state, onSync: c.sync),
+        SpaceHostPanel(state: state, onSync: c.sync),
         _pending(state),
         NovaSection(
           children: [

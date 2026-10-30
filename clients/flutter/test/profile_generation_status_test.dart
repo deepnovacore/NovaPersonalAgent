@@ -79,6 +79,26 @@ void main() {
       await tester.pump();
       expect(find.text('整理好后会自动显示在这里。'), findsOneWidget);
       expect(find.textContaining('先查看已有内容'), findsNothing);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProfileGenerationStatus(
+              generation: c,
+              empty: true,
+              compact: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('feishu.generation.spinner')),
+        findsOneWidget,
+      );
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.text('暂停'), findsOneWidget);
+      expect(find.text('整理好后会自动显示在这里。'), findsOneWidget);
       release.complete();
       await run;
       await tester.pump();
@@ -251,6 +271,42 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     }
     expect(opened, 0);
+    c.dispose();
+  });
+  testWidgets('partial timeline reports kept updates and stops paid retries', (
+    tester,
+  ) async {
+    var calls = 0;
+    final c = ProfileGenerationCoordinator(
+      persistence: MemoryLifePersistence(),
+      autoSchedule: false,
+      inspect: () async => const ProfileGenerationSnapshot(
+        scope: 's',
+        complete: false,
+        hasResult: true,
+        covered: 10,
+        total: 10,
+      ),
+      generate:
+          ({required savedObservationsOnly, required maxNewBatches}) async {
+            calls++;
+            throw 'profile_timeline_partial';
+          },
+      cancel: () {},
+      failureCode: (e) => '$e',
+    );
+    await c.start();
+    await c.poll();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: ProfileGenerationStatus(generation: c)),
+      ),
+    );
+    expect(find.text('已保存部分近况'), findsOneWidget);
+    expect(find.text('部分内容未通过核对，已保留合格内容并停止自动重试。'), findsOneWidget);
+    await c.poll();
+    expect(calls, 1);
+    await tester.pumpWidget(const SizedBox());
     c.dispose();
   });
 }

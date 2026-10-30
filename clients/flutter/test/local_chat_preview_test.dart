@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
+import 'package:nova_mobile/ui/tool_step.dart';
 import 'package:nova_mobile/agent_core/agent_workspace.dart';
 import 'package:nova_mobile/agent_core/tool_registry.dart';
 import 'package:nova_mobile/conversation/local_chat_panel.dart';
@@ -223,6 +224,13 @@ void main() {
               )
               .dy,
         ),
+      );
+      expect(find.byType(ExpansionTile), findsNWidgets(7));
+      expect(
+        tester
+            .widgetList<ToolStepGroup>(find.byType(ToolStepGroup))
+            .map((group) => group.steps.length),
+        [2, 1, 1, 1, 1, 1, 1],
       );
       expect(find.text('other.html'), findsOneWidget);
       expect(find.text('read-only.html'), findsNothing);

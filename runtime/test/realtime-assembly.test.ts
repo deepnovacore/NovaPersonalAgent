@@ -3446,7 +3446,7 @@ test('service close failure still stops core and preserves the first actual fail
 test('knowledge forced close fits the outer core shutdown budget without requiring another stop', async t => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-realtime-close-'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: true}}}, {})
-  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', embedding_api_key: 'embedding-key', knowledge_path: join(directory, 'knowledge.sqlite')})
+  const settings = settingsSchema.parse({executors: [], deepseek_api_key: 'test-key', embedding_api_key: 'embedding-key', knowledge_path: join(directory, 'knowledge.sqlite')})
   const knowledge = await prepareKnowledge(settings, capabilities)
   assert.ok(knowledge)
   const frame = new RecordingFrameSource()
@@ -3655,7 +3655,7 @@ test('personal host shares opened memory, persists configuration and closes with
 test('knowledge-only composition opens canonical originals without enabling personal capture', async () => {
   const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-knowledge-only-'))
   const capabilities=parseCapabilityRegistry({version:1,modules:{search:{enabled:false},coding:{enabled:false},knowledge:{enabled:true}}},{})
-  const settings=settingsSchema.parse({executors:[],model_api_key:'test-key',embedding_api_key:'embedding-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
+  const settings=settingsSchema.parse({executors:[],deepseek_api_key:'test-key',embedding_api_key:'embedding-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
   const knowledge=await prepareKnowledge(settings,capabilities)
   assert.ok(knowledge)
   const core=buildAssembly({settings,capabilities,knowledge,frameSource:new RecordingFrameSource(),gateway:new NeverCalledGateway()})
@@ -3897,7 +3897,7 @@ async function exerciseGateway(gateway: ModelGateway): Promise<void> {
 test('Qwen factory and plain assembly both leave the fast slot to the realtime owner', () => {
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     connector.connector,
   ))
   const qwenBindings = realtime.tools.bindings
@@ -3912,7 +3912,7 @@ test('Qwen factory and plain assembly both leave the fast slot to the realtime o
   // There is no second mode left: plain assembly wires no text front brain either, so a
   // user turn cannot take the fast slot out from under the realtime provider.
   const ordinary = buildAssembly({
-    settings: settings({MODEL_API_KEY: 'model-key'}),
+    settings: settings({DASHSCOPE_API_KEY: 'model-key'}),
     gateway: new NeverGateway(),
     searchTransport: new NeverSearch(),
   })
@@ -3941,7 +3941,7 @@ test('Qwen production composition derives cameraModuleEnabled from Settings', ()
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
     settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       CAMERA_MODULE_ENABLED: 'false',
     }), connector.connector,
   ))
@@ -3956,7 +3956,7 @@ test('Qwen production composition forwards the personal memory owner', async () 
   let created = 0
   let closed = 0
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     recordingConnector().connector,
     {createPersonalMemory: () => {
       created += 1
@@ -3979,7 +3979,7 @@ test('Qwen factory construction does not invoke an unrelated LiveKit agents load
   let agentsLoaderCalls = 0
   const input = {
     ...qwenOptions(
-      settings({MODEL_API_KEY: 'model-key'}),
+      settings({DASHSCOPE_API_KEY: 'model-key'}),
       connector.connector,
     ),
     agentsLoader: () => {
@@ -4052,7 +4052,7 @@ test('Qwen composition exposes approval only for the exact controller-bearing re
     apiKey: 'fixture', maxSteps: 3, budgetMs: 1000, lockRoot: '/tmp/phone-locks'}, approvalController)
   const input = {
     ...qwenOptions(settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       EXECUTORS: 'codex,autoglm',
     }), connector.connector),
     codexResource: resource,
@@ -4088,7 +4088,7 @@ test('Qwen composition exposes approval only for the exact controller-bearing re
   }
   const neverRealtime = buildQwenRealtimeAssembly({
     ...qwenOptions(settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       EXECUTOR: 'codex',
     }), neverConnector.connector),
     codexResource: neverResource,
@@ -4121,7 +4121,7 @@ test('Qwen realtime composition rejects a live Codex fallback', () => {
 
   assert.throws(() => buildQwenRealtimeAssembly({
     ...qwenOptions(settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       EXECUTOR: 'codex',
     }), recordingConnector().connector),
     codexResource: resource,
@@ -4141,7 +4141,6 @@ test('Qwen factory preserves resource identity, explicit Guard settings, and one
   const ids = new RecordingIds()
   const frame = new RecordingFrameSource()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(settings({
-    MODEL_API_KEY: 'model-key',
     DASHSCOPE_API_KEY: 'dash-key',
     QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
     QWEN_REALTIME_MODEL: 'qwen-test',
@@ -4226,7 +4225,7 @@ test('desktop Qwen composition shares one clock, Chromium source, and camera ser
     buildRealtime: (callbacks, transport) => {
       source = new ChromiumFrameSource({source: 'file', transport, clock})
       return buildQwenRealtimeAssembly(qwenOptions(
-        settings({MODEL_API_KEY: 'model-key'}),
+        settings({DASHSCOPE_API_KEY: 'model-key'}),
         connector.connector,
         {clock, frameSource: source, ...callbacks},
       ))
@@ -4249,7 +4248,7 @@ test('desktop Qwen composition shares one clock, Chromium source, and camera ser
 
 test('Qwen factory maps legacy history settings to the generic preemptive-alert service seam', () => {
   const defaults = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     recordingConnector().connector,
   ))
   assert.deepEqual(defaults.service.preemptiveAlertConfiguration, {
@@ -4259,7 +4258,7 @@ test('Qwen factory maps legacy history settings to the generic preemptive-alert 
   })
   for (const pairs of ['1', '2', '4']) {
     const realtime = buildQwenRealtimeAssembly(qwenOptions(settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
       QWEN_GUARD_HISTORY_RECOVERY: 'packed',
       QWEN_GUARD_HISTORY_PAIRS: pairs,
@@ -4272,82 +4271,48 @@ test('Qwen factory maps legacy history settings to the generic preemptive-alert 
   }
 })
 
-test('Qwen factory keeps websocket and model-gateway credential priorities distinct', async () => {
-  const cases = [
-    {
-      name: 'both',
-      environment: {
-        DASHSCOPE_API_KEY: 'dash-key',
-        MODEL_API_KEY: 'model-key',
-      },
-      websocket: 'dash-key',
-      gateway: 'model-key',
-    },
-    {
-      name: 'model only',
-      environment: {MODEL_API_KEY: 'model-key'},
-      websocket: 'model-key',
-      gateway: 'model-key',
-    },
-    {
-      name: 'DashScope only',
-      environment: {DASHSCOPE_API_KEY: 'dash-key'},
-      websocket: 'dash-key',
-      gateway: 'dash-key',
-    },
-    {
-      name: 'Python-whitespace DashScope',
-      environment: {
-        DASHSCOPE_API_KEY: '\u001c\u0085',
-        MODEL_API_KEY: 'model-key',
-      },
-      websocket: 'model-key',
-      gateway: 'model-key',
-    },
-  ] as const
-  for (const scenario of cases) {
-    const authorizations: string[] = []
-    const restoreFetch = installRecordingFetch(authorizations)
-    const connector = recordingConnector()
-    let realtime
-    try {
-      realtime = buildQwenRealtimeAssembly(qwenOptions(
-        settings(scenario.environment),
-        connector.connector,
-      ))
-    } finally {
-      restoreFetch()
-    }
+test('Qwen websocket and support gateway share DASHSCOPE_API_KEY and never borrow another key', async () => {
+  const authorizations: string[] = []
+  const restoreFetch = installRecordingFetch(authorizations)
+  const connector = recordingConnector()
+  const realtime = buildQwenRealtimeAssembly(qwenOptions(
+    settings({DASHSCOPE_API_KEY: 'dash-key'}),
+    connector.connector,
+  ))
+  try {
     await exerciseGateway(realtime.core.gateway)
-    await settleNamed(`${scenario.name} start`, realtime.start())
-    assert.equal(connector.calls[0]?.headers.Authorization, `Bearer ${scenario.websocket}`)
-    assert.deepEqual(authorizations, [`Bearer ${scenario.gateway}`])
-    await settleNamed(`${scenario.name} stop`, realtime.stop())
+    await settleNamed('shared key start', realtime.start())
+    assert.equal(connector.calls[0]?.headers.Authorization, 'Bearer dash-key')
+    assert.deepEqual(authorizations, ['Bearer dash-key'])
+    await settleNamed('shared key stop', realtime.stop())
+  } finally {
+    restoreFetch()
   }
+  assert.throws(() => buildQwenRealtimeAssembly(qwenOptions(
+    settings({DEEPSEEK_API_KEY: 'foreign-key'}),
+    recordingConnector().connector,
+  )), /DASHSCOPE_API_KEY/u)
+  assert.throws(() => buildQwenRealtimeAssembly(qwenOptions(
+    settings({DASHSCOPE_API_KEY: '\u001c\u0085'}),
+    recordingConnector().connector,
+  )), /DASHSCOPE_API_KEY/u)
 })
 
-test('integrated Qwen support requests never send DashScope credentials to a generic override',
+test('integrated Qwen support requests use only DashScope URL and credential',
   async () => {
-    const sentinel = 'hostile-support-route-secret'
     const cases = [
       {
-        name: 'DashScope fallback',
-        environment: {
-          DASHSCOPE_API_KEY: 'dash-support-key',
-          MODEL_BASE_URL: `https://hostile.example/private?sentinel=${sentinel}`,
-        },
+        name: 'default endpoint',
+        environment: {DASHSCOPE_API_KEY: 'dash-support-key'},
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-        authorization: 'Bearer dash-support-key',
       },
       {
-        name: 'generic override',
+        name: 'provider model endpoint',
         environment: {
-          DASHSCOPE_API_KEY: 'dash-provider-key',
-          MODEL_API_KEY: 'generic-support-key',
-          MODEL_BASE_URL: 'https://generic.example/compatible/v9',
+          DASHSCOPE_API_KEY: 'dash-support-key',
+          DASHSCOPE_MODEL_BASE_URL: 'https://qwen-model.example/compatible/v9',
         },
-        endpoint: 'https://generic.example/compatible/v9/chat/completions',
-        authorization: 'Bearer generic-support-key',
+        endpoint: 'https://qwen-model.example/compatible/v9/chat/completions',
       },
     ] as const
 
@@ -4380,19 +4345,18 @@ test('integrated Qwen support requests never send DashScope credentials to a gen
       await exerciseGateway(realtime.core.gateway)
       assert.deepEqual(requests.map(({endpoint, authorization}) => ({endpoint, authorization})), [{
         endpoint: scenario.endpoint,
-        authorization: scenario.authorization,
+        authorization: 'Bearer dash-support-key',
       }], scenario.name)
-      assert.doesNotMatch(requests[0]?.body ?? '',
-        /dash-support-key|dash-provider-key|generic-support-key|hostile-support-route-secret/u)
-      assert.doesNotMatch(JSON.stringify(requests),
-        scenario.name === 'DashScope fallback' ? /hostile\.example|hostile-support-route-secret/u : /never-match/u)
+      assert.doesNotMatch(requests[0]?.body ?? '', /dash-support-key/u)
     }
+    assert.throws(() => settings({MODEL_API_KEY: 'generic-key'}), /MODEL_API_KEY 已移除/u)
+    assert.throws(() => settings({MODEL_BASE_URL: 'https://generic.example/v9'}), /MODEL_BASE_URL 已移除/u)
   })
 
 test('Qwen factory forwards only the reviewed provider tool subset', async () => {
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     connector.connector,
     {providerToolView: tools => ({...tools, schemas: tools.schemas.slice(0, 2)})},
   ))
@@ -4410,7 +4374,7 @@ test('Qwen factory forwards only the reviewed provider tool subset', async () =>
   })
   assert.throws(
     () => buildQwenRealtimeAssembly(qwenOptions(
-      settings({MODEL_API_KEY: 'model-key'}),
+      settings({DASHSCOPE_API_KEY: 'model-key'}),
       connector.connector,
       {providerToolView: copiedBindings},
     )),
@@ -4424,7 +4388,7 @@ test('Qwen factory validates synchronously without connecting or leaking secrets
   const sentinel = 'synchronous-sentinel-secret'
   assert.throws(
     () => buildQwenRealtimeAssembly(qwenOptions(settings({
-      MODEL_API_KEY: sentinel,
+      DASHSCOPE_API_KEY: sentinel,
       QWEN_REALTIME_URL: `https://invalid/?secret=${sentinel}`,
     }), connector.connector)),
     error => error instanceof ConfigurationError
@@ -4441,7 +4405,7 @@ test('Qwen connector failure rolls core back safely and permits one later retry'
   )})
   const frame = new RecordingFrameSource()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     connector.connector,
     {frameSource: frame},
   ))
@@ -5053,7 +5017,6 @@ test('cascaded assembly preserves one graph, shared resources, and frozen Guard 
   const mediaStore = new MediaStore()
   let telemetryCloses = 0
   const configured = settings({
-    MODEL_API_KEY: 'generic-model-key',
     CASCADE_LLM_MODEL: 'ark-realtime-distinct',
     QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
     QWEN_GUARD_HISTORY_RECOVERY: 'packed',
@@ -5237,40 +5200,39 @@ test('cascaded composition forwards an explicit generic controller for a renamed
   }
 })
 
-test('core gateway preserves compressor choices and falls back for provider defaults immutably',
+test('core gateway uses each provider model endpoint and keeps model choices immutable',
   async () => {
     const cases = [
       {
-        name: 'generic',
-        environment: {
-          MODEL_API_KEY: 'generic-safe-key',
-          MODEL_BASE_URL: 'https://generic.example/v9',
-        },
-        endpoint: 'https://generic.example/v9/chat/completions',
-        authorization: 'Bearer generic-safe-key',
-        models: {watch: 'watch-original', surrogate: 'surrogate-original', compressor: 'deepseek-flash'},
-      },
-      {
-        name: 'Python-whitespace Ark fallback',
-        environment: {
-          MODEL_API_KEY: '\u001c\u0085',
-          MODEL_BASE_URL: 'https://generic.example/v9',
-        },
+        name: 'Ark provider endpoint',
+        environment: {},
         endpoint: 'https://ark-support.example/api/v3/chat/completions',
         authorization: 'Bearer ark-test-key',
         models: {watch: 'watch-original', surrogate: 'ark-selected', compressor: 'ark-selected'},
       },
       {
-        name: 'Qwen fallback',
+        name: 'Qwen provider endpoint',
         environment: {
           CASCADE_LLM_PROVIDER: 'qwen',
           CASCADE_LLM_MODEL: 'qwen3-max',
           DASHSCOPE_API_KEY: 'dash-support-key',
-          MODEL_API_KEY: '\u001c\u0085',
+          DASHSCOPE_MODEL_BASE_URL: 'https://qwen-support.example/v1',
         },
-        endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+        endpoint: 'https://qwen-support.example/v1/chat/completions',
         authorization: 'Bearer dash-support-key',
         models: {watch: 'watch-original', surrogate: 'qwen3-max', compressor: 'qwen3-max'},
+      },
+      {
+        name: 'OpenAI provider endpoint',
+        environment: {
+          CASCADE_LLM_PROVIDER: 'openai',
+          CASCADE_LLM_MODEL: 'gpt-support-model',
+          OPENAI_API_KEY: 'openai-support-key',
+          OPENAI_MODEL_BASE_URL: 'https://openai-support.example/v1',
+        },
+        endpoint: 'https://openai-support.example/v1/chat/completions',
+        authorization: 'Bearer openai-support-key',
+        models: {watch: 'watch-original', surrogate: 'gpt-support-model', compressor: 'gpt-support-model'},
       },
     ] as const
     for (const scenario of cases) {

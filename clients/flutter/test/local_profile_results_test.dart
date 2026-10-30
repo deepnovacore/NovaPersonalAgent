@@ -18,6 +18,7 @@ class ReadyHost extends FeishuHost {
   ReadyHost(SourceStore sources) : super(sources: sources) {
     sources.addListener(notifyListeners);
   }
+  void emitProgress() => notifyListeners();
   @override
   bool get ready => true;
   @override
@@ -41,6 +42,44 @@ class UnrestoredHost extends ReadyHost {
   UnrestoredHost(super.sources);
   @override
   bool get restored => false;
+}
+
+class _CountingProfile extends ProfileRepository {
+  _CountingProfile(super.persistence, super.publication, super.sources);
+  int reads = 0;
+  @override
+  Map<String, dynamic>? get value {
+    reads++;
+    return super.value;
+  }
+}
+
+class _ProgressGeneration extends ProfileGenerationCoordinator {
+  _ProgressGeneration()
+    : super(
+        persistence: MemoryLifePersistence(),
+        inspect: () async => null,
+        generate:
+            ({required savedObservationsOnly, required maxNewBatches}) async {},
+        cancel: () {},
+        failureCode: (_) => 'failed',
+        autoSchedule: false,
+      );
+  void emitProgress() => notifyListeners();
+}
+
+class _RevokingEvidenceSource extends SourceStore {
+  _RevokingEvidenceSource(super.persistence, {super.now});
+  bool revokeAfterRead = false;
+  @override
+  Future<List<Map<String, dynamic>>> readAuthorizedEvidenceAsync(
+    String provider,
+    String purpose,
+  ) async {
+    final records = await super.readAuthorizedEvidenceAsync(provider, purpose);
+    if (revokeAfterRead) await grantProcessing(provider, purpose, false);
+    return records;
+  }
 }
 
 class _FlakyProfile extends ProfileRepository {
@@ -71,6 +110,7 @@ class _BriefProfile extends ProfileRepository {
       {
         'key': 'event',
         'kind': 'timeline',
+        'policy_revision': 2,
         'text': 'brief',
         'brief': {'title': 'brief'},
         'observed_at': now.toIso8601String(),
@@ -101,6 +141,7 @@ class _RetainedProfile extends ProfileRepository {
       {
         'key': 'event',
         'kind': 'timeline',
+        'policy_revision': 2,
         'text': 'Retained timeline content.',
         'observed_at': '2026-10-18T05:17:00Z',
         'evidence_ids': <String>[],
@@ -115,7 +156,255 @@ class _RetainedProfile extends ProfileRepository {
   };
 }
 
+class _LabelSources extends SourceStore {
+  _LabelSources() : super(MemoryLifePersistence());
+  @override
+  List<Map<String, dynamic>> messagesByEvidenceIds(Iterable<Object?> ids) => [
+    for (final relation in [
+      'self',
+      'addressed',
+      'participant',
+      'app',
+      'unknown',
+    ])
+      {
+        'created_at': DateTime.utc(2026, 10, 29).millisecondsSinceEpoch,
+        'relation': relation,
+        'text': 'Synthetic $relation message',
+      },
+  ];
+}
+
+class _LabelProfile extends ProfileRepository {
+  _LabelProfile(super.persistence, super.publication, super.sources);
+  @override
+  Future<void> open() async {}
+  @override
+  Map<String, dynamic> get value => {
+    'generated_at': '2026-10-29T00:00:00Z',
+    'available_evidence_ids': ['e1'],
+    'entries': [
+      {
+        'key': 'about',
+        'kind': 'profile',
+        'text': 'Synthetic profile',
+        'evidence_ids': ['e1'],
+      },
+    ],
+  };
+}
+
 void main() {
+  for (final language in ['zh', 'en']) {
+    testWidgets(
+      'source author labels distinguish five relations in $language',
+      (tester) async {
+        final sources = _LabelSources();
+        final host = ReadyHost(sources);
+        final publication = LocalPublicationContext(MemoryLifePersistence());
+        await publication.open();
+        final profile = _LabelProfile(
+          MemoryLifePersistence(),
+          publication,
+          sources,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LocalProfileResults(
+                host: host,
+                publication: publication,
+                repository: profile,
+                kind: 'profile',
+                language: language,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Synthetic profile'));
+        await tester.pumpAndSettle();
+        for (final label
+            in language == 'zh'
+                ? ['我', '直接@你', '其他参与者', '应用或机器人', '未知']
+                : [
+                    'You',
+                    'Directly mentions you',
+                    'Another participant',
+                    'App or bot',
+                    'Unknown',
+                  ]) {
+          expect(find.textContaining(' · $label'), findsOneWidget);
+        }
+        await tester.pumpWidget(const SizedBox());
+        host.dispose();
+        publication.dispose();
+      },
+    );
+  }
+
+  test(
+    'publication rechecks consent after the asynchronous evidence read',
+    () async {
+      final now = DateTime.utc(2026, 10, 18);
+      final sources = _RevokingEvidenceSource(
+        MemoryLifePersistence(),
+        now: () => now,
+      );
+      await sources.bind('self', 1);
+      await sources.select('c', now);
+      await sources.ingestPage(
+        sources.fence('c'),
+        [
+          {
+            'message_id': 'm',
+            'create_time': '${now.millisecondsSinceEpoch}',
+            'msg_type': 'text',
+            'body': {'content': '{"text":"synthetic original"}'},
+          },
+        ],
+        nextPage: null,
+        windowEnd: now,
+      );
+      await sources.grantProcessing('p', 'profile', true);
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
+      final disk = MemoryLifePersistence();
+      final profile = ProfileRepository(disk, publication, sources);
+      final ref = sources.messages('c').single['evidence_id'];
+      sources.revokeAfterRead = true;
+      await expectLater(
+        profile.publish(
+          jsonEncode([
+            {
+              'key': 'about',
+              'kind': 'profile',
+              'text': 'Must not publish',
+              'evidence_ids': [ref],
+            },
+          ]),
+          sourceRevision: sources.revision,
+          consentRevision: sources.processingRevision,
+          provider: 'p',
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'code',
+            'processing_consent_required',
+          ),
+        ),
+      );
+      expect(disk.value, isNull);
+      expect(profile.hasStoredResult, false);
+      sources.dispose();
+      publication.dispose();
+    },
+  );
+  testWidgets(
+    'progress skips profile reads while partial publication refreshes immediately',
+    (tester) async {
+      final now = DateTime.utc(2026, 10, 18);
+      final sources = SourceStore(MemoryLifePersistence(), now: () => now);
+      await sources.bind('self', 1);
+      await sources.select('c', now);
+      final message = {
+        'message_id': 'm',
+        'sender': {'id_type': 'open_id', 'id': 'self'},
+        'create_time': '${now.millisecondsSinceEpoch}',
+        'msg_type': 'text',
+        'body': {'content': '{"text":"synthetic original"}'},
+      };
+      await sources.ingestPage(
+        sources.fence('c'),
+        [message],
+        nextPage: null,
+        windowEnd: now,
+      );
+      await sources.grantProcessing('p', 'profile', true);
+      final host = ReadyHost(sources);
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
+      final profile = _CountingProfile(
+        MemoryLifePersistence(),
+        publication,
+        sources,
+      );
+      final progress = _ProgressGeneration();
+      final ref = sources.messages('c').single['evidence_id'];
+      Future<void> publish(String text, int covered) => profile
+          .publish(
+            jsonEncode([
+              {
+                'key': 'about',
+                'kind': 'profile',
+                'text': text,
+                'evidence_ids': [ref],
+              },
+            ]),
+            sourceRevision: sources.revision,
+            consentRevision: sources.processingRevision,
+            provider: 'p',
+            partial: true,
+            coverage: {
+              'eligible_records': 2,
+              'validated_observation_records': covered,
+              'final_original_records': 1,
+              'unobserved_records': 2 - covered,
+            },
+          )
+          .then((_) {});
+      await publish('First partial profile', 1);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: LocalProfileResults(
+                host: host,
+                publication: publication,
+                repository: profile,
+                generation: progress,
+                kind: 'profile',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('First partial profile'), findsOneWidget);
+      final reads = profile.reads;
+      for (var i = 0; i < 5; i++) {
+        host.emitProgress();
+        progress.emitProgress();
+        await tester.pump();
+      }
+      expect(profile.reads, reads);
+      final sourceRevision = sources.revision;
+      await sources.ingestPage(
+        sources.fence('c'),
+        [message],
+        nextPage: null,
+        windowEnd: now.add(const Duration(seconds: 1)),
+      );
+      await tester.pump();
+      expect(sources.revision, sourceRevision);
+      expect(profile.reads, reads);
+      await publish('New partial profile', 2);
+      progress.emitProgress();
+      await tester.pump();
+      expect(find.text('New partial profile'), findsOneWidget);
+      expect(find.text('First partial profile'), findsNothing);
+      expect(profile.reads, greaterThan(reads));
+      final updatedReads = profile.reads;
+      await sources.grantProcessing('p', 'profile', false);
+      await tester.pump();
+      expect(profile.reads, greaterThan(updatedReads));
+      await tester.pumpWidget(const SizedBox());
+      progress.dispose();
+      host.dispose();
+      publication.dispose();
+    },
+  );
   for (final expire in [false, true]) {
     testWidgets(
       'local history survives ${expire ? 'expiry' : 'processing withdrawal'} and unavailable evidence stays hidden',
@@ -159,6 +448,7 @@ void main() {
             {
               'key': 'event',
               'kind': 'timeline',
+              'policy_revision': 2,
               'text': 'Grounded plan',
               'observed_at': sourceTime.toIso8601String(),
               'evidence_ids': [ref],

@@ -8,7 +8,7 @@ import {reportUsage} from '../src/realtime/usage.js'
 for (const provider of ['openai', 'gemini'] as const) {
   const keyName = `${provider.toUpperCase()}_API_KEY`
   test(`${provider} selected credentials never fall back to DashScope or generic keys`, () => {
-    const environment = {INTEGRATED_PROVIDER: provider, DASHSCOPE_API_KEY: 'wrong', MODEL_API_KEY: 'wrong'}
+    const environment = {INTEGRATED_PROVIDER: provider, DASHSCOPE_API_KEY: 'wrong'}
     const missing = loadSettings(environment)
     assert.deepEqual(describeMissingBlockingCredentials(missing).missing, [keyName])
     assert.throws(() => requireIntegratedRealtime(missing), new RegExp(keyName))
@@ -21,6 +21,15 @@ for (const provider of ['openai', 'gemini'] as const) {
     assert.equal(selected.provider, provider)
     assert.equal(selected.config.apiKey, 'selected')
     assert.match(selected.config.baseUrl, provider === 'openai' ? /api.openai.com/ : /generativelanguage.googleapis.com/)
+  })
+  test(`${provider} cascaded text uses its own model endpoint`, () => {
+    const selected = requireSelectedCascadedLlmConfig(loadSettings({
+      PIPELINE_MODE: 'cascaded',
+      CASCADE_LLM_PROVIDER: provider,
+      [`${provider.toUpperCase()}_MODEL_BASE_URL`]: `https://${provider}-model.example/v1`,
+      [keyName]: 'selected',
+    }))
+    assert.equal(selected.config.baseUrl, `https://${provider}-model.example/v1`)
   })
   test(`${provider} streamed chat request omits domestic vendor parameters`, async () => {
     let body: Record<string, unknown> = {}

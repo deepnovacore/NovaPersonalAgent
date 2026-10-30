@@ -46,7 +46,7 @@ return { text: document.querySelector('#result').textContent };
 
 ## 构建与验证
 
-先准备并打包 Linux 运行时，再构建 Flutter 应用。所有构建输出、临时目录和编译器缓存必须位于已挂载的外置盘，按 worktree 路径与会话 ID 隔离；缺少运行时会使构建失败，不会静默生成没有 shell 的包。
+先准备并打包 Linux 运行时，再构建 Flutter 应用。所有构建输出、临时目录和编译器缓存放在内置盘，按规范化 worktree 路径与会话 ID 隔离；不依赖外置盘。缺少运行时会使构建失败，不会静默生成没有 shell 的包。
 
 - Android 构建与源码许可证：[Android runtime](../tool/linux/android/README.md)、[第三方来源](../tool/linux/android/THIRD_PARTY.md)。
 - iOS 构建：`python3 tool/linux/ios/build_runtime.py --output-root "$NOVA_SESSION_ROOT/ios" --sdk iphoneos`，随后给 Xcode 构建传入 `NOVA_LINUX_ROOT="$NOVA_SESSION_ROOT/ios"`。模拟器需要使用 `--sdk iphonesimulator` 单独构建 ARM64 库。

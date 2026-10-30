@@ -13,6 +13,15 @@ import {
 
 const DEMO_LAUNCHER_URL = new URL('../../../scripts/start-client-demo.mjs', import.meta.url)
 
+test('root start alias reuses the existing desktop client launcher', async () => {
+  const manifest = JSON.parse(await readFile(
+    new URL('../../../package.json', import.meta.url),
+    'utf8',
+  ))
+  assert.equal(manifest.scripts.start, 'node scripts/start-client.mjs')
+  assert.equal(manifest.scripts.start, manifest.scripts['start:client'])
+})
+
 test('root demo command selects the repository camera fixture without mutating its environment', async () => {
   const manifest = JSON.parse(await readFile(
     new URL('../../../package.json', import.meta.url),

@@ -151,6 +151,11 @@ export class ComposioConnector {
   do{const page=await this.#objects(c,after);for(const o of page.objects)await m.setProcessingConsent(o.source_id,grant);after=page.next}while(after)
  }
  async #objects(c:SourceConnection,after:string|null){return z.object({objects:z.array(sourceObjectSchema),next:z.string().nullable()}).parse(await this.#memory().options.client.memory('source_pending',{id:c.fence.connection_id,...(after?{after}:{}),limit:200}))}
+ /** True when this object already stores a real body, so a page whose body could not be read must not replace it. */
+ async #storedBody(c:SourceConnection,objectKey:string):Promise<boolean>{
+  const page=z.object({objects:z.array(sourceObjectSchema)}).parse(await this.#memory().options.client.memory('source_pending',{id:c.fence.connection_id,object_key:objectKey,limit:1}))
+  return page.objects.some(o=>o.status==='current'&&o.current_evidence_ids.length>0&&o.metadata.body_unavailable!==true)
+ }
  async #run(id:string):Promise<void>{
   while(!this.#active.has(id)&&this.#active.size>=4&&!this.#closed)await Promise.race([...this.#active.values()].map(active=>active.promise)).catch(()=>{/* Failed workers still release their slots. */})
   if(this.#closed)return
@@ -195,7 +200,12 @@ export class ComposioConnector {
    }
    if(!page.complete&&!page.objects.length&&canonicalJson(page.continuation)===canonicalJson(state.providerCursor))throw new ComposioFailure('no_progress')
    const grant=await this.#grant(c)
-   for(const o of page.objects){const change=this.#change(c,o,batch);await m.setProcessingConsent(change.source_id,grant);changes.push(change)}
+   for(const o of page.objects){
+    // A body that could not be read must not retire one read earlier: this page has no better content, so the stored
+    // object stays current. A later real body arrives as a normal change with a different hash and still replaces it.
+    if(o.metadata.body_unavailable===true&&await this.#storedBody(c,o.key))continue
+    const change=this.#change(c,o,batch);await m.setProcessingConsent(change.source_id,grant);changes.push(change)
+   }
    state.providerCursor=page.continuation;state.nextCheckpoint={...page.checkpoint,fullAt:state.snapshot?state.anchor:checkpoint?.fullAt??state.anchor,...(config.provider==='macos_mail'?{limited:page.scanLimited===true}:{})}
    if(page.complete){if(state.snapshot&&!(config.provider==='macos_mail'&&!page.snapshot)){state.reconciling=true;state.after=null}else complete=true}
   }

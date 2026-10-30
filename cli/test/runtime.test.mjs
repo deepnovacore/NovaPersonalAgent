@@ -231,7 +231,7 @@ test('doctor names the voice pipeline keys and probes only environment keys when
   assert.doesNotMatch(JSON.stringify(online), /env-value|c2VhbGVk/u)
 })
 
-test('doctor counts only saved keys the desktop can load, and the DashScope-gateway model key', async () => {
+test('doctor counts only saved keys the desktop can load', async () => {
   const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const appData = join(home, 'appdata')
   const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
@@ -243,9 +243,10 @@ test('doctor counts only saved keys the desktop can load, and the DashScope-gate
   // The desktop drops a plaintext or malformed entry, so it cannot satisfy the voice pipeline.
   assert.deepEqual(await voice({secrets: {dashscopeApiKey: 'old-plaintext-value'}}), [{name: 'DASHSCOPE_API_KEY', source: null}])
   assert.deepEqual(await voice({secrets: {dashscopeApiKey: {enc: 'rot13', data: 'c2VhbGVk'}}}), [{name: 'DASHSCOPE_API_KEY', source: null}])
-  assert.deepEqual(await voice({secrets: {modelApiKey: {enc: 'safeStorage', data: 'c2VhbGVk'}}}), [{name: 'MODEL_API_KEY', source: 'settings'}])
-  assert.deepEqual(await voice({}, {MODEL_API_KEY: 'm'}), [{name: 'MODEL_API_KEY', source: 'environment'}])
-  assert.deepEqual(await voice({modelBaseUrl: 'https://models.example/v1'}, {MODEL_API_KEY: 'm'}), [{name: 'DASHSCOPE_API_KEY', source: null}])
+  assert.deepEqual(await voice({secrets: {dashscopeApiKey: {enc: 'safeStorage', data: 'c2VhbGVk'}}}), [{name: 'DASHSCOPE_API_KEY', source: 'settings'}])
+  assert.deepEqual(await voice({}, {DASHSCOPE_API_KEY: 'd'}), [{name: 'DASHSCOPE_API_KEY', source: 'environment'}])
+  // The retired generic model key is not a voice credential.
+  assert.deepEqual(await voice({}, {MODEL_API_KEY: 'm'}), [{name: 'DASHSCOPE_API_KEY', source: null}])
 })
 
 test('doctor defaults a fresh install to the integrated DashScope key', async () => {
@@ -254,12 +255,12 @@ test('doctor defaults a fresh install to the integrated DashScope key', async ()
   assert.deepEqual(report.voice, {pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})
 })
 
-test('doctor never probes a custom gateway key against DashScope', async t => {
+test('doctor never probes a custom model endpoint without a voice key', async t => {
   const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   t.after(() => rm(home, {recursive: true, force: true}))
   const calls = []
   const report = await inspectDoctor({...TARGET_OPTIONS, home, online: true,
-    environment: {APPDATA: join(home, 'appdata'), MODEL_BASE_URL: 'https://models.example/v1', MODEL_API_KEY: 'custom-key'},
+    environment: {APPDATA: join(home, 'appdata'), DASHSCOPE_MODEL_BASE_URL: 'https://models.example/v1'},
     fetchImpl: async url => { calls.push(url); return new Response('{}', {status: 200}) },
   })
   assert.deepEqual(report.voice.keys, [{name: 'DASHSCOPE_API_KEY', source: null}])

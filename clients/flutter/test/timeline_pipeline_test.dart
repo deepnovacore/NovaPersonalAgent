@@ -1,8 +1,184 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/timeline_pipeline.dart';
+import 'package:nova_mobile/context/profile_agent.dart';
 
 void main() {
+  for (final finalValid in [true, false]) {
+    test(
+      'writing repairs distinct validation failures within a hard cap: $finalValid',
+      () async {
+        final data = fixture(1);
+        var compose = 0;
+        final pipeline = TimelinePipeline(
+          cacheScope: 'distinct-repair',
+          authorize: () async {},
+          complete: (stage, instructions, input) async {
+            final response = await normalComplete(stage, instructions, input);
+            if (stage == 'timeline_compose') {
+              compose++;
+              final brief = response['timeline'][0]['brief'] as Map;
+              if (compose == 1) {
+                brief['facts'] = List.generate(
+                  4,
+                  (_) => Map.of((brief['facts'] as List).single as Map),
+                );
+              } else if (compose == 2) {
+                expect(input['validation_detail']['reason'], 'facts_too_many');
+                brief['title'] = '与p99完成核验';
+              } else {
+                expect(input['validation_detail']['reason'], 'internal_alias');
+                if (!finalValid) brief['facts'][0]['quote'] = 'not in source';
+              }
+            }
+            return response;
+          },
+        );
+        final run = pipeline.generate(
+          data.observations,
+          data.records,
+          now: DateTime(2026, 10, 30),
+          historyComplete: true,
+        );
+        if (finalValid) {
+          expect(jsonDecode((await run).entries), isNotEmpty);
+        } else {
+          await expectLater(
+            run,
+            throwsA(isA<TimelinePipelineValidationFailure>()),
+          );
+        }
+        expect(compose, 3);
+        expect(pipeline.coverage['timeline_repair_requests'], 2);
+      },
+    );
+  }
+
+  test('every Timeline stage supplies the JSON mode prompt contract', () async {
+    final data = screeningFixture(2);
+    final stages = <String>{};
+    final pipeline = TimelinePipeline(
+      maxWritingRecords: 2,
+      cacheScope: 'json-contract',
+      authorize: () async {},
+      complete: (stage, instructions, input) async {
+        stages.add(stage);
+        expect(instructions.toLowerCase(), contains('json'), reason: stage);
+        return normalComplete(stage, instructions, input);
+      },
+    );
+    await pipeline.generate(
+      data.observations,
+      data.records,
+      now: DateTime(2026, 10, 30),
+      historyComplete: true,
+    );
+    expect(
+      stages,
+      containsAll([
+        'timeline_select',
+        'timeline_reconcile',
+        'timeline_compose',
+        'timeline_review',
+      ]),
+    );
+  });
+  for (final invalid in ['', 'not-json', '42']) {
+    test(
+      'pipeline repairs model JSON once and settles each completion: $invalid',
+      () async {
+        final data = screeningFixture(1);
+        var calls = 0, settled = 0;
+        final pipeline = TimelinePipeline(
+          maxWritingRecords: 1,
+          cacheScope: 'format-repair',
+          authorize: () async {},
+          complete: (stage, instructions, input) async {
+            if (stage == 'timeline_select') {
+              calls++;
+              if (calls == 1) {
+                return decodeCompletedProfileResponse(
+                  invalid,
+                  validate: () async {},
+                  settleUsage: () async {
+                    settled++;
+                  },
+                );
+              }
+              expect(input['validation_detail']['reason'], 'invalid_json');
+              expect(instructions, contains('JSON'));
+            }
+            if (stage == 'timeline_compose' || stage == 'timeline_review') {
+              for (final cap in [
+                'title≤96',
+                'status_label≤18',
+                'facts.text≤160',
+                'quote≤600',
+                'why_now≤200',
+                'next_steps.title≤40',
+                'next_steps.detail≤120',
+                'uncertainty≤200',
+              ]) {
+                expect(instructions, contains(cap));
+              }
+              expect(instructions, contains('next_steps可为空，至多1项'));
+              expect(instructions, contains('next_steps与正文不输出文件路径'));
+            }
+            final response = await normalComplete(stage, instructions, input);
+            return decodeCompletedProfileResponse(
+              jsonEncode(response),
+              validate: () async {},
+              settleUsage: () async {
+                settled++;
+              },
+            );
+          },
+        );
+        await pipeline.generate(
+          data.observations,
+          data.records,
+          now: DateTime(2026, 10, 30),
+          historyComplete: true,
+        );
+        expect(calls, 2);
+        expect(pipeline.coverage['timeline_repair_requests'], 1);
+        expect(settled, 4);
+      },
+    );
+  }
+  test(
+    'a second malformed model JSON stops after one bounded repair',
+    () async {
+      final data = screeningFixture(1);
+      var calls = 0, settled = 0;
+      final pipeline = TimelinePipeline(
+        maxWritingRecords: 1,
+        cacheScope: 'format-terminal',
+        authorize: () async {},
+        complete: (stage, instructions, input) async {
+          calls++;
+          return decodeCompletedProfileResponse(
+            '',
+            validate: () async {},
+            settleUsage: () async {
+              settled++;
+            },
+          );
+        },
+      );
+      await expectLater(
+        pipeline.generate(
+          data.observations,
+          data.records,
+          now: DateTime(2026, 10, 30),
+          historyComplete: true,
+        ),
+        throwsA(isA<TimelinePipelineValidationFailure>()),
+      );
+      expect(calls, 2);
+      expect(settled, 2);
+    },
+  );
   pipelineIntegrationTests();
   pipelineScopeTests();
   pipelineTitleRepairTests();
@@ -77,7 +253,8 @@ fixture(int count) => (
     (i) => <String, dynamic>{
       'evidence_id': 'e$i',
       'chat': 'c1',
-      'speaker': 'p1',
+      'author': {'key': 'self', 'kind': 'person', 'is_user': true},
+      'local_date': '2026-10-19',
       'relation': 'self',
       'created_at': '2026-10-19T00:00:00Z',
       'text': '本人完成核验$i',
@@ -91,6 +268,14 @@ fixture(int count) => (
     },
   ),
 );
+// One unselected original puts the input above the test's explicit writing cap.
+({List<Map<String, dynamic>> records, List<Map<String, dynamic>> observations})
+screeningFixture(int count) {
+  final data = fixture(count + 1);
+  data.records.last['text'] = '无关背景';
+  return data;
+}
+
 Map<String, dynamic> written(Map<String, dynamic> input) {
   final originals = {
     for (final r in input['messages'] as List) r['evidence_id']: r,
@@ -98,27 +283,31 @@ Map<String, dynamic> written(Map<String, dynamic> input) {
   return {
     'timeline': [
       for (final topic in input['timeline_topics'] as List)
-        (() {
-          final ref = (topic['evidence_ids'] as List).last;
-          return {
-            'evidence_ids': [ref],
-            'time_ref': ref,
-            'brief': {
-              'title': topic['title'],
-              'status_label': '已核验',
-              'facts': [
-                {
-                  'text': originals[ref]['text'],
-                  'ref': ref,
-                  'quote': originals[ref]['text'],
-                },
-              ],
-              'why_now': '本人关注的核验结果已经明确。',
-              'next_steps': [],
-              'uncertainty': '',
-            },
-          };
-        })(),
+        for (final ref
+            in topic['title'] == '近期独立事项'
+                ? topic['evidence_ids'] as List
+                : [(topic['evidence_ids'] as List).last])
+          (() {
+            return {
+              'evidence_ids': [ref],
+              'time_ref': ref,
+              'brief': {
+                'title': topic['title'],
+                'status_label': '已核验',
+                'facts': [
+                  {
+                    'text': originals[ref]['text'],
+                    'ref': ref,
+                    'quote': originals[ref]['text'],
+                  },
+                ],
+                'why_now': '本人关注的核验结果已经明确。',
+                'next_steps': [],
+                'uncertainty': '',
+                'temporal': {'kind': 'unknown', 'dates': []},
+              },
+            };
+          })(),
     ],
   };
 }
@@ -129,7 +318,9 @@ Future<Map<String, dynamic>> normalComplete(
   Map<String, dynamic> input,
 ) async {
   if (stage == 'timeline_select') {
-    final rows = input['observations'] as List;
+    final rows = (input['records'] as List)
+        .where((r) => r['text'] != '无关背景')
+        .toList();
     final middle = (rows.length / 2).ceil();
     return {
       'topics': [
@@ -137,7 +328,7 @@ Future<Map<String, dynamic>> normalComplete(
           'title': '甲交付核验',
           'observation_indices': rows
               .take(middle)
-              .map((r) => r['index'])
+              .map((r) => r['key'])
               .toList(),
         },
         if (rows.length > middle)
@@ -145,7 +336,7 @@ Future<Map<String, dynamic>> normalComplete(
             'title': '乙交付核验',
             'observation_indices': rows
                 .skip(middle)
-                .map((r) => r['index'])
+                .map((r) => r['key'])
                 .toList(),
           },
       ],
@@ -221,6 +412,7 @@ void pipelineIntegrationTests() {
         create().generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         ),
         throwsStateError,
@@ -240,6 +432,7 @@ void pipelineIntegrationTests() {
       final result = await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: true,
       );
       expect(requests.length, 7);
@@ -283,6 +476,7 @@ void pipelineIntegrationTests() {
       await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: false,
       );
       final previousCalls = calls, previousPublications = published;
@@ -291,6 +485,7 @@ void pipelineIntegrationTests() {
         create().generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: false,
         ),
         throwsStateError,
@@ -307,6 +502,7 @@ void pipelineIntegrationTests() {
         create().generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: false,
         ),
         throwsStateError,
@@ -318,7 +514,7 @@ void pipelineIntegrationTests() {
   test(
     'global index belonging to another screening batch is rejected twice before writing',
     () async {
-      final data = fixture(81);
+      final data = fixture(121);
       var calls = 0;
       final pipeline = TimelinePipeline(
         cacheScope: 'scope',
@@ -343,6 +539,7 @@ void pipelineIntegrationTests() {
         pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         ),
         throwsA(
@@ -366,17 +563,23 @@ void pipelineIntegrationTests() {
         'invalid_index',
       });
       expect(jsonEncode(diagnostic), isNot(contains('错误索引')));
-      await pipeline.generate([], [], historyComplete: true);
+      await pipeline.generate(
+        [],
+        [],
+        now: DateTime(2026, 10, 30),
+        historyComplete: true,
+      );
       expect(pipeline.validationDiagnostics, isNull);
     },
   );
   test(
     'reconciliation lists only confident merges and preserves unlisted themes with shared refs',
     () async {
-      final data = fixture(3), cache = <String, Map<String, dynamic>>{};
-      data.observations[2]['refs'] = ['e1', 'e2'];
+      final data = screeningFixture(3),
+          cache = <String, Map<String, dynamic>>{};
       final requests = <String>[];
       TimelinePipeline create() => TimelinePipeline(
+        maxWritingRecords: 3,
         cacheScope: 'sparse-reconcile',
         authorize: () async {},
         loadCheckpoint: (key) async => cache[key] == null
@@ -393,7 +596,7 @@ void pipelineIntegrationTests() {
                 for (var i = 0; i < 3; i++)
                   {
                     'title': '独立事项$i',
-                    'observation_indices': [i],
+                    'observation_indices': i == 2 ? [1, 2] : [i],
                   },
               ],
             };
@@ -407,7 +610,7 @@ void pipelineIntegrationTests() {
               ],
             };
           }
-          expect(input['history_complete'], false);
+          expect(input['history_complete'], true);
           expect(instructions, contains('不得推断当前仍未完成'));
           expect(
             (input['timeline_topics'] as List)
@@ -425,6 +628,7 @@ void pipelineIntegrationTests() {
       final first = await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: false,
       );
       expect(first.coverage['timeline_reconcile_unlisted_topics'], 1);
@@ -435,6 +639,7 @@ void pipelineIntegrationTests() {
       final replay = await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: false,
       );
       expect(requests.length, prior);
@@ -455,10 +660,10 @@ void pipelineIntegrationTests() {
           if (stage == 'timeline_select') {
             return {
               'topics': [
-                for (final row in input['observations'] as List)
+                for (final row in input['records'] as List)
                   {
-                    'title': '独立事项${row['index']}',
-                    'observation_indices': [row['index']],
+                    'title': '独立事项${row['key']}',
+                    'observation_indices': [row['key']],
                   },
               ],
             };
@@ -480,6 +685,7 @@ void pipelineIntegrationTests() {
       final result = await pipeline.generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: false,
       );
       expect(reconciliations, 1);
@@ -527,6 +733,7 @@ void pipelineIntegrationTests() {
       final result = await pipeline.generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: true,
       );
       expect(reconciliations, 2);
@@ -556,9 +763,10 @@ void pipelineIntegrationTests() {
     test(
       'host fallback discards malformed or repeated reconciliation: $members',
       () async {
-        final data = fixture(2);
+        final data = screeningFixture(2);
         var calls = 0;
         final pipeline = TimelinePipeline(
+          maxWritingRecords: 2,
           cacheScope: 'scope',
           authorize: () async {},
           complete: (stage, instructions, input) async {
@@ -580,6 +788,7 @@ void pipelineIntegrationTests() {
         final result = await pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         );
         expect(calls, 4);
@@ -592,7 +801,7 @@ void pipelineIntegrationTests() {
   test(
     'genuinely oversized complete topic is deferred after one refinement and never paid-written',
     () async {
-      final data = fixture(121);
+      final data = fixture(3);
       var calls = 0;
       final observations = [
         <String, dynamic>{
@@ -601,6 +810,7 @@ void pipelineIntegrationTests() {
         },
       ];
       final pipeline = TimelinePipeline(
+        maxWritingRecords: 2,
         cacheScope: 'scope',
         authorize: () async {},
         complete: (stage, instructions, input) async {
@@ -610,14 +820,19 @@ void pipelineIntegrationTests() {
             'topics': [
               {
                 'title': '完整不可分割事项',
-                'observation_indices': [0],
+                'observation_indices': [0, 1, 2],
               },
             ],
           };
         },
       );
       await expectLater(
-        pipeline.generate(observations, data.records, historyComplete: true),
+        pipeline.generate(
+          observations,
+          data.records,
+          now: DateTime(2026, 10, 30),
+          historyComplete: true,
+        ),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
@@ -632,9 +847,10 @@ void pipelineIntegrationTests() {
     },
   );
   test('empty reviewed timeline never invokes publication', () async {
-    final data = fixture(1);
+    final data = screeningFixture(1);
     var published = 0;
     final pipeline = TimelinePipeline(
+      maxWritingRecords: 1,
       cacheScope: 'scope',
       authorize: () async {},
       onPublish: (_) async {
@@ -650,6 +866,7 @@ void pipelineIntegrationTests() {
     final result = await pipeline.generate(
       data.observations,
       data.records,
+      now: DateTime(2026, 10, 30),
       historyComplete: true,
     );
     expect(result.entries, '[]');
@@ -676,6 +893,7 @@ void pipelineIntegrationTests() {
         pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         ),
         throwsA(isA<StateError>().having((e) => e.message, 'code', code)),
@@ -707,6 +925,7 @@ void pipelineScopeTests() {
       final result = await pipeline.generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: true,
       );
       expect(result.completedBatches, 2);
@@ -719,9 +938,11 @@ void pipelineScopeTests() {
   test(
     'changed cache scope never reuses an authorized old-account stage',
     () async {
-      final data = fixture(1), cache = <String, Map<String, dynamic>>{};
+      final data = screeningFixture(1),
+          cache = <String, Map<String, dynamic>>{};
       var calls = 0;
       TimelinePipeline create(String scope) => TimelinePipeline(
+        maxWritingRecords: 1,
         cacheScope: scope,
         authorize: () async {},
         loadCheckpoint: (key) async => cache[key],
@@ -733,13 +954,19 @@ void pipelineScopeTests() {
           return normalComplete(stage, instructions, input);
         },
       );
-      await create(
-        'account-a-source-model',
-      ).generate(data.observations, data.records, historyComplete: true);
+      await create('account-a-source-model').generate(
+        data.observations,
+        data.records,
+        now: DateTime(2026, 10, 30),
+        historyComplete: true,
+      );
       expect(calls, 3);
-      await create(
-        'account-b-source-model',
-      ).generate(data.observations, data.records, historyComplete: true);
+      await create('account-b-source-model').generate(
+        data.observations,
+        data.records,
+        now: DateTime(2026, 10, 30),
+        historyComplete: true,
+      );
       expect(calls, 6);
     },
   );
@@ -769,6 +996,7 @@ void pipelineScopeTests() {
         pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         ),
         throwsStateError,
@@ -780,7 +1008,7 @@ void pipelineScopeTests() {
   test(
     'oversized-topic refinement cannot silently drop selected observations',
     () async {
-      final data = fixture(121);
+      final data = fixture(3);
       var calls = 0;
       final observations = [
         <String, dynamic>{
@@ -789,6 +1017,7 @@ void pipelineScopeTests() {
         },
       ];
       final pipeline = TimelinePipeline(
+        maxWritingRecords: 2,
         cacheScope: 'scope',
         authorize: () async {},
         complete: (stage, instructions, input) async {
@@ -798,7 +1027,7 @@ void pipelineScopeTests() {
                   'topics': [
                     {
                       'title': '完整事项',
-                      'observation_indices': [0],
+                      'observation_indices': [0, 1, 2],
                     },
                   ],
                 }
@@ -806,7 +1035,12 @@ void pipelineScopeTests() {
         },
       );
       await expectLater(
-        pipeline.generate(observations, data.records, historyComplete: true),
+        pipeline.generate(
+          observations,
+          data.records,
+          now: DateTime(2026, 10, 30),
+          historyComplete: true,
+        ),
         throwsA(
           isA<TimelinePipelineValidationFailure>().having(
             (e) => e.detail['reason'],
@@ -836,9 +1070,11 @@ void pipelineTitleRepairTests() {
   test(
     'routing title redaction preserves themes and safe reusable checkpoints without repair',
     () async {
-      final data = fixture(2), cache = <String, Map<String, dynamic>>{};
+      final data = screeningFixture(2),
+          cache = <String, Map<String, dynamic>>{};
       final calls = <String>[];
       TimelinePipeline create() => TimelinePipeline(
+        maxWritingRecords: 2,
         cacheScope: 'safe-routing',
         authorize: () async {},
         loadCheckpoint: (key) async => cache[key] == null
@@ -883,6 +1119,7 @@ void pipelineTitleRepairTests() {
       final first = await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: true,
       );
       expect(calls.where((stage) => stage == 'timeline_select').length, 1);
@@ -893,6 +1130,7 @@ void pipelineTitleRepairTests() {
       final second = await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: true,
       );
       expect(calls.length, count);
@@ -907,6 +1145,7 @@ void pipelineTitleRepairTests() {
       await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: true,
       );
       expect(calls.where((stage) => stage == 'timeline_select').length, 1);
@@ -929,9 +1168,10 @@ void pipelineTitleRepairTests() {
     test(
       'routing repair redacts titles without hiding ${invalid.key}',
       () async {
-        final data = fixture(2);
+        final data = screeningFixture(2);
         var selections = 0;
         final pipeline = TimelinePipeline(
+          maxWritingRecords: 2,
           cacheScope: 'safe-repair',
           authorize: () async {},
           complete: (stage, instructions, input) async {
@@ -983,6 +1223,7 @@ void pipelineTitleRepairTests() {
         final result = await pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         );
         expect(selections, 2);
@@ -993,9 +1234,11 @@ void pipelineTitleRepairTests() {
   test(
     'routing title expansion trims checkpoint titles before cache replay',
     () async {
-      final data = fixture(1), cache = <String, Map<String, dynamic>>{};
+      final data = screeningFixture(1),
+          cache = <String, Map<String, dynamic>>{};
       var calls = 0;
       TimelinePipeline create() => TimelinePipeline(
+        maxWritingRecords: 1,
         cacheScope: 'expanded-title',
         authorize: () async {},
         loadCheckpoint: (key) async => cache[key] == null
@@ -1022,6 +1265,7 @@ void pipelineTitleRepairTests() {
       await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: true,
       );
       final before = calls;
@@ -1032,6 +1276,7 @@ void pipelineTitleRepairTests() {
       await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: true,
       );
       expect(calls, before);
@@ -1040,9 +1285,10 @@ void pipelineTitleRepairTests() {
   test(
     'routing title redaction cannot store an expanded overlength title',
     () async {
-      final data = fixture(1);
+      final data = screeningFixture(1);
       var calls = 0, saves = 0;
       final pipeline = TimelinePipeline(
+        maxWritingRecords: 1,
         cacheScope: 'expanded-overlength',
         authorize: () async {},
         saveCheckpoint: (_, _) async {
@@ -1070,6 +1316,7 @@ void pipelineTitleRepairTests() {
         pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         ),
         throwsA(
@@ -1093,9 +1340,10 @@ void pipelineTitleRepairTests() {
     test(
       '${invalid.key} is content-free and repairs the same theme members once',
       () async {
-        final data = fixture(2);
+        final data = screeningFixture(2);
         var selectionCalls = 0;
         final pipeline = TimelinePipeline(
+          maxWritingRecords: 2,
           cacheScope: 'title-scope',
           authorize: () async {},
           complete: (stage, instructions, input) async {
@@ -1143,6 +1391,7 @@ void pipelineTitleRepairTests() {
         final result = await pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         );
         expect(selectionCalls, 2);
@@ -1158,9 +1407,10 @@ void pipelineTitleRepairTests() {
     test(
       '${invalid.key} repair cannot delete a theme while preserving the index union',
       () async {
-        final data = fixture(2);
+        final data = screeningFixture(2);
         var calls = 0;
         final pipeline = TimelinePipeline(
+          maxWritingRecords: 2,
           cacheScope: 'title-scope',
           authorize: () async {},
           complete: (stage, instructions, input) async {
@@ -1193,6 +1443,7 @@ void pipelineTitleRepairTests() {
           pipeline.generate(
             data.observations,
             data.records,
+            now: DateTime(2026, 10, 30),
             historyComplete: true,
           ),
           throwsA(
@@ -1208,9 +1459,10 @@ void pipelineTitleRepairTests() {
     );
   }
   test('title repair never coerces an unvalidated observation index', () async {
-    final data = fixture(1);
+    final data = screeningFixture(1);
     var calls = 0;
     final pipeline = TimelinePipeline(
+      maxWritingRecords: 1,
       cacheScope: 'title-scope',
       authorize: () async {},
       complete: (stage, instructions, input) async {
@@ -1229,7 +1481,12 @@ void pipelineTitleRepairTests() {
       },
     );
     await expectLater(
-      pipeline.generate(data.observations, data.records, historyComplete: true),
+      pipeline.generate(
+        data.observations,
+        data.records,
+        now: DateTime(2026, 10, 30),
+        historyComplete: true,
+      ),
       throwsA(
         isA<TimelinePipelineValidationFailure>().having(
           (e) => e.detail['reason'],
@@ -1246,9 +1503,11 @@ void hostFallbackTests() {
   test(
     'host fallback persists explicit provenance and replays without another model request',
     () async {
-      final data = fixture(2), cache = <String, Map<String, dynamic>>{};
+      final data = screeningFixture(2),
+          cache = <String, Map<String, dynamic>>{};
       final requests = <String>[];
       TimelinePipeline create() => TimelinePipeline(
+        maxWritingRecords: 2,
         cacheScope: 'host-fallback',
         authorize: () async {},
         loadCheckpoint: (key) async => cache[key] == null
@@ -1282,7 +1541,7 @@ void hostFallbackTests() {
                 ['e1'],
               ],
             );
-            expect(input['history_complete'], false);
+            expect(input['history_complete'], true);
           }
           return normalComplete(stage, instructions, input);
         },
@@ -1290,6 +1549,7 @@ void hostFallbackTests() {
       final result = await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: false,
       );
       final fallbackKey = cache.keys.singleWhere(
@@ -1317,6 +1577,7 @@ void hostFallbackTests() {
       final replay = await create().generate(
         data.observations,
         data.records,
+        now: DateTime(2026, 10, 30),
         historyComplete: false,
       );
       expect(requests.length, prior);
@@ -1351,6 +1612,7 @@ void hostFallbackTests() {
           create().generate(
             data.observations,
             data.records,
+            now: DateTime(2026, 10, 30),
             historyComplete: false,
           ),
           throwsA(
@@ -1372,6 +1634,7 @@ void hostFallbackTests() {
         create().generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: false,
         ),
         throwsA(
@@ -1405,10 +1668,11 @@ void hostFallbackTests() {
     test(
       'host fallback is constructed by the host after invalid schema $response',
       () async {
-        final data = fixture(2);
+        final data = screeningFixture(2);
         var reconcileCalls = 0;
         Map<String, dynamic>? envelope;
         final pipeline = TimelinePipeline(
+          maxWritingRecords: 2,
           cacheScope: 'host-schema',
           authorize: () async {},
           saveCheckpoint: (_, value) async {
@@ -1427,6 +1691,7 @@ void hostFallbackTests() {
         final result = await pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         );
         expect(reconcileCalls, 1);
@@ -1449,9 +1714,10 @@ void hostFallbackTests() {
     'profile_timeline_checkpoint_invalid',
   ]) {
     test('host fallback does not swallow $code', () async {
-      final data = fixture(2);
+      final data = screeningFixture(2);
       var fallbacks = 0;
       final pipeline = TimelinePipeline(
+        maxWritingRecords: 2,
         cacheScope: 'host-fail-closed',
         authorize: () async {},
         saveCheckpoint: (_, value) async {
@@ -1470,6 +1736,7 @@ void hostFallbackTests() {
         pipeline.generate(
           data.observations,
           data.records,
+          now: DateTime(2026, 10, 30),
           historyComplete: true,
         ),
         throwsA(isA<StateError>().having((e) => e.message, 'code', code)),
@@ -1478,9 +1745,10 @@ void hostFallbackTests() {
     });
   }
   test('host fallback reauthorizes after saving before any writing', () async {
-    final data = fixture(2);
+    final data = screeningFixture(2);
     var revoked = false, writes = 0;
     final pipeline = TimelinePipeline(
+      maxWritingRecords: 2,
       cacheScope: 'host-revoked',
       authorize: () async {
         if (revoked) {
@@ -1509,7 +1777,12 @@ void hostFallbackTests() {
       },
     );
     await expectLater(
-      pipeline.generate(data.observations, data.records, historyComplete: true),
+      pipeline.generate(
+        data.observations,
+        data.records,
+        now: DateTime(2026, 10, 30),
+        historyComplete: true,
+      ),
       throwsA(
         isA<StateError>().having(
           (e) => e.message,
@@ -1521,12 +1794,19 @@ void hostFallbackTests() {
     expect(writes, 0);
   });
   test('host fallback is zero for successful model reconciliation', () async {
-    final data = fixture(2);
-    final result = await TimelinePipeline(
-      cacheScope: 'model-reconcile',
-      authorize: () async {},
-      complete: normalComplete,
-    ).generate(data.observations, data.records, historyComplete: true);
+    final data = screeningFixture(2);
+    final result =
+        await TimelinePipeline(
+          maxWritingRecords: 2,
+          cacheScope: 'model-reconcile',
+          authorize: () async {},
+          complete: normalComplete,
+        ).generate(
+          data.observations,
+          data.records,
+          now: DateTime(2026, 10, 30),
+          historyComplete: true,
+        );
     expect(result.coverage['timeline_reconcile_host_fallback'], 0);
   });
 }

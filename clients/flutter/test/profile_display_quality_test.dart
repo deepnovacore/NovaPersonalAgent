@@ -152,6 +152,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】本人协调验收',
+                  'relevance': 'ongoing_work',
                   'refs': ['e1'],
                 },
               ],

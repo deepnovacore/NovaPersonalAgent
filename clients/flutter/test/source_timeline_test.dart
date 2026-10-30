@@ -68,7 +68,7 @@ class _Fixture {
   late final profile = ProfileRepository(disk, publication, sources);
   final life = PersonalStore(send: (_) => false);
 
-  Future<void> open({bool publish = true}) async {
+  Future<void> open({bool publish = true, String? anchorDate}) async {
     await publication.open();
     await sources.bind('self', 1);
     final times = [
@@ -106,6 +106,21 @@ class _Fixture {
             {
               'key': 'event_$i',
               'kind': 'timeline',
+              'policy_revision': 2,
+              if (i == 2 && anchorDate != null)
+                'time': {
+                  'kind': 'event',
+                  'anchor_basis': 'occurred',
+                  'anchor_date': anchorDate,
+                  'occurred_on': anchorDate,
+                  'started_on': null,
+                  'due_on': null,
+                  'scheduled_on': null,
+                  'last_reported_on': '2026-10-17',
+                  'evidence_from': '2026-10-16',
+                  'evidence_to': '2026-10-17',
+                  'as_of': '2026-10-18',
+                },
               'text': [
                 '较早的项目讨论',
                 '当天上午的计划',
@@ -166,6 +181,34 @@ class _Fixture {
 }
 
 void main() {
+  testWidgets('Timeline groups by event anchor instead of report date', (
+    tester,
+  ) async {
+    final f = _Fixture();
+    await f.open(anchorDate: '2026-10-15');
+    await tester.pumpWidget(f.app());
+    await tester.pumpAndSettle();
+    final cards = tester.widgetList<ListTile>(find.byType(ListTile)).toList();
+    String title(ListTile card) =>
+        ((card.title as Column).children.last as Text).data!;
+    expect(cards.take(3).map(title).toList(), [
+      '当天上午的计划',
+      '较早的项目讨论',
+      '最新的项目进展：确认已完成的部分，并保留下一步尚待讨论的安排。',
+    ]);
+    expect(
+      find.byKey(
+        ValueKey(
+          'brief-timeline-marker-${DateTime(2026, 10, 15).toIso8601String()}',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('更新依据 · 2026年10月17日 15:00'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    f.dispose();
+  });
+
   testWidgets(
     'compact profile uses validated saved profile, not timeline text',
     (tester) async {

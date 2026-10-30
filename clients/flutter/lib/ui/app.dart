@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../connectors/feishu/host.dart';
 import '../context/profile_corrections.dart';
 import '../context/profile_agent.dart';
+import '../context/profile_acceptance_diagnostics.dart';
 import '../context/profile_generation_coordinator.dart';
 import '../context/secure_persistence.dart';
 import 'feishu_direct_page.dart';
@@ -41,6 +42,7 @@ import 'workbench_page.dart';
 import 'components.dart';
 import 'connectors_page.dart';
 import 'pet_avatar.dart';
+import 'provider_credentials_sheet.dart';
 import 'theme.dart';
 import 'local_workspace.dart';
 import '../agent/local_agent.dart';
@@ -169,6 +171,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   late final Future<bool> Function() requestMicrophone;
   final emptyStore = PersonalStore(send: (_) => false);
   String language = 'en';
+  bool showProcess = true;
   String? startupError;
   Preferences? preferences;
   late final LifeHost lifeHost;
@@ -188,7 +191,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   AgentCoreHost? agentCore;
   FeishuHost? feishu;
   int _profileRevision = 0;
+  (int, String, bool)? _profileUiState;
   ProfileAgent? profileAgent;
+  ProfileAcceptanceDiagnostics? _profileDiagnostics;
   ProfileGenerationCoordinator? profileGeneration;
   final _profileChanges = ValueNotifier<int>(0);
   Future<void>? _profileOpening;
@@ -218,7 +223,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         WidgetsBinding.instance.platformDispatcher.locale.languageCode == 'zh'
         ? 'zh'
         : 'en';
-    unawaited(_restorePreferences().catchError((Object _) {}));
     unawaited(_openAgentCore());
     unawaited((feishu ??= FeishuHost()).open().catchError((Object _) {}));
     if (defaultTargetPlatform == TargetPlatform.iOS ||
@@ -237,6 +241,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       setState(() {
         preferences = saved;
         language = saved.language(language);
+        showProcess = saved.showProcess;
       });
     }
     await saved.retireRuntimeConnection();
@@ -263,6 +268,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   /// Standalone Space chat owns local execution.
   Future<void> _openAgentCore() async {
     try {
+      await _restorePreferences();
+      if (!mounted) return;
       final nativeTasks = NativeChatTaskRunner();
       final iosTasks = defaultTargetPlatform == TargetPlatform.iOS
           ? nativeTasks
@@ -421,6 +428,16 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       inputs: [connector, lifeHost.publication],
       progress: profile,
     );
+    final diagnostics = await ProfileAcceptanceDiagnostics.open(
+      profile,
+      generation,
+    );
+    if (!mounted) {
+      generation.dispose();
+      profile.dispose();
+      return;
+    }
+    _profileDiagnostics = diagnostics;
     generation.addListener(_profileChanged);
     setState(() {
       profileAgent = profile;
@@ -432,8 +449,20 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   void _profileChanged() {
     if (!mounted) return;
+    if (const {
+      ProfileGenerationPhase.failed,
+      ProfileGenerationPhase.blocked,
+      ProfileGenerationPhase.paused,
+      ProfileGenerationPhase.ready,
+    }.contains(profileGeneration?.phase)) {
+      unawaited(_profileDiagnostics?.capture());
+    }
+    final hint = _profileHint();
+    final state = (profileGeneration?.revision ?? 0, hint.hint, hint.connect);
+    if (_profileUiState == state) return;
+    _profileUiState = state;
     _profileChanges.value++;
-    setState(() => _profileRevision = profileGeneration?.revision ?? 0);
+    setState(() => _profileRevision++);
   }
 
   Future<void> _openLocalSchedules(AgentCoreHost host) async {
@@ -971,13 +1000,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             children: [
               _settingGroup(context, _t('对话', 'Conversation'), [
                 (
-                  'model',
-                  _t('模型服务', 'Model provider'),
-                  CupertinoIcons.sparkles,
-                ),
-                (
-                  'support_model',
-                  _t('辅助与后台模型', 'Background model'),
+                  'model_services',
+                  _t('模型服务', 'Model services'),
                   CupertinoIcons.sparkles,
                 ),
                 (
@@ -993,7 +1017,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               ]),
               _settingGroup(context, _t('更多', 'More'), [
                 ('connectors', _t('连接器', 'Connectors'), CupertinoIcons.link),
-                ('voice', _t('语音设置', 'Voice settings'), CupertinoIcons.mic),
+                (
+                  'message_display',
+                  _t('消息显示', 'Message display'),
+                  CupertinoIcons.text_bubble,
+                ),
                 ('language', _t('语言', 'Language'), CupertinoIcons.globe),
                 (
                   'local_schedules',
@@ -1025,26 +1053,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         }
       case 'connectors':
         await _openConnectors();
-      case 'support_model':
-      case 'model':
-        try {
-          await showLocalModelSettings(
-            context,
-            agentCore?.settings ?? ModelSettings(),
-            language: language,
-            support: choice == 'support_model',
-          );
-          if (mounted) setState(() => _modelRevision++);
-          profileGeneration?.wake();
-        } catch (_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(_t('无法读取模型设置', 'Could not read model settings')),
-              ),
-            );
-          }
-        }
+      case 'model_services':
+        await _modelServices();
       case 'devices':
         await _devices();
       case 'pet_avatar':
@@ -1053,8 +1063,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           petAvatarStore,
           language: language,
         );
-      case 'voice':
-        await _voiceSettings();
+      case 'message_display':
+        await _messageDisplaySettings();
       case 'language':
         await _languageSettings();
       case 'tasks':
@@ -1078,11 +1088,179 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     }
   }
 
+  Future<void> _modelServices() async {
+    final settings = agentCore?.settings ?? ModelSettings();
+    try {
+      var support = await settings.readSupportDraft();
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        CupertinoPageRoute(
+          builder: (context) => StatefulBuilder(
+            builder: (context, update) => Scaffold(
+              backgroundColor: Nova.sheet,
+              appBar: AppBar(title: Text(_t('模型服务', 'Model services'))),
+              body: ListView(
+                padding: const EdgeInsets.fromLTRB(4, 20, 4, 28),
+                children: [
+                  _settingGroup(
+                    context,
+                    _t('模型与服务', 'Models and services'),
+                    [
+                      (
+                        'chat_model',
+                        _t('对话模型', 'Conversation model'),
+                        CupertinoIcons.chat_bubble,
+                      ),
+                      (
+                        'support_model',
+                        _t('信息整理', 'Information processing'),
+                        CupertinoIcons.sparkles,
+                      ),
+                      (
+                        'voice',
+                        _t('语音服务', 'Voice services'),
+                        CupertinoIcons.mic,
+                      ),
+                      (
+                        'credentials',
+                        _t('服务密钥', 'Provider credentials'),
+                        CupertinoIcons.lock,
+                      ),
+                    ],
+                    subtitles: {
+                      'support_model': support == null
+                          ? _t('跟随对话模型', 'Follow chat model')
+                          : _t(
+                              '独立配置 · ${support!['model']}',
+                              'Separate model · ${support!['model']}',
+                            ),
+                    },
+                    onSelected: (choice) async {
+                      try {
+                        switch (choice) {
+                          case 'chat_model':
+                          case 'support_model':
+                            await showLocalModelSettings(
+                              context,
+                              settings,
+                              language: language,
+                              support: choice == 'support_model',
+                            );
+                            if (mounted) setState(() => _modelRevision++);
+                            profileGeneration?.wake();
+                          case 'voice':
+                            await _voiceSettings();
+                          case 'credentials':
+                            await showProviderCredentials(
+                              context,
+                              settings.credentials,
+                              language: language,
+                              onChanged: settings.refreshApiKeyProjection,
+                            );
+                        }
+                        final next = await settings.readSupportDraft();
+                        if (context.mounted) update(() => support = next);
+                      } catch (_) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                _t(
+                                  '无法读取服务设置，请重试。',
+                                  'Could not read service settings. Try again.',
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t(
+                '无法读取服务设置，请重试。',
+                'Could not read service settings. Try again.',
+              ),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _devices() => Navigator.of(context).push<void>(
     CupertinoPageRoute(
       builder: (_) => DevicesPage(host: lifeHost, language: language),
     ),
   );
+
+  Future<void> _messageDisplaySettings() async {
+    final selected = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Nova.sheet,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            _settingGroup(
+              context,
+              _t('消息显示', 'Message display'),
+              [
+                (
+                  'full',
+                  _t('完整过程', 'Full process'),
+                  CupertinoIcons.list_bullet,
+                ),
+                ('concise', _t('简洁', 'Concise'), CupertinoIcons.text_bubble),
+              ],
+              subtitles: {
+                'full': _t(
+                  '显示回复、思考和工具执行过程',
+                  'Show replies, thinking and tool activity',
+                ),
+                'concise': _t('只显示最终回复', 'Show final replies only'),
+              },
+              selected: showProcess ? 'full' : 'concise',
+              onSelected: (choice) => Navigator.pop(context, choice == 'full'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || selected == showProcess) return;
+    try {
+      final saved =
+          preferences ?? Preferences(await SharedPreferences.getInstance());
+      await saved.saveShowProcess(selected);
+      if (mounted) setState(() => showProcess = selected);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t(
+                '无法保存消息显示设置，请重试。',
+                'Could not save message display settings. Please retry.',
+              ),
+            ),
+          ),
+        );
+      }
+    }
+  }
 
   Future<void> _languageSettings() async {
     final selected = await showModalBottomSheet<String>(
@@ -1137,8 +1315,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   Widget _settingGroup(
     BuildContext context,
     String title,
-    List<(String, String, IconData)> rows,
-  ) => NovaSection(
+    List<(String, String, IconData)> rows, {
+    Map<String, String> subtitles = const {},
+    ValueChanged<String>? onSelected,
+    String? selected,
+  }) => NovaSection(
     header: title,
     surface: Nova.sheetCell,
     children: [
@@ -1147,10 +1328,17 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           surface: Nova.sheetCell,
           leading: NovaIconTile(row.$3),
           title: row.$2,
-          trailing: const CupertinoListTileChevron(),
-          onTap: row.$1 == 'model' && agentCore?.busy == true
+          subtitle: subtitles[row.$1] == null ? null : Text(subtitles[row.$1]!),
+          trailing: selected == null
+              ? const CupertinoListTileChevron()
+              : selected == row.$1
+              ? const Icon(CupertinoIcons.checkmark, size: 18, color: Nova.mint)
+              : null,
+          onTap: row.$1 == 'chat_model' && agentCore?.busy == true
               ? null
-              : () => Navigator.pop(context, row.$1),
+              : () => onSelected != null
+                    ? onSelected(row.$1)
+                    : Navigator.pop(context, row.$1),
         ),
     ],
   );
@@ -1390,6 +1578,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                 host: host,
                                 conversationId: chatId!,
                                 language: language,
+                                showProcess: showProcess,
                                 modelRevision: _modelRevision,
                                 onModelSettings: _settings,
                               )

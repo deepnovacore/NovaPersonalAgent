@@ -66,6 +66,12 @@ void main() {
           find.text(language == 'zh' ? '模型服务' : 'Model provider'),
           findsOneWidget,
         );
+        expect(
+          find.text(
+            language == 'zh' ? 'API 密钥：未配置' : 'API key: Not configured',
+          ),
+          findsOneWidget,
+        );
         final fields = tester
             .widgetList<TextField>(find.byType(TextField))
             .toList();
@@ -81,8 +87,8 @@ void main() {
         expect(
           find.text(
             language == 'zh'
-                ? '留空使用此厂商已保存的密钥'
-                : 'Leave blank to use this provider’s saved key',
+                ? '已保存的密钥不会回显；留空时使用此服务已配置的密钥'
+                : 'Saved keys stay hidden. Leave blank to use this provider’s configured key.',
           ),
           findsOneWidget,
         );

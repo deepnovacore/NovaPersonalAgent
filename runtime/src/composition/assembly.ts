@@ -34,7 +34,7 @@ import {
   type ModelPort,
 } from '../core/causal-runtime.js'
 import { RealClock, type Clock } from '../core/clock.js'
-import { capabilitiesFromSettings, resolveModelApiKey, resolveModelRoute, resolveProactivity, resolveWatchModelConnection, type ResolvedModelRoute, type Settings } from '../config/config.js'
+import { capabilitiesFromSettings, resolveSelectedModelConnection, resolveModelRoute, resolveProactivity, resolveWatchModelConnection, type ProviderModelConnection, type ResolvedModelRoute, type Settings } from '../config/config.js'
 import { MonotonicIdFactory, type IdFactory } from '../core/ids.js'
 import { GatewayCompressor } from '../model/model-adapters.js'
 import { unconfiguredModelGateway, OpenAIModelGateway, type MetricsSink, type ModelGateway } from '../model/model-gateway.js'
@@ -178,13 +178,12 @@ function resolveExecutors(
   return resolved
 }
 
-function requireApiKey(settings: Settings): string {
-  const key = stripLikePython(resolveModelApiKey(settings) ?? '')
-  if (key === '') {
+function requireApiKey(connection: ProviderModelConnection): string {
+  if (connection.baseUrl === '' || (connection.missing !== null && connection.apiKey === '')) {
     // Never echo configuration values; the name is enough to act on.
-    throw new AssemblyError('缺少 DEEPSEEK_API_KEY 或 MODEL_API_KEY（Qwen 使用 DASHSCOPE_API_KEY）')
+    throw new AssemblyError(`缺少 ${connection.missing ?? 'API_KEY'}`)
   }
-  return key
+  return connection.apiKey
 }
 
 function requireTavilyApiKey(settings: Settings, capabilities: CapabilityRegistry): string {
@@ -304,12 +303,14 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
 
   // Preserve Python's validation order: the model credential is checked before
   // Tavily when neither production transport is injected.
-  const nativeWithoutSupport = settings.pipeline_mode === 'integrated' && ['minicpm-o','personaplex'].includes(settings.integrated_provider) && !(settings.model_api_key ?? '').trim()
+  const nativeWithoutSupport = settings.pipeline_mode === 'integrated' && ['minicpm-o','personaplex'].includes(settings.integrated_provider)
+  const selectedConnection = resolveSelectedModelConnection(settings)
   let baseGateway: ModelGateway | undefined = options.gateway
-  const legacyBaseGateway = (): ModelGateway => baseGateway ??= (nativeWithoutSupport ? unconfiguredModelGateway : new OpenAIModelGateway({
+  const legacyBaseGateway = (): ModelGateway => baseGateway ??= (nativeWithoutSupport || selectedConnection === null ? unconfiguredModelGateway : new OpenAIModelGateway({
     ...(options.onUsage?{onUsage:options.onUsage}:{}),
-    baseUrl: settings.model_base_url,
-    apiKey: requireApiKey(settings),
+    baseUrl: selectedConnection.baseUrl,
+    apiKey: requireApiKey(selectedConnection),
+    allowAnonymous: selectedConnection.provider === 'self-hosted',
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   }))

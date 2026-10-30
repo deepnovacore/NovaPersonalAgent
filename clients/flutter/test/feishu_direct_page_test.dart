@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/connectors/feishu/host.dart';
+import 'package:nova_mobile/connectors/feishu/collection.dart';
 import 'package:nova_mobile/connectors/feishu/auth.dart';
 import 'package:nova_mobile/connectors/feishu/api.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/context/profile_agent.dart';
+import 'package:nova_mobile/context/profile_budget.dart';
 import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
@@ -43,6 +45,67 @@ class RecordingAuth extends FeishuAuth {
     bound = (brand: brand, appId: appId, secret: secret);
     return super.bindApp(brand: brand, appId: appId, secret: secret);
   }
+}
+
+class _CappedProfile extends ProfileAgent {
+  _CappedProfile(super.connector, super.publication, super.models);
+  @override
+  ProfileBudget get budget => _budget;
+  final _budget = ProfileBudget(
+    MemoryLifePersistence(),
+    capMicroyuan: 10000000,
+  );
+}
+
+/// UI snapshots avoid opening the connector's shared ingestion/checkpoint queues.
+class _SyncCardAuth extends FeishuAuth {
+  _SyncCardAuth() : super(MemoryLifePersistence(), FeishuApi());
+  @override
+  bool get configured => true;
+  @override
+  bool get authorized => true;
+  @override
+  Map<String, dynamic> get identity => {'name': '示例用户'};
+}
+
+class _SyncCardSources extends SourceStore {
+  _SyncCardSources() : super(MemoryLifePersistence());
+  @override
+  List<String> get sources => ['fixture-chat'];
+  int statisticsReads = 0;
+  @override
+  ({Map<String, int> byStatus, Map<String, int> byChat}) get messageCounts {
+    statisticsReads++;
+    return (byStatus: {'available': 1}, byChat: {'fixture-chat': 1});
+  }
+
+  @override
+  List<Map<String, dynamic>> messages(String id) =>
+      throw StateError('UI must not copy message bodies');
+  @override
+  Map<String, dynamic> checkpoint(String id) => {'paused': false};
+}
+
+class _SyncCardCollection extends FeishuCollection {
+  _SyncCardCollection(super.ingest) {
+    running = true;
+  }
+  int pauseCalls = 0;
+  @override
+  void pause() {
+    pauseCalls++;
+    running = false;
+    notifyListeners();
+  }
+}
+
+class _SyncCardHost extends FeishuHost {
+  _SyncCardHost() : super(auth: _SyncCardAuth(), sources: _SyncCardSources());
+  @override
+  bool get ready => true;
+  late final sync = _SyncCardCollection(ingest)..addListener(notifyListeners);
+  @override
+  FeishuCollection get collection => sync;
 }
 
 /// Pumps the Feishu page with no app configured and a tall viewport so the
@@ -167,9 +230,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('同步消息'), findsOneWidget);
       expect(find.byType(Card), findsNothing);
+      expect(find.byIcon(Icons.sync_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.auto_awesome_outlined), findsOneWidget);
       expect(
         tester.getTopLeft(find.text('近况与个人信息')).dy,
-        lessThan(tester.getTopLeft(find.text('聊天记录')).dy),
+        greaterThan(tester.getTopLeft(find.text('聊天记录')).dy),
       );
       await tester.scrollUntilVisible(find.text('近况与个人信息'), 200);
       expect(find.text('近况与个人信息'), findsOneWidget);
@@ -208,11 +273,17 @@ void main() {
         -200,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.pump();
       await tester.tap(find.text('生成近况'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.text('正在阅读聊天记录…'), findsOneWidget);
       expect(find.text('取消生成'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('feishu.generation.spinner')),
+        findsOneWidget,
+      );
+      expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(find.text('生成近况'), findsNothing);
       expect(find.text('更新近况'), findsNothing);
       expect(find.textContaining('正在读取本机资料'), findsNothing);
@@ -242,6 +313,7 @@ void main() {
         -200,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.pump();
       await tester.tap(find.text('继续生成'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
@@ -263,6 +335,7 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('继续生成').hitTestable(), findsOneWidget);
+      await tester.pump();
       await tester.tap(find.text('继续生成'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
@@ -336,6 +409,157 @@ void main() {
       publication.dispose();
     },
   );
+  testWidgets('model privacy shows the actual configured budget cap', (
+    tester,
+  ) async {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+      (_) async => null,
+    );
+    final host = _SyncCardHost();
+    host.sync.running = false;
+    final publication = LocalPublicationContext(MemoryLifePersistence());
+    final profile = _CappedProfile(host, publication, FixtureModels());
+    addTearDown(host.dispose);
+    addTearDown(publication.dispose);
+    addTearDown(profile.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FeishuDirectPage(
+          host: host,
+          models: FixtureModels(),
+          publication: publication,
+          profileAgent: profile,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('模型与隐私'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pump();
+    await tester.tap(find.text('模型与隐私'));
+    await tester.pumpAndSettle();
+    expect(find.text('本次费用上限 ¥10.00'), findsOneWidget);
+    expect(find.text('本次费用上限 ¥5'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'collapsed Feishu page computes counts once without copying message bodies',
+    (tester) async {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+        (_) async => null,
+      );
+      final host = _SyncCardHost();
+      host.sync.running = false;
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      addTearDown(host.dispose);
+      addTearDown(publication.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FeishuDirectPage(
+            host: host,
+            models: FixtureModels(),
+            publication: publication,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final sources = host.sources as _SyncCardSources;
+      final previous = sources.statisticsReads;
+      final dynamic state = tester.state(find.byType(FeishuDirectPage));
+      state.build(tester.element(find.byType(FeishuDirectPage)));
+      expect(sources.statisticsReads - previous, 1);
+      expect(find.text('fixture-chat'), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('同步范围'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pump();
+      await tester.tap(find.text('同步范围'));
+      await tester.pumpAndSettle();
+      expect(find.text('fixture-chat'), findsOneWidget);
+      expect(find.text('1 条缓存 · 尚未完成首次读取'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'sync cards show saved counts, spinner and pause on a narrow phone',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+        (_) async => null,
+      );
+      final host = _SyncCardHost();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      addTearDown(host.dispose);
+      addTearDown(publication.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: FeishuDirectPage(
+            host: host,
+            models: FixtureModels(),
+            publication: publication,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('示例用户'), findsOneWidget);
+      expect(find.text('已授权'), findsOneWidget);
+      expect(find.text('已保存 1 条消息 · 1 个对话'), findsOneWidget);
+      expect(find.byKey(const ValueKey('feishu.sync.spinner')), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.text('正在同步，可继续使用其他页面。'), findsOneWidget);
+      final pause = find.text('暂停同步');
+      await tester.ensureVisible(pause);
+      await tester.pump();
+      await tester.tap(pause);
+      await tester.pump();
+      expect(host.sync.pauseCalls, 1);
+      // Removing the status row shifts the button above the aligned viewport.
+      await tester.scrollUntilVisible(
+        find.text('同步消息'),
+        -100,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('feishu.sync.spinner')), findsNothing);
+      expect(find.text('同步消息'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.scrollUntilVisible(
+        find.text('同步范围'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.textContaining('原文自本次成功读取'), findsNothing);
+      await tester.pump();
+      await tester.tap(find.text('同步范围'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.textContaining('原文自本次成功读取'), findsOneWidget);
+      expect(find.text('断开并撤销飞书授权'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+    timeout: const Timeout(Duration(seconds: 45)),
+  );
+
   testWidgets(
     'unconfigured page offers create-new and connect-existing entry paths',
     (tester) async {

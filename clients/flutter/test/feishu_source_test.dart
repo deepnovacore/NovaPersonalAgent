@@ -1,8 +1,62 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  test(
+    'rich bodies persist as evidence while malformed and oversized bodies remain skipped',
+    () async {
+      final clock = DateTime.utc(2026, 10, 18);
+      final store = SourceStore(MemoryLifePersistence(), now: () => clock);
+      addTearDown(store.dispose);
+      await store.bind('fixture:person', 1);
+      await store.select('chat', clock.subtract(const Duration(days: 1)));
+      Map<String, dynamic> record(String id, String type, Object body) => {
+        'message_id': id,
+        'create_time': '${clock.millisecondsSinceEpoch}',
+        'msg_type': type,
+        'body': {'content': jsonEncode(body)},
+      };
+      await store.ingestPage(
+        store.fence('chat'),
+        [
+          record('post', 'post', {
+            'zh_cn': {
+              'title': 'Update',
+              'content': [
+                [
+                  {'tag': 'text', 'text': 'Reviewed'},
+                ],
+              ],
+            },
+          }),
+          record('card', 'interactive', {
+            'elements': [
+              {'tag': 'markdown', 'content': 'Ready'},
+              {'tag': 'button', 'text': 'Hidden action'},
+            ],
+          }),
+          record('bad', 'post', {
+            'zh_cn': {'content': 'invalid'},
+          }),
+          record('large', 'text', {'text': List.filled(16001, 'x').join()}),
+        ],
+        nextPage: null,
+        windowEnd: clock,
+      );
+      final saved = {
+        for (final row in store.messages('chat')) row['message_id']: row,
+      };
+      expect(saved['post']!['text'], 'Update\nReviewed');
+      expect(saved['card']!['text'], 'Ready');
+      expect(saved['post']!['status'], 'available');
+      expect(saved['card']!['status'], 'available');
+      expect(saved['bad']!['status'], 'missing_body');
+      expect(saved['large']!['status'], 'too_large');
+      expect(store.checkpoint('chat')['page_token'], isNull);
+    },
+  );
   test(
     'large account cache exceeds old cap; quota failure preserves page for resume',
     () async {

@@ -44,6 +44,7 @@ void main() {
     'facts': [
       {
         'text': 'complete step',
+        'relevance': 'ongoing_work',
         'refs': ['e1'],
       },
     ],
@@ -63,23 +64,82 @@ void main() {
     },
   );
 
-  test('scope or expiry mismatch discards stale data', () async {
-    for (final changedExpiry in [false, true]) {
+  test(
+    'scope change or shorter authorized expiry discards stale data',
+    () async {
+      for (final changedExpiry in [false, true]) {
+        final disk = CheckpointDisk();
+        await cache(disk).save('stage', response);
+        expect(
+          await cache(
+            disk,
+            scope: changedExpiry ? 'scope-a' : 'scope-b',
+            expiresAt: changedExpiry
+                ? expiry.subtract(const Duration(seconds: 1))
+                : expiry,
+          ).load('stage'),
+          isNull,
+        );
+        expect(disk.value, 'null');
+      }
+    },
+  );
+  test(
+    'renewed source access reuses stages only until their original expiry',
+    () async {
       final disk = CheckpointDisk();
-      await cache(disk).save('stage', response);
+      final oldExpiry = start.add(const Duration(days: 3));
+      final renewedExpiry = start.add(const Duration(days: 4));
+      await cache(disk, expiresAt: oldExpiry).save('stage', response);
       expect(
         await cache(
           disk,
-          scope: changedExpiry ? 'scope-a' : 'scope-b',
-          expiresAt: changedExpiry
-              ? expiry.add(const Duration(seconds: 1))
-              : expiry,
+          expiresAt: renewedExpiry,
+          now: () => start.add(const Duration(days: 2)),
+        ).load('stage'),
+        response,
+      );
+      await cache(
+        disk,
+        expiresAt: renewedExpiry,
+        now: () => start.add(const Duration(days: 2)),
+      ).save('new-stage', {});
+      expect(
+        jsonDecode(disk.value!)['expires_at'],
+        oldExpiry.toIso8601String(),
+      );
+      expect(
+        await cache(
+          disk,
+          expiresAt: renewedExpiry,
+          now: () => start.add(const Duration(days: 3, hours: 12)),
         ).load('stage'),
         isNull,
       );
       expect(disk.value, 'null');
-    }
-  });
+    },
+  );
+  test(
+    'retained expiry is rechecked after asynchronous authorization',
+    () async {
+      final disk = CheckpointDisk();
+      final oldExpiry = start.add(const Duration(days: 3));
+      await cache(disk, expiresAt: oldExpiry).save('stage', response);
+      var clock = start.add(const Duration(days: 2)), checks = 0;
+      final value = await cache(
+        disk,
+        expiresAt: start.add(const Duration(days: 4)),
+        now: () => clock,
+        authorize: () async {
+          if (++checks == 2) {
+            clock = start.add(const Duration(days: 3, hours: 12));
+          }
+        },
+      ).load('stage');
+      expect(value, isNull);
+      expect(disk.value, 'null');
+    },
+  );
 
   test('expiry or revoked access fails closed before reading', () async {
     for (final expired in [true, false]) {

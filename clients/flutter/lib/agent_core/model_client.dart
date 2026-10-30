@@ -81,6 +81,19 @@ class ModelConfiguration {
     'key': key,
     'protocol': protocol.name,
   };
+  bool get isOfficialDeepSeekFlash =>
+      protocol == ModelProtocol.chatCompletions &&
+      model == 'deepseek-flash' &&
+      const [
+        'https://api.deepseek.com/chat/completions',
+        'https://api.deepseek.com/v1/chat/completions',
+      ].contains(requestUri.toString());
+  bool get supportsJsonObject =>
+      isOfficialDeepSeekFlash ||
+      protocol == ModelProtocol.chatCompletions &&
+          requestUri.toString() ==
+              'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' &&
+          ['qwen-flash', 'qwen3-vl-plus'].contains(model);
 }
 
 /// One client per turn: cancellation closes connections, including a pending open.
@@ -92,8 +105,10 @@ class ModelClient {
     this.maxOutputBytes = 512 * 1024,
     this.collectUsage = false,
     this.disableThinking = false,
+    this.jsonObject = false,
   });
   final bool collectUsage;
+  final bool jsonObject;
 
   /// Background profile/voice turns skip thinking; chat explicitly enables it
   /// on supported providers so visible reasoning can stream to the UI.
@@ -117,7 +132,10 @@ class ModelClient {
     completedUsage = null;
     final usage =
         collectUsage && configuration.protocol == ModelProtocol.chatCompletions
-        ? ChatCompletionUsage(configuration.model)
+        ? ChatCompletionUsage(
+            configuration.model,
+            allowTerminalChoiceUsage: configuration.isOfficialDeepSeekFlash,
+          )
         : null;
     final accountChanges =
         configuration.protocol == ModelProtocol.chatgptResponses
@@ -151,8 +169,9 @@ class ModelClient {
             messages,
             tools,
             disableThinking: disableThinking,
+            jsonObject: jsonObject,
+            includeUsage: usage != null,
           ),
-          if (usage != null) 'stream_options': {'include_usage': true},
         }),
       );
       final response = await request.close();
@@ -387,12 +406,20 @@ Map<String, dynamic> modelRequestBody(
   List<Map<String, dynamic>> messages,
   List<Map<String, dynamic>> tools, {
   bool disableThinking = false,
+  bool jsonObject = false,
+  bool includeUsage = false,
 }) {
   if (config.protocol == ModelProtocol.chatCompletions) {
     final deepseek = config.requestUri.host == 'api.deepseek.com';
     return {
       'model': config.model,
       'stream': true,
+      if (includeUsage) 'stream_options': {'include_usage': true},
+      if (jsonObject &&
+          disableThinking &&
+          tools.isEmpty &&
+          config.supportsJsonObject)
+        'response_format': {'type': 'json_object'},
       // DeepSeek shares this budget between thinking and generated tool source.
       'max_tokens': deepseek && !disableThinking ? 65536 : 12000,
       if (deepseek)
@@ -564,8 +591,9 @@ class CompletedModelUsage {
 }
 
 class ChatCompletionUsage {
-  ChatCompletionUsage(this.model);
+  ChatCompletionUsage(this.model, {this.allowTerminalChoiceUsage = false});
   final String model;
+  final bool allowTerminalChoiceUsage;
   String? _id;
   bool _invalid = false, _stopped = false;
   CompletedModelUsage? _usage;
@@ -603,7 +631,21 @@ class ChatCompletionUsage {
     }
     final usage = event['usage'];
     if (usage == null) return;
-    if (usage is! Map || !_stopped || choices.isNotEmpty) {
+    final terminal = choices.isEmpty ? null : choices.single as Map;
+    final delta = terminal?['delta'];
+    // DeepSeek reports usage on its empty terminal choice, not a separate chunk.
+    final terminalUsage =
+        allowTerminalChoiceUsage &&
+        model == 'deepseek-flash' &&
+        terminal?['finish_reason'] == 'stop' &&
+        delta is Map &&
+        delta.entries.every(
+          (entry) =>
+              (entry.key == 'role' && entry.value == null) ||
+              (const ['content', 'reasoning_content'].contains(entry.key) &&
+                  (entry.value == null || entry.value == '')),
+        );
+    if (usage is! Map || !_stopped || (choices.isNotEmpty && !terminalUsage)) {
       _invalid = true;
       return;
     }

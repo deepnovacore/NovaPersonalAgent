@@ -86,7 +86,7 @@ class ProfilePipelineCheckpoint {
           value['version'] != 1 ||
           value['scope'] != scope ||
           expiry == null ||
-          !expiry.isAtSameMomentAs(expiresAt) ||
+          expiry.isAfter(expiresAt) ||
           !now().isBefore(expiry) ||
           value['entries'] is! Map<String, dynamic> ||
           !(value['entries'] as Map).values.every(
@@ -105,6 +105,11 @@ class ProfilePipelineCheckpoint {
     await _check();
     final data = await _read();
     await _check();
+    // Renewed source access never extends a previously paid stage's deadline.
+    if (!now().isBefore(DateTime.parse(data['expires_at'] as String))) {
+      await persistence.write('null');
+      return null;
+    }
     final value = (data['entries'] as Map<String, dynamic>)[key];
     return value == null ? null : _copyJson(value) as Map<String, dynamic>;
   });

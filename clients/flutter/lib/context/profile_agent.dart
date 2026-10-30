@@ -83,6 +83,7 @@ String profileRunErrorCode(Object error) {
     'profile_timeline_checkpoint_invalid',
     'invalid_profile_pipeline_checkpoint',
     'profile_timeline_invalid',
+    'profile_timeline_partial',
     'profile_timeline_deferred',
     'profile_result_capacity',
     'corrections_changed',
@@ -106,6 +107,12 @@ String profileRunErrorCode(Object error) {
   if (code is String && RegExp(r'^model_http_[1-5]\d{2}$').hasMatch(code)) {
     return code;
   }
+  if (error is ModelRequestFailure &&
+      error.status != null &&
+      error.status! >= 400 &&
+      error.status! <= 599) {
+    return 'model_http_${error.status}';
+  }
   return 'profile_run_failed';
 }
 
@@ -125,13 +132,18 @@ Future<Map<String, dynamic>> decodeCompletedProfileResponse(
     r'^```(?:json)?\s*\n([\s\S]*?)\n```$',
     caseSensitive: false,
   ).firstMatch(trimmed);
-  final value = jsonDecode(fence?.group(1) ?? trimmed);
+  final Object? value;
+  try {
+    value = jsonDecode(fence?.group(1) ?? trimmed);
+  } on FormatException {
+    throw const ProfileResponseFormatFailure();
+  }
   if (value is List &&
       (collection == 'topics' || collection == 'review_notes')) {
     return {collection!: value};
   }
   if (value is! Map<String, dynamic>) {
-    throw const FormatException('json_object_required');
+    throw const ProfileResponseFormatFailure();
   }
   return value;
 }
@@ -198,12 +210,30 @@ class ProfileAgent extends ChangeNotifier {
     if (connector.sources.sources.isEmpty) return null;
     await connector.sources.enableDefaultProcessing(provider);
     final consent = connector.sources.processingRevision;
+    final sourceRevision = connector.sources.revision,
+        generation = connector.auth.generation,
+        authorizationEpoch = connector.auth.authorizationEpoch;
     connector.sources.validateProcessing(provider, 'profile', consent);
     await repository.open();
-    final evidence = ProfileEvidence(
-      connector.sources.readAuthorizedEvidence(provider, 'profile'),
+    final evidence = await ProfileEvidence.build(
+      await connector.sources.readAuthorizedEvidenceAsync(provider, 'profile'),
       validThrough: connector.sources.now().add(maxDuration),
     );
+    if (_disposed || busy || !connector.ready || connector.collection.running) {
+      return null;
+    }
+    publication.requireCurrent();
+    connector.sources.validateProcessing(provider, 'profile', consent);
+    if (connector.auth.generation != generation ||
+        connector.auth.authorizationEpoch != authorizationEpoch) {
+      throw StateError('authorization_changed');
+    }
+    if (connector.sources.revision != sourceRevision) {
+      throw StateError('stale_inputs');
+    }
+    if (evidence.expired(connector.sources.now())) {
+      throw const AgentFailure('source_expired');
+    }
     if (evidence.records.isEmpty) return null;
     final scope = _generationScope(
       model,
@@ -242,7 +272,7 @@ class ProfileAgent extends ChangeNotifier {
   ) {
     return ProfileObservationCheckpoint.digest({
       'result_recipe': useTimelinePipeline
-          ? 'timeline-batched-v6'
+          ? 'timeline-batched-v7'
           : 'timeline-brief-v5',
       'provider': '${model.endpoint}|${model.model}',
       'protocol': model.protocol.name,
@@ -413,6 +443,7 @@ class ProfileAgent extends ChangeNotifier {
     final provider = '${model.endpoint}|${model.model}';
     await connector.sources.enableDefaultProcessing(provider);
     final generation = connector.auth.generation,
+        authorizationEpoch = connector.auth.authorizationEpoch,
         sourceRevision = connector.sources.revision,
         consentRevision = connector.sources.processingRevision;
     publication.requireCurrent();
@@ -422,8 +453,21 @@ class ProfileAgent extends ChangeNotifier {
       repository.correctionScope,
       provider,
     );
-    final evidence = ProfileEvidence(
-      connector.sources.readAuthorizedEvidence(provider, 'profile'),
+    final originals = await connector.sources.readAuthorizedEvidenceAsync(
+      provider,
+      'profile',
+    );
+    if (_cancelled) {
+      throw _invalidationFailure ?? const AgentFailure('cancelled');
+    }
+    if (!connector.ready ||
+        connector.auth.generation != generation ||
+        connector.auth.authorizationEpoch != authorizationEpoch) {
+      throw StateError('authorization_changed');
+    }
+    publication.requireCurrent();
+    final evidence = await ProfileEvidence.build(
+      originals,
       validThrough: connector.sources.now().add(maxDuration),
     );
     void checkRun({bool ignoreCancellation = false}) {
@@ -436,7 +480,9 @@ class ProfileAgent extends ChangeNotifier {
     }
 
     void validateSourceScope() {
-      if (!connector.ready || connector.auth.generation != generation) {
+      if (!connector.ready ||
+          connector.auth.generation != generation ||
+          connector.auth.authorizationEpoch != authorizationEpoch) {
         throw StateError('authorization_changed');
       }
       publication.requireCurrent();
@@ -449,6 +495,9 @@ class ProfileAgent extends ChangeNotifier {
         throw StateError('stale_inputs');
       }
     }
+
+    checkRun();
+    validateSourceScope();
 
     Future<void> validate({bool ignoreCancellation = false}) async {
       checkRun(ignoreCancellation: ignoreCancellation);
@@ -471,9 +520,12 @@ class ProfileAgent extends ChangeNotifier {
     final checkpoint = evidence.expiresAt == null
         ? null
         : ProfileObservationCheckpoint(
-            SecureContextPersistence(ProfileObservationCheckpoint.storageKey),
+            SecureContextPersistence(
+              ProfileObservationCheckpoint.incrementalStorageKey,
+            ),
             scope: ProfileObservationCheckpoint.digest({
               'algorithm': ProfileObservationCheckpoint.algorithm,
+              'credential': ProfileObservationCheckpoint.digest(model.key),
               'provider': provider,
               'protocol': model.protocol.name,
               'account': connector.sources.identity,
@@ -481,12 +533,11 @@ class ProfileAgent extends ChangeNotifier {
               'source_generation': connector.sources.generation,
               'space': publication.spaceId,
               'device': publication.deviceId,
-              'source_revision': sourceRevision,
               'consent_revision': consentRevision,
               'corrections': correctionContext,
-              'evidence': evidence.checkpointDigest,
             }),
             expiresAt: evidence.expiresAt!,
+            maxBytes: 4 * 1024 * 1024,
             now: connector.sources.now,
             authorize: () => validate(ignoreCancellation: true),
           );
@@ -571,13 +622,19 @@ class ProfileAgent extends ChangeNotifier {
           },
           {'role': 'user', 'content': jsonEncode(input)},
         ];
-        final reservation = await budget?.reserve(model, messages);
+        final jsonObject = model.supportsJsonObject;
+        final reservation = await budget?.reserve(
+          model,
+          messages,
+          jsonObject: jsonObject,
+        );
         await validate();
         checkRun();
         final client = ModelClient(
           timeout: const Duration(minutes: 3),
           collectUsage: budget != null,
           disableThinking: true,
+          jsonObject: jsonObject,
         );
         _clients.add(client);
         var content = '';
@@ -598,8 +655,11 @@ class ProfileAgent extends ChangeNotifier {
                 ? () => budget!.settle(reservation, client.completedUsage!)
                 : null,
           );
-        } on FormatException {
+        } on FormatException catch (error) {
           if (pipelineStages.contains(stage)) {
+            if (useTimelinePipeline && error is ProfileResponseFormatFailure) {
+              rethrow;
+            }
             throw AgentFailure(
               stage == 'timeline_select' || stage == 'timeline_reconcile'
                   ? 'profile_selection_invalid'
@@ -649,11 +709,80 @@ class ProfileAgent extends ChangeNotifier {
     });
     var outcome = 'interrupted';
     String? failureCode;
+    // Snapshot before progressive Profile publications can replace repository metadata.
+    final previousPublication = repository.value;
+    final sameTimelineScope =
+        previousPublication?['processing_provider'] == provider &&
+        previousPublication?['consent_revision'] == consentRevision &&
+        previousPublication?['source_generation'] ==
+            connector.sources.generation;
+    final correctionDigest = ProfileObservationCheckpoint.digest(
+      correctionContext,
+    );
+    final previousBasis =
+        sameTimelineScope &&
+            previousPublication?['timeline_basis_corrections'] ==
+                correctionDigest
+        ? (previousPublication?['timeline_input_basis'] as Map?)
+        : null;
+    final checkpointRecords = evidence.checkpointRecords(evidence.records);
+    final currentBasis = evidence.timelineEvidenceDigests;
+    final originalIds = <String, String>{
+      for (var i = 0; i < evidence.records.length; i++)
+        evidence.records[i]['evidence_id'] as String:
+            checkpointRecords[i]['evidence_id'] as String,
+    };
+    final newInputIds = previousBasis == null
+        ? null
+        : [
+            for (final entry in originalIds.entries)
+              if (previousBasis[entry.value] != currentBasis[entry.value])
+                entry.key,
+          ];
+    // Visible historical cards retain their identity across consent refreshes.
+    // A card is model-visible only while every durable ref is still authorized
+    // and restorable; retained history of removed sources must not be replayed.
+    final availableRefs = Set<String>.from(
+      previousPublication?['available_evidence_ids'] as List? ?? const [],
+    );
+    final priorCards = <Map<String, dynamic>>[];
+    for (final card in previousPublication?['entries'] as List? ?? []) {
+      if (card['kind'] != 'timeline' ||
+          card['policy_revision'] is! int ||
+          card['policy_revision'] < 2) {
+        continue;
+      }
+      final durable = Set<String>.from(card['evidence_ids'] as List);
+      final restored = evidence.restoreCheckpointIds(durable);
+      if (!durable.every(availableRefs.contains) ||
+          restored.length != durable.length) {
+        continue;
+      }
+      priorCards.add({
+        ...Map<String, dynamic>.from(card as Map),
+        'identity_evidence_ids': List<String>.from(
+          card['evidence_ids'] as List,
+        ),
+        'evidence_ids': restored.toList(),
+      });
+    }
+    late final TimelinePipeline? pipeline;
+    Map<String, String> timelineBasis(bool complete) => {
+      for (final entry in currentBasis.entries)
+        if (previousBasis?.containsKey(entry.key) == true)
+          entry.key: previousBasis![entry.key] as String,
+      for (final ref
+          in complete
+              ? pipeline!.inputEvidenceIds
+              : pipeline!.completedEvidenceIds)
+        originalIds[ref]!: currentBasis[originalIds[ref]]!,
+    };
     late final ProfileWriter writer;
     Future<void> publishProgress(
       String entries,
       Map<String, int> coverage, {
       required bool partial,
+      Map<String, String>? timelineInputBasis,
     }) async {
       await validate();
       final existing = repository.value;
@@ -679,17 +808,19 @@ class ProfileAgent extends ChangeNotifier {
         coverage: coverage,
         generationScope: generationScope,
         mergeTimelineHistory: true,
+        timelineInputBasis: timelineInputBasis,
+        timelineBasisCorrections: correctionDigest,
       );
       await validate();
       _report('已保存核对完成的内容，正在继续整理…');
     }
 
-    late final TimelinePipeline? pipeline;
     pipeline = useTimelinePipeline
         ? TimelinePipeline(
             complete: complete,
             authorize: validate,
             cacheScope: generationScope,
+            evidenceIdentities: originalIds,
             loadCheckpoint: pipelineCheckpoint?.load,
             saveCheckpoint: pipelineCheckpoint?.save,
             onPublish: (result) async {
@@ -699,6 +830,7 @@ class ProfileAgent extends ChangeNotifier {
                 writer.withVerifiedProfile(result.entries),
                 writer.coverage,
                 partial: true,
+                timelineInputBasis: timelineBasis(!result.partial),
               );
             },
           )
@@ -728,19 +860,39 @@ class ProfileAgent extends ChangeNotifier {
           publishProgress(entries, coverage, partial: writer.isPartial),
       complete: complete,
       onProgress: _report,
+      loadReusableObservations: checkpoint == null
+          ? null
+          : (messages) async {
+              await validate();
+              final reused = await checkpoint.loadReusable(
+                evidence.checkpointRecords(messages),
+              );
+              await validate();
+              return ProfileObservationReuse(
+                evidence.restoreCheckpointIds(reused.recordIds),
+                evidence.restoreCheckpointFacts(reused.facts),
+              );
+            },
       loadValidatedBatch: checkpoint == null
           ? null
           : (messages) async {
               await validate();
-              final value = await checkpoint.load(messages);
+              final value = await checkpoint.load(
+                evidence.checkpointRecords(messages),
+              );
               await validate();
-              return value;
+              return value == null
+                  ? null
+                  : evidence.restoreCheckpointFacts(value);
             },
       saveValidatedBatch: checkpoint == null
           ? null
           : (messages, facts) async {
               await validate();
-              await checkpoint.save(messages, facts);
+              await checkpoint.save(
+                evidence.checkpointRecords(messages),
+                evidence.checkpointFacts(facts),
+              );
               await validate();
             },
     );
@@ -769,6 +921,8 @@ class ProfileAgent extends ChangeNotifier {
         corrections: correctionContext,
         savedObservationsOnly: savedObservationsOnly,
         maxNewBatches: maxNewBatches,
+        priorCards: priorCards,
+        newInputIds: newInputIds,
       );
       await validate();
       checkRun();
@@ -782,24 +936,31 @@ class ProfileAgent extends ChangeNotifier {
         coverage: writer.coverage,
         generationScope: generationScope,
         mergeTimelineHistory: useTimelinePipeline,
+        timelineBasisCorrections: correctionDigest,
+        timelineInputBasis: pipeline == null
+            ? null
+            : timelineBasis(
+                (pipeline.coverage['timeline_pending_batches'] ?? 0) == 0,
+              ),
       );
       await validate();
       if (repository.value == null) {
         throw const AgentFailure('profile_not_published');
       }
       outcome = writer.isPartial ? 'partial' : 'completed';
-      if (!useTimelinePipeline &&
-          !writer.isPartial &&
-          writer.incompleteBatches == 0) {
-        await checkpoint?.clear();
-      }
       // Keep validated observations/stages for an interrupted or explicit rerun.
       // Scope/expiry/revocation invalidation owns their lifetime.
+      if (writer.profileFailureCode == 'profile_no_saved_observations') {
+        throw StateError('profile_no_saved_observations');
+      }
       if (writer.profileFailureCode != null) {
         throw const AgentFailure('profile_output_invalid');
       }
       if ((writer.coverage['timeline_deferred_batches'] ?? 0) > 0) {
         throw StateError('profile_timeline_deferred');
+      }
+      if ((writer.coverage['timeline_incomplete_batches'] ?? 0) > 0) {
+        throw StateError('profile_timeline_partial');
       }
       _report(
         '${writer.isPartial ? '已生成部分结果，未整理的消息可继续补充；' : ''}整理完成：缓存中 ${cachedCounts['available'] ?? 0} 条可用文本，${writer.observedRecordCount + writer.reusedObservationRecordCount} 条合格文本完成分批观察（本轮 ${writer.observedRecordCount} 条、复用 ${writer.reusedObservationRecordCount} 条）；最终撰写与审查使用 ${writer.selectedOriginalCount} 条完整原文和 ${writer.selectedObservationCount} 条观察。'
@@ -831,7 +992,8 @@ class ProfileAgent extends ChangeNotifier {
       }
       failure = _pauseFailure(failure);
       failureCode = profileRunErrorCode(failure);
-      if (writer.profileFailureCode != null) {
+      if (writer.profileFailureCode != null &&
+          writer.profileFailureCode != 'profile_no_saved_observations') {
         failure = ProfileGenerationTerminalFailure(failure);
       }
       Error.throwWithStackTrace(failure, stack);

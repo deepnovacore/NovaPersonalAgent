@@ -8,6 +8,44 @@ import {classifyBackendFailure, createBackendSupervisor, createBackendDiagnostic
 import {codingBackendStatus} from '../src/main/coding-settings.mjs'
 const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 
+test('startup stage diagnostics log one safe marker per real stage change', () => {
+  const body = source.slice(
+    source.indexOf('const STARTUP_DIAGNOSTIC_STAGES'),
+    source.indexOf('async function paintStartup('),
+  )
+  const logs = [], orb = [], settings = []
+  const context = vm.createContext({
+    startup: {stage: 'configuration', code: null},
+    backendStatus: {state: 'starting'},
+    sendToOrb: (channel, payload) => orb.push([channel, payload]),
+    sendToSettings: (channel, payload) => settings.push([channel, payload]),
+    settingsView: () => ({view: true}),
+    console: {error: message => logs.push(message)},
+  })
+  vm.runInContext(body, context)
+  context.publishStartup('configuration')
+  assert.deepEqual(logs, [])
+  context.publishStartup('ready')
+  context.publishStartup('ready')
+  assert.deepEqual(logs, ['[desktop-diagnostic] startup_stage=ready'])
+  context.publishStartup('failed', '/Users/example/token=secret')
+  assert.deepEqual(logs, [
+    '[desktop-diagnostic] startup_stage=ready',
+    '[desktop-diagnostic] startup_stage=failed',
+  ])
+  context.publishStartup('token=secret')
+  assert.equal(logs.length, 2)
+  assert.doesNotMatch(logs.join('\n'), /Users|token|secret/u)
+  assert.equal(context.startup.stage, 'token=secret')
+  assert.equal(context.startup.code, null)
+  assert.equal(orb.length, 5)
+  assert.equal(settings.length, 5)
+  assert.deepEqual(JSON.parse(JSON.stringify(orb.at(-1))), [
+    'nova:backend-status',
+    {state: 'starting', startup: {stage: 'token=secret', code: null}},
+  ])
+})
+
 test('the first paint fence accepts a visible same-stage spinner and requires credential prose',async()=>{
   const body=source.slice(source.indexOf('async function paintStartup('),source.indexOf('async function accessCredentials('))
   const node=(stage,visible)=>({dataset:{stage},visible,getClientRects(){return this.visible?[{}]:[]}})
@@ -235,7 +273,8 @@ test('generic assembly failure still schedules automatic recovery', async () => 
 
 test('configuration commits keep startup readiness independent of unrelated device services', async () => {
   const body=source.slice(source.indexOf('async function commitDesktopConfiguration('),source.indexOf('async function discardDesktopConfiguration('))
-  const context=vm.createContext({managedWorkspaceMaintenance:null,refreshManagedWorkspaceCapabilities:async()=>{},configurationReady:false,settingsReady:true,
+  const {publicManagedWorkspaceCapabilities}=await import('../src/main/workspace-actions.mjs')
+  const context=vm.createContext({managedWorkspaceMaintenance:null,readManagedWorkspaceCapabilities:async()=>publicManagedWorkspaceCapabilities(),managedWorkspaceBackendRecovery:{observe:async()=>{}},managedWorkspaceCapabilities:publicManagedWorkspaceCapabilities(),projectNativeAuthorityPresent:false,closeMaintenanceBounded:async()=>{},configurationReady:false,settingsReady:true,desktopConfig:null,codexStatus:null,
     startup:{stage:'ready'},backendStatus:{state:'connected'}})
   vm.runInContext(body,context)
   await context.commitDesktopConfiguration({maintenance:null,config:{},codexStatus:{}})

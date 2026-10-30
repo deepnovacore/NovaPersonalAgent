@@ -11,6 +11,36 @@ const _speechServices = [
   ('火山语音', 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel'),
 ];
 
+/// Reports local saved state only; a saved key has not been network-validated.
+class ProviderCredentialStatus extends StatelessWidget {
+  const ProviderCredentialStatus({
+    super.key,
+    required this.credential,
+    this.language = 'zh',
+  });
+  final Future<ProviderCredential?> credential;
+  final String language;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<ProviderCredential?>(
+    future: credential,
+    builder: (context, snapshot) {
+      String t(String zh, String en) => language == 'zh' ? zh : en;
+      final state = snapshot.connectionState != ConnectionState.done
+          ? t('正在读取…', 'Loading…')
+          : snapshot.hasError
+          ? t('无法读取', 'Unavailable')
+          : snapshot.data == null
+          ? t('未配置', 'Not configured')
+          : t('已配置', 'Configured');
+      return Text(
+        t('API 密钥：$state', 'API key: $state'),
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    },
+  );
+}
+
 /// Editing credentials never changes the selected conversation model.
 Future<String?> showProviderCredentials(
   BuildContext context,
@@ -60,7 +90,7 @@ Future<String?> showProviderCredentials(
                 ),
                 const SizedBox(height: 12),
                 if (current.isEmpty)
-                  Text(t('还没有配置服务密钥', 'No provider credentials yet')),
+                  Text(t('服务密钥：未配置', 'Provider credentials: Not configured')),
                 for (final entry in current)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -163,8 +193,20 @@ Future<String?> _editCredential(
   );
   final key = TextEditingController();
   var selection = fixed ? url.text : presets.first.$2;
+  var savedCredential = credentials.resolve(
+    url.text,
+    credentialId: existing?.id,
+  );
   var saving = false;
   String? error;
+  Future<String?> resolvedId(Future<ProviderCredential?> credential) async {
+    try {
+      return (await credential)?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
   try {
     return await showLocalDialog<String>(
       context: context,
@@ -208,6 +250,7 @@ Future<String?> _editCredential(
                             setState(() {
                               selection = value;
                               url.text = value == 'custom' ? '' : value;
+                              savedCredential = credentials.resolve(url.text);
                               key.clear();
                               error = null;
                             });
@@ -217,6 +260,21 @@ Future<String?> _editCredential(
                   const SizedBox(height: 12),
                   TextField(
                     controller: url,
+                    key: const ValueKey('credential.endpoint'),
+                    onChanged: (_) async {
+                      final previous = savedCredential;
+                      final next = credentials.resolve(url.text);
+                      setState(() {
+                        savedCredential = next;
+                      });
+                      // A typed key belongs to the credential resolved before
+                      // the edit; keep it unless the URL moves to another one.
+                      if (await resolvedId(previous) ==
+                          await resolvedId(next)) {
+                        return;
+                      }
+                      if (context.mounted) key.clear();
+                    },
                     enabled: !saving,
                     autocorrect: false,
                     keyboardType: TextInputType.url,
@@ -226,6 +284,11 @@ Future<String?> _editCredential(
                   ),
                 ],
                 const SizedBox(height: 12),
+                ProviderCredentialStatus(
+                  credential: savedCredential,
+                  language: language,
+                ),
+                const SizedBox(height: 8),
                 TextField(
                   controller: key,
                   enabled: !saving,
@@ -236,9 +299,10 @@ Future<String?> _editCredential(
                   enableIMEPersonalizedLearning: false,
                   decoration: InputDecoration(
                     labelText: t('API 密钥', 'API key'),
-                    helperText: existing == null
-                        ? null
-                        : t('留空保留现有密钥', 'Leave blank to keep the saved key'),
+                    helperText: t(
+                      '已保存的密钥不会回显；留空时保留此服务已配置的密钥',
+                      'Saved keys stay hidden. Leave blank to keep this provider’s configured key.',
+                    ),
                     helperMaxLines: 2,
                   ),
                 ),
@@ -278,7 +342,7 @@ Future<String?> _editCredential(
                       });
                       try {
                         final result = await credentials.save(
-                          id: existing?.id,
+                          id: (await savedCredential)?.id,
                           endpoint: url.text,
                           key: key.text,
                         );

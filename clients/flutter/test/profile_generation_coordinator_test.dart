@@ -106,6 +106,7 @@ void main() {
     'profile_selection_invalid',
     'profile_timeline_checkpoint_invalid',
     'profile_timeline_invalid',
+    'profile_timeline_partial',
     'profile_timeline_deferred',
     'profile_result_capacity',
     'profile_context_too_large',

@@ -203,6 +203,7 @@ void main() {
         publish({
           'key': 'event',
           'kind': 'timeline',
+          'policy_revision': 2,
           'observed_at': '2026-10-16T00:00:00Z',
           'text': 'Another participant reported completion',
           'evidence_ids': [evidence],
@@ -212,6 +213,7 @@ void main() {
       await publish({
         'key': 'event',
         'kind': 'timeline',
+        'policy_revision': 2,
         'observed_at': '2026-10-17T00:00:00Z',
         'text': 'Another participant reported completion',
         'evidence_ids': [evidence],

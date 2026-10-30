@@ -15,6 +15,7 @@
     "cli"
   ],
   "scripts": {
+    "start": "node scripts/start-client.mjs",
     "start:client": "node scripts/start-client.mjs",
     "start:workbench": "node scripts/start-client.mjs --workbench",
     "start:client_demo": "node scripts/start-client-demo.mjs",

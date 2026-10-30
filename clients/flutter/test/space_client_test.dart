@@ -74,6 +74,27 @@ void main() {
       expect((state.snapshot['profile'] as Map)['about'], 'Host');
     },
   );
+  test('a refused Host key is dropped from the phone queue', () async {
+    final disk = MemorySpacePersistence();
+    var state = SpaceClientState(disk);
+    await state.open();
+    final op = await state.enqueue('secret.put', {
+      'name': 'OPENAI_API_KEY',
+      'value': 'sk-refused',
+    });
+    await state.apply({
+      'v': 1,
+      'type': 'receipt',
+      'op_id': op,
+      'status': 'rejected',
+      'error': 'owner_required',
+    });
+    state = SpaceClientState(disk);
+    await state.open();
+    expect(state.pending.single['status'], 'rejected');
+    expect(state.pending.single['input'], {'name': 'OPENAI_API_KEY'});
+    expect(state.pending.single.containsKey('envelope'), false);
+  });
   test(
     'chat final replaces preview and mailbox duplicate by message id',
     () async {

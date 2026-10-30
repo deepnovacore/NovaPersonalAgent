@@ -61,6 +61,7 @@ void main() {
           {
             'key': 'event',
             'kind': 'timeline',
+            'policy_revision': 2,
             'text': 'last success',
             'evidence_ids': [ref],
             'observed_at': now.toIso8601String(),
@@ -326,6 +327,7 @@ class _Fixture {
       {
         'key': 'event',
         'kind': kind,
+        if (kind == 'timeline') 'policy_revision': 2,
         'text': text,
         'evidence_ids': [ref],
         'observed_at': DateTime.utc(2026, 10, 19).toIso8601String(),

@@ -3,7 +3,7 @@ import 'dart:math';
 import '../agent_core/model_client.dart';
 import '../personal/local_life.dart';
 
-// shortcut: acceptance-only DashScope pricing; add provider pricing before general use.
+// shortcut: acceptance-only official DashScope/DeepSeek pricing; review prices before broader use.
 class ProfileBudget {
   ProfileBudget(this.persistence, {this.capMicroyuan = limitMicroyuan});
   final LifePersistence persistence;
@@ -50,12 +50,21 @@ class ProfileBudget {
 
   static int requestCost(
     ModelConfiguration model,
-    List<Map<String, dynamic>> messages,
-  ) {
-    if (model.requestUri.toString() !=
-            'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' ||
+    List<Map<String, dynamic>> messages, {
+    bool jsonObject = false,
+  }) {
+    final deepseek =
+        model.model == 'deepseek-flash' &&
+        [
+          'https://api.deepseek.com/chat/completions',
+          'https://api.deepseek.com/v1/chat/completions',
+        ].contains(model.requestUri.toString());
+    final dashscope =
+        model.requestUri.toString() ==
+            'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' &&
+        ['qwen-flash', 'qwen3-vl-plus'].contains(model.model);
+    if ((!deepseek && !dashscope) ||
         model.protocol != ModelProtocol.chatCompletions ||
-        !['qwen-flash', 'qwen3-vl-plus'].contains(model.model) ||
         messages.isEmpty ||
         messages.any(
           (m) =>
@@ -65,17 +74,28 @@ class ProfileBudget {
         )) {
       throw const AgentFailure('profile_budget_model_unsupported');
     }
-    final body = modelRequestBody(model, messages, [], disableThinking: true);
+    final body = modelRequestBody(
+      model,
+      messages,
+      [],
+      disableThinking: true,
+      jsonObject: jsonObject,
+      includeUsage: true,
+    );
     // UTF-8 bytes bound text tokens; reserve extra framing and twice list price.
     final input =
         utf8.encode(jsonEncode(body)).length + 4096 + messages.length * 128;
     final output = body['max_tokens'] as int;
     final visionPlus = model.model == 'qwen3-vl-plus';
+    final thinkingDisabled = deepseek
+        ? (body['thinking'] is Map &&
+              (body['thinking'] as Map)['type'] == 'disabled')
+        : body['enable_thinking'] == false;
     if (input > (visionPlus ? 260096 : 990000) ||
         (visionPlus && input + output > 262144) ||
         output < 1 ||
         output > 32768 ||
-        body['enable_thinking'] != false) {
+        !thinkingDisabled) {
       throw const AgentFailure('profile_budget_request_unsupported');
     }
     // Mainland China / Beijing list prices, checked 2026-10-18:
@@ -90,6 +110,11 @@ class ProfileBudget {
   }
 
   static int _tokenCost(String model, int input, int output) {
+    if (model == 'deepseek-flash') {
+      // Twice peak rates, no cache/off-peak discount; verified 2026-10-29:
+      // https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
+      return (input * 2 + output * 8) * 2;
+    }
     final rate = model == 'qwen3-vl-plus'
         ? (input <= 32000
               ? 100
@@ -106,9 +131,10 @@ class ProfileBudget {
 
   Future<ProfileReservation> reserve(
     ModelConfiguration model,
-    List<Map<String, dynamic>> messages,
-  ) => _serialize(() async {
-    final cost = requestCost(model, messages);
+    List<Map<String, dynamic>> messages, {
+    bool jsonObject = false,
+  }) => _serialize(() async {
+    final cost = requestCost(model, messages, jsonObject: jsonObject);
     final ledger = await _read();
     final spent = ledger['reserved_microyuan'] as int;
     reservedMicroyuan = spent;
@@ -190,7 +216,11 @@ class ProfileBudget {
           entry is! Map ||
           entry['cost'] is! int ||
           (entry['cost'] as int) <= 0 ||
-          !['qwen-flash', 'qwen3-vl-plus'].contains(entry['model'])) {
+          ![
+            'qwen-flash',
+            'qwen3-vl-plus',
+            'deepseek-flash',
+          ].contains(entry['model'])) {
         throw const AgentFailure('profile_budget_unavailable');
       }
       total += entry['cost'] as int;

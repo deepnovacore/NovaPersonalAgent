@@ -6,7 +6,7 @@ import {test} from 'node:test'
 
 import {buildAssembly, buildModelRouteGateway} from '../src/composition/assembly.js'
 import {buildTextRealtimeAssembly, cascadedProviderRegistries} from '../src/composition/cascaded-realtime-assembly.js'
-import {loadSettings, resolveModelRoute, settingsSchema, type Settings} from '../src/config/config.js'
+import {loadSettings, resolveMemoryExtractionConnection, resolveModelRoute, settingsSchema, type Settings} from '../src/config/config.js'
 import {VirtualClock} from '../src/core/clock.js'
 import {unconfiguredModelGateway, type ModelGateway} from '../src/model/model-gateway.js'
 import {ResponsesModelGateway} from '../src/model/responses-model-gateway.js'
@@ -18,7 +18,6 @@ function settings(overrides: Record<string, unknown> = {}): Settings {
   return settingsSchema.parse({
     executors: [],
     tavily_api_key: 'tavily-key',
-    model_api_key: 'legacy-key',
     ...overrides,
   })
 }
@@ -193,4 +192,66 @@ test('cascaded support composition never rewrites explicitly routed lane models'
   } finally {
     await rm(directory, {recursive: true, force: true})
   }
+})
+
+test('a fast route never retargets the unrouted support lane', async () => {
+  const calls: {url: string; model: string; authorization: string}[] = []
+  const previous = globalThis.fetch
+  globalThis.fetch = (input, init) => {
+    const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {model?: string}
+    calls.push({
+      url: typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+      model: body.model ?? '',
+      authorization: new Headers(init?.headers).get('authorization') ?? '',
+    })
+    return Promise.resolve(new Response(JSON.stringify({choices: [{message: {content: '{}'}}]}), {status: 200}))
+  }
+  const configured = (textProvider: 'deepseek' | 'qwen', fastProvider: 'deepseek' | 'qwen') => loadSettings({
+    PIPELINE_MODE: 'cascaded',
+    CASCADE_LLM_PROVIDER: textProvider,
+    MODEL_ROUTES: JSON.stringify({fast: {
+      provider: fastProvider,
+      model: fastProvider === 'qwen' ? 'qwen-flash' : 'deepseek-flash',
+    }}),
+    DASHSCOPE_API_KEY: 'dash-key',
+    DEEPSEEK_API_KEY: 'deepseek-key',
+    TAVILY_API_KEY: 'search-key',
+    MEMORY_CONNECTION: 'disabled',
+    CAMERA_MODULE_ENABLED: 'false',
+  })
+  try {
+    const deepseekText = buildAssembly({settings: configured('deepseek', 'qwen'), clock, metrics})
+    await deepseekText.supportGateway.complete({model: deepseekText.settings.support_model, system: 's', prompt: 'p'})
+    assert.deepEqual(calls.pop(), {
+      url: 'https://api.deepseek.com/chat/completions',
+      model: 'deepseek-flash',
+      authorization: 'Bearer deepseek-key',
+    })
+    const extraction = resolveMemoryExtractionConnection(deepseekText.settings)
+    assert.deepEqual([extraction.baseUrl, extraction.apiKey, extraction.model], [
+      'https://dashscope.aliyuncs.com/compatible-mode/v1', 'dash-key', 'qwen-flash',
+    ])
+
+    const qwenText = buildAssembly({settings: configured('qwen', 'deepseek'), clock, metrics})
+    await qwenText.supportGateway.complete({model: qwenText.settings.support_model, system: 's', prompt: 'p'})
+    assert.deepEqual(calls.pop(), {
+      url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+      model: 'qwen-flash',
+      authorization: 'Bearer dash-key',
+    })
+    const reverseExtraction = resolveMemoryExtractionConnection(qwenText.settings)
+    assert.deepEqual([reverseExtraction.baseUrl, reverseExtraction.apiKey, reverseExtraction.model], [
+      'https://api.deepseek.com', 'deepseek-key', 'deepseek-flash',
+    ])
+  } finally {
+    globalThis.fetch = previous
+  }
+  assert.throws(() => buildAssembly({settings: loadSettings({
+    PIPELINE_MODE: 'cascaded',
+    CASCADE_LLM_PROVIDER: 'deepseek',
+    MODEL_ROUTES: JSON.stringify({fast: {provider: 'qwen', model: 'qwen-flash'}}),
+    DASHSCOPE_API_KEY: 'dash-only',
+    TAVILY_API_KEY: 'search-key',
+    MEMORY_CONNECTION: 'disabled',
+  }), clock, metrics}), /DEEPSEEK_API_KEY/u)
 })

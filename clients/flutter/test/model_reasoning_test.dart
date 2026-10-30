@@ -4,6 +4,63 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 
 void main() {
+  test(
+    'structured background requests opt into official JSON mode without changing chat',
+    () {
+      final ds = ModelConfiguration(
+        endpoint: 'https://api.deepseek.com/v1',
+        model: 'deepseek-flash',
+        key: 'synthetic',
+      );
+      final input = <Map<String, dynamic>>[
+        {'role': 'user', 'content': '只返回 JSON 对象'},
+      ];
+      final body = modelRequestBody(
+        ds,
+        input,
+        [],
+        disableThinking: true,
+        jsonObject: true,
+        includeUsage: true,
+      );
+      expect(body['response_format'], {'type': 'json_object'});
+      expect(body['stream_options'], {'include_usage': true});
+      expect(body['thinking'], {'type': 'disabled'});
+      expect(body['max_tokens'], 12000);
+      expect(
+        modelRequestBody(ds, input, []).containsKey('response_format'),
+        false,
+      );
+      expect(
+        modelRequestBody(ds, input, []).containsKey('stream_options'),
+        false,
+      );
+      final remote = ModelConfiguration(
+        endpoint: 'https://example.com/v1',
+        model: 'deepseek-flash',
+        key: 'synthetic',
+      );
+      expect(
+        modelRequestBody(
+          remote,
+          input,
+          [],
+          disableThinking: true,
+          jsonObject: true,
+        ).containsKey('response_format'),
+        false,
+      );
+      expect(
+        modelRequestBody(
+          ds,
+          input,
+          [],
+          jsonObject: true,
+        ).containsKey('response_format'),
+        false,
+      );
+    },
+  );
   final deepseek = ModelConfiguration(
     endpoint: 'https://api.deepseek.com/v1',
     model: 'deepseek-reasoner',

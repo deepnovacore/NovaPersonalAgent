@@ -5,6 +5,37 @@ import 'package:nova_mobile/context/profile_budget.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  test(
+    'structured reservation prices the identical JSON and usage wire payload',
+    () async {
+      final ds = ModelConfiguration(
+        endpoint: 'https://api.deepseek.com/v1',
+        model: 'deepseek-flash',
+        key: 'synthetic',
+      );
+      final input = <Map<String, dynamic>>[
+        {'role': 'user', 'content': '输出 JSON 对象'},
+      ];
+      final body = modelRequestBody(
+        ds,
+        input,
+        [],
+        disableThinking: true,
+        jsonObject: true,
+        includeUsage: true,
+      );
+      final inputBound =
+          utf8.encode(jsonEncode(body)).length + 4096 + input.length * 128;
+      final expected = (inputBound * 2 + (body['max_tokens'] as int) * 8) * 2;
+      expect(ProfileBudget.requestCost(ds, input, jsonObject: true), expected);
+      expect(expected, greaterThan(ProfileBudget.requestCost(ds, input)));
+      final disk = MemoryLifePersistence();
+      final budget = ProfileBudget(disk);
+      await budget.reserve(ds, input, jsonObject: true);
+      expect(budget.reservedMicroyuan, expected);
+      expect(jsonDecode(disk.value!)['reserved_microyuan'], expected);
+    },
+  );
   final model = ModelConfiguration(
     endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-flash',
@@ -14,6 +45,49 @@ void main() {
     {'role': 'system', 'content': '输出 JSON'},
     {'role': 'user', 'content': '核对原文'},
   ];
+  test(
+    'DeepSeek Flash official-only budget uses twice peak rates and settles once',
+    () async {
+      final ds = ModelConfiguration(
+        endpoint: 'https://api.deepseek.com',
+        model: 'deepseek-flash',
+        key: 'synthetic',
+      );
+      final cost = ProfileBudget.requestCost(ds, messages);
+      expect(cost, greaterThan(12000 * 8 * 2));
+      final disk = MemoryLifePersistence();
+      final budget = ProfileBudget(disk);
+      final ticket = await budget.reserve(ds, messages);
+      expect(budget.reservedMicroyuan, cost);
+      const usage = CompletedModelUsage(
+        responseId: 'ds-completed',
+        model: 'deepseek-flash',
+        promptTokens: 1000,
+        completionTokens: 100,
+      );
+      await budget.settle(ticket, usage);
+      expect(budget.reservedMicroyuan, 5600);
+      await budget.settle(ticket, usage);
+      expect(budget.reservedMicroyuan, 5600);
+      for (final invalid in [
+        ModelConfiguration(
+          endpoint: 'https://other.example/v1',
+          model: 'deepseek-flash',
+          key: 'synthetic',
+        ),
+        ModelConfiguration(
+          endpoint: ds.endpoint,
+          model: 'deepseek-v4-pro',
+          key: 'synthetic',
+        ),
+      ]) {
+        expect(
+          () => ProfileBudget.requestCost(invalid, messages),
+          throwsA(isA<AgentFailure>()),
+        );
+      }
+    },
+  );
   final vision = ModelConfiguration(
     endpoint: model.endpoint,
     model: 'qwen3-vl-plus',
@@ -24,9 +98,19 @@ void main() {
       {'role': 'user', 'content': ''},
     ];
     final overhead =
-        utf8.encode(
-          jsonEncode(modelRequestBody(vision, empty, [], disableThinking: true)),
-        ).length +
+        utf8
+            .encode(
+              jsonEncode(
+                modelRequestBody(
+                  vision,
+                  empty,
+                  [],
+                  disableThinking: true,
+                  includeUsage: true,
+                ),
+              ),
+            )
+            .length +
         4096 +
         128;
     return [

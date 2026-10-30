@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 import 'package:nova_mobile/agent_core/tool_registry.dart';
+import 'package:nova_mobile/ui/tool_step.dart';
 import 'package:nova_mobile/personal/life_reducer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -294,6 +295,88 @@ void main() {
       expect(find.text('操作返回结果'), findsNothing);
       expect(find.text('已搜索今天天气。', findRichText: true), findsOneWidget);
       expect(store.conversation(id)['messages'], hasLength(4));
+    },
+  );
+
+  testWidgets(
+    'adjacent tools combine across empty envelopes but preserve visible and user boundaries',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      Future<void> tool(String name, String status, [String? path]) =>
+          store.append(id, {
+            'role': 'tool',
+            'tool_name': name,
+            'content': jsonEncode({
+              'status': status,
+              'data': {
+                'path': path,
+                'type': 'file',
+                'content': 'private receipt',
+              },
+            }),
+          });
+      await store.append(id, {'role': 'user', 'content': 'First turn'});
+      await tool('file_read', 'completed', '/workspace/a');
+      await store.append(id, {
+        'role': 'assistant',
+        'content': '',
+        'tool_calls': [],
+      });
+      await tool('file_read', 'completed', '/workspace/a');
+      await tool('file_read', 'failed', '/workspace/b');
+      await store.append(id, {
+        'role': 'assistant',
+        'content': '',
+        'reasoning_content': 'Check next step',
+      });
+      await tool('file_edit', 'completed');
+      await store.append(id, {
+        'role': 'assistant',
+        'content': 'Visible explanation',
+      });
+      await tool('shell_execute', 'outcome_unknown');
+      await store.append(id, {'role': 'user', 'content': 'Second turn'});
+      await tool('web_fetch', 'completed');
+      final original = jsonEncode(store.conversation(id)['messages']);
+      final host = AgentCoreHost(store: store, settings: ModelSettings());
+      addTearDown(host.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(host: host, conversationId: id),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final groups = tester
+          .widgetList<ToolStepGroup>(find.byType(ToolStepGroup))
+          .toList();
+      expect(
+        groups.map((group) => group.steps.map((step) => step.name).toList()),
+        [
+          ['file_read', 'file_read', 'file_read'],
+          ['file_edit'],
+          ['shell_execute'],
+          ['web_fetch'],
+        ],
+      );
+      expect(find.text('查看了 1 个文件 · 3 次工具调用 · 有未完成或待核实'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Check next step')).dy,
+        lessThan(
+          tester
+              .getTopLeft(find.text('Visible explanation', findRichText: true))
+              .dy,
+        ),
+      );
+      expect(find.textContaining('private receipt'), findsNothing);
+      expect(jsonEncode(store.conversation(id)['messages']), original);
     },
   );
 
