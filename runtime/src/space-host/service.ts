@@ -28,7 +28,7 @@ const ADMIN_KINDS=new Set(['settings.patch','secret.put','secret.clear','connect
 const SECRET_KINDS=new Set<SpaceIntent['kind']>(['secret.put','secret.clear']);
 const fingerprint=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 export class SpaceHost {
- readonly #store;#state:Journal;#raw=new Map<string,string>();#tail:Promise<unknown>=Promise.resolve();#stop:(()=>void|Promise<void>)|undefined;#unsubscribe:(()=>void)|undefined;#chats=new Map<string,Promise<void>>();#flush:Promise<void>|undefined;#opened=false;#snapshotTimer:ReturnType<typeof setTimeout>|undefined;#secretKey:string|undefined;
+ readonly #store;#state:Journal;#raw=new Map<string,string>();#tail:Promise<unknown>=Promise.resolve();#stop:(()=>void|Promise<void>)|undefined;#unsubscribe:(()=>void)|undefined;#chats=new Map<string,Promise<void>>();#feishuPolls=new Map<string,{abort:AbortController;task:Promise<void>}>();#flush:Promise<void>|undefined;#opened=false;#snapshotTimer:ReturnType<typeof setTimeout>|undefined;#secretKey:string|undefined;
 /** `feishuPollMs` is the interval between Feishu app-setup status polls and `feishuSetupTimeoutMs` bounds them to the connector's 300s config operation, so a link that appears late still reaches the phone. */
  constructor(readonly options:{path:string;space:string;host:PersonalAgentHost;transport:SpaceHostTransport;push?:SpacePushDelivery;owner?:()=>string|undefined;secrets?:HostSecretStore;feishuPollMs?:number;feishuSetupTimeoutMs?:number;environment?:NodeJS.ProcessEnv;now?:()=>number;onError?:(error:unknown)=>void}){this.#store=new BoundedJsonStore(options.path,journalSchema,32*1024*1024);this.#state={version:1,space:options.space,cursor:0,projection_revision:0,ops:{},remaps:{},outbox:[],push_outbox:[],actions:{}}}
  #now(){return this.options.now?.()??Date.now()}
@@ -108,22 +108,39 @@ export class SpaceHost {
     }
    }catch(error){if(authorityCommitted)throw error;const code=error instanceof Error?error.message:'invalid_intent';await this.#record(sender,intent,hash,{status:code==='version_conflict'?'conflict':'rejected',error:code.slice(0,128),...(code==='version_conflict'?{snapshot:this.snapshot(sender)}:{})})}
   });
-  if(pollSetup)void this.#pollFeishuSetup(sender).catch(error=>this.options.onError?.(error));
+  if(pollSetup)this.#startFeishuPoll(sender);
   if(startChat){const run=this.#runChat(key);this.#chats.set(key,run);void run.catch(error=>this.options.onError?.(error)).finally(()=>this.#chats.delete(key))}
   await this.flush();
  }
+ /** One cancellable task per owner: a repeated app.start replaces nothing and must not add another polling chain. */
+ #startFeishuPoll(owner:string){
+  if(!this.#opened||this.#feishuPolls.has(owner))return;
+  const abort=new AbortController();
+  const task=this.#pollFeishuSetup(owner,abort.signal).catch(error=>{if(!abort.signal.aborted&&this.#opened)this.options.onError?.(error)}).finally(()=>{if(this.#feishuPolls.get(owner)?.abort===abort)this.#feishuPolls.delete(owner)});
+  this.#feishuPolls.set(owner,{abort,task});
+ }
+ #sleep(ms:number,signal:AbortSignal):Promise<void>{
+  return new Promise<void>(resolve=>{
+   if(signal.aborted)return resolve();
+   const wake=()=>{clearTimeout(timer);resolve()};
+   const timer=setTimeout(()=>{signal.removeEventListener('abort',wake);resolve()},ms);timer.unref();
+   signal.addEventListener('abort',wake,{once:true});
+  })
+ }
  /** The setup link appears only after lark-cli starts; the connector strips it from published snapshots, so fetch it once for the owner. The connector allows 300s for the config operation, so poll while it is still waiting; a status call that fails transiently is retried instead of dropping the link. */
- async #pollFeishuSetup(owner:string){
+ async #pollFeishuSetup(owner:string,signal:AbortSignal){
   const deadline=Date.now()+(this.options.feishuSetupTimeoutMs??300_000);let failures=0;
-  while(this.#opened&&Date.now()<deadline){
-   await new Promise(resolve=>setTimeout(resolve,this.options.feishuPollMs??1000));
-   if(!this.#opened)return;
+  while(this.#opened&&!signal.aborted&&Date.now()<deadline){
+   await this.#sleep(this.options.feishuPollMs??1000,signal);
+   // Every await can outlive close: re-check before touching the host or publishing.
+   if(!this.#opened||signal.aborted)return;
    const result=await this.options.host.command({type:'personal.command',request_id:'space-feishu-setup-'+randomUUID(),method:'feishu.app.status',params:{}},{client_id:'space:'+owner}).catch(()=>undefined) as {ok:boolean;data?:unknown}|undefined;
+   if(!this.#opened||signal.aborted)return;
    if(!result?.ok){if(++failures>=3)return;continue}
    failures=0;
    const view=feishuView(result.data),url=(view.app_setup as {verification_url?:string}|undefined)?.verification_url;
    if(view.app_setup?.state!=='waiting')return;
-   if(url){this.#setupUrl=url;if(this.#hostAdmin(owner))await this.publishSnapshot(owner);return}
+   if(url){this.#setupUrl=url;if(this.#hostAdmin(owner)&&this.#opened&&!signal.aborted)await this.publishSnapshot(owner);return}
   }
  }
  async #record(sender:string,intent:SpaceIntent,hash:string,value:BusinessMessage){const receipt={v:1,type:'receipt',op_id:intent.op_id,...value};const key=this.#key(sender,intent.op_id),projection=value.status==='accepted'&&['life.mutate','card.dismiss','source.input','snapshot.request','settings.patch','secret.put','secret.clear','connector.feishu'].includes(intent.kind)?this.snapshot(sender):undefined;this.#enqueue(sender,receipt,'receipt-'+key);if(projection)this.#enqueue(sender,{v:1,type:'snapshot',snapshot:projection},'snapshot-'+key);this.#state.ops[key]={...this.#state.ops[key]!,hash,intent:this.#journalIntent(intent),sender,receipt};await this.#save()}
@@ -148,5 +165,5 @@ export class SpaceHost {
  async requestMobileAction(device:string,action:unknown,ttlMs=60000,providedId?:string){if(!this.options.transport.clients().includes(device))throw Error('client_not_paired');if(ttlMs<=0||ttlMs>60000)throw Error('invalid_action_deadline');const parsed=mobileActionSchema.parse(action),action_id=providedId??randomUUID(),body={v:1,type:'mobile.action',action_id,...parsed,expires_at:this.#now()+ttlMs};await this.#serial(async()=>{const prior=this.#state.actions[action_id];if(prior){if(prior.device!==device||fingerprint({tool:prior.body.tool,args:prior.body.args})!==fingerprint(parsed))throw Error('action_id_conflict');return}this.#state.actions[action_id]={device,body,result:null};this.#enqueue(device,body,'action-'+action_id);await this.#save()});await this.flush();return {action_id}}
  mobileResult(actionId:string){return structuredClone(this.#state.actions[actionId]?.result??null)}
  flush():Promise<void>{if(this.#flush)return this.#flush;const run=(async()=>{while(this.#opened){let progress=false;for(const next of [...this.#state.outbox]){try{await this.options.transport.send(next.to,next.body,next.id)}catch(error){this.options.onError?.(error);continue}await this.#serial(async()=>{this.#state.outbox=this.#state.outbox.filter(row=>row.id!==next.id||row.to!==next.to);await this.#save()});await this.options.transport.settle?.(next.id);progress=true}await this.#flushPush();if(!progress||!this.#state.outbox.length)return}})();this.#flush=run.finally(()=>{this.#flush=undefined});return this.#flush}
- async close(){this.#opened=false;for(const op of Object.values(this.#state.ops))if(op.chat_status==='admitted')await this.options.host.cancelSpaceChat(displayText(op.intent.input.conversation_id,'chat:main'));await this.waitForChats();if(this.#snapshotTimer)clearTimeout(this.#snapshotTimer);this.#snapshotTimer=undefined;this.#unsubscribe?.();await this.#stop?.();await this.#flush;await this.#serial(()=>this.#save());await this.#tail}
+ async close(){this.#opened=false;const polls=[...this.#feishuPolls.values()];for(const poll of polls)poll.abort.abort();await Promise.all(polls.map(poll=>poll.task.catch(()=>undefined)));for(const op of Object.values(this.#state.ops))if(op.chat_status==='admitted')await this.options.host.cancelSpaceChat(displayText(op.intent.input.conversation_id,'chat:main'));await this.waitForChats();if(this.#snapshotTimer)clearTimeout(this.#snapshotTimer);this.#snapshotTimer=undefined;this.#unsubscribe?.();await this.#stop?.();await this.#flush;await this.#serial(()=>this.#save());await this.#tail}
 }

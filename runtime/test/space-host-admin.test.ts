@@ -11,14 +11,14 @@ import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets,secretClearSchema,secretPutSchema} from '../src/space-host/host-admin.js';
 import {environmentContract} from '../src/config/environment-contract.js';
 
-async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown}={}){
+async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown;feishuPollMs?:number}={}){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-admin-')),sent:Record<string,unknown>[]=[];const calls:string[]=[];
  const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone','other']};
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>options.memory as never,pool:new SuggestionPool(),evidence:()=>null});
  if(options.feishu)host.setFeishu({snapshot:()=>({available:true,configured:true,state:'unauthorized',auth_issue:'login_required',account_id:'tenant-secret',app_setup:{state:'idle'}}),command:(method)=>{calls.push(method);return Promise.resolve({available:true,configured:true,state:'unauthorized',account_id:'tenant-secret',verification_url:method==='feishu.login'?'https://accounts.feishu.cn/device?code=x':'https://evil.example/x',chats:[]})},open:()=>Promise.resolve(),close:()=>Promise.resolve()});
  if(options.feishuConnector)host.setFeishu(options.feishuConnector);
  const secrets=new HostSecretStore(join(dir,'config.json.secrets.json')),env=options.env??{};
- const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>options.owner,secrets,environment:env,feishuPollMs:10});
+ const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>options.owner,secrets,environment:env,feishuPollMs:options.feishuPollMs??10});
  await host.open({deferBackground:true});await space.open();
  const stamps=new Map<string,number>(),send=async(from:string,op_id:string,kind:string,input:Record<string,unknown>)=>{if(!stamps.has(op_id))stamps.set(op_id,Date.now());await space.receive(from,{v:1,type:'intent',op_id,kind,input,created_at:stamps.get(op_id)});return sent.filter(row=>row.type==='receipt'&&row.op_id===op_id).at(-1)!};
  return {dir,host,space,send,sent,calls,secrets,close:async()=>{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}};
@@ -163,6 +163,34 @@ test('Feishu app setup link generated after app.start reaches the owner snapshot
   for(let i=0;i<1500&&!f.sent.some(row=>row.type==='snapshot'&&JSON.stringify(row).includes('code=late'));i++)await new Promise(resolve=>setTimeout(resolve,10));
   assert.ok(polls>=2);const withLink=f.sent.filter(row=>row.type==='snapshot'&&JSON.stringify(row).includes(url)) as {snapshot:{host_feishu?:{app_setup:{verification_url:string}}}}[];assert.ok(withLink.length>0);for(const row of withLink)assert.equal(row.snapshot.host_feishu?.app_setup.verification_url,url);
  }finally{await f.close()}
+});
+
+test('repeated app.start keeps exactly one setup poll chain per owner',async()=>{
+ let polls=0;const view=()=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting'}});
+ // Status keeps answering "waiting", so every chain stays alive and the call rate reveals how many exist.
+ const f=await fixture({owner:'phone',feishuPollMs:20,feishuConnector:{snapshot:view,command:method=>method==='feishu.app.status'?(polls++,Promise.resolve(view())):Promise.resolve(view()),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ try{
+  for(const op of ['setup-a','setup-b','setup-c'])assert.equal((await f.send('phone',op,'connector.feishu',{action:'app.start'})).status,'accepted');
+  const start=polls;await new Promise(resolve=>setTimeout(resolve,250));const calls=polls-start;
+  assert.ok(calls<15,`three app.start intents must share one poll chain (${calls} status calls)`);
+ }finally{await f.close()}
+});
+
+test('close cancels an in-flight setup poll and does not publish its late snapshot',async()=>{
+ let polls=0,commandFinished=false,release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});
+ const url='https://open.feishu.cn/page/cli?code=after-close';
+ const view=(withUrl:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting',...(withUrl?{verification_url:url}:{})}});
+ const f=await fixture({owner:'phone',feishuConnector:{snapshot:()=>view(false),command:method=>method==='feishu.app.status'?(polls++,gate.then(()=>{commandFinished=true;return view(true)})):Promise.resolve(view(false)),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ try{
+  assert.equal((await f.send('phone','setup','connector.feishu',{action:'app.start'})).status,'accepted');
+  for(let i=0;i<200&&polls===0;i++)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(polls,1);
+  let published=0;const publish=f.space.publishSnapshot.bind(f.space);f.space.publishSnapshot=(async(...args:Parameters<typeof publish>)=>{published++;return publish(...args)});
+  const closing=f.space.close();release();await closing;
+  await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(commandFinished,true,'close must wait for the in-flight status call');
+  assert.equal(published,0,'a status call returning during close must not publish a snapshot');
+ }finally{release();await f.close()}
 });
 
 test('a Feishu setup link that appears long after app.start still reaches the owner',async()=>{
