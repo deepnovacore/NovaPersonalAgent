@@ -54,6 +54,7 @@ export async function runServerEntry(options: {
       } finally { await server.close() }
     }
     const {runDesktopEntry} = await import('./desktop/desktop-session.js')
+    const {describeStartupError} = await import('./desktop/startup-error.js')
     const aoq = config.mediaMode === 'aoq_runtime'
     const environment = options.environment ?? process.env
     const aoqModule = aoq ? await import('./server/aoq-chat-server.js') : undefined
@@ -67,6 +68,8 @@ export async function runServerEntry(options: {
     }
     return await runDesktopEntry({
       token: config.token, stop, onDiagnostic, listenBeforeRealtime: aoq,
+      // The failure code alone does not say which file or setting to fix; desktop prints the same redacted line.
+      onStartupFailure: error => { onDiagnostic(`[runtime-startup-error] ${describeStartupError(error)}`) },
       announce: (_endpoint, readiness) => {
         onDiagnostic(`[server-ready] ws://${readiness.host}:${readiness.port}/client/v1`)
         return Promise.resolve()

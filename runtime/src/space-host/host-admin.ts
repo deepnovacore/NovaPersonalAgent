@@ -34,7 +34,8 @@ export function overlaySpaceSecrets(environment:NodeJS.ProcessEnv,configPath:str
  if(!configPath)return environment;
  let text:string;try{text=readFileSync(spaceSecretsPath(configPath),'utf8')}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return environment;throw error}
  // BoundedJsonStore leaves an empty private file until the first write.
- if(!text)return environment;const parsed=fileSchema.parse(JSON.parse(text));
+ if(!text)return environment;let parsed:z.infer<typeof fileSchema>;
+ try{parsed=fileSchema.parse(JSON.parse(text))}catch{throw Error(`space_secrets_invalid: ${spaceSecretsPath(configPath)}`)}
  const next={...environment};for(const [name,value]of Object.entries(parsed.secrets))if(SPACE_SECRET_NAMES.includes(name)&&!environment[name]?.trim())next[name]=value;return next;
 }
 export function credentialsView(store:HostSecretStore|undefined,environment:NodeJS.ProcessEnv){

@@ -80,6 +80,13 @@ test('an untouched secrets file does not block the next Host start',async()=>{
  }finally{await f.close()}
 });
 
+test('a damaged secrets file stops startup with an error naming the file',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secrets-'));
+ try{for(const text of ['{','{"v":2,"secrets":{}}','\n']){await writeFile(join(dir,'config.json.secrets.json'),text,{mode:0o600});
+   assert.throws(()=>overlaySpaceSecrets({},join(dir,'config.json')),/space_secrets_invalid: .*config\.json\.secrets\.json/)}
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
+
 test('Feishu app setup link generated after app.start reaches the owner snapshot',async()=>{
  let polls=0;const url='https://open.feishu.cn/page/cli?code=late';
  const view=(withUrl:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting',...(withUrl?{verification_url:url}:{})}});
