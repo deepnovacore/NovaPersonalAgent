@@ -8,10 +8,10 @@ import {SuggestionPool} from '../src/core/suggestions.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets} from '../src/space-host/host-admin.js';
 
-async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0]}={}){
+async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown}={}){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-admin-')),sent:Record<string,unknown>[]=[];const calls:string[]=[];
  const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone','other']};
- const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>options.memory as never,pool:new SuggestionPool(),evidence:()=>null});
  if(options.feishu)host.setFeishu({snapshot:()=>({available:true,configured:true,state:'unauthorized',auth_issue:'login_required',account_id:'tenant-secret',app_setup:{state:'idle'}}),command:(method)=>{calls.push(method);return Promise.resolve({available:true,configured:true,state:'unauthorized',account_id:'tenant-secret',verification_url:method==='feishu.login'?'https://accounts.feishu.cn/device?code=x':'https://evil.example/x',chats:[]})},open:()=>Promise.resolve(),close:()=>Promise.resolve()});
  if(options.feishuConnector)host.setFeishu(options.feishuConnector);
  const secrets=new HostSecretStore(join(dir,'config.json.secrets.json')),env=options.env??{};
@@ -66,6 +66,11 @@ test('connector.feishu routes to host commands and exposes only validated, secre
   assert.equal((await f.send('phone','x','connector.feishu',{action:'bind'})).status,'rejected');
   const snap=f.space.snapshot('phone') as unknown as {host_feishu:Record<string,unknown>};assert.equal(snap.host_feishu.auth_issue,'login_required');assert.equal(JSON.stringify(snap).includes('tenant-secret'),false);
  }finally{await f.close()}
+});
+
+test('a stale role edit returns a conflict receipt so the phone can retry it',async()=>{
+ const f=await fixture({owner:'phone',memory:{setSoul:()=>Promise.reject(Error('stale'))}});
+ try{const r=await f.send('phone','soul','settings.patch',{method:'soul.set',params:{role:'x',expected_version:0}});assert.deepEqual([r.status,r.error],['conflict','version_conflict']);assert.ok(r.snapshot)}finally{await f.close()}
 });
 
 test('an untouched secrets file does not block the next Host start',async()=>{
