@@ -5,8 +5,13 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createFeishuRunner, FeishuAppNotConfigured, object, parseFeishuJson, type FeishuRun } from './cli.js';
 
-/** Transport-level causes the CLI wraps in verify_failed; a server rejection carries an HTTP or API error instead. */
-const FEISHU_TRANSPORT_FAILURE = /connection refused|connection reset|no such host|dial tcp|i\/o timeout|Client\.Timeout|context deadline exceeded|network is unreachable|proxyconnect|TLS handshake timeout|unexpected EOF/i;
+/**
+ * Only an explicit server-side rejection of the stored credential may invalidate a login. Every other verify failure is
+ * treated as temporarily unverifiable: a blocked network, a proxy returning an HTML page, a TLS, DNS or routing error
+ * and a bare EOF all look like failures, and a network-wording allow-list would silently log the user out on the one
+ * wording it does not know.
+ */
+const FEISHU_CREDENTIAL_REJECTION = /\b(?:401|403)\b|unauthorized|forbidden|invalid[ _-]?(?:app[ _-]?)?(?:access[ _-]?)?token|token[ _-]?(?:is[ _-]?)?(?:expired|invalid|revoked|not[ _-]?found)/i;
 export const FEISHU_SCOPES =['offline_access', 'im:chat:read', 'im:message:readonly', 'im:message.reactions:read'];
 export interface FeishuMessage {
   sender_type?:'user'|'app';
@@ -290,9 +295,10 @@ export class FeishuConnector {
     const priorIdentity=this.saved.outboundIdentity;
     // A blocked network makes the CLI report verify_failed while the stored token is still valid. That is
     // not a logout: keep the connection and consent, collect nothing, and resume once verification passes.
-    // verify_failed also covers a server rejecting the token, so only a transport error qualifies; any
-    // other message stays on the invalidation path below. Notification sends and callbacks stay fenced.
-    if (app && id && user.status === 'verify_failed' && user.tokenStatus !== 'expired' && FEISHU_TRANSPORT_FAILURE.test(str(user.message))) {
+    // Only an explicit server rejection of the credential takes the invalidation path below; an unknown failure
+    // wording is treated as temporarily unverifiable, so it can never silently clear the login.
+    // Notification sends and callbacks stay fenced either way.
+    if (app && id && user.status === 'verify_failed' && user.tokenStatus !== 'expired' && !FEISHU_CREDENTIAL_REJECTION.test(str(user.message))) {
       this.unverified = true; this.view.error = '飞书暂时无法验证登录，网络恢复后会自动继续';
       if (priorIdentity) this.saved.outboundIdentity = {...priorIdentity, valid: false};
       this.view.notification_ready = false;

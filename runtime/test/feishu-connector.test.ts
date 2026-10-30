@@ -161,6 +161,45 @@ test('a transient Feishu verification failure keeps the connection and resumes b
   }finally{await connector.close();await rm(directory,{recursive:true,force:true})}
 });
 
+test('a verify failure with an unknown wording keeps the Feishu login; only an explicit server rejection invalidates it', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-wording-'));
+  let message='';
+  const connector=new FeishuConnector({executable:'unused',credentialRoot:directory,statePath:join(directory,'state.json'),ingest:()=>Promise.resolve(),deleteSource:()=>Promise.resolve(),onAction:()=>Promise.resolve(),
+    run:async(args)=>{
+      await Promise.resolve();
+      if(args[0]==='--version')return 'lark-cli 1.0.69';
+      if(args[1]==='status')return JSON.stringify({appId:'cli_fixture',...(message?'':{verified:true}),identities:{user:message
+        ?{openId:'ou_fixture',status:'verify_failed',available:false,verified:false,tokenStatus:'valid',message}
+        :{openId:'ou_fixture',status:'authenticated',available:true,verified:true,tokenStatus:'valid',scope:FEISHU_SCOPES.join(' ')}}});
+      if(args[1]==='login'&&args.includes('--no-wait'))return JSON.stringify({verification_url:'https://accounts.feishu.cn/device',device_code:'fixture-code',expires_in:900});
+      if(args[1]==='login')return '{}';
+      if(args[1]==='+chat-list')return JSON.stringify({data:{items:[{chat_id:'oc_selected',name:'项目'}],has_more:false}});
+      return '{}';
+    }});
+  const saved=async()=>JSON.parse(await readFile(join(directory,'state.json'),'utf8')) as {connected:boolean};
+  try{
+    await connector.open();await connector.beginLogin();await connector.completeLogin();await connector.listChats();await connector.configure(['oc_selected'],true);
+    assert.equal(connector.snapshot().state,'ready');
+    // Every wording a verify failure can take without a server rejection: routing, DNS, TLS, a bare EOF, a proxy that
+    // answered with HTML, a local socket denied by the OS, and one the CLI has never printed before. None of them
+    // proves the token was rejected.
+    for(const wording of ['no route to host','Temporary failure in name resolution','x509: certificate signed by unknown authority','EOF',
+      `invalid character '<' looking for beginning of value`,'dial tcp 127.0.0.1:1: connect: permission denied','something the CLI has never printed before']){
+      message='User identity: verify failed: server rejected token: '+wording;
+      const status=await connector.command('feishu.status');
+      assert.notEqual(status.state,'unauthorized',wording);
+      assert.equal((status as unknown as {auth_issue?:string}).auth_issue,undefined,wording);
+      assert.equal(status.notification_ready,false,wording);
+      assert.equal((await saved()).connected,true,wording);
+      message='';await connector.command('feishu.status');assert.equal(connector.snapshot().state,'ready',wording);
+    }
+    message='User identity: verify failed: server rejected token: HTTP 403 forbidden';
+    const rejected=await connector.command('feishu.status');
+    assert.equal(rejected.state,'unauthorized');assert.equal((rejected as unknown as {auth_issue:string}).auth_issue,'login_required');
+    assert.equal((await saved()).connected,false,'an explicit server rejection still logs the user out');
+  }finally{await connector.close();await rm(directory,{recursive:true,force:true})}
+});
+
 test('verified automatic token refresh does not require another Feishu login', async () => {
   const directory=await mkdtemp(join(tmpdir(),'nova-feishu-refresh-'));
   const connector=new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:(args)=>Promise.resolve(args[0]==='--version'?'1.0.97':JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{openId:'ou_fixture',status:'needs_refresh',available:true,verified:true,tokenStatus:'needs_refresh',scope:FEISHU_SCOPES.join(' ')}}}))});
