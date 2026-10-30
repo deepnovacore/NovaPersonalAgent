@@ -214,6 +214,8 @@ async function responseAdaptationFor(
 
 export interface RealtimeAssemblyOptions {
   readonly spaceHostConfigPath?:string
+  /** Environment the Space owner credential projection must read; defaults to the Host process environment. */
+  readonly spaceHostEnvironment?:NodeJS.ProcessEnv
   readonly usageContext?: UsageContext
   readonly conversationContext?:()=>Promise<string|null>
   readonly suppressMemoryAdaptation?:boolean
@@ -306,6 +308,7 @@ export class RealtimeAssembly {
   readonly #sharedPersonal: boolean
   #spaceHostPrepared=false
   readonly #spaceHostConfigPath:string|undefined
+  readonly #spaceHostEnvironment:NodeJS.ProcessEnv|undefined
   readonly #unsubscribePersonalEvents: () => void
   readonly #onDiagnostic: (line: string) => void
   readonly #projectAdapter: ProjectExecutorAdapter | undefined
@@ -368,6 +371,7 @@ export class RealtimeAssembly {
   readonly onTool?: (event:{name:string;state:'running'|'ok'|'error';summary:string})=>void
     readonly personalMemory?: PersonalMemoryResource
     readonly spaceHostConfigPath?:string
+    readonly spaceHostEnvironment?:NodeJS.ProcessEnv
     readonly createPersonalMemory?: () => PersonalMemoryResource
     readonly memoryConsumerFingerprint?:string
     readonly personalMemoryTurnTracker: PersonalMemoryTurnTracker
@@ -391,6 +395,7 @@ export class RealtimeAssembly {
     this.#unbindSuggestionSelected = input.unbindSuggestionSelected
     this.#sharedPersonal = input.sharedPersonal !== undefined
     this.#spaceHostConfigPath=input.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
+    this.#spaceHostEnvironment=input.spaceHostEnvironment
     const spaceConfig=this.#spaceHostConfigPath?readHostSpaceConfig(memoryPath(this.#spaceHostConfigPath)):undefined
     this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
       ...((spaceConfig?.personal_path??input.core.personalAgentConfig?.path)?{readingCopiesDirectory:dirname(memoryPath(spaceConfig?.personal_path??input.core.personalAgentConfig!.path))}:{}),
@@ -557,7 +562,7 @@ export class RealtimeAssembly {
         this.#acceptProjectContext(context)
       }
       await this.core.start()
-      if(!this.#sharedPersonal&&!this.#spaceHostPrepared&&this.#spaceHostConfigPath){this.personalAgent.setSpaceHost(await loadSpaceHostController(this.personalAgent,memoryPath(this.#spaceHostConfigPath)));this.#spaceHostPrepared=true}
+      if(!this.#sharedPersonal&&!this.#spaceHostPrepared&&this.#spaceHostConfigPath){this.personalAgent.setSpaceHost(await loadSpaceHostController(this.personalAgent,memoryPath(this.#spaceHostConfigPath),this.#spaceHostEnvironment));this.#spaceHostPrepared=true}
       if (!this.#sharedPersonal) await this.personalAgent.open({deferBackground:true})
     } catch (error) {
       if (this.#state === 'starting') {
@@ -1496,6 +1501,7 @@ export function composeRealtime(
     idFactory: options.idFactory,
     ...providerTuning,
     ...(spaceConfigPath?{spaceHostConfigPath:spaceConfigPath}:{}),
+    ...(options.spaceHostEnvironment===undefined?{}:{spaceHostEnvironment:options.spaceHostEnvironment}),
     ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     ...(options.providerToolView === undefined
       ? {}

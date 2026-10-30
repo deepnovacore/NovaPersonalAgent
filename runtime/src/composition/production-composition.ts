@@ -201,6 +201,8 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       })
       const realtimeOptions: BuildProductionRealtimeAssemblyOptions = {
         ...(spaceConfigPath?{spaceHostConfigPath:spaceConfigPath}:{}),
+        // The Space owner projection must read the same environment the operator passed, not the process default.
+        spaceHostEnvironment: environment,
         includeSpaceMobile:!!spaceConfig,
         textOnly:!remote,
         nextPlaybackGeneration,

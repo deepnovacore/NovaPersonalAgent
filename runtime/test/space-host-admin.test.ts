@@ -43,7 +43,7 @@ test('settings.patch runs allowlisted host methods only and snapshot projects th
  }finally{await f.close()}
 });
 
-test('the writable secret list is an explicit allowlist of contract secrets',async()=>{
+test('the writable secret list is an explicit allowlist of contract secrets',()=>{
  const secretNames=environmentContract.filter(row=>row.secret).map(row=>row.name);
  for(const name of SPACE_SECRET_NAMES){assert.ok(secretNames.includes(name),`${name} is not a contract secret`);assert.equal(secretPutSchema.safeParse({name,value:'x'}).success,true,name)}
  // A secret added to the contract later stays Host-only until someone reviews and lists it.
