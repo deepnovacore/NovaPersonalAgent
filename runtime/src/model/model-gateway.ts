@@ -32,6 +32,8 @@ export type GatewayDelta = GatewayTextDelta | GatewayToolCallDelta
 
 export interface GatewayCompletion {
   readonly text: string
+  /** The provider's stop reason when the transport reports one, so a caller can tell a cut-off reply from a malformed one. */
+  readonly finish_reason?: string | null
 }
 
 export interface GatewayImage {
@@ -357,7 +359,7 @@ export class OpenAIModelGateway implements ModelGateway {
       }
       const choice = payload.choices[0]!
       finishReason = choice.finish_reason ?? null
-      return {text: choice.message.content ?? ''}
+      return {text: choice.message.content ?? '', finish_reason: finishReason}
     } catch (error) {
       errorType = classify(error)
       throw new GatewayError(errorType)

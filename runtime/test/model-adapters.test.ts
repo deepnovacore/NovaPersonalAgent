@@ -531,6 +531,39 @@ test('a profile review that comes back empty under reasoning is retried without 
  assert.ok((reviews[0]!.maxTokens??0)>=8192,'the first review leaves room for an answer after its reasoning')
 })
 
+test('a profile reply cut off anywhere is retried without reasoning, not treated as a malformed answer',async()=>{
+ // JSON.parse wording depends on V8 and on where the token cap stopped the text, so the cut is detected from the
+ // answer's shape rather than a message prefix: mid-string, after a comma, and mid-array are all the same cause.
+ for(const cut of ['{"review_notes":["尚未完成','{"review_notes":["已核对标题",','{"review_notes":[']){
+  const reviews:CompleteRequest[]=[];const inner=profileFixtureGateway(()=>profileProse('你在设计语音助手。',['e0']))
+  const gateway={complete:(request:CompleteRequest)=>{
+   if(!request.system.includes('独立审查整份画像草稿'))return inner.complete(request)
+   reviews.push(request)
+   return Promise.resolve({text:reviews.length===1&&request.reasoning==='enabled'?cut:JSON.stringify({review_notes:[]})})
+  }} as unknown as ModelGateway
+  const original={id:'source:'+('a'.repeat(64)),version:'b'.repeat(64),content:'我在设计语音助手',origin:'stated' as const}
+  const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([original],new AbortController().signal)
+  assert.equal(result.about?.text,'你在设计语音助手。',cut)
+  assert.equal(reviews.length,2,cut);assert.equal(reviews[1]!.reasoning,'disabled',cut)
+ }
+})
+
+test('a profile reply stopped at the token cap is retried without reasoning even when the surviving text still parses',async()=>{
+ // A length stop is authoritative even when the fragment happens to be valid JSON of the wrong shape.
+ const reviews:CompleteRequest[]=[];const inner=profileFixtureGateway(()=>profileProse('你在设计语音助手。',['e0']))
+ const gateway={complete:(request:CompleteRequest)=>{
+  if(!request.system.includes('独立审查整份画像草稿'))return inner.complete(request)
+  reviews.push(request)
+  return Promise.resolve(reviews.length===1
+   ?{text:JSON.stringify({review_notes:'被截断的一半'}),finish_reason:'length'}
+   :{text:JSON.stringify({review_notes:[]}),finish_reason:'stop'})
+ }} as unknown as ModelGateway
+ const original={id:'source:'+('a'.repeat(64)),version:'b'.repeat(64),content:'我在设计语音助手',origin:'stated' as const}
+ const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([original],new AbortController().signal)
+ assert.equal(result.about?.text,'你在设计语音助手。')
+ assert.equal(reviews.length,2);assert.equal(reviews[1]!.reasoning,'disabled')
+})
+
 test('Profile carries time, author, recipients and reply links while screening explicit credentials',async()=>{
  const requests:CompleteRequest[]=[];const gateway=profileFixtureGateway(request=>{requests.push(request);return profileProse('你考虑请同事协助部署。',['e0'])},request=>{requests.push(request);return (JSON.parse(request.prompt) as {profile:ProfileProse}).profile})
  await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([{id:'msg',version:1,origin:'inferred',content:'@Alex请协助部署。 password=test-only-secret',observed_at:'2026-10-10T00:00:00Z',source:{kind:'im',project:'IM',document:'消息',sender_id:'self',sender_name:'Self',relation:'self',thread_id:'thread',message_id:'message',parent_id:'outside',mention_ids:['alex']}}],new AbortController().signal)

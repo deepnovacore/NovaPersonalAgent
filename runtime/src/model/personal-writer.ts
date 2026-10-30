@@ -191,6 +191,7 @@ export class GatewayPersonalWriter {
 
   readonly #profileSummaries=new Map<string,{text:string;refs:string[]}[]>()
   async #profileJson(request:CompleteRequest,schema:z.ZodType,gateway:Pick<ModelGateway,'complete'>=this.#gateway):Promise<unknown>{
+    const reasoningEnabled=request.reasoning==='enabled'
     for(let attempt=0;attempt<2;attempt++){
       const response=await gateway.complete({...request,usage:{...request.usage,feature:'profile',operation:(request.usage?.operation??'summarize')+(attempt?'.retry':'')}})
       try{
@@ -203,7 +204,9 @@ export class GatewayPersonalWriter {
         const detail=error instanceof z.ZodError?error.issues.slice(0,3).map(issue=>issue.path.join('.')+': '+issue.message).join('; '):'Invalid JSON'
         // Providers without a thinking budget (DeepSeek) count reasoning against max_tokens, so an exhausted allowance
         // returns an empty or cut-off answer. Repeating the same request fails the same way: retry without reasoning.
-        const exhausted=error instanceof SyntaxError&&request.reasoning==='enabled'&&error.message.startsWith('Unexpected end of JSON')
+        // The cut is structural — an empty reply, a transport-reported length stop, or unparseable JSON after a
+        // reasoning-enabled attempt — because JSON.parse wording varies with V8 and with where the text was cut.
+        const exhausted=response.text.trim()===''||response.finish_reason==='length'||(reasoningEnabled&&error instanceof SyntaxError)
         request={...request,...(exhausted?{reasoning:'disabled' as const}:{}),prompt:request.prompt+'\n格式错误：'+detail+'\n上次输出格式无效。只返回一个JSON对象，严格遵守output_schema的字段类型、数量和长度，不加解释或顶层version。'}
       }
     }
