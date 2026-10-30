@@ -201,6 +201,19 @@ test('discovery uses bounded Proactive gateway without speech or execution', asy
   await assert.rejects(conflicted.select(emptyView),/契约/)
 })
 
+test('discovery treats an unusable proposal as silence instead of failing the caller, and still returns a valid one',async()=>{
+ // Discovery is optional: a model that returns string memory_refs, an over-long summary or non-JSON text must not
+ // throw into the source pipeline that awaits it. A well-formed proposal is returned unchanged.
+ const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'Asia/Shanghai',memory:[],evidence_refs:['conversation:1'],recent_delivery:[]}
+ const discover=(text:string)=>new GatewayProactivity({gateway:new ScriptedGateway([],text),model:'m',proactivityPreset:'balanced'}).discover(snapshot,new AbortController().signal)
+ const base={kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}
+ assert.equal(await discover(JSON.stringify({proposal:{...base,memory_refs:['entry-1']}})),null)
+ assert.equal(await discover(JSON.stringify({proposal:{...base,summary:'x'.repeat(201)}})),null)
+ assert.equal(await discover('not json at all'),null)
+ assert.equal(await discover(JSON.stringify({proposal:{...base,extra:true}})),null)
+ assert.deepEqual(await discover(JSON.stringify({proposal:base})),base)
+})
+
 test('read-only preparation makes one completion and rejects invented or stale snapshot references',async()=>{
  const snapshot={user_scope:'local',local_date:'2026-09-14',weekday:'Monday',timezone:'Asia/Shanghai',memory:[],evidence_refs:['file:allowed'],recent_delivery:[]}
  const proposal={kind:'question' as const,summary:'Review project',why_now:'meeting today',evidence_refs:['file:allowed'],memory_refs:[]}
