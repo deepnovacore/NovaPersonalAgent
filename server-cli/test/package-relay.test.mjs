@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile} from 'node:fs/promises'
 import {spawnSync} from 'node:child_process'
+import {existsSync} from 'node:fs'
 import {createRequire} from 'node:module'
 import {tmpdir} from 'node:os'
 import {join, resolve} from 'node:path'
@@ -38,8 +39,12 @@ test('packed server installs its private relay without consulting a registry and
     const bundled = await bundleServerRelay({root: source, stage, dependencies})
     const manifest = JSON.parse(await readFile(join(stage, 'node_modules', relay.name, 'package.json'), 'utf8'))
     assert.equal(manifest.dependencies, undefined, 'bundled relay dependencies are installed empty by npm')
-    // Bundle installed public dependencies solely to keep this regression offline.
-    for (const name of Object.keys(relay.dependencies)) await cp(join(repository, 'node_modules', name), join(stage, 'node_modules', name), {recursive: true, dereference: true})
+    // Bundle installed public dependencies solely to keep this regression offline, at the versions relay resolves.
+    const resolved = name => [join(repository, 'relay/node_modules', name), join(repository, 'node_modules', name)].find(path => existsSync(path))
+    for (const name of Object.keys(relay.dependencies)) await cp(resolved(name), join(stage, 'node_modules', name), {recursive: true, dereference: true})
+    for (const [name, version] of Object.entries(relay.dependencies)) {
+      assert.equal(JSON.parse(await readFile(join(stage, 'node_modules', name, 'package.json'), 'utf8')).version, version, `offline ${name} must match the pinned version`)
+    }
     await writeFile(join(stage, 'package.json'), JSON.stringify({name: 'nova-server-package-regression', version: '1.0.0', type: 'module', dependencies,
       bundleDependencies: [...bundled, ...Object.keys(relay.dependencies)]}))
     await writeFile(join(stage, 'probe.mjs'), `import assert from 'node:assert/strict';\nimport {RelayClient} from '@nova-personal-agent/relay';\nimport {generateContentKey,encryptBody,decryptBody} from '@nova-personal-agent/relay/crypto';\nassert.equal(typeof RelayClient,'function');const key=generateContentKey();assert.deepEqual(await decryptBody(await encryptBody({installed:true},key),key),{installed:true});\n`)
