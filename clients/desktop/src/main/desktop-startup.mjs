@@ -74,12 +74,18 @@ export async function runConfigurationStage(attempt, stage, operation, {
     }
     return value
   })
+  let onAbort = null
+  const aborted = new Promise((_, reject) => {
+    onAbort = () => reject(configurationSuperseded())
+    if (attempt.signal.aborted) onAbort()
+    else attempt.signal.addEventListener('abort', onAbort, {once: true})
+  })
   const deadline = new Promise((_, reject) => {
     timer = schedule(() => reject(configurationTimeout(stage)), timeoutMs)
     if (timer !== null && typeof timer.unref === 'function') timer.unref()
   })
   try {
-    const value = await Promise.race([work, deadline])
+    const value = await Promise.race([work, deadline, aborted])
     if (!attempt.current()) {
       try { onLateResult(value) } catch { /* late cleanup is best effort */ }
       throw configurationSuperseded()
@@ -91,6 +97,7 @@ export async function runConfigurationStage(attempt, stage, operation, {
   } finally {
     settled = true
     if (timer !== null) cancel(timer)
+    if (onAbort !== null) attempt.signal.removeEventListener('abort', onAbort)
   }
 }
 
