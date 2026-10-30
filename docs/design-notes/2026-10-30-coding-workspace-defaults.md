@@ -24,7 +24,7 @@
 
 **原则：托管默认工作区是唯一默认；显式路径是例外，失效时降级而不是崩溃。**
 
-1. **默认不设。** `CODEX_WORKSPACE` 保持可选，文档把它标成"高级/无头主机用"。桌面端默认只用 `~/.nova-personal-agent/workspaces/default`（目录改名见 `chore/npa-home-dir`）。
+1. **默认不设。** `CODEX_WORKSPACE` 保持可选，文档把它标成"高级/无头主机用"。桌面端默认只用当前的 `~/.nova-audio-agent/workspaces/default`；如果尚未合并的 `chore/npa-home-dir` 改名落地，则为 `~/.nova-personal-agent/workspaces/default`。
 2. **失效即降级。** 显式路径不存在或不是目录时：编程模块报 `coding_unavailable: workspace_not_found` 并在设置页提示"路径失效，可改回默认或重新选择"；其余模块照常启动。具体做法是把 `desktop-startup.mjs` 里那处 `throw` 改为向 `CODING_MODULE_ENABLED=false` 的既有通道写原因（同类已存在：找不到 Codex CLI 时自动关闭）。
 3. **额外目录靠界面批准，不靠环境变量。** 沿用设计 B：托管工作区列表 + "其它文件夹…"（高级项）。环境变量只给无头部署。
 4. **开关收敛。** 对外只保留一个概念"编程后端"（取值 `none|codex|opencode|codebuddy|pi|deepseek`，默认 `codex` 且 CLI 可用时才生效）。`CODING_MODULE_ENABLED` 退化为内部由"后端是否可用"推导的状态，不再作为用户可配置项；`EXECUTOR` 保留给"computer/browser/mobile"这类设备执行器，不再兼任编程选择。这一步涉及契约和文档，改动大，应单独评审。
