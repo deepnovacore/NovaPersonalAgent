@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {constants} from 'node:fs';
-import {open,mkdir} from 'node:fs/promises';
+import {open,mkdir,stat} from 'node:fs/promises';
 import {dirname,isAbsolute,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createInterface} from 'node:readline/promises';
@@ -19,6 +19,12 @@ export function parseSpaceInit(args:readonly string[]):{configPath:string;person
  if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||
   (url.protocol!=='https:'&&!(url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname))))throw Error('relay_tls_origin_required');
  return {configPath,personalPath,relayUrl,bootstrapFile};
+}
+/** Host data stores refuse a group- or world-accessible parent at startup, so init rejects one before registering. */
+export async function assertPrivateDirectory(path:string):Promise<void>{
+ if(process.platform==='win32')return;
+ const info=await stat(path);
+ if(!info.isDirectory()||(info.mode&0o077)!==0)throw Error(`space_directory_must_be_private: ${path} (chmod 700)`);
 }
 export function parseSpaceResume(args:readonly string[]):{configPath:string;bootstrapFile:string}{
  if(args[0]!=='resume'||args.length!==5)throw Error(usage);
@@ -94,6 +100,7 @@ export async function main(args:readonly string[]):Promise<number>{
  let result:{space:string;configPath:string};
  if(options.mode==='init'){
   await mkdir(dirname(options.configPath),{recursive:true,mode:0o700});await mkdir(dirname(options.personalPath),{recursive:true,mode:0o700});
+  for(const directory of new Set([dirname(options.configPath),dirname(options.personalPath)]))await assertPrivateDirectory(directory);
   result=await initializeHostSpace({...options,bootstrapToken});
  }else result=await resumeHostSpaceRegistration({...options,bootstrapToken});
  process.stdout.write(`Registered Host Space ${result.space}\nSet NOVA_SPACE_HOST_CONFIG=${result.configPath} for the Host.\nDesktop: open Settings > Connections > Space and pair a phone.\nHeadless: run novapersonal-server start, then nova-space-host pair --config ${result.configPath}\n`);return 0;

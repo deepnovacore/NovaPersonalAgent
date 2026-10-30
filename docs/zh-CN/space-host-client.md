@@ -26,7 +26,7 @@ npm run test:space -- --output-root /your/build-disk --run-id your-task
      --bootstrap-file /private/relay-bootstrap
    ```
 
-   配置中包含 Host 私钥和内容密钥，不能提交仓库或放到 relay。`--data` 必须是全新路径，已有数据不会被迁移或覆盖。若网络在首次创建时中断，保留已写出的配置，使用 `resume --config /private/new-space/config.json --bootstrap-file /private/relay-bootstrap` 重试同一身份；不要删除配置重建身份。
+   配置中包含 Host 私钥和内容密钥，不能提交仓库或放到 relay。`--data` 必须是全新路径，已有数据不会被迁移或覆盖。配置和数据所在目录只能本用户访问：缺失的目录会以 `0700` 创建，已存在的目录需先 `chmod 700`，否则 `init` 报 `space_directory_must_be_private`。若网络在首次创建时中断，保留已写出的配置，使用 `resume --config /private/new-space/config.json --bootstrap-file /private/relay-bootstrap` 重试同一身份；不要删除配置重建身份。
 3. 设置 `NOVA_SPACE_HOST_CONFIG=/private/new-space/config.json` 后启动桌面端。桌面的 Settings → Connections → Space 与手机可生成一次性二维码、核对手机完整指纹、确认绑定及撤销设备。
 4. 手机选择“Client”，扫描二维码；在手机与桌面核对指纹后由桌面确认。Client 等待密钥投递后补拉展示数据。Host 离线时状态修改显示等待，聊天立即失败，不会等 Host 上线后悄悄发送。
 5. 在手机创建其他 Space 可选独立模式或另一 Host 的 Client；每个 Space 的凭据、缓存、意图和工具执行记录相互隔离。桌面切到另一个 Host Space 需使用另一份独立配置启动。
