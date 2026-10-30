@@ -97,6 +97,22 @@ test('server ignores IPC disconnect, stops on SIGTERM, and removes signal bindin
   } finally { rmSync(dir, {recursive: true, force: true}) }
 })
 
+test('headless startup failure names its cause in one redacted line', {skip: process.platform === 'win32' && 'POSIX remote host private storage'}, async () => {
+  const {initializeServerToken} = await import('../src/server/server-config.js')
+  const {runServerEntry} = await import('../src/server-entry.js')
+  const dir = mkdtempSync(join(tmpdir(), 'nova-server-'))
+  const tokenFile = join(dir, 'token')
+  initializeServerToken(tokenFile)
+  const lines: string[] = []
+  try {
+    assert.equal(await runServerEntry({environment: {SERVER_PORT: '19876', SERVER_TOKEN_FILE: tokenFile}, processEvents: new EventEmitter(),
+      construct: () => { throw new Error(`space_secrets_invalid: /srv/space/config.json.secrets.json Bearer ${'x'.repeat(40)}`) },
+      onDiagnostic: line => { lines.push(line) }}), 2)
+    assert.deepEqual(lines, ['[runtime-startup-error] Error: space_secrets_invalid: /srv/space/config.json.secrets.json Bearer <redacted>',
+      '[runtime-diagnostic] assembly_failed'])
+  } finally { rmSync(dir, {recursive: true, force: true}) }
+})
+
 test('failed headless construction rolls resources back in reverse order', async () => {
   const calls: string[] = []
   assert.equal(await runDesktopEntry({token: 'a'.repeat(32), stop: new AbortController(),

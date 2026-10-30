@@ -24,6 +24,10 @@ export interface FeishuMessage {
 }
 export interface FeishuSnapshot {
   available: boolean; configured: boolean; state: 'unauthorized' | 'ready' | 'paused' | 'disconnected' | 'error';
+  /** Authenticated account connection; paused and disconnected views keep account_id, so only this says signed in. */
+  signed_in?: boolean;
+  /** Set while a transient transport failure keeps the saved login unverified; collection and delivery are fenced. */
+  unverified?: boolean;
   account_name?: string; account_id?: string; chats: { id: string; name: string; selected: boolean }[];
   last_sync?: string; error?: string; bot_enabled: boolean; retention_days: 30; verification_url?: string;
   app_id?: string;
@@ -197,7 +201,7 @@ export class FeishuConnector {
     if (!options.bootstrapOnly && (!(options.ingest || options.ingestBatch) || !options.deleteSource || !options.onAction)) throw new Error('Feishu collection callbacks required');
     this.run = options.run ?? createFeishuRunner(options.executable, options.credentialRoot);
   }
-  snapshot(): FeishuSnapshot { const view = structuredClone(this.view);if(this.saved.account)view.account_id=this.saved.account;else delete view.account_id;const expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=this.saved.processingConsentPending===true||!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider||JSON.stringify([...(this.saved.processingConsent.conversation_providers??[])].sort())!==JSON.stringify([...(expected?.conversation_providers??[])].sort()); view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; view.all_history=this.saved.allHistory===true; view.chat_discovery_complete=!this.saved.chatDiscovery; view.history_complete=this.saved.selected.every(id=>!this.saved.backfills?.[id]); const counts:Partial<Record<UnsupportedReason,number>>={}; for(const reason of Object.values(this.saved.unsupportedMessageKeys??{}))counts[reason]=(counts[reason]??0)+1; view.unsupported_messages=counts; if (view.app_setup) delete view.app_setup.verification_url; return view; }
+  snapshot(): FeishuSnapshot { const view = structuredClone(this.view);view.signed_in=this.saved.connected===true;if(this.unverified)view.unverified=true;else delete view.unverified;if(this.saved.account)view.account_id=this.saved.account;else delete view.account_id;const expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=this.saved.processingConsentPending===true||!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider||JSON.stringify([...(this.saved.processingConsent.conversation_providers??[])].sort())!==JSON.stringify([...(expected?.conversation_providers??[])].sort()); view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; view.all_history=this.saved.allHistory===true; view.chat_discovery_complete=!this.saved.chatDiscovery; view.history_complete=this.saved.selected.every(id=>!this.saved.backfills?.[id]); const counts:Partial<Record<UnsupportedReason,number>>={}; for(const reason of Object.values(this.saved.unsupportedMessageKeys??{}))counts[reason]=(counts[reason]??0)+1; view.unsupported_messages=counts; if (view.app_setup) delete view.app_setup.verification_url; return view; }
   private setupSnapshot(): FeishuSnapshot {const view=this.snapshot();if(this.view.app_setup)view.app_setup=structuredClone(this.view.app_setup);return view;}
   private publish(): void {
     if (this.closed) return;

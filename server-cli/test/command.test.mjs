@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url'
 import {main} from '../src/command.mjs'
 
 test('help and malformed arguments never load the runtime', async () => {
-  for (const [args, code] of [[['--help'], 0], [['bad'], 2], [['start', 'extra'], 2], [['pair'], 2], [['--env-file'], 2]]) {
+  for (const [args, code] of [[['--help'], 0], [['bad'], 2], [['start', 'extra'], 2], [['pair'], 2], [['space'], 2], [['--env-file'], 2]]) {
     const lines = []
     assert.equal(await main(args, {write: text => lines.push(text), load: () => assert.fail('runtime loaded')}), code)
     assert.match(lines.join(''), /Usage:/)
@@ -42,4 +42,11 @@ test('CLI failures do not expose private file paths', () => {
   assert.equal(result.status, 2)
   assert.match(result.stderr, /runtime-diagnostic.*command_failed/u)
   assert.ok(!result.stderr.includes(privatePath))
+})
+
+test('space passes its arguments to the Space Host CLI after the env file', async () => {
+  const events = []
+  const options = {environment: {}, write: () => {}, loadEnvFile: path => events.push(path), load: async name => ({main: async args => { events.push([name, args]); return 7 }})}
+  assert.equal(await main(['space', 'pair', '--config', '/x/config.json'], options), 7)
+  assert.deepEqual(events, [['space', ['pair', '--config', '/x/config.json']]])
 })

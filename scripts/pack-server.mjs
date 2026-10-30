@@ -20,8 +20,10 @@ export async function bundleServerRelay({root, stage, dependencies}) {
   }
   const destination = join(stage, 'node_modules', relay.name)
   await mkdir(destination, {recursive: true})
-  const {name, version, type, exports, dependencies: relayDependencies, engines, license} = relay
-  await writeFile(join(destination, 'package.json'), JSON.stringify({name, version, type, exports, dependencies: relayDependencies, engines, license}) + '\n')
+  // npm treats a bundled package's dependencies as bundled too and leaves them as
+  // empty directories; the asserted top-level copies resolve from here instead.
+  const {name, version, type, exports, engines, license} = relay
+  await writeFile(join(destination, 'package.json'), JSON.stringify({name, version, type, exports, engines, license}) + '\n')
   await cp(join(root, 'relay/dist/src'), join(destination, 'dist/src'), {
     recursive: true,
     filter: async source => (await stat(source)).isDirectory() || source.endsWith('.js'),
@@ -41,7 +43,7 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const manifest = {
       name: 'nova-personal-agent-server', version: cli.version,
       description: 'Headless Nova Personal Agent service and terminal device pairing.',
-      type: 'module', bin: {'novapersonal-server': 'bin/novapersonal-server.mjs', 'novaaudio-server': 'bin/novapersonal-server.mjs'},
+      type: 'module', bin: {'novapersonal-server': 'bin/novapersonal-server.mjs', 'novaaudio-server': 'bin/novapersonal-server.mjs', 'nova-space-host': 'bin/nova-space-host.mjs'},
       engines: {node: '>=22.14.0'}, os: ['linux'], cpu: ['x64'],
       files: ['bin/', 'src/', 'runtime/dist/src/', 'runtime/dist/eval/', 'runtime/scripts/pair-device.mjs', 'resources/', 'README.md', 'LICENSE'],
       dependencies: runtime.dependencies, bundleDependencies: await bundleServerRelay({root, stage, dependencies: runtime.dependencies}), license: cli.license,
@@ -63,7 +65,7 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const resources = nativeManifest.resources.map(record => record.logical_id === 'project_native_addon'
       ? {...record, electron_abi: null, node_api_version: 10} : record)
     await writeFile(join(resourcesRoot, 'native-resources-v1.json'), JSON.stringify({...nativeManifest, resources}) + '\n')
-    const executables = new Set(['bin/novapersonal-server.mjs', 'resources/native/codex-sandbox-probe'])
+    const executables = new Set(['bin/novapersonal-server.mjs', 'bin/nova-space-host.mjs', 'resources/native/codex-sandbox-probe'])
     for (const name of ['', ...await readdir(stage, {recursive: true})]) {
       const path = join(stage, name)
       await chmod(path, (await stat(path)).isDirectory() || executables.has(name) ? 0o755 : 0o644)
@@ -71,7 +73,7 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', stage, '--ignore-scripts', '--pack-destination', output, '--json'], {encoding: 'utf8'})
     if (result.status !== 0) throw new Error(result.stderr || 'server npm pack failed')
     const [{filename, files}] = JSON.parse(result.stdout)
-    const allowed = new Set(['package.json', 'README.md', 'LICENSE', 'bin/novapersonal-server.mjs', 'src/command.mjs',
+    const allowed = new Set(['package.json', 'README.md', 'LICENSE', 'bin/novapersonal-server.mjs', 'bin/nova-space-host.mjs', 'src/command.mjs',
       'runtime/scripts/pair-device.mjs', 'resources/native-resources-v1.json',
       'node_modules/@nova-personal-agent/relay/package.json',
       'resources/native/project-native/nova_project_native.node', 'resources/native/codex-sandbox-probe',
