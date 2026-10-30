@@ -125,6 +125,7 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
         .toList();
     final credentialsDamaged = credentialView['damaged'] == true;
     final connected = feishu['connected'] == true;
+    final unverified = !connected && feishu['unverified'] == true;
     final setupUrl = setup['verification_url'] as String?;
     final loginUrl = feishu['verification_url'] as String?;
     // A new login replaces the code the browser is confirming, so while one is pending
@@ -245,11 +246,17 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
               key: const ValueKey('host.feishu.status'),
               title: connected
                   ? '已连接'
+                  : unverified
+                  ? '暂时无法验证登录'
                   : loginPending
                   ? '等待在授权页确认'
                   : '未连接',
               subtitle: Text(
-                feishu['configured'] == true ? '应用已配置' : '尚未配置飞书应用',
+                unverified && feishu['error'] is String
+                    ? feishu['error'] as String
+                    : feishu['configured'] == true
+                    ? '应用已配置'
+                    : '尚未配置飞书应用',
               ),
             ),
             if (feishu['configured'] != true)
@@ -264,7 +271,7 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                 title: '打开配置页面',
                 onTap: () => _open(setupUrl),
               ),
-            if (feishu['configured'] == true && !connected)
+            if (feishu['configured'] == true && !connected && !unverified)
               NovaTile(
                 key: const ValueKey('host.feishu.login'),
                 title: loginPending ? '重新开始登录' : '登录飞书',
@@ -286,7 +293,7 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                 subtitle: const Text('在授权页确认后点此通知 Host'),
                 onTap: () => _send('connector.feishu', {'action': 'complete'}),
               ),
-            if (connected)
+            if (connected || unverified)
               NovaTile(
                 key: const ValueKey('host.feishu.logout'),
                 title: '退出登录',

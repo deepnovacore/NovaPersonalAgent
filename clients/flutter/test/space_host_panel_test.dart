@@ -129,25 +129,23 @@ void main() {
     ]);
   });
 
-  testWidgets('a damaged Host credential file asks the owner to re-enter keys', (
-    tester,
-  ) async {
-    final state = stateWith({
-      'owner': true,
-      'host_credentials': {
-        'damaged': true,
-        'credentials': [
-          {'name': 'OPENAI_API_KEY', 'configured': false, 'source': null},
-        ],
-      },
-    });
-    await pump(tester, state);
-    expect(
-      find.text('Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'),
-      findsOneWidget,
-    );
-    expect(find.text('未配置'), findsOneWidget);
-  });
+  testWidgets(
+    'a damaged Host credential file asks the owner to re-enter keys',
+    (tester) async {
+      final state = stateWith({
+        'owner': true,
+        'host_credentials': {
+          'damaged': true,
+          'credentials': [
+            {'name': 'OPENAI_API_KEY', 'configured': false, 'source': null},
+          ],
+        },
+      });
+      await pump(tester, state);
+      expect(find.text('Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'), findsOneWidget);
+      expect(find.text('未配置'), findsOneWidget);
+    },
+  );
 
   testWidgets('Feishu card opens the Host verification URL and completes', (
     tester,
@@ -190,6 +188,26 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('host.feishu.login')));
     await tester.pump();
     expect(state.pending.single['input'], {'action': 'login'});
+  });
+
+  testWidgets('an unverifiable Feishu login is not offered a fresh login', (
+    tester,
+  ) async {
+    final state = stateWith({
+      'owner': true,
+      'host_feishu': {
+        'configured': true,
+        'connected': false,
+        'unverified': true,
+        'error': '飞书暂时无法验证登录，网络恢复后会自动继续',
+      },
+    });
+    await pump(tester, state);
+    expect(find.text('暂时无法验证登录'), findsOneWidget);
+    expect(find.text('飞书暂时无法验证登录，网络恢复后会自动继续'), findsOneWidget);
+    expect(find.text('未连接'), findsNothing);
+    expect(find.text('登录飞书'), findsNothing);
+    expect(find.byKey(const ValueKey('host.feishu.logout')), findsOneWidget);
   });
 
   test('conflict retry refreshes the version Host checks', () {
