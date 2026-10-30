@@ -8,7 +8,7 @@ The repeatable command is:
 node runtime/scripts/live/space-host.mjs --build-dir=/path/to/isolated/runtime-build --output=/path/to/private/evidence
 ```
 
-The script reads the existing `NOVA_AUDIO_AGENT_MODEL_BASE_URL` / `MODEL_BASE_URL`, `DASHSCOPE_API_KEY` / `MODEL_API_KEY`, and selected model settings. It uses the production `conversationRuntimeFactory`, normal cascaded text provider and actual HTTP model API. The synthetic Client uses signed pairing, JOSE encryption, the real local HTTP/WebSocket Relay and the production Host controller. Managed-environment proxy settings are honored with normal TLS verification. Credentials, private keys, pairing secrets and envelope bodies are absent from the report; temporary Space credentials and conversation stores are removed on completion.
+The script reads the existing `NOVA_AUDIO_AGENT_MODEL_BASE_URL` / `SELF_HOSTED_LLM_BASE_URL` and `DASHSCOPE_API_KEY`. It uses the production `conversationRuntimeFactory`, normal cascaded text provider and actual HTTP model API. The synthetic Client uses signed pairing, JOSE encryption, the real local HTTP/WebSocket Relay and the production Host controller. Managed-environment proxy settings are honored with normal TLS verification. Credentials, private keys, pairing secrets and envelope bodies are absent from the report; temporary Space credentials and conversation stores are removed on completion.
 
 Passed run `54e4a2a1-5b2b-4b28-a71e-03afd011ea3e`, operation `live_54e4a2a1-5b2b-4b28-a71e-03afd011ea3e`:
 
