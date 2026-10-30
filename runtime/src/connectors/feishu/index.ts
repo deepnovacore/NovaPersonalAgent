@@ -5,7 +5,14 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createFeishuRunner, FeishuAppNotConfigured, object, parseFeishuJson, type FeishuRun } from './cli.js';
 
-export const FEISHU_SCOPES = ['offline_access', 'im:chat:read', 'im:message:readonly', 'im:message.reactions:read'];
+/**
+ * Only an explicit server-side rejection of the stored credential may invalidate a login. Every other verify failure is
+ * treated as temporarily unverifiable: a blocked network, a proxy returning an HTML page, a TLS, DNS or routing error
+ * and a bare EOF all look like failures, and a network-wording allow-list would silently log the user out on the one
+ * wording it does not know.
+ */
+const FEISHU_CREDENTIAL_REJECTION = /\b(?:401|403)\b|unauthorized|forbidden|invalid[ _-]?(?:app[ _-]?)?(?:access[ _-]?)?token|token[ _-]?(?:is[ _-]?)?(?:expired|invalid|revoked|not[ _-]?found)/i;
+export const FEISHU_SCOPES =['offline_access', 'im:chat:read', 'im:message:readonly', 'im:message.reactions:read'];
 export interface FeishuMessage {
   sender_type?:'user'|'app';
   processing_consent?: ProcessingGrant;
@@ -172,6 +179,8 @@ export class FeishuConnector {
   private active: AbortController | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private busy = false;
+  /** The last verification failed without proving the login invalid, so collection waits instead of disconnecting. */
+  private unverified = false;
   private readonly mentionReads=new Set<Promise<Record<string,unknown>>>();
   private pending: Promise<void> | undefined;
   private listener: Promise<void> | undefined;
@@ -284,6 +293,21 @@ export class FeishuConnector {
     const valid = data.verified !== false && user.verified !== false && (user.status === 'authenticated' || user.tokenStatus === 'valid' || user.authenticated === true
       || user.status === 'needs_refresh' && user.verified === true);
     const priorIdentity=this.saved.outboundIdentity;
+    // A blocked network makes the CLI report verify_failed while the stored token is still valid. That is
+    // not a logout: keep the connection and consent, collect nothing, and resume once verification passes.
+    // Only an explicit server rejection of the credential takes the invalidation path below; an unknown failure
+    // wording is treated as temporarily unverifiable, so it can never silently clear the login.
+    // Notification sends and callbacks stay fenced either way.
+    if (app && id && user.status === 'verify_failed' && user.tokenStatus !== 'expired' && !FEISHU_CREDENTIAL_REJECTION.test(str(user.message))) {
+      this.unverified = true; this.view.error = '飞书暂时无法验证登录，网络恢复后会自动继续';
+      if (priorIdentity) this.saved.outboundIdentity = {...priorIdentity, valid: false};
+      this.view.notification_ready = false;
+      await this.save();
+      // Observers (the notification service rebinds on a readiness edge) must see the fence even when this
+      // check came from a command that returns without publishing.
+      this.publish();
+      return this.snapshot();
+    }
     const identityAccount=app&&id&&valid?hash(JSON.stringify([app,user.tenantKey??user.tenant_key??null,id])):null;
     if(identityAccount){this.saved.outboundIdentity={account:identityAccount,openId:id,generation:(priorIdentity?.generation??0)+Number(!!priorIdentity&&priorIdentity.account!==identityAccount),valid:true};if(priorIdentity&&priorIdentity.account!==identityAccount)this.saved.outbound=false;}
     else if(priorIdentity)this.saved.outboundIdentity={...priorIdentity,valid:false};
@@ -292,6 +316,7 @@ export class FeishuConnector {
     if (!app || !id || !valid || !FEISHU_SCOPES.every((scope) => (scopes as unknown[]).includes(scope))) {
       if (app) this.view.auth_issue = user.tokenStatus === 'expired' ? 'expired' : valid && id ? 'missing_scopes' : 'login_required';
       else delete this.view.auth_issue;
+      if (this.unverified) { this.unverified = false; delete this.view.error; }
       if(this.saved.processingConsent?.extraction_provider)await this.setProcessingConsent(false);
       this.view.state = 'unauthorized'; this.view.bot_enabled = false;
       this.saved.connected = false; this.saved.bot = false;
@@ -300,6 +325,7 @@ export class FeishuConnector {
       return this.snapshot();
     }
     delete this.view.auth_issue;
+    if (this.unverified) { this.unverified = false; delete this.view.error; }
     const account = hash(JSON.stringify([app, user.tenantKey ?? user.tenant_key ?? null, id]));
     if (this.saved.account && this.saved.account !== account) {
       await this.setProcessingConsent(false);
@@ -465,11 +491,14 @@ export class FeishuConnector {
     try { await pending; } finally { if (this.pending === pending) this.pending = undefined; this.publish(); }
   }
   private async syncNow(): Promise<void> {
+    // A login that could not be verified is re-checked even when nothing is collected (notification-only or
+    // paused), so recovery needs no manual command. A failed check keeps the flag for the next tick.
+    if (this.unverified && !this.busy && (this.saved.paused || !this.saved.connected)) { await this.status().catch(() => undefined); return; }
     if (this.busy || this.saved.paused || !this.saved.connected) return;
     this.busy = true; this.active = new AbortController();
     try {
       await this.status();
-      if (this.view.state !== 'ready') return;
+      if (this.view.state !== 'ready' || this.unverified) return;
       const chats = [...this.saved.selected]; let next = 0;
       const errors: unknown[] = [];
       // Independent chats get four workers; a failed or capped chat cannot starve the rest.
@@ -618,7 +647,7 @@ export class FeishuConnector {
       this.saved.sources = this.saved.sources.filter((item) => item !== source); await this.save();
     }
   }
-  private callbackReady():boolean{return !!(this.saved.outbound&&this.saved.outboundIdentity?.valid)||this.saved.bot&&this.saved.connected&&!this.saved.paused;}
+  private callbackReady():boolean{return !this.unverified&&(!!(this.saved.outbound&&this.saved.outboundIdentity?.valid)||this.saved.bot&&this.saved.connected&&!this.saved.paused);}
   notificationBinding(userScope:string):ChannelBinding|null {
     const identity=this.saved.outboundIdentity;if(!identity)return null;
     return {id:'feishu',provider:'feishu',user_scope:userScope,generation:identity.generation,identity:identity.account,status:identity.valid&&(this.saved.outbound||this.saved.bot)?'ready':'unavailable'};
@@ -650,7 +679,7 @@ export class FeishuConnector {
   private async sendReminderNow(proposal: { id: string; title: string; body: string }): Promise<boolean> {
     if (!this.saved.bot || !this.saved.connected || this.saved.paused || !this.saved.openId) return false;
     await this.status();
-    if (this.view.state !== 'ready' || this.active?.signal.aborted) return false;
+    if (this.view.state !== 'ready' || this.unverified || this.active?.signal.aborted) return false;
     const delivery = this.saved.deliveries[proposal.id] ?? { nonce: randomUUID() };
     if (delivery.message) return true;
     this.saved.deliveries[proposal.id] = delivery; await this.save();

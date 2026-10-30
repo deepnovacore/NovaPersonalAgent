@@ -29,6 +29,9 @@ function policy(source:EvidenceSource,c:Candidate,d:CandidateDecision):string[]{
  if(d.attribution!=='user')reasons.push('not_user_attribution')
  if(d.support!=='supported')reasons.push('not_supported')
  if(d.modality==='rejected'||d.modality==='uncertain')reasons.push('unconfirmed_modality')
+ // Importance only ever withholds: a high value never rescues a candidate the rules above refused.
+ // It filters new records only; an explicit update of an existing object is an authorized change, not retention.
+ if(d.importance==='transient'&&c.operation!=='update')reasons.push('transient_importance')
  if(c.kind==='profile'&&d.modality!=='preference')reasons.push('not_stated_preference')
  return reasons
 }
