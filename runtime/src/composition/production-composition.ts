@@ -45,6 +45,15 @@ import {createRealtimeTelemetry} from '../realtime/telemetry.js'
 import type {ApprovalView as ExecutorApprovalView} from '../core/approval-port.js'
 import {buildIntegratedRealtimeAssembly, type IntegratedProviderRegistry} from './cascaded-realtime-assembly.js'
 
+/**
+ * Feishu notification bindings follow the published readiness in both directions. The first published value is only
+ * a baseline — the restore/open path already synced that binding — so construction never syncs twice.
+ */
+export function notificationReadinessEdges(sync:()=>void):(ready:boolean)=>void{
+  let previous:boolean|undefined
+  return ready=>{const initial=previous===undefined;if(ready!==previous&&!initial)sync();previous=ready}
+}
+
 export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage: publishUsage, environment = process.env, deviceRuntimeEnabled = false}: {
   /** Receives the live coding resource so the desktop host can change the new-session default. */
   readonly onCoding?: (coding: {updateDefaultBackend?(backend: CodingBackendId): void}) => void
@@ -286,19 +295,12 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     onAudioFrame:frame=>composition.audioBridge()?.onAudioFrame(frame),onAudioClear:(id,epoch)=>composition.audioBridge()?.onAudioClear(id,epoch),onAudioAlert:(id,epoch)=>composition.audioBridge()?.onAudioAlert(id,epoch),onAudioTerminal:(id,epoch)=>composition.audioBridge()?.onAudioTerminal(id,epoch),
   }),frame=>composition.publishPersonal(frame))
   host.setConnectors(new ComposioConnector({...(process.platform==='darwin'&&environment.CODEX_RESOURCES_PATH?{local:new MacCalendarClient(environment.CODEX_RESOURCES_PATH),mail:new MacMailClient(environment.CODEX_RESOURCES_PATH)}:{}),memory:()=>{const memory=composition.realtime.personalMemory;return memory instanceof SubstrateMemoryResource?memory:undefined},client:environment.COMPOSIO_API_KEY?new ComposioClient(environment.COMPOSIO_API_KEY):null,onChange:()=>{void host.connectionChanged()}}))
-  let notificationReady = false
+  const syncNotificationOnEdge=notificationReadinessEdges(()=>{void syncNotificationBinding().catch(()=>undefined)})
   const feishu = new FeishuConnector({
     executable: environment.FEISHU_CLI_PATH ?? 'lark-cli',
     credentialRoot: join(host.path + '.feishu', 'credentials'),
     statePath: join(host.path + '.feishu', 'state.json'),
-    onChange:snapshot=>{
-      host.connectionChanged()
-      // A transient verification failure leaves the notification service without a ready binding; refresh it
-      // as soon as the background check recovers, without waiting for another Feishu command.
-      const ready=snapshot.notification_ready===true
-      if(ready&&!notificationReady)void syncNotificationBinding().catch(()=>undefined)
-      notificationReady=ready
-    },
+    onChange:snapshot=>{host.connectionChanged();syncNotificationOnEdge(snapshot.notification_ready===true)},
     processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
     get processingConsentTransition():FeishuOptions['processingConsentTransition']{
       const memory=composition.realtime.personalMemory;

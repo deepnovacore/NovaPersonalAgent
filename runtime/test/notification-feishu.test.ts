@@ -53,3 +53,14 @@ test('a notification-only identity recovers from a transient verification failur
   assert.equal(connector.snapshot().error,undefined)
  }finally{await connector.close();await rm(dir,{recursive:true,force:true})}
 })
+test('the notification binding follows readiness in both directions and the first publish only sets the baseline',async()=>{
+ // The composition wires Feishu's onChange through this helper. A fenced identity must rebind as not ready, not
+ // keep a stale ready binding until something else touches the service.
+ const {notificationReadinessEdges}=await import('../src/composition/production-composition.js')
+ let synced=0;const edge=notificationReadinessEdges(()=>{synced++})
+ edge(false);assert.equal(synced,0,'the restore/open path already synced the first published value')
+ edge(false);assert.equal(synced,0,'an unchanged snapshot is not a rebind')
+ edge(true);assert.equal(synced,1,'a recovered identity rebinds as ready')
+ edge(true);assert.equal(synced,1)
+ edge(false);assert.equal(synced,2,'a fenced identity rebinds as not ready')
+})
