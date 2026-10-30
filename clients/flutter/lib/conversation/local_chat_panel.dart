@@ -16,6 +16,7 @@ import '../agent_core/agent_core_host.dart';
 import '../agent_core/model_client.dart';
 import '../agent_core/model_settings.dart';
 import '../agent_core/model_presets.dart';
+import '../agent_core/provider_credentials.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../ui/chatgpt_settings.dart';
 import '../ui/provider_credentials_sheet.dart';
@@ -66,6 +67,14 @@ Future<void> showLocalModelSettings(
       ? ModelPreset.byId('openrouter')
       : ModelPreset.forEndpoint(current.endpoint);
   var fetched = <String>[];
+  Future<ProviderCredential?> resolveSavedCredential() =>
+      settings.credentials.resolve(
+        endpoint.text,
+        credentialId: supportDraft?['endpoint'] == endpoint.text
+            ? (supportDraft?['credentialId'] as String?)
+            : null,
+      );
+  var savedCredential = resolveSavedCredential();
   try {
     await showLocalDialog<void>(
       context: context,
@@ -84,9 +93,13 @@ Future<void> showLocalModelSettings(
             preset = next;
             key.clear();
             invalidateModels();
-            if (next == null) return;
+            if (next == null) {
+              savedCredential = resolveSavedCredential();
+              return;
+            }
             endpoint.text = next.endpoint;
             protocol = next.protocol;
+            savedCredential = resolveSavedCredential();
             model.text = next.recommendedModels.isEmpty
                 ? ''
                 : next.recommendedModels.first;
@@ -160,12 +173,10 @@ Future<void> showLocalModelSettings(
             enableSuggestions: false,
             decoration: InputDecoration(
               labelText: t('API 密钥', 'API key'),
-              helperText: current == null
-                  ? null
-                  : t(
-                      '留空使用此厂商已保存的密钥',
-                      'Leave blank to use this provider’s saved key',
-                    ),
+              helperText: t(
+                '已保存的密钥不会回显；留空时使用此服务已配置的密钥',
+                'Saved keys stay hidden. Leave blank to use this provider’s configured key.',
+              ),
               helperMaxLines: 3,
             ),
           );
@@ -215,7 +226,7 @@ Future<void> showLocalModelSettings(
           return AlertDialog(
             title: Text(
               support
-                  ? t('辅助与后台模型', 'Background model')
+                  ? t('信息整理', 'Information processing')
                   : t('模型服务', 'Model provider'),
             ),
             content: SingleChildScrollView(
@@ -240,7 +251,12 @@ Future<void> showLocalModelSettings(
                                 language: language,
                                 onChanged: settings.refreshApiKeyProjection,
                               );
-                              if (context.mounted) setState(invalidateModels);
+                              if (context.mounted) {
+                                setState(() {
+                                  invalidateModels();
+                                  savedCredential = resolveSavedCredential();
+                                });
+                              }
                             } catch (_) {
                               if (context.mounted) {
                                 setState(
@@ -268,6 +284,14 @@ Future<void> showLocalModelSettings(
                       child: Text(t('使用 ChatGPT 登录', 'Continue with ChatGPT')),
                     ),
                   if (support) ...[
+                    Text(
+                      supportDraft == null
+                          ? t('当前：跟随对话模型', 'Current: Follow chat model')
+                          : t(
+                              '当前：独立配置 · ${supportDraft['model']}',
+                              'Current: Separate model · ${supportDraft['model']}',
+                            ),
+                    ),
                     Text(
                       t(
                         '用于飞书整理和个人近况生成；默认跟随对话模型。',
@@ -327,6 +351,11 @@ Future<void> showLocalModelSettings(
                           },
                   ),
                   const SizedBox(height: 16),
+                  ProviderCredentialStatus(
+                    credential: savedCredential,
+                    language: language,
+                  ),
+                  const SizedBox(height: 8),
                   if (preset != null) ...[
                     if (note != null)
                       Padding(
@@ -382,6 +411,7 @@ Future<void> showLocalModelSettings(
                       onChanged: (_) => setState(() {
                         key.clear();
                         invalidateModels();
+                        savedCredential = resolveSavedCredential();
                       }),
                       keyboardType: TextInputType.url,
                       autocorrect: false,
@@ -515,6 +545,7 @@ class LocalChatPanel extends StatefulWidget {
     required this.host,
     required this.conversationId,
     this.language = 'zh',
+    this.showProcess = true,
     this.onVoice,
     this.voiceBusy = false,
     this.active = true,
@@ -542,7 +573,7 @@ class LocalChatPanel extends StatefulWidget {
   final String language;
   final VoidCallback? onModelSettings, onVoice;
   final int modelRevision;
-  final bool voiceBusy, active;
+  final bool voiceBusy, active, showProcess;
   @override
   State<LocalChatPanel> createState() => LocalChatPanelState();
 }
@@ -874,11 +905,18 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   Widget _message(Map message, {Set<String>? seenPreviews}) {
     if (message['role'] == 'tool') {
       String status = '';
-      String? preview, title, previewKey;
+      String? preview, title, previewKey, completedReadPath;
       try {
         final result = jsonDecode(message['content'] as String) as Map;
         status = result['status'] as String? ?? '';
         final data = result['data'];
+        if (status == 'completed' &&
+            message['tool_name'] == 'file_read' &&
+            data is Map &&
+            data['type'] != 'directory' &&
+            data['path'] is String) {
+          completedReadPath = data['path'] as String;
+        }
         if (data is Map && message['tool_name'] != 'file_read') {
           if (data['artifact'] is Map) {
             final artifact = data['artifact'] as Map;
@@ -899,6 +937,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       final step = ToolStep(
         name: message['tool_name'] as String? ?? '',
         status: status,
+        completedReadPath: completedReadPath,
         language: widget.language,
       );
       if (status == 'completed' &&
@@ -944,14 +983,24 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       return step;
     }
     final reasoning =
-        message['role'] == 'assistant' && message['reasoning_content'] is String
+        widget.showProcess &&
+            message['role'] == 'assistant' &&
+            message['reasoning_content'] is String
         ? (message['reasoning_content'] as String).trim()
         : '';
     final text = message['content'] as String;
-    if (text.isEmpty && reasoning.isEmpty) return const SizedBox.shrink();
+    if (text.isEmpty && reasoning.isEmpty && message['interrupted'] != true) {
+      return const SizedBox.shrink();
+    }
     final user = message['role'] == 'user';
+    final process =
+        !user &&
+        message['interrupted'] != true &&
+        (text.isEmpty ||
+            message['tool_calls'] is List &&
+                (message['tool_calls'] as List).isNotEmpty);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: EdgeInsets.only(bottom: process ? 8 : 24),
       child: Align(
         alignment: user ? Alignment.centerRight : Alignment.centerLeft,
         child: Container(
@@ -971,7 +1020,13 @@ class LocalChatPanelState extends State<LocalChatPanel> {
             children: [
               if (reasoning.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: EdgeInsets.only(
+                    bottom: text.isEmpty
+                        ? 0
+                        : process
+                        ? 8
+                        : 10,
+                  ),
                   child: ThinkingBlock(
                     key: ValueKey('thinking:${message['time']}'),
                     text: reasoning,
@@ -1029,13 +1084,54 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       final messages = conversation['messages'] as List;
       final messageWidgets = <Widget>[];
       final seenPreviews = <String>{};
-      // Walk backwards so each user turn keeps its last successful preview.
-      for (final message in messages.reversed) {
-        if (message['role'] == 'user') seenPreviews.clear();
-        messageWidgets.add(
-          _message(message as Map, seenPreviews: seenPreviews),
-        );
+      final toolSteps = <ToolStep>[];
+      var finalReplyShown = false;
+      void flushTools() {
+        if (toolSteps.isEmpty) return;
+        messageWidgets.add(ToolStepGroup(steps: toolSteps.reversed.toList()));
+        toolSteps.clear();
       }
+
+      // Walk backwards so each user turn keeps its last successful preview.
+      for (final stored in messages.reversed) {
+        var message = stored as Map;
+        if (message['role'] == 'user') {
+          seenPreviews.clear();
+          finalReplyShown = false;
+        }
+        if (!widget.showProcess) {
+          if (message['role'] == 'tool') continue;
+          if (message['role'] == 'assistant') {
+            final reply =
+                !finalReplyShown &&
+                (message['tool_calls'] is! List ||
+                    (message['tool_calls'] as List).isEmpty) &&
+                (message['content'] as String? ?? '').trim().isNotEmpty;
+            if (reply) {
+              finalReplyShown = true;
+            } else if (message['interrupted'] == true) {
+              message = {...message, 'content': '', 'reasoning_content': ''};
+            } else {
+              continue;
+            }
+          }
+        }
+        // Empty tool-call envelopes have no displayed boundary of their own.
+        if (message['role'] == 'assistant' &&
+            (message['content'] as String? ?? '').isEmpty &&
+            (message['reasoning_content'] as String? ?? '').trim().isEmpty &&
+            message['interrupted'] != true) {
+          continue;
+        }
+        final item = _message(message, seenPreviews: seenPreviews);
+        if (item is ToolStep) {
+          toolSteps.add(item);
+        } else {
+          flushTools();
+          messageWidgets.add(item);
+        }
+      }
+      flushTools();
       final liveReasoning = host.reasoning.trim();
       return LayoutBuilder(
         builder: (context, constraints) {
@@ -1117,7 +1213,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                 'role': 'user',
                                 'content': host.pendingUserText,
                               }),
-                            if (host.draft.isNotEmpty &&
+                            if (widget.showProcess &&
+                                host.draft.isNotEmpty &&
                                 host.activeConversationId ==
                                     widget.conversationId)
                               _message({
@@ -1128,103 +1225,117 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                 host.activeConversationId ==
                                     widget.conversationId)
                               ChatActivity(
-                                label: switch (host.activeTool) {
-                                  'file_write' ||
-                                  'file_edit' => t('正在编写文件', 'Writing files'),
-                                  'shell_execute' => t(
-                                    '正在执行命令',
-                                    'Running a command',
-                                  ),
-                                  'file_read' => t('正在读取文件', 'Reading files'),
-                                  'calendar_list' => t(
-                                    '正在读取系统日历',
-                                    'Reading Calendar',
-                                  ),
-                                  'reminders_list' => t(
-                                    '正在读取提醒事项',
-                                    'Reading Reminders',
-                                  ),
-                                  'device_run_task' => t(
-                                    '正在执行手机任务',
-                                    'Working on your phone',
-                                  ),
-                                  null =>
-                                    host.draft.isEmpty
-                                        ? t('正在思考', 'Thinking')
-                                        : t('正在回复', 'Writing the reply'),
-                                  _ => t('正在处理', 'Working'),
-                                },
-                                summary: host.draft.isEmpty
+                                label: !widget.showProcess
+                                    ? t('正在回复', 'Waiting for reply')
+                                    : switch (host.activeTool) {
+                                        'file_write' || 'file_edit' => t(
+                                          '正在编写文件',
+                                          'Writing files',
+                                        ),
+                                        'shell_execute' => t(
+                                          '正在执行命令',
+                                          'Running a command',
+                                        ),
+                                        'file_read' => t(
+                                          '正在读取文件',
+                                          'Reading files',
+                                        ),
+                                        'calendar_list' => t(
+                                          '正在读取系统日历',
+                                          'Reading Calendar',
+                                        ),
+                                        'reminders_list' => t(
+                                          '正在读取提醒事项',
+                                          'Reading Reminders',
+                                        ),
+                                        'device_run_task' => t(
+                                          '正在执行手机任务',
+                                          'Working on your phone',
+                                        ),
+                                        null =>
+                                          host.draft.isEmpty
+                                              ? t('正在思考', 'Thinking')
+                                              : t('正在回复', 'Writing the reply'),
+                                        _ => t('正在处理', 'Working'),
+                                      },
+                                summary:
+                                    widget.showProcess && host.draft.isEmpty
                                     ? thinkingSummary(liveReasoning)
                                     : null,
                                 startedAt: host.turnStartedAt ?? DateTime.now(),
                                 language: widget.language,
-                                details: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (liveReasoning.isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 10,
-                                        ),
-                                        child: ConstrainedBox(
-                                          constraints: const BoxConstraints(
-                                            maxHeight: 320,
-                                          ),
-                                          child: SingleChildScrollView(
-                                            child: SelectableText(
-                                              liveReasoning,
+                                details: !widget.showProcess
+                                    ? null
+                                    : Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          if (liveReasoning.isNotEmpty)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 10,
+                                              ),
+                                              child: ConstrainedBox(
+                                                constraints:
+                                                    const BoxConstraints(
+                                                      maxHeight: 320,
+                                                    ),
+                                                child: SingleChildScrollView(
+                                                  child: SelectableText(
+                                                    liveReasoning,
+                                                    style: const TextStyle(
+                                                      color: Nova.secondary,
+                                                      fontSize: 13,
+                                                      height: 1.5,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          if (host.activeTool != null)
+                                            Text(
+                                              host.activeTool!,
+                                              style: const TextStyle(
+                                                color: Nova.secondary,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          if (host
+                                              .activeToolArguments
+                                              .isNotEmpty)
+                                            ConstrainedBox(
+                                              constraints: const BoxConstraints(
+                                                maxHeight: 220,
+                                              ),
+                                              child: SingleChildScrollView(
+                                                child: SelectableText(
+                                                  host.activeToolArguments,
+                                                  style: const TextStyle(
+                                                    fontFamily: 'Menlo',
+                                                    fontSize: 12,
+                                                    height: 1.4,
+                                                  ),
+                                                ),
+                                              ),
+                                            )
+                                          else if (liveReasoning.isEmpty)
+                                            Text(
+                                              host.draft.isEmpty
+                                                  ? t(
+                                                      '正在等待模型输出；收到内容后会显示在这里。',
+                                                      'Waiting for model output; received content will appear here.',
+                                                    )
+                                                  : t(
+                                                      '正在接收回复…',
+                                                      'Receiving the reply…',
+                                                    ),
                                               style: const TextStyle(
                                                 color: Nova.secondary,
                                                 fontSize: 13,
-                                                height: 1.5,
                                               ),
                                             ),
-                                          ),
-                                        ),
+                                        ],
                                       ),
-                                    if (host.activeTool != null)
-                                      Text(
-                                        host.activeTool!,
-                                        style: const TextStyle(
-                                          color: Nova.secondary,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    if (host.activeToolArguments.isNotEmpty)
-                                      ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxHeight: 220,
-                                        ),
-                                        child: SingleChildScrollView(
-                                          child: SelectableText(
-                                            host.activeToolArguments,
-                                            style: const TextStyle(
-                                              fontFamily: 'Menlo',
-                                              fontSize: 12,
-                                              height: 1.4,
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                    else if (liveReasoning.isEmpty)
-                                      Text(
-                                        host.draft.isEmpty
-                                            ? t(
-                                                '正在等待模型输出；收到内容后会显示在这里。',
-                                                'Waiting for model output; received content will appear here.',
-                                              )
-                                            : t(
-                                                '正在接收回复…',
-                                                'Receiving the reply…',
-                                              ),
-                                        style: const TextStyle(
-                                          color: Nova.secondary,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                  ],
-                                ),
                               ),
                           ],
                         ),

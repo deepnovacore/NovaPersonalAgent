@@ -65,6 +65,7 @@ class _Fixture {
         {
           'key': 'event',
           'kind': 'timeline',
+          'policy_revision': 2,
           'text': 'Grounded event',
           'observed_at': now.toIso8601String(),
           'evidence_ids': [ref],

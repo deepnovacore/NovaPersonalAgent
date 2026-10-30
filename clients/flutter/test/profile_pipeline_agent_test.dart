@@ -32,6 +32,8 @@ class _Fixture {
   late LocalPublicationContext publication;
   late _Models models;
   bool failSecondCompose = true;
+  bool retitle = false;
+  bool replacedSecond = false;
   bool failProfileDraft = false;
   bool failProfileReview = false;
   bool failSelection = false;
@@ -39,7 +41,7 @@ class _Fixture {
   String? profileAtRevocation;
   bool revokeDuringReview = false;
   bool revoked = false;
-  final now = DateTime.utc(2026, 10, 19);
+  final now = DateTime.now().toUtc().subtract(const Duration(minutes: 1));
   String get provider => '${models.configuration.endpoint}|fixture';
   ProfileAgent createAgent() => ProfileAgent(host, publication, models);
 
@@ -152,28 +154,32 @@ class _Fixture {
               for (final id in input['allowed_evidence_ids'] as List)
                 {
                   'text': '【事】本人完成项目核验',
+                  'relevance': 'ongoing_work',
                   'refs': [id],
                 },
             ],
           };
         } else if (stage == 'timeline_select') {
-          final indices = (input['allowed_indices'] as List).cast<int>();
+          final rows = input['records'] as List;
+          // Full 13k originals pack three per raw screening batch without truncation.
+          expect(rows, hasLength(3));
+          expect(
+            rows.every((row) => (row['text'] as String).length > 13000),
+            true,
+          );
+          final indices = rows.map((row) => row['key']).toList();
+          expect(input['allowed_indices'], indices);
           response = {
             'topics': [
-              {
-                'title': '甲事项已完成核验',
-                'observation_indices': indices.take(3).toList(),
-              },
-              {
-                'title': '乙事项已完成核验',
-                'observation_indices': indices.skip(3).toList(),
-              },
+              {'title': '项目核验${indices.first}', 'observation_indices': indices},
             ],
           };
         } else if (stage == 'timeline_reconcile') {
+          final topics = input['topics'] as List;
+          expect(topics, hasLength(2));
           response = {
             'groups': [
-              for (final topic in input['topics'] as List)
+              for (final topic in topics)
                 {
                   'members': [topic['id']],
                 },
@@ -210,14 +216,18 @@ class _Fixture {
                 'evidence_ids': [id],
                 'time_ref': id,
                 'brief': {
-                  'title': second ? '乙事项已完成核验' : '甲事项已完成核验',
+                  'title':
+                      '${second ? (replacedSecond ? '丙事项已完成核验' : '乙事项已完成核验') : '甲事项已完成核验'}${retitle ? '（复核）' : ''}',
                   'status_label': '已核验',
                   'facts': [
                     {'text': '本人完成了这项项目核验。', 'ref': id, 'quote': quote},
                   ],
-                  'why_now': '本人关注的核验结果已经明确。',
+                  'why_now': second
+                      ? (replacedSecond ? '丙专属背景已经明确。' : '乙专属背景已经明确。')
+                      : '本人关注的核验结果已经明确。',
                   'next_steps': [],
                   'uncertainty': '',
+                  'temporal': {'kind': 'unknown', 'dates': []},
                 },
               },
             ],
@@ -284,6 +294,214 @@ class _Fixture {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  for (final upgradedCache in [false, true]) {
+    test(
+      'coordinator collects after ${upgradedCache ? 'upgraded' : 'empty'} observation cache miss',
+      () async {
+        final fixture = _Fixture()..failSecondCompose = false;
+        await fixture.open();
+        final agent = fixture.createAgent();
+        addTearDown(agent.dispose);
+        if (upgradedCache) {
+          await agent.run(maxNewBatches: 1);
+          final storage = SecureContextPersistence(
+            ProfileObservationCheckpoint.incrementalStorageKey,
+          );
+          final legacy = jsonDecode((await storage.read())!) as Map;
+          expect(legacy['batches'], isNotEmpty);
+          legacy['scope'] = 'profile-observations-v3-author';
+          for (final batch in (legacy['batches'] as Map).values) {
+            for (final fact in batch as List) {
+              (fact as Map).remove('relevance');
+            }
+          }
+          await storage.write(jsonEncode(legacy));
+        }
+        final observationsBefore = fixture.counts['observations'] ?? 0;
+        final disk = MemoryLifePersistence();
+        var time = DateTime.now();
+        final calls = <bool>[];
+        final coordinator = ProfileGenerationCoordinator(
+          persistence: disk,
+          autoSchedule: false,
+          now: () => time,
+          inspect: agent.inspectGeneration,
+          generate:
+              ({required savedObservationsOnly, required maxNewBatches}) async {
+                calls.add(savedObservationsOnly);
+                await agent.run(
+                  savedObservationsOnly: savedObservationsOnly,
+                  maxNewBatches: maxNewBatches,
+                );
+              },
+          processedRecords: () =>
+              agent.lastCoverage['validated_observation_records'] ?? 0,
+          cancel: agent.cancel,
+          failureCode: profileRunErrorCode,
+        );
+        addTearDown(coordinator.dispose);
+        await coordinator.start();
+        await coordinator.poll();
+        expect(calls, [true]);
+        expect(coordinator.phase, ProfileGenerationPhase.continuing);
+        expect(coordinator.code, isNull);
+        expect(jsonDecode(disk.value!)['stage'], 'collect');
+        expect(
+          (agent.repository.value!['entries'] as List).where(
+            (e) => e['kind'] == 'timeline',
+          ),
+          isNotEmpty,
+        );
+        time = time.add(const Duration(seconds: 5));
+        await coordinator.poll();
+        expect(calls, [true, false]);
+        expect(fixture.counts['observations'], greaterThan(observationsBefore));
+        expect(coordinator.phase, isNot(ProfileGenerationPhase.failed));
+      },
+    );
+  }
+
+  for (final metadata in ['links', 'sender']) {
+    test('Timeline reconsiders $metadata-only source refresh', () async {
+      final fixture = _Fixture()..failSecondCompose = false;
+      await fixture.open();
+      final agent = fixture.createAgent();
+      addTearDown(agent.dispose);
+      Future<void> refresh(String sender, {bool forwarded = false}) =>
+          fixture.sources.ingestPage(
+            fixture.sources.fence('c'),
+            [
+              {
+                'message_id': 'm5',
+                'sender': {'id_type': 'open_id', 'id': sender},
+                'create_time': '${fixture.now.millisecondsSinceEpoch + 5}',
+                'msg_type': 'text',
+                if (forwarded) 'upper_message_id': 'm4',
+                'body': {
+                  'content': jsonEncode({
+                    'text': '本人关注项目核验；本人完成项目核验 5 ${'甲' * 13000}',
+                  }),
+                },
+              },
+            ],
+            nextPage: null,
+            windowEnd: fixture.now.add(const Duration(minutes: 1)),
+          );
+      if (metadata == 'sender') await refresh('other-before');
+      await agent.run();
+      final before = fixture.counts['timeline_compose']!;
+      await refresh(
+        metadata == 'sender' ? 'other-after' : 'self',
+        forwarded: metadata == 'links',
+      );
+      await agent.run();
+      expect(fixture.counts['timeline_compose'], greaterThan(before));
+      expect(
+        fixture.bodies['timeline_compose']!.last['context']['new_input_ids'],
+        ['e6'],
+      );
+    });
+  }
+
+  test(
+    'Timeline input basis detects edits and does not cross consent scopes',
+    () async {
+      final fixture = _Fixture()..failSecondCompose = false;
+      await fixture.open();
+      final agent = fixture.createAgent();
+      addTearDown(agent.dispose);
+      await agent.run();
+      expect(agent.repository.value!['timeline_input_basis'], hasLength(6));
+      for (final input in fixture.bodies['timeline_compose']!) {
+        expect(input['context'].containsKey('prior_cards'), false);
+        expect(input['context'].containsKey('new_input_ids'), false);
+      }
+      final before = Map<String, int>.from(fixture.counts);
+      await agent.run();
+      expect(fixture.counts, before);
+      final firstKeys = (agent.repository.value!['entries'] as List)
+          .where((e) => e['kind'] == 'timeline')
+          .map((e) => e['key'])
+          .toSet();
+      await fixture.sources.ingestPage(
+        fixture.sources.fence('c'),
+        [
+          {
+            'message_id': 'm0',
+            'sender': {'id_type': 'open_id', 'id': 'self'},
+            'create_time': '${fixture.now.millisecondsSinceEpoch}',
+            'msg_type': 'text',
+            'body': {
+              'content': jsonEncode({
+                'text': '本人关注项目核验；本人完成项目核验 0 已复核 ${'甲' * 13000}',
+              }),
+            },
+          },
+        ],
+        nextPage: null,
+        windowEnd: fixture.now.add(const Duration(minutes: 1)),
+      );
+      await agent.run();
+      final context =
+          fixture.bodies['timeline_compose']!.last['context'] as Map;
+      expect(context['new_input_ids'], ['e1']);
+      expect(
+        (context['prior_cards'] as List).map((c) => c['id']).toSet(),
+        firstKeys,
+      );
+      expect(agent.repository.value!['timeline_input_basis'], hasLength(6));
+      fixture.retitle = true;
+      final beforeCorrection = fixture.counts['timeline_compose']!;
+      await agent.corrections.correct(
+        agent.repository.correctionScope,
+        'interests',
+        '本人更关注已复核的交付结果。',
+        fixture.provider,
+      );
+      await agent.run();
+      expect(fixture.counts['timeline_compose'], greaterThan(beforeCorrection));
+      final revised = (agent.repository.value!['entries'] as List)
+          .where((e) => e['kind'] == 'timeline')
+          .toList();
+      expect(revised, hasLength(2));
+      expect(revised.map((e) => e['key']).toSet(), firstKeys);
+      expect(
+        revised.every((e) => (e['brief']['title'] as String).contains('复核')),
+        true,
+      );
+      expect(
+        fixture.bodies['timeline_compose']!.last['context']['prior_cards'],
+        hasLength(2),
+      );
+      expect(
+        fixture.bodies['timeline_compose']!.last['context'].containsKey(
+          'new_input_ids',
+        ),
+        false,
+      );
+      await fixture.sources.grantProcessing(fixture.provider, 'profile', false);
+      await fixture.sources.grantProcessing(fixture.provider, 'profile', true);
+      await agent.run();
+      expect(
+        fixture.bodies['timeline_compose']!.last['context'].containsKey(
+          'prior_cards',
+        ),
+        true,
+      );
+      final afterConsentCycle = (agent.repository.value!['entries'] as List)
+          .where((e) => e['kind'] == 'timeline')
+          .toList();
+      expect(afterConsentCycle, hasLength(2));
+      expect(afterConsentCycle.map((e) => e['key']).toSet(), firstKeys);
+      expect(
+        fixture.bodies['timeline_compose']!.last['context'].containsKey(
+          'new_input_ids',
+        ),
+        false,
+      );
+    },
+  );
+
   test(
     'profile failure preserves all Timeline batches and cached restart completes once',
     () async {
@@ -298,7 +516,7 @@ void main() {
       );
       expect(fixture.counts, {
         'observations': 6,
-        'timeline_select': 1,
+        'timeline_select': 2,
         'timeline_reconcile': 1,
         'timeline_compose': 2,
         'timeline_review': 2,
@@ -333,7 +551,7 @@ void main() {
       await next.run(savedObservationsOnly: true);
       expect(fixture.counts, {
         'observations': 6,
-        'timeline_select': 1,
+        'timeline_select': 2,
         'timeline_reconcile': 1,
         'timeline_compose': 2,
         'timeline_review': 2,
@@ -379,7 +597,7 @@ void main() {
       await expectLater(first.run(), throwsA(isA<AgentFailure>()));
       expect(fixture.counts, {
         'observations': 6,
-        'timeline_select': 1,
+        'timeline_select': 2,
         'timeline_reconcile': 1,
         'timeline_compose': 2,
         'timeline_review': 1,
@@ -401,6 +619,7 @@ void main() {
         '本人关注项目核验。',
       );
       expect(partial['partial'], true);
+      expect(partial['timeline_input_basis'], hasLength(3));
       expect(partial['coverage']['timeline_completed_batches'], 1);
       expect(partial['coverage']['timeline_pending_batches'], 1);
       expect(partial['coverage']['final_original_records'], 4);
@@ -414,7 +633,7 @@ void main() {
       final savedStages = await SecureContextPersistence(
         ProfilePipelineCheckpoint.storageKey,
       ).read();
-      expect((jsonDecode(savedStages!)['entries'] as Map).length, 5);
+      expect((jsonDecode(savedStages!)['entries'] as Map).length, 6);
       first.dispose();
       fixture.failSecondCompose = false;
       final next = fixture.createAgent();
@@ -422,7 +641,7 @@ void main() {
       await next.run(savedObservationsOnly: true);
       expect(fixture.counts, {
         'observations': 6,
-        'timeline_select': 1,
+        'timeline_select': 2,
         'timeline_reconcile': 1,
         'timeline_compose': 3,
         'timeline_review': 2,
@@ -580,6 +799,94 @@ void main() {
         throwsA(isA<StateError>()),
       );
       expect(fixture.counts, previous);
+    },
+  );
+
+  test(
+    'removed chat evidence never reaches model input as prior cards',
+    () async {
+      final fixture = _Fixture()..failSecondCompose = false;
+      await fixture.open();
+      final agent = fixture.createAgent();
+      addTearDown(agent.dispose);
+      await agent.run();
+      final cards = (agent.repository.value!['entries'] as List)
+          .where((e) => e['kind'] == 'timeline')
+          .toList();
+      expect(cards, hasLength(2));
+      final removed = cards.singleWhere(
+        (e) => (e['brief']['title'] as String).startsWith('乙'),
+      );
+      final removedRefs = (removed['evidence_ids'] as List).toSet();
+      final before = {
+        for (final entry in fixture.bodies.entries)
+          entry.key: entry.value.length,
+      };
+      // Deleting the source messages makes only that card's evidence unavailable.
+      await fixture.sources.ingestPage(
+        fixture.sources.fence('c'),
+        [
+          for (var i = 3; i < 6; i++)
+            {
+              'message_id': 'm$i',
+              'deleted': true,
+              'sender': {'id_type': 'open_id', 'id': 'self'},
+              'create_time': '${fixture.now.millisecondsSinceEpoch + i}',
+              'msg_type': 'text',
+            },
+        ],
+        nextPage: null,
+        windowEnd: fixture.now.add(const Duration(minutes: 1)),
+      );
+      fixture.replacedSecond = true;
+      await fixture.sources.ingestPage(
+        fixture.sources.fence('c'),
+        [
+          for (var i = 6; i < 9; i++)
+            {
+              'message_id': 'm$i',
+              'sender': {'id_type': 'open_id', 'id': 'self'},
+              'create_time': '${fixture.now.millisecondsSinceEpoch + i}',
+              'msg_type': 'text',
+              'body': {
+                'content': jsonEncode({
+                  'text': '本人关注项目核验；本人完成项目核验 $i ${'甲' * 13000}',
+                }),
+              },
+            },
+        ],
+        nextPage: null,
+        windowEnd: fixture.now.add(const Duration(minutes: 2)),
+      );
+      expect(
+        fixture.sources
+            .messagesByEvidenceIds(removedRefs)
+            .where((m) => m['status'] == 'available'),
+        isEmpty,
+      );
+      await agent.run();
+      final later = [
+        for (final entry in fixture.bodies.entries)
+          ...entry.value.skip(before[entry.key] ?? 0),
+      ];
+      expect(
+        fixture.counts['timeline_compose'],
+        greaterThan(before['timeline_compose']!),
+      );
+      final priors = later
+          .map((input) => (input['context'] as Map?)?['prior_cards'])
+          .whereType<List>();
+      expect(priors, isNotEmpty);
+      final wire = jsonEncode(later);
+      expect(wire, isNot(contains(removed['brief']['title'])));
+      expect(wire, isNot(contains('乙专属背景')));
+      expect(wire, isNot(contains(removed['key'])));
+      final offered = later
+          .map((input) => (input['context'] as Map?)?['prior_cards'])
+          .whereType<List>()
+          .expand((cards) => cards)
+          .map((card) => card['id']);
+      expect(offered, isNot(contains(removed['key'])));
     },
   );
 }

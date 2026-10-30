@@ -53,6 +53,7 @@ void main() {
             'facts': [
               {
                 'text': '【事】提出项目计划',
+                'relevance': 'ongoing_work',
                 'refs': [id],
               },
             ],
@@ -83,6 +84,7 @@ void main() {
                     'why_now': '这是本人正在协调的项目安排。',
                     'next_steps': [],
                     'uncertainty': '',
+                    'temporal': {'kind': 'unknown', 'dates': []},
                   },
                   'evidence_ids': ['e1'],
                   'time_ref': 'e1',
@@ -179,7 +181,7 @@ void main() {
       expect(observationCalls, 2);
       expect(finalCalls, 0);
       final checkpoint = SecureContextPersistence(
-        ProfileObservationCheckpoint.storageKey,
+        ProfileObservationCheckpoint.incrementalStorageKey,
       );
       final saved = await checkpoint.read();
       expect((jsonDecode(saved!)['batches'] as Map).length, 1);
@@ -294,11 +296,17 @@ void main() {
         completedScope!.scope,
       );
 
-      expect(await checkpoint.read(), 'null');
+      expect(
+        (jsonDecode((await checkpoint.read())!)['batches'] as Map).length,
+        2,
+      );
       final completeProjection = await SecureContextPersistence(
         'nova.profile.local.v1',
       ).read();
       final completeRevision = agent.repository.value!['revision'];
+      // Simulate lost working cache, retaining the complete published result.
+      // A smaller resumed attempt must still be rejected before model spending.
+      await ProfileObservationCheckpoint.invalidate(checkpoint);
       failMissing = true;
       await expectLater(agent.run(), throwsA(isA<AgentFailure>()));
       final smallerCheckpoint = await checkpoint.read();

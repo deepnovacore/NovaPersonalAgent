@@ -75,7 +75,7 @@ void main() {
         endpoint: 'https://openrouter.ai/api/v1',
         key: 'support-key',
       );
-      expect(find.text('辅助与后台模型'), findsOneWidget);
+      expect(find.text('信息整理'), findsOneWidget);
       expect(find.byKey(const ValueKey('support.follow')), findsOneWidget);
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();

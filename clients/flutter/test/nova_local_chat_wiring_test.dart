@@ -62,7 +62,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(find.text('Model provider'), findsOneWidget);
+    expect(find.text('Model services'), findsOneWidget);
     await tester.tap(find.text('Devices'));
     await tester.pumpAndSettle();
     expect(find.text('This device'), findsOneWidget);

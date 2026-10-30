@@ -6,8 +6,14 @@ import '../personal/life_reducer.dart';
 import 'source_store.dart';
 import 'profile_corrections.dart';
 import 'timeline_brief.dart';
+import 'timeline_time.dart';
 import 'profile_validation.dart';
 export 'profile_validation.dart';
+
+bool _trustedTimeline(dynamic entry) =>
+    entry is Map &&
+    (entry['kind'] != 'timeline' ||
+        entry['policy_revision'] is int && entry['policy_revision'] >= 2);
 
 String? profileRepairReason(Object error) {
   if (error is FormatException) return 'invalid_projection';
@@ -133,6 +139,8 @@ void validateProfileEntries(
           'kind',
           'observed_at',
           'brief',
+          'time',
+          'policy_revision',
         }).isNotEmpty) {
       reject('entry_schema', '');
     }
@@ -170,6 +178,58 @@ void validateProfileEntries(
     if (!['profile', 'timeline', 'todo_candidate'].contains(kind)) {
       throw StateError('invalid_projection_kind');
     }
+    if ((item.containsKey('policy_revision') &&
+            (kind != 'timeline' || item['policy_revision'] is! int)) ||
+        (item.containsKey('time') &&
+            (kind != 'timeline' || item['time'] is! Map))) {
+      reject('entry_schema', '');
+    }
+    final time = item['time'];
+    if (time is Map) {
+      const dates = {
+        'anchor_date',
+        'occurred_on',
+        'started_on',
+        'due_on',
+        'scheduled_on',
+        'last_reported_on',
+        'evidence_from',
+        'evidence_to',
+        'as_of',
+      };
+      bool validDate(dynamic value) {
+        if (value == null) return true;
+        if (value is! String ||
+            !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) {
+          return false;
+        }
+        final parsed = DateTime.tryParse('${value}T00:00:00Z');
+        return parsed != null &&
+            parsed.toIso8601String().substring(0, 10) == value;
+      }
+
+      if (time.length != dates.length + 2 ||
+          !time.keys.every({...dates, 'kind', 'anchor_basis'}.contains) ||
+          !const {
+            'event',
+            'ongoing',
+            'deadline',
+            'scheduled',
+            'synthesis',
+            'unknown',
+          }.contains(time['kind']) ||
+          !const {
+            'occurred',
+            'deadline',
+            'scheduled',
+            'reported',
+            'unknown',
+          }.contains(time['anchor_basis']) ||
+          time['as_of'] == null ||
+          !dates.every((field) => validDate(time[field]))) {
+        reject('invalid_time', '.time');
+      }
+    }
     if (kind == 'profile' &&
         !ProfileCorrections.categories.containsKey(item['key'])) {
       throw ProfileValidationFailure('invalid_profile_category', {
@@ -188,6 +248,27 @@ void validateProfileEntries(
       if (item['text'] != timelineBriefText(brief)) {
         reject('brief_text_mismatch', '.text');
       }
+      if (brief.containsKey('temporal')) {
+        if (time is! Map || time['as_of'] is! String) {
+          reject('invalid_temporal', '.brief.temporal');
+        }
+        final resolved = resolveTimelineTime(brief['temporal'], [
+          for (final id in evidenceIds)
+            {
+              ...Map<String, dynamic>.from(originals[id] as Map),
+              'evidence_id': id,
+              'local_date':
+                  originals[id]['local_date'] ??
+                  DateTime.fromMillisecondsSinceEpoch(
+                    originals[id]['created_at'] as int,
+                  ).toIso8601String().substring(0, 10),
+            },
+        ], localDate: time['as_of'] as String);
+        if (resolved == null ||
+            lifeFingerprint(resolved) != lifeFingerprint(time)) {
+          reject('invalid_temporal', '.brief.temporal');
+        }
+      }
       item['brief'] = brief;
     }
     final refs = (item['evidence_ids'] as List).map((id) => originals[id]!);
@@ -205,8 +286,12 @@ void validateProfileEntries(
           for (final id in invalid.take(120))
             {
               'evidence_id': id,
-              'relation': originals[id]!['relation'] == 'participant'
-                  ? 'participant'
+              'relation': const {
+                'participant',
+                'addressed',
+                'app',
+              }.contains(originals[id]!['relation'])
+                  ? originals[id]!['relation']
                   : 'unknown',
             },
         ],
@@ -248,6 +333,14 @@ class ProfileRepository {
   final LocalPublicationContext publication;
   final SourceStore sources;
   Map<String, dynamic>? _value;
+  int _revision = 0;
+  int get revision => _revision;
+  void _replace(Map<String, dynamic>? next) {
+    if (identical(_value, next)) return;
+    _value = next;
+    _revision++;
+  }
+
   Future<void> _tail = Future.value();
   Map<String, dynamic>? get value {
     final current = _value;
@@ -258,7 +351,7 @@ class ProfileRepository {
       return null;
     }
     final historicalSnapshot =
-        current['history_schema'] == 1 &&
+        const {1, 2}.contains(current['history_schema']) &&
         current['evidence_fingerprints'] is Map;
     if (historicalSnapshot) {
       if (current['source_identity'] != sources.identity) {
@@ -288,7 +381,10 @@ class ProfileRepository {
             current['consent_revision'] == sources.processingRevision;
       }
     }
-    final refs = (current['entries'] as List)
+    final trustedEntries = (current['entries'] as List)
+        .where(_trustedTimeline)
+        .toList();
+    final refs = trustedEntries
         .expand((entry) => entry['evidence_ids'] as List)
         .toSet();
     final originals = {
@@ -301,8 +397,11 @@ class ProfileRepository {
           (id) =>
               originals.containsKey(id) &&
               (!historicalSnapshot ||
-                  current['evidence_fingerprints'][id] ==
-                      _evidenceFingerprint(originals[id]!)),
+                  _verifiedEvidence(
+                    current['history_schema'] as int,
+                    current['evidence_fingerprints'][id],
+                    originals[id]!,
+                  )),
         )
         .toList();
     if (!historicalSnapshot && available.length != refs.length) return null;
@@ -315,9 +414,11 @@ class ProfileRepository {
         available.length != refs.length;
     final explicit = corrections?.values(correctionScope) ?? <String, String>{};
     result['entries'] = [
-      ...(result['entries'] as List).where(
-        (e) => e['kind'] == 'timeline' || !explicit.containsKey(e['key']),
-      ),
+      ...(result['entries'] as List)
+          .where(_trustedTimeline)
+          .where(
+            (e) => e['kind'] == 'timeline' || !explicit.containsKey(e['key']),
+          ),
       for (final item in explicit.entries)
         {
           'key': item.key,
@@ -334,16 +435,69 @@ class ProfileRepository {
   /// hides it because it belongs to another Space, device or identity.
   bool get hasStoredResult => _value != null;
 
+  /// Content identity only: author metadata (sender_type, mentions, relation,
+  /// reply links) can be enriched later without changing what was said.
+  static const _fingerprintFields = {
+    'evidence_id',
+    'identity',
+    'chat_id',
+    'message_id',
+    'created_at',
+    'sender_id',
+    'text',
+    'status',
+  };
   static String _evidenceFingerprint(Map original) => lifeFingerprint({
-    for (final entry in original.entries)
-      if (entry.key != 'fetched_at') entry.key: entry.value,
+    for (final field in _fingerprintFields) field: original[field],
   });
+
+  static const _metadataFields = {
+    'sender_type',
+    'mention',
+    'mention_ids',
+    'parent_id',
+    'root_id',
+    'thread_id',
+    'upper_message_id',
+  };
+
+  /// Schema 1 hashed every stored field except fetched_at. Its digest still
+  /// verifies a message whose only change is the later metadata enrichment,
+  /// by recomputing it as stored then or as stored before enrichment existed.
+  static bool _verifiedEvidence(int schema, Object? stored, Map original) {
+    if (schema == 2) return stored == _evidenceFingerprint(original);
+    String full(Map record) => lifeFingerprint({
+      for (final entry in record.entries)
+        if (entry.key != 'fetched_at') entry.key: entry.value,
+    });
+    if (stored == full(original)) return true;
+    final self = original['relation'] == 'self';
+    final legacy = {
+      for (final entry in original.entries)
+        if (!_metadataFields.contains(entry.key)) entry.key: entry.value,
+      'relation': original['sender_id'] == null
+          ? 'unknown'
+          : self
+          ? 'self'
+          : 'participant',
+    };
+    // Before the re-read, records either lacked the metadata keys (older
+    // builds) or carried their unknown defaults (builds with the new ingest).
+    return stored == full(legacy) ||
+        stored ==
+            full({
+              ...legacy,
+              'sender_type': 'unknown',
+              'mention': self ? 'none' : 'unknown',
+              'mention_ids': <String>[],
+            });
+  }
 
   Future<void> open() {
     final result = _tail.then((_) async {
       await corrections?.open();
       final raw = await persistence.read();
-      if (raw != null) _value = jsonDecode(raw) as Map<String, dynamic>?;
+      if (raw != null) _replace(jsonDecode(raw) as Map<String, dynamic>?);
       final legacy = _value;
       if (legacy != null && legacy['history_schema'] == null && value != null) {
         // Only the original fences and still-readable references can establish a
@@ -356,7 +510,7 @@ class ProfileRepository {
           ...legacy,
           'source_identity': sources.identity,
           'source_generation': sources.generation,
-          'history_schema': 1,
+          'history_schema': 2,
           'evidence_fingerprints': {
             for (final id
                 in (legacy['entries'] as List)
@@ -366,7 +520,7 @@ class ProfileRepository {
           },
         };
         await persistence.write(jsonEncode(migrated));
-        _value = migrated;
+        _replace(migrated);
       }
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
@@ -415,6 +569,8 @@ class ProfileRepository {
     Map<String, int>? coverage,
     String? generationScope,
     bool mergeTimelineHistory = false,
+    Map<String, String>? timelineInputBasis,
+    String? timelineBasisCorrections,
   }) {
     final result = _tail.then((_) async {
       final previous = _value;
@@ -424,23 +580,28 @@ class ProfileRepository {
       if (partial) {
         validatePartialCoverage(coverage, generationScope: generationScope);
       }
-      final entries = jsonDecode(encoded);
-      final originals = {
-        for (final e in sources.readAuthorizedEvidence(provider, 'profile'))
-          e['evidence_id']: e,
-      };
+      var entries = jsonDecode(encoded);
+      final evidence = await sources.readAuthorizedEvidenceAsync(
+        provider,
+        'profile',
+      );
+      publication.requireCurrent();
+      sources.validateProcessing(provider, 'profile', consentRevision);
+      if (sources.revision != sourceRevision) throw StateError('stale_inputs');
+      final originals = {for (final e in evidence) e['evidence_id']: e};
       // Model responses stay capped at 100 per batch. A host-assembled snapshot
       // can contain many independently validated batches.
       if (entries is List && entries.length > 10000) {
         throw StateError('profile_result_capacity');
       }
       validateProfileEntries(entries, originals, maxEntries: 10000);
+      entries = (entries as List).where(_trustedTimeline).toList();
       if (partial &&
-          (entries as List).any((entry) => entry['kind'] == 'todo_candidate')) {
+          entries.any((entry) => entry['kind'] == 'todo_candidate')) {
         throw StateError('partial_profile_todo_unsupported');
       }
       final retained = value;
-      final noNewContent = (entries as List).isEmpty && retained != null;
+      final noNewContent = entries.isEmpty && retained != null;
       // value gates account/publication ownership. Preserve the underlying
       // publication, not its temporary overlay of explicit user corrections.
       final oldEntries = retained == null
@@ -453,21 +614,14 @@ class ProfileRepository {
       final hasNewTimeline = entries.any((e) => e['kind'] == 'timeline');
       // A null/omitted profile category or an empty Timeline is not a deletion.
       // Prior suggestions never become current actionable candidates again.
-      String timelineIdentity(dynamic entry) {
-        final refs = List<String>.from(entry['evidence_ids'] as List)..sort();
-        return jsonEncode(refs);
-      }
-
-      final newTimelineEvidence = entries
-          .where((e) => e['kind'] == 'timeline')
-          .map(timelineIdentity)
-          .toSet();
+      final newTimelineKeys = entries.where((e) => e['kind'] == 'timeline')
+          .map((e) => e['key']).toSet();
       final preserved = oldEntries.where((e) {
+        if (!_trustedTimeline(e)) return false;
         final kind = e['kind'] ?? 'profile';
         return kind == 'timeline'
-            ? !hasNewTimeline ||
-                  mergeTimelineHistory &&
-                      !newTimelineEvidence.contains(timelineIdentity(e))
+            ? !newTimelineKeys.contains(e['key']) &&
+                  (!hasNewTimeline || mergeTimelineHistory)
             : kind == 'profile' &&
                   ProfileCorrections.categories.containsKey(e['key']) &&
                   !newProfileKeys.contains(e['key']);
@@ -499,13 +653,30 @@ class ProfileRepository {
         throw StateError('profile_result_capacity');
       }
       final oldFingerprints = _value?['evidence_fingerprints'] as Map? ?? {};
+      // Preserved evidence that verified under the old schema is re-keyed to
+      // the content digest; unverified evidence keeps a digest that can never
+      // match again, so it stays historical rather than becoming available.
+      final verified = Set<String>.from(
+        retained?['available_evidence_ids'] as List? ?? const [],
+      );
+      final preservedIds = preserved
+          .expand((e) => e['evidence_ids'] as List)
+          .toSet();
+      final reverify = preservedIds.where(verified.contains).toSet();
+      final current = {
+        if (reverify.isNotEmpty)
+          for (final m in sources.messagesByEvidenceIds(reverify))
+            if (m['status'] == 'available') m['evidence_id']: m,
+      };
       final fingerprints = {
+        for (final id in preservedIds)
+          if (current.containsKey(id))
+            id: _evidenceFingerprint(current[id]!)
+          else if (oldFingerprints.containsKey(id))
+            id: oldFingerprints[id],
         for (final id
             in entries.expand((e) => e['evidence_ids'] as List).toSet())
           id: _evidenceFingerprint(originals[id]!),
-        for (final id
-            in preserved.expand((e) => e['evidence_ids'] as List).toSet())
-          if (oldFingerprints.containsKey(id)) id: oldFingerprints[id],
       };
       final next = {
         'version': 1,
@@ -518,8 +689,19 @@ class ProfileRepository {
         'processing_provider': provider,
         'source_identity': sources.identity,
         'source_generation': sources.generation,
-        'history_schema': 1,
+        'history_schema': 2,
         'evidence_fingerprints': fingerprints,
+        if (timelineInputBasis != null) ...{
+          'timeline_input_basis': Map<String, String>.from(timelineInputBasis),
+          'timeline_basis_corrections': timelineBasisCorrections,
+        }
+        else if (retained?['processing_provider'] == provider &&
+            retained?['consent_revision'] == consentRevision &&
+            retained?['source_generation'] == sources.generation &&
+            retained?['timeline_input_basis'] is Map) ...{
+          'timeline_input_basis': retained!['timeline_input_basis'],
+          'timeline_basis_corrections': retained['timeline_basis_corrections'],
+        },
         'source_revision': noNewContent
             ? _value!['source_revision']
             : sourceRevision,
@@ -543,10 +725,10 @@ class ProfileRepository {
       } catch (_) {
         // A failed replacement must not erase the prior committed success.
         await persistence.write(jsonEncode(previous));
-        _value = previous;
+        _replace(previous);
         rethrow;
       }
-      _value = next;
+      _replace(next);
       return {'revision': next['revision'], 'entries': publishedEntries.length};
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
@@ -595,7 +777,7 @@ class ProfileRepository {
   Future<void> clear() {
     final result = _tail.then((_) async {
       await persistence.write('null');
-      _value = null;
+      _replace(null);
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;

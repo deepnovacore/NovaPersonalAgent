@@ -96,7 +96,7 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
   /// must stay usable while a long sync is running; only the page's own
   /// in-flight work and an open browser session block them.
   bool get bindBusy => _busy || session != null;
-  bool manualBind = false;
+  bool manualBind = false, _scopeExpanded = false;
   String? bindError;
   bool registering = false;
   List<Map<String, dynamic>> get chats => host.collection.chats;
@@ -617,525 +617,735 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
     }
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    // Opaque background: the page is pushed over the translucent shell, and a
-    // transparent Scaffold leaves the previous tab visible mid-transition.
-    backgroundColor: Nova.ink,
-    appBar: AppBar(title: Text(t('飞书', 'Feishu'))),
-    body: ListView(
-      padding: const EdgeInsets.all(20),
+  Widget _card({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required List<Widget> children,
+  }) => NovaSection(
+    margin: const EdgeInsets.only(bottom: 16),
+    children: [
+      Semantics(
+        header: true,
+        child: NovaTile(
+          leading: NovaIconTile(icon),
+          title: title,
+          subtitle: subtitle == null ? null : Text(subtitle),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
+      ),
+    ],
+  );
+
+  Widget _running(String label, {required String id}) => Semantics(
+    liveRegion: true,
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!host.auth.configured) ...[
-          Text(
-            t(
-              '连接飞书，查看聊天中的近况。',
-              'Connect Feishu to see updates from your chats.',
+        Padding(
+          padding: const EdgeInsets.only(top: 3, right: 10),
+          child: ExcludeSemantics(
+            child: SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(
+                key: ValueKey('feishu.$id.spinner'),
+                strokeWidth: 2,
+              ),
             ),
           ),
-          const SizedBox(height: 16),
-          NovaSection(
-            margin: const EdgeInsets.only(bottom: 12),
-            header: t('连接应用', 'CONNECT AN APP'),
-            children: [
-              NovaTile(
-                leading: const NovaIconTile(CupertinoIcons.add),
-                title: t('通过飞书网页绑定', 'Connect in Feishu'),
-                subtitle: Text(
-                  t(
-                    '在飞书网页创建新应用，或直接选择已有应用；无需复制密钥。',
-                    'Create a new app or choose an existing one in Feishu; no keys to copy.',
-                  ),
-                ),
-                trailing: const CupertinoListTileChevron(),
-                onTap: busy || session != null ? null : () => _run(_register),
-              ),
-              NovaTile(
-                leading: const NovaIconTile(CupertinoIcons.link),
-                title: t('手动绑定已有应用', 'Connect an existing app manually'),
-                subtitle: Text(
-                  t(
-                    '已有 App ID 和 App Secret 时使用。',
-                    'Use this when you already have an App ID and App Secret.',
-                  ),
-                ),
-                trailing: const CupertinoListTileChevron(),
-                onTap: bindBusy
-                    ? null
-                    : () => setState(() {
-                        manualBind = !manualBind;
-                        bindError = null;
-                      }),
-              ),
-            ],
+        ),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(color: Nova.secondary, height: 1.5),
           ),
-          if (manualBind) ...[
+        ),
+      ],
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final counts = host.ready
+        ? host.sources.messageCounts
+        : (byStatus: const <String, int>{}, byChat: const <String, int>{});
+    final skipped = host.sources.skippedSummaryFor(counts.byStatus);
+    return Scaffold(
+      // Opaque background: the page is pushed over the translucent shell, and a
+      // transparent Scaffold leaves the previous tab visible mid-transition.
+      backgroundColor: Nova.ink,
+      appBar: AppBar(title: Text(t('飞书', 'Feishu'))),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          if (!host.auth.configured) ...[
             Text(
               t(
-                '在飞书开放平台的应用详情中，找到「凭证与基础信息」。',
-                'Find these under Credentials & Basic Info in the Feishu Open Platform app details.',
+                '连接飞书，查看聊天中的近况。',
+                'Connect Feishu to see updates from your chats.',
               ),
-              style: const TextStyle(color: Nova.secondary, fontSize: 13),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: brand,
-              decoration: InputDecoration(labelText: t('应用品牌', 'App brand')),
-              items: const [
-                DropdownMenuItem(value: 'feishu', child: Text('飞书')),
-                DropdownMenuItem(value: 'lark', child: Text('Lark')),
-              ],
-              onChanged: bindBusy
-                  ? null
-                  : (value) => setState(() => brand = value!),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: app,
-              autocorrect: false,
-              enabled: !bindBusy,
-              decoration: const InputDecoration(labelText: 'App ID'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: secret,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              enabled: !bindBusy,
-              decoration: const InputDecoration(labelText: 'App Secret'),
-            ),
-            if (bindError != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  bindError!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+            const SizedBox(height: 16),
+            NovaSection(
+              margin: const EdgeInsets.only(bottom: 12),
+              header: t('连接应用', 'CONNECT AN APP'),
+              children: [
+                NovaTile(
+                  leading: const NovaIconTile(CupertinoIcons.add),
+                  title: t('通过飞书网页绑定', 'Connect in Feishu'),
+                  subtitle: Text(
+                    t(
+                      '在飞书网页创建新应用，或直接选择已有应用；无需复制密钥。',
+                      'Create a new app or choose an existing one in Feishu; no keys to copy.',
+                    ),
+                  ),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: busy || session != null ? null : () => _run(_register),
                 ),
-              ),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: bindBusy ? null : _bindExisting,
-              child: Text(t('绑定应用', 'Connect app')),
+                NovaTile(
+                  leading: const NovaIconTile(CupertinoIcons.link),
+                  title: t('手动绑定已有应用', 'Connect an existing app manually'),
+                  subtitle: Text(
+                    t(
+                      '已有 App ID 和 App Secret 时使用。',
+                      'Use this when you already have an App ID and App Secret.',
+                    ),
+                  ),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: bindBusy
+                      ? null
+                      : () => setState(() {
+                          manualBind = !manualBind;
+                          bindError = null;
+                        }),
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-          ],
-        ] else ...[
-          ListTile(
-            leading: const Icon(CupertinoIcons.chat_bubble_2),
-            title: Text(
-              host.auth.authorized
+            if (manualBind) ...[
+              Text(
+                t(
+                  '在飞书开放平台的应用详情中，找到「凭证与基础信息」。',
+                  'Find these under Credentials & Basic Info in the Feishu Open Platform app details.',
+                ),
+                style: const TextStyle(color: Nova.secondary, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: brand,
+                decoration: InputDecoration(labelText: t('应用品牌', 'App brand')),
+                items: const [
+                  DropdownMenuItem(value: 'feishu', child: Text('飞书')),
+                  DropdownMenuItem(value: 'lark', child: Text('Lark')),
+                ],
+                onChanged: bindBusy
+                    ? null
+                    : (value) => setState(() => brand = value!),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: app,
+                autocorrect: false,
+                enabled: !bindBusy,
+                decoration: const InputDecoration(labelText: 'App ID'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: secret,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                enabled: !bindBusy,
+                decoration: const InputDecoration(labelText: 'App Secret'),
+              ),
+              if (bindError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    bindError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: bindBusy ? null : _bindExisting,
+                child: Text(t('绑定应用', 'Connect app')),
+              ),
+              const SizedBox(height: 4),
+            ],
+          ] else ...[
+            _card(
+              icon: CupertinoIcons.link,
+              title: host.auth.authorized
                   ? t('已连接飞书', 'Connected to Feishu')
                   : t('应用已绑定', 'App connected'),
-            ),
-            subtitle: Text(
-              host.auth.authorized
-                  ? '${host.auth.identity?['name'] ?? ''}'
+              subtitle: host.auth.authorized
+                  ? ((host.auth.identity?['name'] as String?)
+                                ?.trim()
+                                .isNotEmpty ==
+                            true
+                        ? host.auth.identity!['name'] as String
+                        : t('授权已完成', 'Authorization complete'))
                   : t('需要前往飞书授权', 'Authorization required in Feishu'),
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: NovaStatusChip(
+                    host.auth.revocationPending
+                        ? t('待撤销授权', 'Revocation pending')
+                        : host.auth.authorized
+                        ? t('已授权', 'Authorized')
+                        : t('待授权', 'Authorization needed'),
+                    tone: host.auth.authorized
+                        ? NovaTone.success
+                        : NovaTone.warning,
+                  ),
+                ),
+                if (!host.auth.authorized && !host.auth.revocationPending)
+                  FilledButton(
+                    onPressed: busy ? null : () => _run(_authorize),
+                    child: Text(t('前往飞书授权', 'Authorize in Feishu')),
+                  ),
+                if (host.auth.revocationPending)
+                  FilledButton(
+                    onPressed: busy
+                        ? null
+                        : () => _run(host.auth.retryRevocation),
+                    child: Text(t('重试撤销授权', 'Retry revoking access')),
+                  ),
+              ],
             ),
-          ),
-          if (!host.auth.authorized && !host.auth.revocationPending)
-            FilledButton(
-              onPressed: busy ? null : () => _run(_authorize),
-              child: Text(t('前往飞书授权', 'Authorize in Feishu')),
+          ],
+          if (session != null)
+            _card(
+              icon: CupertinoIcons.clock,
+              title: registering
+                  ? t('等待应用绑定', 'Waiting for app connection')
+                  : t('等待飞书授权', 'Waiting for authorization'),
+              subtitle: t(
+                '请在飞书网页完成${registering ? '应用绑定' : '授权'}，然后返回 Nova。',
+                'Finish ${registering ? 'connecting the app' : 'authorization'} in Feishu, then return to Nova.',
+              ),
+              children: [
+                TextButton(
+                  onPressed: () => _run(_openSession),
+                  child: Text(t('重新打开飞书网页', 'Reopen Feishu')),
+                ),
+                if (registering)
+                  TextButton(
+                    onPressed: busy
+                        ? null
+                        : () => _run(() async {
+                            timer?.cancel();
+                            await host.auth.cancelAppRegistration();
+                            session = null;
+                            registering = false;
+                          }),
+                    child: Text(t('取消绑定', 'Cancel connection')),
+                  ),
+              ],
             ),
-          if (host.auth.revocationPending)
-            FilledButton(
-              onPressed: busy ? null : () => _run(host.auth.retryRevocation),
-              child: Text(t('重试撤销授权', 'Retry revoking access')),
+          if (host.ready) ...[
+            _card(
+              icon: Icons.sync_rounded,
+              title: t('聊天记录', 'Chat history'),
+              children: [
+                Text(
+                  t(
+                    '已保存 ${counts.byStatus['available'] ?? 0} 条消息 · ${host.sources.sources.length} 个对话',
+                    '${counts.byStatus['available'] ?? 0} messages saved · ${host.sources.sources.length} chats',
+                  ),
+                ),
+                if (host.collection.running) ...[
+                  const SizedBox(height: 12),
+                  _running(
+                    t('正在同步，可继续使用其他页面。', 'Syncing. You can use other pages.'),
+                    id: 'sync',
+                  ),
+                ],
+                if (host.collection.error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: NovaNotice(_message(host.collection.error!)),
+                    ),
+                  ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: host.collection.running
+                        ? host.collection.pause
+                        : _busy
+                        ? null
+                        : () => _run(_readScope),
+                    icon: Icon(
+                      host.collection.running
+                          ? CupertinoIcons.pause_fill
+                          : CupertinoIcons.arrow_2_circlepath,
+                    ),
+                    label: Text(
+                      host.collection.running
+                          ? t('暂停同步', 'Pause sync')
+                          : t('同步消息', 'Sync messages'),
+                    ),
+                  ),
+                ),
+              ],
             ),
-        ],
-        if (session != null) ...[
-          Text(
-            t(
-              '请在飞书网页完成${registering ? '应用绑定' : '授权'}，然后返回 Nova。',
-              'Finish ${registering ? 'connecting the app' : 'authorization'} in Feishu, then return to Nova.',
-            ),
-          ),
-          TextButton(
-            onPressed: () => _run(_openSession),
-            child: Text(t('重新打开飞书网页', 'Reopen Feishu')),
-          ),
-          if (registering)
-            TextButton(
-              onPressed: busy
-                  ? null
-                  : () => _run(() async {
-                      timer?.cancel();
-                      await host.auth.cancelAppRegistration();
-                      session = null;
-                      registering = false;
-                    }),
-              child: Text(t('取消绑定', 'Cancel connection')),
-            ),
-        ],
-        if (host.ready) ...[
-          if (host.sources.sources.isNotEmpty) ...[
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(t('近况与个人信息', 'Updates and personal info')),
-              subtitle: Text(
-                t(
+            if (host.sources.sources.isNotEmpty) ...[
+              _card(
+                icon: Icons.auto_awesome_outlined,
+                title: t('近况与个人信息', 'Updates and personal info'),
+                subtitle: t(
                   '根据已同步的聊天生成，可查看原文。',
                   'Generated from synced chats, with source messages available.',
                 ),
-              ),
-            ),
-            if (widget.generation != null)
-              ProfileGenerationStatus(
-                generation: widget.generation!,
-                language: widget.language,
-                empty: profile.repository.value == null,
-              )
-            else if (profile.busy) ...[
-              const LinearProgressIndicator(minHeight: 2),
-              const SizedBox(height: 8),
-              Text(
-                profileProgressLabel(profile.status, language: widget.language),
-              ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: profile.cancel,
-                  child: Text(t('取消生成', 'Cancel')),
-                ),
-              ),
-            ] else if (processingError != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  processingError!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
-            if (host.collection.running && !profile.busy)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  t(
-                    '消息同步完成后即可生成或更新近况。',
-                    'You can generate or refresh updates after messages finish syncing.',
-                  ),
-                ),
-              ),
-            if (profile.repository.value != null) ...[
-              FilledButton(
-                onPressed: _showResults,
-                child: Text(t('查看近况', 'View updates')),
-              ),
-              if (widget.generation == null &&
-                  widget.publication.canPublish &&
-                  !profile.busy)
-                OutlinedButton(
-                  onPressed: busy ? null : _organize,
-                  child: Text(
-                    processingError == null
-                        ? t('更新近况', 'Refresh updates')
-                        : t('继续生成', 'Resume generation'),
-                  ),
-                ),
-            ] else ...[
-              if (widget.generation == null &&
-                  widget.publication.canPublish &&
-                  !profile.busy)
-                FilledButton(
-                  onPressed: busy ? null : _organize,
-                  child: Text(
-                    processingError == null
-                        ? t('生成近况', 'Generate updates')
-                        : t('继续生成', 'Resume generation'),
-                  ),
-                ),
-              TextButton(
-                onPressed: _showResults,
-                child: Text(t('个人信息', 'Personal info')),
-              ),
-            ],
-            if (widget.generation == null &&
-                widget.publication.canPublish &&
-                !profile.busy) ...[
-              TextButton(
-                onPressed: busy
-                    ? null
-                    : () => _organize(savedObservationsOnly: true),
-                child: Text(t('先生成已整理部分', 'Generate from saved progress')),
-              ),
-              Text(
-                t(
-                  '根据已核对的消息生成近况，剩余记录可稍后继续整理。',
-                  'Generate partial results from verified messages without processing new ones. Continue the remaining messages later.',
-                ),
-                style: const TextStyle(color: Nova.secondary, fontSize: 12),
-              ),
-            ],
-            ExpansionTile(
-              title: Text(t('模型与隐私', 'Model and privacy')),
-              children: [
-                ListTile(
-                  title: Text(
-                    processingAllowed
-                        ? t('已允许模型使用消息', 'Model access allowed')
-                        : t('尚未允许模型使用消息', 'Model access not yet allowed'),
-                  ),
-                  subtitle: Text(providerLabel),
-                ),
-
-                if (profile.budget != null)
-                  ListTile(
-                    title: Text(t('本次费用上限 ¥5', 'Cost limit: ¥5')),
-                    subtitle: Text(
-                      t(
-                        '按保守上限计入 ¥${(profile.budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}；实际费用以模型服务账单为准。',
-                        'Conservative usage estimate: ¥${(profile.budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}. Actual charges are determined by your model provider.',
+                children: [
+                  if (widget.generation == null && !profile.busy)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: NovaStatusChip(
+                        processingError != null
+                            ? t('待重试', 'Retry needed')
+                            : profile.repository.value != null
+                            ? t('已有近况', 'Updates available')
+                            : host.collection.running
+                            ? t('等待同步', 'Waiting for sync')
+                            : t('待生成', 'Ready to generate'),
+                        tone: processingError != null
+                            ? NovaTone.warning
+                            : profile.repository.value != null
+                            ? NovaTone.success
+                            : NovaTone.neutral,
                       ),
                     ),
-                  ),
-                TextButton(
-                  onPressed: busy
-                      ? null
-                      : () => _run(
-                          processingAllowed ? _revokeProcessing : _processing,
+                  if (widget.generation != null)
+                    ProfileGenerationStatus(
+                      generation: widget.generation!,
+                      language: widget.language,
+                      empty: profile.repository.value == null,
+                      compact: true,
+                    )
+                  else if (profile.busy) ...[
+                    _running(
+                      profileProgressLabel(
+                        profile.status,
+                        language: widget.language,
+                      ),
+                      id: 'generation',
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: profile.cancel,
+                        child: Text(t('取消生成', 'Cancel')),
+                      ),
+                    ),
+                  ] else if (processingError != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Semantics(
+                        liveRegion: true,
+                        child: NovaNotice(processingError!),
+                      ),
+                    ),
+                  if (host.collection.running && !profile.busy)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        t(
+                          '消息同步完成后即可生成或更新近况。',
+                          'You can generate or refresh updates after messages finish syncing.',
                         ),
-                  child: Text(
-                    processingAllowed
-                        ? t('停止模型使用消息', 'Stop model access')
-                        : t('允许模型使用消息', 'Allow model access'),
-                  ),
-                ),
-              ],
-            ),
-            if (!widget.publication.canPublish)
-              Text(
-                t(
-                  '此 Space 的个人信息由 Host 更新；已同步的消息保留在这台设备。',
-                  'This Space uses its Host to update personal info. Synced messages stay on this device.',
-                ),
+                      ),
+                    ),
+                  if (profile.repository.value != null) ...[
+                    FilledButton(
+                      onPressed: _showResults,
+                      child: Text(t('查看近况', 'View updates')),
+                    ),
+                    if (widget.generation == null &&
+                        widget.publication.canPublish &&
+                        !profile.busy)
+                      OutlinedButton(
+                        onPressed: busy ? null : _organize,
+                        child: Text(
+                          processingError == null
+                              ? t('更新近况', 'Refresh updates')
+                              : t('继续生成', 'Resume generation'),
+                        ),
+                      ),
+                  ] else ...[
+                    if (widget.generation == null &&
+                        widget.publication.canPublish &&
+                        !profile.busy)
+                      FilledButton(
+                        onPressed: busy ? null : _organize,
+                        child: Text(
+                          processingError == null
+                              ? t('生成近况', 'Generate updates')
+                              : t('继续生成', 'Resume generation'),
+                        ),
+                      ),
+                    TextButton(
+                      onPressed: _showResults,
+                      child: Text(t('个人信息', 'Personal info')),
+                    ),
+                  ],
+                  if (widget.generation == null &&
+                      widget.publication.canPublish &&
+                      !profile.busy) ...[
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () => _organize(savedObservationsOnly: true),
+                      child: Text(
+                        t('先生成已整理部分', 'Generate from saved progress'),
+                      ),
+                    ),
+                    Text(
+                      t(
+                        '先查看已整理的内容，剩余记录稍后继续。',
+                        'See verified results now; process the remaining messages later.',
+                      ),
+                      style: const TextStyle(
+                        color: Nova.secondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  if (!widget.publication.canPublish)
+                    Text(
+                      t(
+                        '此 Space 的个人信息由 Host 更新；已同步的消息保留在这台设备。',
+                        'This Space uses its Host to update personal info. Synced messages stay on this device.',
+                      ),
+                    ),
+                ],
               ),
-          ],
-          const SizedBox(height: 20),
-          Text(
-            t('聊天记录', 'Chat history'),
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            t(
-              '已保存 ${host.sources.statusCounts['available'] ?? 0} 条消息 · ${host.sources.sources.length} 个对话',
-              '${host.sources.statusCounts['available'] ?? 0} messages saved · ${host.sources.sources.length} chats',
-            ),
-          ),
-          if (host.collection.running) ...[
-            const SizedBox(height: 12),
-            const LinearProgressIndicator(minHeight: 2),
-            const SizedBox(height: 8),
-            Text(t('正在同步，可继续使用其他页面。', 'Syncing. You can use other pages.')),
-          ],
-          if (host.collection.error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _message(host.collection.error!),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: host.collection.running
-                  ? host.collection.pause
-                  : _busy
-                  ? null
-                  : () => _run(_readScope),
-              icon: Icon(
-                host.collection.running
-                    ? CupertinoIcons.pause_fill
-                    : CupertinoIcons.arrow_2_circlepath,
-              ),
-              label: Text(
-                host.collection.running
-                    ? t('暂停同步', 'Pause sync')
-                    : t('同步消息', 'Sync messages'),
-              ),
-            ),
-          ),
-          ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            title: Text(t('同步详情', 'Sync details')),
-            childrenPadding: const EdgeInsets.only(bottom: 12),
-            expandedCrossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(host.collection.status),
-              if (host.sources.skippedSummary.isNotEmpty)
-                Text(
-                  t(
-                    '以下消息仅保留基本信息，不会发送给模型：${host.sources.skippedSummary}',
-                    'Only metadata is retained for these messages; they are not sent to the model: ${host.sources.skippedSummary}',
-                  ),
-                ),
-            ],
-          ),
-          ExpansionTile(
-            title: Text(t('同步范围', 'Sync scope')),
-            subtitle: Text(
-              host.sources.allAccessible
-                  ? t('全部可访问的聊天记录', 'All accessible chat history')
-                  : t('已选聊天', 'Selected chats'),
-            ),
-            children: [
-              SwitchListTile(
-                title: Text(t('全部可访问的聊天', 'All accessible chats')),
-                value: host.sources.allAccessible,
-                onChanged: busy
-                    ? null
-                    : (value) =>
-                          _run(() => host.sources.setAllAccessible(value)),
-              ),
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  '读取全部可访问的文本历史。原文自本次成功读取起在手机保留 30 天；消息的原始日期不会改变。暂停或移除的对话不会自动恢复。达到本机容量上限会停止并保留续传进度，不代表全量读取完成。',
-                ),
-              ),
-              OutlinedButton(
-                onPressed: busy ? null : () => _run(_listChats),
-                child: Text(hasMoreChats ? '加载更多聊天' : '查看可访问聊天'),
-              ),
-              for (final chat in chats)
-                ListTile(
-                  title: Text(chat['name'] as String? ?? chat['chat_id']),
-
-                  trailing: host.sources.sources.contains(chat['chat_id'])
-                      ? const Icon(CupertinoIcons.checkmark)
-                      : null,
-                  onTap: busy
-                      ? null
-                      : () => _run(() => _select(chat['chat_id'])),
-                ),
-              for (final id in host.sources.sources)
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              NovaSection(
+                margin: const EdgeInsets.only(bottom: 12),
+                children: [
+                  Material(
+                    color: Nova.cell,
+                    borderRadius: BorderRadius.circular(12),
+                    clipBehavior: Clip.antiAlias,
+                    child: ExpansionTile(
+                      leading: const Icon(
+                        CupertinoIcons.lock_shield,
+                        color: Nova.secondary,
+                      ),
+                      title: Text(t('模型与隐私', 'Model and privacy')),
+                      subtitle: Text(
+                        processingAllowed
+                            ? t('已允许使用消息', 'Model access allowed')
+                            : t('使用前需要同意', 'Consent required'),
+                      ),
                       children: [
-                        Text(
-                          chats
-                                      .where((c) => c['chat_id'] == id)
-                                      .firstOrNull?['name']
-                                  as String? ??
-                              id,
+                        ListTile(
+                          title: Text(
+                            processingAllowed
+                                ? t('已允许模型使用消息', 'Model access allowed')
+                                : t(
+                                    '尚未允许模型使用消息',
+                                    'Model access not yet allowed',
+                                  ),
+                          ),
+                          subtitle: Text(providerLabel),
                         ),
-                        Text(
-                          '${host.sources.messages(id).length} 条缓存 · ${host.sources.checkpoint(id)['read_through'] == null ? '尚未完成首次读取' : '已读取至 ${host.sources.checkpoint(id)['read_through']}'}',
-                        ),
-                        if (host.sources.checkpoint(
-                              id,
-                            )['history_refresh_pending'] ==
-                            true)
-                          const Text('部分缓存已过期，当前分页完成后再次读取可刷新历史。'),
-                        if (host.sources.checkpoint(id)['page_token'] != null)
-                          const Text('历史读取尚未完成，可继续下一页'),
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            TextButton(
-                              onPressed:
-                                  busy ||
-                                      host.sources.checkpoint(id)['paused'] ==
-                                          true
-                                  ? null
-                                  : () => _run(() => _read(id)),
-                              child: const Text('继续读取选定范围'),
-                            ),
-                            TextButton(
-                              onPressed: busy
-                                  ? null
-                                  : () => _run(
-                                      () => host.sources.pause(
-                                        id,
-                                        host.sources.checkpoint(id)['paused'] !=
-                                            true,
-                                      ),
-                                    ),
-                              child: Text(
-                                host.sources.checkpoint(id)['paused'] == true
-                                    ? t('继续同步', 'Resume sync')
-                                    : t('暂停同步', 'Pause sync'),
+
+                        if (profile.budget != null)
+                          ListTile(
+                            title: Text(
+                              t(
+                                '本次费用上限 ¥${(profile.budget!.capMicroyuan / 1000000).toStringAsFixed(2)}',
+                                'Cost limit: ¥${(profile.budget!.capMicroyuan / 1000000).toStringAsFixed(2)}',
                               ),
                             ),
-                            TextButton(
-                              onPressed: busy
-                                  ? null
-                                  : () => _run(() async {
-                                      await host.sources.remove(id);
-                                    }),
-                              child: const Text('断开并删除本机消息'),
+                            subtitle: Text(
+                              t(
+                                '按保守上限计入 ¥${(profile.budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}；实际费用以模型服务账单为准。',
+                                'Conservative usage estimate: ¥${(profile.budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}. Actual charges are determined by your model provider.',
+                              ),
                             ),
-                          ],
+                          ),
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => _run(
+                                  processingAllowed
+                                      ? _revokeProcessing
+                                      : _processing,
+                                ),
+                          child: Text(
+                            processingAllowed
+                                ? t('停止模型使用消息', 'Stop model access')
+                                : t('允许模型使用消息', 'Allow model access'),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ),
-            ],
-          ),
-        ],
-        if (host.auth.configured)
-          ExpansionTile(
-            title: Text(t('连接管理', 'Connection settings')),
-            children: [
-              if (!host.auth.revocationPending)
-                TextButton(
-                  onPressed: busy
-                      ? null
-                      : () => _run(() async {
-                          timer?.cancel();
-                          session = null;
-                          chats.clear();
-                          chatPage = null;
-                          await host.auth.forgetApp();
-                          await host.synchronizeIdentity();
-                        }),
-                  child: const Text('移除本机应用凭据，改绑其他应用'),
-                ),
-              const Divider(),
-              TextButton(
-                onPressed: busy
-                    ? null
-                    : () => _run(() async {
-                        timer?.cancel();
-                        session = null;
-                        chats.clear();
-                        chatPage = null;
-                        await host.disconnect();
-                      }),
-                child: const Text('断开本机连接并清理缓存'),
-              ),
-              TextButton(
-                onPressed: busy
-                    ? null
-                    : () => _run(() async {
-                        timer?.cancel();
-                        session = null;
-                        chats.clear();
-                        chatPage = null;
-                        await host.disconnect(revoke: true);
-                      }),
-                child: const Text('断开并撤销飞书授权'),
+                ],
               ),
             ],
-          ),
-        if (error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 16),
-            child: Text(
-              error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            NovaSection(
+              margin: const EdgeInsets.only(bottom: 12),
+              children: [
+                Material(
+                  color: Nova.cell,
+                  borderRadius: BorderRadius.circular(12),
+                  clipBehavior: Clip.antiAlias,
+                  child: ExpansionTile(
+                    leading: const Icon(
+                      CupertinoIcons.info_circle,
+                      color: Nova.secondary,
+                    ),
+                    tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+                    title: Text(t('同步详情', 'Sync details')),
+                    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(host.collection.status),
+                      if (skipped.isNotEmpty)
+                        Text(
+                          t(
+                            '以下消息仅保留基本信息，不会发送给模型：$skipped',
+                            'Only metadata is retained for these messages; they are not sent to the model: $skipped',
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ),
-      ],
-    ),
-  );
+            NovaSection(
+              margin: const EdgeInsets.only(bottom: 12),
+              children: [
+                Material(
+                  color: Nova.cell,
+                  borderRadius: BorderRadius.circular(12),
+                  clipBehavior: Clip.antiAlias,
+                  child: ExpansionTile(
+                    leading: const Icon(
+                      CupertinoIcons.line_horizontal_3_decrease,
+                      color: Nova.secondary,
+                    ),
+                    title: Text(t('同步范围', 'Sync scope')),
+                    initiallyExpanded: _scopeExpanded,
+                    onExpansionChanged: (value) =>
+                        setState(() => _scopeExpanded = value),
+                    subtitle: Text(
+                      host.sources.allAccessible
+                          ? t('全部可访问的聊天记录', 'All accessible chat history')
+                          : t('已选聊天', 'Selected chats'),
+                    ),
+                    children: _scopeExpanded
+                        ? [
+                            SwitchListTile(
+                              title: Text(
+                                t('全部可访问的聊天', 'All accessible chats'),
+                              ),
+                              value: host.sources.allAccessible,
+                              onChanged: busy
+                                  ? null
+                                  : (value) => _run(
+                                      () =>
+                                          host.sources.setAllAccessible(value),
+                                    ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text(
+                                '读取全部可访问的文本历史。原文自本次成功读取起在手机保留 30 天；消息的原始日期不会改变。暂停或移除的对话不会自动恢复。达到本机容量上限会停止并保留续传进度，不代表全量读取完成。',
+                              ),
+                            ),
+                            OutlinedButton(
+                              onPressed: busy ? null : () => _run(_listChats),
+                              child: Text(hasMoreChats ? '加载更多聊天' : '查看可访问聊天'),
+                            ),
+                            for (final chat in chats)
+                              ListTile(
+                                title: Text(
+                                  chat['name'] as String? ?? chat['chat_id'],
+                                ),
+
+                                trailing:
+                                    host.sources.sources.contains(
+                                      chat['chat_id'],
+                                    )
+                                    ? const Icon(CupertinoIcons.checkmark)
+                                    : null,
+                                onTap: busy
+                                    ? null
+                                    : () =>
+                                          _run(() => _select(chat['chat_id'])),
+                              ),
+                            for (final id in host.sources.sources)
+                              Card(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        chats
+                                                    .where(
+                                                      (c) => c['chat_id'] == id,
+                                                    )
+                                                    .firstOrNull?['name']
+                                                as String? ??
+                                            id,
+                                      ),
+                                      Text(
+                                        '${counts.byChat[id] ?? 0} 条缓存 · ${host.sources.checkpoint(id)['read_through'] == null ? '尚未完成首次读取' : '已读取至 ${host.sources.checkpoint(id)['read_through']}'}',
+                                      ),
+                                      if (host.sources.checkpoint(
+                                            id,
+                                          )['history_refresh_pending'] ==
+                                          true)
+                                        const Text('部分缓存已过期，当前分页完成后再次读取可刷新历史。'),
+                                      if (host.sources.checkpoint(
+                                            id,
+                                          )['page_token'] !=
+                                          null)
+                                        const Text('历史读取尚未完成，可继续下一页'),
+                                      Wrap(
+                                        spacing: 8,
+                                        children: [
+                                          TextButton(
+                                            onPressed:
+                                                busy ||
+                                                    host.sources.checkpoint(
+                                                          id,
+                                                        )['paused'] ==
+                                                        true
+                                                ? null
+                                                : () => _run(() => _read(id)),
+                                            child: const Text('继续读取选定范围'),
+                                          ),
+                                          TextButton(
+                                            onPressed: busy
+                                                ? null
+                                                : () => _run(
+                                                    () => host.sources.pause(
+                                                      id,
+                                                      host.sources.checkpoint(
+                                                            id,
+                                                          )['paused'] !=
+                                                          true,
+                                                    ),
+                                                  ),
+                                            child: Text(
+                                              host.sources.checkpoint(
+                                                        id,
+                                                      )['paused'] ==
+                                                      true
+                                                  ? t('继续同步', 'Resume sync')
+                                                  : t('暂停同步', 'Pause sync'),
+                                            ),
+                                          ),
+                                          TextButton(
+                                            onPressed: busy
+                                                ? null
+                                                : () => _run(() async {
+                                                    await host.sources.remove(
+                                                      id,
+                                                    );
+                                                  }),
+                                            child: const Text('断开并删除本机消息'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ]
+                        : const [],
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (host.auth.configured)
+            NovaSection(
+              margin: const EdgeInsets.only(bottom: 12),
+              children: [
+                Material(
+                  color: Nova.cell,
+                  borderRadius: BorderRadius.circular(12),
+                  clipBehavior: Clip.antiAlias,
+                  child: ExpansionTile(
+                    leading: const Icon(
+                      CupertinoIcons.gear,
+                      color: Nova.secondary,
+                    ),
+                    title: Text(t('连接管理', 'Connection settings')),
+                    children: [
+                      if (!host.auth.revocationPending)
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => _run(() async {
+                                  timer?.cancel();
+                                  session = null;
+                                  chats.clear();
+                                  chatPage = null;
+                                  await host.auth.forgetApp();
+                                  await host.synchronizeIdentity();
+                                }),
+                          child: const Text('移除本机应用凭据，改绑其他应用'),
+                        ),
+                      const Divider(),
+                      TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => _run(() async {
+                                timer?.cancel();
+                                session = null;
+                                chats.clear();
+                                chatPage = null;
+                                await host.disconnect();
+                              }),
+                        child: const Text('断开本机连接并清理缓存'),
+                      ),
+                      TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => _run(() async {
+                                timer?.cancel();
+                                session = null;
+                                chats.clear();
+                                chatPage = null;
+                                await host.disconnect(revoke: true);
+                              }),
+                        child: const Text('断开并撤销飞书授权'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Semantics(liveRegion: true, child: NovaNotice(error!)),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     widget.generation?.removeListener(_changed);

@@ -21,24 +21,38 @@ class FeishuHost extends ChangeNotifier {
           SourceStore(
             SecureContextPersistence('nova.feishu.sources.v1'),
             onInvalidated: _scopedInvalidator(),
+            onContentChanged: _scopedInvalidator(preserveObservations: true),
           );
-  static Future<void> Function() _scopedInvalidator() {
+  static Future<void> Function() _scopedInvalidator({
+    bool preserveObservations = false,
+  }) {
     final scope = SpaceStorage.scope;
-    return () =>
-        SpaceStorage.runScoped(scope, () => invalidateDerivedProfile());
+    return () => SpaceStorage.runScoped(
+      scope,
+      () =>
+          invalidateDerivedProfile(preserveObservations: preserveObservations),
+    );
   }
 
   final _spaceScope = SpaceStorage.scope;
   static Future<void> invalidateDerivedProfile({
     bool clearPublished = false,
+    bool preserveObservations = false,
   }) async {
-    // Input changes invalidate paid working checkpoints, not successful history.
+    // Content changes retain context batches for current-record revalidation.
     if (clearPublished) {
       await SecureContextPersistence('nova.profile.local.v1').write('null');
     }
-    await ProfileObservationCheckpoint.invalidate(
-      SecureContextPersistence(ProfileObservationCheckpoint.storageKey),
-    );
+    if (!preserveObservations) {
+      for (final key in [
+        ProfileObservationCheckpoint.storageKey,
+        ProfileObservationCheckpoint.incrementalStorageKey,
+      ]) {
+        await ProfileObservationCheckpoint.invalidate(
+          SecureContextPersistence(key),
+        );
+      }
+    }
     await ProfilePipelineCheckpoint.invalidate(
       SecureContextPersistence(ProfilePipelineCheckpoint.storageKey),
     );

@@ -32,6 +32,7 @@ void main() {
             'facts': [
               {
                 'text': '【风】反复核对依据',
+                'relevance': 'ongoing_work',
                 'refs': records.map((r) => r['evidence_id']).toList(),
               },
             ],
@@ -74,7 +75,7 @@ void main() {
             attempts++;
             return {
               'facts': [
-                {'text': '【风】反复核对依据', 'refs': refs},
+                {'text': '【风】反复核对依据', 'relevance': 'repeated_pattern', 'refs': refs},
               ],
             };
           }
@@ -120,6 +121,7 @@ void main() {
           'facts': [
             {
               'text': '【风】反复核对依据',
+              'relevance': 'ongoing_work',
               'refs': [...records.map((r) => r['evidence_id']), 'e999'],
             },
           ],
@@ -139,89 +141,172 @@ void main() {
     },
   );
 
-  test('observations see all inputs while final complete originals and facts are bounded', () async {
-    final records = List.generate(12, (index) => <String, dynamic>{
-      'evidence_id': 'e${index + 1}', 'chat': 'c1', 'relation': 'self',
-      'created_at': DateTime.utc(2026, 1, index + 1).toIso8601String(),
-      'text': 'x' * 12000,
-    });
-    final seen = <String>{};
-    final progress = <String>[];
-    final finalStages = <String>[];
-    late ProfileWriter writer;
-    writer = fixtureProfileWriter(onProgress: progress.add, complete: (stage, instructions, input) async {
-      if (stage == 'observations') {
-        final messages = (input['messages'] as List).cast<Map<String, dynamic>>();
-        for (final message in messages) {
-          seen.add(message['evidence_id'] as String);
-          expect(message['text'], records.first['text']);
-        }
-        return {'facts': List.generate(24, (index) => {
-          'text': '【风】${messages.first['evidence_id']}-$index ${'y' * 280}',
-          'refs': [messages.first['evidence_id']],
-        })};
-      }
-      finalStages.add(stage);
-      final originals = (input['messages'] as List).cast<Map<String, dynamic>>();
-      final facts = input['observations'] as List;
-      expect(seen, records.map((r) => r['evidence_id']).toSet());
-      expect(originals, hasLength(3));
-      expect(jsonEncode(originals).length, lessThanOrEqualTo(ProfileWriter.finalOriginalCharacters));
-      expect(jsonEncode(facts).length, lessThanOrEqualTo(ProfileWriter.finalObservationCharacters));
-      expect(instructions.length + jsonEncode(input).length, lessThanOrEqualTo(ProfileWriter.finalInputCharacters));
-      final ids = originals.map((r) => r['evidence_id']).toSet();
-      for (final original in originals) {
-        expect(original, records.firstWhere((r) => r['evidence_id'] == original['evidence_id']));
-      }
-      for (final fact in facts) {
-        expect((fact['refs'] as List).every(ids.contains), true);
-      }
-      if (stage == 'review') return {'review_notes': []};
-      return {'timeline': [], 'profile': {'about': {
-        'text': '持续核对依据。', 'evidence_ids': [originals.first['evidence_id']],
-      }}};
-    });
-    await writer.generate(records);
-    expect(finalStages, ['draft', 'review', 'edit']);
-    expect(writer.coverage['observation_model_records'], 12);
-    expect(writer.coverage['validated_observation_records'], 12);
-    expect(writer.coverage['final_original_records'], 3);
-    expect(writer.coverage['original_records_not_in_final'], 9);
-    expect(writer.observationCount, 288);
-    expect(writer.selectedObservationCount, lessThanOrEqualTo(72));
-    expect(writer.selectedObservationCount, greaterThan(24));
-    expect(progress.any((p) => p.contains('最终撰写选用 3 条完整原文')), true);
-  });
+  test(
+    'observations see all inputs while final complete originals and facts are bounded',
+    () async {
+      final records = List.generate(
+        12,
+        (index) => <String, dynamic>{
+          'evidence_id': 'e${index + 1}',
+          'chat': 'c1',
+          'relation': 'self',
+          'created_at': DateTime.utc(2026, 1, index + 1).toIso8601String(),
+          'text': 'x' * 12000,
+        },
+      );
+      final seen = <String>{};
+      final progress = <String>[];
+      final finalStages = <String>[];
+      late ProfileWriter writer;
+      writer = fixtureProfileWriter(
+        onProgress: progress.add,
+        complete: (stage, instructions, input) async {
+          if (stage == 'observations') {
+            final messages = (input['messages'] as List)
+                .cast<Map<String, dynamic>>();
+            for (final message in messages) {
+              seen.add(message['evidence_id'] as String);
+              expect(message['text'], records.first['text']);
+            }
+            return {
+              'facts': List.generate(
+                24,
+                (index) => {
+                  'text':
+                      '【风】${messages.first['evidence_id']}-$index ${'y' * 280}',
+                  'relevance': 'ongoing_work',
+                  'refs': [messages.first['evidence_id']],
+                },
+              ),
+            };
+          }
+          finalStages.add(stage);
+          final originals = (input['messages'] as List)
+              .cast<Map<String, dynamic>>();
+          final facts = input['observations'] as List;
+          expect(seen, records.map((r) => r['evidence_id']).toSet());
+          expect(originals, hasLength(3));
+          expect(
+            jsonEncode(originals).length,
+            lessThanOrEqualTo(ProfileWriter.finalOriginalCharacters),
+          );
+          expect(
+            jsonEncode(facts).length,
+            lessThanOrEqualTo(ProfileWriter.finalObservationCharacters),
+          );
+          expect(
+            instructions.length + jsonEncode(input).length,
+            lessThanOrEqualTo(ProfileWriter.finalInputCharacters),
+          );
+          final ids = originals.map((r) => r['evidence_id']).toSet();
+          for (final original in originals) {
+            expect(
+              original,
+              records.firstWhere(
+                (r) => r['evidence_id'] == original['evidence_id'],
+              ),
+            );
+          }
+          for (final fact in facts) {
+            expect((fact['refs'] as List).every(ids.contains), true);
+          }
+          if (stage == 'review') return {'review_notes': []};
+          return {
+            'timeline': [],
+            'profile': {
+              'about': {
+                'text': '持续核对依据。',
+                'evidence_ids': [originals.first['evidence_id']],
+              },
+            },
+          };
+        },
+      );
+      await writer.generate(records);
+      expect(finalStages, ['draft', 'review', 'edit']);
+      expect(writer.coverage['observation_model_records'], 12);
+      expect(writer.coverage['validated_observation_records'], 12);
+      expect(writer.coverage['final_original_records'], 3);
+      expect(writer.coverage['original_records_not_in_final'], 9);
+      expect(writer.observationCount, 288);
+      expect(writer.selectedObservationCount, lessThanOrEqualTo(72));
+      expect(writer.selectedObservationCount, greaterThan(24));
+      expect(progress.any((p) => p.contains('最终撰写选用 3 条完整原文')), true);
+    },
+  );
 
-  test('oversized final corrections fail visibly after observations without truncation', () async {
-    final calls = <String>[];
-    final writer = fixtureProfileWriter(complete: (stage, _, input) async {
-      calls.add(stage);
-      return {'facts': [{'text': '【风】核对依据', 'refs': ['e1']}]};
-    });
-    await expectLater(writer.generate([{
-      'evidence_id': 'e1', 'chat': 'c1', 'relation': 'self',
-      'created_at': '2026-10-17T00:00:00Z', 'text': '核对依据',
-    }], corrections: 'z' * ProfileWriter.finalInputCharacters), throwsA(
-      isA<StateError>().having((e) => e.message, 'code', 'profile_context_too_large'),
-    ));
-    expect(calls, ['observations']);
-    expect(writer.observedRecordCount, 1);
-  });
+  test(
+    'oversized final corrections fail visibly after observations without truncation',
+    () async {
+      final calls = <String>[];
+      final writer = fixtureProfileWriter(
+        complete: (stage, _, input) async {
+          calls.add(stage);
+          return {
+            'facts': [
+              {
+                'text': '【风】核对依据',
+                'relevance': 'ongoing_work',
+                'refs': ['e1'],
+              },
+            ],
+          };
+        },
+      );
+      await expectLater(
+        writer.generate([
+          {
+            'evidence_id': 'e1',
+            'chat': 'c1',
+            'relation': 'self',
+            'created_at': '2026-10-17T00:00:00Z',
+            'text': '核对依据',
+          },
+        ], corrections: 'z' * ProfileWriter.finalInputCharacters),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'code',
+            'profile_context_too_large',
+          ),
+        ),
+      );
+      expect(calls, ['observations']);
+      expect(writer.observedRecordCount, 1);
+    },
+  );
 
-  test('final original selection accounts for JSON escaping and keeps reference groups whole', () {
-    final records = [
-      {'evidence_id': 'e1', 'created_at': '2026-01-01', 'text': '\u0001' * 16000},
-      {'evidence_id': 'e2', 'created_at': '2026-01-02', 'text': 'short'},
-      {'evidence_id': 'e3', 'created_at': '2026-01-03', 'text': 'another'},
-    ];
-    final selected = ProfileWriter.selectOriginals(records, [
-      {'text': '【人】两条共同支持', 'refs': ['e1', 'e2']},
-      {'text': '【风】独立依据', 'refs': ['e3']},
-    ]);
-    expect(selected.map((r) => r['evidence_id']), ['e3']);
-    expect(jsonEncode(selected).length, lessThanOrEqualTo(ProfileWriter.finalOriginalCharacters));
-  });
+  test(
+    'final original selection accounts for JSON escaping and keeps reference groups whole',
+    () {
+      final records = [
+        {
+          'evidence_id': 'e1',
+          'created_at': '2026-01-01',
+          'text': '\u0001' * 16000,
+        },
+        {'evidence_id': 'e2', 'created_at': '2026-01-02', 'text': 'short'},
+        {'evidence_id': 'e3', 'created_at': '2026-01-03', 'text': 'another'},
+      ];
+      final selected = ProfileWriter.selectOriginals(records, [
+        {
+          'text': '【人】两条共同支持',
+          'relevance': 'ongoing_work',
+          'refs': ['e1', 'e2'],
+        },
+        {
+          'text': '【风】独立依据',
+          'relevance': 'ongoing_work',
+          'refs': ['e3'],
+        },
+      ]);
+      expect(selected.map((r) => r['evidence_id']), ['e3']);
+      expect(
+        jsonEncode(selected).length,
+        lessThanOrEqualTo(ProfileWriter.finalOriginalCharacters),
+      );
+    },
+  );
 
   test('structured repair preserves the complete prior result', () async {
     final valid = <String, dynamic>{
@@ -257,6 +342,7 @@ void main() {
             'facts': [
               {
                 'text': '【事】计划核对项目',
+                'relevance': 'ongoing_work',
                 'refs': ['e1'],
               },
             ],
@@ -413,6 +499,7 @@ void main() {
               'facts': [
                 {
                   'text': '【风】反复核对项目依据',
+                  'relevance': 'ongoing_work',
                   'refs': ['e1'],
                 },
               ],
@@ -481,13 +568,19 @@ void main() {
                     'text': message['evidence_id'] == 'e120'
                         ? '【事】计划推进项目'
                         : '【人】项目协作关系',
+                    'relevance': 'ongoing_work',
                     'refs': [message['evidence_id']],
                   },
               ],
             };
           }
           expect((input['messages'] as List).length, lessThan(records.length));
-          expect((input['observations'] as List).any((f) => (f['text'] as String).startsWith('【事】')), true);
+          expect(
+            (input['observations'] as List).any(
+              (f) => (f['text'] as String).startsWith('【事】'),
+            ),
+            true,
+          );
           if (stage == 'review') return {'review_notes': []};
           return {
             'entries': [
@@ -495,7 +588,9 @@ void main() {
                 'key': 'about',
                 'kind': 'profile',
                 'text': '持续推进项目',
-                'evidence_ids': ['e0'],
+                'evidence_ids': [
+                  (input['messages'] as List).first['evidence_id'],
+                ],
               },
             ],
           };
@@ -517,10 +612,12 @@ void main() {
               'facts': [
                 {
                   'text': '【风】反复核对依据',
+                  'relevance': 'ongoing_work',
                   'refs': ['e1'],
                 },
                 {
                   'text': '【事】unsupported detail',
+                  'relevance': 'ongoing_work',
                   'refs': ['not-in-batch'],
                 },
               ],
@@ -580,14 +677,22 @@ void main() {
               for (var group = 0; group < 4; group++)
                 {
                   'text': '【风】反复核对项目依据 $group',
-                  'refs': records.skip(group * 3).take(3).map((r) => r['evidence_id']).toList(),
+                  'relevance': 'ongoing_work',
+                  'refs': records
+                      .skip(group * 3)
+                      .take(3)
+                      .map((r) => r['evidence_id'])
+                      .toList(),
                 },
             ],
           };
         }
         if (stage == 'review') return {'review_notes': []};
         expect(
-          (input['observations'] as List).expand((fact) => fact['refs'] as List).toSet().length,
+          (input['observations'] as List)
+              .expand((fact) => fact['refs'] as List)
+              .toSet()
+              .length,
           12,
         );
         return {
@@ -611,6 +716,7 @@ void main() {
         'facts': [
           {
             'text': '【事】计划',
+            'relevance': 'ongoing_work',
             'refs': ['private-model-output', 'e999'],
           },
         ],
@@ -658,6 +764,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】本人计划推进项目',
+                  'relevance': 'ongoing_work',
                   'refs': [observations == 1 ? 'e1' : 'e42'],
                 },
               ],
@@ -721,6 +828,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】计划推进项目',
+                  'relevance': 'ongoing_work',
                   'refs': ['e1'],
                 },
               ],
@@ -785,7 +893,14 @@ void main() {
           throwsStateError,
         );
       }
-      expect(jsonDecode(ProfileWriter.encodeEntries({'entries': [profile]}, originals)), hasLength(1));
+      expect(
+        jsonDecode(
+          ProfileWriter.encodeEntries({
+            'entries': [profile],
+          }, originals),
+        ),
+        hasLength(1),
+      );
       expect(
         () => ProfileWriter.encodeEntries({
           'entries': [
@@ -824,6 +939,7 @@ void main() {
         1000,
         (i) => <String, dynamic>{
           'text': '${['【事】', '【人】', '【风】'][i % 3]} observation',
+          'relevance': 'ongoing_work',
           'refs': ['e$i'],
         },
       );
@@ -865,6 +981,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】本人计划推进项目',
+                  'relevance': 'ongoing_work',
                   'refs': [batch.first['evidence_id']],
                 },
               ],
@@ -922,6 +1039,7 @@ void main() {
             'facts': [
               {
                 'text': '【事】unsupported',
+                'relevance': 'ongoing_work',
                 'refs': ['not-in-batch'],
               },
             ],

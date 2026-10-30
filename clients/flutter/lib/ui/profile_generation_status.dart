@@ -8,13 +8,14 @@ class ProfileGenerationStatus extends StatelessWidget {
     required this.generation,
     this.language = 'zh',
     this.empty = false,
+    this.compact = false,
     this.emptyLabel,
     this.waitingHint,
     this.onOpenConnectors,
   });
   final ProfileGenerationCoordinator generation;
   final String language;
-  final bool empty;
+  final bool empty, compact;
   final String? emptyLabel;
 
   /// Replaces the default waiting copy with the reason that applies now.
@@ -40,6 +41,8 @@ class ProfileGenerationStatus extends StatelessWidget {
         ProfileGenerationPhase.blocked =>
           code == 'profile_budget_exhausted'
               ? t('本次整理已暂停', 'Paused')
+              : code == 'profile_timeline_partial'
+              ? t('已保存部分近况', 'Some updates saved')
               : code == 'profile_timeline_invalid'
               ? t('这次近况未通过校验', 'Updates failed validation')
               : t('暂时无法继续整理', 'Updates paused'),
@@ -47,7 +50,12 @@ class ProfileGenerationStatus extends StatelessWidget {
           emptyLabel ?? t('暂时没有可确认的内容', 'No confirmed updates yet'),
         _ => waitingHint ?? t('消息同步后，会自动整理到这里', 'Waiting for sync'),
       };
-      final detail = code == 'profile_timeline_invalid'
+      final detail = code == 'profile_timeline_partial'
+          ? t(
+              '部分内容未通过核对，已保留合格内容并停止自动重试。',
+              'Some content failed checks. Valid updates were kept; automatic retries stopped.',
+            )
+          : code == 'profile_timeline_invalid'
           ? t(
               '生成内容的格式或原文引用不符合要求，已停止自动重试。已有内容会保留。',
               'Generated content failed format or source checks. Automatic retries stopped. Existing results kept.',
@@ -76,14 +84,51 @@ class ProfileGenerationStatus extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (phase == ProfileGenerationPhase.working) ...[
-              const LinearProgressIndicator(minHeight: 2),
-              const SizedBox(height: 10),
+            if (compact &&
+                (phase == ProfileGenerationPhase.working ||
+                    phase == ProfileGenerationPhase.continuing))
+              Semantics(
+                liveRegion: true,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3, right: 10),
+                      child: ExcludeSemantics(
+                        child: SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            key: const ValueKey('feishu.generation.spinner'),
+                            strokeWidth: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          color: Nova.secondary,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else ...[
+              if (!compact && phase == ProfileGenerationPhase.working) ...[
+                const LinearProgressIndicator(minHeight: 2),
+                const SizedBox(height: 10),
+              ],
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  title,
+                  style: const TextStyle(color: Nova.secondary, height: 1.5),
+                ),
+              ),
             ],
-            Text(
-              title,
-              style: const TextStyle(color: Nova.secondary, height: 1.5),
-            ),
             if (detail != null)
               Text(
                 detail,
