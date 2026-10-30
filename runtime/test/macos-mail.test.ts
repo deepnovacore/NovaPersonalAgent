@@ -16,6 +16,18 @@ test('local mail identity separates accounts and read flags do not supersede con
  assert.throws(()=>client.request({command:'send'}))
 })
 
+test('a mail body that could not be read is flagged instead of carrying a placeholder sentence',()=>{
+ const mail={account:'account-a',mailbox:'Inbox',id:'12',messageId:'same@example.test',subject:'Review',sender:'a@example.test',recipients:['b@example.test'],received:'2026-09-20T00:00:00.000Z',sent:'2026-09-19T23:00:00.000Z',content:'',read:false,flagged:false}
+ const stored=module.normalizeMacMailMessage({...mail,content:'Please review the plan'}),unavailable=module.normalizeMacMailMessage({...mail,body_unavailable:true})
+ assert.equal(unavailable.key,stored.key,'the message identity does not depend on the body')
+ assert.equal(unavailable.metadata.body_unavailable,true)
+ assert(!unavailable.text.includes('[正文'),'an unread body is never presented as quoted text')
+ assert.equal(unavailable.text,[mail.subject,mail.sender,mail.recipients.join(', '),mail.received].join('\n'))
+ assert.notEqual(unavailable.semanticHash,stored.semanticHash,'a later real body supersedes the unread one')
+ assert.equal(unavailable.semanticHash,module.normalizeMacMailMessage({...mail,body_unavailable:true}).semanticHash,'repeating an unread body changes nothing')
+ assert.equal(module.normalizeMacMailMessage({...mail,content:'',body_unavailable:false}).metadata.body_unavailable,undefined)
+})
+
 test('local mail incomplete scans retain current evidence and persist continuation',async()=>{
  const {MacMailClient}=await import('../src/connectors/macos/mail.js')
  const {ComposioConnector}=await import('../src/connectors/composio/index.js')
@@ -48,5 +60,32 @@ test('local mail incomplete scans retain current evidence and persist continuati
   assert.equal(retained.objects[0]?.status,'current')
   await manager.command('connector.pause',{id});assert.equal(manager.snapshot().connections[0]?.state,'paused')
   await manager.command('connector.disconnect',{id});assert.equal(manager.snapshot().connections[0]?.state,'disconnected')
+ }finally{await manager.close();await memory.close();await rm(root,{recursive:true,force:true})}
+})
+
+test('a body that could not be read leaves the stored message and its text untouched',async()=>{
+ const {MacMailClient}=await import('../src/connectors/macos/mail.js')
+ const {ComposioConnector}=await import('../src/connectors/composio/index.js')
+ const {SubstrateMemoryResource}=await import('../src/memory-substrate/resource.js')
+ const {MemoryLedgerClient}=await import('../src/memory-ledger/store-client.js')
+ const root=await mkdtemp(join(tmpdir(),'nova-local-mail-unread-'));let unread=false
+ const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'fixture',model:'fixture',gateway:{async *stream(){await Promise.resolve();throw Error('unexpected model call')},complete(){throw Error('unexpected model call')}}})
+ const mail=new MacMailClient('/fixture')
+ mail.request=(input:unknown)=>{
+  const request=input as {command:string}
+  if(request.command==='status')return Promise.resolve({status:'granted'})
+  return Promise.resolve({status:'granted',messages:[{account:'a',mailbox:'box',id:'1',messageId:'test@example.test',subject:'Task',sender:'sender',recipients:[],received:new Date(Date.now()-60000).toISOString(),sent:new Date(Date.now()-60000).toISOString(),content:unread?'':'Read only',...(unread?{body_unavailable:true}:{}),read:false,flagged:false}],complete:true,capped:false,cursor:null})
+ }
+ const manager=new ComposioConnector({memory:()=>memory,client:null,mail,automatic:false,onChange:()=>{ /* inspected below */ }})
+ try{
+  await memory.open();await manager.open();const {id}=await manager.command('connector.mail_connect') as {id:string}
+  const objects=async()=>(await memory.options.client.memory('source_pending',{id})) as {objects:{semantic_hash:string;current_evidence_ids:string[];metadata:{body_unavailable?:boolean}}[]}
+  await manager.command('connector.configure',{id,scope:{kind:'macos_mail',mailboxes:['box'],pastDays:30},processingConsent:false})
+  await manager.syncOnce(id)
+  const read=await objects();assert.equal(read.objects.length,1);assert.equal(read.objects[0]?.metadata.body_unavailable,undefined)
+  unread=true;await manager.syncOnce(id)
+  const after=await objects()
+  assert.equal(after.objects[0]?.semantic_hash,read.objects[0]?.semantic_hash,'an unread body must not retire the body read earlier')
+  assert.deepEqual(after.objects[0]?.current_evidence_ids,read.objects[0]?.current_evidence_ids)
  }finally{await manager.close();await memory.close();await rm(root,{recursive:true,force:true})}
 })

@@ -97,7 +97,8 @@ final class MailErrors:NSObject,SBApplicationDelegate {
    let (account,array,limit,path)=boxes[boxIndex];if offset>=limit {boxIndex+=1;offset=0;continue}
    if idsBox != boxIndex || offset>=idsOffset+ids.count {ids=batchIDs(account,path,offset+1,min(8,limit-offset));idsOffset=offset;idsBox=boxIndex}
    if !messages.isEmpty {
-    // Commit the successful prefix, leaving the slow message at the cursor for retry.
+    // Commit the successful prefix and leave the pending message at the cursor: it has no metadata yet, so the next
+    // poll retries it rather than replaying finished messages or dropping it.
     let prefix:[String:Any]=["status":"granted","messages":messages,"complete":false,"capped":capped,"cursor":["box":boxIndex,"offset":offset,"fingerprints":fingerprints]]
     errors.onTimeout={emit(prefix)}
    }
@@ -108,9 +109,10 @@ final class MailErrors:NSObject,SBApplicationDelegate {
    let recipients=list(m,"recipients");guard recipients.count<=200 else {fail("response_too_large")}
    var addresses:[String]=[];for i in 0..<recipients.count {addresses.append(string(object(recipients,i),"address"))}
    let meta:[String:Any]=["account":account,"mailbox":selected[boxIndex],"id":id.stringValue,"messageId":string(m,"messageId"),"subject":string(m,"subject"),"sender":string(m,"sender"),"recipients":addresses,"received":iso.string(from:received),"sent":iso.string(from:sent),"read":read,"flagged":flagged]
-   // The body stalls while Mail downloads it. Keep the metadata with a placeholder body and advance the cursor,
-   // so one slow message cannot pin the whole mailbox at the same position forever.
-   let slow=meta.merging(["content":"[正文暂未能读取]"]){_,new in new}
+   // The body stalls while Mail downloads it. Metadata is already read, so emit it with empty content and a
+   // machine-readable flag and advance the cursor: one slow message cannot pin the whole mailbox. The empty body is
+   // never a placeholder sentence, so the host cannot quote it as fact or retire a body read earlier.
+   let slow=meta.merging(["content":"","body_unavailable":true]){_,new in new}
    errors.onTimeout={
     let atEnd=offset>=boxes[boxIndex].2,nextBox=atEnd ? boxIndex+1 : boxIndex,nextOffset=atEnd ? 0 : offset,done=nextBox==boxes.count
     emit(["status":"granted","messages":messages+[slow],"complete":done,"capped":true,"cursor":done ? NSNull() : ["box":nextBox,"offset":nextOffset,"fingerprints":fingerprints]])
