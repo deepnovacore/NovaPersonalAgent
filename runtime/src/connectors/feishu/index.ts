@@ -279,12 +279,34 @@ export class FeishuConnector {
       this.listenerRetry.unref();
     });
   }
+  /** Keep the connection and consent, fence delivery, and let observers (the notification service rebinds on a readiness edge) see the fence. */
+  private async fenceVerification(): Promise<FeishuSnapshot> {
+    this.unverified = true; this.view.error = '飞书暂时无法验证登录，网络恢复后会自动继续';
+    if (this.saved.outboundIdentity) this.saved.outboundIdentity = {...this.saved.outboundIdentity, valid: false};
+    this.view.notification_ready = false;
+    await this.save();
+    this.publish();
+    return this.snapshot();
+  }
   async status(signal?: AbortSignal): Promise<FeishuSnapshot> {
     // Preserve the preflight error instead of attempting credential access with an unsupported CLI.
     if (!this.view.available) return this.snapshot();
     let data: Record<string, unknown>;
     try {data = signal ? parseFeishuJson(await this.run(['auth', 'status', '--json', '--verify'], {signal})) : await this.json(['auth', 'status', '--json', '--verify']);}
-    catch (error) {if (!(error instanceof FeishuAppNotConfigured)) throw error; data = {};}
+    catch (error) {
+      if (error instanceof FeishuAppNotConfigured) data = {};
+      else {
+        const message = error instanceof Error ? error.message : '';
+        // A bare EOF, a DNS/TLS error or unparseable output proves nothing about the credential. Keep the saved
+        // connection and fence delivery instead of rethrowing past the caller that would publish a stale ready view.
+        if (!FEISHU_CREDENTIAL_REJECTION.test(message)) {
+          if (!this.saved.connected && !this.saved.outboundIdentity?.valid) throw error;
+          return this.fenceVerification();
+        }
+        // An explicit server rejection still takes the invalidation path with the identity we already knew.
+        data = {appId: this.currentApp, identities: {user: {openId: this.saved.openId ?? '', status: 'verify_failed', verified: false, tokenStatus: 'valid', message}}};
+      }
+    }
     const app = str(data.appId ?? data.app_id);
     this.currentApp = app || undefined;
     this.view.configured = Boolean(app);
@@ -303,14 +325,8 @@ export class FeishuConnector {
     // wording is treated as temporarily unverifiable, so it can never silently clear the login.
     // Notification sends and callbacks stay fenced either way.
     if (app && id && user.status === 'verify_failed' && user.tokenStatus !== 'expired' && !FEISHU_CREDENTIAL_REJECTION.test(str(user.message))) {
-      this.unverified = true; this.view.error = '飞书暂时无法验证登录，网络恢复后会自动继续';
       if (priorIdentity) this.saved.outboundIdentity = {...priorIdentity, valid: false};
-      this.view.notification_ready = false;
-      await this.save();
-      // Observers (the notification service rebinds on a readiness edge) must see the fence even when this
-      // check came from a command that returns without publishing.
-      this.publish();
-      return this.snapshot();
+      return this.fenceVerification();
     }
     const identityAccount=app&&id&&valid?hash(JSON.stringify([app,user.tenantKey??user.tenant_key??null,id])):null;
     if(identityAccount){this.saved.outboundIdentity={account:identityAccount,openId:id,generation:(priorIdentity?.generation??0)+Number(!!priorIdentity&&priorIdentity.account!==identityAccount),valid:true};if(priorIdentity&&priorIdentity.account!==identityAccount)this.saved.outbound=false;}

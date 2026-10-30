@@ -200,6 +200,44 @@ test('a verify failure with an unknown wording keeps the Feishu login; only an e
   }finally{await connector.close();await rm(directory,{recursive:true,force:true})}
 });
 
+test('a CLI exception while verifying fences the login without logging out, and a thrown 401 still logs out', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-exception-'));
+  let mode:'ready'|'eof'|'rejected'='ready';
+  const connector=new FeishuConnector({executable:'unused',credentialRoot:directory,statePath:join(directory,'state.json'),ingest:()=>Promise.resolve(),deleteSource:()=>Promise.resolve(),onAction:()=>Promise.resolve(),
+    run:async(args)=>{
+      await Promise.resolve();
+      if(args[0]==='--version')return 'lark-cli 1.0.69';
+      if(args[1]==='status'){
+        if(mode==='eof')throw new Error('EOF');
+        if(mode==='rejected')throw new Error('request failed: HTTP 401 invalid access token');
+        return JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{openId:'ou_fixture',status:'authenticated',available:true,verified:true,tokenStatus:'valid',scope:FEISHU_SCOPES.join(' ')}}});
+      }
+      if(args[1]==='login'&&args.includes('--no-wait'))return JSON.stringify({verification_url:'https://accounts.feishu.cn/device',device_code:'fixture-code',expires_in:900});
+      if(args[1]==='login')return '{}';
+      if(args[1]==='+chat-list')return JSON.stringify({data:{items:[{chat_id:'oc_selected',name:'项目'}],has_more:false}});
+      if(args[1]==='+chat-messages-list')return JSON.stringify({data:{messages:[],has_more:false}});
+      return '{}';
+    }});
+  const saved=async()=>JSON.parse(await readFile(join(directory,'state.json'),'utf8')) as {connected:boolean};
+  try{
+    await connector.open();await connector.beginLogin();await connector.completeLogin();await connector.listChats();await connector.configure(['oc_selected'],true);
+    assert.equal(connector.snapshot().notification_ready,true);
+    // The old code rethrew here and kept the previous notification_ready and identity-valid flags.
+    mode='eof';
+    const fenced=await connector.command('feishu.status');
+    assert.equal((fenced as unknown as {unverified?:boolean}).unverified,true);
+    assert.equal(fenced.notification_ready,false);
+    assert.notEqual(fenced.state,'unauthorized');assert.equal((fenced as unknown as {auth_issue?:string}).auth_issue,undefined);
+    assert.equal((await saved()).connected,true,'a CLI exception must not drop the authorization');
+    mode='ready';
+    await connector.command('feishu.status');
+    assert.equal(connector.snapshot().state,'ready');assert.equal(connector.snapshot().notification_ready,true);assert.equal(connector.snapshot().unverified,undefined);
+    mode='rejected';
+    const rejected=await connector.command('feishu.status');
+    assert.equal(rejected.state,'unauthorized');assert.equal((await saved()).connected,false,'an explicit 401 still logs the user out');
+  }finally{await connector.close();await rm(directory,{recursive:true,force:true})}
+});
+
 test('verified automatic token refresh does not require another Feishu login', async () => {
   const directory=await mkdtemp(join(tmpdir(),'nova-feishu-refresh-'));
   const connector=new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:(args)=>Promise.resolve(args[0]==='--version'?'1.0.97':JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{openId:'ou_fixture',status:'needs_refresh',available:true,verified:true,tokenStatus:'needs_refresh',scope:FEISHU_SCOPES.join(' ')}}}))});
