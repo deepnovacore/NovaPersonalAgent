@@ -1,7 +1,10 @@
 import {notificationSchema,type NotificationInput} from '../notifications/contracts.js';
 import {applySpaceSourceInput} from './context-input.js';
 import type {SpacePushDelivery} from './push.js';
-import {createHash,randomUUID} from 'node:crypto';
+import {constants} from 'node:fs';
+import {mkdir,open as openFile,readFile} from 'node:fs/promises';
+import {createHash,createHmac,randomBytes,randomUUID} from 'node:crypto';
+import {dirname} from 'node:path';
 import {z} from 'zod';
 import {BoundedJsonStore} from '../storage/bounded-json.js';
 import type {PersonalAgentHost} from '../personal-agent/host.js';
@@ -18,24 +21,41 @@ export interface SpaceHostTransport {
  stream(to:string,body:BusinessMessage,id:string):Promise<void>;
 }
 const record=z.record(z.string(),z.unknown());
-const entry=z.object({hash:z.string(),intent:intentSchema,sender:z.string(),receipt:record.nullable(),chat_status:z.enum(['admitted','completed']).optional(),final:record.optional(),notification_pending:z.boolean().optional()});
+const entry=z.object({hash:z.string(),tag:z.string().optional(),intent:intentSchema,sender:z.string(),receipt:record.nullable(),chat_status:z.enum(['admitted','completed']).optional(),final:record.optional(),notification_pending:z.boolean().optional()});
 const journalSchema=z.object({version:z.literal(1),space:z.string(),cursor:z.number().int().nonnegative(),projection_revision:z.number().int().nonnegative().default(0),ops:z.record(z.string(),entry),remaps:z.record(z.string(),z.record(z.string(),z.string())),outbox:z.array(z.object({id:z.string(),to:z.string(),body:record})),push_outbox:z.array(z.object({to:z.string(),id:z.string(),title:z.string(),body:z.string(),expires_at:z.number().int().optional(),notification:notificationSchema.optional()})).default([]),actions:z.record(z.string(),z.object({device:z.string(),body:record,result:record.nullable()}))});
 type Journal=z.infer<typeof journalSchema>;
 const ADMIN_KINDS=new Set(['settings.patch','secret.put','secret.clear','connector.feishu']);
+const SECRET_KINDS=new Set<SpaceIntent['kind']>(['secret.put','secret.clear']);
 const fingerprint=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 export class SpaceHost {
- readonly #store;#state:Journal;#raw=new Map<string,string>();#tail:Promise<unknown>=Promise.resolve();#stop:(()=>void|Promise<void>)|undefined;#unsubscribe:(()=>void)|undefined;#chats=new Map<string,Promise<void>>();#flush:Promise<void>|undefined;#opened=false;#snapshotTimer:ReturnType<typeof setTimeout>|undefined;
+ readonly #store;#state:Journal;#raw=new Map<string,string>();#tail:Promise<unknown>=Promise.resolve();#stop:(()=>void|Promise<void>)|undefined;#unsubscribe:(()=>void)|undefined;#chats=new Map<string,Promise<void>>();#flush:Promise<void>|undefined;#opened=false;#snapshotTimer:ReturnType<typeof setTimeout>|undefined;#secretKey:string|undefined;
 /** `feishuPollMs` is the interval between Feishu app-setup status polls and `feishuSetupTimeoutMs` bounds them to the connector's 300s config operation, so a link that appears late still reaches the phone. */
  constructor(readonly options:{path:string;space:string;host:PersonalAgentHost;transport:SpaceHostTransport;push?:SpacePushDelivery;owner?:()=>string|undefined;secrets?:HostSecretStore;feishuPollMs?:number;feishuSetupTimeoutMs?:number;environment?:NodeJS.ProcessEnv;now?:()=>number;onError?:(error:unknown)=>void}){this.#store=new BoundedJsonStore(options.path,journalSchema,32*1024*1024);this.#state={version:1,space:options.space,cursor:0,projection_revision:0,ops:{},remaps:{},outbox:[],push_outbox:[],actions:{}}}
  #now(){return this.options.now?.()??Date.now()}
  #serial<T>(work:()=>Promise<T>):Promise<T>{const run=this.#tail.then(work);this.#tail=run.catch(()=>{ /* Keep the serial queue usable after a caller-visible failure. */ });return run}
  async #save(){await this.#store.write(this.#state)}
- // A persisted hash must not be an offline guess oracle for a stored secret: the idempotency hash covers the redacted form only. A conflicting value under the same op id is detected from `#raw`, which never reaches disk.
+ // A persisted hash must not be an offline guess oracle for a stored secret: the idempotency hash covers the redacted form only. A conflicting value under the same op id is detected from `#raw` within one process and from the persisted HMAC tag across restarts. The tag key lives in a private sibling file, never in the journal.
  #journalIntent(intent:SpaceIntent):SpaceIntent{if(intent.kind==='source.input')return {...intent,input:{}};if(intent.kind==='secret.put'||intent.kind==='secret.clear')return {...intent,input:{name:intent.input.name}};if(intent.kind==='push.register'){const {credential:_credential,...rest}=intent.input;return {...intent,input:rest}}return intent}
+ /** The journal is a portable backup; its secret tags are useless without this separate 0600 key. */
+ async #loadSecretKey():Promise<string>{
+  if(this.#secretKey)return this.#secretKey
+  const path=this.options.path+'.key',valid=(text:string)=>/^[a-f0-9]{64}$/u.test(text)
+  try{const text=(await readFile(path,'utf8')).trim();if(!valid(text))throw Error('space_secret_key_invalid');this.#secretKey=text;return text}
+  catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
+  const key=randomBytes(32).toString('hex')
+  await mkdir(dirname(path),{recursive:true,mode:0o700})
+  try{const file=await openFile(path,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);try{await file.writeFile(key);await file.sync()}finally{await file.close()}}
+  catch(error){
+   if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error
+   const text=(await readFile(path,'utf8')).trim();if(!valid(text))throw Error('space_secret_key_invalid');this.#secretKey=text;return text
+  }
+  this.#secretKey=key;return key
+ }
+ #secretTag(key:string,raw:string):string{return createHmac('sha256',this.#secretKey!).update(key+'\n'+raw).digest('hex')}
  #owner(){return this.options.owner?.()}
  #hostAdmin(sender:string){return this.#owner()===sender}
  #key(sender:string,op:string){return fingerprint([sender,op])}
- async open(){if(this.#opened)return;try{this.#state=await this.#store.read(this.#state)}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}if(this.#state.space!==this.options.space)throw Error('space_scope_mismatch');await this.options.secrets?.open();await this.options.push?.open();await this.options.push?.prune(this.options.transport.clients());this.#opened=true;const clients=new Set(this.options.transport.clients());this.#state.outbox=this.#state.outbox.filter(row=>clients.has(row.to));this.#state.push_outbox=this.#state.push_outbox.filter(row=>clients.has(row.to));await this.#save();await this.options.transport.recoverPending?.(this.#state.outbox.map(row=>row.id));
+ async open(){if(this.#opened)return;try{this.#state=await this.#store.read(this.#state)}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}if(this.#state.space!==this.options.space)throw Error('space_scope_mismatch');await this.#loadSecretKey();await this.options.secrets?.open();await this.options.push?.open();await this.options.push?.prune(this.options.transport.clients());this.#opened=true;const clients=new Set(this.options.transport.clients());this.#state.outbox=this.#state.outbox.filter(row=>clients.has(row.to));this.#state.push_outbox=this.#state.push_outbox.filter(row=>clients.has(row.to));await this.#save();await this.options.transport.recoverPending?.(this.#state.outbox.map(row=>row.id));
   // An admitted chat is never submitted to the model a second time after a crash.
   for(const [key,op] of Object.entries(this.#state.ops))if(op.chat_status==='admitted'){const saved=this.options.host.spaceChatResult('space:'+key,displayText(op.intent.input.conversation_id,'chat:main'));await this.#finishChat(key,saved??{text:'',status:'interrupted',message_id:'turn-'+fingerprint(key)})}
   this.#unsubscribe=this.options.host.subscribe(()=>this.#scheduleSnapshot());
@@ -49,11 +69,11 @@ export class SpaceHost {
  async publishSnapshot(to?:string){await this.#serial(async()=>{for(const device of to?[to]:this.options.transport.clients())this.#enqueue(device,{v:1,type:'snapshot',snapshot:this.snapshot(device)},'snapshot-'+randomUUID());await this.#save()});await this.flush()}
  #enqueue(to:string,body:BusinessMessage,id:string){if(body.type==='snapshot'){const data=JSON.stringify(body.snapshot);if(Buffer.byteLength(data)>48*1024){if(Buffer.byteLength(data)>16*1024*1024)throw Error('snapshot_capacity');const chunks:string[]=[];let text='',bytes=0;for(const char of data){const size=Buffer.byteLength(char);if(bytes+size>48*1024){chunks.push(text);text='';bytes=0}text+=char;bytes+=size}if(text)chunks.push(text);if(chunks.length>512)throw Error('snapshot_capacity');for(const [index,data]of chunks.entries())this.#enqueue(to,{v:1,type:'snapshot.chunk',snapshot_id:id,index,total:chunks.length,data},id+'-'+index);return}}if(this.#state.outbox.some(row=>row.id===id&&row.to===to))return;if(this.#state.outbox.length>=4096)throw Error('space_outbox_capacity');this.#state.outbox.push({to,body:structuredClone(body),id})}
  async receive(sender:string,raw:unknown){if(!this.#opened)throw Error('space_host_closed');if(!this.options.transport.clients().includes(sender))throw Error('sender_not_paired');const parsed=intentSchema.safeParse(raw);if(!parsed.success){this.options.onError?.(Error('invalid_business_intent'));return}const intent=parsed.data;const key=this.#key(sender,intent.op_id);let startChat=false,pollSetup=false;
-  await this.#serial(async()=>{const old=this.#state.ops[key],raw=fingerprint(intent),hash=fingerprint(this.#journalIntent(intent));if(old){if(old.hash!==hash||(this.#raw.get(key)??raw)!==raw){this.#enqueue(sender,{v:1,type:'receipt',op_id:intent.op_id,status:'rejected',error:'op_id_conflict'},'conflict-'+randomUUID());await this.#save();return}if(old.receipt&&old.receipt.status!=='pending'){this.#enqueue(sender,old.receipt,'receipt-'+key);await this.#save();return}}else this.#raw.set(key,raw);
+  await this.#serial(async()=>{const old=this.#state.ops[key],raw=fingerprint(intent),hash=fingerprint(this.#journalIntent(intent)),tag=SECRET_KINDS.has(intent.kind)?this.#secretTag(key,raw):undefined;if(old){const seen=old.tag??this.#raw.get(key)??raw,next=tag??raw;if(old.hash!==hash||seen!==next){this.#enqueue(sender,{v:1,type:'receipt',op_id:intent.op_id,status:'rejected',error:'op_id_conflict'},'conflict-'+randomUUID());await this.#save();return}if(old.receipt&&old.receipt.status!=='pending'){this.#enqueue(sender,old.receipt,'receipt-'+key);await this.#save();return}}else this.#raw.set(key,raw);
    if(Object.keys(this.#state.ops).length>=10000&&!old)throw Error('space_receipt_capacity');
    for(const dep of intent.depends_on??[]){const prior=this.#state.ops[this.#key(sender,dep)]?.receipt;if(!prior||prior.status==='pending'){await this.#record(sender,intent,hash,{status:'pending',error:'dependency_pending'});return}if(prior.status!=='accepted'){await this.#record(sender,intent,hash,{status:'rejected',error:'dependency_failed'});return}}
    if(Object.keys(this.#state.ops).length>=10000&&!old)throw Error('space_receipt_capacity');
-   if(!old){this.#state.ops[key]={hash,intent:this.#journalIntent(intent),sender,receipt:null};await this.#save()}
+   if(!old){this.#state.ops[key]={hash,...(tag?{tag}:{}),intent:this.#journalIntent(intent),sender,receipt:null};await this.#save()}
    let authorityCommitted=false;
    try{
     if(intent.expires_at!==undefined&&intent.expires_at<=this.#now())throw Error('expired');

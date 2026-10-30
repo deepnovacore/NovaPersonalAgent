@@ -129,6 +129,32 @@ test('the journal hashes the redacted intent, so a stored hash never confirms a 
  }finally{await f.close()}
 });
 
+test('a secret replayed with another value conflicts after a SpaceHost restart',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-restart-')),sent:Record<string,unknown>[]=[];
+ const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone']};
+ const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ const makeSpace=(host:PersonalAgentHost)=>new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>'phone',secrets:new HostSecretStore(join(dir,'config.json.secrets.json')),environment:{}});
+ const stamp=Date.now(),intent=(value:string)=>({v:1,type:'intent',op_id:'restart-secret',kind:'secret.put',created_at:stamp,input:{name:'OPENAI_API_KEY',value}});
+ const receipt=()=>sent.filter(row=>row.type==='receipt'&&row.op_id==='restart-secret').at(-1)!;
+ let host=make(),space=makeSpace(host);
+ try{
+  await host.open({deferBackground:true});await space.open();await space.receive('phone',intent('sk-first-value'));assert.equal(receipt().status,'accepted');
+  await space.close();await host.close();
+  // A fresh instance has no in-memory raw fingerprints; the persisted salted tag must still catch a changed value.
+  host=make();space=makeSpace(host);await host.open({deferBackground:true});await space.open();
+  await space.receive('phone',intent('sk-first-value'));assert.equal(receipt().status,'accepted');assert.equal(receipt().error,undefined);
+  await space.receive('phone',intent('sk-second-value'));assert.equal(receipt().error,'op_id_conflict');
+  assert.equal((space.snapshot('phone') as unknown as {host_credentials:{credentials:{name:string;fingerprint:string}[]}}).host_credentials.credentials.find(row=>row.name==='OPENAI_API_KEY')!.fingerprint,'e802e85a');
+  await space.close();
+  const journal=await readFile(join(dir,'space.json'),'utf8'),rawHash=createHash('sha256').update(canonicalJson(intent('sk-first-value'))).digest('hex');
+  assert.equal(journal.includes('sk-first-value'),false);assert.equal(journal.includes('sk-second-value'),false);
+  assert.equal(journal.includes(rawHash),false);assert.equal(journal.includes(createHash('sha256').update('sk-first-value').digest('hex')),false);
+  const key=await readFile(join(dir,'space.json.key'),'utf8');
+  assert.equal((await stat(join(dir,'space.json.key'))).mode&0o777,0o600);assert.match(key,/^[a-f0-9]{64}$/);assert.equal(key.includes('sk-first-value'),false);
+  assert.equal(journal.includes(key.trim()),false);
+ }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
+});
+
 test('Feishu app setup link generated after app.start reaches the owner snapshot',async()=>{
  let polls=0;const url='https://open.feishu.cn/page/cli?code=late';
  const view=(withUrl:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting',...(withUrl?{verification_url:url}:{})}});
