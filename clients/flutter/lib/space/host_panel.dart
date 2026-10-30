@@ -5,6 +5,26 @@ import '../ui/components.dart';
 import 'client_state.dart';
 import 'space_dialog.dart';
 
+/// A conflicted settings edit retried against the latest Host settings: Host
+/// checks the version inside params, not the intent's base_version.
+Map<String, dynamic> refreshSettingsPatch(
+  Map<String, dynamic> input,
+  Map<String, dynamic> snapshot,
+) {
+  final params = Map<String, dynamic>.from(input['params'] as Map? ?? {});
+  if (!params.containsKey('expected_version')) return input;
+  final settings = snapshot['host_settings'] as Map? ?? const {};
+  final version = switch (input['method']) {
+    'soul.set' => (settings['soul'] as Map?)?['version'],
+    'news.configure' => (settings['news'] as Map?)?['profile_version'],
+    _ => params['expected_version'],
+  };
+  return {
+    ...input,
+    'params': {...params, 'expected_version': version},
+  };
+}
+
 /// Owner-only Host administration. Every edit is a durable intent; Host decides, and values are never read back.
 class SpaceHostPanel extends StatefulWidget {
   const SpaceHostPanel({
@@ -66,8 +86,8 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
     return value == null || value.isEmpty ? null : value;
   }
 
-  Future<void> _putSecret(String name, {String? value}) async {
-    final secret = value ?? await _ask('$name（保存到 Host）', '', secret: true);
+  Future<void> _putSecret(String name) async {
+    final secret = await _ask('$name（保存到 Host）', '', secret: true);
     if (secret == null) return;
     await _send('secret.put', {'name': name, 'value': secret});
   }

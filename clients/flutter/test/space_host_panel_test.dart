@@ -144,4 +144,36 @@ void main() {
     expect(state.pending.single['kind'], 'connector.feishu');
     expect(state.pending.single['input'], {'action': 'complete'});
   });
+
+  test('conflict retry refreshes the version Host checks', () {
+    final snapshot = {
+      'host_settings': {
+        'soul': {'version': 4},
+        'news': {'profile_version': 7},
+      },
+    };
+    Map<String, dynamic> patch(String method) => {
+      'method': method,
+      'params': {
+        'interests': ['AI'],
+        'expected_version': 1,
+      },
+    };
+    expect(refreshSettingsPatch(patch('news.configure'), snapshot)['params'], {
+      'interests': ['AI'],
+      'expected_version': 7,
+    });
+    expect(
+      refreshSettingsPatch(
+        patch('soul.set'),
+        snapshot,
+      )['params']['expected_version'],
+      4,
+    );
+    final identity = {
+      'method': 'identity.configure',
+      'params': {'user_name': 'x'},
+    };
+    expect(refreshSettingsPatch(identity, snapshot), identity);
+  });
 }

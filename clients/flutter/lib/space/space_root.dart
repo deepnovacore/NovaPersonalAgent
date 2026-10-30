@@ -704,9 +704,10 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
                     if (action == 'discard') {
                       await state.discard(p['op_id'] as String);
                     } else {
-                      final input = Map<String, dynamic>.from(
-                        p['input'] as Map,
-                      );
+                      var input = Map<String, dynamic>.from(p['input'] as Map);
+                      if (p['kind'] == 'settings.patch') {
+                        input = refreshSettingsPatch(input, state.snapshot);
+                      }
                       final kind = input['kind'] as String?;
                       final current = kind == null
                           ? (state.snapshot['profile'] as Map?)
