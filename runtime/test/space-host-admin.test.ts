@@ -278,14 +278,21 @@ test('Feishu app setup link generated after app.start reaches the owner snapshot
 });
 
 test('repeated app.start keeps exactly one setup poll chain per owner',async()=>{
- let polls=0;const view=()=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting'}});
- // Status keeps answering "waiting", so every chain stays alive and the call rate reveals how many exist.
- const f=await fixture({owner:'phone',feishuPollMs:20,feishuConnector:{snapshot:view,command:method=>method==='feishu.app.status'?(polls++,Promise.resolve(view())):Promise.resolve(view()),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ let calls=0,inFlight=0,maxInFlight=0,release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});
+ const view=(waiting:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:waiting?'waiting':'idle'}});
+ const f=await fixture({owner:'phone',feishuPollMs:20,feishuConnector:{snapshot:()=>view(false),command:()=>Promise.resolve(view(true)),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ // Gate the status command itself: a chain waits for its own answer, so every call still in flight is another chain. Admin commands stay on the Host so the sends never queue behind the gate.
+ const hostCommand=f.host.command.bind(f.host);
+ f.host.command=(async(raw:unknown,context?:Parameters<typeof hostCommand>[1])=>{const method=(raw as {method?:string}).method;if(method!=='feishu.app.status')return hostCommand(raw,context);calls++;inFlight++;maxInFlight=Math.max(maxInFlight,inFlight);try{await gate;return {type:'personal.result',request_id:(raw as {request_id:string}).request_id,ok:true,data:view(true)}}finally{inFlight--}});
  try{
   for(const op of ['setup-a','setup-b','setup-c'])assert.equal((await f.send('phone',op,'connector.feishu',{action:'app.start'})).status,'accepted');
-  const start=polls;await new Promise(resolve=>setTimeout(resolve,250));const calls=polls-start;
-  assert.ok(calls<15,`three app.start intents must share one poll chain (${calls} status calls)`);
- }finally{await f.close()}
+  for(let i=0;i<200&&calls===0;i++)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(calls,1,'the first setup poll must reach the Host and stay unanswered');
+  // A second chain reaches its own status call within one poll interval of its app.start; one chain stays blocked on its first.
+  await new Promise(resolve=>setTimeout(resolve,200));
+  assert.equal(calls,1,'three app.start intents must share one poll chain');
+  assert.equal(maxInFlight,1,'one chain never has two status calls in flight');
+ }finally{release();await f.close()}
 });
 
 test('close cancels an in-flight setup poll and does not publish its late snapshot',async()=>{
