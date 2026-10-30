@@ -10,6 +10,6 @@
 
 # Build isolation
 
-- Place build outputs and compiler caches on the user-selected external disk. Verify it is mounted before building; do not silently fall back to the internal disk.
+- Place build outputs and compiler caches on internal storage. The external disk is no longer used; do not write to it or depend on it being mounted.
 - Namespace output directories by canonical worktree path and chat ID. Concurrent chats in the same checkout must not share mutable build outputs.
 - Clean only the current chat's output directory. Avoid build commands that clean shared `runtime/dist` or desktop build directories while other chats are using them.
