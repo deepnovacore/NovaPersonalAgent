@@ -36,6 +36,8 @@ test('packed server installs its private relay without consulting a registry and
     await mkdir(stage)
     const dependencies = {[relay.name]: relay.version, ...relay.dependencies}
     const bundled = await bundleServerRelay({root: source, stage, dependencies})
+    const manifest = JSON.parse(await readFile(join(stage, 'node_modules', relay.name, 'package.json'), 'utf8'))
+    assert.equal(manifest.dependencies, undefined, 'bundled relay dependencies are installed empty by npm')
     // Bundle installed public dependencies solely to keep this regression offline.
     for (const name of Object.keys(relay.dependencies)) await cp(join(repository, 'node_modules', name), join(stage, 'node_modules', name), {recursive: true, dereference: true})
     await writeFile(join(stage, 'package.json'), JSON.stringify({name: 'nova-server-package-regression', version: '1.0.0', type: 'module', dependencies,

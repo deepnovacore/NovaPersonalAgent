@@ -20,8 +20,10 @@ export async function bundleServerRelay({root, stage, dependencies}) {
   }
   const destination = join(stage, 'node_modules', relay.name)
   await mkdir(destination, {recursive: true})
-  const {name, version, type, exports, dependencies: relayDependencies, engines, license} = relay
-  await writeFile(join(destination, 'package.json'), JSON.stringify({name, version, type, exports, dependencies: relayDependencies, engines, license}) + '\n')
+  // npm treats a bundled package's dependencies as bundled too and leaves them as
+  // empty directories; the asserted top-level copies resolve from here instead.
+  const {name, version, type, exports, engines, license} = relay
+  await writeFile(join(destination, 'package.json'), JSON.stringify({name, version, type, exports, engines, license}) + '\n')
   await cp(join(root, 'relay/dist/src'), join(destination, 'dist/src'), {
     recursive: true,
     filter: async source => (await stat(source)).isDirectory() || source.endsWith('.js'),
