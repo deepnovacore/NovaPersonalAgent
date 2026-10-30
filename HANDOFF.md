@@ -3,7 +3,7 @@
 > **2026-10-30 最新接手入口：[移动端飞书质量迁移交接](docs/handoffs/mobile-feishu-quality-next.md)。** Android build 18 已生成卡片，但主体归属内容验收失败；功能分支未合入、未 push。下文保留历史快照，以新交接现状和优先级为准。
 
 Date: 2026-10-29  
-Worktree: `<worktree>`  
+Worktree: `<worktree>`
 Branch: `fix/mobile-thinking-and-pages`  
 Base: `v1.0.0dev` @ `90d0e10a`  
 Code HEAD: `c33f0224` (this handoff is a docs-only commit after it)  
