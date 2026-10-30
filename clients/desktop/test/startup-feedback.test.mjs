@@ -235,7 +235,8 @@ test('generic assembly failure still schedules automatic recovery', async () => 
 
 test('configuration commits keep startup readiness independent of unrelated device services', async () => {
   const body=source.slice(source.indexOf('async function commitDesktopConfiguration('),source.indexOf('async function discardDesktopConfiguration('))
-  const context=vm.createContext({managedWorkspaceMaintenance:null,refreshManagedWorkspaceCapabilities:async()=>{},configurationReady:false,settingsReady:true,
+  const {publicManagedWorkspaceCapabilities}=await import('../src/main/workspace-actions.mjs')
+  const context=vm.createContext({managedWorkspaceMaintenance:null,readManagedWorkspaceCapabilities:async()=>publicManagedWorkspaceCapabilities(),managedWorkspaceBackendRecovery:{observe:async()=>{}},managedWorkspaceCapabilities:publicManagedWorkspaceCapabilities(),projectNativeAuthorityPresent:false,closeMaintenanceBounded:async()=>{},configurationReady:false,settingsReady:true,desktopConfig:null,codexStatus:null,
     startup:{stage:'ready'},backendStatus:{state:'connected'}})
   vm.runInContext(body,context)
   await context.commitDesktopConfiguration({maintenance:null,config:{},codexStatus:{}})

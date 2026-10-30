@@ -1,7 +1,27 @@
 import {t} from './locale.mjs'
 
+// Fixed stage labels for the bounded configuration waits. Codes carry no paths
+// or credentials, so they are safe to show and to log.
+const CONFIGURATION_STAGE_LABELS = Object.freeze({
+  configuration_wait_settings: t('启动配置'),
+  configuration_wait_workspace: t('工作区路径检查'),
+  configuration_wait_directories: t('状态与工作区目录'),
+  configuration_wait_codex: t('Codex 环境检查'),
+  configuration_wait_maintenance: t('工作区维护服务'),
+  configuration_wait_reconcile: t('外部工作区清理核对'),
+  configuration_wait_capabilities: t('工作区能力检查'),
+  configuration_wait_recovery: t('后台恢复检查'),
+})
+
+export function configurationStageLabel(code) {
+  return CONFIGURATION_STAGE_LABELS[code] ?? t('启动配置')
+}
+
 export function startupMessage(value) {
   if (value?.stage === 'credentials') return t('正在读取凭据，请查看系统授权弹窗。')
+  if (value?.stage === 'configuration' && value.code) {
+    return t('正在准备{0}…', configurationStageLabel(value.code))
+  }
   if (value?.stage === 'backend' && value.code) return t('后台启动尚未完成，正在自动重试。')
   if (value?.stage === 'reconnecting') return t('后台连接已断开，正在自动重连。')
   if (value?.stage !== 'failed') return ''
@@ -14,6 +34,7 @@ export function startupMessage(value) {
   if (value.code === 'personal_store_capacity' || value.code === 'state_corrupt') return t('状态文件无法读取或超过大小上限。请备份后运行 novapersonal reset-state。')
   if (value.code === 'state_version_unsupported') return t('状态文件由更新版本的 Nova 写入。请升级 Nova，或备份后运行 novapersonal reset-state。')
   if (['state_busy', 'state_lock_failed', 'personal_store_locked'].includes(value.code)) return t('Nova 已在另一个窗口运行。请关闭它后重试。')
+  if (value.code === 'configuration_timeout') return t('配置阶段等待超时，后台尚未启动。请点击重试；若反复出现，请检查状态与工作区目录是否可访问。')
   if (value.code === 'settings_recovery_failed') return t('设置恢复未完成。请在设置中恢复上次可用配置。')
   return t('后台启动失败，请打开设置检查配置后重试。')
 }

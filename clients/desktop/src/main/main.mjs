@@ -16,7 +16,7 @@ import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/lo
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {codingBackendStatus} from './coding-settings.mjs'
 import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
-import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
+import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode, createConfigurationAttempt, runConfigurationStage, configurationTimeout} from './desktop-startup.mjs'
 import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
@@ -254,6 +254,11 @@ let projectNativeHost
 let projectNativeAuthorityPresent = false
 let managedWorkspaceMaintenance = null
 let managedWorkspaceCapabilities = publicManagedWorkspaceCapabilities()
+// Only the newest configuration attempt may commit. A timed-out or superseded
+// attempt keeps running in the background, so its results are discarded and its
+// maintenance store is closed instead of being installed globally.
+let activeConfigurationAttempt = null
+const CONFIGURATION_CLOSE_TIMEOUT_MS = 2_000
 let quitDrain = null
 let quitDrained = false
 let releaseSmokeChannel = null
@@ -974,7 +979,35 @@ async function getChatGptAccounts() {
   return chatGptAccounts
 }
 
-async function prepareDesktopConfiguration() {
+function beginConfigurationAttempt() {
+  if (activeConfigurationAttempt !== null) activeConfigurationAttempt.abort()
+  activeConfigurationAttempt = createConfigurationAttempt()
+  return activeConfigurationAttempt
+}
+
+function configurationAttemptCurrent(attempt) {
+  return attempt !== null && attempt === activeConfigurationAttempt && attempt.current()
+}
+
+// Stage identifiers are fixed, non-secret labels. They replace the previous
+// silent spinner so a stuck configuration wait names the directory or service
+// it is waiting on, and the timeout below reports the same stage.
+function publishConfigurationStage(stage) {
+  if (configurationReady) return
+  publishStartup('configuration', `configuration_wait_${stage}`)
+}
+
+async function closeMaintenanceBounded(maintenance) {
+  if (maintenance === null || maintenance === undefined) return
+  let timer
+  await Promise.race([
+    Promise.resolve().then(() => maintenance.close()).catch(() => undefined),
+    new Promise(resolve => { timer = setTimeout(resolve, CONFIGURATION_CLOSE_TIMEOUT_MS); timer.unref?.() }),
+  ]).finally(() => { if (timer !== undefined) clearTimeout(timer) })
+}
+
+async function prepareDesktopConfiguration(attempt = beginConfigurationAttempt()) {
+  // Loading the native host is synchronous and cannot be preempted by a JS timer.
   if (projectNativeHost === undefined) {
     const projectNativeLoad = inspectProjectNativeHostFromResources({
       resourcesPath: app.isPackaged ? process.resourcesPath : realpathSync(resolve(packageRoot, 'build')),
@@ -1021,29 +1054,78 @@ async function prepareDesktopConfiguration() {
       pathApi: path,
       mkdir,
     }),
+    // Each real wait boundary runs through the same attempt and budget, so the
+    // displayed stage, the deadline being enforced, and error.stage all agree.
+    runStage: (stage, operation) => runConfigurationStage(attempt, stage, operation, {
+      onStage: publishConfigurationStage,
+    }),
   })
   const maintenance = projectNativeHost === null
     ? null
-    : await ManagedWorkspaceMaintenanceService.openFromDesktop({
+    : await runConfigurationStage(attempt, 'maintenance', () =>
+      ManagedWorkspaceMaintenanceService.openFromDesktop({
         stateRoot: prepared.config.stateRoot,
         managedRoot: prepared.config.managedRoot,
         nativeHost: projectNativeHost,
-      })
-  return Object.freeze({...prepared, maintenance})
+      }), {
+      onStage: publishConfigurationStage,
+      // A store opened after the attempt lost ownership is closed here, so it cannot
+      // keep a transaction lock or be installed as the active maintenance service.
+      onLateResult: service => closeMaintenanceBounded(service),
+    })
+  return Object.freeze({...prepared, maintenance, attempt})
+}
+
+async function readManagedWorkspaceCapabilities(maintenance) {
+  if (maintenance === null) return publicManagedWorkspaceCapabilities()
+  try {
+    return publicManagedWorkspaceCapabilities(await maintenance.capabilities())
+  } catch {
+    return publicManagedWorkspaceCapabilities()
+  }
 }
 
 async function commitDesktopConfiguration(prepared) {
-  const reconciliation = prepared.maintenance === null
-    ? null
-    : await prepared.maintenance.reconcileExternalCleanup()
+  const attempt = prepared.attempt ?? null
+  const stage = (name, operation, options = {}) => attempt === null
+    ? operation()
+    : runConfigurationStage(attempt, name, operation, {onStage: publishConfigurationStage, ...options})
+  const current = () => attempt === null || configurationAttemptCurrent(attempt)
+  let reconciliation = null
+  let capabilities
+  try {
+    reconciliation = prepared.maintenance === null
+      ? null
+      : await stage('reconcile', () => prepared.maintenance.reconcileExternalCleanup())
+    if (!current()) throw configurationTimeout('commit')
+    capabilities = await stage('capabilities', () => readManagedWorkspaceCapabilities(prepared.maintenance))
+    if (!current()) throw configurationTimeout('commit')
+    // Observe before installing anything: a recovery hazard must not leave the
+    // previous attempt's configuration half-committed when this wait times out.
+    await stage('recovery', () => managedWorkspaceBackendRecovery.observe(
+      capabilities,
+      projectNativeAuthorityPresent,
+    ))
+    if (!current()) throw configurationTimeout('commit')
+  } catch (error) {
+    // A superseded attempt is reported as a retriable timeout, and its store is
+    // closed here so it cannot keep a lock or be installed later.
+    if (error?.code === 'configuration_superseded') {
+      await discardDesktopConfiguration(prepared)
+      throw configurationTimeout('commit')
+    }
+    throw error
+  }
+  // Point of no return: everything below is synchronous, so a later timeout
+  // cannot observe a partially installed configuration.
   const previousMaintenance = managedWorkspaceMaintenance
   desktopConfig = prepared.config
   codexStatus = prepared.codexStatus
   managedWorkspaceMaintenance = prepared.maintenance
-  if (previousMaintenance !== null) await previousMaintenance.close().catch(() => undefined)
-  await refreshManagedWorkspaceCapabilities()
+  managedWorkspaceCapabilities = capabilities
   configurationReady = true
   settingsReady = true
+  await closeMaintenanceBounded(previousMaintenance)
   return Object.freeze({
     externalWorkspaceReset: reconciliation?.status === 'reconciled'
       && reconciliation.active_workspace_reset === true,
@@ -1051,17 +1133,25 @@ async function commitDesktopConfiguration(prepared) {
 }
 
 async function discardDesktopConfiguration(prepared) {
+  prepared?.attempt?.abort?.()
   const maintenance = prepared?.maintenance
   if (maintenance !== null && maintenance !== undefined
     && maintenance !== managedWorkspaceMaintenance) {
-    await maintenance.close().catch(() => undefined)
+    await closeMaintenanceBounded(maintenance)
   }
 }
 
 async function refreshDesktopConfiguration() {
-  const prepared = await prepareDesktopConfiguration()
-  await commitDesktopConfiguration(prepared)
-  return prepared
+  const attempt = beginConfigurationAttempt()
+  let prepared
+  try {
+    prepared = await prepareDesktopConfiguration(attempt)
+    return await commitDesktopConfiguration(prepared)
+  } catch (error) {
+    attempt.abort(error)
+    if (prepared !== undefined) await discardDesktopConfiguration(prepared)
+    throw error
+  }
 }
 
 async function refreshManagedWorkspaceCapabilities() {
@@ -1074,15 +1164,9 @@ async function refreshManagedWorkspaceCapabilities() {
     )
     return managedWorkspaceCapabilities
   }
-  try {
-    const capabilities = await maintenance.capabilities()
-    if (maintenance !== managedWorkspaceMaintenance) return managedWorkspaceCapabilities
-    managedWorkspaceCapabilities = publicManagedWorkspaceCapabilities(capabilities)
-  } catch {
-    if (maintenance === managedWorkspaceMaintenance) {
-      managedWorkspaceCapabilities = publicManagedWorkspaceCapabilities()
-    }
-  }
+  const capabilities = await readManagedWorkspaceCapabilities(maintenance)
+  if (maintenance !== managedWorkspaceMaintenance) return managedWorkspaceCapabilities
+  managedWorkspaceCapabilities = capabilities
   await managedWorkspaceBackendRecovery.observe(
     managedWorkspaceCapabilities,
     projectNativeAuthorityPresent,
