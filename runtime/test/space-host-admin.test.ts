@@ -305,6 +305,26 @@ test('close cancels an in-flight setup poll and does not publish its late snapsh
  }finally{release();await f.close()}
 });
 
+test('close clears a snapshot timer queued before it while an in-flight setup poll is still pending',async()=>{
+ let polls=0,release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});
+ const url='https://open.feishu.cn/page/cli?code=queued-before-close';
+ const view=(withUrl:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting',...(withUrl?{verification_url:url}:{})}});
+ const f=await fixture({owner:'phone',feishuConnector:{snapshot:()=>view(false),command:method=>method==='feishu.app.status'?(polls++,gate.then(()=>view(true))):Promise.resolve(view(false)),open:()=>Promise.resolve(),close:()=>Promise.resolve()}});
+ try{
+  // app.start runs through the Host, whose change notification queues the 100ms snapshot timer before close.
+  const notifications:string[]=[];f.host.subscribe(()=>notifications.push('changed'));
+  assert.equal((await f.send('phone','setup','connector.feishu',{action:'app.start'})).status,'accepted');
+  assert.ok(notifications.length>0,'app.start must notify the Host so a snapshot timer is queued');
+  for(let i=0;i<200&&polls===0;i++)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(polls,1);
+  let published=0;const publish=f.space.publishSnapshot.bind(f.space);f.space.publishSnapshot=(async(...args:Parameters<typeof publish>)=>{published++;return publish(...args)});
+  // close now waits longer than the timer delay for the in-flight status call, so a timer left armed would fire inside close.
+  const closing=f.space.close();await new Promise(resolve=>setTimeout(resolve,150));release();await closing;
+  await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(published,0,'a snapshot timer queued before close must not publish while close awaits the setup poll');
+ }finally{release();await f.close()}
+});
+
 test('a Feishu setup link that appears long after app.start still reaches the owner',async()=>{
  let polls=0;const url='https://open.feishu.cn/page/cli?code=very-late';
  const view=(withUrl:boolean)=>({available:true,configured:false,state:'unauthorized',app_setup:{state:'waiting',...(withUrl?{verification_url:url}:{})}});
