@@ -72,6 +72,8 @@ Model keys go only to the Host and are stored in a private file next to its conf
 
 Feishu authorization happens on the Host. Tap Sign in to Feishu, confirm on the authorization page the Host provides, then tap Done. While the Host waits for that confirmation the phone shows it as waiting. If the authorization page expires or confirmation fails, tap Restart sign-in; the earlier authorization link stops working. The phone's own Feishu tokens are never passed to the Host.
 
+If a temporary network failure prevents the Host from verifying an existing login, the phone shows that verification is temporarily unavailable and the Host's reason instead of offering a fresh login. The saved authorization is kept; verification resumes automatically when the network recovers.
+
 ## Acceptance boundary
 
 Automated tests can prove ciphertext protocol interop, idempotent retry, conflicts and id remapping, real-network catch-up, pairing and revocation, and handling up to the push vendor boundary. iOS NSE and system permissions, Android Doze/force-stop, Xiaomi lock screen and overnight arrival need real devices with signing and vendor accounts. Without that evidence do not claim M0/M5/M6 device acceptance. The matrix is in the [design milestones](../design-notes/2026-10-23-space-host-client-milestones.md).
