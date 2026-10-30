@@ -1,21 +1,9 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import '../agent_core/model_presets.dart';
-import '../agent_core/provider_credentials.dart';
 import '../connectors/feishu/browser.dart';
 import '../ui/components.dart';
 import 'client_state.dart';
 import 'space_dialog.dart';
-
-/// Environment variable per provider preset, for the explicit "use this phone's key" shortcut.
-const hostCredentialForPreset = {
-  'openai': 'OPENAI_API_KEY',
-  'openrouter': 'OPENROUTER_API_KEY',
-  'gemini': 'GEMINI_API_KEY',
-  'deepseek': 'DEEPSEEK_API_KEY',
-  'qwen': 'DASHSCOPE_API_KEY',
-  'ark': 'ARK_API_KEY',
-};
 
 /// Owner-only Host administration. Every edit is a durable intent; Host decides, and values are never read back.
 class SpaceHostPanel extends StatefulWidget {
@@ -23,12 +11,10 @@ class SpaceHostPanel extends StatefulWidget {
     super.key,
     required this.state,
     required this.onSync,
-    this.credentials,
     this.openUrl,
   });
   final SpaceClientState state;
   final Future<void> Function() onSync;
-  final ProviderCredentials? credentials;
   final Future<void> Function(Uri uri)? openUrl;
   @override
   State<SpaceHostPanel> createState() => _SpaceHostPanelState();
@@ -84,22 +70,6 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
     final secret = value ?? await _ask('$name（保存到 Host）', '', secret: true);
     if (secret == null) return;
     await _send('secret.put', {'name': name, 'value': secret});
-  }
-
-  Future<void> _usePhoneKey(String name) async {
-    final entries = await widget.credentials?.list() ?? const [];
-    for (final entry in entries) {
-      final id = ModelPreset.forEndpoint(entry.endpoint)?.id;
-      if (id != null && hostCredentialForPreset[id] == name) {
-        await _putSecret(name, value: entry.key);
-        return;
-      }
-    }
-    if (mounted) {
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(const SnackBar(content: Text('此手机没有保存匹配的密钥')));
-    }
   }
 
   Future<void> _open(String? url) async {
@@ -225,13 +195,6 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                 ),
                 trailing: Wrap(
                   children: [
-                    if (hostCredentialForPreset.containsValue(c['name']))
-                      IconButton(
-                        key: ValueKey('host.credential.phone.${c['name']}'),
-                        tooltip: '使用此手机已保存的密钥',
-                        icon: const Icon(CupertinoIcons.device_phone_portrait),
-                        onPressed: () => _usePhoneKey('${c['name']}'),
-                      ),
                     if (c['source'] == 'space')
                       IconButton(
                         key: ValueKey('host.credential.clear.${c['name']}'),

@@ -14,7 +14,6 @@ import 'space_storage.dart';
 import 'native_scope.dart';
 import 'push_client.dart';
 import 'notification_router.dart';
-import '../agent_core/provider_credentials.dart';
 import 'host_panel.dart';
 import 'source_panel.dart';
 import 'space_dialog.dart';
@@ -1136,11 +1135,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           ],
         ),
         SpaceSourcePanel(state: state, onSync: c.sync),
-        SpaceHostPanel(
-          state: state,
-          onSync: c.sync,
-          credentials: ProviderCredentials(),
-        ),
+        SpaceHostPanel(state: state, onSync: c.sync),
         _pending(state),
         NovaSection(
           children: [
