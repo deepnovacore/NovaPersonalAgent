@@ -432,8 +432,17 @@ function settingsView() {
   }
 }
 
+// Only fixed stage names may reach the log; codes, paths and payloads never do.
+const STARTUP_DIAGNOSTIC_STAGES = Object.freeze(new Set([
+  'configuration', 'backend', 'failed', 'ready',
+]))
+
 function publishStartup(stage, code = null) {
+  const changed = startup.stage !== stage
   startup = Object.freeze({stage, code})
+  if (changed && STARTUP_DIAGNOSTIC_STAGES.has(stage)) {
+    console.error(`[desktop-diagnostic] startup_stage=${stage}`)
+  }
   sendToOrb('nova:backend-status', {...backendStatus, startup})
   sendToSettings('nova:settings:changed', settingsView())
 }
