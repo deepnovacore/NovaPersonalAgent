@@ -64,6 +64,14 @@ Lock-screen notifications need a deployed [push gateway](../../push-gateway/READ
 
 The Client's system tools run only actions the Host explicitly sends, and check foreground state, system permission, user confirmation and a persistent action id. Calendar read and camera capture are included; reminder creation is iOS only and Android returns an explicit unsupported result. The Client runs no local model or autonomous planning loop.
 
+## Managing the Host from the phone
+
+The first phone the Host confirms becomes the owner. After the owner is revoked, the next device the Host confirms takes over; devices that are already paired are not promoted. Only the owner sees Settings → Host settings on the phone, where it can change the assistant name, how the assistant addresses you, the role description, proactive discovery and news topics, manage the Host's model keys, and set up and sign in to Feishu for the Host.
+
+Model keys go only to the Host and are stored in a private file next to its config; the phone shows only whether each key is set and its fingerprint. A key takes effect after the Host restarts. A key of the same name already set in the Host's startup environment wins, and the phone marks it as coming from the Host environment.
+
+Feishu authorization happens on the Host. Tap Sign in to Feishu, confirm on the authorization page the Host provides, then tap Done. While the Host waits for that confirmation the phone shows it as waiting instead of offering a second sign-in. The phone's own Feishu tokens are never passed to the Host.
+
 ## Acceptance boundary
 
 Automated tests can prove ciphertext protocol interop, idempotent retry, conflicts and id remapping, real-network catch-up, pairing and revocation, and handling up to the push vendor boundary. iOS NSE and system permissions, Android Doze/force-stop, Xiaomi lock screen and overnight arrival need real devices with signing and vendor accounts. Without that evidence do not claim M0/M5/M6 device acceptance. The matrix is in the [design milestones](../design-notes/2026-10-23-space-host-client-milestones.md).

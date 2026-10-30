@@ -34,7 +34,7 @@ The same service can be a Space Host for the Nova phone Client. Set `NOVA_SPACE_
 nova-space-host pair --config /private/new-space/config.json
 ```
 
-`nova-space-host` (also `novapersonal-server space ...`) provides `init`, `resume`, `status`, `pair`, `devices` and `revoke`. See the [Space guide](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/docs/en/space-host-client.md#headless-hostlinuxmacos).
+`nova-space-host` (also `novapersonal-server space ...`) provides `init`, `resume`, `status`, `pair`, `devices` and `revoke`. See the [Space guide](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/docs/en/space-host-client.md#headless-host-linuxmacos).
 
 ## Upgrading
 
