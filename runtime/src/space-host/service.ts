@@ -25,7 +25,8 @@ const ADMIN_KINDS=new Set(['settings.patch','secret.put','secret.clear','connect
 const fingerprint=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 export class SpaceHost {
  readonly #store;#state:Journal;#tail:Promise<unknown>=Promise.resolve();#stop:(()=>void|Promise<void>)|undefined;#unsubscribe:(()=>void)|undefined;#chats=new Map<string,Promise<void>>();#flush:Promise<void>|undefined;#opened=false;#snapshotTimer:ReturnType<typeof setTimeout>|undefined;
- constructor(readonly options:{path:string;space:string;host:PersonalAgentHost;transport:SpaceHostTransport;push?:SpacePushDelivery;owner?:()=>string|undefined;secrets?:HostSecretStore;feishuPollMs?:number;environment?:NodeJS.ProcessEnv;now?:()=>number;onError?:(error:unknown)=>void}){this.#store=new BoundedJsonStore(options.path,journalSchema,32*1024*1024);this.#state={version:1,space:options.space,cursor:0,projection_revision:0,ops:{},remaps:{},outbox:[],push_outbox:[],actions:{}}}
+/** `feishuPollMs` is the interval between Feishu app-setup status polls and `feishuSetupTimeoutMs` bounds them to the connector's 300s config operation, so a link that appears late still reaches the phone. */
+ constructor(readonly options:{path:string;space:string;host:PersonalAgentHost;transport:SpaceHostTransport;push?:SpacePushDelivery;owner?:()=>string|undefined;secrets?:HostSecretStore;feishuPollMs?:number;feishuSetupTimeoutMs?:number;environment?:NodeJS.ProcessEnv;now?:()=>number;onError?:(error:unknown)=>void}){this.#store=new BoundedJsonStore(options.path,journalSchema,32*1024*1024);this.#state={version:1,space:options.space,cursor:0,projection_revision:0,ops:{},remaps:{},outbox:[],push_outbox:[],actions:{}}}
  #now(){return this.options.now?.()??Date.now()}
  #serial<T>(work:()=>Promise<T>):Promise<T>{const run=this.#tail.then(work);this.#tail=run.catch(()=>{ /* Keep the serial queue usable after a caller-visible failure. */ });return run}
  async #save(){await this.#store.write(this.#state)}
@@ -90,8 +91,20 @@ export class SpaceHost {
   if(startChat){const run=this.#runChat(key);this.#chats.set(key,run);void run.catch(error=>this.options.onError?.(error)).finally(()=>this.#chats.delete(key))}
   await this.flush();
  }
- /** The setup link appears only after lark-cli starts; the connector strips it from published snapshots, so fetch it once for the owner. */
- async #pollFeishuSetup(owner:string,attempts=30){for(let i=0;i<attempts&&this.#opened;i++){await new Promise(resolve=>setTimeout(resolve,this.options.feishuPollMs??1000));const result=await this.options.host.command({type:'personal.command',request_id:'space-feishu-setup-'+randomUUID(),method:'feishu.app.status',params:{}},{client_id:'space:'+owner}) as {ok:boolean;data?:unknown};if(!result.ok)return;const view=feishuView(result.data),url=(view.app_setup as {verification_url?:string}|undefined)?.verification_url;if(view.app_setup?.state!=='waiting')return;if(url){this.#setupUrl=url;if(this.#hostAdmin(owner))await this.publishSnapshot(owner);return}}}
+ /** The setup link appears only after lark-cli starts; the connector strips it from published snapshots, so fetch it once for the owner. The connector allows 300s for the config operation, so poll while it is still waiting; a status call that fails transiently is retried instead of dropping the link. */
+ async #pollFeishuSetup(owner:string){
+  const deadline=Date.now()+(this.options.feishuSetupTimeoutMs??300_000);let failures=0;
+  while(this.#opened&&Date.now()<deadline){
+   await new Promise(resolve=>setTimeout(resolve,this.options.feishuPollMs??1000));
+   if(!this.#opened)return;
+   const result=await this.options.host.command({type:'personal.command',request_id:'space-feishu-setup-'+randomUUID(),method:'feishu.app.status',params:{}},{client_id:'space:'+owner}).catch(()=>undefined) as {ok:boolean;data?:unknown}|undefined;
+   if(!result?.ok){if(++failures>=3)return;continue}
+   failures=0;
+   const view=feishuView(result.data),url=(view.app_setup as {verification_url?:string}|undefined)?.verification_url;
+   if(view.app_setup?.state!=='waiting')return;
+   if(url){this.#setupUrl=url;if(this.#hostAdmin(owner))await this.publishSnapshot(owner);return}
+  }
+ }
  async #record(sender:string,intent:SpaceIntent,hash:string,value:BusinessMessage){const receipt={v:1,type:'receipt',op_id:intent.op_id,...value};const key=this.#key(sender,intent.op_id),projection=value.status==='accepted'&&['life.mutate','card.dismiss','source.input','snapshot.request','settings.patch','secret.put','secret.clear','connector.feishu'].includes(intent.kind)?this.snapshot(sender):undefined;this.#enqueue(sender,receipt,'receipt-'+key);if(projection)this.#enqueue(sender,{v:1,type:'snapshot',snapshot:projection},'snapshot-'+key);this.#state.ops[key]={...this.#state.ops[key]!,hash,intent:this.#journalIntent(intent),sender,receipt};await this.#save()}
  async #runChat(key:string){const op=this.#state.ops[key]!;const conversation=displayText(op.intent.input.conversation_id,'chat:main');let sequence=0;
   const unsubscribe=this.options.host.subscribeSpaceFrames(frame=>{if(frame.conversation_id!==conversation||typeof frame.text!=='string'||frame.role!=='assistant')return;void this.options.transport.stream(op.sender,{v:1,type:'chat.delta',op_id:op.intent.op_id,conversation_id:conversation,text:typeof frame.full_text==='string'?frame.full_text:frame.text,sequence:++sequence},'delta-'+randomUUID()).catch(()=>{/* previews are intentionally disposable */})});
