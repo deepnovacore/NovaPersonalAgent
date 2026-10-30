@@ -2,7 +2,7 @@ import {readHostSpaceConfig,loadSpaceHostController} from '../space-host/config.
 import type {UsageContext} from '../usage/context.js'
 import {soulRoleContext} from './soul-context.js'
 import {acceptanceReadExistingOnly} from '../desktop/workbench-acceptance.js'
-import {resolveModelApiKey, resolveEmbeddingConnection} from '../config/config.js'
+import {resolveMemoryExtractionConnection, resolveSelectedModelConnection, resolveEmbeddingConnection} from '../config/config.js'
 import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import {admitIntakeTask} from '../personal-agent/intake-task.js'
@@ -179,7 +179,8 @@ export function configuredMemoryRecipient(settings: AssemblyOptions['settings'],
   } catch { return undefined }
 }
 export function configuredTaskVerifierConsumer(settings:AssemblyOptions['settings']):string {
-  return embeddingHash('sha256').update(JSON.stringify({provider:'openai-compatible',endpoint:settings.model_base_url,model:settings.support_model})).digest('hex')
+  const connection=resolveSelectedModelConnection(settings)
+  return embeddingHash('sha256').update(JSON.stringify({provider:connection?.provider??'unconfigured',endpoint:connection?.baseUrl??'',model:settings.support_model})).digest('hex')
 }
 
 async function responseAdaptationFor(
@@ -1464,7 +1465,7 @@ export function composeRealtime(
   let sharedClient: MemoryLedgerClient | undefined
   const getClient = () => sharedClient ??= new MemoryLedgerClient(spaceConfig?spaceConfig.personal_path+'.memory.sqlite':memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
-  const extraction=local?.extraction??{baseUrl:options.settings.model_base_url,apiKey:resolveModelApiKey(options.settings)??''}
+  const extraction=local?.extraction??(()=>{const connection=resolveMemoryExtractionConnection(options.settings);return {baseUrl:connection.baseUrl,apiKey:connection.apiKey}})()
   const memoryGateway=local?(extraction.apiKey.trim()?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),...extraction,clock:new RealClock()}):unconfiguredModelGateway):core.gateway
   const useLocalLedger=spaceConfig!==undefined||local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
   const createPersonalMemory = useLocalLedger ? () => {
