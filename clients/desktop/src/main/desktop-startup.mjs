@@ -13,6 +13,87 @@ const PROBE_ENV_KEYS = Object.freeze([
   'PATH', 'PATHEXT', 'SystemRoot', 'WINDIR', 'HOME', 'USERPROFILE', 'TMP', 'TEMP',
 ])
 
+/** Each configuration wait must settle, even when an OS/filesystem call never returns. */
+export const CONFIGURATION_STAGE_TIMEOUT_MS = 20_000
+
+const STAGE_NAME = /^[a-z_]{1,32}$/u
+
+function stageError(code, stage = null) {
+  const error = new Error(code)
+  error.code = code
+  if (typeof stage === 'string' && STAGE_NAME.test(stage)) error.stage = stage
+  return error
+}
+
+export function configurationTimeout(stage) {
+  return stageError('configuration_timeout', stage)
+}
+
+export function configurationSuperseded() {
+  return stageError('configuration_superseded')
+}
+
+/**
+ * One configuration attempt per owner. Aborting it is how a timeout or a newer
+ * attempt prevents an older operation from committing after it lost ownership.
+ */
+export function createConfigurationAttempt() {
+  const controller = new AbortController()
+  return Object.freeze({
+    signal: controller.signal,
+    abort(reason = configurationSuperseded()) {
+      if (controller.signal.aborted) return false
+      controller.abort(reason)
+      return true
+    },
+    current(isActive = () => true) {
+      return !controller.signal.aborted && isActive(this)
+    },
+  })
+}
+
+/**
+ * Bounds one wait and reports which stage is waiting. The race keeps ownership
+ * local: a late value is handed to `onLateResult` for cleanup instead of being
+ * allowed to continue into the caller's commit.
+ */
+export async function runConfigurationStage(attempt, stage, operation, {
+  onStage = () => {},
+  timeoutMs = CONFIGURATION_STAGE_TIMEOUT_MS,
+  onLateResult = () => {},
+  schedule = setTimeout,
+  cancel = clearTimeout,
+} = {}) {
+  if (!attempt.current()) throw configurationSuperseded()
+  onStage(stage)
+  let settled = false
+  let timer = null
+  const work = Promise.resolve().then(operation).then(value => {
+    if (settled && !attempt.current()) {
+      try { onLateResult(value) } catch { /* late cleanup is best effort */ }
+    }
+    return value
+  })
+  const deadline = new Promise((_, reject) => {
+    timer = schedule(() => reject(configurationTimeout(stage)), timeoutMs)
+    if (timer !== null && typeof timer.unref === 'function') timer.unref()
+  })
+  try {
+    const value = await Promise.race([work, deadline])
+    if (!attempt.current()) {
+      try { onLateResult(value) } catch { /* late cleanup is best effort */ }
+      throw configurationSuperseded()
+    }
+    return value
+  } catch (error) {
+    if (error?.code === 'configuration_timeout') attempt.abort(error)
+    throw error
+  } finally {
+    settled = true
+    if (timer !== null) cancel(timer)
+  }
+}
+
 export function inspectCodexVersion(invocation, { environment = {}, run }) {
   const env = {}
   for (const key of PROBE_ENV_KEYS) {
@@ -136,6 +217,7 @@ export async function prepareDesktopStartup({
   inspectCodex,
   inspectWorkspace = stat,
   ensureDirectories = config => ensureProductDirectories(config, { mkdir, pathApi }),
+  onStage = () => {},
 }) {
   const config = resolveDesktopConfig({
     settings,
@@ -146,6 +228,7 @@ export async function prepareDesktopStartup({
     canonicalize: canonicalizePath,
   })
   if (settings.codexWorkspace?.trim() || environment.CODEX_WORKSPACE?.trim()) {
+    onStage('workspace')
     let workspace
     try { workspace = await inspectWorkspace(config.workspace) }
     catch (error) {
@@ -154,7 +237,9 @@ export async function prepareDesktopStartup({
     }
     if (!workspace.isDirectory()) throw Object.assign(new Error('workspace_invalid'), {code: 'workspace_invalid'})
   }
+  onStage('directories')
   await ensureDirectories(config)
+  onStage('codex')
   const { config: resolved, status } = await resolveDesktopCodex({
     config,
     automaticCandidates: codexCandidates({
@@ -211,7 +296,8 @@ const MESSAGE_CODES = new Set([
 ])
 
 export function startupFailureCode(error) {
-  if (['embedding_provider_invalid', 'credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'workspace_not_found', 'workspace_invalid', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked'].includes(error?.code)) return error.code
+  if (error?.code === 'configuration_superseded') return 'configuration_timeout'
+  if (['embedding_provider_invalid', 'credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'workspace_not_found', 'workspace_invalid', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'configuration_timeout'].includes(error?.code)) return error.code
   if (['EACCES', 'EPERM', 'EROFS'].includes(error?.code)) return 'filesystem_permissions'
   if (MESSAGE_CODES.has(error?.message)) return error.message
   if (error?.name === 'MainCameraConfigurationError') return 'camera_configuration_invalid'
@@ -226,7 +312,8 @@ export function reportStartupFailure(error, {
   showError,
 } = {}) {
   const code = startupFailureCode(error)
-  write(`[desktop-diagnostic] startup_failure code=${code}\n`)
+  const stage = typeof error?.stage === 'string' && STAGE_NAME.test(error.stage) ? ` stage=${error.stage}` : ''
+  write(`[desktop-diagnostic] startup_failure code=${code}${stage}\n`)
   if (code === 'embedding_provider_invalid') {
     showError?.(t("embeddingProvider 仅支持 dashscope，后端未启动，原配置未修改。请在设置文件中明确选择云端服务后再重启。"))
   } else showError?.(t("启动失败，请打开设置检查配置后重试。"))
