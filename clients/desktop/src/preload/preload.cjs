@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     chooseBuildDirectory: () => ipcRenderer.invoke('nova:personal:build-directory'),
     defaultWorkspace: () => ipcRenderer.invoke('nova:personal:default-workspace'),
     setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),
+    notify: payload => ipcRenderer.invoke('nova:personal:notify', payload),
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
     localToolApproval: mode => ipcRenderer.invoke('nova:personal:local-tool-approval', mode),
     showPresentationError: message => ipcRenderer.invoke('nova:personal:presentation-error', message),
@@ -232,6 +233,9 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     },
   }),
   settings: Object.freeze({
+    systemNotifications: () => ipcRenderer.invoke('nova:personal:notifications-status'),
+    setSystemNotifications: value => ipcRenderer.invoke('nova:personal:notifications-enabled', value),
+    openNotificationSettings: () => ipcRenderer.invoke('nova:personal:notifications-settings'),
     voicePreset: (action, settings) => ipcRenderer.invoke('nova:settings:voice-preset', action, settings),
     nativeVoiceCapabilities: provider => ipcRenderer.invoke('nova:settings:native-voice', provider),
     voiceprint: input => ipcRenderer.invoke('nova:settings:voiceprint', input),

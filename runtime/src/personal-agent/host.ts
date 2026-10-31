@@ -50,6 +50,7 @@ import type {SourceChange} from '../memory-substrate/source-state.js'
 import {runInMemoryBackground} from '../memory-ledger/store-client.js'
 
 // Account, key, rate-limit and connectivity failures are shown in every mode; workbench modes also show model detail.
+const DEFAULT_DISCOVERY_WINDOW={quietMs:3*60_000,maxMs:15*60_000}
 const ACTIONABLE_FAILURE=/^model_(?:http_(?:auth|quota|rate_limited)|network|timeout|output_limit(?:_[a-z_]+)?|protocol_output_limit)$/u
 function conversationFailureReason(error:unknown,workbench:boolean):{reason?:string}{
     if(!(error instanceof Error))return {}
@@ -59,7 +60,8 @@ function conversationFailureReason(error:unknown,workbench:boolean):{reason?:str
     return {}
 }
 import type {WakeReason} from '../core/slots.js';
-import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
+import {briefQuietConflicts,dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
+import {DiscoveryWindow} from './discovery-window.js';
 import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool,nextConversationTitle,sourceTodoSchema, type ConversationRuntimeFactory,type ConversationRuntime,type ConversationTurnContext} from './conversations.js';
 import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.js';
 import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
@@ -70,7 +72,7 @@ import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
-import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, goalProgressSchema, type GoalProgress, type DiscussionReference, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
+import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, MAX_PROPOSALS_PER_DISCOVERY, NEWS_DAILY_CAP, NEWS_MAX_AGE_MS, versionSchema, goalProgressSchema, type GoalProgress, type DiscussionReference, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, PersonalStoreError, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
@@ -102,6 +104,8 @@ export interface DiscoverySnapshot {
     memory: MemoryEntry[];
     evidence_refs: string[];
     recent_delivery: FeedItem[];
+    /** Proactive deliveries still allowed today, so the model can keep only what cannot wait. */
+    daily_budget_remaining?: number;
 }
 export interface PersonalSources {
     acceptanceCounts?():Record<string,number>;
@@ -148,7 +152,9 @@ export interface HostOptions {
     memory: () => PersonalMemoryResource | undefined;
     pool: SuggestionPool;
     evidence: (ref: string) => Evidence | null;
-    discover?: (snapshot: DiscoverySnapshot, signal: AbortSignal) => Promise<Proposal | null>;
+    discover?: (snapshot: DiscoverySnapshot, signal: AbortSignal) => Promise<Proposal | readonly Proposal[] | null>;
+    /** Many-to-one pooling of source evidence before discovery; defaults to 3 minutes quiet, 15 minutes cap. */
+    discoveryWindow?: {quietMs: number; maxMs: number};
     prepareBrief?: (snapshot:DiscoverySnapshot,slot:DailyBriefSlot,signal:AbortSignal)=>Promise<PreparedMaterial|null>;
     prepareProposal?: (snapshot:DiscoverySnapshot,proposal:Proposal,signal:AbortSignal)=>Promise<PreparedMaterial|null>;
     proposeGoals?: GoalProposer;
@@ -603,7 +609,7 @@ export class PersonalAgentHost {
         return message;
     }
     /** Quota-bound proactive feeds (same scope as notificationValidity's cap) may be spoken only after the notification service admitted them. */
-    #proactiveAdmitted(item:FeedItem):boolean{const m=this.#feedNotification(item);return !['brief','suggestion'].includes(m.kind)||m.priority>=100||this.notifications.isAdmitted(m)}
+    #proactiveAdmitted(item:FeedItem):boolean{const m=this.#feedNotification(item);return !['brief','suggestion','news'].includes(m.kind)||m.priority>=100||this.notifications.isAdmitted(m)}
     /** Every conversation message a goal proposal cites must still exist in a live (not clearing) conversation. */
     #goalProposalEvidenceIntact(item:FeedItem):boolean{const refs=item.goal_proposal?.evidence_refs;if(!refs)return true;const live=new Set(this.#state.conversations.items.filter(c=>!this.#clearingConversations.has(c.id)).flatMap(c=>c.messages.map(m=>'message:'+c.id+':'+m.id)));return refs.every(ref=>live.has(ref))}
     async notificationValidity(message:NotificationInput):Promise<'valid'|'defer'|'invalid'>{
@@ -619,6 +625,14 @@ export class PersonalAgentHost {
         // Any goal in the summary that is gone, not active or muted voids the whole summary; the next tick rewrites it for the rest.
         if(message.source.type===goalCheckinSource){if(!this.#checkinEligible(guard?.goal_ids??[]))return 'invalid';if(!this.#online())return 'defer';}
         if(message.priority>=100)return 'valid';
+        // News is capped on its own: it must never use up the allowance that briefs and suggestions share.
+        if(message.kind==='news'){
+            const item=feedId===undefined?undefined:this.#state.feed.find(f=>f.id===feedId);
+            if(!item||!this.#state.settings.discovery_enabled||!this.news.snapshot().enabled||(item.expires_at&&Date.parse(item.expires_at)<=this.#now().getTime()))return 'invalid';
+            const eligibility=this.news.pushEligibility(item.source.ref);
+            if(eligibility==='ineligible')return 'invalid';
+            return eligibility==='pending'||isQuietTime(this.#state.settings,this.#now())||this.notifications.deliveredToday(['news'],dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=NEWS_DAILY_CAP?'defer':'valid';
+        }
         if(isQuietTime(this.#state.settings,this.#now()))return 'defer';
         const proactive=['brief','suggestion'] as const;
         return proactive.some(kind=>kind===message.kind)&&this.notifications.deliveredToday(proactive,dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=(this.#state.settings.proactive_daily_cap??5)?'defer':'valid';
@@ -997,6 +1011,7 @@ export class PersonalAgentHost {
     #memoryReady = false;
     #lifecycle:Promise<void> = Promise.resolve();
     #sourceSignature = '';
+    #discoveryWindow!: DiscoveryWindow;
     #connectorsOpening:Promise<void>|undefined;
     #sourcePending={invalidated:0,ready:new Set<number>(),legacy:false};
     #sourceSeen={invalidated:0,ready:new Set<number>()};
@@ -1045,6 +1060,9 @@ export class PersonalAgentHost {
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
     constructor(readonly options: HostOptions) {
+      this.#discoveryWindow=new DiscoveryWindow({...(options.discoveryWindow??DEFAULT_DISCOVERY_WINDOW),now:()=>this.#now().getTime(),fire:async()=>{
+        try{await this.discoverLatest()}catch(error){this.#sourceSignature='';this.#sourcePending.legacy=true;throw error}
+      }});
       this.workbench=new WorkbenchStore(options.path+'.workbench-agent');
       if(options.readingCopiesDirectory)this.#readingCopies=new ReadingCopies(options.readingCopiesDirectory,()=>{
         const state=this.snapshot(),account=typeof state.feishu==='object'&&state.feishu!==null&&'account_id' in state.feishu&&typeof state.feishu.account_id==='string'?state.feishu.account_id:undefined;
@@ -1059,7 +1077,7 @@ export class PersonalAgentHost {
           await authorize();signal.throwIfAborted();appendAcceptanceCounts('profile_model',{source_entries:entries.filter(entry=>!!entry.source).length,stated_entries:entries.filter(entry=>entry.origin==='stated').length,model_calls:1});
           const result=await withModelPurpose('profile',()=>options.generateProfile!(entries,signal));
           await authorize();signal.throwIfAborted();return result;
-        }:undefined,()=>{this.#notify();this.#seedNews()},{participants:options.profileParticipantMessages===true,report:result=>appendAcceptanceCounts('profile_result',{['outcome_'+result.outcome]:1,latency_ms:result.latency_ms,items:result.items})}); this.workbenchContext=options.generateWorkbench?new DailyWorkbench({path:options.path+'.workbench-daily.json',legacyPath:options.path+'.context.json',generate:options.generateWorkbench,life:()=>this.life,changed:()=>this.#notify(),inputs:()=>this.#timelineInputs(),inputsReady:()=>this.#memoryReady,timezone:()=>dailyBriefSettings(this.#state.settings).timezone,now:()=>this.#now(),ready:()=>this.#workbenchReady()}):new WorkbenchContext(options.path+'.context.json',!options.memory()?.sourceProcessing&&options.generateContext?async(entries,signal)=>{const refs=[...new Set(entries.flatMap(entry=>entry.refs.map(ref=>ref.entry_id)))];const current=await this.#generationMemories(refs);const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];const authorized=entries.filter(entry=>entry.refs.every(ref=>allowed.some(item=>item.id===ref.entry_id&&item.version===ref.version)));signal.throwIfAborted();appendAcceptanceCounts('context_model',{eligible_candidates:authorized.length,model_calls:1});return withModelPurpose('context',()=>options.generateContext!(authorized,signal))}:undefined,()=>this.#notify()); this.projectDigests=new ProjectDigests(options.path+'.project-digests.json',options.generateDigests&&!options.memory()?.sourceProcessing&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?(projects,signal)=>{const authorize=()=>{const allowed=new Map((this.#sources?.contextEntries?.()??[]).map(entry=>[entry.id,entry.version]));if(projects.some(project=>project.documents.some(d=>allowed.get(d.entry_id)!==d.version)))throw Error('processing_consent_required')};try{authorize()}catch(error){return Promise.reject(error instanceof Error?error:Error('processing_consent_required'))}appendAcceptanceCounts('digest_model',{projects:projects.length,model_calls:1});return withModelPurpose('digest',()=>options.generateDigests!(projects,signal,authorize))}:undefined,()=>this.#digestsChanged(),{report:result=>appendAcceptanceCounts('digest_result',{['outcome_'+result.outcome]:1,projects:result.projects,digests:result.digests,latency_ms:result.latency_ms})}); this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify(),taskId=>{if(this.#recovering||this.#recoveryBlocked.has(taskId))throw new TaskExecutionRejected('task_recovery_blocked')}); this.schedules=new ScheduleService(options.path+'.schedules.json',()=>this.#notify(),()=>this.#now());this.scheduledAuthority=new ScheduledRunAuthority(this.schedules,this.tasks);this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{validateEvidence:task=>{if(!task.trigger)return Promise.resolve(true);return this.taskRuntime(task.id).validateEvidence?.(task)??Promise.resolve(false)},ready:task=>{if(this.#recovering||this.#recoveryBlocked.has(task.id))return false;try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>task.trigger?this.publishScheduledResult(task.trigger.run_id):this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+announcedGoal(task.goal),task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews&&!acceptanceEnabled()?{rank:options.rankNewsFallback?(interests,articles,signal)=>(this.#state.settings.news_rank_fallback!==false?options.rankNewsFallback!:options.rankNews!)(interests,articles,signal):options.rankNews}:{}),...(acceptanceEnabled()&&!acceptanceNewsEnabled()?{firstRefreshMs:null}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand&&!acceptanceEnabled()?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
+        }:undefined,()=>{this.#notify();this.#seedNews()},{participants:options.profileParticipantMessages===true,report:result=>appendAcceptanceCounts('profile_result',{['outcome_'+result.outcome]:1,latency_ms:result.latency_ms,items:result.items})}); this.workbenchContext=options.generateWorkbench?new DailyWorkbench({path:options.path+'.workbench-daily.json',legacyPath:options.path+'.context.json',generate:options.generateWorkbench,life:()=>this.life,changed:()=>this.#notify(),inputs:()=>this.#timelineInputs(),inputsReady:()=>this.#memoryReady,timezone:()=>dailyBriefSettings(this.#state.settings).timezone,now:()=>this.#now(),ready:()=>this.#workbenchReady()}):new WorkbenchContext(options.path+'.context.json',!options.memory()?.sourceProcessing&&options.generateContext?async(entries,signal)=>{const refs=[...new Set(entries.flatMap(entry=>entry.refs.map(ref=>ref.entry_id)))];const current=await this.#generationMemories(refs);const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];const authorized=entries.filter(entry=>entry.refs.every(ref=>allowed.some(item=>item.id===ref.entry_id&&item.version===ref.version)));signal.throwIfAborted();appendAcceptanceCounts('context_model',{eligible_candidates:authorized.length,model_calls:1});return withModelPurpose('context',()=>options.generateContext!(authorized,signal))}:undefined,()=>this.#notify()); this.projectDigests=new ProjectDigests(options.path+'.project-digests.json',options.generateDigests&&!options.memory()?.sourceProcessing&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?(projects,signal)=>{const authorize=()=>{const allowed=new Map((this.#sources?.contextEntries?.()??[]).map(entry=>[entry.id,entry.version]));if(projects.some(project=>project.documents.some(d=>allowed.get(d.entry_id)!==d.version)))throw Error('processing_consent_required')};try{authorize()}catch(error){return Promise.reject(error instanceof Error?error:Error('processing_consent_required'))}appendAcceptanceCounts('digest_model',{projects:projects.length,model_calls:1});return withModelPurpose('digest',()=>options.generateDigests!(projects,signal,authorize))}:undefined,()=>this.#digestsChanged(),{report:result=>appendAcceptanceCounts('digest_result',{['outcome_'+result.outcome]:1,projects:result.projects,digests:result.digests,latency_ms:result.latency_ms})}); this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify(),taskId=>{if(this.#recovering||this.#recoveryBlocked.has(taskId))throw new TaskExecutionRejected('task_recovery_blocked')}); this.schedules=new ScheduleService(options.path+'.schedules.json',()=>this.#notify(),()=>this.#now());this.scheduledAuthority=new ScheduledRunAuthority(this.schedules,this.tasks);this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{validateEvidence:task=>{if(!task.trigger)return Promise.resolve(true);return this.taskRuntime(task.id).validateEvidence?.(task)??Promise.resolve(false)},ready:task=>{if(this.#recovering||this.#recoveryBlocked.has(task.id))return false;try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>task.trigger?this.publishScheduledResult(task.trigger.run_id):this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+announcedGoal(task.goal),task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews&&!acceptanceEnabled()?{rank:options.rankNewsFallback?(interests,articles,signal)=>(this.#state.settings.news_rank_fallback!==false?options.rankNewsFallback!:options.rankNews!)(interests,articles,signal):options.rankNews}:{}),...(acceptanceEnabled()&&!acceptanceNewsEnabled()?{firstRefreshMs:null}:{}),changed:()=>this.#notify(),ranked:()=>{void this.#pushNews()}}); this.understanding=new PersonalUnderstanding({...(options.understand&&!acceptanceEnabled()?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -1197,6 +1215,7 @@ export class PersonalAgentHost {
         this.#sourceReady = false;
         this.#memoryReady = false;
         clearInterval(this.#scheduledTimer);
+        this.#discoveryWindow.cancel();
         await this.timeline.close();
         await this.#timelineCache.flush();
         await this.#timelineRefresh;
@@ -1769,12 +1788,21 @@ export class PersonalAgentHost {
         }
         const dueDate=(entry:MemoryEntry):string=>entry.life?.due??(entry.commitment?.due?new Date(entry.commitment.due).toLocaleDateString('en-CA',{timeZone:timezone}):'9999-12-31')
         relevant=relevant.filter((e,i,all)=>all.findIndex(a=>a.id===e.id)===i).sort((a,b)=>dueDate(a).localeCompare(dueDate(b)))
-        return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,memory:relevant.filter(memoryEligibleForDiscovery).slice(0,16),evidence_refs:[...new Set(interleave([(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),this.options.evidenceRefs?.()??[],(retrieval?.snippets??[]).map(item=>item.evidence_id)],48))].slice(0,16),recent_delivery:this.#state.feed.filter(f=>f.lifecycle!=='invalidated'&&Object.values(f.delivery).some(Boolean)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
+        return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,daily_budget_remaining:Math.max(0,(this.#state.settings.proactive_daily_cap??5)-this.notifications.deliveredToday(['brief','suggestion'],timezone,now.getTime())),memory:relevant.filter(memoryEligibleForDiscovery).slice(0,16),evidence_refs:[...new Set(interleave([(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),this.options.evidenceRefs?.()??[],(retrieval?.snippets??[]).map(item=>item.evidence_id)],48))].slice(0,16),recent_delivery:this.#state.feed.filter(f=>f.lifecycle!=='invalidated'&&Object.values(f.delivery).some(Boolean)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
+    }
+    /** Judges everything that has arrived: a run already in flight started from an older snapshot, so one more follows it. */
+    async discoverLatest(): Promise<void> {
+        const running=this.#discovery
+        if(running){await running.catch(()=>{ /* its own caller sees the failure; this run still owes the newer evidence */ })}
+        if(!this.#opened)return
+        await this.discover()
     }
     discover(): Promise<void> { if (this.#discovery)
         return this.#discovery; if (acceptanceEnabled() || !this.#opened || !this.#state.settings.discovery_enabled || !this.options.discover)
-        return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const proposal = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); if (proposal && !controller.signal.aborted && this.#opened && this.#state.settings.discovery_enabled)
-        await this.admit(proposal, snapshot); })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
+        return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const found = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); const proposals: Proposal[] = found === null ? [] : Array.isArray(found) ? (found as readonly Proposal[]).slice(0, MAX_PROPOSALS_PER_DISCOVERY) : [found as Proposal]; const matters = new Set<string>(); for (const proposal of proposals) { if (controller.signal.aborted || !this.#opened || !this.#state.settings.discovery_enabled) break;
+        // A question and a notification about the same evidence or memory are one matter, whatever their kind.
+        const refs = [...proposal.evidence_refs, ...proposal.memory_refs.map(ref => 'memory:' + ref.entry_id)]; if (refs.some(ref => matters.has(ref))) continue;
+        if (await this.admit(proposal, snapshot) === 'admitted') refs.forEach(ref => matters.add(ref)); } })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
         this.#discovery = undefined; }).catch(() => { /* optional observer or cleanup already reported */ }); return run; }
     async admit(input:unknown,snapshot:DiscoverySnapshot):Promise<'admitted'|'rejected'|'suppressed_duplicate'>{
         const parsed=proposalSchema.safeParse(input);if(!parsed.success)return 'rejected';
@@ -1800,6 +1828,32 @@ export class PersonalAgentHost {
         const keyFor=(subjectKey:string)=>hash([this.options.userScope,p.kind,subjectKey,snapshot.local_date]);
         const key=keyFor(subject);
         if([subject,...(briefKey?[]:entities.length>0?entities.map(e=>e.subject_key):memorySubjects)].some(candidate=>this.#state.dedupe.includes(keyFor(candidate)))) return 'suppressed_duplicate'; const now = this.#now(); const item: FeedItem = { ...(prepared?{prepared:prepared.prepared,action_label:prepared.action_label}:{}), id: randomUUID(), kind: p.kind, title: p.summary.slice(0, 120), why_now: p.why_now, evidence_refs: p.evidence_refs, memory_refs: p.memory_refs, source: primary.source, subject_key: subject, task_ref: entities[0]?.task_ref ?? null, suggestion_id: null, priority: 40, created_at: now.toISOString(), updated_at: now.toISOString(), expires_at: new Date(now.getTime() + 86400000).toISOString(), user_state: 'new', snooze_until: null, lifecycle: 'active', delivery: { presented_at: null, notified_at: null, spoken_at: null } }; const next = structuredClone(this.#state); next.feed.push(item); next.dedupe.push(key); if(briefKey){next.dedupe.push(briefKey);const run=next.brief_runs[briefKey];if(run)run.status='success'} await this.#commit(next); return 'admitted' as const; }).then(async result=>{await this.flushNotifications();return result}); }
+    #newsPush:Promise<void>|undefined;#newsRerun=false
+    /** Strong news matches go to the main conversation like any other proactive message, within their own allowance. */
+    #pushNews():Promise<void>{
+        // Rankings are saved batch by batch, so one may land while a push is running: remember it and look again.
+        if(this.#newsPush){this.#newsRerun=true;return this.#newsPush}
+        const run=(async()=>{do{this.#newsRerun=false
+            for(const candidate of this.news.pushCandidates()){
+                const reason=(candidate.ranking?.reason??'').trim();const result=await this.admitNews(candidate,reason.length>0?reason:'与你关注的内容相关');if(result==='capped'||result==='disabled')break
+            }
+        }while(this.#newsRerun&&this.#opened)})().catch(()=>{ /* optional: the page still lists the article, and the next ranking tries again */ }).finally(()=>{this.#newsPush=undefined})
+        this.#newsPush=run;return run
+    }
+    /** One article worth interrupting for becomes a feed item (and so a chat:main message and a system notification). */
+    admitNews(article:{id:string;title:string;summary:string;url:string;published_at:string|null;first_seen:string},reason:string):Promise<'admitted'|'suppressed_duplicate'|'capped'|'disabled'>{
+        return this.#serial(async()=>{
+            if(!this.#opened||acceptanceEnabled()||!this.#state.settings.discovery_enabled)return 'disabled' as const
+            const timezone=dailyBriefSettings(this.#state.settings).timezone,day=(at:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone}).format(at),now=this.#now()
+            // A publisher editing a headline is still the same story: identity, not content, decides whether it was already pushed.
+            const key=hash([this.options.userScope,'news',article.id])
+            if(this.#state.dedupe.includes(key))return 'suppressed_duplicate' as const
+            // Counted when admitted, not only when delivered, so a quiet-hours backlog cannot pile up behind the delivery cap.
+            if(this.#state.feed.filter(f=>f.subject_key.startsWith('news:')&&day(Date.parse(f.created_at))===day(now.getTime())).length>=NEWS_DAILY_CAP)return 'capped' as const
+            const item:FeedItem={id:randomUUID(),kind:'notify',title:article.title.slice(0,120),why_now:reason.slice(0,200),evidence_refs:[],memory_refs:[],source:{type:'news',ref:article.id},suggestion_id:null,task_ref:null,subject_key:'news:'+article.id,priority:30,created_at:now.toISOString(),updated_at:now.toISOString(),expires_at:new Date(Date.parse(article.published_at??article.first_seen)+NEWS_MAX_AGE_MS).toISOString(),user_state:'new',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null},prepared:{trust:'untrusted_external',text:(article.summary.trim()?article.summary.trim()+'\n':'')+article.url,evidence_refs:[]}}
+            const next=structuredClone(this.#state);next.feed.push(item);next.dedupe.push(key);await this.#commit(next);return 'admitted' as const
+        }).then(async result=>{await this.flushNotifications();return result})
+    }
     #pool(item: FeedItem): void { if(!this.localNotifications)return;const suggestion = this.options.pool.add({ origin: 'surrogate', kind: item.kind === 'question' ? 'question' : 'notify', content: { summary: item.title, why_now: item.why_now, personal_feed_id: item.id }, evidence_refs: item.evidence_refs.filter(r => memoryRefSchema.safeParse(r).success), salience: 40, expires_at: item.expires_at?Date.parse(item.expires_at)/1000:this.#now().getTime()/1000+86400 }); item.suggestion_id = suggestion.id; }
     async revalidate(): Promise<void> { await this.#serial(async () => { const next = structuredClone(this.#state); let changed = false; for (const item of next.feed) {
         if (item.lifecycle !== 'active')
@@ -1849,7 +1903,7 @@ export class PersonalAgentHost {
                     await this.refreshMemory();await this.revalidate();await this.#serial(()=>this.#commit(structuredClone(this.#state)));
                     if(next.legacy||next.ready.length){
                         const signature=hash({refs:(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref).sort(),revision:next.ready});
-                        if(signature!==this.#sourceSignature){await this.discover();this.#sourceSignature=signature;}
+                        if(signature!==this.#sourceSignature){this.#sourceSignature=signature;if(this.#opened)await this.#discoveryWindow.touch();}
                     }
                     this.#sourceSeen.invalidated=Math.max(this.#sourceSeen.invalidated,next.invalidated);
                     for(const revision of next.ready){this.#sourceSeen.ready.add(revision);this.#sourcePending.ready.delete(revision);}
@@ -2212,7 +2266,9 @@ export class PersonalAgentHost {
         }
         else if (command.method === 'discovery.configure') {
             const q = personalSettingsSchema.omit({assistant_name:true,user_name:true}).partial().extend({ enabled: z.boolean().optional(), interval_minutes: z.number().int().min(5).max(1440).optional(), proactive_daily_cap: z.number().int().min(1).max(10).optional(), news_rank_fallback: z.boolean().optional() }).strict().parse(p);
-            await this.#serial(async () => { const next = structuredClone(this.#state);const settings={...q};delete settings.enabled;delete settings.interval_minutes;Object.assign(next.settings,settings); if (q.enabled !== undefined)
+            await this.#serial(async () => { const next = structuredClone(this.#state);const settings={...q};delete settings.enabled;delete settings.interval_minutes;Object.assign(next.settings,settings);
+                // A brief scheduled inside quiet hours is skipped for good. Only a save that touches those fields is checked, so an old conflict never locks the user out of unrelated settings.
+                if(Object.keys(q).some(key=>key.startsWith('briefing_')||key==='quiet_start'||key==='quiet_end')&&briefQuietConflicts(next.settings).length>0)throw Error('brief_in_quiet_hours'); if (q.enabled !== undefined)
                 next.settings.discovery_enabled = q.enabled; if (q.interval_minutes !== undefined)
                 next.settings.discovery_interval_minutes = q.interval_minutes; await this.#commit(next); });
             this.options.memory()?.configureDiary?.({enabled:this.#state.settings.diary_enabled!==false,timezone:dailyBriefSettings(this.#state.settings).timezone});

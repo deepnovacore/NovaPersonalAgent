@@ -17,6 +17,29 @@ test('desktop main has no unresolved globals after module removal', async () => 
   assert.deepEqual(diagnostics.map(({line, column, message}) => ({line, column, message})), [])
 })
 
+test('notification preferences accept only main frames in main and settings windows; notify stays main-only', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const handlers = {}, main = {mainFrame: {}}, settings = {mainFrame: {}}, stranger = {mainFrame: {}}
+  const currentSettings = {systemNotifications: true}, writes = []
+  const start = source.indexOf("  ipcMain.handle('nova:personal:notify'")
+  runInContext(source.slice(start, source.indexOf("  ipcMain.handle('nova:personal:unread'", start)), createContext({
+    ipcMain: {handle: (name, handler) => {handlers[name] = handler}},
+    mainWindow: {webContents: main}, settingsWindow: {webContents: settings}, currentSettings, process,
+    systemNotifier: {status: () => ({enabled: currentSettings.systemNotifications}), openSystemSettings: () => true, notify: () => 'shown'},
+    accessCredentials: fn => fn(), settingsWriter: async patch => {writes.push(patch);Object.assign(currentSettings, patch)},
+  }))
+  for (const name of ['status', 'enabled', 'settings']) {
+    const handler = handlers['nova:personal:notifications-' + name]
+    for (const sender of [main, settings]) await handler({sender, senderFrame: sender.mainFrame}, false)
+    for (const sender of [main, settings, stranger]) await assert.rejects(async () => handler({sender, senderFrame: {}}, false), /rejected/)
+    await assert.rejects(async () => handler({sender: stranger, senderFrame: stranger.mainFrame}, false), /rejected/)
+  }
+  assert.equal(writes.length, 1)
+  await assert.rejects(() => handlers['nova:personal:notifications-enabled']({sender: settings, senderFrame: settings.mainFrame}, 'yes'), /invalid/)
+  assert.throws(() => handlers['nova:personal:notify']({sender: settings}, {}), /rejected/)
+  assert.equal(handlers['nova:personal:notify']({sender: main}, {}), 'shown')
+})
+
 test('main owns single-instance lifecycle and denies renderer escape', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 
@@ -80,6 +103,10 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:personal:feishu-verification',
     'nova:personal:local-tool-approval',
     'nova:personal:maximized',
+    'nova:personal:notifications-enabled',
+    'nova:personal:notifications-settings',
+    'nova:personal:notifications-status',
+    'nova:personal:notify',
     'nova:personal:presentation',
     'nova:personal:presentation-error',
     'nova:personal:presentation-request',

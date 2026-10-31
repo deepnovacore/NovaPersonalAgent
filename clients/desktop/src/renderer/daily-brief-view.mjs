@@ -1,4 +1,6 @@
 import {t} from './locale.mjs'
+import {briefQuietConflict} from './brief-quiet.mjs'
+import {refusalText} from './host-refusals.mjs'
 
 const WEEKDAYS=['周一','周二','周三','周四','周五','周六','周日']
 
@@ -42,6 +44,7 @@ export function renderDailyBrief({settings={},connected,card,el,button,command})
   params.briefing_weekdays=weekdays.flatMap((input,index)=>input.checked?[index+1]:[])
   if(!params.briefing_weekdays.length)throw new Error(t('请选择至少一天'))
   for(const key of ['briefing_outlook_time','briefing_review_time','quiet_start','quiet_end'])if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(params[key]))throw new Error(t('请输入有效时间'))
+  if(briefQuietConflict(params))throw new Error(refusalText('brief_in_quiet_hours'))
   await command('discovery.configure',params)
  },a);save.disabled=!connected
  return fields

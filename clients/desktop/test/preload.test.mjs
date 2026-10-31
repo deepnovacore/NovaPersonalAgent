@@ -60,11 +60,23 @@ test('preload exposes sanitized backend status and explicit settings retry', asy
   assert.deepEqual(invokes, [{channel: 'nova:backend:retry', payload: undefined}])
 })
 
+test('settings notification controls invoke the same bounded channels as the main renderer', async () => {
+  const {exposed, invokes} = await loadPreload()
+  await exposed.settings.systemNotifications()
+  await exposed.settings.setSystemNotifications(false)
+  await exposed.settings.openNotificationSettings()
+  assert.deepEqual(invokes, [
+    {channel: 'nova:personal:notifications-status', payload: undefined},
+    {channel: 'nova:personal:notifications-enabled', payload: false},
+    {channel: 'nova:personal:notifications-settings', payload: undefined},
+  ])
+})
+
 test('preload exposes the settings bridge as invoke/invoke/removable listener', async () => {
   const { exposed, ipcRenderer, invokes } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
-    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'nativeVoiceCapabilities', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'personalCommand', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'voicePreset', 'voiceprint',
+    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'nativeVoiceCapabilities', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'openNotificationSettings', 'personalCommand', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'setSystemNotifications', 'systemNotifications', 'voicePreset', 'voiceprint',
   ])
   assert.ok(Object.isFrozen(exposed.settings))
 

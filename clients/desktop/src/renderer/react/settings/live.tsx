@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Action, Card, Field, useCommand } from './controls';
 import { t } from '../../locale.mjs';
+import { briefQuietConflict } from '../../brief-quiet.mjs';
+import { refusalText } from '../../host-refusals.mjs';
+import { SystemNotificationsCard } from './system-notifications';
 
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 const BRIEF_SLOTS: any[] = [['briefing_outlook', '早间简报', '早间时间', '08:30'], ['briefing_review', '晚间简报', '晚间时间', '18:30']];
@@ -38,6 +41,8 @@ export function ProactivityPanel({ api, diary = false, keyMissing = false, memor
         for (const key of ['briefing_outlook_time', 'briefing_review_time', 'quiet_start', 'quiet_end'])
             if (!TIME_PATTERN.test(params[key]))
                 throw Error(t('请输入有效时间'));
+        if (briefQuietConflict(params))
+            throw Error(refusalText('brief_in_quiet_hours'));
         await configure(params);
         setDraft((current: any) => current === editedDraft ? null : current);
     }
@@ -84,13 +89,14 @@ export function ProactivityPanel({ api, diary = false, keyMissing = false, memor
             <Card title="主动发现" description="有依据才提出建议；也包括提议目标和按节奏问候目标进展。关闭后这些都会停止，仍可主动交办任务。">
                 <Field label="主动发现间隔" value={s.discovery_enabled ? String(s.discovery_interval_minutes) : '0'} options={['0', '15', '30', '60', '120'].map((v, i) => ({ value: v, label: ['关闭', '每 15 分钟', '每 30 分钟', '每小时', '每两小时'][i] }))} disabled={busy || !state?.capabilities?.discovery} onChange={(v: string) => void configure({ enabled: v !== '0', ...(v !== '0' ? { interval_minutes: Number(v) } : {}) }).catch(() => { })}/>
             </Card>
-            <Card title="每日主动消息上限" description="agent 主动找你的消息每天最多几条；你自己发起的任务结果不计入。">
+            <Card title="每日主动消息上限" description="agent 主动找你的消息每天最多几条（资讯推送另计）；你自己发起的任务结果不计入。">
                 <div className="cap-stepper">
                     <Action aria-label={t('减少上限')} disabled={busy || !state} action={() => configure({ proactive_daily_cap: Math.max(1, (s.proactive_daily_cap ?? 5) - 1) })}>−</Action>
                     <Field label="每日主动消息上限" type="number" min={1} max={10} step={1} value={s.proactive_daily_cap ?? 5} disabled={busy || !state} onChange={(v: number) => void configure({ proactive_daily_cap: Number.isFinite(v) ? Math.min(10, Math.max(1, Math.round(v))) : 5 }).catch(() => { })}/>
                     <Action aria-label={t('增加上限')} disabled={busy || !state} action={() => configure({ proactive_daily_cap: Math.min(10, (s.proactive_daily_cap ?? 5) + 1) })}>+</Action>
                 </div>
             </Card>
+            <SystemNotificationsCard api={api} />
             {keyMissing && <Card title="资讯相关度" description="未配置资讯评分密钥时，会用对话模型判断相关度；你的兴趣、文章标题和摘要会发给它。">
                 <Field label="用对话模型判断资讯相关度" type="checkbox" value={s.news_rank_fallback !== false} disabled={busy || !state} onChange={(news_rank_fallback: boolean) => void configure({ news_rank_fallback }).catch(() => { })}/>
             </Card>}

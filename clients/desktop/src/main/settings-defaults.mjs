@@ -40,6 +40,7 @@ export const RUNTIME_DEFAULTS = Object.freeze({
   cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
   codexApprovalMode: 'ask',
   localToolApproval: 'ask',
+  systemNotifications: true,
   clarificationDepth: 'balanced',
   planReadback: 'summary',
   generatePlan: true,

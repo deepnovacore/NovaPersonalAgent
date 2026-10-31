@@ -341,6 +341,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     cascadedTtsVoice: pick(source.cascadedTtsVoice, fallback.cascadedTtsVoice, DEFAULT_SETTINGS.cascadedTtsVoice, validModelOrVoice),
     codexApprovalMode: pick(acceptsV4Fields ? source.codexApprovalMode : undefined, acceptsV4Fields ? fallback.codexApprovalMode : undefined, DEFAULT_SETTINGS.codexApprovalMode, validCodexApprovalMode),
     localToolApproval: pick(source.localToolApproval,fallback.localToolApproval,DEFAULT_SETTINGS.localToolApproval,enumValidator(new Set(['ask','never']))),
+    systemNotifications: pick(source.systemNotifications, fallback.systemNotifications, DEFAULT_SETTINGS.systemNotifications, validBoolean),
     clarificationDepth: pick(acceptsV4Fields ? source.clarificationDepth : undefined, acceptsV4Fields ? fallback.clarificationDepth : undefined, DEFAULT_SETTINGS.clarificationDepth, validClarificationDepth),
     generatePlan: pick(source.generatePlan, fallback.generatePlan, DEFAULT_SETTINGS.generatePlan, validBoolean),
     buildReasoning: pick(source.buildReasoning, fallback.buildReasoning, DEFAULT_SETTINGS.buildReasoning, validBoolean),
@@ -365,7 +366,7 @@ export function startupPresentation(settings, argv = []) {
 }
 
 export function backendSettings(settings) {
-  const {skinId, importedSkins, companionForm, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, ...backend} = normalizeSettings(settings)
+  const {skinId, importedSkins, companionForm, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, systemNotifications, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -418,6 +419,7 @@ export function publicSettings(settings) {
     cascadedTtsVoice: normalized.cascadedTtsVoice,
     codexApprovalMode: normalized.codexApprovalMode,
     localToolApproval: normalized.localToolApproval,
+    systemNotifications: normalized.systemNotifications,
     clarificationDepth: normalized.clarificationDepth,
     planReadback: normalized.planReadback,
     generatePlan: normalized.generatePlan,

@@ -1,13 +1,16 @@
 import {z} from 'zod'
 import {newsArticleSchema} from '../personal-agent/life.js'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
+import {NEWS_MAX_AGE_MS} from '../personal-agent/contracts.js'
 import {NEWS_SOURCES,newsLanguage,digest,fetchFeed,type Article,type NewsSource} from './feeds.js'
 import {scoreSchema,validateScores,type NewsRanker} from './ranking.js'
 const interest=z.object({id:z.string(),text:z.string().min(1).max(100),weight:z.number().min(0).max(2)})
 const article=z.object({id:z.string(),source_id:z.string(),title:z.string().max(300),summary:z.string().max(1500),url:z.string().url(),published_at:z.string().nullable(),first_seen:z.string(),content_hash:z.string(),read:z.boolean(),saved:z.boolean(),ranking:scoreSchema.extend({profile_version:z.number(),ready_at:z.string()}).nullable()})
 const schema=z.object({version:z.literal(1),profile_version:z.number(),enabled:z.boolean(),explore:z.boolean(),interests:z.array(interest).max(8),/** Interests guessed from the Profile stay local: they order nothing until the user saves them. */interests_seeded:z.boolean().default(false),blocked:z.array(z.string()).max(20),items:z.array(article).max(500),sources:z.array(z.object({id:z.string(),last_attempt:z.string().nullable(),last_success:z.string().nullable(),error:z.string().nullable(),count:z.number()})),rank_error:z.string().nullable()})
 type State=z.infer<typeof schema>
-export interface NewsOptions {path:string;language?:string;sources?:NewsSource[];rank?:NewsRanker;fetcher?:typeof fetch;changed?:()=>void;now?:()=>Date;/** Delay before the first automatic refresh after open, so launch work goes first; null turns automatic refresh off. */firstRefreshMs?:number|null}
+export interface NewsOptions {path:string;language?:string;sources?:NewsSource[];rank?:NewsRanker;fetcher?:typeof fetch;changed?:()=>void;/** Called after each ranked batch is saved, so the host can look for articles worth a push. */ranked?:()=>void;now?:()=>Date;/** Delay before the first automatic refresh after open, so launch work goes first; null turns automatic refresh off. */firstRefreshMs?:number|null}
+/** A push interrupts the user, so it needs a clearly strong match and news that is still news. */
+const PUSH_MIN_STRENGTH=0.85,PUSH_MAX_AGE_MS=NEWS_MAX_AGE_MS
 // ponytail: bounded 500-article cache; add indexed storage only if this measured ceiling grows.
 export class NewsService{
  #store:BoundedJsonStore<State>;#state:State;#opened=false;#abort=new AbortController();#timer:ReturnType<typeof setInterval>|undefined;#first:ReturnType<typeof setTimeout>|undefined;#run:Promise<void>|undefined;#rerun=false;#tail:Promise<unknown>=Promise.resolve();#sources:NewsSource[]
@@ -69,6 +72,20 @@ export class NewsService{
   const map=(a:typeof s.items[number])=>({...a,summary:a.summary.slice(0,700),ranking:a.ranking?.profile_version===s.profile_version?a.ranking:null,exploration:exploration.has(a.id)})
   return {enabled:s.enabled,explore:s.explore,interests:structuredClone(s.interests),interests_seeded:s.interests_seeded,profile_version:s.profile_version,refreshing:!!this.#run,mode:fallback?'timeline':'personalized',rank_error:s.rank_error,pending:fresh.filter(a=>a.ranking?.profile_version!==s.profile_version).length,total:visible.length,items:selected.map(map),saved:s.items.filter(a=>a.saved&&this.#sources.some(source=>source.id===a.source_id)).map(map),sources:this.#sources.map(source=>({...source,...s.sources.find(s=>s.id===source.id),blocked:s.blocked.includes(source.id)}))}
  }
+ /** Articles strong enough to interrupt the user for: confirmed interests only, fresh, concrete, best first. */
+ pushCandidates(){
+  const s=this.#state,now=this.#now().getTime()
+  return s.items.filter(a=>this.#pushEligibility(a)==='eligible'&&now-Date.parse(a.published_at??a.first_seen)<PUSH_MAX_AGE_MS)
+   .sort((a,b)=>this.#pushStrength(b)-this.#pushStrength(a)).map(a=>({...a,summary:a.summary.slice(0,700)}))
+ }
+ pushEligibility(articleId:string):'eligible'|'pending'|'ineligible'{return this.#pushEligibility(this.#state.items.find(a=>a.id===articleId))}
+ #pushStrength(a:State['items'][number]){return Math.max(0,...(a.ranking?.matches??[]).map(m=>m.score*Math.min(1,this.#state.interests.find(i=>i.id===m.interest_id)?.weight??0)))}
+ #pushEligibility(a:State['items'][number]|undefined):'eligible'|'pending'|'ineligible'{
+  const s=this.#state
+  if(!a||!s.enabled||s.interests_seeded||!s.interests.length||!this.#sources.some(source=>source.id===a.source_id)||s.blocked.includes(a.source_id))return 'ineligible'
+  if(a.ranking?.profile_version!==s.profile_version)return 'pending'
+  return (a.ranking.judgment===undefined||a.ranking.judgment.substance==='concrete')&&this.#pushStrength(a)>=PUSH_MIN_STRENGTH?'eligible':'ineligible'
+ }
  refresh():Promise<void>{if(this.#run){this.#rerun=true;return this.#run}if(!this.#opened||!this.#state.enabled)return Promise.resolve()
   const run=(async()=>{do{this.#rerun=false;await this.#refresh()}while(this.#rerun&&this.#opened&&this.#state.enabled)})();this.#run=run;this.options.changed?.();void run.finally(()=>{this.#run=undefined;this.options.changed?.()}).catch(()=>{/* optional cleanup/observer */});return run
  }
@@ -100,6 +117,7 @@ export class NewsService{
      for(const score of scores){const row=next.items.find(a=>a.id===score.id);if(row&&row.content_hash===part.find(a=>a.id===score.id)?.content_hash)row.ranking={...score,profile_version:version,ready_at:this.#now().toISOString()}}
      next.rank_error=null;await this.#save(next)
     })
+    try{this.options.ranked?.()}catch{/* optional host hook; ranking itself succeeded */}
    }
   }catch{if(!signal.aborted)await this.#serial(()=>this.#save({...this.#state,rank_error:'ranking_failed'}))}
  }
