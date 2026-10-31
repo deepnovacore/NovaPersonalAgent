@@ -83,3 +83,10 @@ test('system notification settings open the right pane per platform',async()=>{
  const {notifier,state}=setup({platform:'win32'});assert.equal(await notifier.openSystemSettings(),true);assert.deepEqual(state.opened,['ms-settings:notifications'])
  const linux=setup({platform:'linux'});assert.equal(await linux.notifier.openSystemSettings(),false);assert.deepEqual(linux.state.opened,[])
 })
+
+test('the merged notification title follows the interface language',()=>{
+ const shown=[];class N{static isSupported(){return true}constructor(init){shown.push(init)}on(){return this}show(){}}
+ const translate=(source,...values)=>source==='Nova · {0} 条新提醒'?`Nova · ${values[0]} new reminders`:source
+ const notifier=createSystemNotifier({Notification:N,platform:'darwin',isEnabled:()=>true,windowState:()=>({visible:false,focused:false}),activate(){},shell:{openExternal:async()=>{}},translate})
+ notifier.notify({items:[{id:'a',title:'一',body:''},{id:'b',title:'二',body:''}]});assert.equal(shown[0].title,'Nova · 2 new reminders')
+})

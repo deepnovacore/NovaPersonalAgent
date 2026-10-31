@@ -14,7 +14,8 @@ function parse(payload){
  * Electron has no API to read the notification permission, so the only signal is the platform's own `show` and
  * `failed` events: the status reports what actually happened, and the settings pane is one click away.
  */
-export function createSystemNotifier({Notification,platform=process.platform,isEnabled,windowState,activate,shell,log=()=>{}}){
+const identity=(source,...values)=>source.replace(/\{(\d+)\}/g,(match,index)=>values[index]===undefined?match:String(values[index]))
+export function createSystemNotifier({Notification,platform=process.platform,isEnabled,windowState,activate,shell,translate=identity,log=()=>{}}){
  const seen=new Set();let state='unverified',error=null
  const status=()=>({supported:Notification.isSupported(),enabled:isEnabled(),state:Notification.isSupported()?state:'unsupported',error})
  function notify(payload){
@@ -28,7 +29,7 @@ export function createSystemNotifier({Notification,platform=process.platform,isE
   if(window.visible&&window.focused)return 'foreground'
   const single=fresh.length===1
   const notification=new Notification({id:'nova-proactive:'+fresh[0].id,silent:false,
-   title:single?fresh[0].title:`Nova · ${fresh.length} 条新提醒`,
+   title:single?fresh[0].title:translate('Nova · {0} 条新提醒',fresh.length),
    body:single?fresh[0].body:fresh.slice(0,MAX_LISTED).map(item=>item.title).join(' · ').slice(0,MAX_BODY)})
   notification.on('show',()=>{state='working';error=null})
   notification.on('failed',(_event,reason)=>{state='failed';error=String(reason??'unknown').slice(0,160);log('system_notification_failed')})

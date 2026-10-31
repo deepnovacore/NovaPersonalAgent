@@ -8,8 +8,9 @@ export function systemNotificationsView(status,platform){
  const canOpenSettings=platform==='darwin'||platform==='win32'
  if(!status.enabled)return {tone:'muted',hint:'已关闭：提醒只出现在主对话里，不会弹出系统通知。',canOpenSettings}
  if(status.state==='failed'){
-  const where=platform==='darwin'?'请在「系统设置 → 通知」里允许 Nova 发送通知。':platform==='win32'?'请检查「设置 → 系统 → 通知」，并确认没有开启专注助手或勿扰。':'请检查桌面环境的通知设置。'
-  return {tone:'warning',hint:'上一次系统通知没能显示。'+where,canOpenSettings}
+  // Whole sentences, not pieces, so each one is a single translatable string.
+  const hint=platform==='darwin'?'上一次系统通知没能显示。请在「系统设置 → 通知」里允许 Nova 发送通知。':platform==='win32'?'上一次系统通知没能显示。请检查「设置 → 系统 → 通知」，并确认没有开启专注助手或勿扰。':'上一次系统通知没能显示。请检查桌面环境的通知设置。'
+  return {tone:'warning',hint,canOpenSettings}
  }
  if(status.state==='working')return {tone:'ok',hint:'系统通知正常。你正在使用工作台时不会重复弹出。',canOpenSettings}
  return {tone:'neutral',hint:'尚未确认系统是否允许通知；第一条提醒到达时会自动检测。你正在使用工作台时不会弹出。',canOpenSettings}

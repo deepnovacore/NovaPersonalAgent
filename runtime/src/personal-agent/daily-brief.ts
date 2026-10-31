@@ -33,6 +33,11 @@ export function isQuietTime(input:PersonalSettings,now:Date):boolean {
  const settings=dailyBriefSettings(input)
  return quiet(localParts(formatter(settings.timezone),now).time,settings.quiet_start,settings.quiet_end)
 }
+/** Briefs that are switched on but scheduled inside quiet hours: the scheduler skips those slots, so they would never be sent. */
+export function briefQuietConflicts(input:PersonalSettings):('outlook'|'review')[] {
+ const settings=dailyBriefSettings(input)
+ return (['outlook','review'] as const).filter(kind=>settings[`briefing_${kind}_enabled`]&&quiet(settings[`briefing_${kind}_time`],settings.quiet_start,settings.quiet_end))
+}
 /** Returns only recent real wall-clock slots; the host tracks bounded durable attempts for each key. */
 export function dueDailyBriefs(input:PersonalSettings,now:Date,claimed:Iterable<string>):DailyBriefSlot[] {
  const settings=dailyBriefSettings(input),format=formatter(settings.timezone),current=localParts(format,now)

@@ -27,3 +27,15 @@ test('a working state is plain and quiet',()=>{
 test('a missing status is treated as loading, never as an error',()=>{
  const view=systemNotificationsView(null,'darwin');assert.equal(view.tone,'muted');assert.equal(view.canOpenSettings,false)
 })
+
+import {readFileSync} from 'node:fs'
+import {ENGLISH_MESSAGES} from '../src/renderer/messages.en.mjs'
+test('every sentence the panel can show has an English translation, so the English UI is never half Chinese',()=>{
+ const states=[null,{supported:false,enabled:true,state:'unsupported',error:null},{supported:true,enabled:false,state:'unverified',error:null},{supported:true,enabled:true,state:'unverified',error:null},{supported:true,enabled:true,state:'working',error:null},{supported:true,enabled:true,state:'failed',error:'x'}]
+ const hints=new Set(states.flatMap(status=>['darwin','win32','linux'].map(platform=>systemNotificationsView(status,platform).hint)).filter(Boolean))
+ assert.ok(hints.size>=7,'each state and each platform-specific failure is its own whole sentence')
+ for(const hint of hints)assert.ok(Object.hasOwn(ENGLISH_MESSAGES,hint),'missing English: '+hint)
+ const source=readFileSync(new URL('../src/renderer/react/settings/system-notifications.tsx',import.meta.url),'utf8')
+ const literals=[...source.matchAll(/(?:title|description|label)="([^"]*[一-鿿][^"]*)"|\bt\('([^']*[一-鿿][^']*)'\)/g)].map(match=>match[1]??match[2])
+ assert.ok(literals.length>=4);for(const text of literals)assert.ok(Object.hasOwn(ENGLISH_MESSAGES,text),'missing English: '+text)
+})

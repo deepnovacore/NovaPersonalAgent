@@ -54,7 +54,15 @@ Direct @mentions of you in the Feishu chats you selected feed the Timeline brief
 
 ## Daily briefs
 
-Optional morning and evening briefs summarize your Todos, calendar events and direct Feishu mentions as proactive reminders. Both are off by default. Turn them on in Settings → General → Proactivity → Daily briefs, where you can also set the times (08:30 and 18:30 by default), the repeat days (weekdays by default), the time zone and quiet hours (22:00 to 08:00 by default); no reminders are sent during quiet hours.
+Optional morning and evening briefs summarize your Todos, calendar events and direct Feishu mentions as proactive reminders. Both are off by default. Turn them on in Settings → Diary & briefings → Daily briefs, where you can also set the times (08:30 and 18:30 by default), the repeat days (weekdays by default) and quiet hours (22:00 to 08:00 by default). Briefs follow the device's time zone. No reminders are sent during quiet hours, so a brief time that falls inside quiet hours cannot be saved until one of the two is changed.
+
+## How reminders arrive
+
+New content from Feishu, mail, the calendar and local files does not interrupt you one item at a time. Nova first gathers what arrives over a stretch of time, either until 3 minutes pass with nothing new or until 15 minutes after the first item, and then judges the whole batch for anything worth a reminder. A batch yields at most 3 reminders, and one matter is raised only once.
+
+News is judged article by article. Only an article that closely matches an interest you confirmed, was published within the last day and has real substance is pushed. At most 2 a day, counted separately from the daily proactive message limit.
+
+Every reminder appears in the main conversation. When you are away from the Workbench (the window is hidden, minimized or not focused), a system notification also appears, with one batch of reminders merged into one notification; clicking it returns you to the unread message. Turn it off in Settings → General → System notifications. System notifications depend on the operating system allowing them: the settings page shows whether the last one succeeded and opens the system notification settings. Turning off Proactive discovery stops source reminders and news pushes.
 
 ## Daily diary
 

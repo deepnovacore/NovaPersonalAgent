@@ -59,7 +59,7 @@ function conversationFailureReason(error:unknown,workbench:boolean):{reason?:str
     return {}
 }
 import type {WakeReason} from '../core/slots.js';
-import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
+import {briefQuietConflicts,dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
 import {DiscoveryWindow} from './discovery-window.js';
 import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool,nextConversationTitle,sourceTodoSchema, type ConversationRuntimeFactory,type ConversationRuntime,type ConversationTurnContext} from './conversations.js';
 import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.js';
@@ -2251,7 +2251,9 @@ export class PersonalAgentHost {
         }
         else if (command.method === 'discovery.configure') {
             const q = personalSettingsSchema.omit({assistant_name:true,user_name:true}).partial().extend({ enabled: z.boolean().optional(), interval_minutes: z.number().int().min(5).max(1440).optional(), proactive_daily_cap: z.number().int().min(1).max(10).optional(), news_rank_fallback: z.boolean().optional() }).strict().parse(p);
-            await this.#serial(async () => { const next = structuredClone(this.#state);const settings={...q};delete settings.enabled;delete settings.interval_minutes;Object.assign(next.settings,settings); if (q.enabled !== undefined)
+            await this.#serial(async () => { const next = structuredClone(this.#state);const settings={...q};delete settings.enabled;delete settings.interval_minutes;Object.assign(next.settings,settings);
+                // A brief scheduled inside quiet hours is skipped for good. Only a save that touches those fields is checked, so an old conflict never locks the user out of unrelated settings.
+                if(Object.keys(q).some(key=>key.startsWith('briefing_')||key==='quiet_start'||key==='quiet_end')&&briefQuietConflicts(next.settings).length>0)throw Error('brief_in_quiet_hours'); if (q.enabled !== undefined)
                 next.settings.discovery_enabled = q.enabled; if (q.interval_minutes !== undefined)
                 next.settings.discovery_interval_minutes = q.interval_minutes; await this.#commit(next); });
             this.options.memory()?.configureDiary?.({enabled:this.#state.settings.diary_enabled!==false,timezone:dailyBriefSettings(this.#state.settings).timezone});

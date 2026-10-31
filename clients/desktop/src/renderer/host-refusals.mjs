@@ -33,6 +33,7 @@ export const HOST_REFUSALS=Object.freeze({
  reference_not_authorized:'引用来源当前不允许用于对话，请核对来源权限。',
  outcome_unknown:'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。',
  version_conflict:'内容已在其他操作中更新，请核对最新状态后重试。',
+ brief_in_quiet_hours:'简报时间在免打扰时段内，不会发送。请调整简报时间或免打扰时段。',
 })
 
 const GENERIC_REFUSAL='操作没有完成，请检查当前状态后再试。'

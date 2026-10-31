@@ -243,14 +243,6 @@ function enterBackground(){
   void nativeAudio?.deactivate().catch(()=>{})
 }
 let trayUnread = 0
-// OS notifications for proactive messages that land while the workbench is not in front of the user.
-const systemNotifier = createSystemNotifier({
-  Notification, platform: process.platform, shell,
-  isEnabled: () => currentSettings.systemNotifications !== false,
-  windowState: () => ({visible: Boolean(mainWindow?.isVisible()) && presentationMode === 'workbench', focused: Boolean(mainWindow?.isFocused())}),
-  activate: () => { requestPresentation('workbench', {attention: true}) },
-  log: message => console.warn(`[nova-personal-agent-desktop] ${message}`),
-})
 const requestPresentation = (mode, options = {}) => {
   if(mode==='background')enterBackground()
   sendToOrb('nova:personal:presentation-request',mode,options.attention===true)
@@ -949,6 +941,15 @@ function trayImage() {
 function hideOrb() {
   requestPresentation('background')
 }
+
+// OS notifications for proactive messages that land while the workbench is not in front of the user.
+const systemNotifier = createSystemNotifier({
+  Notification, platform: process.platform, shell, translate: t,
+  isEnabled: () => currentSettings.systemNotifications !== false,
+  windowState: () => ({visible: Boolean(mainWindow?.isVisible()) && presentationMode === 'workbench', focused: Boolean(mainWindow?.isFocused())}),
+  activate: () => { requestPresentation('workbench', {attention: true}) },
+  log: message => console.warn(`[nova-personal-agent-desktop] ${message}`),
+})
 
 function createTray() {
   const next = new Tray(trayImage())
