@@ -1056,7 +1056,9 @@ export class PersonalAgentHost {
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
     constructor(readonly options: HostOptions) {
-      this.#discoveryWindow=new DiscoveryWindow({...(options.discoveryWindow??DEFAULT_DISCOVERY_WINDOW),fire:()=>this.discoverLatest()});
+      this.#discoveryWindow=new DiscoveryWindow({...(options.discoveryWindow??DEFAULT_DISCOVERY_WINDOW),fire:async()=>{
+        try{await this.discoverLatest()}catch(error){this.#sourceSignature='';this.#sourcePending.legacy=true;throw error}
+      }});
       this.workbench=new WorkbenchStore(options.path+'.workbench-agent');
       if(options.readingCopiesDirectory)this.#readingCopies=new ReadingCopies(options.readingCopiesDirectory,()=>{
         const state=this.snapshot(),account=typeof state.feishu==='object'&&state.feishu!==null&&'account_id' in state.feishu&&typeof state.feishu.account_id==='string'?state.feishu.account_id:undefined;

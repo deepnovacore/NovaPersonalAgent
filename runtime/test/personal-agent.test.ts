@@ -682,6 +682,19 @@ test('closing the host drops a pending discovery window',async t=>{
   assert.equal(discoveries,0)
  }finally{t.mock.timers.reset();await host.close();await f.close()}
 })
+for(const quietMs of [0,3*60_000])test(`a failed discovery retries the same evidence on the next source drain (quietMs=${quietMs})`,async t=>{
+ const f=await fixture();await f.host.close();let discoveries=0
+ const host=new PersonalAgentHost({...f.host.options,discoveryWindow:{quietMs,maxMs:15*60_000}})
+ host.discover=()=>{discoveries++;return discoveries===1?Promise.reject(Error('model timeout')):Promise.resolve()}
+ try{
+  await host.open();t.mock.timers.enable({apis:['setTimeout']})
+  if(quietMs===0)await assert.rejects(host.sourceChanged({revision:1,phase:'ready'}),/model timeout/)
+  else{await host.sourceChanged({revision:1,phase:'ready'});t.mock.timers.tick(quietMs);await new Promise(resolve=>setImmediate(resolve))}
+  assert.equal(discoveries,1)
+  await host.sourceChanged({revision:1,phase:'ready'});t.mock.timers.tick(quietMs)
+  assert.equal(discoveries,2,'the same evidence is retried without waiting for a periodic discovery tick')
+ }finally{t.mock.timers.reset();await host.close();await f.close()}
+})
 test('one discovery may surface up to three matters, never a fourth',async()=>{
  const f=await fixture();await f.host.close()
  const ids=['a','b','c','d'];for(const id of ids)f.entries.set(id,entry(id))
