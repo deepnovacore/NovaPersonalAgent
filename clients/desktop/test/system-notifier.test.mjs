@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import {spawnSync} from 'node:child_process'
 import {createSystemNotifier,systemNotificationSettingsUrl} from '../src/main/system-notifier.mjs'
 
 function setup(options={}){
@@ -17,6 +18,25 @@ function setup(options={}){
  return {notifier,shown,state,setSupported:value=>{supported=value}}
 }
 const item=(id,title,body='')=>({id,title,body})
+
+test('native notifications survive GC until click, close, failure or the timeout fallback',()=>{
+ const script=`
+  import assert from 'node:assert/strict';import {mock} from 'node:test';
+  import {createSystemNotifier} from ${JSON.stringify(new URL('../src/main/system-notifier.mjs',import.meta.url).href)};
+  let weak;class N{static isSupported(){return true}constructor(){weak=new WeakRef(this);this.handlers={}}on(event,handler){this.handlers[event]=handler}show(){}}
+  const notifier=createSystemNotifier({Notification:N,isEnabled:()=>true,windowState:()=>({visible:false,focused:false}),activate(){},shell:{}});
+  const collect=async()=>{for(let i=0;i<8;i++){await new Promise(setImmediate);global.gc()}};
+  for(const event of ['click','close','failed','timeout']){
+   mock.timers.enable({apis:['setTimeout']});notifier.notify({items:[{id:event,title:event}]});
+   await collect();assert.ok(weak.deref(),'retained before '+event);
+   if(event==='timeout')mock.timers.tick(5*60_000);else weak.deref().handlers[event]();
+   mock.timers.reset();await collect();assert.equal(weak.deref(),undefined,'released after '+event);
+  }
+  assert.equal(notifier.status().enabled,true);
+ `
+ const result=spawnSync(process.execPath,['--expose-gc','--input-type=module','-e',script],{encoding:'utf8'})
+ assert.equal(result.status,0,result.stderr)
+})
 
 test('a background arrival shows one notification and a click brings the workbench forward',()=>{
  const {notifier,shown,state}=setup()

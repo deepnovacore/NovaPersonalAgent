@@ -16,7 +16,7 @@ function parse(payload){
  */
 const identity=(source,...values)=>source.replace(/\{(\d+)\}/g,(match,index)=>values[index]===undefined?match:String(values[index]))
 export function createSystemNotifier({Notification,platform=process.platform,isEnabled,windowState,activate,shell,translate=identity,log=()=>{}}){
- const seen=new Set();let state='unverified',error=null
+ const seen=new Set(),active=new Set();let state='unverified',error=null
  const status=()=>({supported:Notification.isSupported(),enabled:isEnabled(),state:Notification.isSupported()?state:'unsupported',error})
  function notify(payload){
   const fresh=parse(payload).filter(item=>!seen.has(item.id))
@@ -31,10 +31,14 @@ export function createSystemNotifier({Notification,platform=process.platform,isE
   const notification=new Notification({id:'nova-proactive:'+fresh[0].id,silent:false,
    title:single?fresh[0].title:translate('Nova · {0} 条新提醒',fresh.length),
    body:single?fresh[0].body:fresh.slice(0,MAX_LISTED).map(item=>item.title).join(' · ').slice(0,MAX_BODY)})
+  active.add(notification)
+  const release=()=>{active.delete(notification);clearTimeout(timeout)}
+  const timeout=setTimeout(release,5*60_000);timeout.unref()
   notification.on('show',()=>{state='working';error=null})
-  notification.on('failed',(_event,reason)=>{state='failed';error=String(reason??'unknown').slice(0,160);log('system_notification_failed')})
-  notification.on('click',()=>activate())
-  notification.show()
+  notification.on('failed',(_event,reason)=>{release();state='failed';error=String(reason??'unknown').slice(0,160);log('system_notification_failed')})
+  notification.on('click',()=>{release();activate()})
+  notification.on('close',release)
+  try{notification.show()}catch(error){release();throw error}
   return 'shown'
  }
  async function openSystemSettings(){
