@@ -7,6 +7,7 @@ import { mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PersonalAgentHost, countSourceGroundedContextCards, type DiscoverySnapshot } from '../src/personal-agent/host.js';
+import {DiscoveryWindow} from '../src/personal-agent/discovery-window.js';
 import type {ContextInput} from '../src/personal-agent/context-candidates.js';
 import { SuggestionPool } from '../src/core/suggestions.js';
 import type { MemoryEntry } from '../src/memory/entry.js';
@@ -694,6 +695,24 @@ test('the source window cap follows the host clock without replacing global Date
   await host.sourceChanged({revision:3,phase:'ready'});tick(60_000)
   assert.equal(discoveries,1,'the cap uses five minutes of the injected clock')
  }finally{t.mock.timers.reset();await host.close();await f.close()}
+})
+test('a source drain resuming after close cannot re-arm the discovery window',async t=>{
+ const f=await fixture();await f.host.close();let discoveries=0,release!:()=>void,entered!:()=>void
+ const gate=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+ const host=new PersonalAgentHost({...f.host.options,discoveryWindow:{quietMs:3*60_000,maxMs:15*60_000}})
+ host.discover=()=>{discoveries++;return Promise.resolve()}
+ let changing:Promise<void>|undefined,closing:Promise<void>|undefined
+ try{
+  await host.open();t.mock.timers.enable({apis:['setTimeout']})
+  const touches=t.mock.method(DiscoveryWindow.prototype,'touch'),cancels=t.mock.method(DiscoveryWindow.prototype,'cancel')
+  host.refreshMemory=async()=>{entered();await gate}
+  changing=host.sourceChanged({revision:1,phase:'ready'});await started
+  closing=host.close();await new Promise(resolve=>setImmediate(resolve));assert.equal(cancels.mock.callCount(),1)
+  await host.sourceChanged({revision:2,phase:'ready'});release();await changing;await closing
+  t.mock.timers.tick(30*60_000)
+  assert.equal(discoveries,0)
+  assert.equal(touches.mock.callCount(),0,'even a downstream closed-host guard must not hide a re-armed timer')
+ }finally{release();await Promise.allSettled([changing,closing]);t.mock.restoreAll();t.mock.timers.reset();await host.close();await f.close()}
 })
 for(const quietMs of [0,3*60_000])test(`a failed discovery retries the same evidence on the next source drain (quietMs=${quietMs})`,async t=>{
  const f=await fixture();await f.host.close();let discoveries=0
