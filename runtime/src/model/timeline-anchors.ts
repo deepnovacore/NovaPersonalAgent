@@ -4,9 +4,37 @@ import type {TimelineInput} from '../personal-agent/timeline-brief.js'
 const byTime=(a:TimelineInput,b:TimelineInput):number=>a.observed_at.localeCompare(b.observed_at)||a.id.localeCompare(b.id)
 
 /** Old messages that name a state change are the ones a current card still has to explain. */
-const STATE_WORDS=/(?:取消|完成|已完成|延期|推迟|恢复|撤回|截止|上线|发布|失败|阻塞|结束|关闭|卡住|cancelled|completed|postponed|resumed|reopened|blocked|failed|closed)/iu
+const STATE_WORDS=/(?:取消|完成|已完成|延期|推迟|恢复|撤回|截止|上线|发布|失败|阻塞|结束|关闭|卡住|cancelled|completed|postponed|resumed|reopened|blocked|failed|closed|recovered|resolved|restored|degraded|launched|released|started|ended)/iu
 
 /** How many messages directly before the newest one are always worth keeping. */
+/** Whether a message names a state change the current card must still explain. */
+export function namesStateChange(text:string):boolean{return STATE_WORDS.test(text)}
+
+/** Same conversation plus same normalized body: repeated routine alerts, not independent evidence. */
+export const repeatedAlertKey=(input:TimelineInput):string=>(input.group??'')+'\u0000'+input.text.normalize('NFKC').replace(/\s+/gu,' ').trim()
+
+export interface FoldedAlerts {
+ readonly inputs:TimelineInput[]
+ /** Kept message id -> how many copies the alert produced. */
+ readonly repeats:ReadonlyMap<string,number>
+}
+
+/** Fold identical repeated alerts into their newest copy so one batched notice does not spend the budget twice. */
+export function foldRepeatedAlerts(inputs:readonly TimelineInput[]):FoldedAlerts{
+ const folded=new Map<string,{keep:TimelineInput;count:number}>()
+ for(const input of inputs){
+  // Only a named conversation proves two copies are the same notification; without a group every
+  // message stays independent rather than risking two unrelated identical sentences collapsing.
+  const key=input.group?repeatedAlertKey(input):'id:'+input.id,existing=folded.get(key)
+  if(!existing){folded.set(key,{keep:input,count:1});continue}
+  existing.count+=1
+  if(input.observed_at>existing.keep.observed_at)existing.keep=input
+ }
+ const repeats=new Map<string,number>()
+ for(const row of folded.values())if(row.count>1)repeats.set(row.keep.id,row.count)
+ return {inputs:[...folded.values()].map(row=>row.keep),repeats}
+}
+
 const NEIGHBOUR_WINDOW=6
 /** Old evidence may not exceed half of the new evidence, and never drops below this floor. */
 const MIN_BUDGET_CHARS=8000

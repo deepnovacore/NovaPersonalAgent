@@ -14,6 +14,14 @@ export type ProcessingRef=z.infer<typeof processingRefSchema>
 export const processingObservationSchema=z.object({kind:z.enum(['people','work','style']),text:z.string().trim().min(1).max(400),refs:z.array(processingRefSchema).min(1).max(8)}).strict()
 export type ProcessingObservation=z.infer<typeof processingObservationSchema>
 
+/** Every prefix of this order covers its lane evenly; the newest quarter comes first so fresh input is never crowded out. */
+export function profileLaneOrder<T>(lane:readonly T[]):T[]{
+ const spread=(n:number,count:number)=>{let value=0;for(let width=1;width<count;width*=2){value=value*2+n%2;n=Math.floor(n/2)}return value}
+ const newestCount=Math.max(1,Math.ceil(lane.length*0.25)),split=Math.max(0,lane.length-newestCount),rest=lane.slice(0,split)
+ const sampled=rest.map((item,index)=>({item,order:spread(index,rest.length)})).sort((a,b)=>a.order-b.order).map(row=>row.item)
+ return [...lane.slice(split).reverse(),...sampled]
+}
+
 const profileCacheSchema=z.object({about_parts:z.array(profileDraftSchema.shape.about.unwrap()).optional(),draft:profileDraftSchema,refs:z.array(processingRefSchema),products:understandingProductsSchema.optional(),generated_at:z.string().optional()}).extend({generation_version:z.string().optional(),fact_scopes:z.record(z.string(),z.array(processingRefSchema)).optional(),publication_key:z.string().optional(),synthesis_key:z.string().optional(),profile_pending:z.boolean().optional()})
 const storedIdentitySchema=z.object({id:z.string(),kind:z.string(),title:z.string(),project_id:z.string().nullable(),source_key:z.string()})
 export const processingTopicSchema=z.object({title:z.string().trim().min(1).max(120),summary:z.string().trim().min(1).max(1500),refs:z.array(processingRefSchema).min(1).max(8)}).strict()
@@ -357,7 +365,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   if(result)track(batch.id,refs)
   return result
  }
- const profileContext=()=>{
+const profileContext=()=>{
   const rows=db.prepare(`WITH ranked AS (
    SELECT payload_json,row_number() OVER(PARTITION BY json_extract(payload_json,'$.kind') ORDER BY rowid) n,
    count(*) OVER(PARTITION BY json_extract(payload_json,'$.kind')) total FROM processing_observations WHERE prefix=? AND provider=?
@@ -365,8 +373,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const available=rows.flatMap(row=>{const observation=processingObservationSchema.parse(JSON.parse(String(row.payload_json))),originals=readRefs(db,prefix,consumer,observation.refs,recipe,participants);return originals?[{observation,originals,at:originals.items.map(i=>i.observed_at).sort()[0]??''}]:[]}).sort((a,b)=>a.at.localeCompare(b.at)||canonicalJson(a.observation).localeCompare(canonicalJson(b.observation)))
   // Every prefix samples the entire history, with separate lanes for relationships,
   // recurring work and working style. A high-volume recent topic cannot take all slots.
-  const spread=(n:number,count:number)=>{let value=0;for(let width=1;width<count;width*=2){value=value*2+n%2;n=Math.floor(n/2)}return value}
-  const lanes=(['people','style','work'] as const).map(kind=>{const lane=available.filter(item=>item.observation.kind===kind);return lane.map((item,index)=>({item,order:spread(index,lane.length)})).sort((a,b)=>a.order-b.order).map(row=>row.item)})
+  const lanes=(['people','style','work'] as const).map(kind=>profileLaneOrder(available.filter(item=>item.observation.kind===kind)))
   const refs:ProcessingRef[]=[],observations:ProcessingObservation[]=[],items:NonNullable<ReturnType<typeof readRefs>>['items']=[],chosen=new Set<string>(),texts=new Set<string>();let chars=0
   for(let round=0;round<Math.max(0,...lanes.map(lane=>lane.length));round++)for(const lane of lanes){
    const item=lane[round];if(!item)continue

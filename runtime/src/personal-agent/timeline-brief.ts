@@ -46,6 +46,8 @@ export const timelineDiagnosticsSchema=z.object({
  cache_reused_topics:count.default(0),cache_reused_inputs:count.default(0),cache_screened_inputs:count.default(0),cache_stage_hits:count.default(0),cache_stage_misses:count.default(0),
  /** Topics whose inputs were all already published, so their existing cards stay the answer. */
  cache_skipped_topics:count.default(0),
+ /** Repeated routine alerts folded into one batch entry, and revisions that ignored a new state change. */
+ duplicates_folded:count.default(0),stale_state_repairs:count.default(0),stale_state_dropped:count.default(0),
 })
 export type TimelineDiagnostics=z.infer<typeof timelineDiagnosticsSchema>
 export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:z.input<typeof timelineDiagnosticsSchema>}
