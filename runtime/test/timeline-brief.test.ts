@@ -513,3 +513,18 @@ test('incremental cache counters default to zero and survive persistence',async(
   assert.equal(brief.snapshot().diagnostics?.cache_stage_misses,0,'defaults are persisted, not stripped by the schema')
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('the writer receives identities for every visible card beyond thirty two',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-all-identities-'))
+ const inputs=Array.from({length:33},(_,i)=>({...input,id:'m'+i,text:'result '+i}))
+ let calls=0
+ const brief=new TimelineBrief(join(dir,'timeline.json'),(items,context)=>{
+  if(calls++)assert.equal(context.prior_cards?.length,33)
+  return Promise.resolve({cards:items.map(item=>({...reply.cards[0]!,title:item.text,refs:[item.id],facts:[{text:item.text,quote:item.text,ref:item.id}]}))})
+ },()=>undefined)
+ try{
+  await brief.open();brief.update(inputs,'2026-10-17','UTC');await brief.refresh()
+  assert.equal(brief.snapshot().cards.length,33)
+  await brief.refresh({force:true});assert.equal(calls,2)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})

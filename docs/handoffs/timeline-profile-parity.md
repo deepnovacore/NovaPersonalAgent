@@ -37,7 +37,7 @@ Status: **未合入、未 push**；主 checkout 未改动。
 | 成员 version 变化 | 整个主题失效，其存活成员按新增输入重筛 |
 | 成员从池中消失（滑出时间窗/撤权） | 只删该成员，主题保留其余成员 |
 | 被筛掉的输入（负向索引） | 同 id+version 不再重筛，直到 72h TTL 或 version 变化 |
-| `force=true`（手动刷新） | 绕过全部缓存读，只写；用于「刷新必须重算」 |
+| `force=true`（手动刷新） | 仅绕过 brief checkpoint，筛选和阶段缓存仍优先复用 |
 | 小池直通（≤200 条 / ≤60k 字符） | 不写主题索引（模型本来就没参与），避免直通结果被误复用 |
 
 阶段缓存 key = `sha256('timeline-stage-v1'|<kind>|<model>|<system>|<attempt-0 prompt>)`；命中后仍走完整 schema/引用/quote/time/敏感内容校验，不通过即视为 miss 并删除条目；repair 成功的输出写回 attempt-0 key。batch 缓存以「compose+review 一个整体」为单位，payload 为该批复核后的 cards + 该批 `diagnostics.stages`。
@@ -127,10 +127,22 @@ flutter（克隆 SDK + 独立 PUB_CACHE，见上）：
 ## 5. 已知限制
 
 - partial 失败恢复：`timeline-brief.ts` 在每次 progress 局部发布时就推进 checkpoint，`prior_cards`/`new_input_ids` 随之变化，因此 compose/review 的阶段缓存可能 miss（筛选/归并仍免费）。这是有意收窄的承诺，比改动前严格更好。
-- 负向索引 72h：被筛掉的输入在 TTL 内不会重筛（version 变化或 `force` 除外），用于省 token 的代价是「误判延迟」。
+- 负向索引 72h：被筛掉的输入在 TTL 内不会重筛（version 变化除外），用于省 token 的代价是「误判延迟」。
 - 移动端 golden 截图测试（`chat_screenshots_test` / `workbench_screenshots_test`）在本机环境因像素差恒失败，已用 `git archive HEAD` 基线复现同样失败，与本次改动无关。
 - receipt 里其它 `profile_budget_*` 码（`unavailable`/`usage_*`）不会被 `retry()` 清除，属既有问题，本次未改。
 
 ## 6. 相关设计文档
 
 - [`docs/plans/2026-10-31-incremental-evidence-weighting.md`](../plans/2026-10-31-incremental-evidence-weighting.md)：Phase 2「增量读取 + 新消息加权 + 旧新合并」设计（clean/dirty 主题、anchor 证据配额、R1–R3 宿主规则、Profile 侧增量），已完成两轮 opus-5-5 评审输入。
+
+## 7. 2026-10-31 Review 收尾
+
+- 生成与发布共享修订身份识别，移除 prior_cards 的 32 张截断。
+- R3 按拆批前的完整主题，要求修订引用主题最新的新状态原文；其他卡片不能代为满足，超过 16 条状态也不要求全部引用。
+- 每批只修复一次，失败仅丢弃受影响修订，保留无关有效卡片。跨批尚未看到最新状态的旧修订不可发布。
+- 阶段缓存版本升为 v2，防止旧护栏结果直接复用；不修改已发布卡片或用户数据。
+- 独立 review 的引用上限、身份集合、拆批边界均纳入修复；不追加 Profile 分区重写、Dart parity 或 P2。
+
+验证使用内置磁盘聊天独立目录。TypeScript 编译通过；timeline/model-adapters/lane 162 passed（包含 >32 张旧卡回归）；Flutter 受影响 8 文件 105 passed。完整套件及真机/live 未验收。初次沙箱端口绑定失败后，本地端口测试使用授权的非沙箱执行。
+
+邻近批次：470 passed / 2 skipped，source-processing 因编译输出并发更新出现一次模块导出读取错误；停止编译后独立重跑 39/39 passed。最终集成验证串行编译与测试。runtime eslint src eval test 通过。

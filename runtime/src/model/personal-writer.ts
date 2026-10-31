@@ -2,7 +2,7 @@ import {TIMELINE_PERSPECTIVE_RULES,timelinePerspective} from './timeline-perspec
 import {selectTimelineTopics,reconcileTimelineTopics,timelineCompositionBatches,parseTimelineJson,timelineStageKey,type TimelineTopic,type TimelineStagePort} from './timeline-selection.js'
 import {resolveTimelineTime} from '../personal-agent/timeline-time.js'
 import {foldRepeatedAlerts,namesStateChange,withTimelineAnchors} from './timeline-anchors.js'
-import {timelineReplySchema,groundedTimelinePeople,TIMELINE_MAX_REFS,type TimelineGenerator,type TimelineDiagnostics,type TimelineContext,type TimelineInput} from '../personal-agent/timeline-brief.js'
+import {timelineReplySchema,timelineRevisionId,groundedTimelinePeople,TIMELINE_MAX_REFS,type TimelineGenerator,type TimelineDiagnostics,type TimelineContext,type TimelineInput} from '../personal-agent/timeline-brief.js'
 import type {TimelineCacheRun,TimelineRunOptions} from '../personal-agent/timeline-cache.js'
 import {createHash} from 'node:crypto'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
@@ -189,7 +189,7 @@ export class GatewayPersonalWriter {
     await Promise.all(Array.from({length:Math.min(2,batches.length)},async()=>{
       while(next<batches.length){
         signal.throwIfAborted();const batch=next++;
-        try{results[batch]=await this.#composeTimelineBatch(batches[batch]!,perspective,delta,signal,diagnostics,batch,stage)}
+        try{results[batch]=await this.#composeTimelineBatch(batches[batch]!,perspective,delta,signal,diagnostics,batch,stage,dirty)}
         catch(error){signal.throwIfAborted();diagnostics.failed_batches.push({batch,reason:error instanceof z.ZodError?'invalid_format':error instanceof SyntaxError?'invalid_json':error instanceof Error&&error.message==='invalid_timeline_evidence'?'invalid_evidence':'generation_failed'})}
         diagnostics.pending_batches--;await progress?.({cards:results.flat(),diagnostics});
       }
@@ -200,7 +200,7 @@ export class GatewayPersonalWriter {
     return {cards:results.flat(),diagnostics};
     }finally{pending.abort();await handle?.commit()}
   }
-  async #composeTimelineBatch(topics:TimelineTopic[],context:Parameters<TimelineGenerator>[1],delta:{prior_cards:NonNullable<TimelineContext['prior_cards']>;new_input_ids:string[]}|undefined,signal:AbortSignal,diagnostics:TimelineDiagnostics,batch:number,stage?:TimelineStagePort):Promise<z.infer<typeof timelineReplySchema>['cards']>{
+  async #composeTimelineBatch(topics:TimelineTopic[],context:Parameters<TimelineGenerator>[1],delta:{prior_cards:NonNullable<TimelineContext['prior_cards']>;new_input_ids:string[]}|undefined,signal:AbortSignal,diagnostics:TimelineDiagnostics,batch:number,stage?:TimelineStagePort,allTopics:readonly TimelineTopic[]=topics):Promise<z.infer<typeof timelineReplySchema>['cards']>{
     const pooled=[...new Map(topics.flatMap(topic=>topic.inputs).map(input=>[input.id,input])).values()];
     // Identical routine alerts are folded into their newest copy; the count travels with the batch.
     const folded=foldRepeatedAlerts(pooled),inputs=folded.inputs
@@ -253,7 +253,7 @@ export class GatewayPersonalWriter {
     }
     }
     if(!reply)throw Error('invalid_timeline_evidence');
-    reply=await this.#freshStateGuard(reply,byKey,delta,context,signal,diagnostics)
+    reply=await this.#freshStateGuard(reply,byKey,allTopics,delta,context,signal,diagnostics)
     const cards=reply.cards.filter(card=>[...card.refs,...card.facts.map(f=>f.ref),...card.temporal.dates.map(d=>d.ref)].every(ref=>byKey.has(ref))).map(card=>({...card,people:card.people.map(person=>({...person,ref:byKey.get(person.ref)!.id})),category:stripInternalIds(card.category),title:stripInternalIds(card.title),status_label:stripInternalIds(card.status_label),why_now:stripInternalIds(card.why_now),uncertainty:stripInternalIds(card.uncertainty),next_steps:card.next_steps.slice(0,1).map(step=>({title:stripInternalIds(step.title),detail:stripInternalIds(step.detail)})),actions:card.actions.map(action=>({...action,label:stripInternalIds(action.label)})),refs:card.refs.map(ref=>byKey.get(ref)!.id),facts:card.facts.map(f=>({...f,label:stripInternalIds(f.label),text:stripInternalIds(f.text),ref:byKey.get(f.ref)!.id})),temporal:{...card.temporal,dates:card.temporal.dates.map(d=>({...d,ref:byKey.get(d.ref)!.id}))}}));
     if(stage&&batchKey)stage.put(batchKey,'batch',{cards,stages:diagnostics.stages.filter(entry=>entry.batch===batch)} satisfies BatchPayload)
     return cards
@@ -263,33 +263,52 @@ export class GatewayPersonalWriter {
   * Ask once for the missed original to be cited; if that fails, keep the published card instead of
   * shipping an update the new evidence does not support.
   */
-  async #freshStateGuard(reply:z.infer<typeof timelineReplySchema>,byKey:ReadonlyMap<string,TimelineInput>,delta:{prior_cards:NonNullable<TimelineContext['prior_cards']>;new_input_ids:string[]}|undefined,context:Parameters<TimelineGenerator>[1],signal:AbortSignal,diagnostics:TimelineDiagnostics):Promise<z.infer<typeof timelineReplySchema>>{
+  async #freshStateGuard(reply:z.infer<typeof timelineReplySchema>,byKey:ReadonlyMap<string,TimelineInput>,topics:readonly TimelineTopic[],delta:{prior_cards:NonNullable<TimelineContext['prior_cards']>;new_input_ids:string[]}|undefined,context:Parameters<TimelineGenerator>[1],signal:AbortSignal,diagnostics:TimelineDiagnostics):Promise<z.infer<typeof timelineReplySchema>>{
     const newIds=new Set(delta?.new_input_ids??[])
     if(!newIds.size)return reply
-    const watch=[...byKey].filter(([,input])=>newIds.has(input.id)&&namesStateChange(input.text)).map(([key])=>key)
-    if(!watch.length)return reply
-    const cited=(cards:readonly {refs:readonly string[];facts:readonly {ref:string}[];temporal:{dates:readonly {ref:string}[]}}[])=>new Set(cards.flatMap(card=>[...card.refs,...card.facts.map(fact=>fact.ref),...card.temporal.dates.map(date=>date.ref)]))
-    const missing=watch.filter(key=>!cited(reply.cards).has(key))
-    if(!missing.length)return reply
-    // Cards appended for the new message already carry its state; only a revision of an old card can hide it.
-    if(!reply.cards.some(card=>card.prior_id))return reply
+    const refsOf=(card:z.infer<typeof timelineReplySchema>['cards'][number])=>[...new Set([...card.refs,...card.facts.map(fact=>fact.ref),...card.temporal.dates.map(date=>date.ref)])]
+    const identify=(card:z.infer<typeof timelineReplySchema>['cards'][number])=>{
+      const id=timelineRevisionId(card.prior_id,refsOf(card).flatMap(key=>byKey.get(key)?.id??[]),delta?.prior_cards??[],true)
+      return id?{...card,prior_id:id}:card
+    }
+    const stale=(card:z.infer<typeof timelineReplySchema>['cards'][number]):boolean=>{
+      if(!card.prior_id)return false
+      const refs=refsOf(card),prior=delta?.prior_cards.find(prior=>prior.id===card.prior_id)
+      const originals=new Set([...refs.flatMap(key=>byKey.get(key)?.id??[]),...prior?.evidence_ids??[]])
+      const relevant=topics.filter(topic=>topic.inputs.some(input=>originals.has(input.id)))
+      // Use the full topic before batching; only its latest state must fit the citation limit.
+      const latest=relevant.flatMap(topic=>{
+        const watch=topic.inputs.filter(input=>newIds.has(input.id)&&namesStateChange(input.text))
+        watch.sort((a,b)=>a.observed_at.localeCompare(b.observed_at)||a.id.localeCompare(b.id))
+        return watch.length?[watch.at(-1)!.id]:[]
+      })
+      const cited=new Set(refs.flatMap(key=>byKey.get(key)?.id??[]))
+      return latest.some(id=>!cited.has(id))
+    }
+    reply={cards:reply.cards.map(identify)}
+    const affected=reply.cards.filter(stale)
+    if(!affected.length)return reply
+    const affectedIds=new Set(affected.map(card=>card.prior_id))
     diagnostics.stale_state_repairs+=1
     try{
       const schema=z.toJSONSchema(timelineReplySchema) as unknown as Readonly<Record<string,JsonValue>>
       const response=await this.#gateway.complete({usage:{feature:'timeline',operation:'compose.repair'},model:this.#model,signal,reasoning:'disabled',maxTokens:10000,
-        system:TIMELINE_PERSPECTIVE_RULES+CLAIM_SCOPE+'\n这是发布前补充核对：以下带状态变化的新原文没有被任何卡片引用（key 为 '+missing.join('、')+'）。请修改卡片，让对应事项至少引用其中一条新原文并陈述其当前状态；没有原文依据的状态不得补写。previous 只是上一版草稿，不是事实来源。只返回符合 schema 的 JSON。',
+        system:TIMELINE_PERSPECTIVE_RULES+CLAIM_SCOPE+'\n这是发布前补充核对：以下修订没有覆盖所属主题的带状态变化的新原文（prior_id 为 '+affected.map(card=>card.prior_id).join('、')+'）。请修改卡片，让对应事项引用所属主题最新的状态变化原文并陈述其当前状态；没有原文依据的状态不得补写。previous 只是上一版草稿，不是事实来源。只返回符合 schema 的 JSON。',
         prompt:JSON.stringify({previous:reply.cards,inputs:[...byKey].map(([key,input])=>({key,kind:input.kind,at:input.observed_at,relation:input.relation,author:input.author,text:input.text})),schema}),jsonSchema:schema})
       signal.throwIfAborted()
       const parsed=timelineReplySchema.parse(parseTimelineJson(response.text,'cards'))
-      const valid=parsed.cards.map(card=>({...card,people:groundedTimelinePeople(card,byKey)})).filter(card=>{
+      const valid=parsed.cards.map(identify).filter(card=>{
         const refs=[...new Set([...card.refs,...card.facts.map(fact=>fact.ref),...card.temporal.dates.map(date=>date.ref)])]
         return refs.length<=TIMELINE_MAX_REFS&&refs.every(ref=>byKey.has(ref))&&card.facts.every(fact=>byKey.get(fact.ref)!.text.includes(fact.quote))&&resolveTimelineTime(card.temporal,refs.map(ref=>({...byKey.get(ref)!,id:ref})),context)!==null
       })
-      if(valid.length&&watch.every(key=>cited(valid).has(key)))return {cards:valid}
+      const repaired=valid.filter(card=>affectedIds.has(card.prior_id)&&!stale(card)).map(card=>({...card,people:groundedTimelinePeople(card,byKey)}))
+      const repairedIds=new Set(repaired.map(card=>card.prior_id))
+      diagnostics.stale_state_dropped+=affected.filter(card=>!repairedIds.has(card.prior_id)).length
+      return {cards:[...reply.cards.filter(card=>!stale(card)),...repaired]}
     }catch{/* fall through to keeping the previously published card */}
-    const dropped=reply.cards.filter(card=>card.prior_id).length
+    const dropped=affected.length
     diagnostics.stale_state_dropped+=dropped
-    return {cards:reply.cards.filter(card=>!card.prior_id)}
+    return {cards:reply.cards.filter(card=>!stale(card))}
   }
   /** Validate a previously composed batch against the current originals before trusting it. */
   #cachedTimelineBatch(entry:{readonly kind:string;readonly payload:unknown}|undefined,inputs:readonly TimelineInput[],context:Parameters<TimelineGenerator>[1]):BatchPayload|undefined{

@@ -12,6 +12,13 @@ export interface TimelineAccess {scope:string;allowed:boolean;legacy_refs:readon
 export interface TimelineInput {account_scope?:string;history_only?:boolean;id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
 /** One already-published card, as a bounded index for an incremental synthesis. Never evidence. */
 export interface TimelinePriorCard {id:string;title:string;category:string;why_now:string;anchor_date:string|null;evidence_ids?:string[]}
+/** Shared by generation and publication so omitted identities cannot bypass revision checks. */
+export function timelineRevisionId(priorId:string|undefined,refs:readonly string[],priorCards:readonly {id:string;evidence_ids?:readonly string[]}[],infer:boolean):string|undefined{
+ if(priorId&&priorCards.some(card=>card.id===priorId))return priorId
+ if(!infer)return undefined
+ const candidates=priorCards.filter(card=>card.evidence_ids?.some(id=>refs.includes(id)))
+ return candidates.length===1?candidates[0]!.id:undefined
+}
 export const TIMELINE_MAX_REFS=16
 const ref=z.string().min(1).max(600)
 export const timelineReplySchema=z.object({cards:z.array(z.object({
@@ -151,7 +158,7 @@ export class TimelineBrief {
   const checkpointVersions=new Map(this.#state.checkpoint.input_versions.map(({id,version})=>[id,version]))
   const inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only)).map(source=>{const input={...source};delete input.account_scope;return input}))
   const newInputIds=inputs.filter(input=>checkpointVersions.get(input.id)!==input.version).map(input=>input.id)
-  const priorCards=this.#visibleCards().slice(0,32).map(card=>({id:card.id,title:card.title,category:card.category,why_now:card.why_now.slice(0,120),anchor_date:card.time.anchor_date,evidence_ids:[...new Set(card.refs)].slice(0,TIMELINE_MAX_REFS)}))
+  const priorCards=this.#visibleCards().map(card=>({id:card.id,title:card.title,category:card.category,why_now:card.why_now.slice(0,120),anchor_date:card.time.anchor_date,evidence_ids:[...new Set(card.refs)].slice(0,TIMELINE_MAX_REFS)}))
   const context:TimelineContext={local_date:this.#date,timezone:this.#timezone,...(priorCards.length?{prior_cards:priorCards}:{}),...(newInputIds.length?{new_input_ids:newInputIds}:{})},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
   this.#status='working';this.#error=null;this.changed()
   const publish=async(generated:TimelineGenerated,done:boolean)=>{
@@ -162,7 +169,7 @@ export class TimelineBrief {
    const drop=(reason:string)=>{diagnostics.host_dropped[reason]=(diagnostics.host_dropped[reason]??0)+1;return []}
    const byId=new Map(inputs.map(input=>[input.id,input])),seen=new Set<string>()
    // A delta synthesis may revise an already published card; prior_id keeps that card's stable identity and history.
-   const priorIds=new Set(this.#state.cards.filter(card=>card.artifact_scope===this.#access!.scope).map(card=>card.id))
+   const revisionCards=priorCards
    const cards=result.cards.flatMap(raw=>{
     const card={...raw,people:groundedTimelinePeople(raw,byId)}
     const priorId=card.prior_id;delete card.prior_id
@@ -175,13 +182,7 @@ export class TimelineBrief {
     const recentSince=new Date(Date.parse(context.local_date+'T00:00:00Z')-14*86400000).toISOString().slice(0,10)
     if(time.anchor_date&&time.anchor_date<recentSince&&(!time.last_reported_on||time.last_reported_on<recentSince)&&(!time.due_on||time.due_on<recentSince)&&(!time.scheduled_on||time.scheduled_on<recentSince))return drop('outside_window')
     const newInputs=context.new_input_ids??[]
-    // A card that omits prior_id is still recognized as a revision when exactly one published card
-    // cites the same originals; several candidates stay separate instead of guessing a merge.
-    let stable=priorId&&priorIds.has(priorId)?priorId:undefined
-    if(!stable&&newInputs.length){
-     const candidates=this.#visibleCards().filter(card=>card.refs.some(id=>refs.includes(id)))
-     if(candidates.length===1)stable=candidates[0]!.id
-    }
+    const stable=timelineRevisionId(priorId,refs,revisionCards,newInputs.length>0)
     // A revision has to be grounded in at least one new original: unchanged sources alone cannot
     // justify rewriting a published conclusion, so the previous card is kept instead.
     if(stable&&!refs.some(id=>newInputs.includes(id)))return drop('unsupported_revision')

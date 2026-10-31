@@ -17,9 +17,9 @@ class StateGateway implements ModelGateway {
  complete(request:CompleteRequest):Promise<GatewayCompletion>{
   this.requests.push(request)
   const operation=request.usage?.operation??''
-  if(operation.startsWith('compose.repair'))return Promise.resolve({text:JSON.stringify({cards:[this.options.repair?.(request)??this.options.card(request)]})})
+  if(operation.startsWith('compose.repair'))return Promise.resolve({text:JSON.stringify({cards:[this.options.repair?.(request)??this.options.card(request)].flat()})})
   if(operation.startsWith('review')){const body=JSON.parse(request.prompt) as {cards:unknown[]};return Promise.resolve({text:JSON.stringify({cards:body.cards})})}
-  if(operation.startsWith('compose'))return Promise.resolve({text:JSON.stringify({cards:[this.options.card(request)]})})
+  if(operation.startsWith('compose'))return Promise.resolve({text:JSON.stringify({cards:[this.options.card(request)].flat()})})
   throw Error('unexpected timeline operation '+operation)
  }
 }
@@ -55,4 +55,66 @@ test('a revision that still ignores the new state change is dropped so the publi
  assert.equal(result.diagnostics?.stale_state_repairs,1)
  assert.equal(result.diagnostics?.stale_state_dropped,1)
  assert.equal(result.cards.length,0,'no stale revision reaches the host merge')
+})
+
+const prior=(id:string,evidence:string)=>({id,title:id,category:'Alert',why_now:'state',anchor_date:null,evidence_ids:[evidence]})
+
+test('an inferred revision cannot bypass the state guard',async()=>{
+ const inputs=[input('old','node is down','2026-10-15T00:00:00Z'),input('note','investigation continues','2026-10-16T00:00:00Z'),input('new','node recovered','2026-10-17T00:00:00Z')]
+ const gateway=new StateGateway({card:()=>({...card('e0','node is down'),refs:['e0','e1']})})
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{...context,prior_cards:[prior('prior','old')],new_input_ids:['note','new']},new AbortController().signal)
+ assert.equal(gateway.count('compose.repair'),1)
+ assert.equal(result.cards.length,0)
+})
+
+test('another card citing recovery cannot cover a stale revision',async()=>{
+ const inputs=[input('old','node is down','2026-10-16T00:00:00Z'),input('new','node recovered','2026-10-17T00:00:00Z')]
+ const gateway=new StateGateway({card:()=>[card('e0','node is down','prior'),card('e1','node recovered')]})
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{...context,prior_cards:[prior('prior','old')],new_input_ids:['new']},new AbortController().signal)
+ assert.equal(gateway.count('compose.repair'),1)
+ assert.equal(result.cards.length,1)
+ assert.deepEqual(result.cards[0]?.refs,['new'])
+ assert.equal(result.diagnostics?.stale_state_dropped,1)
+})
+
+for(const includeStale of [true,false])test(includeStale?'a failed repair retains valid revisions from unrelated topics':'an unrelated state change does not trigger repair',async()=>{
+ const inputs=[input('a0','node is down','2026-10-16T00:00:00Z'),input('a1','node recovered','2026-10-17T00:00:00Z'),input('b0','design draft','2026-10-16T00:00:00Z'),input('b1','design feedback','2026-10-17T00:00:00Z')]
+ const gateway=new StateGateway({card:request=>{const rows=(JSON.parse(request.prompt) as {inputs:{key:string;text:string}[]}).inputs;return [...(includeStale?[card(rows.find(row=>row.text==='node is down')!.key,'node is down','a')]:[]),card(rows.find(row=>row.text==='design feedback')!.key,'design feedback','b')]}})
+ const complete=gateway.complete.bind(gateway)
+ gateway.complete=async request=>{
+  if(request.usage?.operation?.startsWith('select'))return {text:JSON.stringify({topics:[{title:'Node',refs:['e0','e1']},{title:'Design',refs:['e2','e3']}]})}
+  if(request.usage?.operation==='reconcile')return {text:JSON.stringify({groups:[{members:['t0']},{members:['t1']}]})}
+  return complete(request)
+ }
+ const cache={open:()=>Promise.resolve(),clear:()=>Promise.resolve(),flush:()=>Promise.resolve(),beginRun:()=>({getTopics:()=>[],getScreened:()=>[],appendBatchResult:()=>undefined,getStage:()=>undefined,putStage:()=>undefined,deleteStage:()=>undefined,commit:()=>Promise.resolve()})}
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{...context,prior_cards:[prior('a','a0'),prior('b','b0')],new_input_ids:['a1','b1']},new AbortController().signal,undefined,{cache,scope:'local',force:false})
+ assert.equal(gateway.count('compose.repair'),includeStale?1:0)
+ assert.deepEqual(result.cards.map(card=>card.prior_id),['b'])
+})
+
+test('more than sixteen state updates only require the latest state',async()=>{
+ const inputs=[input('old','node is down','2026-10-16T00:00:00Z'),...Array.from({length:20},(_,i)=>input('new'+i,'node recovered '+i,'2026-10-17T00:'+String(i).padStart(2,'0')+':00Z'))]
+ const gateway=new StateGateway({card:()=>card('e0','node is down','prior'),repair:()=>card('e20','node recovered 19','prior')})
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{...context,prior_cards:[prior('prior','old')],new_input_ids:inputs.slice(1).map(input=>input.id)},new AbortController().signal)
+ assert.deepEqual(result.cards[0]?.refs,['new19'])
+ assert.equal(result.diagnostics?.stale_state_dropped,0)
+})
+
+test('a state change beyond a composition split blocks an earlier stale revision',async()=>{
+ const inputs=[input('old','node is down','2026-10-16T00:00:00Z'),...Array.from({length:205},(_,i)=>input('n'+i,'investigation '+i,'2026-10-17T00:00:00Z')),input('latest','node recovered','2026-10-17T01:00:00Z')]
+ const gateway=new StateGateway({card:request=>{
+  const rows=(JSON.parse(request.prompt) as {inputs:{key:string;text:string}[]}).inputs
+  const recovery=rows.find(row=>row.text==='node recovered'),old=rows.find(row=>row.text==='node is down')
+  if(recovery)return card(recovery.key,recovery.text,'prior')
+  return {...card(old!.key,old!.text,'prior'),refs:[old!.key,rows[1]!.key]}
+ }})
+ const complete=gateway.complete.bind(gateway)
+ gateway.complete=async request=>{
+  if(request.usage?.operation?.startsWith('select')){const rows=(JSON.parse(request.prompt) as {inputs:{key:string}[]}).inputs;return {text:JSON.stringify({topics:[{title:'Node',refs:rows.map(row=>row.key)}]})}}
+  if(request.usage?.operation==='reconcile')return {text:JSON.stringify({groups:[{members:['t0','t1']}]})}
+  return complete(request)
+ }
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{...context,prior_cards:[prior('prior','old')],new_input_ids:inputs.slice(1).map(input=>input.id)},new AbortController().signal)
+ assert.ok(result.cards.length)
+ assert.ok(result.cards.every(card=>card.refs.includes('latest')))
 })

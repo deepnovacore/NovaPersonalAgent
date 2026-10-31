@@ -21,7 +21,7 @@ export interface TimelineStagePort {
 }
 /** A repair retry reuses the attempt-0 key, so a successful repair also heals the cache entry. */
 export function timelineStageKey(kind:TimelineStageKind,request:Pick<CompleteRequest,'model'|'system'|'prompt'>):string{
- return createHash('sha256').update(['timeline-stage-v1',kind,request.model,request.system,request.prompt].join('\u0000')).digest('hex')
+ return createHash('sha256').update(['timeline-stage-v2',kind,request.model,request.system,request.prompt].join('\u0000')).digest('hex')
 }
 export interface TimelineSelectionOptions {
  /** Titles of topics already reused from the cache; read-only context, never evidence. */
