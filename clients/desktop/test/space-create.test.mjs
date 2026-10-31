@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {mkdtemp, mkdir, rm, stat, writeFile, chmod} from 'node:fs/promises'
+import {mkdtemp, mkdir, rm, stat, writeFile, chmod, readdir, readFile} from 'node:fs/promises'
+import {readFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {parseSpaceCreateRequest, createSpaceCreateHandler, spaceCreateErrorCode} from '../src/main/space-create.mjs'
@@ -74,12 +75,6 @@ test('an unfinished Space resumes the same identity instead of rebuilding, and a
   assert.deepEqual(await h.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN}), {ok: true})
   assert.deepEqual(h.calls.map(([name]) => name), ['load', 'resume'])
   assert.deepEqual(h.calls[1][1], {configPath: join(h.directory, 'config.json'), bootstrapToken: TOKEN})
-  const other = await harness(t)
-  await mkdir(other.directory, {mode: 0o700})
-  await writeFile(join(other.directory, 'config.json'), '{}', {mode: 0o600})
-  assert.deepEqual(await other.handler(settingsEvent, {relayUrl: 'https://other.example', bootstrapToken: TOKEN}), {ok: false, error: 'space_relay_mismatch', relayUrl: 'https://relay.example'})
-  assert.deepEqual(other.calls.map(([name]) => name), ['load'])
-  assert.deepEqual(other.persisted, [])
   const done = await harness(t, {configured: () => true})
   assert.deepEqual(await done.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN}), {ok: false, error: 'space_already_created'})
   assert.deepEqual(done.calls, [])
@@ -122,4 +117,60 @@ test('an existing directory that others can read is refused', {skip: process.pla
   await chmod(h.directory, 0o755)
   assert.deepEqual(await h.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN}), {ok: false, error: 'space_directory_not_private'})
   assert.deepEqual(h.calls.map(([name]) => name), ['load'])
+})
+
+const goodConfig = relay => JSON.stringify({relay_url: relay})
+async function seed(h, content, personal) {
+  await mkdir(h.directory, {mode: 0o700})
+  await writeFile(join(h.directory, 'config.json'), content, {mode: 0o600})
+  if (personal !== undefined) await writeFile(join(h.directory, 'personal.json'), personal, {mode: 0o600})
+}
+function realReader() {
+  return {readHostSpaceConfig: path => JSON.parse(readFileSync(path, 'utf8'))}
+}
+
+test('an unregistered config pinned to a different relay is archived unread and a fresh Space is created', async t => {
+  const secret = 'SECRET-IDENTITY-MARKER'
+  const h = await harness(t, {runtime: {readHostSpaceConfig: path => { const c = JSON.parse(readFileSync(path, 'utf8')); return {relay_url: c.relay_url} }}})
+  const logs = []
+  for (const name of ['log', 'warn', 'error', 'info']) t.mock.method(console, name, (...args) => logs.push(args.join(' ')))
+  await seed(h, JSON.stringify({relay_url: 'https://typo.example', secret}), '')
+  const result = await h.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN})
+  assert.deepEqual(result, {ok: true})
+  assert.deepEqual(h.calls.map(([name]) => name), ['load', 'init'])
+  const names = await readdir(h.directory)
+  const archived = names.filter(name => /^config\.unfinished-\d+\.json$/u.test(name))
+  assert.equal(archived.length, 1)
+  assert.equal((await stat(join(h.directory, archived[0]))).mode & 0o777, 0o600)
+  assert.match(await readFile(join(h.directory, archived[0]), 'utf8'), /typo\.example/u)
+  assert.ok(!JSON.stringify(result).includes(secret) && !logs.join('\n').includes(secret))
+  assert.equal((await stat(h.directory)).mode & 0o777, 0o700)
+  assert.deepEqual(h.persisted, [join(h.directory, 'config.json')])
+})
+
+test('a different relay with a non-empty personal.json keeps the mismatch refusal and archives nothing', async t => {
+  const h = await harness(t, {runtime: realReader()})
+  await seed(h, goodConfig('https://typo.example'), '{"data":1}')
+  assert.deepEqual(await h.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN}), {ok: false, error: 'space_relay_mismatch', relayUrl: 'https://typo.example'})
+  assert.deepEqual((await readdir(h.directory)).sort(), ['config.json', 'personal.json'])
+  assert.deepEqual(h.calls.map(([name]) => name), ['load'])
+})
+
+test('the same relay still resumes the original identity', async t => {
+  const h = await harness(t, {runtime: realReader()})
+  await seed(h, goodConfig('https://relay.example'), '')
+  assert.deepEqual(await h.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN}), {ok: true})
+  assert.deepEqual(h.calls.map(([name]) => name), ['load', 'resume'])
+  assert.deepEqual((await readdir(h.directory)).sort(), ['config.json', 'personal.json'])
+})
+
+test('an empty config.json left by an interrupted write is removed and creation proceeds; a non-empty broken one is invalid', async t => {
+  const h = await harness(t, {runtime: {readHostSpaceConfig: path => JSON.parse(readFileSync(path, 'utf8'))}})
+  await seed(h, '')
+  assert.deepEqual(await h.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN}), {ok: true})
+  assert.deepEqual(h.calls.map(([name]) => name), ['load', 'init'])
+  assert.deepEqual((await readdir(h.directory)).sort(), ['config.json'])
+  const bad = await harness(t, {runtime: {readHostSpaceConfig: path => JSON.parse(readFileSync(path, 'utf8'))}})
+  await seed(bad, '{not json')
+  assert.deepEqual(await bad.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN}), {ok: false, error: 'space_config_invalid'})
 })

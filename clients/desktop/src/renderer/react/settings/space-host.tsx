@@ -104,6 +104,12 @@ function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en:string
    let result:any
    try{result=await api.spaceCreate({relayUrl:url,bootstrapToken:secret})}catch{result={ok:false,error:'space_create_failed'}}
    if(!active.current)return
+   if(result?.error==='space_already_created'){
+    let hosted=false
+    try{hosted=(await api.personalCommand('space.status',{}))?.mode==='host'}catch{hosted=false}
+    if(!active.current)return
+    if(!hosted){setPhase('restart_failed');setProblem(label('空间已创建，重启后台后生效','Space created. Restart the backend to use it.'));return}
+   }
    if(result?.ok!==true){setPhase('idle');setProblem(createFailure(String(result?.error??''),typeof result?.relayUrl==='string'?result.relayUrl:undefined,label));return}
    setToken('');setReveal(false)
    await restart()

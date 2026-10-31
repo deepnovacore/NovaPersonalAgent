@@ -1,4 +1,4 @@
-import {lstat, mkdir} from 'node:fs/promises'
+import {lstat, mkdir, rename, unlink} from 'node:fs/promises'
 import {join} from 'node:path'
 
 // Main-process only. The bootstrap token stays in this process's memory: it is
@@ -33,7 +33,7 @@ export function spaceCreateErrorCode(error) {
   if (code === 'bootstrap_denied') return 'bootstrap_denied'
   if (['tls_required', 'origin_url_required', 'relay_tls_origin_required'].includes(code)) return 'relay_tls_required'
   if (code === 'space_personal_path_exists') return 'space_data_exists'
-  if (['space_config_permissions', 'space_config_capacity', 'space_identity_mismatch'].includes(code)) return 'space_config_invalid'
+  if (['space_config_permissions', 'space_config_capacity', 'space_identity_mismatch', 'space_config_invalid'].includes(code)) return 'space_config_invalid'
   if (error?.name === 'TimeoutError' || error?.name === 'AbortError' || (error instanceof TypeError && /fetch/iu.test(error.message))) return 'relay_unreachable'
   if (typeof error?.status === 'number' && error.status >= 400) return 'relay_rejected'
   return 'space_create_failed'
@@ -47,8 +47,8 @@ async function privateDirectory(directory) {
 
 /**
  * The Space lives at a fixed main-owned path. An unfinished registration
- * (config written, relay unreachable) resumes the same identity; a config is
- * never deleted or rebuilt here.
+ * (config written, relay unreachable) resumes the same identity on the same
+ * relay; on a different relay it is archived and a new Space is created.
  */
 export function createSpaceCreateHandler({allowed, directory, configured, loadRuntime, persist}) {
   let inFlight = false
@@ -63,17 +63,30 @@ export function createSpaceCreateHandler({allowed, directory, configured, loadRu
       const runtime = await loadRuntime()
       const root = directory(), configPath = join(root, 'config.json'), personalPath = join(root, 'personal.json')
       await privateDirectory(root)
-      const existing = await lstat(configPath).then(() => true, error => {
-        if (error?.code === 'ENOENT') return false
+      const missing = error => {
+        if (error?.code === 'ENOENT') return null
         throw error
-      })
-      if (existing) {
-        const relayUrl = runtime.readHostSpaceConfig(configPath).relay_url
-        if (new URL(relayUrl).origin !== request.relayUrl) return {ok: false, error: 'space_relay_mismatch', relayUrl: new URL(relayUrl).origin}
-        await runtime.resumeHostSpaceRegistration({configPath, bootstrapToken: request.bootstrapToken})
-      } else {
-        await runtime.initializeHostSpace({configPath, personalPath, relayUrl: request.relayUrl, bootstrapToken: request.bootstrapToken})
       }
+      let info = await lstat(configPath).catch(missing)
+      // An interrupted first write leaves a zero-byte file that holds no identity.
+      if (info?.isFile() && info.size === 0) { await unlink(configPath); info = null }
+      let resume = false
+      if (info) {
+        let relayUrl
+        try { relayUrl = new URL(runtime.readHostSpaceConfig(configPath).relay_url).origin } catch (error) {
+          throw error?.code ? error : Object.assign(new Error('space_config_invalid'), {code: 'space_config_invalid'})
+        }
+        if (relayUrl === request.relayUrl) resume = true
+        else {
+          // Unregistered (configured() is false) and no personal data: the half-made Space
+          // is pinned to a mistyped relay. Archive it aside rather than leave a dead end.
+          const personal = await lstat(personalPath).catch(missing)
+          if (personal && personal.size > 0) return {ok: false, error: 'space_relay_mismatch', relayUrl}
+          await rename(configPath, join(root, `config.unfinished-${Date.now()}.json`))
+        }
+      }
+      if (resume) await runtime.resumeHostSpaceRegistration({configPath, bootstrapToken: request.bootstrapToken})
+      else await runtime.initializeHostSpace({configPath, personalPath, relayUrl: request.relayUrl, bootstrapToken: request.bootstrapToken})
       await persist(configPath)
       return {ok: true}
     } catch (error) {

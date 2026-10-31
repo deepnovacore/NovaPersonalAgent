@@ -90,3 +90,29 @@ test('creation failures show a redacted reason and keep the form usable; a faile
  await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})));await waitFor(()=>assert.match(v.container.textContent??'',/后台未能重启/))
  await act(async()=>fireEvent.click(v.getByRole('button',{name:'重启后台'})));await waitFor(()=>assert.ok(v.queryByRole('button',{name:'生成一次性配对码'}),'condition not met'))
 })
+test('an already-created but not-yet-active Space offers a locked restart; an active one keeps the plain notice',async()=>{
+ let restarts=0
+ const api=independentApi({spaceCreate:async()=>({ok:false,error:'space_already_created'})});const baseRestart=api.restart
+ api.restart=async()=>{restarts++;return baseRestart()}
+ const v=render(<SpaceHostPanel api={api}/>)
+ await waitFor(()=>assert.ok(v.queryByRole('button',{name:'创建空间'}),'condition not met'))
+ fireEvent.change(v.getByLabelText('Relay 地址'),{target:{value:'https://relay.example'}});fireEvent.change(v.getByLabelText('Bootstrap 凭据'),{target:{value:TOKEN}})
+ await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})))
+ await waitFor(()=>assert.ok(v.queryByRole('button',{name:'重启后台'}),'condition not met'))
+ assert.match(v.container.textContent??'',/空间已创建，重启后台后生效/)
+ assert.equal((v.getByRole('button',{name:'创建空间'}) as HTMLButtonElement).disabled,true)
+ assert.equal(restarts,0)
+ await act(async()=>fireEvent.click(v.getByRole('button',{name:'重启后台'})))
+ await waitFor(()=>assert.ok(v.queryByRole('button',{name:'生成一次性配对码'}),'condition not met'))
+ assert.equal(restarts,1)
+ cleanup()
+ let hostNow=false
+ const active=independentApi({spaceCreate:async()=>{hostNow=true;return {ok:false,error:'space_already_created'}}})
+ const base=active.personalCommand;active.personalCommand=async(method:string,params:any)=>method==='space.status'&&hostNow?{mode:'host',space:'x',clients:[]}:base(method,params)
+ const w=render(<SpaceHostPanel api={active}/>)
+ await waitFor(()=>assert.ok(w.queryByRole('button',{name:'创建空间'}),'condition not met'))
+ fireEvent.change(w.getByLabelText('Relay 地址'),{target:{value:'https://relay.example'}});fireEvent.change(w.getByLabelText('Bootstrap 凭据'),{target:{value:TOKEN}})
+ await act(async()=>fireEvent.click(w.getByRole('button',{name:'创建空间'})))
+ await waitFor(()=>assert.match(w.container.textContent??'',/已经创建过空间/))
+ assert.ok(!w.queryByRole('button',{name:'重启后台'}))
+})
