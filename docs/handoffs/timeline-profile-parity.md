@@ -10,7 +10,10 @@ Status: **未合入、未 push**；主 checkout 未改动。
 
 两处双端差异修复：
 
-1. **PC（runtime）新增 Timeline 增量缓存**：持久化 screening 主题索引（正/负两向）+ 阶段结果缓存（select / reconcile / batch），让「失败恢复、重复 tick、增量新消息」不再为没变化的输入重复付费。缺省路径（`force=false`，即 60s tick / 来源变更触发的刷新）读缓存；手动刷新 `force=true` 只写不读，保持「刷新就重算」的既有语义。
+1. **PC（runtime）新增 Timeline 增量缓存 + Phase 2 P0 增量读取**：
+   - 持久化 screening 主题索引（正/负两向）+ 阶段结果缓存（select / reconcile / batch），失败恢复、重复 tick、增量新消息不再为没变化的输入重复付费；
+   - **所有刷新（含手动 `force`）都是缓存优先**：手动刷新只绕过 brief 的 checkpoint 提前返回，不再绕过缓存；
+   - 没有新证据的主题整题跳过（不重写旧卡）；有新证据的主题只送「全部新消息 + 旧证据锚点」，并加两条宿主规则：修订必须引用新原文（R1）、唯一重叠旧卡可补稳定身份（R2）。
 2. **移动端删除 Profile 预算硬上限**：`ProfileBudget` 退化为「验收专用记账」，保留 reserve/settle 与保守花费显示，删除 `profile_budget_exhausted` 抛出处、额度暂停/恢复/升级状态机与相关 dart-define；旧安装的 `profile_budget_exhausted` terminal 状态在启动时一次性自愈。
 
 ## 1. PC 增量缓存（runtime）
@@ -27,7 +30,10 @@ Status: **未合入、未 push**；主 checkout 未改动。
 | 场景 | 行为 |
 | --- | --- |
 | 输入池未变（重复 tick / 失败恢复） | topics 全部复用 → 不调用筛选；reconcile/compose/review 命中阶段缓存 → 0 次模型调用 |
-| 新增 N 条消息 | 只有这 N 条进入 `selectTimelineTopics`（复用主题标题作为只读 `existing_topics` hints）；旧主题原样进入 reconcile |
+| 新增 N 条消息 | 只有这 N 条进入 `selectTimelineTopics`（复用主题标题作为只读 `existing_topics` hints）；旧主题在 reconcile 后按「是否含新证据」分成 dirty / clean |
+| 无新证据的主题（clean） | 整题跳过写作，旧卡保留（`cache_skipped_topics` 计数） |
+| 有新证据的主题（dirty） | 新消息全量 + 旧证据锚点（旧卡 evidence_ids / 主题首条 / 状态词消息 / 新消息前 6 条），预算 `max(8k, 0.5×新消息字符)`，被裁剪时 `history_complete=false` |
+| 修订旧卡 | 必须引用 ≥1 条新原文，否则丢弃本次修订（`host_dropped.unsupported_revision`）；模型漏填 `prior_id` 但只有一张旧卡与其 refs 重叠时，宿主补稳定身份 |
 | 成员 version 变化 | 整个主题失效，其存活成员按新增输入重筛 |
 | 成员从池中消失（滑出时间窗/撤权） | 只删该成员，主题保留其余成员 |
 | 被筛掉的输入（负向索引） | 同 id+version 不再重筛，直到 72h TTL 或 version 变化 |
@@ -35,6 +41,14 @@ Status: **未合入、未 push**；主 checkout 未改动。
 | 小池直通（≤200 条 / ≤60k 字符） | 不写主题索引（模型本来就没参与），避免直通结果被误复用 |
 
 阶段缓存 key = `sha256('timeline-stage-v1'|<kind>|<model>|<system>|<attempt-0 prompt>)`；命中后仍走完整 schema/引用/quote/time/敏感内容校验，不通过即视为 miss 并删除条目；repair 成功的输出写回 attempt-0 key。batch 缓存以「compose+review 一个整体」为单位，payload 为该批复核后的 cards + 该批 `diagnostics.stages`。
+
+### Phase 2 P0（同分支追加）
+
+- 新增 [`runtime/src/model/timeline-anchors.ts`](../../runtime/src/model/timeline-anchors.ts)：`withTimelineAnchors()` 纯函数，按「旧卡 evidence_ids → 主题首条 → 状态词消息 → 新消息前 6 条」挑旧证据，新消息永不裁剪，超预算只丢可选锚点并置 `history_complete=false`。
+- `personal-writer.ts`：reconcile 之后按 `new_input_ids` 把主题分成 dirty / clean；clean 直接跳过；dirty 先裁锚点再打包写作批。`cache_skipped_topics` 进入 diagnostics。
+- `timeline-selection.ts`：有持久索引时关闭小池直通（`screen:true`），让新增输入也进索引；`timelineCompositionBatches` 保留锚点裁剪带来的 `history_complete=false`。
+- `timeline-brief.ts`：`prior_cards` 增加 `evidence_ids`（旧卡 refs，≤16/卡）；发布前加 R1（修订须引用新原文）与 R2（唯一重叠旧卡补 `prior_id`）。
+- **双端**：Dart 侧本轮未改，Anchor/R1-R3 的 Dart parity 属于设计文档 P1。
 
 ### 生命周期与隐私
 
@@ -88,8 +102,8 @@ runtime：
 | 项目 | 结果 |
 | --- | --- |
 | `node scripts/clean-dist.mjs && tsc -p tsconfig.json` | ✅ 0 error |
-| timeline / writer 定向（`timeline-*.test.js` + `model-adapters.test.js`） | ✅ 143 passed |
-| host + 邻近接线（`personal-agent*`、`reading-copies-host`、`daily-workbench`、`workbench-*`、`assembly`、`space-host*` 等） | ✅ 328 passed |
+| timeline / writer 定向（`timeline-*.test.js` + `model-adapters.test.js`，含新增 anchors / clean-skip / R1-R2 用例） | ✅ 150 passed |
+| host + 邻近接线（`personal-agent*`、`reading-copies-host`、`daily-workbench`、`workbench-*`、`assembly`、`space-host*`、source-processing、scheduled、profile 等） | ✅ 288 passed |
 | 资料处理 / 调度 / 画像 / usage（`source-processing*`、`scheduled-*`、`profile-*`、`project-digests`、`usage-*`） | ✅ 141 passed |
 | `tsc --noEmit` / `eslint src eval test` | ✅ 0 error |
 | 全量 `node --test dist/test/*.test.js` | ⚠️ 未在本机跑完：全量并发时卡在与本次改动无关的重型集成用例（如 `task-dispatch` 单独跑 43 passed/21s，并发 390 文件时挂起），属本机沙箱资源/外部依赖限制；已用上面的定向批次覆盖受影响面 |
