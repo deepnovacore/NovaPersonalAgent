@@ -90,7 +90,9 @@ dirty 主题送写作时不再送主题全部原文，改为「新消息全量 +
 - **clean 判定需要「有新增证据」这一前提**：`new_input_ids` 非空时按主题是否含新 id 分区；没有新增证据的整轮直接跳过写作（旧卡保留），避免跨天窗口滚动时把全部主题重写一遍。
 - **R2 落地为「refs 重叠唯一的旧卡」**，而不是设计里的「主题唯一旧卡」：brief 层看不到主题，只能按「新卡 refs 与已发布卡 refs 的重叠数」判定；候选 >1 时不猜，保留双方。
 - **R1 严格**：带稳定身份的卡必须引用 ≥1 条 `new_input_ids`，否则 `host_dropped.unsupported_revision` 丢弃本次修订。
-- **R3（stale_state 修复重试）与重复告警折叠未实现**，留在 P1；Dart 侧 parity 同样留到 P1。
+- **R3、重复告警折叠、Profile 新观察配额已实现**（同分支 P1）；R3 的修复是一次额外 `compose.repair` 调用，修复不达标时丢弃修订卡而不是清洗其正文——宁可保留旧结论也不发布弱证据状态。
+- **重复折叠只对同名 `group` 生效**：没有 group 的消息无法证明是同一条通知，宁可多花 token 也不误合并两条无关同文。
+- **work 最新状态 / 按区重写、Dart parity 仍未做**：前者需要 observations 携带项目身份、发布层支持分区时间；后者需要专门分支与真机/dart 测试对照。
 
 ## 5. Profile 侧的等价设计（P1）
 
@@ -123,7 +125,7 @@ dirty 主题送写作时不再送主题全部原文，改为「新消息全量 +
 | 阶段 | 内容 | 验收（可测） |
 | --- | --- | --- |
 | P0 ✅ 已实现 | clean 主题跳过 compose/review；anchor 配额；R1/R2；`prior_cards` 扩展 `evidence_ids`；小池直通在有主题索引时关闭 | ① 回放「14 天池 + 5% 新增」，按 usage 统计 compose/review 输入 token，降幅 ≥60%；② 同主题不重复出卡、`prior_id` 保持；③「计划→取消/完成」场景状态正确 |
-| P1 | R3 + 修复重试；重复告警折叠；Profile 新观察预留名额 + work 最新状态 + 按区重写 | 离线评测：计划→取消、告警恢复、无关噪音、撤回、主题漂移各 ≥3 例，状态错误数不高于全量基线 |
+| P1 ◐ 部分实现 | ✅ R3（一次 `compose.repair`，失败则丢弃修订）；✅ 重复告警折叠（仅同 group）；✅ Profile 新观察 25% 配额；⏳ work 以最新状态为准 / 按区重写未做（需要 observations 携带项目身份与发布层分区）；⏳ Dart parity 未做（需单独分支 + 真机验收） | 离线评测：计划→取消、告警恢复、无关噪音、撤回、主题漂移各 ≥3 例，状态错误数不高于全量基线 |
 | P2 | reconcile 增量（只送新主题 + 旧索引摘要）、`continues` 边、主题级 TTL/全量校准策略 | 归并调用 token 降幅 ≥40%，合并质量不下降 |
 
 **token 降幅度量**：不靠估算，用现有 usage 记账（`runtime/src/usage/model-call.ts`）按 `feature:'timeline'` + `operation` 聚合，对比同一 fixture 回放的输入 token；Dart 端用 `ProfileBudget`/`ModelClient.completedUsage` 同口径统计。

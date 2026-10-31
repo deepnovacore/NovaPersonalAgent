@@ -42,13 +42,16 @@ Status: **未合入、未 push**；主 checkout 未改动。
 
 阶段缓存 key = `sha256('timeline-stage-v1'|<kind>|<model>|<system>|<attempt-0 prompt>)`；命中后仍走完整 schema/引用/quote/time/敏感内容校验，不通过即视为 miss 并删除条目；repair 成功的输出写回 attempt-0 key。batch 缓存以「compose+review 一个整体」为单位，payload 为该批复核后的 cards + 该批 `diagnostics.stages`。
 
-### Phase 2 P0（同分支追加）
+### Phase 2 P0/P1（同分支追加）
 
 - 新增 [`runtime/src/model/timeline-anchors.ts`](../../runtime/src/model/timeline-anchors.ts)：`withTimelineAnchors()` 纯函数，按「旧卡 evidence_ids → 主题首条 → 状态词消息 → 新消息前 6 条」挑旧证据，新消息永不裁剪，超预算只丢可选锚点并置 `history_complete=false`。
 - `personal-writer.ts`：reconcile 之后按 `new_input_ids` 把主题分成 dirty / clean；clean 直接跳过；dirty 先裁锚点再打包写作批。`cache_skipped_topics` 进入 diagnostics。
 - `timeline-selection.ts`：有持久索引时关闭小池直通（`screen:true`），让新增输入也进索引；`timelineCompositionBatches` 保留锚点裁剪带来的 `history_complete=false`。
 - `timeline-brief.ts`：`prior_cards` 增加 `evidence_ids`（旧卡 refs，≤16/卡）；发布前加 R1（修订须引用新原文）与 R2（唯一重叠旧卡补 `prior_id`）。
-- **双端**：Dart 侧本轮未改，Anchor/R1-R3 的 Dart parity 属于设计文档 P1。
+- `timeline-anchors.ts` 追加 **重复告警折叠**：同 `group` + 归一化正文相同的告警只送最新一条，`repeat_count` 随批次走；没有 group 的消息不折叠（避免两条无关同文被合并）。
+- `personal-writer.ts` 追加 **R3 stale-state 护栏**：修订卡若没引用带状态词（取消/完成/恢复/失败/上线…）的新消息，先发一次 `compose.repair` 要求补引；修复仍不达标就丢弃该修订卡（旧卡保留），并记 `stale_state_repairs` / `stale_state_dropped`。
+- Profile **观察采样配额**：`source-processing.ts` 抽出 `profileLaneOrder()`，每条 lane 的**最新 25% 观察优先**，其余维持全历史均匀抽样，避免新信息被均匀抽样挤掉。
+- **双端**：Dart 侧本轮未改，Anchor/R1-R3 与折叠的 Dart parity 需要单独分支 + 真机验收（parity 文档要求同模型同输入对照）。
 
 ### 生命周期与隐私
 
@@ -103,7 +106,7 @@ runtime：
 | --- | --- |
 | `node scripts/clean-dist.mjs && tsc -p tsconfig.json` | ✅ 0 error |
 | timeline / writer 定向（`timeline-*.test.js` + `model-adapters.test.js`，含新增 anchors / clean-skip / R1-R2 用例） | ✅ 150 passed |
-| host + 邻近接线（`personal-agent*`、`reading-copies-host`、`daily-workbench`、`workbench-*`、`assembly`、`space-host*`、source-processing、scheduled、profile 等） | ✅ 288 passed |
+| host + 邻近接线（`personal-agent*`、`reading-copies-host`、`daily-workbench`、`workbench-*`、`assembly`、`space-host*`、source-processing、scheduled、profile、lane-order 等） | ✅ 438 passed（含 P1 新增的折叠 / R3 / lane 配额用例） |
 | 资料处理 / 调度 / 画像 / usage（`source-processing*`、`scheduled-*`、`profile-*`、`project-digests`、`usage-*`） | ✅ 141 passed |
 | `tsc --noEmit` / `eslint src eval test` | ✅ 0 error |
 | 全量 `node --test dist/test/*.test.js` | ⚠️ 未在本机跑完：全量并发时卡在与本次改动无关的重型集成用例（如 `task-dispatch` 单独跑 43 passed/21s，并发 390 文件时挂起），属本机沙箱资源/外部依赖限制；已用上面的定向批次覆盖受影响面 |
