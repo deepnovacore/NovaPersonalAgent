@@ -48,7 +48,7 @@ Suggestion cards, drawn from the sources you've connected, offer to adopt someth
 
 Goal task progress counts the Todos linked to it and excludes any that were cancelled; whether a Goal is actually done is always your call, never inferred automatically.
 
-Nova can propose long-term goals from recent conversations, creating them only when you accept. Choose daily check-ins, progress-based follow-ups or no reminders. Use a check-in’s reply action before answering to update the goal’s derived progress summary; pausing a goal stops its check-ins. Proactive messages default to five per day, adjustable in Settings → General → Proactivity.
+Nova can propose long-term goals from recent conversations, creating them only when you accept. Choose daily check-ins, progress-based follow-ups or no reminders. Use a check-in’s reply action before answering to update the goal’s derived progress summary; pausing a goal stops its check-ins. Proactive messages default to five per day, adjustable in Settings → General → Proactivity; news pushes have their own allowance of two a day and do not count toward it.
 
 Direct @mentions of you in the Feishu chats you selected feed the Timeline briefing once you have given both Feishu consents; they are not recorded as Todos. See [Sources and connectors](sources-and-connectors.md#feishu).
 

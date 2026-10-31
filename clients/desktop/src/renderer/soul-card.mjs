@@ -13,7 +13,7 @@ export function soulIntro(soul,lang=currentLanguage()){
   if(filled(soul?.reply_style))parts.push(t('平时说话我会按你说的来：{0}。',oneLine(soul.reply_style,INTRO_ROLE_LIMIT)))
   const contact=soul?.contact
   if(contact){
-   if(contact.briefs_on||contact.discovery_on)parts.push(t('我最多每天主动找你 {0} 次，{1} 到 {2} 不打扰你。',contact.daily_cap,contact.quiet_start,contact.quiet_end))
+   if(contact.briefs_on||contact.discovery_on)parts.push(t('我最多每天主动找你 {0} 次（资讯推送另计，每天最多 2 条），{1} 到 {2} 不打扰你。',contact.daily_cap,contact.quiet_start,contact.quiet_end))
    else parts.push(t('我不会主动来找你，你叫我我再出现。'))
   }
   return parts.join(lang==='en'?' ':'')
@@ -21,7 +21,7 @@ export function soulIntro(soul,lang=currentLanguage()){
 }
 export function contactSummary(contact){
  if(!contact)return ''
- const lines=[t('每天最多主动找你 {0} 次；{1} 到 {2} 不打扰你。',contact.daily_cap,contact.quiet_start,contact.quiet_end)]
+ const lines=[t('每天最多主动找你 {0} 次（资讯推送另计，最多 2 条）；{1} 到 {2} 不打扰你。',contact.daily_cap,contact.quiet_start,contact.quiet_end)]
  lines.push(contact.briefs_on?t('简报：已开启'):t('简报：未开启'),contact.discovery_on?t('主动发现：已开启'):t('主动发现：未开启'))
  return lines.join(' · ')
 }
