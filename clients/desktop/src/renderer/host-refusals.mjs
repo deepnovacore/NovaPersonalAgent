@@ -34,6 +34,16 @@ export const HOST_REFUSALS=Object.freeze({
  outcome_unknown:'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。',
  version_conflict:'内容已在其他操作中更新，请核对最新状态后重试。',
  brief_in_quiet_hours:'简报时间在免打扰时段内，不会发送。请调整简报时间或免打扰时段。',
+ // Realtime voice connect failures (runtime RealtimeConnectError); the host never forwards provider text.
+ realtime_auth_rejected:'实时语音鉴权失败，请在设置中检查语音服务的 API Key 与地域（千问为 DashScope 北京或新加坡站）。',
+ realtime_endpoint_not_found:'找不到实时语音服务地址或模型，请检查语音服务的地域、地址与模型名称。',
+ realtime_rate_limited:'实时语音服务请求过于频繁或额度不足，请稍后重试或检查账户额度。',
+ realtime_handshake_rejected:'实时语音服务拒绝了连接，请稍后重试；若持续失败，请检查语音服务设置。',
+ realtime_unreachable:'无法连接实时语音服务，请检查网络或代理后重试。',
+ realtime_timeout:'连接实时语音服务超时，请检查网络后重试。',
+ realtime_session_rejected:'实时语音服务拒绝了会话，可能是模型权限或账户余额问题，请检查语音服务的模型与账户状态。',
+ realtime_connect_failed:'实时语音连接失败，请稍后重试；若持续失败，请检查语音服务设置。',
+ realtime_protocol_error:'实时语音服务的响应不符合预期，请确认所选模型支持实时语音后重试。',
 })
 
 const GENERIC_REFUSAL='操作没有完成，请检查当前状态后再试。'

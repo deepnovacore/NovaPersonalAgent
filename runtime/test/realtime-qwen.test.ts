@@ -15,6 +15,7 @@ import {
   type QwenSocket,
 } from '../src/realtime/qwen.js'
 import { ItemDeliveryUncertainError, type RealtimeProviderEvent } from '../src/realtime/protocol.js'
+import { RealtimeConnectError } from '../src/realtime/transport.js'
 import { RealtimeProviderSession } from '../src/realtime/provider-session.js'
 import {createOpenAIWireProfile} from '../src/realtime/openai-wire-profile.js'
 import {createStepFunWireProfile} from '../src/realtime/integrated-wire-profile.js'
@@ -338,7 +339,7 @@ test('a session id that changes between created and updated is rejected', async 
   await assert.rejects(
     adapter.connect({tools: [], signal: new AbortController().signal}),
     (error: unknown) => error instanceof QwenRealtimeError
-      && error.message.includes('session identity changed'),
+      && error.message === 'realtime_protocol_error',
   )
 })
 
@@ -1567,4 +1568,74 @@ test('OpenAI GA item added confirms host delivery and playback truncates the exa
   await adapter.reportPlayback({response_id:'r',played_ms:40,disposition:'interrupted'},signal)
   assert.equal(scripted.sent.length,count)
   await adapter.close();scripted.end()
+})
+
+function recordingTelemetry() {
+  const records: {kind: string; payload: Record<string, unknown>}[] = []
+  return {
+    records,
+    telemetry: {
+      record(kind: string, payload: Readonly<Record<string, unknown>>) { records.push({kind, payload: {...payload}}) },
+      close() { /* nothing */ },
+    },
+  }
+}
+
+test('connect failures surface a sanitized code and record integrated.connect telemetry', async () => {
+  for (const [failure, code] of [
+    [new RealtimeConnectError('realtime_auth_rejected', 401), 'realtime_auth_rejected'],
+    [new RealtimeConnectError('realtime_endpoint_not_found', 404), 'realtime_endpoint_not_found'],
+    [new RealtimeConnectError('realtime_unreachable'), 'realtime_unreachable'],
+    [new Error('boom secret-key-value wss://example.invalid/realtime'), 'realtime_connect_failed'],
+  ] as const) {
+    const {records, telemetry} = recordingTelemetry()
+    const adapter = new QwenAudioRealtimeAdapter({
+      url: 'wss://example.invalid/realtime', apiKey: 'secret-key-value', model: 'm', voice: 'v',
+      idFactory: ids(), telemetry, connector: () => Promise.reject(failure),
+    })
+    await assert.rejects(
+      adapter.connect({tools: [], signal: new AbortController().signal}),
+      (error: unknown) => error instanceof QwenRealtimeError && error.message === code,
+    )
+    assert.equal(records.length, 1)
+    assert.equal(records[0]!.kind, 'integrated.connect')
+    assert.equal(records[0]!.payload.provider, 'qwen')
+    assert.equal(records[0]!.payload.outcome, 'failed')
+    assert.equal(records[0]!.payload.code, code)
+    if (failure instanceof RealtimeConnectError && failure.status !== undefined) {
+      assert.equal(records[0]!.payload.http_status, failure.status)
+    }
+    const serialized = JSON.stringify(records)
+    assert.ok(!serialized.includes('secret-key-value'))
+    assert.ok(!serialized.includes('example.invalid'))
+  }
+})
+
+test('a provider error event during setup is reported as realtime_session_rejected', async () => {
+  const {records, telemetry} = recordingTelemetry()
+  const scripted = scriptedSocket([{type: 'error', error: {code: 'Arrearage', message: 'secret-key-value overdue'}}])
+  const adapter = adapterFor(scripted, {apiKey: 'secret-key-value', telemetry})
+  await assert.rejects(
+    adapter.connect({tools: [], signal: new AbortController().signal}),
+    (error: unknown) => error instanceof QwenRealtimeError && error.message === 'realtime_session_rejected',
+  )
+  assert.equal(records[0]!.payload.code, 'realtime_session_rejected')
+  assert.equal(records[0]!.payload.provider_code, 'Arrearage')
+  assert.ok(!JSON.stringify(records).includes('secret-key-value'))
+})
+
+test('a setup that never answers times out as realtime_timeout', async () => {
+  const adapter = adapterFor(scriptedSocket(), {connectTimeout: 0.02})
+  await assert.rejects(
+    adapter.connect({tools: [], signal: new AbortController().signal}),
+    (error: unknown) => error instanceof QwenRealtimeError && error.message === 'realtime_timeout',
+  )
+})
+
+test('a successful connect records integrated.connect without the credential', async () => {
+  const {records, telemetry} = recordingTelemetry()
+  const adapter = adapterFor(scriptedSocket([...handshake]), {apiKey: 'secret-key-value', telemetry})
+  await adapter.connect({tools: [], signal: new AbortController().signal})
+  assert.deepEqual(records.map(record => [record.kind, record.payload.provider, record.payload.outcome]), [['integrated.connect', 'qwen', 'connected']])
+  assert.ok(!JSON.stringify(records).includes('secret-key-value'))
 })

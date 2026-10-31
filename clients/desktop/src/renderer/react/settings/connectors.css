@@ -28,7 +28,13 @@
   background: var(--warn-wash);
   color: var(--warn);
   font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
 }
+#connectors-home .connectors-error p { margin: 0; flex: 1 1 100%; }
+#connectors-home .connectors-error .connector-retry.rt-Button { flex: none; }
 #connectors-home .connectors-empty { margin: 0; color: var(--ink-dim); font-size: 12px; }
 
 /* ── Entry card grid ─────────────────────────────────────────────────────── */

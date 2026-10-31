@@ -19,6 +19,9 @@ const MODEL_FAILURES={
   model_http_quota:'模型服务账户余额不足或已欠费，请充值或在设置中更换密钥后重试。',
   model_http_rate_limited:'模型服务请求过于频繁，请稍后重试。',
 }
+/** Failures that only mean a superseded voice start was torn down; nothing for the user to act on. */
+const VOICE_CANCELLATIONS=new Set(['realtime_connect_aborted','conversation_runtime_closed','conversation_cleared','conversation_closed','presentation_hidden','voice_not_owned'])
+function supersededCancellation(error){return error?.outcome_unknown===true||VOICE_CANCELLATIONS.has(error?.refusal_code)}
 function conversationSnapshot(value){
   if(!value||typeof value.selected_id!=='string'||!value.selected_id||!Array.isArray(value.items))return false
   const ids=new Set()
@@ -38,8 +41,10 @@ function dropDraftIntent(state){
  return had
 }
 export class PersonalController {
-  constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{}}) {
+  constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{},presentationChanged=(_mode,_collapsed)=>{}}) {
     this.confirmBuildSwitch=confirmBuildSwitch
+    // Synchronous layout hook: the renderer must leave (or enter) the workbench layout before the native window changes size.
+    this.presentationChanged=presentationChanged
     Object.assign(this,{startRequests:new Map(),send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false,voiceState:null,voiceNotice:''})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
@@ -144,12 +149,17 @@ export class PersonalController {
   }
   async applyMode(mode,{activate=false}={}){
     this.presentationMode=mode;this.collapsed=mode!=='workbench'
+    // Publish before awaiting: main resizes the window as soon as the presentation IPC arrives, and that call may
+    // stall or fail afterwards. The window keeps its new size on failure, so the collapsed state is not rolled back.
     if(mode==='background'){
       this.generation++;if(this.dictationId)this.send({type:'input.dictation',id:this.dictationId,action:'cancel',conversation_id:this.dictationConversationId})
       this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
-      await Promise.all([this.stop(),this.applyPresentation?.(mode,{activate:false})])
-    }else await this.applyPresentation?.(mode,{activate})
-    this.changed()
+    }
+    this.presentationChanged(mode,this.collapsed);this.changed()
+    try{
+      if(mode==='background')await Promise.all([this.stop(),this.applyPresentation?.(mode,{activate:false})])
+      else await this.applyPresentation?.(mode,{activate})
+    }finally{this.changed()}
   }
   async resumeVoice({wake=true}={}){
     this.clearVoiceNotice()
@@ -160,7 +170,7 @@ export class PersonalController {
     catch(error){this.captureConversationId=null;this.mode='text';await this.stop();throw error}
     finally{this.changed()}
   }
-  collapse(value){this.collapsed=value;if(value&&this.dictationId)void this.text();this.changed()}
+  collapse(value){this.collapsed=value;this.presentationChanged(this.presentationMode,value);if(value&&this.dictationId)void this.text();this.changed()}
   receive(frame){
     if(frame.type==='conversation.capabilities'&&frame.mode==='voice'&&typeof frame.conversation_id==='string'&&Number.isSafeInteger(frame.conversation_generation)&&frame.conversation_generation>=0){
       const caps=frame.capabilities
@@ -270,14 +280,20 @@ export class PersonalController {
     if(!id||!this.connected)throw new Error('尚未选择会话')
     if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束当前语音或录音')
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
+    let hostStarted=false
     try{
       await this.command('conversations.voice',{id,enabled:true})
+      hostStarted=true
       if(generation!==this.generation)return
       await this.startCapture({wake})
       if(generation!==this.generation){await this.stop();return}
       if(!this.send({type:'input.audio',conversation_id:id}))throw new Error('连接已断开')
       this.mode='voice'
-    }catch(error){if(generation!==this.generation)return;this.mode='text';this.captureConversationId=null;await this.stop();if(this.connected)await this.command('conversations.voice',{id,enabled:false}).catch(()=>{});throw error}
+    }catch(error){
+      // A newer action owns the voice state now. A host/provider start failure is still real and is reported;
+      // a stale local capture or the cancellation itself is not.
+      if(generation!==this.generation){if(hostStarted||supersededCancellation(error))return;throw error}
+      this.mode='text';this.captureConversationId=null;await this.stop();if(this.connected)await this.command('conversations.voice',{id,enabled:false}).catch(()=>{});throw error}
     finally{this.changed()}
   }
   async dictate(){

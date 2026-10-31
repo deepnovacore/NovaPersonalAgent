@@ -94,7 +94,8 @@ export class QwenRealtimeError extends Error {
   }
 }
 
-import {RealtimeSocketClosedError as QwenSocketClosedError} from './transport.js'
+import {RealtimeConnectError, RealtimeSocketClosedError as QwenSocketClosedError} from './transport.js'
+import type {RealtimeTelemetry} from './telemetry.js'
 import type {RealtimeSocket as QwenSocket, RealtimeConnector as QwenConnector, RealtimeAdapterOptions as QwenAdapterOptions} from './transport.js'
 // Compatibility exports for existing Qwen consumers. Native providers depend on transport.ts directly.
 export {RealtimeSocketClosedError as QwenSocketClosedError} from './transport.js'
@@ -157,6 +158,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
   #language: PromptLanguage
   readonly #instructions: () => string
   readonly #wireProfile: IntegratedWireProfile
+  readonly #telemetry: RealtimeTelemetry | undefined
 
   readonly #speechIds = new Map<string, string>()
   readonly #narrations = new Map<string, {epoch: number; hostId: string; publicId?: string; retired: boolean; cleanup?: Promise<void>}>()
@@ -188,6 +190,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
     this.#initialHistory=options.history===undefined?undefined:committedConversationPairsSchema.parse(options.history)
     this.#onUsage = options.onUsage
     this.#wireProfile = options.wireProfile ?? qwenWireProfile
+    this.#telemetry = options.telemetry
     this.#url = options.url
     this.#apiKey = options.apiKey
     this.#model = options.model
@@ -239,6 +242,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
       })
       this.#socket = socket
       const created = await this.#untilDeadline(this.#receiveJson(socket), deadline)
+      if (created.type === 'error') throw new ProviderSetupRejected(created)
       providerSessionId = sessionId(created, 'session.created')
       initialInstructions = this.#instructions()
       await this.#untilDeadline(this.#sendJson({
@@ -246,15 +250,25 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
         session: this.#wireProfile.session(options.tools, this.#voice, initialInstructions, this.#model),
       }), deadline)
       const updated = await this.#untilDeadline(this.#receiveJson(socket), deadline)
+      if (updated.type === 'error') throw new ProviderSetupRejected(updated)
       if (sessionId(updated, 'session.updated') !== providerSessionId) {
         throw new QwenRealtimeError('qwen realtime session identity changed during setup')
       }
     } catch (error) {
       await this.#cleanupDetached()
-      if (error instanceof QwenRealtimeError) throw error
-      if (isTimeout(error)) throw new QwenRealtimeError('qwen realtime connection timed out')
-      throw new QwenRealtimeError('qwen realtime connection failed')
+      const failure = options.signal.aborted
+        ? {code: 'realtime_connect_aborted', error: new QwenRealtimeError('realtime_connect_aborted')}
+        : connectFailureCode(error)
+      this.#recordConnect({
+        outcome: 'failed',
+        code: failure.code,
+        ...('detail' in failure && failure.detail !== undefined ? {detail: failure.detail} : {}),
+        ...(error instanceof RealtimeConnectError && error.status !== undefined ? {http_status: error.status} : {}),
+        ...(error instanceof ProviderSetupRejected && error.providerCode !== undefined ? {provider_code: error.providerCode} : {}),
+      })
+      throw failure.error
     }
+    this.#recordConnect({outcome: 'connected'})
     this.#historyRestoring=false
     this.#historyRestored=false
     this.#conversationUsed=false
@@ -1228,6 +1242,11 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
     }
   }
 
+  #recordConnect(payload: Readonly<Record<string, JsonValue>>): void {
+    // Diagnostics must never change the connect outcome.
+    try { this.#telemetry?.record('integrated.connect', {provider: this.#wireProfile.provider, ...payload}) } catch { /* diagnostic only */ }
+  }
+
   async #receiveJson(socket: QwenSocket): Promise<Readonly<Record<string, JsonValue>>> {
     const raw = await socket.receive()
     let parsed: unknown
@@ -1317,6 +1336,32 @@ class QwenTimeout extends Error {
     super('qwen realtime deadline exceeded')
     this.name = 'QwenTimeout'
   }
+}
+
+/** A provider `error` event in place of the setup handshake (e.g. quota or model access). */
+class ProviderSetupRejected extends Error {
+  readonly providerCode: string | undefined
+
+  constructor(event: Readonly<Record<string, JsonValue>>) {
+    super('realtime_session_rejected')
+    const detail = event.error
+    const code = isJsonObject(detail) ? detail.code : undefined
+    // Provider codes are short identifiers such as `Arrearage`; anything else is dropped.
+    this.providerCode = typeof code === 'string' && /^[A-Za-z0-9_.-]{1,64}$/u.test(code) ? code : undefined
+  }
+}
+
+/**
+ * Connect failures leave as a stable snake_case code the client can explain; protocol violations
+ * become `realtime_protocol_error`. Nothing provider-authored is surfaced.
+ */
+function connectFailureCode(error: unknown): {readonly code: string; readonly detail?: string; readonly error: QwenRealtimeError} {
+  if (error instanceof RealtimeConnectError) return {code: error.code, error: new QwenRealtimeError(error.code)}
+  if (error instanceof ProviderSetupRejected) return {code: error.message, error: new QwenRealtimeError(error.message)}
+  // Adapter-authored protocol text is constant (never provider data) and stays as a diagnostic detail.
+  if (error instanceof QwenRealtimeError) return {code: 'realtime_protocol_error', detail: error.message.slice(0, 120), error: new QwenRealtimeError('realtime_protocol_error')}
+  if (isTimeout(error)) return {code: 'realtime_timeout', error: new QwenRealtimeError('realtime_timeout')}
+  return {code: 'realtime_connect_failed', error: new QwenRealtimeError('realtime_connect_failed')}
 }
 
 function isTimeout(error: unknown): boolean {

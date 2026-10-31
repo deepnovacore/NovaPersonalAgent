@@ -46,6 +46,15 @@ test('disconnected workspace leaves edits visible and prevents mutations',async(
 test('brief pagination preserves date grouping and historical action restrictions',async()=>{
  const cards=Array.from({length:10},(_,i)=>({id:'b'+i,title:'Brief '+i,version:1,kind:'progress',historical:i===0,time:{anchor_date:'2026-10-28',anchor_basis:'reported'},facts:[],actions:[{kind:'discuss',label:'Discuss '+i}],sources:[]}));const p=await mount('timeline',{life,timeline:{status:'ready',generation_id:'g1',cards}});assert.equal(p.host.querySelectorAll('.timeline-attention-card').length,8);assert.equal([...p.host.querySelectorAll('button')].some(b=>b.textContent==='Discuss 0'),false);await p.click('继续查看进展（还有 2 条）');assert.equal(p.host.querySelectorAll('.timeline-attention-card').length,10);assert.equal(document.activeElement?.getAttribute('data-object-id'),'b8');assert.equal(p.host.querySelectorAll('[data-date="2026-10-28"]').length,1);await p.close()
 })
+test('briefing metadata stays within two lines and follows the problem priority',async()=>{
+ const cards=[{id:'b0',title:'Brief',version:1,kind:'progress',time:{anchor_date:'2026-10-28',anchor_basis:'reported'},facts:[],actions:[],sources:[]}],coverage='本轮资料：1519 条消息 · 0 份文档 · 0 条个人记录；消息记录 2026-10-01—2026-10-30',base={status:'ready',generation_id:'g1',cards,input_count:3,coverage,updated_at:'2026-10-28T00:35:00Z'}
+ const check=async(timeline:any,extra:any,expected:string[])=>{const p=await mount('timeline',{life,timeline,...extra});try{const lines=[...p.host.querySelectorAll('.timeline-meta-line')];assert.ok(lines.length<=2,'at most two lines');assert.equal(lines.length,expected.length);expected.forEach((text,i)=>assert.ok(lines[i].textContent!.includes(text),`${lines[i].textContent} includes ${text}`));return {p,lines}}finally{await p.close()}}
+ const {lines:normal}=await check(base,{},['1519 条消息 · 0 份文档 · 0 条个人记录 · 共 1 条（已展示 1）']);assert.equal(normal[0].getAttribute('title'),'消息记录 2026-10-01—2026-10-30');assert.equal(normal[0].textContent!.includes('卡片按事项时间排列'),false)
+ await check({...base,status:'failed',diagnostics:{pending_batches:1}},{sources:[{id:'s',state:'connected',processing_consent_required:true}]},['共 1 条','部分资料需要授权后才能整理 · 查看来源'])
+ await check({...base,status:'failed',diagnostics:{pending_batches:1}},{},['共 1 条','本次更新未完成，已保留上次结果'])
+ await check({...base,diagnostics:{failed_batches:[{batch:1}]}},{},['共 1 条','部分资料尚未整理，可刷新补充'])
+ const p=await mount('timeline',{life,timeline:base,sources:[{id:'s',state:'connected',path:'/tmp/docs',processing_consent_required:true}]});try{assert.equal(p.host.querySelectorAll('.source-status').length,1);const d=p.host.querySelector('.source-status') as HTMLDetailsElement;assert.equal(d.open,false)}finally{await p.close()}
+})
 test('source cards expose their evidence from the keyboard context menu',async()=>{
  const p=await mount('ideas',{life:{...life,ideas:[{...life.ideas[0],sources:[{type:'file',label:'Evidence.txt',summary:'Grounded',url:'javascript:alert(1)'}]}]}});const card=p.host.querySelector('[data-life-id="i1"]')!;await act(async()=>{card.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true}))});assert.ok(p.host.querySelector('[role="menuitem"]'));await act(async()=>{(p.host.querySelector('[role="menuitem"]') as HTMLButtonElement).click()});assert.ok(document.querySelector('[role="dialog"]')?.textContent?.includes('Evidence.txt'));assert.equal(document.querySelector('[role="dialog"] a'),null);await p.close()
 })
@@ -138,7 +147,7 @@ test('timeline no longer hosts suggestions awaiting confirmation',async()=>{
  }finally{await p.close()}
 })
 
-test('ideas tab shows Nova suggestions with only ignore and goal adoption',async()=>{
+test('ideas tab shows Nova suggestions as plain ideas with only ignore',async()=>{
  const suggestions=[{id:'s1',kind:'idea',title:'整理灵感',body:'把零散的想法收在一起',project_id:null,todo_id:null,due:null,refs:[]},{id:'s2',kind:'goal',title:'每周读一本书',body:'长期坚持的方向',project_id:null,todo_id:null,due:null,refs:[]}]
  const p=await mount('ideas',{life,derived_understanding:{projects:[],suggestions,sources:[]}})
  try{
@@ -150,15 +159,18 @@ test('ideas tab shows Nova suggestions with only ignore and goal adoption',async
   assert.equal(cards[0].getAttribute('data-suggestion-kind'),'idea')
   assert.ok(cards[0].textContent!.includes('整理灵感'))
   assert.ok(cards[0].textContent!.includes('把零散的想法收在一起'))
-  assert.ok(cards[0].textContent!.includes('想法'))
-  assert.ok(cards[1].textContent!.includes('目标建议'))
-  assert.deepEqual([...cards[0].querySelectorAll('button')].map(node=>node.textContent),['忽略'])
-  assert.deepEqual([...cards[1].querySelectorAll('button')].map(node=>node.textContent),['设为目标','忽略'])
+  for(const card of cards){
+   assert.deepEqual([...card.querySelectorAll('button')].map(node=>node.textContent),['忽略'])
+   assert.equal(card.textContent!.includes('设为目标'),false)
+   assert.equal(card.textContent!.includes('目标建议'),false)
+   assert.equal(card.querySelector('.card-tag'),null)
+  }
+  assert.ok(section.textContent!.includes('根据你的资料整理的想法，不需要额外保存；不适用的直接忽略。'))
   for(const text of ['加入想法','加入目标'])assert.equal(section.textContent!.includes(text),false,text)
  }finally{await p.close()}
 })
 
-test('Nova suggestions dismiss and adopt through understanding commands then hide',async()=>{
+test('Nova suggestions dismiss through understanding command then hide',async()=>{
  const suggestions=[{id:'s1',kind:'idea',title:'Idea A',body:'Body A',project_id:null,todo_id:null,due:null,refs:[]},{id:'s2',kind:'goal',title:'Goal B',body:'Body B',project_id:null,todo_id:null,due:null,refs:[]}]
  const p=await mount('ideas',{life,derived_understanding:{projects:[],suggestions,sources:[]}})
  try{
@@ -166,9 +178,6 @@ test('Nova suggestions dismiss and adopt through understanding commands then hid
   assert.deepEqual(p.calls[0],['understanding.dismiss',{id:'s1'}])
   assert.equal(p.host.querySelector('[data-suggestion-id="s1"]'),null)
   assert.ok(p.host.querySelector('[data-suggestion-id="s2"]'))
-  await p.click('设为目标',p.host)
-  assert.deepEqual(p.calls[1],['understanding.adopt',{id:'s2'}])
-  assert.equal(p.host.querySelector('[data-suggestion-id="s2"]'),null)
  }finally{await p.close()}
 })
 

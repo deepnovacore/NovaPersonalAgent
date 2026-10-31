@@ -144,3 +144,67 @@ test('private settings pass local identity to the real Host without authorizing 
     }
   } finally {await host.close(); await rm(dir, {recursive: true, force: true})}
 })
+
+test('a saturated control port answers busy with the request id instead of staying silent', async () => {
+  const parentPort = new Parent(), stop = new AbortController()
+  const finishers: ((value: unknown) => void)[] = []
+  const control = installDesktopControl({parentPort, signal: stop.signal, status: () => undefined,
+    handle: () => new Promise(resolve => {finishers.push(resolve)})})
+  try {
+    for (let index = 0; index < 9; index++)
+      parentPort.emit('message', {data: {type: 'nova.control.request', id: `slow-${index}`, method: 'knowledge.reindex', params: {}}})
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(parentPort.sent, [{type: 'nova.control.reply', id: 'slow-8', error: 'busy'}])
+    for (const finish of finishers) finish({ok: true})
+  } finally {control.dispose(); stop.abort()}
+})
+
+test('a control request before the host handle exists answers not_ready, a thrown handler answers unavailable', async () => {
+  const parentPort = new Parent(), stop = new AbortController()
+  let handle: ((method: string, params: unknown) => Promise<unknown>) | undefined
+  const control = installDesktopControl({parentPort, signal: stop.signal, status: () => undefined,
+    handle: (method, params) => handle ? handle(method, params) : Promise.resolve(undefined)})
+  try {
+    parentPort.emit('message', {data: {type: 'nova.control.request', id: 'early', method: 'feishu.status', params: {}}})
+    await new Promise(resolve => setImmediate(resolve))
+    handle = () => Promise.reject(new Error('lark-cli secret detail'))
+    parentPort.emit('message', {data: {type: 'nova.control.request', id: 'thrown', method: 'feishu.status', params: {}}})
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(parentPort.sent, [
+      {type: 'nova.control.reply', id: 'early', error: 'not_ready'},
+      {type: 'nova.control.reply', id: 'thrown', error: 'unavailable'},
+    ])
+  } finally {control.dispose(); stop.abort()}
+})
+
+test('cached settings reads bypass a slow command queue on the real Host', async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'desktop-read-bypass-'))
+  const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'fixture', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
+  let release: (() => void) | undefined
+  const methods: unknown[] = []
+  try {
+    await host.open({deferBackground: true})
+    host.setFeishu({snapshot: () => ({available: true, configured: true, state: 'ready'}), open: () => Promise.resolve(), close: () => Promise.resolve(),
+      command: (method, params) => {
+        methods.push([method, params])
+        if (method === 'feishu.sync') return new Promise(resolve => {release = () => resolve({available: true, configured: true, state: 'ready'})})
+        return Promise.resolve({available: true, configured: true, state: 'ready', cached: true})
+      }})
+    const slow = handleFeishuSettings(input => host.command(input), 'feishu.sync', {})
+    await new Promise(resolve => setImmediate(resolve))
+    const outcome = await Promise.race([
+      Promise.all([
+        handleFeishuSettings(input => host.command(input), 'feishu.status', {cached: true}),
+        handlePersonalSettings(host.command.bind(host), 'state', {}),
+      ]),
+      new Promise(resolve => setTimeout(() => resolve('blocked'), 1000)),
+    ])
+    assert.notEqual(outcome, 'blocked', 'cached reads must not wait for the slow feishu.sync')
+    const [feishu, state] = outcome as [Record<string, unknown>, Record<string, unknown>]
+    assert.equal(feishu.cached, true)
+    assert.ok(Array.isArray(state.sources))
+    assert.deepEqual(methods.at(-1), ['feishu.status', {cached: true}])
+    release?.()
+    assert.equal((await slow as {state: string}).state, 'ready')
+  } finally {release?.(); await host.close(); await rm(dir, {recursive: true, force: true})}
+})

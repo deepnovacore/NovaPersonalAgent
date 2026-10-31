@@ -3629,6 +3629,18 @@ test('failed provider connect keeps recovered blackboard owned until retry or fi
   } finally { await realtime.stop(); await rm(directory, {recursive: true, force: true}) }
 })
 
+test('a sanitized realtime connect code survives the provider session wrapper', async () => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-board-code-'))
+  const frame = new RecordingFrameSource()
+  const core = realCore(frame, {path: join(directory, 'board.sqlite'), ownerId: 'local'})
+  const provider = new AbortAwareProvider()
+  provider.connectSteps.push(() => Promise.reject(new Error('realtime_auth_rejected')))
+  const realtime = buildRealtimeAssembly({core, provider, onDiagnostic: () => undefined})
+  try {
+    await assert.rejects(realtime.start(), (error: unknown) => error instanceof Error && error.message === 'realtime_auth_rejected')
+  } finally { await realtime.stop(); await rm(directory, {recursive: true, force: true}) }
+})
+
 test('personal host shares opened memory, persists configuration and closes with production owner', {timeout:5000}, async () => {
   const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-personal-assembly-'))
   let opens=0,closes=0,lists=0,release!:()=>void

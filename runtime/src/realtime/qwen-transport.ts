@@ -7,6 +7,7 @@
 
 import { WebSocket, type RawData } from 'ws'
 import {
+  RealtimeConnectError,
   RealtimeSocketClosedError,
   type RealtimeConnector,
   type RealtimeConnectorOptions,
@@ -129,9 +130,8 @@ export const webSocketRealtimeConnector: RealtimeConnector = (
   const onError = (error: unknown): void => settle(() => {
     socket.terminate()
     // Never surface the provider's message: the endpoint carries the model and the
-    // request carries the credential.
-    void error
-    reject(new Error('qwen realtime websocket failed to open'))
+    // request carries the credential. Only the HTTP status or socket error class survives.
+    reject(connectFailure(error))
   })
   const onAbort = (): void => settle(() => {
     socket.terminate()
@@ -144,6 +144,29 @@ export const webSocketRealtimeConnector: RealtimeConnector = (
   // have been missed by both, leaving the same unowned socket.
   if (options.signal.aborted) onAbort()
 })
+
+const UNREACHABLE = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE',
+])
+
+/** Reduces a `ws` open failure to a sanitized code; `ws` reports a non-101 reply only in its message. */
+export function connectFailure(error: unknown): RealtimeConnectError {
+  const message = error instanceof Error ? error.message : ''
+  const status = /^Unexpected server response: (\d{3})$/u.exec(message)?.[1]
+  if (status !== undefined) {
+    const code = Number(status)
+    if (code === 401 || code === 403) return new RealtimeConnectError('realtime_auth_rejected', code)
+    if (code === 404) return new RealtimeConnectError('realtime_endpoint_not_found', code)
+    if (code === 429) return new RealtimeConnectError('realtime_rate_limited', code)
+    return new RealtimeConnectError('realtime_handshake_rejected', code)
+  }
+  const systemCode = error instanceof Error && 'code' in error ? String(error.code) : ''
+  if (systemCode === 'ETIMEDOUT' || /handshake has timed out/iu.test(message)) {
+    return new RealtimeConnectError('realtime_timeout')
+  }
+  if (UNREACHABLE.has(systemCode)) return new RealtimeConnectError('realtime_unreachable')
+  return new RealtimeConnectError('realtime_connect_failed')
+}
 
 /** Compatibility name retained for existing clients. */
 export const webSocketQwenConnector = webSocketRealtimeConnector

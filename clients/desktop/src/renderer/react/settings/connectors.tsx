@@ -27,6 +27,10 @@ type ConnectorTone = 'ok' | 'progress' | 'warn' | 'error' | 'muted';
 interface ConnectorStatus {
     tone: ConnectorTone;
     label: string;
+    /** Current state plus the next step, shown in place of the card summary. */
+    detail?: string;
+    /** A failed read: clicking the card retries instead of opening the detail. */
+    retry?: boolean;
 }
 
 const STATUS: Record<string, ConnectorStatus> = {
@@ -39,34 +43,99 @@ const STATUS: Record<string, ConnectorStatus> = {
     unavailable: { tone: 'muted', label: '不可用' },
     offline: { tone: 'muted', label: '未连接' },
     checking: { tone: 'progress', label: '待检查' },
+    failed: { tone: 'error', label: '读取失败' },
 };
 const CONNECTED = STATUS.connected!;
 const CHECKING = STATUS.checking!;
+const withDetail = (status: ConnectorStatus, detail: string): ConnectorStatus => ({ ...status, detail });
 
 export const MAIL_TOOLKITS = ['gmail', 'macos_mail'];
 export const CALENDAR_TOOLKITS = ['googlecalendar', 'macos_calendar'];
 const CONNECTED_FEISHU_STATES = ['ready', 'connected'];
 
-/** Coarse Feishu status from `feishuCommand('status')` with a state fallback. */
+/** Short, user-safe reasons for a failed read; raw IPC and backend text never reaches the page. */
+type ReadFailure = 'timeout' | 'busy' | 'restarting' | 'not_ready' | 'unavailable' | 'failed';
+const FAILURE_REASON: Record<ReadFailure, string> = {
+    timeout: '请求超时',
+    busy: '后台繁忙',
+    restarting: '后台正在重启',
+    not_ready: '后台尚未就绪',
+    unavailable: '后台暂不可用',
+    failed: '后台返回错误',
+};
+
+function readFailure(result: PromiseSettledResult<any>): ReadFailure | null {
+    if (result.status === 'rejected') {
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason ?? '');
+        if (/timeout|timed out/i.test(message))
+            return 'timeout';
+        if (/\bbusy\b/i.test(message))
+            return 'busy';
+        if (/connection changed|control closed/i.test(message))
+            return 'restarting';
+        if (/not ready|connections? unavailable/i.test(message))
+            return 'not_ready';
+        return /unavailable/i.test(message) ? 'unavailable' : 'failed';
+    }
+    const value = result.value;
+    // The settings port replies `{error}` alone; a Feishu snapshot also carries a display `error`
+    // (unverified login, sync failure) next to its state and must still render as a snapshot.
+    if (!value || typeof value !== 'object' || typeof value.error !== 'string' || Object.keys(value).length !== 1)
+        return null;
+    if (value.error === 'busy')
+        return 'busy';
+    if (value.error === 'not_ready')
+        return 'not_ready';
+    return value.error === 'unavailable' ? 'unavailable' : 'failed';
+}
+
+function clip(text: string, max = 60) {
+    const value = text.trim();
+    return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function formatTime(value: unknown) {
+    if (value === null || value === undefined || value === '')
+        return '';
+    const date = new Date(value as string | number);
+    if (Number.isNaN(date.getTime()))
+        return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    return date.toDateString() === new Date().toDateString() ? time : `${date.getMonth() + 1}/${date.getDate()} ${time}`;
+}
+
+function failedStatus(failure: ReadFailure): ConnectorStatus {
+    return { ...STATUS.failed!, detail: t('{0}，点此重试', t(FAILURE_REASON[failure])), retry: true };
+}
+
+/** Coarse Feishu status from the cached `feishu.status` snapshot. */
 function deriveFeishuStatus(snapshot: any): ConnectorStatus {
     if (!snapshot || typeof snapshot !== 'object')
         return CHECKING;
     if (snapshot.available === undefined && snapshot.configured === undefined && snapshot.state === undefined)
         return CHECKING;
     if (snapshot.available === false)
-        return STATUS.unavailable!;
+        return withDetail(STATUS.unavailable!, t('未检测到可用的飞书 CLI，点此查看'));
     if (snapshot.state === 'error' || snapshot.unverified === true)
-        return STATUS.attention!;
+        return withDetail(STATUS.attention!, typeof snapshot.error === 'string' && snapshot.error.trim() ? t(clip(snapshot.error)) : t('连接出错，点此查看'));
     if (snapshot.auth_issue || snapshot.state === 'authorizing')
-        return STATUS.authorize!;
+        return withDetail(STATUS.authorize!, snapshot.auth_issue === 'expired' ? t('登录已过期，点此重新授权')
+            : snapshot.auth_issue === 'missing_scopes' ? t('权限不完整，点此重新授权') : t('尚未登录，点此授权'));
     if (snapshot.configured !== true)
-        return STATUS.setup!;
+        return withDetail(STATUS.setup!, t('尚未配置飞书应用，点此开始'));
     if (snapshot.state === 'paused')
-        return STATUS.paused!;
+        return withDetail(STATUS.paused!, t('同步已暂停，点此恢复'));
     if (snapshot.state === 'disconnected')
-        return STATUS.offline!;
-    if (CONNECTED_FEISHU_STATES.includes(snapshot.state))
-        return snapshot.scope_configured === false ? STATUS.setup! : CONNECTED;
+        return withDetail(STATUS.offline!, t('已断开连接，点此重新连接'));
+    if (snapshot.state === 'unauthorized')
+        return withDetail(STATUS.authorize!, t('尚未登录，点此授权'));
+    if (CONNECTED_FEISHU_STATES.includes(snapshot.state)) {
+        if (snapshot.scope_configured === false)
+            return withDetail(STATUS.setup!, t('还没选要同步的会话，点此选择'));
+        const synced = formatTime(snapshot.last_sync);
+        return withDetail(CONNECTED, synced ? t('上次同步 {0}', synced) : t('已登录，点此管理同步的会话'));
+    }
     return CHECKING;
 }
 
@@ -78,57 +147,82 @@ function deriveFilesStatus(personal: any): ConnectorStatus {
     if (!Array.isArray(sources))
         return CHECKING;
     if (!sources.length)
-        return STATUS.offline!;
-    if (sources.some((source: any) => source?.state === 'error'))
-        return STATUS.attention!;
+        return withDetail(STATUS.offline!, t('还没有授权文件夹，点此添加'));
+    const failing = sources.filter((source: any) => source?.state === 'error').length;
+    if (failing)
+        return withDetail(STATUS.attention!, t('{0} 个文件夹读取出错，点此查看', failing));
     const active = sources.filter((source: any) => source?.state !== 'disconnected');
-    if (active.some((source: any) => source?.scan_pending))
-        return STATUS.syncing!;
+    if (active.some((source: any) => source?.scan_pending)) {
+        const indexed = active.reduce((sum: number, source: any) => sum + (Number.isSafeInteger(source?.indexed) ? source.indexed : 0), 0);
+        return withDetail(STATUS.syncing!, indexed > 0 ? t('正在扫描，已索引 {0} 个文件', indexed) : t('正在扫描文件夹'));
+    }
     if (active.length && active.every((source: any) => source?.state === 'paused'))
-        return STATUS.paused!;
-    return active.length ? CONNECTED : STATUS.offline!;
+        return withDetail(STATUS.paused!, t('同步已暂停，点此恢复'));
+    return active.length ? withDetail(CONNECTED, t('已授权 {0} 个文件夹', active.length)) : withDetail(STATUS.offline!, t('还没有授权文件夹，点此添加'));
 }
 
 /** Coarse status for mail/calendar from the Composio connector snapshot. */
 function deriveConnectorStatus(personal: any, toolkits: string[]): ConnectorStatus {
     if (!personal)
         return CHECKING;
+    const mail = toolkits === MAIL_TOOLKITS;
     const connectors = personal.connectors;
     if (!connectors || typeof connectors !== 'object')
-        return STATUS.unavailable!;
+        return withDetail(STATUS.unavailable!, t('连接服务未启动，稍后再试'));
     if (connectors.memory_available === false)
-        return STATUS.setup!;
+        return withDetail(STATUS.setup!, t('需先开启记忆功能才能同步'));
     const rows = (connectors.connections ?? []).filter((connection: any) => toolkits.includes(connection?.toolkit));
-    if (rows.some((connection: any) => connection?.error || connection?.state === 'error'))
-        return STATUS.attention!;
-    if (rows.some((connection: any) => connection?.has_pending && connection?.state === 'connected'))
-        return STATUS.syncing!;
+    const failing = rows.find((connection: any) => connection?.error || connection?.state === 'error');
+    if (failing)
+        return withDetail(STATUS.attention!, typeof failing.error === 'string' && failing.error.trim() ? t(clip(failing.error)) : t('同步出错，点此查看'));
+    const pending = rows.filter((connection: any) => connection?.has_pending && connection?.state === 'connected');
+    if (pending.length) {
+        const last = Math.max(0, ...pending.map((connection: any) => new Date(connection?.last_complete ?? 0).getTime() || 0));
+        const finished = last > 0 ? formatTime(last) : '';
+        return withDetail(STATUS.syncing!, finished ? t('正在同步，上次完成于 {0}', finished) : t('正在同步'));
+    }
     if (rows.some((connection: any) => connection?.state === 'authorizing'))
-        return STATUS.authorize!;
-    if (rows.some((connection: any) => connection?.state === 'connected'))
-        return CONNECTED;
+        return withDetail(STATUS.authorize!, t('授权尚未完成，点此继续'));
+    const connected = rows.filter((connection: any) => connection?.state === 'connected');
+    if (connected.length) {
+        const names = connected.map((connection: any) => connection?.identity).filter((name: unknown) => typeof name === 'string' && name);
+        return withDetail(CONNECTED, names.length ? t('已连接：{0}', clip(names.join('、'), 40)) : t('已连接 {0} 个账户', connected.length));
+    }
     if (rows.length && rows.every((connection: any) => connection?.state === 'paused'))
-        return STATUS.paused!;
-    const localAvailable = toolkits === MAIL_TOOLKITS ? connectors.mail_available === true : connectors.local_available === true;
+        return withDetail(STATUS.paused!, t('同步已暂停，点此恢复'));
+    const localAvailable = mail ? connectors.mail_available === true : connectors.local_available === true;
     if (connectors.available !== true && !localAvailable)
-        return STATUS.unavailable!;
-    return STATUS.offline!;
+        return withDetail(STATUS.unavailable!, t('连接服务未启动，稍后再试'));
+    return withDetail(STATUS.offline!, mail ? t('尚未连接，点此连接邮箱') : t('尚未连接，点此连接日历'));
 }
 
-function errorMessage(result: PromiseSettledResult<any>) {
-    if (result.status === 'rejected')
-        return result.reason instanceof Error ? result.reason.message : '';
-    const value = result.value;
-    return value && typeof value === 'object' && typeof value.error === 'string' ? value.error : '';
+const READ_TIMEOUT_MS = 15_000;
+/** A verified Feishu read is bounded to 15 s in the runtime; leave room for the IPC hop. */
+const VERIFY_TIMEOUT_MS = 25_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('connector read timeout')), ms);
+    });
+    return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
 }
 
-/** One shared read of `personalCommand('state')` plus the Feishu snapshot for the page. */
-function useConnectorOverview(api: any) {
-    const [personal, setPersonal] = useState<any>(null);
-    const [feishu, setFeishu] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-    const [loaded, setLoaded] = useState(false);
-    const [error, setError] = useState('');
+interface SourceRead {
+    data: any;
+    failure: ReadFailure | null;
+    pending: boolean;
+}
+const IDLE_READ: SourceRead = { data: null, failure: null, pending: true };
+
+/**
+ * Personal state and the Feishu snapshot are read independently: each settles on its own,
+ * so a slow or failing Feishu read never hides the other three cards.
+ * Normal loads read the cached Feishu snapshot; only an explicit refresh asks the CLI to verify.
+ */
+function useConnectorOverview(api: any, timeoutMs: number, verifyTimeoutMs: number) {
+    const [personal, setPersonal] = useState<SourceRead>(IDLE_READ);
+    const [feishu, setFeishu] = useState<SourceRead>(IDLE_READ);
     const mounted = useRef(true);
     const epoch = useRef(0);
     useEffect(() => {
@@ -138,40 +232,33 @@ function useConnectorOverview(api: any) {
             epoch.current++;
         };
     }, []);
-    const read = useCallback(async (method: 'personalCommand' | 'feishuCommand', name: string) => {
-        const bridge = api?.[method];
-        if (typeof bridge !== 'function')
-            return null;
-        return bridge.call(api, name, {});
-    }, [api]);
-    const load = useCallback(async () => {
+    const load = useCallback(async ({ verify = false }: { verify?: boolean } = {}) => {
         const run = ++epoch.current;
-        setLoading(true);
-        setError('');
-        const [personalResult, feishuResult] = await Promise.allSettled([
-            read('personalCommand', 'state'),
-            read('feishuCommand', 'feishu.status'),
+        const read = async (method: 'personalCommand' | 'feishuCommand', name: string, params: any, ms: number, set: (value: (prior: SourceRead) => SourceRead) => void) => {
+            set((prior) => ({ ...prior, pending: true }));
+            const bridge = api?.[method];
+            const [result] = await Promise.allSettled([typeof bridge === 'function' ? withTimeout(Promise.resolve(bridge.call(api, name, params)), ms) : Promise.resolve(null)]);
+            if (!mounted.current || run !== epoch.current)
+                return;
+            const failure = readFailure(result!);
+            if (failure)
+                set((prior) => ({ ...prior, failure, pending: false }));
+            else {
+                const value = result!.status === 'fulfilled' ? result!.value : null;
+                set(() => ({ data: value && typeof value === 'object' ? value : null, failure: null, pending: false }));
+            }
+        };
+        await Promise.all([
+            read('personalCommand', 'state', {}, timeoutMs, setPersonal),
+            read('feishuCommand', 'feishu.status', verify ? {} : { cached: true }, verify ? verifyTimeoutMs : timeoutMs, setFeishu),
         ]);
-        if (!mounted.current || run !== epoch.current)
-            return;
-        let failed = false;
-        if (personalResult.status === 'fulfilled' && personalResult.value && typeof personalResult.value === 'object' && !personalResult.value.error)
-            setPersonal(personalResult.value);
-        else if (personalResult.status === 'rejected' || errorMessage(personalResult))
-            failed = true;
-        if (feishuResult.status === 'fulfilled' && feishuResult.value && typeof feishuResult.value === 'object' && !feishuResult.value.error)
-            setFeishu(feishuResult.value);
-        else if (feishuResult.status === 'rejected' || errorMessage(feishuResult))
-            failed = true;
-        if (failed)
-            setError(t('未能读取连接状态，请重试。'));
-        setLoading(false);
-        setLoaded(true);
-    }, [read]);
+    }, [api, timeoutMs, verifyTimeoutMs]);
     useEffect(() => {
         void load();
     }, [load]);
-    return { personal, feishu, loading, loaded, error, reload: load };
+    const loading = personal.pending || feishu.pending;
+    const loaded = !personal.pending || !feishu.pending || personal.data !== null || feishu.data !== null;
+    return { personal, feishu, loading, loaded, reload: load };
 }
 
 interface ConnectorCard {
@@ -213,7 +300,7 @@ const CONNECTOR_CARDS: ConnectorCard[] = [
     },
 ];
 
-function ConnectorGrid({ statuses, loading, onOpen, cardRefs }: any) {
+function ConnectorGrid({ statuses, loading, onOpen, onRetry, cardRefs }: any) {
     if (loading) {
         return <ul className="connector-grid" aria-label={t('正在读取连接状态…')} aria-busy="true">
             {CONNECTOR_CARDS.map((card) => <li key={card.id}>
@@ -238,12 +325,12 @@ function ConnectorGrid({ statuses, loading, onOpen, cardRefs }: any) {
                     data-connector={card.id}
                     data-tone={status.tone}
                     ref={(element) => { cardRefs.current[card.id] = element; }}
-                    onClick={() => onOpen(card.id)}
+                    onClick={() => status.retry ? onRetry() : onOpen(card.id)}
                 >
                     <span className="connector-card-icon" aria-hidden="true"><Icon size={22} strokeWidth={1.8}/></span>
                     <span className="connector-card-copy">
                         <span className="connector-card-title">{t(card.title)}</span>
-                        <span className="connector-card-description">{t(card.summary)}</span>
+                        <span className="connector-card-description">{status.detail ?? t(card.summary)}</span>
                     </span>
                     <span className="connector-card-meta">
                         <span className="connector-status" data-tone={status.tone}>{t(status.label)}</span>
@@ -255,22 +342,28 @@ function ConnectorGrid({ statuses, loading, onOpen, cardRefs }: any) {
     </ul>;
 }
 
-export function ConnectorsPage({ api }: any) {
-    const overview = useConnectorOverview(api);
+export function ConnectorsPage({ api, timeoutMs = READ_TIMEOUT_MS, verifyTimeoutMs = VERIFY_TIMEOUT_MS }: any) {
+    const overview = useConnectorOverview(api, timeoutMs, verifyTimeoutMs);
     const [view, setView] = useState<string | null>(null);
     const backRef = useRef<HTMLButtonElement | null>(null);
     const cardRefs = useRef<Record<string, HTMLButtonElement | null>>({});
     const lastOpened = useRef<string | null>(null);
 
     const statuses = useMemo<Record<string, ConnectorStatus>>(() => {
-        const feishuSnapshot = overview.feishu ?? overview.personal?.feishu;
+        const { personal, feishu } = overview;
+        const personalFailed = personal.failure && !personal.pending ? failedStatus(personal.failure) : null;
         return {
-            feishu: deriveFeishuStatus(feishuSnapshot),
-            files: deriveFilesStatus(overview.personal),
-            mail: deriveConnectorStatus(overview.personal, MAIL_TOOLKITS),
-            calendar: deriveConnectorStatus(overview.personal, CALENDAR_TOOLKITS),
+            feishu: feishu.failure && !feishu.pending ? failedStatus(feishu.failure) : deriveFeishuStatus(feishu.data),
+            files: personalFailed ?? deriveFilesStatus(personal.data),
+            mail: personalFailed ?? deriveConnectorStatus(personal.data, MAIL_TOOLKITS),
+            calendar: personalFailed ?? deriveConnectorStatus(personal.data, CALENDAR_TOOLKITS),
         };
     }, [overview.personal, overview.feishu]);
+    const errors = [
+        overview.personal.failure && !overview.personal.pending ? t('连接状态读取失败：{0}', t(FAILURE_REASON[overview.personal.failure])) : '',
+        overview.feishu.failure && !overview.feishu.pending ? t('飞书状态读取失败：{0}', t(FAILURE_REASON[overview.feishu.failure])) : '',
+    ].filter(Boolean);
+    const retry = useCallback(() => { void overview.reload(); }, [overview]);
 
     useEffect(() => {
         if (view) {
@@ -315,12 +408,15 @@ export function ConnectorsPage({ api }: any) {
 
     return <div className="connectors-page">
         <div className="connectors-toolbar">
-            <Button type="button" className="ghost connector-refresh" disabled={overview.loading} aria-busy={overview.loading} onClick={() => void overview.reload()}>
+            <Button type="button" className="ghost connector-refresh" disabled={overview.loading} aria-busy={overview.loading} onClick={() => void overview.reload({ verify: true })}>
                 <RefreshCw size={15} aria-hidden="true"/>{t('刷新状态')}
             </Button>
         </div>
-        {overview.error && <p className="connectors-error" role="alert">{overview.error}</p>}
-        <ConnectorGrid statuses={statuses} loading={skeleton} onOpen={setView} cardRefs={cardRefs}/>
+        {errors.length > 0 && <div className="connectors-error" role="alert">
+            {errors.map((message) => <p key={message}>{message}</p>)}
+            <Button type="button" className="ghost connector-retry" disabled={overview.loading} onClick={retry}>{t('重试')}</Button>
+        </div>}
+        <ConnectorGrid statuses={statuses} loading={skeleton} onOpen={setView} onRetry={retry} cardRefs={cardRefs}/>
     </div>;
 }
 

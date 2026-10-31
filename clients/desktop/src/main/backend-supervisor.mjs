@@ -213,7 +213,10 @@ const BLOCKING_CREDENTIALS = new Set(['OPENAI_API_KEY', 'GEMINI_API_KEY', 'STEPF
 export function createBackendControl(child, {onStatus = () => {}, onUsage = () => {}} = {}) {
   const pending = new Map()
   let closed = false
+  // Short, fixed reasons let the settings page tell a slow backend from a missing or restarting one.
   const unavailable = () => new Error('backend control unavailable')
+  const failure = reason => new Error(`backend control ${reason}`)
+  const REPLY_FAILURES = {busy: 'busy', not_ready: 'not ready'}
   const receive = message => {
     if (closed || !message || typeof message !== 'object') return
     if (message.type === 'nova.usage') {
@@ -231,7 +234,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
     if (!request) return
     pending.delete(message.id)
     clearTimeout(request.timer)
-    if (message.error) request.reject(unavailable())
+    if (message.error) request.reject(Object.hasOwn(REPLY_FAILURES, message.error) ? failure(REPLY_FAILURES[message.error]) : unavailable())
     else request.resolve(message.result)
   }
   function close() {
@@ -240,7 +243,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
     child.off('message', receive)
     child.off('exit', close)
     child.off('error', close)
-    for (const request of pending.values()) { clearTimeout(request.timer); request.reject(unavailable()) }
+    for (const request of pending.values()) { clearTimeout(request.timer); request.reject(failure('closed')) }
     pending.clear()
   }
   child.on('message', receive)
@@ -249,11 +252,13 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
   return {
     close,
     request(method, params = {}, {timeoutMs = 30000} = {}) {
-      if (closed || pending.size >= 8 || typeof method !== 'string' || method.length > 80
+      if (closed) return Promise.reject(failure('closed'))
+      if (pending.size >= 8) return Promise.reject(failure('busy'))
+      if (typeof method !== 'string' || method.length > 80
         || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3600000) return Promise.reject(unavailable())
       return new Promise((resolve, reject) => {
         const id = randomUUID()
-        const timer = setTimeout(() => {pending.delete(id); reject(unavailable())}, timeoutMs)
+        const timer = setTimeout(() => {pending.delete(id); reject(failure('timeout'))}, timeoutMs)
         pending.set(id, {resolve, reject, timer})
         try { child.postMessage({type: 'nova.control.request', id, method, params}) }
         catch { pending.delete(id); clearTimeout(timer); reject(unavailable()) }

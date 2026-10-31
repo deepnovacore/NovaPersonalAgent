@@ -21,7 +21,8 @@ export class WorkbenchRuntime{
  confirmation:{resolve:(answer:boolean)=>void}|null=null
  disposed=false
  constructor(public options:WorkbenchOptions){
-  this.controller=new PersonalController({...options,applyPresentation:options.applyPresentation,changed:()=>this.refresh(),confirmBuildSwitch:()=>new Promise<boolean>(resolve=>{this.confirmation={resolve};this.refresh()})})
+  // Written synchronously, not from a React effect: main resizes the window as soon as the presentation IPC lands.
+  this.controller=new PersonalController({...options,applyPresentation:options.applyPresentation,changed:()=>this.refresh(),presentationChanged:(mode:string,collapsed:boolean)=>{document.body.dataset.presentationMode=mode;document.body.dataset.personalCollapsed=String(collapsed)},confirmBuildSwitch:()=>new Promise<boolean>(resolve=>{this.confirmation={resolve};this.refresh()})})
  }
  subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener)}}
  snapshot=()=>this.revision

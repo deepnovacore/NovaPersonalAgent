@@ -42,5 +42,6 @@ export function buildConversationVoiceProvider(options:ConversationVoiceProvider
     modules:{schedules:options.schedules===true,search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled,chatToolPolicy:options.chatToolPolicy===true},
     ...(options.onUsage===undefined?{}:{onUsage:options.onUsage}),
     ...(options.history===undefined?{}:{history:options.history}),
+    ...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),
   })
 }

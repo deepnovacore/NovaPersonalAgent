@@ -1701,7 +1701,9 @@ async function startSelectedCamera(camera, smokeChannel) {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       throw new Error('microphone permission request rejected')
     }
-    if (['granted', 'denied', 'restricted'].includes(microphoneSystemStatus)) {
+    // Only a grant is stable. A denial or restriction can be lifted in System Settings while
+    // the app runs, so it is read again on every request instead of being cached forever.
+    if (microphoneSystemStatus === 'granted') {
       return Object.freeze({ status: microphoneSystemStatus })
     }
     const result = await resolveMicrophonePermission({

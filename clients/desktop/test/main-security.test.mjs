@@ -235,6 +235,14 @@ test('owner replacement during clear confirmation prevents the actual main handl
   assert.equal(context.clearingConversation, null)
 })
 
+test('only a microphone grant is cached; a denial is re-read so a fix in System Settings takes effect', async () => {
+  const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const handler = main.slice(main.indexOf("ipcMain.handle('nova:microphone:permission'"))
+  const body = handler.slice(0, handler.indexOf('\n  })'))
+  assert.match(body, /if \(microphoneSystemStatus === 'granted'\) \{\n\s*return Object\.freeze\(\{ status: microphoneSystemStatus \}\)/)
+  assert.doesNotMatch(body, /\['granted', 'denied', 'restricted'\]\.includes\(microphoneSystemStatus\)/)
+})
+
 test('microphone permission starts from the ready orb and every IPC edge is sender-bound', async () => {
   const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const preload = await readFile(new URL('../src/preload/preload.cjs', import.meta.url), 'utf8')

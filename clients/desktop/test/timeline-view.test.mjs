@@ -291,15 +291,15 @@ test('briefing pagination exposes every card in descending date order without tr
  assert.equal(render(state,{expanded}).parent.querySelectorAll('.timeline-attention-card').length,19,'batch progress rerenders retain expansion')
  const compact=render(state,{compact:true}).parent
  assert.equal(compact.querySelectorAll('.timeline-attention-card').length,3)
- assert.ok(compact.querySelectorAll('.timeline-brief-count')[0].textContent.includes('19'))
+ assert.ok(compact.querySelectorAll('.timeline-meta-line')[0].textContent.includes('共 19 条（已展示 3）'))
 })
 
 test('partial generation keeps grounded cards visible and explains missing coverage',()=>{
  const state={life:{todos:[],goals:[]},timeline:{status:'ready',cards:[datedBrief('kept',{kind:'event',anchor_date:'2026-10-11'})],diagnostics:{failed_batches:[{batch:2,reason:'invalid_evidence'}]}}}
  const {parent}=render(state)
  assert.equal(parent.querySelectorAll('.timeline-attention-card').length,1)
- assert.equal(parent.querySelectorAll('.timeline-partial').length,1)
- assert.match(parent.querySelectorAll('.timeline-partial')[0].textContent,/部分资料尚未完成/)
+ assert.equal(parent.querySelectorAll('.timeline-meta-issue').length,1)
+ assert.equal(parent.querySelectorAll('.timeline-meta-issue')[0].textContent,'部分资料尚未整理，可刷新补充')
 })
 
 test('briefings display name-only people tags without inventing roles or changing date order',()=>{
@@ -418,8 +418,30 @@ test('briefing reports active and archived card counts separately',()=>{
  const cards=[briefCard({id:'active',sources_available:true}),briefCard({id:'archived',title:'Retained history',sources_available:false,historical:true})]
  const state={life:{todos:[],goals:[]},timeline:{status:'ready',cards,active_count:1,archived_count:1}}
  const {parent}=render(state)
- assert.ok(parent.querySelectorAll('.timeline-brief-count')[0].textContent.includes('2'))
- assert.match(parent.querySelectorAll('.timeline-brief-archived')[0].textContent,/1/)
+ const line=parent.querySelectorAll('.timeline-meta-line')[0]
+ assert.ok(line.textContent.includes('共 2 条'))
+ assert.match(line.title,/1 条为来源不可用的归档记录/,'archived count moves to the tooltip')
  const compact=render({...state,timeline:{status:'ready',cards:[briefCard({id:'active'})],active_count:1,archived_count:0}},{compact:true}).parent
- assert.equal(compact.querySelectorAll('.timeline-brief-archived').length,0,'no archive note when every card is active')
+ assert.equal(compact.querySelectorAll('.timeline-meta-line')[0].title??'','','no archive note when every card is active')
+})
+
+test('briefing metadata is at most two lines and picks one problem sentence by priority',()=>{
+ const cards=[briefCard({id:'a'})],coverage='本轮资料：1519 条消息 · 0 份文档 · 0 条个人记录；消息记录 2026-10-01—2026-10-30'
+ const base={status:'ready',cards,input_count:3,coverage,updated_at:'2026-10-11T00:35:00Z'}
+ const lines=state=>render({life:{todos:[],goals:[]},...state}).parent.querySelectorAll('.timeline-meta-line')
+ const normal=lines({timeline:base})
+ assert.equal(normal.length,1)
+ assert.match(normal[0].textContent,/^整理于 .+ · 1519 条消息 · 0 份文档 · 0 条个人记录 · 共 1 条（已展示 1）$/u)
+ assert.ok(!normal[0].textContent.includes('卡片按事项时间排列')&&!normal[0].textContent.includes('本轮资料'))
+ assert.equal(normal[0].title,'消息记录 2026-10-01—2026-10-30')
+ const consentSources=[{id:'s',state:'connected',processing_consent_required:true}]
+ const consent=lines({timeline:{...base,status:'failed',diagnostics:{pending_batches:1}},sources:consentSources})
+ assert.equal(consent.length,2)
+ assert.equal(consent[1].children[0].textContent,'部分资料需要授权后才能整理 · 查看来源','consent wins over failed and partial')
+ assert.equal(render({life:{todos:[],goals:[]},timeline:base,sources:consentSources}).parent.querySelectorAll('.source-status').length,1,'one source row, not a second one at the top')
+ const failed=lines({timeline:{...base,status:'failed',diagnostics:{pending_batches:1}}})
+ assert.equal(failed.length,2);assert.equal(failed[1].textContent,'本次更新未完成，已保留上次结果')
+ const partial=lines({timeline:{...base,diagnostics:{failed_batches:[{batch:1}]}}})
+ assert.equal(partial.length,2);assert.equal(partial[1].textContent,'部分资料尚未整理，可刷新补充')
+ assert.equal(lines({timeline:{...base,status:'working',diagnostics:{pending_batches:1}}}).length,1,'no partial warning while working')
 })

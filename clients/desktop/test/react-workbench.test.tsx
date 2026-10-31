@@ -9,12 +9,12 @@ const {mountPersonalView}=await import('../src/renderer/react/personal-view.tsx'
 const {personalState,fixedNow}=await import('./react-fixtures/personal-state.mjs')
 const views:any[]=[]
 afterEach(async()=>{for(const view of views.splice(0))await act(async()=>view.dispose());document.body.innerHTML='<div id="personal-root"></div><div id="personal-orb-host"></div>';localStorage.clear()})
-async function mount(){
+async function mount(extra:Record<string,any>={}){
  let view:any;const sent:any[]=[];const listeners=new Map<string,Function>();let stops=0
  const on=(name:string)=>(callback:Function)=>{listeners.set(name,callback);return()=>{stops++;listeners.delete(name)}}
  const api={personal:{onPresentationRequest:on('presentation'),onCollapsed:on('collapsed'),onMaximized:on('maximized'),setUnread:async()=>{}},orbMenu:{openSettings:()=>{}},windowControls:{},computerUse:{onStop:on('computer-stop'),overlay:()=>{},clear:()=>{}}}
  const send=(frame:any)=>{sent.push(frame);queueMicrotask(()=>{if(frame.type==='personal.command')view.receive({type:'personal.result',request_id:frame.request_id,ok:true,data:frame.method==='presentation.set'?{mode:frame.params.mode}:frame.method==='conversations.select'?{...view.controller.snapshot.conversations,selected_id:frame.params.id}:{}});if(frame.type==='input.text')view.receive({type:'input.text_result',request_id:frame.request_id,conversation_id:frame.conversation_id,ok:true})});return true}
- await act(async()=>{view=mountPersonalView({api,send,start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[]});views.push(view);await view.controller.connect();view.receive({type:'client.ready',input_instance_id:'ui-test',capabilities:['text_input']});view.receive(personalState())})
+ await act(async()=>{view=mountPersonalView({api,send,start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],...extra});views.push(view);await view.controller.connect();view.receive({type:'client.ready',input_instance_id:'ui-test',capabilities:['text_input']});view.receive(personalState())})
  return {view,sent,listeners,stops:()=>stops}
 }
 test('React workbench preserves left chat and right workspace while keyboard tabs move focus',async()=>{
@@ -148,4 +148,32 @@ test('a mirrored goal-proposal feed renders an actionable card in the main conve
  const action=sent.filter(frame=>frame.method==='feed.action'&&frame.params?.action==='adopt_goal').at(-1)
  assert.ok(action,'adopt_goal command sent')
  assert.equal(action.params.goal_revision,'rev1')
+})
+
+test('switching to the orb during workbench voice leaves the workbench layout before the window shrinks',async()=>{
+ const windowCalls:any[]=[]
+ // The native presentation for the orb never settles here, like a stalled IPC or playback-mute call.
+ const applyPresentation=(mode:string)=>{windowCalls.push({mode,collapsed:document.body.dataset.personalCollapsed});return mode==='orb'?new Promise(()=>{}):Promise.resolve()}
+ const {view}=await mount({applyPresentation})
+ const state=personalState(2);state.conversations.voice_id='chat:main'
+ await act(async()=>view.receive(state));view.controller.mode='voice'
+ await act(async()=>{view.refresh()})
+ assert.ok(document.querySelector('.chat-voice'),'workbench voice is active')
+ assert.equal(document.body.dataset.personalCollapsed,'false')
+ await act(async()=>{void view.controller.setPresentation('orb').catch(()=>{})})
+ await waitFor(()=>assert.ok(windowCalls.some(call=>call.mode==='orb')))
+ assert.equal(windowCalls.find(call=>call.mode==='orb').collapsed,'true','the collapsed layout is in place before the window is resized')
+ assert.equal(document.body.dataset.personalCollapsed,'true')
+ const workspace=document.getElementById('personal-workspace') as HTMLElement
+ assert.equal(workspace.style.display,'none','the workbench layout (and its voice bar) is hidden in the orb window')
+ assert.equal(view.controller.voiceId,'chat:main','switching presentation never ends voice')
+ assert.equal(view.controller.mode,'voice')
+})
+
+test('a realtime voice failure in the orb is shown on the orb, not only in the hidden workbench',async()=>{
+ const {view}=await mount(),original=view.controller.send
+ view.controller.send=(frame:any)=>{if(frame.type==='personal.command'&&frame.method==='conversations.voice'&&frame.params.enabled){queueMicrotask(()=>view.receive({type:'personal.result',request_id:frame.request_id,ok:false,error:'realtime_auth_rejected'}));return true}return original(frame)}
+ await act(async()=>{await view.controller.setPresentation('orb')})
+ await waitFor(()=>assert.ok(document.querySelector('#personal-orb-host .personal-orb-error')))
+ assert.match(document.querySelector('#personal-orb-host .personal-orb-error')!.textContent!,/API Key/)
 })

@@ -203,7 +203,7 @@ test('状态数据缺失时仍渲染四张卡片、合法状态徽标且可安�
   }
   const v = render(<ConnectorsPage api={api as any}/>)
   await waitFor(() => assert.equal(cardButtons(v.container).length, 4))
-  const labels = ['已连接', '待配置', '需要授权', '同步中', '已暂停', '需处理', '不可用', '未连接', '待检查']
+  const labels = ['已连接', '待配置', '需要授权', '同步中', '已暂停', '需处理', '不可用', '未连接', '待检查', '读取失败']
   for (const card of cardButtons(v.container)) {
     const label = card.querySelector('.connector-status')?.textContent
     assert.ok(label && labels.includes(label), `${card.dataset.connector} 状态未知: ${label}`)
@@ -228,10 +228,150 @@ test('接口缺失或读取失败时给出错误提示而不是崩溃', async ()
   const v = render(<ConnectorsPage api={failing as any}/>)
   await waitFor(() => assert.equal(cardButtons(v.container).length, 4))
   await waitFor(() => assert.ok(v.getByRole('alert')))
-  assert.match(v.getByRole('alert').textContent ?? '', /未能读取连接状态/)
+  assert.match(v.getByRole('alert').textContent ?? '', /连接状态读取失败/)
+  assert.match(v.getByRole('alert').textContent ?? '', /飞书状态读取失败/)
   cleanup()
   const missing = render(<ConnectorsPage/>)
   await waitFor(() => assert.equal(cardButtons(missing.container).length, 4))
+})
+
+const description = (container: HTMLElement, id: string) => cardById(container, id).querySelector('.connector-card-description')?.textContent ?? ''
+const ipcError = (reason: string) => new Error(`Error invoking remote method 'nova:settings:feishu': Error: ${reason}`)
+
+test('飞书状态读取失败只影响飞书卡片，并显示具体原因与重试', async () => {
+  const b = bridge({ personal: personalState({ feishu: { available: true, configured: true, state: 'ready' } }) })
+  let fail = true
+  const feishuCommand = b.api.feishuCommand
+  b.api.feishuCommand = async (method: string, params: any) => {
+    if (method === 'feishu.status' && fail) {
+      b.calls.push(['feishu', method, structuredClone(params ?? {})])
+      throw ipcError('backend control busy')
+    }
+    return feishuCommand(method, params)
+  }
+  const v = render(<ConnectorsPage api={b.api}/>)
+  await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '读取失败'))
+  for (const id of ['files', 'mail', 'calendar'])
+    assert.equal(statusOf(v.container, id), '已连接', `${id} 不应受飞书失败影响`)
+  assert.equal(cardById(v.container, 'feishu').dataset.tone, 'error')
+  const alert = v.getByRole('alert').textContent ?? ''
+  assert.match(alert, /飞书状态读取失败：后台繁忙/)
+  assert.doesNotMatch(alert, /连接状态读取失败/)
+  assert.doesNotMatch(alert, /backend control/)
+  assert.match(description(v.container, 'feishu'), /后台繁忙/)
+  const before = b.calls.filter((call) => call[1] === 'feishu.status').length
+  fail = false
+  fireEvent.click(v.getByRole('button', { name: '重试' }))
+  await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '已连接'))
+  assert.ok(b.calls.filter((call) => call[1] === 'feishu.status').length > before)
+  assert.equal(v.queryByRole('alert'), null)
+})
+
+test('各类读取错误映射为不同的简短原因', async () => {
+  const cases: [Error | object, RegExp][] = [
+    [ipcError('backend control timeout'), /请求超时/],
+    [ipcError('IM connection changed'), /后台正在重启/],
+    [ipcError('backend control closed'), /后台正在重启/],
+    [ipcError('IM connection unavailable'), /后台尚未就绪/],
+    [ipcError('backend control not ready'), /后台尚未就绪/],
+    [{ error: 'unavailable' }, /后台暂不可用/],
+    [{ error: 'lark-cli token=SECRET' }, /后台返回错误/],
+  ]
+  for (const [failure, reason] of cases) {
+    const b = bridge()
+    b.api.feishuCommand = async () => { if (failure instanceof Error) throw failure; return failure }
+    const v = render(<ConnectorsPage api={b.api}/>)
+    await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '读取失败'))
+    const alert = v.getByRole('alert').textContent ?? ''
+    assert.match(alert, reason, String((failure as any).message ?? (failure as any).error))
+    assert.doesNotMatch(alert, /SECRET/)
+    cleanup()
+  }
+})
+
+test('单个接口超时时先显示已有卡片，飞书标记读取失败', async () => {
+  const b = bridge()
+  b.api.feishuCommand = () => new Promise(() => {})
+  const v = render(<ConnectorsPage api={b.api} timeoutMs={30}/>)
+  await waitFor(() => assert.equal(statusOf(v.container, 'files'), '已连接'))
+  await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '读取失败'))
+  assert.match(v.getByRole('alert').textContent ?? '', /飞书状态读取失败：请求超时/)
+  assert.equal(statusOf(v.container, 'mail'), '已连接')
+})
+
+test('加载中显示待检查，与读取失败区分', async () => {
+  const b = bridge()
+  b.api.feishuCommand = () => new Promise(() => {})
+  const v = render(<ConnectorsPage api={b.api}/>)
+  await waitFor(() => assert.equal(statusOf(v.container, 'files'), '已连接'))
+  assert.equal(statusOf(v.container, 'feishu'), '待检查')
+  assert.equal(cardById(v.container, 'feishu').dataset.tone, 'progress')
+  assert.equal(v.queryByRole('alert'), null)
+})
+
+test('页面读取飞书缓存状态，只有刷新状态才联网校验', async () => {
+  const b = bridge()
+  const v = render(<ConnectorsPage api={b.api}/>)
+  await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '已连接'))
+  const reads = () => b.calls.filter((call) => call[0] === 'feishu' && call[1] === 'feishu.status')
+  assert.deepEqual(reads().map((call) => call[2]), [{ cached: true }])
+  fireEvent.click(v.getByRole('button', { name: '刷新状态' }))
+  await waitFor(() => assert.equal(reads().length, 2))
+  assert.deepEqual(reads()[1]![2], {})
+})
+
+test('读取失败的卡片点击后重试而不是进入详情', async () => {
+  const b = bridge()
+  let fail = true
+  const feishuCommand = b.api.feishuCommand
+  b.api.feishuCommand = async (method: string, params: any) => {
+    if (method === 'feishu.status' && fail)
+      throw ipcError('backend control timeout')
+    return feishuCommand(method, params)
+  }
+  const v = render(<ConnectorsPage api={b.api}/>)
+  await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '读取失败'))
+  assert.match(description(v.container, 'feishu'), /点此重试/)
+  fail = false
+  fireEvent.click(cardById(v.container, 'feishu'))
+  await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '已连接'))
+  assert.equal(v.container.querySelector('.connector-detail'), null)
+})
+
+test('卡片副文案说明当前状态与下一步', async () => {
+  const b = bridge({
+    personal: personalState({
+      sources: [{ id: 'source-scan', path: '/notes', state: 'connected', scan_pending: true, indexed: 12 }],
+      connectors: {
+        available: true, memory_available: true, local_available: true, mail_available: true,
+        connections: [
+          { id: 'gmail-pending', toolkit: 'gmail', identity: 'a@example.test', state: 'connected', has_pending: true, last_complete: null },
+          { id: 'calendar-error', toolkit: 'macos_calendar', state: 'error', error: '日历权限被撤销' },
+        ],
+      },
+    }),
+    feishu: feishuState({ state: 'unauthorized', auth_issue: 'expired' }),
+  })
+  const v = render(<ConnectorsPage api={b.api}/>)
+  await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '需要授权'))
+  assert.equal(description(v.container, 'feishu'), '登录已过期，点此重新授权')
+  assert.equal(statusOf(v.container, 'files'), '同步中')
+  assert.match(description(v.container, 'files'), /已索引 12 个文件/)
+  assert.equal(statusOf(v.container, 'mail'), '同步中')
+  assert.equal(statusOf(v.container, 'calendar'), '需处理')
+  assert.match(description(v.container, 'calendar'), /日历权限被撤销/)
+})
+
+test('飞书未登录与验证失败给出原因和下一步', async () => {
+  const b = bridge({ feishu: feishuState({ state: 'unauthorized', auth_issue: 'login_required' }) })
+  const v = render(<ConnectorsPage api={b.api}/>)
+  await waitFor(() => assert.equal(statusOf(v.container, 'feishu'), '需要授权'))
+  assert.equal(description(v.container, 'feishu'), '尚未登录，点此授权')
+  cleanup()
+  const unverified = bridge({ feishu: feishuState({ unverified: true, error: '飞书暂时无法验证登录，网络恢复后会自动继续' }) })
+  const w = render(<ConnectorsPage api={unverified.api}/>)
+  await waitFor(() => assert.equal(statusOf(w.container, 'feishu'), '需处理'))
+  assert.match(description(w.container, 'feishu'), /网络恢复后会自动继续/)
 })
 
 test('Space 与手机面板不再包裹卡片，保留原有配对操作', async () => {

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { createServer } from 'node:http'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
+import { RealtimeConnectError } from '../src/realtime/transport.js'
 import { QwenSocketClosedError } from '../src/realtime/qwen.js'
 import {
   MAX_QWEN_INBOUND_BACKLOG,
@@ -198,10 +200,54 @@ test('a refused endpoint reports a bounded failure with no credential or URL', a
   const stop = new AbortController()
   await assert.rejects(
     connect('ws://127.0.0.1:1/', stop.signal),
-    (error: unknown) => error instanceof Error
-      && error.message === 'qwen realtime websocket failed to open',
+    (error: unknown) => error instanceof RealtimeConnectError
+      && error.message === 'realtime_unreachable'
+      && error.code === 'realtime_unreachable'
+      && !error.message.includes('transport-test-key')
+      && !error.message.includes('127.0.0.1'),
   )
 })
+
+/** An HTTP server that answers every WebSocket upgrade with a fixed status. */
+async function rejectingServer(status: number): Promise<{endpoint: string; close(): Promise<void>}> {
+  const server = createServer()
+  server.on('upgrade', (_request, socket) => {
+    socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.ok(address !== null && typeof address === 'object')
+  return {
+    endpoint: `ws://127.0.0.1:${address.port}/api-ws/v1/realtime?model=secret-model`,
+    close: () => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }),
+  }
+}
+
+for (const [status, code] of [
+  [401, 'realtime_auth_rejected'],
+  [403, 'realtime_auth_rejected'],
+  [404, 'realtime_endpoint_not_found'],
+  [429, 'realtime_rate_limited'],
+  [500, 'realtime_handshake_rejected'],
+] as const) {
+  test(`a ${status} handshake maps to ${code} without the credential or URL`, async () => {
+    const server = await rejectingServer(status)
+    try {
+      await assert.rejects(
+        connect(server.endpoint, new AbortController().signal),
+        (error: unknown) => error instanceof RealtimeConnectError
+          && error.message === code
+          && error.code === code
+          && error.status === status
+          && !error.message.includes('transport-test-key')
+          && !error.message.includes('secret-model')
+          && !error.message.includes('127.0.0.1'),
+      )
+    } finally {
+      await server.close()
+    }
+  })
+}
 
 test('an aborted connect does not leak a half-open socket', async () => {
   const server = await harness()

@@ -1257,6 +1257,7 @@ export class PersonalAgentHost {
             // A failed resource close must not release ownership ahead of queued writes.
             await this.#sourceDrain?.catch(() => { /* caller receives the source failure */ });
             await this.#commands;
+            await Promise.allSettled([...this.#readRuns]);
             await this.#tail;
             await this.#readingCopies?.close();
             this.#loaded = false;
@@ -1996,7 +1997,12 @@ export class PersonalAgentHost {
     else if (p.action === 'open')
         item.user_state = 'seen'; item.updated_at = this.#now().toISOString(); await this.#commit(next); return item; }); }
     #taskInputRuns=new Set<Promise<unknown>>();
-    command(raw: unknown, context?:PersonalCommandContext): Promise<unknown> { const parsed = personalCommandSchema.parse(raw); if (!this.#opened || this.#pendingCommands >= 8)
+    #readRuns=new Set<Promise<unknown>>();
+    /** Snapshot reads (no connector or CLI work; only the usual receipt is written) must not wait behind a slow command. */
+    static #bypassRead(command:{method:string;params:Record<string,unknown>}):boolean{return command.method==='state'||command.method==='feishu.status'&&command.params.cached===true&&Object.keys(command.params).length===1}
+    command(raw: unknown, context?:PersonalCommandContext): Promise<unknown> { const parsed = personalCommandSchema.parse(raw);
+        if(PersonalAgentHost.#bypassRead(parsed)){if(!this.#opened||this.#readRuns.size>=8)return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' });const run=this.#executeCommand(parsed,context);this.#readRuns.add(run);void run.finally(()=>this.#readRuns.delete(run)).catch(()=>{ /* caller receives rejection */ });return run}
+        if (!this.#opened || this.#pendingCommands >= 8)
         return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context));if(parsed.method==='tasks.input'){this.#taskInputRuns.add(run);void run.finally(()=>{this.#taskInputRuns.delete(run);this.#pendingCommands--}).catch(()=>{ /* caller receives rejection */ });return run} this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
         if(context?.client_id!=='desktop:local'&&typeof command.params.id==='string'&&this.#state.conversations.items.some(item=>item.id===command.params.id&&item.kind==='build'))return {type:'personal.result',request_id:command.request_id,ok:false,error:'local_workbench_required'};

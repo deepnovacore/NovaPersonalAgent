@@ -68,6 +68,8 @@ export interface FeishuOptions {
   executable: string; credentialRoot: string; statePath: string;
   run?: FeishuRun;
   bootstrapOnly?: boolean;
+  /** Upper bound for an explicit `feishu.status` verification (default 15 s); background checks keep the CLI's own limit. */
+  statusTimeoutMs?: number;
   processingGrant?: (consent:boolean,revision:number,scopeRevision:number)=>ProcessingGrant | undefined;
   onProcessingConsent?: (sources:string[],grant:ProcessingGrant)=>Promise<void>;
   processingConsentTransition?: ((mode:'suspend'|'reconcile'|'apply'|'activate',sources:string[],grant:ProcessingGrant,pending?:boolean)=>Promise<ProcessingGrant>) | undefined;
@@ -759,7 +761,16 @@ export class FeishuConnector {
       case 'feishu.app.start': case 'feishu.app.status': case 'feishu.app.cancel':
         if (Object.keys(params).length) throw new Error('Invalid app setup request');
         return method === 'feishu.app.start' ? this.beginAppSetup() : method === 'feishu.app.cancel' ? this.cancelAppSetup() : this.setupSnapshot();
-      case 'feishu.status': await this.status(); return this.setupSnapshot();
+      case 'feishu.status':
+        // Settings pages read the snapshot kept fresh by open() and the sync tick; only an explicit check runs the CLI.
+        if (params.cached === true) return this.setupSnapshot();
+        try { await this.status(AbortSignal.timeout(this.options.statusTimeoutMs ?? 15_000)); }
+        catch {
+          // status() throws only when no login is known; a failed check is still a displayable state, not a page error.
+          // `unverified` makes the sync tick re-check, and a successful status clears it.
+          this.unverified = true; this.view.error = '暂时无法连接飞书，请检查网络后重试'; this.publish();
+        }
+        return this.setupSnapshot();
       case 'feishu.notification.login': return this.beginLogin(true);
       case 'feishu.notification.configure':
         if(typeof params.enabled!=='boolean')throw Error('invalid_request');await this.status();if(params.enabled&&!this.saved.outboundIdentity?.valid)throw Error('飞书身份未验证');this.saved.outbound=params.enabled;this.view.notification_enabled=params.enabled;if(!this.callbackReady()){this.listenerController?.abort();await this.listener?.catch(()=>{/* caller owns the result */});}await this.save();break;

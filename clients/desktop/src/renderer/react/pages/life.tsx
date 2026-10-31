@@ -20,13 +20,11 @@ function NovaSuggestions(){
  const forget=(id:string)=>setHidden(current=>current.includes(id)?current:[...current,id])
  return <section className="workbench-suggestions nova-suggestions" aria-label={t('Nova 的建议')}>
   <h2>{t('Nova 的建议')}</h2>
-  <p className="hint">{t('根据你的资料整理的想法和目标，不需要额外保存；不适用的直接忽略，目标类可以设为目标。')}</p>
+  <p className="hint">{t('根据你的资料整理的想法，不需要额外保存；不适用的直接忽略。')}</p>
   {suggestions.map((item:any)=><SourceArticle className="card nova-suggestion" data-suggestion-id={item.id} data-suggestion-kind={item.kind} key={item.id}>
-   <Tags items={[{label:item.kind==='goal'?'目标建议':'想法',tone:item.kind==='goal'?'progress':'context'}]}/>
    <h3>{item.title}</h3>
    {typeof item.body==='string'&&item.body.trim()?<p>{item.body}</p>:null}
    <div className="card-actions">
-    {item.kind==='goal'&&<Action className="soft" actionKey={`understanding:${item.id}`} action={async()=>{await command('understanding.adopt',{id:item.id});forget(item.id)}}>{t('设为目标')}</Action>}
     <Action className="ghost" actionKey={`understanding:${item.id}`} action={async()=>{await command('understanding.dismiss',{id:item.id});forget(item.id)}}>{t('忽略')}</Action>
    </div>
   </SourceArticle>)}

@@ -176,6 +176,8 @@ export class RealtimeProviderSession {
         if (!this.#isClosed()) this.#state = 'disconnected'
       }
       this.#identity = null
+      // A sanitized connect code (see RealtimeConnectError) is what the user can act on; keep it.
+      if (error instanceof Error && /^realtime_[a-z_]{1,64}$/u.test(error.message)) throw new RealtimeProtocolError(error.message)
       throw protocolFailure('provider connect failed', error)
     }
   }

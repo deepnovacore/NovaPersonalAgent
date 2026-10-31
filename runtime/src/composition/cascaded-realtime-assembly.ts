@@ -520,6 +520,7 @@ export interface BuildQwenRealtimeProviderOptions {
   readonly history?:readonly CommittedConversationPair[]
   readonly language?: PromptLanguage
   readonly onUsage?: UsageReporter
+  readonly telemetry?: RealtimeTelemetry
 
 
   readonly config: QwenRealtimeConfig
@@ -536,6 +537,7 @@ function buildIntegratedWireProvider(options: BuildQwenRealtimeProviderOptions, 
     ...(options.language === undefined ? {} : {language: options.language}),
     ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, options.config.url)!}),
     ...(profile === undefined ? {} : {wireProfile: profile}),
+    ...(options.telemetry === undefined ? {} : {telemetry: options.telemetry}),
     url: options.config.url,
     apiKey: options.config.apiKey,
     model: options.config.model,

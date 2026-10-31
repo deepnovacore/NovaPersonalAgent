@@ -95,3 +95,32 @@ test('a terminal voice failure invalidates an in-flight voice startup', () => {
   assert.equal(controller.mode,'text')
   settle(controller)
 })
+
+function startingVoice() {
+  const {controller,sent}=makeController({voiceId:null})
+  controller.mode='text'
+  const started=controller.voice()
+  const request=sent.find(frame=>frame.type==='personal.command'&&frame.method==='conversations.voice')
+  return {controller,sent,started,request}
+}
+
+test('a superseded voice start still surfaces a real provider failure', async () => {
+  const {controller,started,request}=startingVoice()
+  controller.generation++ // a newer action took ownership while the host was connecting
+  controller.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'realtime_auth_rejected'})
+  await assert.rejects(started,error=>/API Key/.test(error.message)&&error.refusal_code==='realtime_auth_rejected')
+  settle(controller)
+})
+
+test('a superseded voice start stays quiet when the failure is only the cancellation', async () => {
+  for(const code of ['realtime_connect_aborted','conversation_runtime_closed','conversation_cleared']){
+    const {controller,started,request}=startingVoice()
+    controller.generation++
+    controller.receive({type:'personal.result',request_id:request.request_id,ok:false,error:code})
+    assert.equal(await started,undefined,code)
+    settle(controller)
+  }
+  const {controller,started}=startingVoice()
+  controller.disconnect()
+  assert.equal(await started,undefined,'a disconnect rejection is not a provider failure')
+})

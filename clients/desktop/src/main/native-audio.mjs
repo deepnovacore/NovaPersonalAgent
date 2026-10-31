@@ -340,6 +340,7 @@ export function createNativeAudioManager({
   binary,
   startImpl = startNativeAudio,
   onEvent = () => {},
+  diagnostic = message => console.warn(message),
 }) {
   let audio = null
   let pending = null
@@ -389,7 +390,13 @@ export function createNativeAudioManager({
         if (current.setCaptureEpoch && !current.setCaptureEpoch(captureEpoch)) throw new Error('native capture epoch failed')
         if (!current.setCaptureEnabled(true)) throw new Error('native capture command failed')
         return Object.freeze({ audioMode: 'voice_processing_io' })
-      } catch {
+      } catch (error) {
+        // Record why native capture fell back. Only our own command text and system error codes are kept:
+        // a spawn error message carries the helper's absolute path.
+        const message = error instanceof Error ? error.message : ''
+        const code = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,31}$/.test(error.code) ? ` code=${error.code}` : ''
+        const reason = /^native [a-z ]{1,60}$/.test(message) ? ` reason=${message}` : ''
+        try { diagnostic(`[desktop-diagnostic] native_audio_activate_fallback type=${error?.name ?? 'unknown'}${code}${reason}`) } catch { /* diagnostics never change the fallback */ }
         await closeCurrent()
         return Object.freeze({ audioMode: 'browser_aec' })
       }

@@ -157,6 +157,33 @@ test('snapshot presentation update pauses capture without changing host voice ow
  await Promise.resolve();assert.equal(h.c.presentationMode,'background');assert.equal(h.c.voiceId,'a');assert.equal(h.starts,0);assert.equal(h.stops,1)
 })
 
+test('the renderer leaves the workbench layout before the window shrinks to the orb, even if presentation stalls or fails',async()=>{
+ const layout=[],changes=[];let release
+ const sent=[]
+ const c=new PersonalController({send:frame=>{sent.push(frame);return true},start:async()=>{},stop:async()=>{},changed:()=>changes.push(c.collapsed),
+  presentationChanged:(mode,collapsed)=>layout.push([mode,collapsed]),
+  applyPresentation:mode=>{layout.push(['window',mode]);return mode==='orb'?new Promise((_resolve,reject)=>{release=reject}):Promise.resolve()}})
+ const ack=()=>{const request=sent.findLast(frame=>frame.method==='presentation.set');c.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{mode:request.params.mode}})}
+ const ready=c.connect();ack();await ready;layout.length=0
+ const orb=c.setPresentation('orb');ack()
+ for(let n=0;n<20&&!release;n++)await Promise.resolve()
+ assert.equal(typeof release,'function','the native presentation is in flight')
+ assert.deepEqual(layout,[['orb',true],['window','orb']],'collapsed layout is published before the window is resized')
+ assert.equal(changes.at(-1),true,'subscribers already see the collapsed state while the window call is pending')
+ changes.length=0;release(new Error('native presentation failed'))
+ await assert.rejects(orb,/native presentation failed/)
+ assert.equal(c.collapsed,true,'the window already shrank, so the renderer stays collapsed with it')
+ assert.ok(changes.length>0)
+ // applyMode on its own (snapshot/reconnect paths) must still notify subscribers when the window call fails.
+ changes.length=0;const direct=c.applyMode('workbench');await assert.doesNotReject(direct);assert.equal(changes.at(-1),false)
+ c.applyPresentation=async()=>{throw new Error('window gone')};changes.length=0
+ await assert.rejects(c.applyMode('orb'),/window gone/);assert.deepEqual(changes,[true,true])
+})
+test('a main-process collapse publishes the layout synchronously',()=>{
+ const layout=[];const c=new PersonalController({send:()=>true,start:async()=>{},stop:async()=>{},presentationChanged:(mode,collapsed)=>layout.push([mode,collapsed])})
+ c.presentationMode='orb';c.collapse(true);assert.deepEqual(layout,[['orb',true]])
+})
+
 test('background during pending microphone permission keeps the acquired voice owner',async()=>{
  let rejectStart;const h=presentationHarness(),ready=h.c.connect();h.ack();await ready
  h.c.start=()=>new Promise((_resolve,reject)=>{rejectStart=reject})

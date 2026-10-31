@@ -643,7 +643,6 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 @container(max-width:430px){.timeline-attention-card{padding:17px}.timeline-attention-facts,.timeline-attention-facts[data-count="3"]{grid-template-columns:1fr;gap:10px}.timeline-fact,.timeline-fact:first-child,.timeline-fact:last-child{border:0;padding:0}.timeline-next-steps{grid-template-columns:1fr}.timeline-next-steps li{display:grid;grid-template-columns:20px 1fr;column-gap:6px}.timeline-next-steps h5{margin:0}.timeline-next-steps p{grid-column:2}.timeline-step-number{padding-top:2px}}
 @media(prefers-color-scheme:dark){.timeline-attention-card{--brief-accent:#72bddc;--brief-wash:#1b303c}.timeline-attention-card[data-kind="attention"]{--brief-accent:#f29a9e;--brief-wash:#39262d}.timeline-attention-card[data-kind="deadline"]{--brief-accent:#e4bc77;--brief-wash:#352e22}.timeline-attention-card[data-kind="progress"]{--brief-accent:#72c9b6;--brief-wash:#1b342f}.workbench .timeline-attention-card .timeline-primary{color:#12242d}}
 
-.timeline-generated-at{margin:0;font-size:11px;line-height:1.5;color:var(--ink-dim)}
 .timeline-card-time{display:flex;flex-wrap:wrap;gap:4px 12px;margin:var(--tl-gap-s) 0 var(--tl-gap-m);font-size:11px;line-height:1.5;color:var(--ink-dim)}
 .timeline-time-label:first-child{color:var(--brief-accent);font-weight:550}
 .timeline-unplaced{display:grid;gap:14px;padding-top:20px;border-top:1px solid var(--line)}
@@ -651,7 +650,8 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 
 .timeline-people{margin:var(--tl-gap-s) 0 0;gap:6px}
 .timeline-history-note{margin:var(--tl-gap-s) 0 0;font-size:11px;line-height:1.5;color:var(--ink-dim)}
-.timeline-coverage,.timeline-brief-count,.timeline-partial{margin:0;font-size:11px;line-height:1.5}
+.timeline-meta-line{margin:0;font-size:11px;line-height:1.5;color:var(--ink-dim)}
+.timeline-meta-issue summary{font-size:11px;color:#b87a14}.timeline-meta-issue{font-size:11px}
 .timeline-people .tag-person{font-size:11px;font-weight:500;border-radius:999px;padding:3px 10px;color:var(--ink-dim);background:color-mix(in srgb,var(--brief-accent) 7%,var(--surface));border-color:color-mix(in srgb,var(--brief-accent) 15%,transparent)}
 /* Ordinary speech has a quiet surface; actionable feeds retain their own card. */
 .workbench .message.assistant:not(.message-feed)>.message-body{padding:14px 18px;border:1px solid color-mix(in srgb,var(--line) 45%,transparent);border-radius:var(--radius-xl);background:color-mix(in srgb,var(--surface-raised) 70%,transparent)}
@@ -1008,9 +1008,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .profile-interests h4{font-size:12px;font-weight:600;line-height:1.4;color:var(--ink-dim)}
 .profile-interests .interest-chips{gap:7px}
 /* Suggestions moved from the briefing into the ideas tab: one calm card per candidate. */
-.workbench .nova-suggestion{position:relative;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface-raised);padding:14px 16px 12px 18px}
-.workbench .nova-suggestion::before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.workbench .nova-suggestion{position:relative;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface-raised);padding:14px 16px 12px}
 .workbench .nova-suggestion .card-actions{gap:6px}
-.workbench .nova-suggestion .card-tag{font-weight:500}
 .workbench .voice-failure{flex:1 0 100%;order:-1;margin:0 0 4px;font-size:12px;color:var(--warn)}
 .workbench .composer-actions:has(.voice-failure){flex-wrap:wrap}

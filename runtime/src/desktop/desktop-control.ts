@@ -44,7 +44,9 @@ export function installDesktopControl(options: {
     const wrapper = event as {readonly data?: unknown}
     const value = (wrapper?.data ?? event) as {readonly type?: unknown; readonly id?: unknown; readonly method?: unknown; readonly params?: unknown}
     if (disposed || value?.type !== 'nova.control.request' || typeof value.id !== 'string' || value.id.length > 80
-      || typeof value.method !== 'string' || value.method.length > 80 || pending >= 8) return
+      || typeof value.method !== 'string' || value.method.length > 80) return
+    // A full port still answers, so the main process does not wait out its own timeout.
+    if (pending >= 8) { port?.postMessage({type: 'nova.control.reply', id: value.id, error: 'busy'}); return }
     const id = value.id
     const method = value.method
     pending += 1
@@ -61,7 +63,7 @@ export function installDesktopControl(options: {
           options.updateCodingBackend(params.backend as CodingBackendId)
           result = {backend: params.backend}
         } else result = method === 'capabilities.status' ? options.status() : await options.handle?.(method, value.params)
-        if (!disposed) port?.postMessage({type: 'nova.control.reply', id, ...(result === undefined ? {error: 'unavailable'} : {result})})
+        if (!disposed) port?.postMessage({type: 'nova.control.reply', id, ...(result === undefined ? {error: 'not_ready'} : {result})})
       } catch {
         if (!disposed) port?.postMessage({type: 'nova.control.reply', id, error: 'unavailable'})
       } finally { pending -= 1 }

@@ -1,4 +1,4 @@
-import {t} from './locale.mjs'
+import {t,currentLanguage} from './locale.mjs'
 export function sourceStatus(sources=[],status){
  if(sources.some(source=>source.processing_consent_required))return {kind:'consent',text:'部分资料需要授权后才能整理'}
  if(sources.length&&sources.every(source=>['paused','disconnected'].includes(source.state)))return {kind:'paused',text:'资料来源已暂停'}
@@ -8,9 +8,31 @@ export function sourceStatus(sources=[],status){
  if(sources.some(source=>source.scan_pending))return {kind:'indexing',text:'资料索引仍在更新'}
  return null
 }
-export function renderSourceStatus(parent,{sources=[],status,processing=[],el,button,openSettings}){
- const state=sourceStatus(sources,status);if(!state&&!sources.length&&!processing.length)return
- const details=el('details',undefined,'source-status');details.dataset.state=state?.kind??'ready';details.append(el('summary',t(state?.text??'查看来源')));parent.append(details)
+/**
+ * The briefing's metadata block is at most two lines: a constant summary, then at most one problem sentence.
+ * Counts come from the backend coverage string ("本轮资料：N 条消息 · N 份文档 · N 条个人记录；消息记录 A—B"); the date range moves to the tooltip.
+ */
+export function timelineMeta({attention,sources=[],status,total=0,shown=0,archived=0,timeZone}){
+ const parts=[],tips=[]
+ if(attention.updated_at&&Number.isFinite(Date.parse(attention.updated_at)))parts.push(t('整理于 {0}',new Date(attention.updated_at).toLocaleString(currentLanguage(),{timeZone,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})))
+ if(attention.input_count&&attention.coverage){
+  const match=/^本轮资料：([^；]*)(?:；消息记录 (.*))?$/u.exec(attention.coverage)
+  parts.push(match?match[1]:attention.coverage)
+  if(match?.[2])tips.push(t('消息记录 {0}',match[2]))
+ }
+ if(total)parts.push(t('共 {0} 条（已展示 {1}）',total,shown))
+ if(archived)tips.push(t('其中 {0} 条为来源不可用的归档记录',archived))
+ const state=sourceStatus(sources,status)
+ let issue=null
+ if(state?.kind==='consent')issue={kind:'consent',text:'部分资料需要授权后才能整理',sources:true}
+ else if(attention.status==='failed'&&attention.cards?.length)issue={kind:'failed',text:'本次更新未完成，已保留上次结果'}
+ else if((attention.diagnostics?.failed_batches?.length||attention.diagnostics?.pending_batches)&&attention.status!=='working')issue={kind:'partial',text:'部分资料尚未整理，可刷新补充'}
+ else if(state&&['paused','partial'].includes(state.kind))issue={kind:state.kind,text:state.text,sources:true}
+ return {line:parts.join(' · '),title:tips.join('\n'),issue}
+}
+export function renderSourceStatus(parent,{sources=[],status,processing=[],el,button,openSettings,text,link,className=''}){
+ const state=sourceStatus(sources,status);if(!state&&!text&&!sources.length&&!processing.length)return
+ const details=el('details',undefined,('source-status '+className).trim());details.dataset.state=state?.kind??'ready';details.append(el('summary',t(text??state?.text??'查看来源')+(link?' · '+t(link):'')));parent.append(details)
  const body=el('div',undefined,'source-status-details');details.append(body)
  for(const source of sources){
   const label=source.scope==='computer'?t('本机资料'):source.path?.split(/[\\/]/u).filter(Boolean).at(-1)??t('资料来源')

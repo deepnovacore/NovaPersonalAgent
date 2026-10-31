@@ -839,3 +839,49 @@ test('a fresh paused connector reopens before any capture scope has been configu
  try{await connector.open();await connector.pause();await connector.close();connector=make();await connector.open();assert.equal(connector.snapshot().state,'error')}
  finally{await connector.close();await rm(directory,{recursive:true,force:true})}
 })
+
+test('cached Feishu status reads the snapshot without running the CLI', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-cached-'));
+  const calls:string[][]=[];
+  const connector=new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:async(args)=>{
+    calls.push(args);
+    if(args[0]==='--version')return '1.0.97';
+    return JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{openId:'ou_fixture',status:'authenticated',tokenStatus:'valid',scope:FEISHU_SCOPES.join(' ')}}});
+  }});
+  try {
+    await connector.open();
+    const before=calls.length;
+    const cached=await connector.command('feishu.status',{cached:true});
+    assert.equal(calls.length,before,'cached status must not spawn lark-cli');
+    assert.equal(cached.configured,true);
+    await connector.command('feishu.status');
+    assert.equal(calls.length,before+1,'uncached status still verifies');
+  } finally {await connector.close();await rm(directory,{recursive:true,force:true});}
+});
+
+test('verified Feishu status is bounded and a failed check without a login returns a displayable snapshot', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-bounded-'));
+  let mode:'ok'|'hang'|'offline'='ok';
+  const connector=new FeishuConnector({bootstrapOnly:true,statusTimeoutMs:50,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:(args,options)=>{
+    if(args[0]==='--version')return Promise.resolve('1.0.97');
+    if(mode==='offline')return Promise.reject(Error('Feishu CLI failed (1)'));
+    if(mode==='hang')return new Promise((_,reject)=>{options?.signal?.addEventListener('abort',()=>reject(Error('Feishu operation cancelled')),{once:true})});
+    return Promise.resolve(JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{status:'missing'}}}));
+  }});
+  try {
+    await connector.open();
+    mode='hang';
+    const started=Date.now();
+    const hung=await connector.command('feishu.status');
+    assert.ok(Date.now()-started<2000,'status verification must be cut off by its short timeout');
+    assert.equal(hung.unverified,true);assert.match(hung.error!,/网络/);
+    mode='offline';
+    const offline=await connector.command('feishu.status');
+    assert.equal(offline.unverified,true);
+    assert.equal(offline.configured,true,'the known app binding stays visible');
+    assert.equal((await connector.command('feishu.status',{cached:true})).unverified,true,'the cached view reflects the failed check');
+    mode='ok';
+    const recovered=await connector.command('feishu.status');
+    assert.equal(recovered.unverified,undefined);assert.equal(recovered.error,undefined);
+  } finally {await connector.close();await rm(directory,{recursive:true,force:true});}
+});
