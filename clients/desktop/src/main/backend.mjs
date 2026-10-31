@@ -338,7 +338,7 @@ export function backendLaunchSpec({
   // surrounding whitespace in a pasted key is cleaned up too.
   Object.assign(env, capabilityEnvironment(settings, decryptedSecrets, env, capabilitiesDocument))
   const modelRoutes = Object.fromEntries(Object.entries(settings?.modelRoutes ?? {}).filter(([, route]) => route))
-  if (Object.keys(modelRoutes).length > 0) env.MODEL_ROUTES = JSON.stringify(modelRoutes)
+  if (!env.NOVA_SPACE_HOST_CONFIG && Object.keys(modelRoutes).length > 0) env.MODEL_ROUTES = JSON.stringify(modelRoutes)
   return {
     kind: 'node',
     entry: nodeEntry,

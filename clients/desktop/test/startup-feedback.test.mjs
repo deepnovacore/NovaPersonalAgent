@@ -91,7 +91,7 @@ test('closing settings releases recording and clears UI ownership after phone mi
 test('settings public projection never opens the keychain or capability files', () => {
   const body = source.slice(source.indexOf('function settingsView()'), source.indexOf('async function loadMemoryBoardExport()'))
   const touched = () => {throw Error('keychain/file access')}
-  const context = vm.createContext({capabilityEditorCache:null, skillsCache:[], runtimeCapabilities:null, settingsWindow:{}, settingsGeneration:1, currentSettings:{},
+  const context = vm.createContext({configuredSpaceModelsPath: () => null, settingsRestartPending: false, capabilityEditorCache:null, skillsCache:[], runtimeCapabilities:null, settingsWindow:{}, settingsGeneration:1, currentSettings:{},
     secretCodec:{available:touched}, capabilityDocumentRevision:touched, decryptSecretsForSpawn:touched,
     readCapabilityDocument:touched, resolveSecretConfiguration:()=>({secretsPresent:{},secretSources:{}}),process:{env:{}},developmentEnv:{},
     secretsPresent:()=>({}), publicSettings:()=>({}), codexStatus:{},frontendUsage:{snapshot:()=>({})},VISION_MODELS:[],MODEL_CATALOG:{},backendStatus:{state:'stopped'},

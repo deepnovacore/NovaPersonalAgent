@@ -54,6 +54,16 @@ function nodeLaunchSpec(options) {
   })
 }
 
+test('Space routes come from the Host store while operator routes retain precedence', () => {
+  const modelRoutes = {conversationText: {provider: 'qwen', model: 'desktop-saved'}}
+  const launch = parentEnv => nodeLaunchSpec({workspace: '/workspace', token: TOKEN,
+    readyEndpoint: '127.0.0.1:1234', settings: {...SETTINGS_V2, modelRoutes}, parentEnv})
+  assert.equal(launch({}).env.MODEL_ROUTES, JSON.stringify(modelRoutes))
+  assert.equal(launch({NOVA_SPACE_HOST_CONFIG: '/space/config.json'}).env.MODEL_ROUTES, undefined)
+  const explicit = '{"support":{"provider":"openai","model":"operator-model"}}'
+  assert.equal(launch({NOVA_SPACE_HOST_CONFIG: '/space/config.json', MODEL_ROUTES: explicit}).env.MODEL_ROUTES, explicit)
+})
+
 function readinessLine(overrides = {}) {
   return `${JSON.stringify({ token: TOKEN, host: '127.0.0.1', port: 49152, ...overrides })}\n`
 }

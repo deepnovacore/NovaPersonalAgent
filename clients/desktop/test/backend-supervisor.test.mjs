@@ -9,6 +9,23 @@ function deferred() {
   return {promise, resolve}
 }
 
+test('only the exact child model-change notification crosses the control boundary', () => {
+  const child = new EventEmitter()
+  let notifications = 0
+  const control = createBackendControl(child, {onSpaceModelsChanged: (...args) => {
+    assert.deepEqual(args, [])
+    notifications++
+  }})
+  child.emit('message', {type: 'nova.space.models.changed', secret: 'must-not-cross'})
+  child.emit('message', {type: 'nova.space.models.changed.extra'})
+  assert.equal(notifications, 0)
+  child.emit('message', {type: 'nova.space.models.changed'})
+  assert.equal(notifications, 1)
+  control.close()
+  child.emit('message', {type: 'nova.space.models.changed'})
+  assert.equal(notifications, 1)
+})
+
 test('disconnect survives repeated readiness failures and retires each child before retry', async () => {
   const timers = []
   const stopped = []

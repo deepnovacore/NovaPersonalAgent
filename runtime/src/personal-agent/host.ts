@@ -2015,11 +2015,11 @@ export class PersonalAgentHost {
         if(this.activeLocalBuild()&&(command.method==='build.start'||command.method==='build.begin'||(command.method==='conversations.clear'&&command.params.id===this.activeLocalBuild()!.id)))return {type:'personal.result',request_id:command.request_id,ok:false,error:'build_stop_required'};
         // Recovery owns task execution only: presentation, state and non-task commands keep working, and a handback made now is woken when recovery ends.
         if(this.#recovering&&(command.method.startsWith('tasks.')||command.method==='conversations.approve')&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
-        const scheduleCommand=command.method.startsWith('schedules.'),taskCommand=command.method.startsWith('tasks.'),scoped=localCommand||scheduleCommand||taskCommand||command.method==='presentation.set'||command.method==='conversations.approve'||command.method==='conversations.confirm'||command.method==='conversations.start';
+        const scheduleCommand=command.method.startsWith('schedules.'),taskCommand=command.method.startsWith('tasks.'),scoped=localCommand||scheduleCommand||taskCommand||command.method==='space.models.configure'||command.method==='presentation.set'||command.method==='conversations.approve'||command.method==='conversations.confirm'||command.method==='conversations.start';
         const client=context?.client_id;
         if((scheduleCommand||taskCommand||command.method==='conversations.approve')&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
         const receiptId=scoped?hash({client:client??null,request:command.request_id}):command.request_id;
-        const taskRead=command.method==='tasks.get'||command.method==='tasks.list'||['schedules.list','schedules.get','schedules.history','schedules.presets','schedules.preview'].includes(command.method);
+        const taskRead=command.method==='space.models.status'||command.method==='tasks.get'||command.method==='tasks.list'||['schedules.list','schedules.get','schedules.history','schedules.presets','schedules.preview'].includes(command.method);
         const payload=scoped?hash(canonicalJson(command)):hash(command),prior=taskRead?undefined:this.#state.receipts[receiptId];
         if(prior&&command.method==='identity.configure'&&prior.payload===payload&&!(prior.result as {identity_pending?:boolean})?.identity_pending){try{await this.synchronizePreferredName();return prior.result}catch(error){return {type:'personal.result',request_id:command.request_id,ok:false,error:error instanceof Error?error.message:'unavailable'}}}
         if(prior&&!(command.method==='identity.configure'&&prior.payload===payload&&(prior.result as {identity_pending?:boolean})?.identity_pending))
@@ -2028,7 +2028,9 @@ export class PersonalAgentHost {
         const m = this.options.memory(), p = command.params;
         if(command.method==='space.status'){data=this.spaceHostStatus()}
         else if(command.method.startsWith('space.')){if(!this.#spaceHost)throw Error('space_host_unconfigured');
-            if(command.method==='space.invitation')data=await this.#spaceHost.invitation();
+            if(command.method==='space.models.status'){z.object({}).strict().parse(p);data=this.#spaceHost.modelsStatus()}
+            else if(command.method==='space.models.configure')data=await this.#spaceHost.configureModels(p,'desktop:'+command.request_id);
+            else if(command.method==='space.invitation')data=await this.#spaceHost.invitation();
             else if(command.method==='space.pairings')data=await this.#spaceHost.pairings();
             else if(command.method==='space.confirm_pairing'){const q=z.object({id:z.string(),fingerprint:z.string()}).strict().parse(p);data=await this.#spaceHost.confirmPairing(q.id,q.fingerprint)}
             else if(command.method==='space.revoke'){const q=z.object({device:z.string()}).strict().parse(p);data=await this.#spaceHost.revoke(q.device)}

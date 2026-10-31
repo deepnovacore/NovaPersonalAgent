@@ -20,10 +20,15 @@ class ConnectorsPage extends StatelessWidget {
     required this.language,
     required this.feishuStatus,
     required this.onOpenFeishu,
+    this.onOpenSystem,
+    this.systemTitle,
+    this.systemSubtitle,
   });
   final String language;
   final FeishuConnectorStatus feishuStatus;
-  final VoidCallback onOpenFeishu;
+  final VoidCallback? onOpenFeishu;
+  final VoidCallback? onOpenSystem;
+  final String? systemTitle, systemSubtitle;
 
   String t(String zh, String en) => language == 'zh' ? zh : en;
 
@@ -72,14 +77,18 @@ class ConnectorsPage extends StatelessWidget {
             children: [
               NovaTile(
                 leading: const NovaIconTile(CupertinoIcons.calendar),
-                title: t('日历与提醒事项', 'Calendar & reminders'),
+                title: systemTitle ?? t('日历与提醒事项', 'Calendar & reminders'),
                 subtitle: Text(
-                  t(
-                    '授权后可读取，并按你的请求创建或更新日历与提醒事项。系统权限可在手机设置中管理。',
-                    'With permission, Nova can read, create and update events and reminders at your request. Manage permissions in your phone settings.',
-                  ),
+                  systemSubtitle ??
+                      t(
+                        '授权后可读取，并按你的请求创建或更新日历与提醒事项。系统权限可在手机设置中管理。',
+                        'With permission, Nova can read, create and update events and reminders at your request. Manage permissions in your phone settings.',
+                      ),
                 ),
-                trailing: NovaStatusChip(t('系统授权', 'System permission')),
+                trailing: onOpenSystem == null
+                    ? NovaStatusChip(t('系统授权', 'System permission'))
+                    : const CupertinoListTileChevron(),
+                onTap: onOpenSystem,
               ),
             ],
           ),

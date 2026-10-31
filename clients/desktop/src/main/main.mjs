@@ -108,6 +108,7 @@ import {
   saveSettingsRecovery, restoreSettingsRecovery, clearSettingsRecovery,
   hasPlaintextSecret,
   loadSettings,
+  normalizeSettings,
   startupPresentation,
   orbSettings,
   publicSettings,
@@ -227,6 +228,8 @@ const feishuSetupOwner = createFeishuSetupOwner({Connector: FeishuConnector})
 let backendControl = null
 let settingsApplyStatus = 'idle'
 let settingsRestartPending = false
+let spaceModelsCache = null
+let spaceModelsAppliedVersion = null
 let settingsRecoveryAvailable = false
 let visor = null
 let computerOverlay = null
@@ -391,6 +394,86 @@ function managedWorkspacesView() {
   })
 }
 
+function configuredSpaceModelsPath() {
+  return process.env.NOVA_SPACE_HOST_CONFIG || currentSettings?.spaceHostConfigPath || null
+}
+
+function projectSpaceModels(value) {
+  if (!value || !Number.isSafeInteger(value.version) || value.version < 0
+    || !Number.isSafeInteger(value.applied_version) || value.applied_version < 0
+    || !['space', 'environment'].includes(value.source) || typeof value.locked !== 'boolean'
+    || !value.routes || typeof value.routes !== 'object' || Array.isArray(value.routes)) throw invalidCommit()
+  const routes = normalizeSettings({modelRoutes: value.routes}).modelRoutes
+  validatePreparedSettings({modelRoutes: value.routes}, {modelRoutes: routes})
+  return {version: value.version, applied_version: value.applied_version, routes,
+    source: value.source, locked: value.locked}
+}
+
+// Disk reads keep settings usable while the child is disconnected; only Runtime writes this file.
+async function refreshSpaceModels({seed = false, status = true} = {}) {
+  const configPath = configuredSpaceModelsPath()
+  if (!configPath) { spaceModelsCache = null; spaceModelsAppliedVersion = null; return }
+  try {
+    const runtime = await loadSpaceHostRuntime()
+    runtime.readHostSpaceConfig(configPath)
+    const operatorRoutes = process.env.MODEL_ROUTES?.trim()
+    if (seed && !operatorRoutes) await runtime.seedHostModelRoutes(configPath, currentSettings.modelRoutes)
+    const stored = operatorRoutes ? {version: 0, routes: {}} : runtime.readHostModelRoutes(configPath) ?? {version: 0, routes: {}}
+    if (seed) spaceModelsAppliedVersion = stored.version
+    let value = {version: stored.version, applied_version: spaceModelsAppliedVersion ?? stored.version,
+      routes: operatorRoutes ? JSON.parse(operatorRoutes) : stored.routes,
+      locked: Boolean(operatorRoutes), source: operatorRoutes ? 'environment' : 'space'}
+    const owner = backendControl
+    if (status && owner) {
+      try {
+        const reported = await owner.request('space.models.status', {})
+        if (owner === backendControl && configPath === configuredSpaceModelsPath() && !reported?.error) value = reported
+      } catch { /* A stopped child does not make its saved model selection unreadable. */ }
+    }
+    if (configPath === configuredSpaceModelsPath()) spaceModelsCache = projectSpaceModels(value)
+  } catch {
+    spaceModelsCache = {routes: {}, locked: true, source: 'unavailable'}
+    if (seed) throw classifyBackendFailure('configuration_required')
+  }
+}
+
+async function applySpaceModelRoutes(commit) {
+  const coordinated = await lifecycleCoordinator.run('settings_save', async () => {
+    try {
+      const {modelRoutes, hostModelRoutesVersion, ...mirrors} = commit.settingsPatch
+      if (commit.capabilitiesDocument !== undefined || !modelRoutes || typeof modelRoutes !== 'object' || Array.isArray(modelRoutes)
+        || !Number.isSafeInteger(hostModelRoutesVersion) || hostModelRoutesVersion < 0) throw invalidCommit()
+      const route = modelRoutes.conversationText
+      const allowed = route ? {cascadedLlmProvider: route.provider, cascadedLlmModels: {[route.provider]: route.model}} : {}
+      if (Object.keys(mirrors).some(key => !Object.hasOwn(allowed, key))) throw invalidCommit()
+      validatePreparedSettings(mirrors, allowed)
+      const routes = normalizeSettings({modelRoutes}).modelRoutes
+      validatePreparedSettings({modelRoutes}, {modelRoutes: routes})
+      if (!spaceModelsCache || spaceModelsCache.locked || process.env.MODEL_ROUTES?.trim()) throw invalidCommit(t('模型选择由启动配置管理，当前只读。'))
+      const owner = backendControl
+      if (!owner) throw invalidCommit(t('请连接后台后再保存模型选择。'))
+      const result = await owner.request('space.models.configure', {expected_version: hostModelRoutesVersion, routes: modelRoutes})
+      if (owner !== backendControl) throw new Error('backend changed')
+      if (result?.error) {
+        if (result.error === 'model_provider_unconfigured') throw invalidCommit(t('请先保存模型密钥并重启后台，再保存模型选择。'))
+        if (result.error === 'version_conflict') throw invalidCommit(t('模型选择已在其他设备修改，请重新读取后再保存。'))
+        throw invalidCommit(t('模型选择未保存，请检查配置后重试。'))
+      }
+      if (!Number.isSafeInteger(result?.version) || result.version <= hostModelRoutesVersion) throw new Error('invalid model settings reply')
+      settingsRestartPending = true
+      publishSettingsApplyStatus('pending_restart')
+      await refreshSpaceModels()
+      sendToSettings('nova:settings:changed', settingsView())
+      return {saved: true, restarted: false, operationStatus: 'pending_restart', rejectedSecrets: []}
+    } catch (error) {
+      await refreshSpaceModels()
+      return {saved: false, restarted: false, operationStatus: error?.code === 'invalid_settings_commit' ? 'invalid' : 'failed',
+        rejectedSecrets: [], ...(error?.code === 'invalid_settings_commit' ? {problems: error.problems} : {})}
+    }
+  })
+  return {...settingsView(), ...(coordinated.status === 'busy' ? {saved: false, operationStatus: 'busy'} : coordinated.value)}
+}
+
 // The single shape the settings panel is ever told. Key material is reduced to
 // presence booleans and source labels here, never plaintext;
 // `keyringAvailable` is what turns the plaintext warning line on. It answers
@@ -413,6 +496,7 @@ function settingsView() {
     capabilitiesRevision: capabilities.revision ?? null,
     capabilities: {...capabilities, document: undefined, revision: undefined, diskGeneration: settingsGeneration, runtime: runtimeCapabilities},
     ...publicSettings(currentSettings),
+    ...(configuredSpaceModelsPath() ? {modelRoutes: spaceModelsCache?.routes ?? {}, hostModelRoutes: spaceModelsCache ?? {locked: true, source: 'unavailable'}} : {}),
     codexStatus,
     codingBackends: codingBackendStatus(currentSettings, process.env),
     skills: skillsCache,
@@ -424,6 +508,7 @@ function settingsView() {
     backendRetryInMs: backendStatus.retryInMs,
     startup,
     settingsApplyStatus,
+    settingsRestartPending,
     settingsRecoveryAvailable,
     managedWorkspaces: managedWorkspacesView(),
     microphoneStatus,
@@ -756,6 +841,10 @@ async function applyDesktopSettings(payload, restart = false) {
   // only in main for validation or backend spawn. Public settings replies
   // contain presence flags and rejected key names, never secret values.
   if (typeof restart !== 'boolean') throw new Error('invalid restart mode')
+  if (configuredSpaceModelsPath() && payload?.settingsPatch && Object.hasOwn(payload.settingsPatch, 'modelRoutes')) {
+    try { return await applySpaceModelRoutes(parseSettingsCommit(payload)) }
+    catch { return {...settingsView(), saved: false, operationStatus: 'invalid', rejectedSecrets: []} }
+  }
   const pendingRestart = settingsRestartPending
   const previousSettings = currentSettings
   const recoveryPending = settingsRecoveryAvailable
@@ -811,6 +900,13 @@ async function applyDesktopSettings(payload, restart = false) {
   if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
   else if (applied.operationStatus === 'applied') settingsRestartPending = false
   if (['applied', 'pending_restart'].includes(applied.operationStatus)) await refreshSettingsCapabilities()
+  if (configuredSpaceModelsPath()) {
+    await refreshSpaceModels()
+    if (spaceModelsCache?.source === 'space' && spaceModelsCache.version !== spaceModelsCache.applied_version) {
+      settingsRestartPending = true
+      publishSettingsApplyStatus('pending_restart')
+    }
+  }
   return {...settingsView(), ...applied}
 }
 
@@ -1244,6 +1340,7 @@ const workspaceActions = createWorkspaceActions({
 })
 
 async function launchBackend(smokeChannel, onExit) {
+  await refreshSpaceModels({seed: true, status: false})
   const spaceConfig = process.env.NOVA_SPACE_HOST_CONFIG || currentSettings?.spaceHostConfigPath
   if (spaceConfig && spaceConfig === resolve(app.getPath('userData'), 'space', 'config.json') && existsSync(spaceConfig)) {
     try {
@@ -1342,7 +1439,12 @@ async function launchBackend(smokeChannel, onExit) {
     const acceptanceProof=acceptance?waitForAcceptanceRuntimeGate(spawnedBackend,{buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(spec.entry)}):Promise.resolve()
     backend = spawnedBackend
     backendControl?.close()
-    backendControl = createBackendControl(spawnedBackend, {onUsage: () => {
+    backendControl = createBackendControl(spawnedBackend, {onSpaceModelsChanged: () => {
+      if (backend !== spawnedBackend || launchGeneration !== generation) return
+      settingsRestartPending = true
+      publishSettingsApplyStatus('pending_restart')
+      void refreshSpaceModels().then(() => sendToSettings('nova:settings:changed', settingsView()))
+    }, onUsage: () => {
       if (backend !== spawnedBackend || launchGeneration !== generation) return
       refreshRuntimeUsage()
     }, onStatus: status => {
@@ -1928,6 +2030,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     }
     await refreshManagedWorkspaceCapabilities()
     await refreshSettingsCapabilities()
+    await refreshSpaceModels()
     ensureBuiltInSkills();skillsCache = listSkills()
     // A cold open cannot be told which category to show by a push: the panel
     // subscribes only after its module evaluates, and this reply is the first

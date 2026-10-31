@@ -210,7 +210,7 @@ export function publicRuntimeCapabilityStatus(value) {
 const BLOCKING_CREDENTIALS = new Set(['OPENAI_API_KEY', 'GEMINI_API_KEY', 'STEPFUN_API_KEY', 'DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
 
 /** One private utility child owns every pending request; replacement closes this handle. */
-export function createBackendControl(child, {onStatus = () => {}, onUsage = () => {}} = {}) {
+export function createBackendControl(child, {onStatus = () => {}, onUsage = () => {}, onSpaceModelsChanged = () => {}} = {}) {
   const pending = new Map()
   let closed = false
   // Short, fixed reasons let the settings page tell a slow backend from a missing or restarting one.
@@ -219,6 +219,10 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
   const REPLY_FAILURES = {busy: 'busy', not_ready: 'not ready'}
   const receive = message => {
     if (closed || !message || typeof message !== 'object') return
+    if (message.type === 'nova.space.models.changed') {
+      if (Object.keys(message).length === 1) onSpaceModelsChanged()
+      return
+    }
     if (message.type === 'nova.usage') {
       const report = publicUsageReport(message.report)
       if (report) onUsage(report)

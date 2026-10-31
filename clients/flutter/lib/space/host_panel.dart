@@ -16,6 +16,7 @@ Map<String, dynamic> refreshSettingsPatch(
   final settings = snapshot['host_settings'] as Map? ?? const {};
   final version = switch (input['method']) {
     'soul.set' => (settings['soul'] as Map?)?['version'],
+    'models.configure' => (settings['models'] as Map?)?['version'],
     'news.configure' => (settings['news'] as Map?)?['profile_version'],
     _ => params['expected_version'],
   };
@@ -32,7 +33,9 @@ class SpaceHostPanel extends StatefulWidget {
     required this.state,
     required this.onSync,
     this.openUrl,
+    this.section,
   });
+  final String? section;
   final SpaceClientState state;
   final Future<void> Function() onSync;
   final Future<void> Function(Uri uri)? openUrl;
@@ -134,173 +137,186 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
         !connected && (feishu['login_pending'] == true || loginUrl != null);
     return Column(
       children: [
-        NovaSection(
-          header: 'Host 设置',
-          footer: '修改将发送到 Host 执行，仅限本 Space 的所有者设备。',
-          children: [
-            _tile(
-              '助手名称',
-              '${identity['assistant_name'] ?? ''}',
-              () async {
-                final v = await _ask(
-                  '助手名称',
-                  '${identity['assistant_name'] ?? ''}',
-                );
-                if (v != null) {
-                  await _patch('identity.configure', {'assistant_name': v});
-                }
-              },
-              key: const ValueKey('host.assistant_name'),
-            ),
-            _tile(
-              '你的称呼',
-              '${identity['user_name'] ?? ''}',
-              () async {
-                final v = await _ask('你的称呼', '${identity['user_name'] ?? ''}');
-                if (v != null) {
-                  await _patch('identity.configure', {'user_name': v});
-                }
-              },
-              key: const ValueKey('host.user_name'),
-            ),
-            if (soul['available'] == true)
-              _tile('角色设定', '${soul['role'] ?? ''}', () async {
-                final v = await _ask('角色设定', '${soul['role'] ?? ''}', lines: 3);
-                if (v != null) {
-                  await _patch('soul.set', {
-                    'role': v,
-                    'expected_version': soul['version'],
+        if (widget.section == null || widget.section == 'assistant')
+          NovaSection(
+            header: 'Host 设置',
+            footer: '修改将发送到 Host 执行，仅限本 Space 的所有者设备。',
+            children: [
+              _tile(
+                '助手名称',
+                '${identity['assistant_name'] ?? ''}',
+                () async {
+                  final v = await _ask(
+                    '助手名称',
+                    '${identity['assistant_name'] ?? ''}',
+                  );
+                  if (v != null) {
+                    await _patch('identity.configure', {'assistant_name': v});
+                  }
+                },
+                key: const ValueKey('host.assistant_name'),
+              ),
+              _tile(
+                '你的称呼',
+                '${identity['user_name'] ?? ''}',
+                () async {
+                  final v = await _ask(
+                    '你的称呼',
+                    '${identity['user_name'] ?? ''}',
+                  );
+                  if (v != null) {
+                    await _patch('identity.configure', {'user_name': v});
+                  }
+                },
+                key: const ValueKey('host.user_name'),
+              ),
+              if (soul['available'] == true)
+                _tile('角色设定', '${soul['role'] ?? ''}', () async {
+                  final v = await _ask(
+                    '角色设定',
+                    '${soul['role'] ?? ''}',
+                    lines: 3,
+                  );
+                  if (v != null) {
+                    await _patch('soul.set', {
+                      'role': v,
+                      'expected_version': soul['version'],
+                    });
+                  }
+                }, key: const ValueKey('host.soul')),
+              NovaTile(
+                key: const ValueKey('host.discovery'),
+                title: '主动发现',
+                trailing: Switch(
+                  value: discovery['discovery_enabled'] == true,
+                  onChanged: (v) =>
+                      _patch('discovery.configure', {'enabled': v}),
+                ),
+              ),
+              _tile(
+                '关注的资讯主题',
+                (news['interests'] as List? ?? []).join('、'),
+                () async {
+                  final v = await _ask(
+                    '资讯主题（用逗号分隔，最多 8 个）',
+                    (news['interests'] as List? ?? []).join(','),
+                  );
+                  if (v == null) return;
+                  final interests = v
+                      .split(RegExp(r'[,，、]'))
+                      .map((e) => e.trim())
+                      .where((e) => e.isNotEmpty)
+                      .take(8)
+                      .toList();
+                  await _patch('news.configure', {
+                    'enabled': interests.isNotEmpty,
+                    'explore': news['explore'] ?? true,
+                    'interests': interests,
+                    'expected_version': news['profile_version'],
                   });
-                }
-              }, key: const ValueKey('host.soul')),
-            NovaTile(
-              key: const ValueKey('host.discovery'),
-              title: '主动发现',
-              trailing: Switch(
-                value: discovery['discovery_enabled'] == true,
-                onChanged: (v) => _patch('discovery.configure', {'enabled': v}),
+                },
+                key: const ValueKey('host.news'),
               ),
-            ),
-            _tile(
-              '关注的资讯主题',
-              (news['interests'] as List? ?? []).join('、'),
-              () async {
-                final v = await _ask(
-                  '资讯主题（用逗号分隔，最多 8 个）',
-                  (news['interests'] as List? ?? []).join(','),
-                );
-                if (v == null) return;
-                final interests = v
-                    .split(RegExp(r'[,，、]'))
-                    .map((e) => e.trim())
-                    .where((e) => e.isNotEmpty)
-                    .take(8)
-                    .toList();
-                await _patch('news.configure', {
-                  'enabled': interests.isNotEmpty,
-                  'explore': news['explore'] ?? true,
-                  'interests': interests,
-                  'expected_version': news['profile_version'],
-                });
-              },
-              key: const ValueKey('host.news'),
-            ),
-          ],
-        ),
-        NovaSection(
-          header: 'Host 模型密钥',
-          footer: credentialsDamaged
-              ? 'Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'
-              : '密钥只发送给 Host，不会回显；写入后需重启 Host 生效，Host 环境变量中已设置的密钥优先。',
-          children: [
-            for (final c in credentials)
+            ],
+          ),
+        if (widget.section == null || widget.section == 'models')
+          NovaSection(
+            header: 'Host 模型密钥',
+            footer: credentialsDamaged
+                ? 'Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'
+                : '密钥只发送给 Host，不会回显；写入后需重启 Host 生效，Host 环境变量中已设置的密钥优先。',
+            children: [
+              for (final c in credentials)
+                NovaTile(
+                  key: ValueKey('host.credential.${c['name']}'),
+                  title: '${c['name']}',
+                  subtitle: Text(
+                    c['configured'] == true
+                        ? '已配置 · ${c['source'] == 'environment' ? '来自 Host 环境' : '来自 Space'} · ${c['fingerprint']}'
+                        : '未配置',
+                  ),
+                  trailing: Wrap(
+                    children: [
+                      if (c['source'] == 'space')
+                        IconButton(
+                          key: ValueKey('host.credential.clear.${c['name']}'),
+                          tooltip: '清除',
+                          icon: const Icon(CupertinoIcons.delete),
+                          onPressed: () =>
+                              _send('secret.clear', {'name': c['name']}),
+                        ),
+                    ],
+                  ),
+                  onTap: () => _putSecret('${c['name']}'),
+                ),
+            ],
+          ),
+        if (widget.section == null || widget.section == 'feishu')
+          NovaSection(
+            header: 'Host 飞书',
+            footer: '授权在 Host 上完成，手机不保存也不转交飞书令牌。',
+            children: [
               NovaTile(
-                key: ValueKey('host.credential.${c['name']}'),
-                title: '${c['name']}',
+                key: const ValueKey('host.feishu.status'),
+                title: connected
+                    ? '已连接'
+                    : unverified
+                    ? '暂时无法验证登录'
+                    : loginPending
+                    ? '等待在授权页确认'
+                    : '未连接',
                 subtitle: Text(
-                  c['configured'] == true
-                      ? '已配置 · ${c['source'] == 'environment' ? '来自 Host 环境' : '来自 Space'} · ${c['fingerprint']}'
-                      : '未配置',
+                  unverified && feishu['error'] is String
+                      ? feishu['error'] as String
+                      : feishu['configured'] == true
+                      ? '应用已配置'
+                      : '尚未配置飞书应用',
                 ),
-                trailing: Wrap(
-                  children: [
-                    if (c['source'] == 'space')
-                      IconButton(
-                        key: ValueKey('host.credential.clear.${c['name']}'),
-                        tooltip: '清除',
-                        icon: const Icon(CupertinoIcons.delete),
-                        onPressed: () =>
-                            _send('secret.clear', {'name': c['name']}),
-                      ),
-                  ],
+              ),
+              if (feishu['configured'] != true)
+                NovaTile(
+                  key: const ValueKey('host.feishu.app_start'),
+                  title: '配置飞书应用',
+                  onTap: () =>
+                      _send('connector.feishu', {'action': 'app.start'}),
                 ),
-                onTap: () => _putSecret('${c['name']}'),
-              ),
-          ],
-        ),
-        NovaSection(
-          header: 'Host 飞书',
-          footer: '授权在 Host 上完成，手机不保存也不转交飞书令牌。',
-          children: [
-            NovaTile(
-              key: const ValueKey('host.feishu.status'),
-              title: connected
-                  ? '已连接'
-                  : unverified
-                  ? '暂时无法验证登录'
-                  : loginPending
-                  ? '等待在授权页确认'
-                  : '未连接',
-              subtitle: Text(
-                unverified && feishu['error'] is String
-                    ? feishu['error'] as String
-                    : feishu['configured'] == true
-                    ? '应用已配置'
-                    : '尚未配置飞书应用',
-              ),
-            ),
-            if (feishu['configured'] != true)
-              NovaTile(
-                key: const ValueKey('host.feishu.app_start'),
-                title: '配置飞书应用',
-                onTap: () => _send('connector.feishu', {'action': 'app.start'}),
-              ),
-            if (setupUrl != null)
-              NovaTile(
-                key: const ValueKey('host.feishu.app_open'),
-                title: '打开配置页面',
-                onTap: () => _open(setupUrl),
-              ),
-            if (feishu['configured'] == true && !connected && !unverified)
-              NovaTile(
-                key: const ValueKey('host.feishu.login'),
-                title: loginPending ? '重新开始登录' : '登录飞书',
-                subtitle: loginPending
-                    ? const Text('授权页过期或确认失败时使用，之前的授权链接会失效')
-                    : null,
-                onTap: () => _send('connector.feishu', {'action': 'login'}),
-              ),
-            if (loginUrl != null && !connected)
-              NovaTile(
-                key: const ValueKey('host.feishu.open'),
-                title: '打开授权页面',
-                onTap: () => _open(loginUrl),
-              ),
-            if (loginUrl != null && !connected)
-              NovaTile(
-                key: const ValueKey('host.feishu.complete'),
-                title: '完成',
-                subtitle: const Text('在授权页确认后点此通知 Host'),
-                onTap: () => _send('connector.feishu', {'action': 'complete'}),
-              ),
-            if (connected || unverified)
-              NovaTile(
-                key: const ValueKey('host.feishu.logout'),
-                title: '退出登录',
-                onTap: () => _send('connector.feishu', {'action': 'logout'}),
-              ),
-          ],
-        ),
+              if (setupUrl != null)
+                NovaTile(
+                  key: const ValueKey('host.feishu.app_open'),
+                  title: '打开配置页面',
+                  onTap: () => _open(setupUrl),
+                ),
+              if (feishu['configured'] == true && !connected && !unverified)
+                NovaTile(
+                  key: const ValueKey('host.feishu.login'),
+                  title: loginPending ? '重新开始登录' : '登录飞书',
+                  subtitle: loginPending
+                      ? const Text('授权页过期或确认失败时使用，之前的授权链接会失效')
+                      : null,
+                  onTap: () => _send('connector.feishu', {'action': 'login'}),
+                ),
+              if (loginUrl != null && !connected)
+                NovaTile(
+                  key: const ValueKey('host.feishu.open'),
+                  title: '打开授权页面',
+                  onTap: () => _open(loginUrl),
+                ),
+              if (loginUrl != null && !connected)
+                NovaTile(
+                  key: const ValueKey('host.feishu.complete'),
+                  title: '完成',
+                  subtitle: const Text('在授权页确认后点此通知 Host'),
+                  onTap: () =>
+                      _send('connector.feishu', {'action': 'complete'}),
+                ),
+              if (connected || unverified)
+                NovaTile(
+                  key: const ValueKey('host.feishu.logout'),
+                  title: '退出登录',
+                  onTap: () => _send('connector.feishu', {'action': 'logout'}),
+                ),
+            ],
+          ),
       ],
     );
   }

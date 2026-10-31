@@ -41,6 +41,7 @@ import 'devices_page.dart';
 import 'workbench_page.dart';
 import 'components.dart';
 import 'connectors_page.dart';
+import 'settings_sheet.dart';
 import 'pet_avatar.dart';
 import 'provider_credentials_sheet.dart';
 import 'theme.dart';
@@ -970,72 +971,38 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   }
 
   Future<void> _settings() async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      clipBehavior: Clip.antiAlias,
-      builder: (context) => FractionallySizedBox(
-        heightFactor: .9,
-        child: Scaffold(
-          backgroundColor: Nova.sheet,
-          appBar: AppBar(
-            centerTitle: true,
-            automaticallyImplyLeading: false,
-            title: Text(
-              _t('设置', 'Settings'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+    final choice = await showSettingsSheet(
+      context,
+      language: language,
+      builder: (context) => ListView(
+        padding: const EdgeInsets.fromLTRB(4, 20, 4, 28),
+        children: [
+          _settingGroup(
+            context,
+            _t('对话', 'Conversation'),
+            conversationSettingsRows(language),
+          ),
+          _settingGroup(context, _t('更多', 'More'), [
+            ('connectors', _t('连接器', 'Connectors'), CupertinoIcons.link),
+            (
+              'message_display',
+              _t('消息显示', 'Message display'),
+              CupertinoIcons.text_bubble,
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(_t('完成', 'Done')),
-              ),
-            ],
-          ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(4, 20, 4, 28),
-            children: [
-              _settingGroup(context, _t('对话', 'Conversation'), [
-                (
-                  'model_services',
-                  _t('模型服务', 'Model services'),
-                  CupertinoIcons.sparkles,
-                ),
-                (
-                  'devices',
-                  _t('设备', 'Devices'),
-                  CupertinoIcons.desktopcomputer,
-                ),
-                (
-                  'pet_avatar',
-                  _t('宠物头像', 'Pet avatar'),
-                  CupertinoIcons.person_crop_circle,
-                ),
-              ]),
-              _settingGroup(context, _t('更多', 'More'), [
-                ('connectors', _t('连接器', 'Connectors'), CupertinoIcons.link),
-                (
-                  'message_display',
-                  _t('消息显示', 'Message display'),
-                  CupertinoIcons.text_bubble,
-                ),
-                ('language', _t('语言', 'Language'), CupertinoIcons.globe),
-                (
-                  'local_schedules',
-                  _t('手机定时任务', 'Phone schedules'),
-                  CupertinoIcons.calendar,
-                ),
-                ('tasks', _t('执行记录', 'Activity'), CupertinoIcons.clock),
-                (
-                  'sync',
-                  _t('本机事项', 'Local data'),
-                  CupertinoIcons.arrow_2_circlepath,
-                ),
-              ]),
-            ],
-          ),
-        ),
+            ('language', _t('语言', 'Language'), CupertinoIcons.globe),
+            (
+              'local_schedules',
+              _t('手机定时任务', 'Phone schedules'),
+              CupertinoIcons.calendar,
+            ),
+            ('tasks', _t('执行记录', 'Activity'), CupertinoIcons.clock),
+            (
+              'sync',
+              _t('本机事项', 'Local data'),
+              CupertinoIcons.arrow_2_circlepath,
+            ),
+          ]),
+        ],
       ),
     );
     if (!mounted || choice == null) return;
@@ -1317,28 +1284,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     Map<String, String> subtitles = const {},
     ValueChanged<String>? onSelected,
     String? selected,
-  }) => NovaSection(
-    header: title,
-    surface: Nova.sheetCell,
-    children: [
-      for (final row in rows)
-        NovaTile(
-          surface: Nova.sheetCell,
-          leading: NovaIconTile(row.$3),
-          title: row.$2,
-          subtitle: subtitles[row.$1] == null ? null : Text(subtitles[row.$1]!),
-          trailing: selected == null
-              ? const CupertinoListTileChevron()
-              : selected == row.$1
-              ? const Icon(CupertinoIcons.checkmark, size: 18, color: Nova.mint)
-              : null,
-          onTap: row.$1 == 'chat_model' && agentCore?.busy == true
-              ? null
-              : () => onSelected != null
-                    ? onSelected(row.$1)
-                    : Navigator.pop(context, row.$1),
-        ),
-    ],
+  }) => SettingsGroup(
+    title: title,
+    rows: rows,
+    subtitles: subtitles,
+    selected: selected,
+    onSelected: onSelected,
+    disabled: {if (agentCore?.busy == true) 'chat_model'},
   );
 
   @override

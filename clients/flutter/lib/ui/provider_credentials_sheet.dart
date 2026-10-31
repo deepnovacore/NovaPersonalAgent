@@ -11,26 +11,26 @@ const _speechServices = [
   ('火山语音', 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel'),
 ];
 
-/// Reports local saved state only; a saved key has not been network-validated.
+/// Reports saved presence only; a saved key has not been network-validated.
 class ProviderCredentialStatus extends StatelessWidget {
   const ProviderCredentialStatus({
     super.key,
-    required this.credential,
+    required this.configured,
     this.language = 'zh',
   });
-  final Future<ProviderCredential?> credential;
+  final Future<bool> configured;
   final String language;
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<ProviderCredential?>(
-    future: credential,
+  Widget build(BuildContext context) => FutureBuilder<bool>(
+    future: configured,
     builder: (context, snapshot) {
       String t(String zh, String en) => language == 'zh' ? zh : en;
       final state = snapshot.connectionState != ConnectionState.done
           ? t('正在读取…', 'Loading…')
           : snapshot.hasError
           ? t('无法读取', 'Unavailable')
-          : snapshot.data == null
+          : snapshot.data != true
           ? t('未配置', 'Not configured')
           : t('已配置', 'Configured');
       return Text(
@@ -285,7 +285,7 @@ Future<String?> _editCredential(
                 ],
                 const SizedBox(height: 12),
                 ProviderCredentialStatus(
-                  credential: savedCredential,
+                  configured: savedCredential.then((value) => value != null),
                   language: language,
                 ),
                 const SizedBox(height: 8),

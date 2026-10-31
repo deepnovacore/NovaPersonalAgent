@@ -5,6 +5,8 @@ import {join} from 'node:path'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import {EventEmitter} from 'node:events'
+import {HostModelRoutesStore} from '../src/space-host/model-settings.js'
+import type {SpaceHostController} from '../src/space-host/config.js'
 import {test} from 'node:test'
 import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, connectionsProjection, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop/desktop-control.js'
 import {runDesktopEntry} from '../src/desktop/desktop-session.js'
@@ -138,9 +140,11 @@ test('private settings pass local identity to the real Host without authorizing 
     const status = host.spaceHostStatus()
     assert.deepEqual(await handlePersonalSettings(host.command.bind(host), 'space.status', {}), status)
     for (const context of [undefined, {client_id: 'phone:fixture'}]) {
-      const result = await host.command({type: 'personal.command', request_id: 'remote', method: 'space.status', params: {}}, context) as {ok: boolean; error: string}
-      assert.equal(result.ok, false)
-      assert.equal(result.error, 'local_desktop_required')
+      for (const method of ['space.status', 'space.models.status', 'space.models.configure']) {
+        const result = await host.command({type: 'personal.command', request_id: 'remote', method, params: {}}, context) as {ok: boolean; error: string}
+        assert.equal(result.ok, false)
+        assert.equal(result.error, 'local_desktop_required')
+      }
     }
   } finally {await host.close(); await rm(dir, {recursive: true, force: true})}
 })
@@ -207,4 +211,32 @@ test('cached settings reads bypass a slow command queue on the real Host', async
     release?.()
     assert.equal((await slow as {state: string}).state, 'ready')
   } finally {release?.(); await host.close(); await rm(dir, {recursive: true, force: true})}
+})
+
+
+test('desktop model commands reach the shared store and durable writes notify only the active parent', async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'desktop-model-control-'))
+  const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'fixture', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
+  const models = new HostModelRoutesStore(join(dir, 'space.json'), {DEEPSEEK_API_KEY: 'private-key'})
+  const parentPort = new Parent(), stop = new AbortController()
+  const control = installDesktopControl({parentPort, signal: stop.signal, status: () => undefined})
+  host.setSpaceHost({modelsStatus: () => models.view(), configureModels: (params: unknown, opId: string) => models.configure(params, opId), open: () => Promise.resolve(), close: () => Promise.resolve(), status: () => ({mode: 'host', clients: []})} as unknown as SpaceHostController)
+  try {
+    await host.open({deferBackground: true})
+    const command = host.command.bind(host)
+    assert.equal((await handlePersonalSettings(command, 'space.models.status', {}) as {version: number}).version, 0)
+    const statusRequest = {type: 'personal.command', request_id: 'desktop-model-status', method: 'space.models.status', params: {}}
+    assert.equal((await command(statusRequest, {client_id: 'desktop:local'}) as {data: {version: number}}).data.version, 0)
+    const edit = {type: 'personal.command', request_id: 'desktop-model-edit', method: 'space.models.configure', params: {expected_version: 0, routes: {support: {provider: 'deepseek', model: 'deepseek-chat'}}}}
+    const applied = await command(edit, {client_id: 'desktop:local'}) as {ok: boolean; data: unknown}
+    assert.equal(applied.ok, true)
+    assert.deepEqual(applied.data, {version: 1, applies: 'restart'})
+    assert.deepEqual(await command(edit, {client_id: 'desktop:local'}), applied)
+    assert.equal((await command(statusRequest, {client_id: 'desktop:local'}) as {data: {version: number}}).data.version, 1)
+    assert.deepEqual(parentPort.sent, [{type: 'nova.space.models.changed'}])
+    assert.deepEqual(await handlePersonalSettings(command, 'space.models.configure', {expected_version: 0, routes: {}}), {error: 'version_conflict'})
+    stop.abort()
+    await models.configure({expected_version: 1, routes: {support: null}}, 'after-dispose')
+    assert.equal(parentPort.sent.length, 1)
+  } finally {control.dispose(); stop.abort(); await host.close(); await rm(dir, {recursive: true, force: true})}
 })

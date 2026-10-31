@@ -9,6 +9,7 @@ import {SuggestionPool} from '../src/core/suggestions.js';
 import {canonicalJson} from '../src/text/canonical-json.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets,secretClearSchema,secretPutSchema} from '../src/space-host/host-admin.js';
+import {HostModelRoutesStore} from '../src/space-host/model-settings.js';
 import {environmentContract} from '../src/config/environment-contract.js';
 import {describeHostBlockingEnvironment as describeDesktopEnvironment} from '../src/desktop.js';
 
@@ -19,10 +20,11 @@ async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boo
  if(options.feishu)host.setFeishu({snapshot:()=>({available:true,configured:true,state:'unauthorized',auth_issue:'login_required',account_id:'tenant-secret',app_setup:{state:'idle'}}),command:(method)=>{calls.push(method);return Promise.resolve({available:true,configured:true,state:'unauthorized',account_id:'tenant-secret',verification_url:method==='feishu.login'?'https://accounts.feishu.cn/device?code=x':'https://evil.example/x',chats:[]})},open:()=>Promise.resolve(),close:()=>Promise.resolve()});
  if(options.feishuConnector)host.setFeishu(options.feishuConnector);
  const secrets=new HostSecretStore(join(dir,'config.json.secrets.json')),env=options.env??{};
- const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>options.owner,secrets,environment:env,feishuPollMs:options.feishuPollMs??10});
+ const models=new HostModelRoutesStore(join(dir,'config.json'),env,{credentialConfigured:name=>!!secrets.value(name)?.trim()});
+ const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>options.owner,secrets,models,environment:env,feishuPollMs:options.feishuPollMs??10});
  await host.open({deferBackground:true});await space.open();
- const stamps=new Map<string,number>(),send=async(from:string,op_id:string,kind:string,input:Record<string,unknown>)=>{if(!stamps.has(op_id))stamps.set(op_id,Date.now());await space.receive(from,{v:1,type:'intent',op_id,kind,input,created_at:stamps.get(op_id)});return sent.filter(row=>row.type==='receipt'&&row.op_id===op_id).at(-1)!};
- return {dir,host,space,send,sent,calls,secrets,close:async()=>{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}};
+ const stamps=new Map<string,number>(),send=async(from:string,op_id:string,kind:string,input:Record<string,unknown>,depends_on?:string[])=>{if(!stamps.has(op_id))stamps.set(op_id,Date.now());await space.receive(from,{v:1,type:'intent',op_id,kind,input,created_at:stamps.get(op_id),...(depends_on?{depends_on}:{})});return sent.filter(row=>row.type==='receipt'&&row.op_id===op_id).at(-1)!};
+ return {dir,host,space,send,sent,calls,secrets,models,close:async()=>{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}};
 }
 
 test('desktop startup admits a phone-stored provider key without changing its environment source',async()=>{
@@ -399,5 +401,44 @@ test('after logout a failed re-login keeps the phone signed out though the accou
   assert.equal((await f.send('phone','out','connector.feishu',{action:'logout'})).status,'accepted');
   assert.equal((await f.send('phone','in','connector.feishu',{action:'login'})).status,'rejected');
   assert.equal((f.space.snapshot('phone') as unknown as {host_feishu:{connected:boolean}}).host_feishu.connected,false);
+ }finally{await f.close()}
+});
+
+
+test('owner model edits use current stored keys, dependency receipts and the same authoritative model store',async()=>{
+ const f=await fixture({owner:'phone'}),params={expected_version:0,routes:{support:{provider:'deepseek',model:'deepseek-chat'}}};
+ try{
+  const denied=await f.send('other','denied','settings.patch',{method:'models.configure',params});
+  assert.deepEqual([denied.status,denied.error],['rejected','owner_required']);
+  assert.equal('host_settings' in f.space.snapshot('other'),false);
+  assert.equal(f.models.view().providers.find(provider=>provider.id==='deepseek')!.usable,false);
+  const unready=await f.send('phone','before-key','settings.patch',{method:'models.configure',params});
+  assert.deepEqual([unready.status,unready.error],['rejected','model_provider_unconfigured']);
+  assert.equal(f.models.view().version,0);
+  await f.send('phone','bad-key','secret.put',{name:'DESKTOP_TOKEN',value:'rejected'});
+  const dependency=await f.send('phone','blocked','settings.patch',{method:'models.configure',params},['bad-key']);
+  assert.deepEqual([dependency.status,dependency.error],['rejected','dependency_failed']);
+  assert.equal(f.models.view().version,0);
+  await f.send('phone','key','secret.put',{name:'DEEPSEEK_API_KEY',value:'new-live-key'});
+  const accepted=await f.send('phone','choose','settings.patch',{method:'models.configure',params},['key']);
+  assert.deepEqual([accepted.status,accepted.applies,accepted.version],['accepted','restart',1]);
+  const snapshot=f.space.snapshot('phone') as unknown as {host_settings:{models:ReturnType<HostModelRoutesStore['view']>}};
+  assert.equal(snapshot.host_settings.models.version,1);assert.equal(snapshot.host_settings.models.applied_version,0);
+  assert.equal(JSON.stringify(snapshot).includes('new-live-key'),false);
+  const stale=await f.send('phone','stale','settings.patch',{method:'models.configure',params});
+  assert.deepEqual([stale.status,stale.error],['conflict','version_conflict']);assert.ok(stale.snapshot);
+ }finally{await f.close()}
+});
+
+test('a model write surviving before its service receipt replays after a newer edit without reverting it',async()=>{
+ const f=await fixture({owner:'phone',env:{DEEPSEEK_API_KEY:'fixture'}});
+ try{
+  const params={expected_version:0,routes:{support:{provider:'deepseek',model:'deepseek-chat'}}};
+  const key=createHash('sha256').update(canonicalJson(['phone','lost-receipt'])).digest('hex');
+  await f.models.configure(params,'space:'+key);
+  await f.models.configure({expected_version:1,routes:{support:null}},'desktop:newer');
+  const replay=await f.send('phone','lost-receipt','settings.patch',{method:'models.configure',params});
+  assert.deepEqual([replay.status,replay.version],['accepted',1]);
+  assert.equal(f.models.view().version,2);assert.deepEqual(f.models.view().routes,{});
  }finally{await f.close()}
 });

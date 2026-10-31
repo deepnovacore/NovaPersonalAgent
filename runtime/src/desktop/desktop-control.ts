@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto'
+import {subscribeHostModelRoutesChanges} from '../space-host/model-settings.js'
 import {personalCommandSchema} from '../personal-agent/contracts.js'
 import type {PersonalCommandContext} from '../personal-agent/host.js'
 import {BlockingConfigurationError, type memoryStatus} from '../config/config.js'
@@ -69,12 +70,14 @@ export function installDesktopControl(options: {
       } finally { pending -= 1 }
     })()
   }
+  const unsubscribeModels = subscribeHostModelRoutesChanges(() => {if (!disposed) port?.postMessage({type: 'nova.space.models.changed'})})
   const timer = port === undefined ? undefined : setInterval(publish, 1000)
   timer?.unref()
   function dispose(): void {
     if (disposed) return
     disposed = true
     clearInterval(timer)
+    unsubscribeModels()
     port?.off?.('message', receive)
     options.signal.removeEventListener('abort', dispose)
   }
@@ -105,7 +108,7 @@ export function desktopBudgetFailure(error: unknown): DesktopCapabilityState | u
 
 /** The settings window may manage Space pairing, sources, connectors and discovery scheduling; nothing that reads memory, feeds or conversations. */
 export const PERSONAL_SETTINGS_METHODS: readonly string[] = Object.freeze([
-  'space.status', 'space.invitation', 'space.pairings', 'space.confirm_pairing', 'space.revoke',
+  'space.status', 'space.models.status', 'space.models.configure', 'space.invitation', 'space.pairings', 'space.confirm_pairing', 'space.revoke',
   'state', 'identity.configure', 'sources.add', 'sources.authorize_computer', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete',
   'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent',
   'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete',

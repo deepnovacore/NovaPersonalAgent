@@ -7,6 +7,11 @@ import '../ui/app.dart' show BottomAppBarTabs;
 import '../ui/components.dart';
 import '../ui/theme.dart';
 import '../ui/my_overview.dart';
+import '../ui/settings_sheet.dart';
+import '../ui/pet_avatar.dart';
+import '../ui/connectors_page.dart';
+import '../ui/model_settings_editor.dart';
+import 'model_settings_backend.dart';
 import 'client_controller.dart';
 import 'client_state.dart';
 import 'relay_transport.dart';
@@ -430,21 +435,18 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
   SpaceClientController? controller;
   String? startupError;
   final chat = TextEditingController();
+  final petAvatar = PetAvatarStore();
   bool sending = false;
   int tab = 0;
-  Widget _switchSpaceButton() => Tooltip(
-    message: '切换 Space',
-    child: TextButton.icon(
-      onPressed: widget.onSwitchSpace,
-      style: TextButton.styleFrom(foregroundColor: Nova.secondary),
-      icon: const Icon(CupertinoIcons.arrow_swap, size: 17),
-      label: const Text('Space'),
-    ),
+  Widget _switchSpaceButton() => IconButton(
+    tooltip: '切换 Space',
+    onPressed: widget.onSwitchSpace,
+    icon: const Icon(CupertinoIcons.arrow_swap, size: 23),
   );
-
   @override
   void initState() {
     super.initState();
+    unawaited(petAvatar.load());
     unawaited(_open());
   }
 
@@ -470,6 +472,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
   @override
   void dispose() {
     chat.dispose();
+    petAvatar.dispose();
     controller?.state.removeListener(_changed);
     unawaited(controller?.dispose() ?? Future.value());
     super.dispose();
@@ -689,63 +692,71 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     );
   }
 
-  Widget _pending(SpaceClientState state) => state.pending.isEmpty
-      ? const SizedBox.shrink()
-      : NovaSection(
-          header: '待处理请求',
-          children: [
-            for (final p in state.pending)
-              NovaTile(
-                title: p['status'] == 'conflict'
-                    ? '编辑冲突 · 修改已保留'
-                    : p['status'] == 'rejected'
-                    ? 'Host 拒绝了操作'
-                    : '等待 Host 确认',
-                subtitle: Text(
-                  '${(p['input'] as Map)['title'] ?? (p['input'] as Map)['about'] ?? p['kind']}${p['error'] == null ? '' : ' · ${p['error']}'}',
-                ),
-                trailing: PopupMenuButton<String>(
-                  icon: const Icon(
-                    CupertinoIcons.ellipsis,
-                    size: 20,
-                    color: Nova.secondary,
+  bool _needsAttention(Map<String, dynamic> value) =>
+      ['conflict', 'rejected'].contains(value['status']);
+  Widget _pending(SpaceClientState state) {
+    final problems = state.pending.where(_needsAttention).toList();
+    return problems.isEmpty
+        ? const SizedBox.shrink()
+        : NovaSection(
+            header: '需要处理',
+            children: [
+              for (final p in problems)
+                NovaTile(
+                  title: p['status'] == 'conflict' ? '编辑冲突 · 修改已保留' : '修改未能保存',
+                  subtitle: Text(
+                    '${(p['input'] as Map)['title'] ?? (p['input'] as Map)['about'] ?? const {'life.mutate': '事项修改', 'settings.patch': '助手设置'}[p['kind']] ?? '内容修改'}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  onSelected: (action) async {
-                    if (action == 'discard') {
-                      await state.discard(p['op_id'] as String);
-                    } else {
-                      var input = Map<String, dynamic>.from(p['input'] as Map);
-                      if (p['kind'] == 'settings.patch') {
-                        input = refreshSettingsPatch(input, state.snapshot);
+                  trailing: PopupMenuButton<String>(
+                    icon: const Icon(
+                      CupertinoIcons.ellipsis,
+                      size: 20,
+                      color: Nova.secondary,
+                    ),
+                    onSelected: (action) async {
+                      if (action == 'discard') {
+                        await state.discard(p['op_id'] as String);
+                      } else {
+                        var input = Map<String, dynamic>.from(
+                          p['input'] as Map,
+                        );
+                        if (p['kind'] == 'settings.patch') {
+                          input = refreshSettingsPatch(input, state.snapshot);
+                        }
+                        final kind = input['kind'] as String?;
+                        final current = kind == null
+                            ? (state.snapshot['profile'] as Map?)
+                            : state
+                                  .cards('${kind}s')
+                                  .where((e) => e['id'] == input['id'])
+                                  .firstOrNull;
+                        await state.enqueue(
+                          p['kind'] as String,
+                          input,
+                          baseVersion: current?['version'] as int?,
+                        );
+                        await state.discard(p['op_id'] as String);
                       }
-                      final kind = input['kind'] as String?;
-                      final current = kind == null
-                          ? (state.snapshot['profile'] as Map?)
-                          : state
-                                .cards('${kind}s')
-                                .where((e) => e['id'] == input['id'])
-                                .firstOrNull;
-                      await state.enqueue(
-                        p['kind'] as String,
-                        input,
-                        baseVersion: current?['version'] as int?,
-                      );
-                      await state.discard(p['op_id'] as String);
-                    }
-                    unawaited(controller!.sync());
-                  },
-                  itemBuilder: (_) => [
-                    if (p['status'] == 'conflict')
+                      unawaited(controller!.sync());
+                    },
+                    itemBuilder: (_) => [
+                      if (p['status'] == 'conflict')
+                        const PopupMenuItem(
+                          value: 'retry',
+                          child: Text('按最新内容重试'),
+                        ),
                       const PopupMenuItem(
-                        value: 'retry',
-                        child: Text('按最新版本重提修改'),
+                        value: 'discard',
+                        child: Text('放弃这次修改'),
                       ),
-                    const PopupMenuItem(value: 'discard', child: Text('撤销此请求')),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-          ],
-        );
+            ],
+          );
+  }
 
   /// Quiet one-line status above the page, only when the Host is unreachable
   /// or reported a problem.
@@ -850,7 +861,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
       for (final kind in _kindNames.keys)
         if (state.cards('${kind}s').isNotEmpty) kind,
     ];
-    if (kinds.isEmpty && state.pending.isEmpty) {
+    if (kinds.isEmpty && !state.pending.any(_needsAttention)) {
       return _empty('还没有目标、待办或想法。\n点右下角 + 创建。');
     }
     return ListView(
@@ -998,8 +1009,11 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     ),
   );
 
-  void _openPersonalPage(String title, Widget Function() content) {
-    Navigator.of(context).push(
+  Future<void> _openPersonalPage(
+    String title,
+    Widget Function() content,
+  ) async {
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => AnimatedBuilder(
           animation: controller!.state,
@@ -1085,7 +1099,148 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     },
   );
 
-  Widget _settings(SpaceClientController c) {
+  Future<void> _settings(SpaceClientController c) async {
+    final choice = await showSettingsSheet(
+      context,
+      language: 'zh',
+      builder: (context) => ListView(
+        padding: const EdgeInsets.fromLTRB(4, 20, 4, 28),
+        children: [
+          SettingsGroup(title: '对话', rows: conversationSettingsRows('zh')),
+          const SettingsGroup(
+            title: '更多',
+            rows: [
+              ('connectors', '连接器', CupertinoIcons.link),
+              ('assistant', '助手设置', CupertinoIcons.person),
+            ],
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'devices':
+        await _openPersonalPage('设备', () => _devices(c));
+      case 'model_services':
+        await _openPersonalPage('模型服务', () => _modelServices(c));
+      case 'pet_avatar':
+        await showPetAvatarSettings(context, petAvatar);
+      case 'assistant':
+        await _openPersonalPage('助手设置', () => _hostSection(c, 'assistant'));
+      case 'connectors':
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => AnimatedBuilder(
+              animation: c.state,
+              builder: (context, _) {
+                final feishu = c.state.snapshot['host_feishu'] as Map? ?? {};
+                final connected = feishu['connected'] == true;
+                final label = connected
+                    ? '已连接'
+                    : feishu['unverified'] == true
+                    ? '暂时无法验证登录'
+                    : feishu['login_pending'] == true
+                    ? '等待授权'
+                    : '未连接';
+                return ConnectorsPage(
+                  language: 'zh',
+                  feishuStatus: (
+                    label: label,
+                    subtitle: connected ? '从电脑同步已授权的消息与资料' : '在电脑上完成飞书授权',
+                    tone: connected ? NovaTone.success : NovaTone.warning,
+                  ),
+                  onOpenFeishu: () =>
+                      _openPersonalPage('飞书', () => _hostSection(c, 'feishu')),
+                  systemTitle: '手机采集与授权',
+                  systemSubtitle: '手动提交内容，管理上传与处理授权。',
+                  onOpenSystem: () => _openPersonalPage(
+                    '手机采集与授权',
+                    () => SingleChildScrollView(
+                      child: SpaceSourcePanel(state: c.state, onSync: c.sync),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+    }
+  }
+
+  Widget _hostSection(SpaceClientController c, String section) =>
+      c.state.snapshot['owner'] != true
+      ? _empty('仅 Space 所有者可以修改电脑上的设置')
+      : ListView(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          children: [
+            SpaceHostPanel(state: c.state, onSync: c.sync, section: section),
+            _pending(c.state),
+          ],
+        );
+
+  Widget _modelServices(SpaceClientController c) {
+    final models =
+        (c.state.snapshot['host_settings'] as Map?)?['models'] as Map?;
+    if (models == null || c.state.snapshot['owner'] != true) {
+      return _empty('暂时无法读取电脑上的模型设置，请连接 Host 后刷新');
+    }
+    final routes = models['routes'] as Map? ?? {};
+    final providers = {
+      for (final provider
+          in (models['providers'] as List? ?? []).whereType<Map>())
+        provider['id']: provider['label'] ?? provider['id'],
+    };
+    const labels = {
+      'conversationText': '对话模型',
+      'support': '后台分析模型',
+      'fast': '快速响应模型',
+      'compressor': '上下文压缩模型',
+      'watch': '视觉模型',
+      'embedding': '向量模型',
+    };
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      children: [
+        SettingsGroup(
+          title: '模型选择',
+          rows: [
+            for (final lane in labels.keys)
+              (lane, labels[lane]!, CupertinoIcons.sparkles),
+          ],
+          subtitles: {
+            for (final lane in labels.keys)
+              lane: routes[lane] is Map
+                  ? "${providers[routes[lane]['provider']] ?? routes[lane]['provider']} · ${routes[lane]['model']}"
+                  : '使用电脑默认模型',
+          },
+          onSelected: (lane) => showModelSettingsEditor(
+            context,
+            RemoteModelSettingsBackend(c.state, onSync: c.sync, lane: lane),
+            title: labels[lane],
+            description: '修改将加密发送到电脑，重启电脑上的助手后生效。',
+            onManageCredentials: (context) =>
+                _openPersonalPage('模型密钥', () => _hostSection(c, 'models')),
+          ),
+        ),
+        NovaSection(
+          footer: models['locked'] == true
+              ? '模型由电脑的启动配置管理，请在电脑上修改。'
+              : '模型和密钥保存在当前 Space；密钥不会传回手机。',
+          children: [
+            NovaTile(
+              title: '模型密钥',
+              trailing: const CupertinoListTileChevron(),
+              onTap: () =>
+                  _openPersonalPage('模型密钥', () => _hostSection(c, 'models')),
+            ),
+          ],
+        ),
+        _pending(c.state),
+      ],
+    );
+  }
+
+  Widget _devices(SpaceClientController c) {
     final state = c.state;
     return ListView(
       padding: const EdgeInsets.only(top: 8, bottom: 24),
@@ -1145,8 +1300,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
             ),
           ],
         ),
-        SpaceSourcePanel(state: state, onSync: c.sync),
-        SpaceHostPanel(state: state, onSync: c.sync),
+
         _pending(state),
         NovaSection(
           children: [
@@ -1183,27 +1337,31 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 64,
+        leading: tab == 3
+            ? null
+            : IconButton(
+                tooltip: '刷新',
+                onPressed: () => c.sync(),
+                icon: const Icon(CupertinoIcons.arrow_clockwise, size: 23),
+              ),
+        automaticallyImplyLeading: false,
         centerTitle: true,
-        title: Text(
-          ['Nova', '任务', '时间线', '我的'][tab],
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -.5,
-          ),
-        ),
+        title: tab == 0
+            ? PetAvatarTitle(store: petAvatar)
+            : Text(
+                ['Nova', '任务', '时间线', '我的'][tab],
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -.5,
+                ),
+              ),
         actions: [
           IconButton(
             tooltip: '设置',
             icon: const Icon(CupertinoIcons.gear_alt, size: 23),
-            onPressed: () => _openPersonalPage('设置', () => _settings(c)),
+            onPressed: () => _settings(c),
           ),
-          if (tab != 3)
-            IconButton(
-              onPressed: () => c.sync(),
-              icon: const Icon(CupertinoIcons.arrow_clockwise, size: 23),
-              tooltip: '补拉 Host 状态',
-            ),
           _switchSpaceButton(),
           const SizedBox(width: 10),
         ],

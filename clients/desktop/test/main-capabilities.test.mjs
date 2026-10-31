@@ -22,7 +22,7 @@ test('actual main prelaunch registry failures stop the supervisor without schedu
   for (const bytes of ['invalid json', ' '.repeat(256 * 1024 + 1), null]) {
     if (bytes === null) await rm(path)
     else await writeFile(path, bytes)
-    const context = vm.createContext({acceptance: null, readCapabilityDocument, classifyBackendFailure, currentSettings: {capabilitiesConfigPath: path}, process: {env: {}}, desktopConfig: {}, codexStatus: {status: 'ready'}})
+    const context = vm.createContext({refreshSpaceModels: async () => {}, acceptance: null, readCapabilityDocument, classifyBackendFailure, currentSettings: {capabilitiesConfigPath: path}, process: {env: {}}, desktopConfig: {}, codexStatus: {status: 'ready'}})
     vm.runInContext(launch, context)
     let retries = 0
     const supervisor = createBackendSupervisor({start: () => context.launchBackend(), stopBackend: async () => {}, onStatus: () => {}, schedule: () => {retries++; return 1}})
@@ -35,7 +35,7 @@ test('actual main prelaunch registry failures stop the supervisor without schedu
 })
 test('actual main turns Coding off instead of blocking on an unfinished manual Codex path', async () => {
   const specs = []
-  const context = vm.createContext({acceptance: null, readCapabilityDocument: () => ({version: 1}), classifyBackendFailure,
+  const context = vm.createContext({refreshSpaceModels: async () => {}, acceptance: null, readCapabilityDocument: () => ({version: 1}), classifyBackendFailure,
     accessCredentials: fn => fn(), refreshCapabilityEditor() {}, preferredLanguage: () => 'en', acceptanceBackendSettings: value => value,
     currentSettings: {}, process: {env: {}, cwd: () => '/tmp'}, desktopConfig: {codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'ready'},
     randomBytes: () => Buffer.alloc(16), createReadinessListener: () => ({endpoint: Promise.resolve('ep'), close() {}}), createBackendDiagnosticCollector: () => ({}),
@@ -50,7 +50,7 @@ test('actual main turns Coding off instead of blocking on an unfinished manual C
 })
 test('actual settings view never decrypts while projecting startup and panel state', () => {
   let decrypts = 0
-  const context = vm.createContext({codingBackendStatus, createManagedPhoneService: () => ({}), VISION_MODELS: {}, MODEL_CATALOG: {}, resolveSecretConfiguration, developmentEnv: {}, frontendUsage: {snapshot: () => ({})}, wakeWord: null, settingsWindow: null, skillsCache:[], capabilityEditorCache: null, settingsGeneration: 0, currentSettings: {}, process: {env: {}},
+  const context = vm.createContext({configuredSpaceModelsPath: () => null, settingsRestartPending: false, codingBackendStatus, createManagedPhoneService: () => ({}), VISION_MODELS: {}, MODEL_CATALOG: {}, resolveSecretConfiguration, developmentEnv: {}, frontendUsage: {snapshot: () => ({})}, wakeWord: null, settingsWindow: null, skillsCache:[], capabilityEditorCache: null, settingsGeneration: 0, currentSettings: {}, process: {env: {}},
     readCapabilityDocument: () => ({version: 1}), decryptSecretsForSpawn: () => {decrypts++; return {}},
     readCapabilityEditor: () => ({document: {version: 1}, revision: 'test-revision', problems: []}), capabilityEnvironment: () => ({}), capabilityPath, statSync, capabilityDocumentRevision: () => 'fixed',
     runtimeCapabilities: null, publicSettings: () => ({}), codexStatus: {}, backendStatus: {}, settingsApplyStatus: 'idle', settingsRecoveryAvailable: false, managedWorkspacesView: () => ({}),

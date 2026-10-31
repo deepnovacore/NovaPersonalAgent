@@ -87,6 +87,10 @@ class SpaceClientState extends ChangeNotifier {
           entry.addAll({'status': 'unknown', 'error': 'interrupted_effect'});
         }
       }
+      _rejectDependents({
+        for (final p in pending)
+          if (p['status'] == 'rejected') p['op_id'] as String,
+      }, 'dependency_rejected');
       await save();
     }
     changed();
@@ -161,14 +165,29 @@ class SpaceClientState extends ChangeNotifier {
   Future<void> discard(String opId) => transaction(() async {
     // Dependent edits are retained for explicit user resolution too.
     pending.removeWhere((p) => p['op_id'] == opId);
-    for (final p in pending) {
-      if ((p['depends_on'] as List? ?? []).contains(opId)) {
-        p.addAll({'status': 'rejected', 'error': 'dependency_discarded'});
-      }
-    }
+    _rejectDependents({opId}, 'dependency_discarded');
     await save();
     changed();
   });
+  void _rejectDependents(Set<String> failed, String error) {
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (final p in pending) {
+        if (p['status'] == 'pending' &&
+            (p['depends_on'] as List? ?? []).any(failed.contains)) {
+          p.addAll({'status': 'rejected', 'error': error});
+          if (p['kind'] == 'secret.put') {
+            p['input'] = _copy(p['input'] as Map)..remove('value');
+            p.remove('envelope');
+          }
+          failed.add(p['op_id'] as String);
+          changed = true;
+        }
+      }
+    }
+  }
+
   Future<void> acceptHostVersion(String opId) => discard(opId);
   Future<String> collectSource({
     required String name,
@@ -529,6 +548,9 @@ class SpaceClientState extends ChangeNotifier {
     } else if (event['status'] == 'conflict' || event['status'] == 'rejected') {
       item['status'] = event['status'];
       item['error'] = event['error'];
+      if (event['status'] == 'rejected') {
+        _rejectDependents({opId as String}, 'dependency_rejected');
+      }
       // A refused key is never resent, so the phone keeps neither its plaintext nor its envelope.
       if (item['kind'] == 'secret.put') {
         item['input'] = _copy(item['input'] as Map)..remove('value');

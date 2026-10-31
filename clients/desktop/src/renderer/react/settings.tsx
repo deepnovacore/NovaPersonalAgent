@@ -49,7 +49,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         return { saved: false, status: 'busy' };
         const idle = document.getElementById('auto-hide-seconds') as HTMLInputElement | null;
         if (idleText !== null && idle && !commitIdle(idle)) return { saved: false, status: 'invalid' };
-        for (const input of document.querySelectorAll<HTMLInputElement>('[data-lane-custom-model]')) {
+        for (const input of view.hostModelRoutes ? [] : document.querySelectorAll<HTMLInputElement>('[data-lane-custom-model]')) {
             if (!input.checkValidity()) { setStatus(input.validationMessage); setCategory('models'); setModelPane('routes'); input.reportValidity(); return { saved: false, status: 'invalid' }; }
         }
         const writes: any = {}, revisions: any = {}; for (const key of secretDirty) {
@@ -151,7 +151,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         }
         // Space 与手机 has its own left-rail category and renders from a standalone section.
         if (id === 'capabilities-problems') { const problems=view.capabilities?.problems??[]; return <p key={key} id={id} className="warning" hidden={!problems.length} role="alert">{problems.map((problem:string)=>t(problem)).join(' · ')}</p>; }
-        if (id === 'model-routes') return <ModelRoutesPanel key={key} view={view} stage={stage} hidden={modelPane !== 'routes'}/>;
+        if (id === 'model-routes') return <ModelRoutesPanel key={key} view={view} stage={stage} api={api} onSaved={(next: any) => controller.syncView(next, {trackRestart: false})} hidden={modelPane !== 'routes'}/>;
         if (id === 'visor-section')
             return category === 'themes' ? <VisorPanel key={key} api={bridge?.visor}/> : null;
         if (id === 'orb-skin-section')

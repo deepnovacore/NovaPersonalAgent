@@ -1012,7 +1012,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
     const sender = {}
     const context = vm.createContext({
       ipcMain: {handle: (_name, value) => { handler = value }}, settingsWindow: {webContents: sender},
-      currentSettings: {...DEFAULT_SETTINGS}, settingsApplyStatus: 'applied', settingsRestartPending: false, backendSettings, lifecycleCoordinator: {},
+      configuredSpaceModelsPath: () => null, currentSettings: {...DEFAULT_SETTINGS}, settingsApplyStatus: 'applied', settingsRestartPending: false, backendSettings, lifecycleCoordinator: {},
       applySettingsTransaction: async options => { await options.write(payload); restart = options.needsBackendRestart(); return {} },
       parseSettingsCommit: value => value,
       accessCredentials: operation => operation(), refreshSettingsCapabilities: async () => {},

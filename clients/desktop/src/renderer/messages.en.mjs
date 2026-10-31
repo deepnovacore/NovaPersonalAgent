@@ -1,4 +1,13 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "模型选择由启动配置管理，当前只读。": "Model selection is managed by the launch configuration and is read-only.",
+  "请连接后台后再保存模型选择。": "Connect the backend before saving model selection.",
+  "模型选择已在其他设备修改，请重新读取后再保存。": "Model selection changed on another device. Reload it before saving.",
+  "请先保存模型密钥并重启后台，再保存模型选择。": "Save the model key and restart the backend before saving the model selection.",
+  "模型选择未保存，请检查配置后重试。": "Model selection was not saved. Check the configuration and try again.",
+  "模型选择暂时无法读取，请稍后重试。": "Model selection is unavailable. Try again shortly.",
+  "电脑与手机共用这些模型选择；在此单独保存，重启后台后生效。": "Your computer and phone share these model selections. Save them here separately, then restart the backend to apply them.",
+  "保存模型选择": "Save model selection",
+  "重新读取模型选择": "Reload model selection",
   "我眼中的你": "How I see you",
   "自我介绍": "Introduction",
   "我在慢慢补充对你的了解。": "I'm getting to know you a little better.",

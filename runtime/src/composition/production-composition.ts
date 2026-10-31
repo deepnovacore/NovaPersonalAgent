@@ -30,6 +30,7 @@ import {loadCapabilityRegistry} from '../config/capability-registry.js'
 import type {CodingBackendId} from '../config/coding-backends.js'
 import {prepareExternalMcp} from '../executors/mcp.js'
 import {overlaySpaceSecrets} from '../space-host/host-admin.js'
+import {overlaySpaceModelRoutes} from '../space-host/model-settings.js'
 import {loadSettings, memoryStatus, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
 import {requireSelectedCascadedLlmConfig, requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
 import {remoteClientMedia} from '../server/server-config.js'
@@ -72,7 +73,8 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   readonly createServer?: (options: Parameters<NonNullable<DesktopRealtimeOptions['createServer']>>[0], media?: ClientMedia) => ReturnType<NonNullable<DesktopRealtimeOptions['createServer']>>
 }) {
   // Credentials a Space owner stored from a phone fill only variables the operator left unset.
-  const environment = overlaySpaceSecrets(operatorEnvironment, operatorEnvironment.NOVA_SPACE_HOST_CONFIG ? resolve(operatorEnvironment.NOVA_SPACE_HOST_CONFIG) : undefined, onDiagnostic)
+  const spaceModelConfigPath = operatorEnvironment.NOVA_SPACE_HOST_CONFIG ? resolve(operatorEnvironment.NOVA_SPACE_HOST_CONFIG) : undefined
+  const environment = overlaySpaceModelRoutes(overlaySpaceSecrets(operatorEnvironment, spaceModelConfigPath, onDiagnostic), spaceModelConfigPath)
   const baseSettings = loadSettings(environment, !remote)
   const spaceConfigPath=environment.NOVA_SPACE_HOST_CONFIG?resolve(environment.NOVA_SPACE_HOST_CONFIG):undefined
   const spaceConfig=spaceConfigPath?readHostSpaceConfig(spaceConfigPath):undefined

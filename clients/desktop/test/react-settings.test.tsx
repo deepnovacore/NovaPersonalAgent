@@ -98,6 +98,49 @@ test('model routes save exact custom catalog IDs, keyless local models and expli
  const watch=v.container.querySelector('[data-lane-provider="watch"]') as HTMLSelectElement;assert.ok(![...watch.options].some(o=>o.value==='openai'));
 })
 
+test('Space model choices save separately from API keys and preserve the first edited Host version', async () => {
+ const host={version:4,applied_version:4,source:'space',locked:false};
+ const initial=base({focusCategory:'models',modelCatalog:routeCatalog,hostModelRoutes:host,modelRoutes:{}});
+ const b=bridge(initial,async(commit:any)=>base({...initial,saved:commit.settingsPatch.modelRoutes===undefined,restarted:false,operationStatus:commit.settingsPatch.modelRoutes?'invalid':'applied',problems:['模型选择已在其他设备修改，请重新读取后再保存。']}));
+ const v=render(<SettingsApp bridge={b.bridge}/>);
+ await waitFor(()=>assert.ok(v.getByRole('button',{name:'保存模型选择'})));
+ assert.equal((v.container.querySelector('[data-lane-provider="conversationText"]') as HTMLSelectElement).value,'','Space does not display the stale global conversation model');
+ fireEvent.change(v.container.querySelector('[data-lane-provider="fast"]')!,{target:{value:'qwen'}});
+ fireEvent.input(v.container.querySelector('#dashscopeApiKey')!,{target:{value:'new-key'}});
+ await act(async()=>b.push(base({...initial,hostModelRoutes:{...host,version:5},modelRoutes:{support:{provider:'qwen',model:'phone-model'}}})));
+ fireEvent.click(v.getByRole('button',{name:'保存模型选择'}));
+ await waitFor(()=>assert.equal(b.calls.length,1));
+ assert.deepEqual(b.calls[0],{settingsPatch:{modelRoutes:{fast:{provider:'qwen',model:'catalog-model'}},hostModelRoutesVersion:4}});
+ await waitFor(()=>assert.ok(v.getByText('模型选择已在其他设备修改，请重新读取后再保存。')));
+ assert.equal((v.container.querySelector('#dashscopeApiKey') as HTMLInputElement).value,'new-key');
+ fireEvent.click(v.container.querySelector('#settings-save')!);
+ await waitFor(()=>assert.equal(b.calls.length,2));
+ assert.deepEqual(b.calls[1],{settingsPatch:{secrets:{dashscopeApiKey:'new-key'}}});
+})
+
+test('Space operator routes disable model editing while reload remains available',async()=>{
+ const b=bridge(base({focusCategory:'models',modelCatalog:routeCatalog,modelRoutes:{fast:{provider:'qwen',model:'qwen-plus'}},hostModelRoutes:{version:1,applied_version:1,source:'environment',locked:true}}));
+ const v=render(<SettingsApp bridge={b.bridge}/>);
+ await waitFor(()=>assert.ok(v.getByText('模型选择由启动配置管理，当前只读。')));
+ for(const input of v.container.querySelectorAll('#model-routes select,#model-routes input'))assert.equal((input as HTMLInputElement).disabled,true);
+ assert.equal((v.getByRole('button',{name:'保存模型选择'}) as HTMLButtonElement).disabled,true);
+ assert.equal((v.getByRole('button',{name:'重新读取模型选择'}) as HTMLButtonElement).disabled,false);
+ assert.equal(b.calls.length,0);
+})
+
+test('an unfinished Space model draft cannot block saving an unrelated API key',async()=>{
+ const b=bridge(base({focusCategory:'models',modelCatalog:routeCatalog,modelRoutes:{},hostModelRoutes:{version:1,applied_version:1,source:'space',locked:false}}));
+ const v=render(<SettingsApp bridge={b.bridge}/>);
+ await waitFor(()=>assert.ok(v.getByRole('button',{name:'保存模型选择'})));
+ fireEvent.change(v.container.querySelector('[data-lane-provider="fast"]')!,{target:{value:'self-hosted'}});
+ assert.equal((v.getByLabelText('记忆提取自定义模型 ID') as HTMLInputElement).checkValidity(),false);
+ fireEvent.input(v.container.querySelector('#dashscopeApiKey')!,{target:{value:'new-key'}});
+ fireEvent.click(v.container.querySelector('#settings-save')!);
+ await waitFor(()=>assert.equal(b.calls.length,1));
+ assert.deepEqual(b.calls[0],{settingsPatch:{secrets:{dashscopeApiKey:'new-key'}}});
+ assert.equal((v.getByLabelText('记忆提取自定义模型 ID') as HTMLInputElement).value,'');
+})
+
 test('a newer idle edit survives a pending save response',async()=>{
  let resolve:any;const b=bridge(base({autoHideSeconds:60}),()=>new Promise(r=>{resolve=r}));const v=render(<SettingsApp bridge={b.bridge}/>);
  await waitFor(()=>assert.equal((v.container.querySelector('#auto-hide-seconds') as HTMLInputElement).value,'60'));

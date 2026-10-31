@@ -13,6 +13,50 @@ class MemorySpacePersistence implements SpacePersistence {
 
 void main() {
   test(
+    'rejected dependencies become actionable transitively and survive recovery',
+    () async {
+      final disk = MemorySpacePersistence();
+      var state = SpaceClientState(disk);
+      final key = await state.enqueue('secret.put', {
+        'name': 'OPENAI_API_KEY',
+        'value': 'private',
+      });
+      final route = await state.enqueue(
+        'settings.patch',
+        {'method': 'models.configure'},
+        dependsOn: [key],
+      );
+      await state.enqueue(
+        'life.mutate',
+        {'title': 'dependent'},
+        dependsOn: [route],
+      );
+      await state.apply({
+        'v': 1,
+        'type': 'receipt',
+        'op_id': key,
+        'status': 'rejected',
+      });
+      expect(state.pending.every((p) => p['status'] == 'rejected'), true);
+      expect(
+        state.pending.skip(1).every((p) => p['error'] == 'dependency_rejected'),
+        true,
+      );
+      expect(jsonEncode(state.pending), isNot(contains('private')));
+      state = SpaceClientState(disk);
+      await state.open();
+      expect(state.pending.every((p) => p['status'] == 'rejected'), true);
+      // Recover queues written by older clients which did not propagate failure.
+      state.pending[1]['status'] = 'pending';
+      state.pending[2]['status'] = 'pending';
+      await state.save();
+      state = SpaceClientState(disk);
+      await state.open();
+      expect(state.pending.every((p) => p['status'] == 'rejected'), true);
+    },
+  );
+
+  test(
     'interrupted chat displays unknown after restart without resending',
     () async {
       final disk = MemorySpacePersistence();

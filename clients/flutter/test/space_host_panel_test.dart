@@ -39,6 +39,33 @@ Future<void> pump(
 void main() {
   setUpAll(loadSpaceTestFonts);
 
+  test(
+    'model conflict retry takes the latest Host version and preserves its sparse edit',
+    () {
+      final patch = {
+        'method': 'models.configure',
+        'params': {
+          'expected_version': 3,
+          'routes': {'support': null},
+        },
+      };
+      expect(
+        refreshSettingsPatch(patch, {
+          'host_settings': {
+            'models': {'version': 5},
+          },
+        }),
+        {
+          'method': 'models.configure',
+          'params': {
+            'expected_version': 5,
+            'routes': {'support': null},
+          },
+        },
+      );
+    },
+  );
+
   testWidgets('hidden for a non-owner device', (tester) async {
     await pump(
       tester,

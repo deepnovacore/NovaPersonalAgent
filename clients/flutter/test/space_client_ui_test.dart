@@ -4,9 +4,75 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/ui/app.dart' show BottomAppBarTabs;
 import 'package:nova_mobile/ui/components.dart';
 import 'support/space_client_fixture.dart';
+import 'package:nova_mobile/ui/settings_sheet.dart';
+import 'package:nova_mobile/ui/pet_avatar.dart';
+import 'remote_model_settings_backend_test.dart' show fixture;
 
 void main() {
   setUpAll(loadSpaceTestFonts);
+  testWidgets(
+    'routine edits stay queued in the background without internal request labels',
+    (tester) async {
+      final state = seededState();
+      await state.enqueue('life.mutate', {
+        'op': 'update',
+        'kind': 'todo',
+        'id': 't1',
+        'status': 'done',
+      });
+      await pumpClient(tester, state);
+      await tester.tap(find.text('任务'));
+      await tester.pump();
+      expect(state.pending, hasLength(1));
+      expect(find.textContaining('life.mutate'), findsNothing);
+      expect(find.text('等待 Host 确认'), findsNothing);
+      expect(find.text('待处理请求'), findsNothing);
+    },
+  );
+  testWidgets(
+    'conflicts and rejected edits remain actionable with ordinary labels',
+    (tester) async {
+      final state = seededState();
+      await state.enqueue('life.mutate', {
+        'op': 'update',
+        'kind': 'todo',
+        'id': 't1',
+        'status': 'done',
+      });
+      state.pending.single.addAll({
+        'status': 'conflict',
+        'error': 'internal_version_conflict',
+      });
+      await pumpClient(tester, state);
+      await tester.tap(find.text('任务'));
+      await tester.pump();
+      expect(find.text('编辑冲突 · 修改已保留'), findsOneWidget);
+      expect(find.textContaining('life.mutate'), findsNothing);
+      expect(find.textContaining('internal_version_conflict'), findsNothing);
+      state.pending.single['status'] = 'rejected';
+      state.changed();
+      await tester.pump();
+      expect(find.text('修改未能保存'), findsOneWidget);
+      expect(state.pending, hasLength(1));
+    },
+  );
+  testWidgets('phone-width title stays centered with refresh on the left', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpClient(tester, seededState());
+    final title = find.byType(PetAvatarTitle);
+    expect(tester.getCenter(title).dx, closeTo(195, 1));
+    expect(tester.getCenter(find.byTooltip('刷新')).dx, lessThan(100));
+    expect(
+      find.descendant(of: find.byType(AppBar), matching: find.text('Space')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('every Client tab offers the same quick Space switch', (
     tester,
   ) async {
@@ -136,9 +202,14 @@ void main() {
       await tester.pump();
       await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
-      for (final header in ['Space', 'Host 连接', '手机采集与授权']) {
-        expect(find.text(header), findsOneWidget);
+      expect(find.byType(SettingsGroup), findsAtLeastNWidgets(2));
+      for (final title in ['模型服务', '设备', '宠物头像', '连接器', '助手设置']) {
+        expect(find.text(title), findsOneWidget);
       }
+      expect(find.text('Host 模型密钥'), findsNothing);
+      await tester.tap(find.text('设备'));
+      await tester.pumpAndSettle();
+      expect(find.text('Host 连接'), findsOneWidget);
 
       // SelectableText carries its own Scrollable; scroll the page list.
       await tester.scrollUntilVisible(
@@ -160,6 +231,30 @@ void main() {
       await tester.pumpAndSettle();
       expect(switched, 1);
       expect(find.byTooltip('设置'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Client connectors reuse the shared cards and keep phone consent separate',
+    (tester) async {
+      await pumpClient(tester, seededState());
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('连接器'));
+      await tester.pumpAndSettle();
+      expect(find.text('飞书'), findsOneWidget);
+      expect(find.text('日历与提醒事项'), findsNothing);
+      expect(find.text('手动提交内容，管理上传与处理授权。'), findsOneWidget);
+      await tester.tap(find.text('手机采集与授权'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('手机采集与授权'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('发送采集输入'), findsOneWidget);
     },
   );
 
@@ -194,6 +289,58 @@ void main() {
       expect(find.text('暂无资讯'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'Client model editor uses the shared form and sends writes to Host',
+    (tester) async {
+      final state = seededState();
+      state.snapshot.addAll(fixture().snapshot);
+      await pumpClient(tester, state);
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('模型服务'));
+      await tester.pumpAndSettle();
+      expect(find.text('DeepSeek · current'), findsOneWidget);
+      await tester.tap(find.text('对话模型'));
+      await tester.pumpAndSettle();
+      expect(find.text('API 地址'), findsNothing);
+      final model = find.byWidgetPredicate(
+        (w) => w is TextField && w.controller?.text == 'current',
+      );
+      await tester.enterText(model, 'phone-selected');
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(state.pending, hasLength(1));
+      expect(state.pending.single['kind'], 'settings.patch');
+      expect(state.pending.single['input'], {
+        'method': 'models.configure',
+        'params': {
+          'expected_version': 7,
+          'routes': {
+            'conversationText': {
+              'provider': 'deepseek',
+              'model': 'phone-selected',
+            },
+          },
+        },
+      });
+      expect(find.textContaining('等待 Host'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Client pet avatar uses the same local settings as standalone', (
+    tester,
+  ) async {
+    await pumpClient(tester, seededState());
+    expect(find.byType(PetAvatarTitle), findsOneWidget);
+    await tester.tap(find.byTooltip('设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('宠物头像'));
+    await tester.pumpAndSettle();
+    expect(find.text('仅保存在本机'), findsOneWidget);
+    expect(find.text('从相册选择'), findsOneWidget);
+  });
 
   testWidgets('keyboard hides the tab bar like the local app', (tester) async {
     await pumpClient(tester, seededState());
