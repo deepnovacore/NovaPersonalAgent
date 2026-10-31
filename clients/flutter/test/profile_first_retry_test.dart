@@ -9,7 +9,6 @@ void main() {
   for (final cause in [
     'profile_output_invalid',
     'model_http_503',
-    'profile_budget_exhausted',
     'processing_consent_required',
     'profile_result_more_complete',
     'profile_no_saved_observations',
@@ -19,7 +18,7 @@ void main() {
       'Profile output failure requires explicit retry across restart: $cause',
       () async {
         final disk = MemoryLifePersistence();
-        var calls = 0, recoveries = 0;
+        var calls = 0;
         var time = DateTime.utc(2026);
         var processed = 5;
         var scope = 'same-scope';
@@ -28,11 +27,6 @@ void main() {
           persistence: disk,
           autoSchedule: false,
           now: () => time,
-          budgetLimitMicroyuan: 200,
-          recoverBudgetPause: (state) async {
-            recoveries++;
-            return {...state}..remove('terminal_code');
-          },
           inspect: () async => ProfileGenerationSnapshot(
             scope: scope,
             complete: false,
@@ -61,9 +55,6 @@ void main() {
         expect(coordinator.code, cause);
         expect(coordinator.phase, ProfileGenerationPhase.blocked);
         expect(jsonDecode(disk.value!)['requires_explicit_retry'], true);
-        if (cause == 'profile_budget_exhausted') {
-          expect(jsonDecode(disk.value!)['budget_limit_microyuan'], 200);
-        }
         coordinator.setForeground(true);
         time = time.add(const Duration(days: 1));
         await coordinator.poll();
@@ -72,7 +63,6 @@ void main() {
         await coordinator.start();
         await coordinator.poll();
         expect(calls, 1);
-        expect(recoveries, 0);
         expect(coordinator.code, cause);
         scope = 'new-source-scope';
         await coordinator.poll();

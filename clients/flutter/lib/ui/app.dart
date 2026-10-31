@@ -407,15 +407,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     if (!mounted || models == null) return;
     final profile = ProfileAgent(connector, lifeHost.publication, models);
     final generation = ProfileGenerationCoordinator(
-      pauseAfterRound:
-          ProfileAgent.budgetId.isNotEmpty &&
-          const bool.fromEnvironment('NOVA_PROFILE_PAUSE_AFTER_ROUND'),
+      pauseAfterRound: const bool.fromEnvironment(
+        'NOVA_PROFILE_PAUSE_AFTER_ROUND',
+      ),
       persistence: SecureContextPersistence(
         'nova.profile.automatic.v1${ProfileAgent.budgetId.isEmpty ? '' : '.${ProfileAgent.budgetId}'}',
       ),
       inspect: profile.inspectGeneration,
-      recoverBudgetPause: profile.recoverBudgetPause,
-      budgetLimitMicroyuan: profile.budget?.capMicroyuan,
       generate: ({required savedObservationsOnly, required maxNewBatches}) =>
           profile.run(
             savedObservationsOnly: savedObservationsOnly,

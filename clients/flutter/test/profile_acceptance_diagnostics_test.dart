@@ -83,8 +83,13 @@ void main() {
         snapshots.first['receipt']['error_code'],
         'profile_timeline_invalid',
       );
-      expect(snapshots.last['budget_cap_microyuan'], 10000000);
+      expect(snapshots.last['budget_cap_microyuan'], isNull);
       expect(snapshots.last['budget_reserved_microyuan'], 9926000);
+      // Legacy hard-cap receipts stay diagnosable without any cap metadata.
+      expect(
+        snapshots.last['receipt']['error_code'],
+        'profile_budget_exhausted',
+      );
       for (var i = 0; i < 12; i++) {
         receipt = {
           'status': 'interrupted',

@@ -39,9 +39,7 @@ class ProfileGenerationStatus extends StatelessWidget {
         ProfileGenerationPhase.paused => t('已暂停整理', 'Paused'),
         ProfileGenerationPhase.failed => t('这次没整理完，稍后会再试', 'Retrying shortly'),
         ProfileGenerationPhase.blocked =>
-          code == 'profile_budget_exhausted'
-              ? t('本次整理已暂停', 'Paused')
-              : code == 'profile_timeline_partial'
+          code == 'profile_timeline_partial'
               ? t('已保存部分近况', 'Some updates saved')
               : code == 'profile_timeline_invalid'
               ? t('这次近况未通过校验', 'Updates failed validation')
@@ -60,8 +58,6 @@ class ProfileGenerationStatus extends StatelessWidget {
               '生成内容的格式或原文引用不符合要求，已停止自动重试。已有内容会保留。',
               'Generated content failed format or source checks. Automatic retries stopped. Existing results kept.',
             )
-          : code == 'profile_budget_exhausted'
-          ? t('已达到本次费用上限，现有内容会保留。', 'Cost limit reached. Results kept.')
           : {
               'processing_not_allowed',
               'processing_consent_required',
@@ -151,7 +147,7 @@ class ProfileGenerationStatus extends StatelessWidget {
                 if (phase == ProfileGenerationPhase.paused ||
                     phase == ProfileGenerationPhase.failed ||
                     phase == ProfileGenerationPhase.blocked &&
-                        !(code?.startsWith('profile_budget_') ?? false))
+                        code != 'profile_budget_unavailable')
                   TextButton(
                     onPressed: generation.retry,
                     child: Text(

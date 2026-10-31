@@ -57,16 +57,11 @@ class ProfileGenerationCoordinator extends ChangeNotifier
     this.pauseAfterRound = false,
     this.inputs = const [],
     this.progress,
-    this.recoverBudgetPause,
-    this.budgetLimitMicroyuan,
     this.retryBase = const Duration(seconds: 30),
     this.roundDelay = const Duration(seconds: 3),
   }) : now = now ?? DateTime.now,
        processedRecords = processedRecords ?? (() => 0);
   final LifePersistence persistence;
-  final Future<Map<String, dynamic>?> Function(Map<String, dynamic>)?
-  recoverBudgetPause;
-  final int? budgetLimitMicroyuan;
   final Future<ProfileGenerationSnapshot?> Function() inspect;
   final Future<void> Function({
     required bool savedObservationsOnly,
@@ -117,19 +112,26 @@ class ProfileGenerationCoordinator extends ChangeNotifier
         _record = value;
       }
       if (_disposed) return;
-      if (!manuallyPaused &&
-          _record['requires_explicit_retry'] != true &&
-          _record['terminal_code'] == 'profile_budget_exhausted') {
-        final resumed = await recoverBudgetPause?.call(Map.of(_record));
-        if (resumed != null) {
-          _record = resumed;
-          _record.remove('error_code');
-          _record.remove('next_at');
-          _record['stage'] = 'saved';
-          _record['retry_count'] = 0;
-          _record['status'] = 'budget_resumed';
-          await _save();
+      // One-time migration: hard-cap acceptance builds persisted this terminal
+      // code with an explicit-retry latch. Accounting-only builds drop the
+      // latch (before the explicit-retry early exit) so the run can continue.
+      // Manual pause is preserved and repeated starts are idempotent.
+      if (_record['terminal_code'] == 'profile_budget_exhausted') {
+        // Drop the cap-era fields; every removed budget key shares this prefix.
+        final legacy = [
+          for (final key in _record.keys)
+            if (key == 'terminal_code' ||
+                key == 'requires_explicit_retry' ||
+                key == 'error_code' ||
+                key.startsWith('budget_'))
+              key,
+        ];
+        for (final key in legacy) {
+          _record.remove(key);
         }
+        _record['retry_count'] = 0;
+        _record['stage'] = 'saved';
+        await _save();
       }
       if (_record['status'] == 'running') {
         _record['stage'] = 'saved';
@@ -201,13 +203,6 @@ class ProfileGenerationCoordinator extends ChangeNotifier
       _notify();
       return;
     }
-    if ((_record['terminal_code'] as String?)?.startsWith('profile_budget_') ==
-        true) {
-      phase = ProfileGenerationPhase.blocked;
-      code = _record['terminal_code'] as String;
-      _notify();
-      return;
-    }
     _checking = true;
     try {
       final snapshot = await inspect();
@@ -220,16 +215,6 @@ class ProfileGenerationCoordinator extends ChangeNotifier
       }
       covered = snapshot.covered;
       total = snapshot.total;
-      // Budget/storage failures do not become permission to spend on a new scope.
-      if ((_record['terminal_code'] as String?)?.startsWith(
-            'profile_budget_',
-          ) ==
-          true) {
-        phase = ProfileGenerationPhase.blocked;
-        code = _record['terminal_code'] as String;
-        _notify();
-        return;
-      }
       if (_record['scope'] != snapshot.scope) {
         _record = {
           'scope': snapshot.scope,
@@ -354,7 +339,6 @@ class ProfileGenerationCoordinator extends ChangeNotifier
           _record['error_code'] = code;
           final terminal =
               explicitRetry ||
-              code!.startsWith('profile_budget_') ||
               {
                 'authorization_changed',
                 'processing_not_allowed',
@@ -365,6 +349,9 @@ class ProfileGenerationCoordinator extends ChangeNotifier
                 'connector_unavailable',
                 'source_expired',
                 'profile_checkpoint_storage_full',
+                'profile_budget_unavailable',
+                'profile_budget_usage_invalid',
+                'profile_budget_usage_exceeds_reservation',
                 'profile_selection_invalid',
                 'profile_timeline_checkpoint_invalid',
                 'profile_timeline_invalid',
@@ -377,10 +364,6 @@ class ProfileGenerationCoordinator extends ChangeNotifier
           if (terminal) {
             _record['terminal_code'] = code;
             if (explicitRetry) _record['requires_explicit_retry'] = true;
-            if (code!.startsWith('profile_budget_') &&
-                budgetLimitMicroyuan != null) {
-              _record['budget_limit_microyuan'] = budgetLimitMicroyuan;
-            }
           }
           phase = terminal
               ? ProfileGenerationPhase.blocked
@@ -413,18 +396,6 @@ class ProfileGenerationCoordinator extends ChangeNotifier
       if (!_disposed) {
         phase = ProfileGenerationPhase.blocked;
         code = failureCode(error);
-        if (code?.startsWith('profile_budget_') == true) {
-          _record['terminal_code'] = code;
-          if (budgetLimitMicroyuan != null) {
-            _record['budget_limit_microyuan'] = budgetLimitMicroyuan;
-          }
-          _record['status'] = 'blocked';
-          try {
-            await _save();
-          } catch (_) {
-            /* No generation follows a storage failure. */
-          }
-        }
         _notify();
       }
     } finally {

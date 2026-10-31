@@ -152,26 +152,27 @@ void main() {
     );
   });
   test(
-    'switching from Flash to VL Plus continues the same five-yuan ledger',
+    'switching from Flash to VL Plus continues the same ledger without a cap',
     () async {
       final disk = MemoryLifePersistence();
       final flashCost = ProfileBudget.requestCost(model, messages);
       final visionCost = ProfileBudget.requestCost(vision, messages);
-      final original = ProfileBudget(disk, capMicroyuan: 5000000);
+      final original = ProfileBudget(disk);
       await original.reserve(model, messages);
-      final reopened = ProfileBudget(disk, capMicroyuan: 5000000);
+      final reopened = ProfileBudget(disk);
       await reopened.reserve(vision, messages);
       expect(reopened.reservedMicroyuan, flashCost + visionCost);
-      // Reopening with a different model does not reset or partition the remainder.
+      // Reopening with a different model does not reset or partition the ledger.
       disk.value = jsonEncode({'reserved_microyuan': 5000000 - visionCost});
       await reopened.reserve(vision, messages);
-      final full = disk.value;
-      await expectLater(
-        original.reserve(model, messages),
-        throwsA(isA<AgentFailure>()),
+      expect(jsonDecode(disk.value!)['reserved_microyuan'], 5000000);
+      // A request crossing the old five-yuan cap still reserves and records.
+      await original.reserve(model, messages);
+      expect(
+        jsonDecode(disk.value!)['reserved_microyuan'],
+        5000000 + flashCost,
       );
-      expect(disk.value, full);
-      expect(jsonDecode(full!)['reserved_microyuan'], 5000000);
+      expect(original.reservedMicroyuan, 5000000 + flashCost);
     },
   );
   test(
@@ -259,20 +260,32 @@ void main() {
     },
   );
   test(
-    'rejects the request crossing five yuan without changing its ledger',
+    'reserves past the removed five-yuan cap and keeps durable accounting',
     () async {
       final disk = MemoryLifePersistence();
       final cost = ProfileBudget.requestCost(model, messages);
       disk.value = jsonEncode({'reserved_microyuan': 5000000 - cost});
-      final budget = ProfileBudget(disk, capMicroyuan: 5000000);
+      final budget = ProfileBudget(disk);
       await budget.reserve(model, messages);
-      final full = disk.value;
-      await expectLater(
-        budget.reserve(model, messages),
-        throwsA(isA<AgentFailure>()),
-      );
-      expect(disk.value, full);
       expect(budget.reservedMicroyuan, 5000000);
+      await budget.reserve(model, messages);
+      final full = jsonDecode(disk.value!);
+      expect(budget.reservedMicroyuan, 5000000 + cost);
+      expect(full['reserved_microyuan'], 5000000 + cost);
+      expect(full['pending_reservations'], hasLength(2));
+      // A ledger above the old cap is readable and still settles accounting.
+      final spentTicket = await budget.reserve(model, messages);
+      await budget.settle(
+        spentTicket,
+        const CompletedModelUsage(
+          responseId: 'over-cap',
+          model: 'qwen-flash',
+          promptTokens: 1000,
+          completionTokens: 100,
+        ),
+      );
+      expect(budget.reservedMicroyuan, 5000000 + cost + 600);
+      expect(jsonDecode(disk.value!)['pending_reservations'], hasLength(2));
     },
   );
   test(

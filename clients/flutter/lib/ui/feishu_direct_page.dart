@@ -332,10 +332,6 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
       '本次未能生成完整近况，消息仍保存在手机。',
       'Could not generate complete updates. Messages remain on this phone.',
     ),
-    AgentFailure(code: 'profile_budget_exhausted') => t(
-      '本次费用额度已用完，整理已暂停。已保存的进度会保留。',
-      'The cost allowance is used up. Updates are paused and saved progress is kept.',
-    ),
     AgentFailure(code: 'profile_budget_unavailable') => t(
       '暂时无法确认剩余额度，已暂停整理，避免重复扣费。',
       'The remaining allowance could not be checked. Updates are paused to avoid repeated charges.',
@@ -1066,14 +1062,14 @@ class _FeishuDirectPageState extends State<FeishuDirectPage>
                           ListTile(
                             title: Text(
                               t(
-                                '本次费用上限 ¥${(profile.budget!.capMicroyuan / 1000000).toStringAsFixed(2)}',
-                                'Cost limit: ¥${(profile.budget!.capMicroyuan / 1000000).toStringAsFixed(2)}',
+                                '已记账（保守估算）¥${(profile.budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}',
+                                'Recorded (conservative estimate): ¥${(profile.budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}',
                               ),
                             ),
                             subtitle: Text(
                               t(
-                                '按保守上限计入 ¥${(profile.budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}；实际费用以模型服务账单为准。',
-                                'Conservative usage estimate: ¥${(profile.budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}. Actual charges are determined by your model provider.',
+                                '非账单；实际费用以模型服务账单为准。',
+                                'Not a bill. Actual charges are determined by your model provider.',
                               ),
                             ),
                           ),

@@ -47,14 +47,12 @@ class RecordingAuth extends FeishuAuth {
   }
 }
 
-class _CappedProfile extends ProfileAgent {
-  _CappedProfile(super.connector, super.publication, super.models);
+class _AcceptanceBudgetProfile extends ProfileAgent {
+  _AcceptanceBudgetProfile(super.connector, super.publication, super.models);
   @override
   ProfileBudget get budget => _budget;
-  final _budget = ProfileBudget(
-    MemoryLifePersistence(),
-    capMicroyuan: 10000000,
-  );
+  final _budget = ProfileBudget(MemoryLifePersistence())
+    ..reservedMicroyuan = 100000;
 }
 
 /// UI snapshots avoid opening the connector's shared ingestion/checkpoint queues.
@@ -166,7 +164,7 @@ void main() {
     () {
       expect(
         profileProgressLabel(
-          '已整理 240 / 1000 条文本，正在归纳事情、协作与习惯…\n验收预算 ¥5',
+          '已整理 240 / 1000 条文本，正在归纳事情、协作与习惯…\n已记账（保守估算）¥0.100；实际费用以账单为准',
           language: 'en',
         ),
         'Processed 240 / 1000 messages',
@@ -290,11 +288,11 @@ void main() {
       final dynamic runningState = tester.state(find.byType(FeishuDirectPage));
       final ProfileAgent runningAgent = runningState.profile;
       runningAgent.status =
-          '已整理 240 / 1000 条文本，正在归纳事情、协作与习惯…\n验收预算 ¥5；累计预留 ¥0.100（保守上限，非账单）';
+          '已整理 240 / 1000 条文本，正在归纳事情、协作与习惯…\n已记账（保守估算）¥0.100；实际费用以账单为准';
       runningAgent.onProgress!();
       await tester.pump();
       expect(find.text('已处理 240 / 1000 条消息'), findsOneWidget);
-      expect(find.textContaining('验收预算'), findsNothing);
+      expect(find.textContaining('已记账（保守估算）'), findsNothing);
       expect(find.textContaining('协作与习惯'), findsNothing);
       await tester.tap(find.text('取消生成'));
       models.pendingRead!.completeError(const AgentFailure('cancelled'));
@@ -409,7 +407,7 @@ void main() {
       publication.dispose();
     },
   );
-  testWidgets('model privacy shows the actual configured budget cap', (
+  testWidgets('model privacy shows recorded acceptance accounting, not a cap', (
     tester,
   ) async {
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -419,7 +417,11 @@ void main() {
     final host = _SyncCardHost();
     host.sync.running = false;
     final publication = LocalPublicationContext(MemoryLifePersistence());
-    final profile = _CappedProfile(host, publication, FixtureModels());
+    final profile = _AcceptanceBudgetProfile(
+      host,
+      publication,
+      FixtureModels(),
+    );
     addTearDown(host.dispose);
     addTearDown(publication.dispose);
     addTearDown(profile.dispose);
@@ -442,8 +444,9 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('模型与隐私'));
     await tester.pumpAndSettle();
-    expect(find.text('本次费用上限 ¥10.00'), findsOneWidget);
-    expect(find.text('本次费用上限 ¥5'), findsNothing);
+    expect(find.text('已记账（保守估算）¥0.100'), findsOneWidget);
+    expect(find.text('非账单；实际费用以模型服务账单为准。'), findsOneWidget);
+    expect(find.textContaining('本次费用上限'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 

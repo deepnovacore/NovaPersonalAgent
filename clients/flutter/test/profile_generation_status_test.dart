@@ -43,7 +43,7 @@ void main() {
     c.dispose();
   });
   testWidgets(
-    'empty working state is truthful and budget block has no retry action',
+    'empty working state is truthful and unavailable budget blocks retry',
     (tester) async {
       final entered = Completer<void>(), release = Completer<void>();
       final c = ProfileGenerationCoordinator(
@@ -60,7 +60,7 @@ void main() {
             ({required savedObservationsOnly, required maxNewBatches}) async {
               entered.complete();
               await release.future;
-              throw 'profile_budget_exhausted';
+              throw 'profile_budget_unavailable';
             },
         cancel: () {},
         failureCode: (e) => '$e',
@@ -102,7 +102,7 @@ void main() {
       release.complete();
       await run;
       await tester.pump();
-      expect(find.text('本次整理已暂停'), findsOneWidget);
+      expect(find.text('暂时无法继续整理'), findsOneWidget);
       expect(find.text('重试'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
@@ -253,9 +253,6 @@ void main() {
       ProfileGenerationPhase.paused,
     ]) {
       c.phase = phase;
-      if (phase == ProfileGenerationPhase.paused) {
-        c.code = 'profile_budget_exhausted';
-      }
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
