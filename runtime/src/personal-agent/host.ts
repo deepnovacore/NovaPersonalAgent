@@ -18,6 +18,7 @@ import {DailyWorkbench} from './daily-workbench.js'
 import type {WorkbenchGenerator} from './workbench-evidence.js'
 import {timelineContextInputs} from './timeline-inputs.js'
 import {TimelineBrief,type TimelineGenerator,type TimelineInput} from './timeline-brief.js'
+import {TimelineCache} from './timeline-cache.js'
 import type {StopRevoker} from '../device/port.js';
 import {SourceProcessingAgent} from './source-processing-agent.js';
 import {notificationResultText} from '../notifications/content.js';
@@ -722,6 +723,9 @@ export class PersonalAgentHost {
     }
     readonly workbenchContext:WorkbenchContext|DailyWorkbench;
     readonly timeline:TimelineBrief;
+    readonly #timelineCache:TimelineCache;
+    /** The scope the incremental cache currently belongs to; a change starts from an empty index. */
+    #timelineCacheScope:string|undefined;
     #timelineRefresh:Promise<void>|undefined;
     #stateRefresh:Promise<void>|undefined;
     #timelineRevision=0;
@@ -1046,10 +1050,11 @@ export class PersonalAgentHost {
         const state=this.snapshot(),account=typeof state.feishu==='object'&&state.feishu!==null&&'account_id' in state.feishu&&typeof state.feishu.account_id==='string'?state.feishu.account_id:undefined;
         return {scope:options.userScope+':'+(account??'local'),life:state.life,timeline:this.timeline.snapshot(true),timelineLoadFailed:this.timeline.loadFailed,profile:state.profile_preparation};
       },code=>options.onDiagnostic?.(code));
-      this.timeline=new TimelineBrief(options.path+'.timeline.json',options.generateTimeline?async(inputs,context,signal,progress)=>{
-        const authorize=async()=>{signal.throwIfAborted();const allowed=await this.#timelineInputs();signal.throwIfAborted();if(inputs.some(input=>!allowed.some(current=>current.id===input.id&&current.version===input.version))){this.timeline.invalidate();throw Error('processing_consent_required')}}
-        await authorize();const result=await options.generateTimeline!(inputs,context,signal,async partial=>{await authorize();await progress?.(partial)});await authorize();return result
-      }:undefined,()=>this.#notify()); this.notifications=new NotificationService({path:options.path+'.notifications.json',userScope:options.userScope,adapters:[novaNotificationAdapter(message=>this.#presentNotification(message)),spaceRelayNotificationAdapter(()=>this.#spaceHost?.service),...(options.notificationAdapters??[])],now:()=>this.#now().getTime(),valid:message=>this.notificationValidity(message),changed:()=>this.#notify()}); this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',!options.memory()?.sourceProcessing&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?async(entries,signal)=>{
+      this.#timelineCache=new TimelineCache(options.path+'.timeline-cache.json');
+      this.timeline=new TimelineBrief(options.path+'.timeline.json',options.generateTimeline?async(inputs,context,signal,progress,run)=>{
+        const authorize=async()=>{signal.throwIfAborted();const allowed=await this.#timelineInputs();signal.throwIfAborted();if(inputs.some(input=>!allowed.some(current=>current.id===input.id&&current.version===input.version))){this.timeline.invalidate();void this.#timelineCache.clear();throw Error('processing_consent_required')}}
+        await authorize();const result=await options.generateTimeline!(inputs,context,signal,async partial=>{await authorize();await progress?.(partial)},run);await authorize();return result
+      }:undefined,()=>this.#notify(),{cache:this.#timelineCache}); this.notifications=new NotificationService({path:options.path+'.notifications.json',userScope:options.userScope,adapters:[novaNotificationAdapter(message=>this.#presentNotification(message)),spaceRelayNotificationAdapter(()=>this.#spaceHost?.service),...(options.notificationAdapters??[])],now:()=>this.#now().getTime(),valid:message=>this.notificationValidity(message),changed:()=>this.#notify()}); this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',!options.memory()?.sourceProcessing&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?async(entries,signal)=>{
           const authorize=async()=>{signal.throwIfAborted();const memory=options.memory(),current=await this.#generationMemories(entries.map(e=>e.id));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[]),...await memory?.profileSources?.(entries.filter(entry=>entry.source?.kind).map(entry=>entry.id))??[]],digests=new Map(profileInputsFromDigests(this.projectDigests.digests()).map(input=>[input.id,input]));if(entries.some(e=>{const digest=digests.get(e.id);return digest?digest.version!==e.version||digest.refs.some(ref=>!allowed.some(a=>a.id===ref.entry_id&&a.version===ref.version)):!allowed.some(a=>a.id===e.id&&a.version===e.version)}))throw Error('processing_consent_required');};
           await authorize();signal.throwIfAborted();appendAcceptanceCounts('profile_model',{source_entries:entries.filter(entry=>!!entry.source).length,stated_entries:entries.filter(entry=>entry.origin==='stated').length,model_calls:1});
           const result=await withModelPurpose('profile',()=>options.generateProfile!(entries,signal));
@@ -1115,6 +1120,7 @@ export class PersonalAgentHost {
             this.understanding.reopen();
             await this.workbenchContext.open({deferGeneration:true});
             await this.timeline.open();
+            await this.#timelineCache.open();
             await this.projectDigests.open({deferGeneration:true});
             await this.life.open();
             await this.tasks.open();
@@ -1192,6 +1198,7 @@ export class PersonalAgentHost {
         this.#memoryReady = false;
         clearInterval(this.#scheduledTimer);
         await this.timeline.close();
+        await this.#timelineCache.flush();
         await this.#timelineRefresh;
         await this.#scheduledTail;
         this.#notificationReady=false;clearInterval(this.#notificationTimer);
@@ -1672,7 +1679,7 @@ export class PersonalAgentHost {
     refreshTimeline():Promise<void>{
         if(!this.#opened)return Promise.resolve();
         if(this.#timelineRefresh)return this.#timelineRefresh;
-        const run=(async()=>{try{while(this.#opened){const revision=this.#timelineRevision,account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id,scope=account?'feishu:'+account:'local';this.timeline.setAccess({scope,allowed:true,legacy_refs:[]});const inputs=await this.#timelineInputs(true);if(!this.#opened)return;if(revision!==this.#timelineRevision)continue;const timezone=dailyBriefSettings(this.#state.settings).timezone;this.timeline.update(inputs,this.#now().toLocaleDateString('en-CA',{timeZone:timezone}),timezone,{scope,allowed:true,legacy_refs:inputs.filter(input=>input.kind==='file'||input.kind==='memory'||!!account&&input.account_scope===account).map(input=>input.id)});return}}catch(error){this.timeline.unavailable();throw error}})();
+        const run=(async()=>{try{while(this.#opened){const revision=this.#timelineRevision,account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id,scope=account?'feishu:'+account:'local';if(this.#timelineCacheScope!==undefined&&this.#timelineCacheScope!==scope)void this.#timelineCache.clear();this.#timelineCacheScope=scope;this.timeline.setAccess({scope,allowed:true,legacy_refs:[]});const inputs=await this.#timelineInputs(true);if(!this.#opened)return;if(revision!==this.#timelineRevision)continue;const timezone=dailyBriefSettings(this.#state.settings).timezone;this.timeline.update(inputs,this.#now().toLocaleDateString('en-CA',{timeZone:timezone}),timezone,{scope,allowed:true,legacy_refs:inputs.filter(input=>input.kind==='file'||input.kind==='memory'||!!account&&input.account_scope===account).map(input=>input.id)});return}}catch(error){this.timeline.unavailable();throw error}})();
         this.#timelineRefresh=run.finally(()=>{this.#timelineRefresh=undefined});return this.#timelineRefresh;
     }
     async timelineAuthorized(id:string,version:string,consumer:string|undefined):Promise<boolean>{
@@ -2150,6 +2157,7 @@ export class PersonalAgentHost {
             if(!m?.purgeEntry)throw Error('unsupported');
             this.#invalidateOverview();this.#overviewCache=undefined;
             await this.timeline.clear();
+            await this.#timelineCache.clear();
             await this.workbenchContext.clear();
             await this.profileWarmup.clear();
             await this.projectDigests.clear();
@@ -2215,7 +2223,7 @@ export class PersonalAgentHost {
             if (!this.#sources)
                 throw Error('unsupported');
             data = await this.#sources.command(command.method, p);
-            if(['sources.delete','sources.pause','sources.disconnect','sources.consent'].includes(command.method)){const files=new Set((this.#sources?.contextEntries?.()??[]).map(entry=>entry.id));await this.projectDigests.forgetUnavailable(files);await this.profileWarmup.forgetUnavailable(new Set([...this.#profileExternal.map(input=>input.id),...files,...profileInputsFromDigests(this.projectDigests.digests()).map(input=>input.id)]));void this.refreshMemory().catch(()=>{/* sourceChanged refreshes again */});}
+            if(['sources.delete','sources.pause','sources.disconnect','sources.consent'].includes(command.method)){void this.#timelineCache.clear();const files=new Set((this.#sources?.contextEntries?.()??[]).map(entry=>entry.id));await this.projectDigests.forgetUnavailable(files);await this.profileWarmup.forgetUnavailable(new Set([...this.#profileExternal.map(input=>input.id),...files,...profileInputsFromDigests(this.projectDigests.digests()).map(input=>input.id)]));void this.refreshMemory().catch(()=>{/* sourceChanged refreshes again */});}
         }
         result = { type: 'personal.result', request_id: command.request_id, ok: true, ...(data === undefined ? {} : { data }) };
     }

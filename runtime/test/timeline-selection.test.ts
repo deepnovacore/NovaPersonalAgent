@@ -100,3 +100,36 @@ test('global topic reconciliation co-locates non-overlapping old plans and later
  const invalid={complete:()=>Promise.resolve({text:JSON.stringify({groups:[{members:['t0']}]})})} as unknown as ModelGateway
  await assert.rejects(reconcileTimelineTopics(invalid,'fixture',[{title:'a',inputs:[old]},{title:'b',inputs:[done]}],{local_date:'2026-10-18',timezone:'UTC'},new AbortController().signal),/incomplete_timeline_reconciliation/)
 })
+
+test('screening offers reused topic titles as read-only hints without treating them as evidence',async()=>{
+ const inputs=Array.from({length:201},(_,i)=>({id:String(i),version:'1',kind:'im',text:'message '+i,observed_at:'2026-10-17T00:00:00Z'}))
+ let prompt:(Record<string,unknown>|undefined)
+ const gateway={complete:(request:{prompt:string})=>{try{
+  prompt=JSON.parse(request.prompt) as Record<string,unknown>
+  const batch=(prompt.inputs as {key:string}[])
+  return Promise.resolve({text:JSON.stringify({topics:[{title:'New topic',refs:[batch[0]!.key]}]})});
+ }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
+ await selectTimelineEvidence(gateway,'fixture',inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal,{hints:['旧主题','已完成事项']})
+ assert.deepEqual(prompt?.existing_topics,['旧主题','已完成事项'])
+})
+
+test('a cached screening reply skips the model and an invalid reply is dropped and recomputed',async()=>{
+ const inputs=Array.from({length:201},(_,i)=>({id:String(i),version:'1',kind:'im',text:'message '+i,observed_at:'2026-10-17T00:00:00Z'}))
+ const entries=new Map<string,{kind:'select';payload:unknown}>()
+ let calls=0,hits=0,misses=0
+ const stage={get:(key:string)=>entries.get(key),put:(key:string,_kind:'select',payload:unknown)=>{entries.set(key,{kind:'select',payload})},delete:(key:string)=>{entries.delete(key)},hit:()=>{hits++},miss:()=>{misses++}}
+ const gateway={complete:()=>{calls++;return Promise.resolve({text:JSON.stringify({topics:[{title:'Model topic',refs:['e0']}]})})}} as unknown as ModelGateway
+ await selectTimelineEvidence(gateway,'fixture',inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal,{stage})
+ assert.equal(calls,2,'a cold cache still screens every batch')
+ assert.equal(misses,2);assert.equal(entries.size,2)
+ calls=0
+ const cached=await selectTimelineEvidence(gateway,'fixture',inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal,{stage})
+ assert.equal(calls,0,'cached batches skip the model')
+ assert.equal(hits,2);assert.equal(cached.length,2)
+
+ for(const [key,entry] of entries)entries.set(key,{...entry,payload:{text:JSON.stringify({topics:[{title:'invented',refs:['outside']}]})}})
+ calls=0
+ const repaired=await selectTimelineEvidence(gateway,'fixture',inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal,{stage})
+ assert.equal(calls,2,'an invalid cached reply is discarded instead of trusted')
+ assert.equal(repaired.length,2)
+})

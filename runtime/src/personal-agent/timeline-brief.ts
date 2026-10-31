@@ -6,6 +6,7 @@ import {z} from 'zod'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {abortable} from '../core/camera-session.js'
 import {sourceTagSchema,type SourceTag} from '../memory/provenance.js'
+import type {TimelineCachePort,TimelineRunOptions} from './timeline-cache.js'
 
 export interface TimelineAccess {scope:string;allowed:boolean;legacy_refs:readonly string[]}
 export interface TimelineInput {account_scope?:string;history_only?:boolean;id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
@@ -41,12 +42,14 @@ export const timelineDiagnosticsSchema=z.object({
  failed_batches:z.array(z.object({batch:count,reason:z.string()})).default([]),
  stages:z.array(z.object({batch:count,phase:z.enum(['compose','review']),received:count,accepted:count,dropped:z.record(z.string(),count)})),
  host_received:count.default(0),published:count.default(0),host_dropped:z.record(z.string(),count).default({}),
+ // Incremental cache counters are part of the persisted shape; parse would strip them otherwise.
+ cache_reused_topics:count.default(0),cache_reused_inputs:count.default(0),cache_screened_inputs:count.default(0),cache_stage_hits:count.default(0),cache_stage_misses:count.default(0),
 })
 export type TimelineDiagnostics=z.infer<typeof timelineDiagnosticsSchema>
-export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:TimelineDiagnostics}
+export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:z.input<typeof timelineDiagnosticsSchema>}
 /** `prior_cards` and `new_input_ids` only describe what is already published and what changed since the last checkpoint; they are never evidence. */
 export interface TimelineContext {local_date:string;timezone:string;viewer_names?:string[];prior_cards?:TimelinePriorCard[];new_input_ids?:string[]}
-export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>)=>Promise<TimelineGenerated>
+export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>,run?:TimelineRunOptions)=>Promise<TimelineGenerated>
 const cardSchema=timelineReplySchema.shape.cards.element.omit({prior_id:true}).extend({id:z.string(),version:z.string(),timezone:z.string().optional(),artifact_scope:z.string().optional(),evidence_basis:z.array(z.object({id:ref,version:z.string()})).optional(),policy_revision:z.number().int().optional(),sources:z.array(sourceTagSchema),time:resolvedTimeSchema})
 const failureSchema=z.object({name:z.string(),code:z.string(),issues:z.array(z.object({code:z.string(),path:z.array(z.union([z.string(),z.number()])),maximum:z.number().optional()})).optional()})
 /** State v2 stores the last successful synthesis as a checkpoint: which inputs it covered and which generation it produced. */
@@ -71,8 +74,8 @@ export class TimelineBrief {
  #persisted:State=empty()
  #loadFailed=false
  get loadFailed(){return this.#loadFailed}
- #access:TimelineAccess|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
- constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void){this.#store=new BoundedJsonStore(path,stateSchema)}
+ #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
+ constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void,options?:{readonly cache?:TimelineCachePort}){this.#store=new BoundedJsonStore(path,stateSchema);this.#cache=options?.cache}
  async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}this.#persisted=structuredClone(this.#state);this.#access=undefined;this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
  startGeneration(){this.#defer=false;this.#schedule()}
  #save(){const state=structuredClone(this.#state);const run=this.#tail.then(async()=>{await this.#store.write(state);this.#persisted=state});this.#tail=run.catch(()=>undefined);return run}
@@ -182,7 +185,8 @@ export class TimelineBrief {
   }
   const work=(async()=>{try{
    this.#state.last_attempt=Date.now();this.#state.failure=null;await this.#save();signal.throwIfAborted()
-   const generated=await abortable(this.generate!(inputs,context,signal,result=>publish(result,false)),signal)
+   // The scheduled path reads the incremental cache; a manual refresh keeps writing it but recomputes.
+   const generated=await abortable(this.generate!(inputs,context,signal,result=>publish(result,false),{...(this.#cache?{cache:this.#cache}:{}),scope:this.#access?.scope??'local',force}),signal)
    signal.throwIfAborted();await publish(generated,true)
   }catch(error){if(!cancel.aborted){if(error instanceof Error&&'diagnostics' in error){const parsed=timelineDiagnosticsSchema.safeParse(error.diagnostics);if(parsed.success)this.#state.diagnostics=parsed.data}this.#state.failure={name:error instanceof Error?error.name:'unknown',code:error instanceof Error&&['invalid_timeline_evidence','invalid_timeline_selection','timeline_batches_failed','processing_consent_required'].includes(error.message)?error.message:error instanceof Error&&'classification' in error&&typeof error.classification==='string'?error.classification:'unavailable',...(error instanceof z.ZodError?{issues:error.issues.map(issue=>({code:issue.code,path:issue.path.map(part=>typeof part==='number'?part:String(part)),...('maximum' in issue&&typeof issue.maximum==='number'?{maximum:issue.maximum}:{})}))}:{})};await this.#save().catch(()=>undefined)}if(cancel.aborted){this.#status=this.#inputs.length?'queued':'idle';this.#error=null;this.#state.last_attempt=0}else{this.#status='failed';this.#error=timeout.aborted?'timeline_generation_timeout':'timeline_generation_failed'}}finally{this.#run=undefined;this.changed();this.#schedule()}})()
   this.#run=work;await work

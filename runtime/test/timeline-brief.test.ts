@@ -443,3 +443,35 @@ test('snapshot separates active and archived cards and keeps the page key stable
   assert.equal(after.pagination_key,before.pagination_key,'the page key follows the generation, not the recheck timestamp')
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('refresh hands the cache, the current account scope and the force flag to the generator',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-run-options-'))
+ const runs:{cache:unknown;scope:string;force:boolean}[]=[]
+ const cache={open:()=>Promise.resolve(),beginRun:()=>({getTopics:()=>[],getScreened:()=>[],appendBatchResult:()=>undefined,getStage:()=>undefined,putStage:()=>undefined,deleteStage:()=>undefined,commit:()=>Promise.resolve()}),clear:()=>Promise.resolve(),flush:()=>Promise.resolve()}
+ const brief=new TimelineBrief(join(dir,'timeline.json'),(_inputs,_context,_signal,_progress,run)=>{if(run)runs.push({cache:run.cache,scope:run.scope,force:run.force});return Promise.resolve(reply)},()=>undefined,{cache})
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC',{scope:'account-a',allowed:true,legacy_refs:[input.id]})
+  await brief.refresh()
+  assert.equal(runs.length,1);assert.equal(runs[0]!.cache,cache);assert.equal(runs[0]!.scope,'account-a');assert.equal(runs[0]!.force,true)
+  brief.update([{...input,version:'v2'}],'2026-10-17','UTC',{scope:'account-a',allowed:true,legacy_refs:[input.id]})
+  await brief.refresh({force:false})
+  assert.equal(runs.length,2);assert.equal(runs[1]!.force,false,'the scheduled path reads the cache')
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('incremental cache counters default to zero and survive persistence',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-cache-counters-'))
+ const diagnostics={input_count:1,selected_inputs:1,screened_topics:1,composition_batches:1,stages:[]}
+ let brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve({...reply,diagnostics}),()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  assert.equal(brief.snapshot().diagnostics?.cache_reused_topics,0)
+  assert.equal(brief.snapshot().diagnostics?.cache_reused_inputs,0)
+  assert.equal(brief.snapshot().diagnostics?.cache_screened_inputs,0)
+  assert.equal(brief.snapshot().diagnostics?.cache_stage_hits,0)
+  assert.equal(brief.snapshot().diagnostics?.cache_stage_misses,0)
+  await brief.close();brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve({cards:[]}),()=>undefined)
+  await brief.open();brief.update([input],'2026-10-17','UTC')
+  assert.equal(brief.snapshot().diagnostics?.cache_stage_misses,0,'defaults are persisted, not stripped by the schema')
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
