@@ -29,6 +29,8 @@ export interface TimelineSelectionOptions {
  readonly stage?:TimelineStagePort
  /** Called once per batch after the model reply passed validation, so the index can persist incrementally. */
  readonly onBatch?:(topics:readonly TimelineTopic[],inputs:readonly TimelineInput[])=>void
+ /** Skip the local pass-through when a durable index exists, so fresh input is screened and indexed too. */
+ readonly screen?:boolean
 }
 
 // A screening request contains at most 200 records; this is a request safety bound, not a briefing quota.
@@ -41,7 +43,7 @@ export function parseTimelineJson(text:string,collection:'topics'|'cards'):unkno
 }
 /** Screening is an index, never evidence: final prose still cites original messages. */
 export async function selectTimelineTopics(gateway:ModelGateway,model:string,inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,options?:TimelineSelectionOptions):Promise<TimelineTopic[]>{
- if(inputs.length<=200&&inputs.reduce((sum,input)=>sum+input.text.length,0)<=60000)return inputs.length?[{title:'',inputs:[...inputs]}]:[]
+ if(!options?.screen&&inputs.length<=200&&inputs.reduce((sum,input)=>sum+input.text.length,0)<=60000)return inputs.length?[{title:'',inputs:[...inputs]}]:[]
  const hints=options?.hints?.filter(Boolean).slice(0,40)??[],stage=options?.stage
  const batches=timelineBatches(inputs),selections:TimelineTopic[][]=Array.from({length:batches.length},()=>[])
  let next=0
@@ -98,11 +100,12 @@ export async function selectTimelineEvidence(...args:Parameters<typeof selectTim
 export function timelineCompositionBatches(topics:readonly TimelineTopic[]):TimelineTopic[][]{
  const merged:TimelineTopic[]=[]
  for(const topic of topics){
-  let current={title:topic.title,inputs:[...topic.inputs]},ids=new Set(current.inputs.map(input=>input.id))
+  let current:TimelineTopic={title:topic.title,inputs:[...topic.inputs],...(topic.history_complete===undefined?{}:{history_complete:topic.history_complete})},ids=new Set(current.inputs.map(input=>input.id))
   for(let i=merged.length-1;i>=0;i--){
    const previous=merged[i]!
    if(!previous.inputs.some(input=>ids.has(input.id)))continue
-   current={title:[previous.title,current.title].filter(Boolean).join(' / '),inputs:[...new Map([...previous.inputs,...current.inputs].map(input=>[input.id,input])).values()]}
+   const historyComplete=previous.history_complete===false||current.history_complete===false?false:current.history_complete
+   current={title:[previous.title,current.title].filter(Boolean).join(' / '),inputs:[...new Map([...previous.inputs,...current.inputs].map(input=>[input.id,input])).values()],...(historyComplete===undefined?{}:{history_complete:historyComplete})}
    ids=new Set(current.inputs.map(input=>input.id));merged.splice(i,1)
   }
   merged.push(current)
@@ -113,7 +116,8 @@ export function timelineCompositionBatches(topics:readonly TimelineTopic[]):Time
   for(const inputs of parts){
    const chars=inputs.reduce((sum,input)=>sum+input.text.length,0)
    if(batch.length&&(batch.length>=4||size+chars>60000)){batches.push(batch);batch=[];size=0}
-   batch.push({title:topic.title,inputs,history_complete:parts.length===1});size+=chars
+   // Anchor trimming already dropped history, so a single part still is not a complete topic.
+   batch.push({title:topic.title,inputs,history_complete:parts.length===1&&topic.history_complete!==false});size+=chars
   }
  }
  if(batch.length)batches.push(batch)

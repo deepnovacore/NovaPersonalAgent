@@ -396,7 +396,7 @@ test('unchanged automatic refreshes spend no model call and identical output nev
 
 test('incremental synthesis receives prior card summaries and only the changed input ids',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-delta-'))
- const contexts:{prior_cards?:{id:string}[];new_input_ids?:string[]}[]=[]
+ const contexts:{prior_cards?:{id:string;evidence_ids?:string[]}[];new_input_ids?:string[]}[]=[]
  const brief=new TimelineBrief(join(dir,'timeline.json'),(_inputs,context)=>{contexts.push(context);return Promise.resolve(reply)},()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
@@ -405,6 +405,7 @@ test('incremental synthesis receives prior card summaries and only the changed i
   await brief.refresh({force:false});assert.equal(contexts.length,1)
   await brief.refresh()
   assert.equal(contexts[1]!.prior_cards?.length,1);assert.equal(contexts[1]!.prior_cards[0]!.id,brief.snapshot().cards[0]!.id)
+  assert.deepEqual(contexts[1]!.prior_cards[0]!.evidence_ids,['message'],'prior cards carry the originals they were built from')
   assert.equal(contexts[1]!.new_input_ids,undefined,'nothing changed since the checkpoint')
   brief.update([{...input,version:'v2',text:'The node recovered'}],'2026-10-17','UTC');await brief.refresh()
   assert.deepEqual(contexts[2]!.new_input_ids,['message'])
@@ -414,19 +415,56 @@ test('incremental synthesis receives prior card summaries and only the changed i
 
 test('a delta revision keeps the published identity and an unknown prior id is not trusted',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-prior-id-'))
+ const updated={...input,id:'node-2',version:'v1',text:'Node is still down again'}
+ const card=(ref:string,quote:string,title:string)=>({...reply.cards[0]!,title,why_now:'The node was reported again',facts:[{text:'The node is down',quote,ref}],refs:[ref]})
  let generated:{cards:unknown[]}=reply
  const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(generated as typeof reply),()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
   const original=brief.snapshot().cards[0]!
-  generated={cards:[{...reply.cards[0]!,prior_id:original.id,title:'Check the node again',why_now:'The node was reported again'}]}
-  await brief.refresh()
+  generated={cards:[{...card('node-2','Node is still down again','Check the node again'),prior_id:original.id}]}
+  brief.update([input,updated],'2026-10-17','UTC');await brief.refresh()
   const cards=brief.snapshot().cards
   assert.equal(cards.length,1,'a revision updates the published card instead of adding a duplicate')
   assert.equal(cards[0]!.id,original.id);assert.equal(cards[0]!.title,'Check the node again')
-  generated={cards:[{...reply.cards[0]!,prior_id:'not-a-published-card',title:'Independent issue'}]}
-  await brief.refresh()
+  generated={cards:[{...card('node-3','Another node alert','Independent issue'),prior_id:'not-a-published-card'}]}
+  brief.update([input,updated,{...updated,id:'node-3',text:'Another node alert'}],'2026-10-17','UTC');await brief.refresh()
   assert.equal(brief.snapshot().cards.length,2,'an unknown prior id falls back to a new grounded identity')
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a revision with no new evidence is dropped instead of rewriting a published conclusion',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-unsupported-revision-'))
+ const updated={...input,id:'node-2',version:'v1',text:'Node is still down again'}
+ let generated:{cards:unknown[]}=reply
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(generated as typeof reply),()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  const original=brief.snapshot().cards[0]!
+  // The revision keeps the previous original only; new node-2 evidence is never cited.
+  generated={cards:[{...reply.cards[0]!,prior_id:original.id,title:'Check the node again'}]}
+  brief.update([input,updated],'2026-10-17','UTC');await brief.refresh()
+  const snapshot=brief.snapshot()
+  assert.equal(snapshot.cards.length,1)
+  assert.equal(snapshot.cards[0]!.title,original.title,'unchanged sources cannot justify a rewrite')
+  assert.equal(snapshot.diagnostics?.host_dropped.unsupported_revision,1)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a card that cites one published card plus new evidence keeps that card identity without prior_id',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-supersede-'))
+ const updated={...input,id:'node-2',version:'v1',text:'Node is still down again'}
+ let generated:{cards:unknown[]}=reply
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(generated as typeof reply),()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  const original=brief.snapshot().cards[0]!
+  generated={cards:[{...reply.cards[0]!,title:'Check the node again',why_now:'No recovery was reported again',facts:[{text:'The node is down',quote:'node is still down',ref:'message'},{text:'Still down',quote:'Node is still down again',ref:'node-2'}],refs:['message','node-2']}]}
+  brief.update([input,updated],'2026-10-17','UTC');await brief.refresh()
+  const cards=brief.snapshot().cards
+  assert.equal(cards.length,1,'one overlapping published card makes the identity unambiguous')
+  assert.equal(cards[0]!.id,original.id)
+  assert.equal(cards[0]!.title,'Check the node again')
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 

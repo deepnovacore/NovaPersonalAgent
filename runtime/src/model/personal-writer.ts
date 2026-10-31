@@ -1,6 +1,7 @@
 import {TIMELINE_PERSPECTIVE_RULES,timelinePerspective} from './timeline-perspective.js'
 import {selectTimelineTopics,reconcileTimelineTopics,timelineCompositionBatches,parseTimelineJson,timelineStageKey,type TimelineTopic,type TimelineStagePort} from './timeline-selection.js'
 import {resolveTimelineTime} from '../personal-agent/timeline-time.js'
+import {withTimelineAnchors} from './timeline-anchors.js'
 import {timelineReplySchema,groundedTimelinePeople,TIMELINE_MAX_REFS,type TimelineGenerator,type TimelineDiagnostics,type TimelineContext,type TimelineInput} from '../personal-agent/timeline-brief.js'
 import type {TimelineCacheRun,TimelineRunOptions} from '../personal-agent/timeline-cache.js'
 import {createHash} from 'node:crypto'
@@ -95,15 +96,15 @@ const safeTimelineRun=(run:TimelineRunOptions|undefined):TimelineCacheRun|undefi
   commit:()=>Promise.resolve().then(()=>handle.commit()).catch(()=>undefined),
  }
 }
-/** Force keeps writing new stage replies but never reads stale ones. */
-const timelineStagePort=(handle:TimelineCacheRun|undefined,force:boolean,diagnostics:TimelineDiagnostics):TimelineStagePort|undefined=>{
+/** Every refresh reads the cache first, including a manual one: a refresh still re-authorizes sources, it just stops paying twice for unchanged input. */
+const timelineStagePort=(handle:TimelineCacheRun|undefined,diagnostics:TimelineDiagnostics):TimelineStagePort|undefined=>{
  if(!handle)return undefined
  return {
-  get:key=>force?undefined:handle.getStage(key),
+  get:key=>handle.getStage(key),
   put:(key,kind,payload)=>handle.putStage(key,kind,payload),
-  delete:key=>{if(!force)handle.deleteStage(key)},
-  hit:()=>{if(!force)diagnostics.cache_stage_hits++},
-  miss:()=>{if(!force)diagnostics.cache_stage_misses++},
+  delete:key=>handle.deleteStage(key),
+  hit:()=>{diagnostics.cache_stage_hits++},
+  miss:()=>{diagnostics.cache_stage_misses++},
  }
 }
 /** Persist one successfully screened batch: selected topics become the positive index, the rest the negative one. */
@@ -115,6 +116,8 @@ const persistTimelineBatch=(handle:TimelineCacheRun,topics:readonly TimelineTopi
 }
 /** A stable topic order keeps cached and uncached runs keyed identically. */
 const timelineTopicOrder=(topic:TimelineTopic):string=>topic.title+'\u0000'+(topic.inputs[0]?.id??'')
+/** Originals the previously published cards were built from; they stay in the batch as anchors. */
+const priorCardEvidence=(cards:readonly {evidence_ids?:readonly string[]}[]):Set<string>=>new Set(cards.flatMap(card=>card.evidence_ids??[]))
 /** Optional durable cache for batch summaries, so a failed run resumes instead of repeating every batch. */
 export interface ProfileSummaryStore {get(key:string):Promise<{text:string;refs:string[]}[]|undefined>;set(key:string,value:{text:string;refs:string[]}[]):Promise<void>}
 const PROFILE_SUMMARY_VERSION='summary-v3'
@@ -132,18 +135,19 @@ export class GatewayPersonalWriter {
   }
   readonly generateTimeline:TimelineGenerator=async(pool,rawContext,parentSignal,progress,run)=>{
     const pending=new AbortController(),signal=AbortSignal.any([parentSignal,pending.signal]);
-    const handle=safeTimelineRun(run),force=run?.force===true
+    const handle=safeTimelineRun(run)
     try{
     // Prior-card ids and the new-input list guide an incremental synthesis; screening still sees only the ordinary context.
     const {prior_cards:priorCards,new_input_ids:newInputIds,...context}=rawContext
     const delta=priorCards?.length||newInputIds?.length?{prior_cards:priorCards??[],new_input_ids:newInputIds??[]}:undefined
+    const newIds=new Set(delta?.new_input_ids??[])
     const perspective=timelinePerspective(pool,context);
-    const diagnostics:TimelineDiagnostics={input_count:pool.length,selected_inputs:0,screened_topics:0,composition_batches:0,pending_batches:0,failed_batches:[],stages:[],host_received:0,published:0,host_dropped:{},cache_reused_topics:0,cache_reused_inputs:0,cache_screened_inputs:0,cache_stage_hits:0,cache_stage_misses:0};
-    const stage=timelineStagePort(handle,force,diagnostics)
+    const diagnostics:TimelineDiagnostics={input_count:pool.length,selected_inputs:0,screened_topics:0,composition_batches:0,pending_batches:0,failed_batches:[],stages:[],host_received:0,published:0,host_dropped:{},cache_reused_topics:0,cache_reused_inputs:0,cache_screened_inputs:0,cache_stage_hits:0,cache_stage_misses:0,cache_skipped_topics:0};
+    const stage=timelineStagePort(handle,diagnostics)
     // Reuse a topic only while every member is still present with the version the screening saw.
     // A withdrawn member is dropped from the topic; a changed version invalidates the whole topic.
     const poolById=new Map(pool.map(input=>[input.id,input])),reused:TimelineTopic[]=[],reusedIds=new Set<string>()
-    if(!force)for(const cached of handle?.getTopics()??[]){
+    for(const cached of handle?.getTopics()??[]){
       const inputs:TimelineInput[]=[];let invalid=false
       for(const member of cached.members){
         const input=poolById.get(member.id)
@@ -156,7 +160,7 @@ export class GatewayPersonalWriter {
     }
     diagnostics.cache_reused_topics=reused.length;diagnostics.cache_reused_inputs=reusedIds.size
     // The negative index holds inputs the screening already read and rejected at this version.
-    const screened=force?new Set<string>():new Set((handle?.getScreened()??[]).map(entry=>entry.id+'\u0000'+entry.version))
+    const screened=new Set((handle?.getScreened()??[]).map(entry=>entry.id+'\u0000'+entry.version))
     const fresh=pool.filter(input=>!reusedIds.has(input.id)&&!screened.has(input.id+'\u0000'+input.version))
     diagnostics.cache_screened_inputs=pool.length-reusedIds.size-fresh.length
     let freshTopics:TimelineTopic[]=[]
@@ -164,12 +168,22 @@ export class GatewayPersonalWriter {
       const hints=[...new Set(reused.map(topic=>topic.title).filter(Boolean))].slice(0,40)
       // A successful screening batch lands in the index immediately, so a later failed batch only
       // costs its own inputs on the next run. The direct pass-through never calls this path.
-      freshTopics=await selectTimelineTopics(this.#gateway,this.#model,fresh,perspective,signal,{...(hints.length?{hints}:{}),...(stage?{stage}:{}),...(handle?{onBatch:(batchTopics,batchInputs)=>persistTimelineBatch(handle,batchTopics,batchInputs)}:{})})
+      freshTopics=await selectTimelineTopics(this.#gateway,this.#model,fresh,perspective,signal,{...(hints.length?{hints}:{}),...(stage?{stage}:{}),...(handle?{screen:true,onBatch:(batchTopics,batchInputs)=>persistTimelineBatch(handle,batchTopics,batchInputs)}:{})})
     }
     const topics=[...reused,...freshTopics]
     if(handle)topics.sort((a,b)=>{const left=timelineTopicOrder(a),right=timelineTopicOrder(b);return left<right?-1:left>right?1:0})
-    const reconciled=await reconcileTimelineTopics(this.#gateway,this.#model,topics,perspective,signal,stage),batches=timelineCompositionBatches(reconciled);
-    diagnostics.selected_inputs=new Set(reconciled.flatMap(topic=>topic.inputs.map(input=>input.id))).size;diagnostics.screened_topics=reconciled.filter(topic=>topic.title).length;diagnostics.composition_batches=batches.length;diagnostics.pending_batches=batches.length
+    const reconciled=await reconcileTimelineTopics(this.#gateway,this.#model,topics,perspective,signal,stage)
+    // A topic with no new evidence is already represented by its published cards, so re-writing it
+    // only re-bills the model. Dirty topics keep every new message and trim the history to anchors.
+    const anchorIds=priorCardEvidence(delta?.prior_cards??[]),dirty:TimelineTopic[]=[]
+    let skippedTopics=0
+    for(const topic of reconciled){
+      const isDirty=delta===undefined||topic.inputs.some(input=>newIds.has(input.id))
+      if(!isDirty){skippedTopics+=1;continue}
+      dirty.push(withTimelineAnchors(topic,newIds,anchorIds))
+    }
+    const batches=timelineCompositionBatches(dirty)
+    diagnostics.selected_inputs=new Set(reconciled.flatMap(topic=>topic.inputs.map(input=>input.id))).size;diagnostics.screened_topics=reconciled.filter(topic=>topic.title).length;diagnostics.composition_batches=batches.length;diagnostics.pending_batches=batches.length;diagnostics.cache_skipped_topics=skippedTopics
     const results:z.infer<typeof timelineReplySchema>['cards'][]=Array.from({length:batches.length},()=>[]);let next=0;
     // Bound individual calls and concurrency without capping the number of independent updates.
     await Promise.all(Array.from({length:Math.min(2,batches.length)},async()=>{
