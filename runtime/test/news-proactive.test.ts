@@ -109,6 +109,40 @@ test('a completed ranking in the real service pushes its candidates through the 
   assert.equal(h.snapshot().feed.filter(f=>f.subject_key==='news:a1').length,1,'ranking again never pushes the same article twice')
  }finally{await h.close();await rm(dir,{recursive:true,force:true})}
 })
+test('a next-day refresh pushes already-ranked fresh backlog without another model call',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-nextday-'));let current=NOW,rankCalls=0
+ const h=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'u',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null,now:()=>current,
+  rankNews:(interests,articles)=>{rankCalls++;return Promise.resolve(articles.map(a=>({id:a.id,matches:[{interest_id:interests[0]!.id,score:1,quote:a.title}],reason:'相关'})))}})
+ h.news.options.now=()=>current;h.news.options.firstRefreshMs=null;h.news.options.fetcher=()=>Promise.resolve(new Response(feed(item(1),item(2),item(3))))
+ const admit=h.admitNews.bind(h);let capped!:()=>void;const hitCap=new Promise<void>(resolve=>{capped=resolve})
+ h.admitNews=async(...args)=>{const result=await admit(...args);if(result==='capped')capped();return result}
+ const news=()=>h.snapshot().feed.filter(row=>row.source.type==='news')
+ const waitFor=async(count:number)=>{for(let i=0;i<200&&news().length<count;i++)await new Promise(resolve=>setTimeout(resolve,10));await h.flushNotifications()}
+ try{
+  await h.open();await h.command({type:'personal.command',request_id:'tz',method:'discovery.configure',params:{timezone:'UTC'}});await h.news.configure({enabled:true,interests:['Voice AI'],explore:false})
+  await h.news.refresh();await hitCap;await new Promise(resolve=>setImmediate(resolve));await waitFor(2);assert.equal(news().length,2,'today admits only two');assert.equal(rankCalls,1)
+  current=new Date('2026-09-21T09:00:00Z');await h.news.refresh();await waitFor(3)
+  assert.equal(news().length,3,'the remaining article is still fresh after the daily allowance resets');assert.equal(rankCalls,1,'cached rankings do not need another model call')
+  assert.equal(h.snapshot().conversations.messages.filter(row=>row.conversation_id==='chat:main'&&row.origin==='proactive').length,3)
+  await h.news.refresh();await h.flushNotifications();assert.equal(news().length,3,'a later refresh does not push the same article twice')
+ }finally{await h.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a refresh recovers cached rankings after discovery is re-enabled and the host restarts',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-restart-'));let rankCalls=0
+ const make=()=>{
+  const h=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'u',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null,now:()=>NOW,
+   rankNews:(interests,articles)=>{rankCalls++;return Promise.resolve(articles.map(a=>({id:a.id,matches:[{interest_id:interests[0]!.id,score:1,quote:a.title}],reason:'相关'})))}})
+  h.news.options.now=()=>NOW;h.news.options.firstRefreshMs=null;h.news.options.fetcher=()=>Promise.resolve(new Response(feed(item(1))))
+  return h
+ }
+ let h=make()
+ try{
+  await h.open();await h.command({type:'personal.command',request_id:'off',method:'discovery.configure',params:{enabled:false,timezone:'UTC'}});await h.news.configure({enabled:true,interests:['Voice AI'],explore:false});await h.news.refresh();await h.flushNotifications();assert.equal(h.snapshot().feed.length,0)
+  await h.close();h=make();await h.open();await h.command({type:'personal.command',request_id:'on',method:'discovery.configure',params:{enabled:true}});await h.news.refresh()
+  for(let i=0;i<200&&!h.snapshot().feed.length;i++)await new Promise(resolve=>setTimeout(resolve,10))
+  await h.flushNotifications();assert.equal(h.snapshot().feed.length,1);assert.equal(rankCalls,1,'restart and re-enable reuse the saved ranking')
+ }finally{await h.close();await rm(dir,{recursive:true,force:true})}
+})
 test('articles held back overnight cannot add up to more than the daily news allowance when they are delivered',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-overnight-'));let current=new Date('2026-09-19T23:00:00Z')
  const h=await host(dir,{now:()=>current})

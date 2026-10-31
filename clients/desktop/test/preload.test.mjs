@@ -26,6 +26,15 @@ async function loadPreload() {
   return { exposed, ipcRenderer, invokes, sends, source }
 }
 
+test('presentation requests preserve a fixed main-chat destination without accepting arbitrary conversation ids',async()=>{
+  const {exposed,ipcRenderer}=await loadPreload(),seen=[]
+  const stop=exposed.personal.onPresentationRequest((mode,options)=>seen.push({mode,options:{...options}}))
+  ipcRenderer.emit('nova:personal:presentation-request',{},'workbench',true,'chat:main')
+  ipcRenderer.emit('nova:personal:presentation-request',{},'workbench',true,'task:untrusted')
+  stop()
+  assert.deepEqual(seen,[{mode:'workbench',options:{attention:true,conversationId:'chat:main'}},{mode:'workbench',options:{attention:true}}])
+})
+
 test('preload exposes a removable backend-exit listener without exposing ipcRenderer', async () => {
   const { exposed, ipcRenderer } = await loadPreload()
 

@@ -57,7 +57,7 @@ export const timelineDiagnosticsSchema=z.object({
  duplicates_folded:count.default(0),stale_state_repairs:count.default(0),stale_state_dropped:count.default(0),
 })
 export type TimelineDiagnostics=z.infer<typeof timelineDiagnosticsSchema>
-export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:z.input<typeof timelineDiagnosticsSchema>}
+export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:z.input<typeof timelineDiagnosticsSchema>;/** Inputs whose screening and composition completed, including valid empty results. */completed_input_ids?:string[]}
 /** `prior_cards` and `new_input_ids` only describe what is already published and what changed since the last checkpoint; they are never evidence. */
 export interface TimelineContext {local_date:string;timezone:string;viewer_names?:string[];prior_cards?:TimelinePriorCard[];new_input_ids?:string[]}
 export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>,run?:TimelineRunOptions)=>Promise<TimelineGenerated>
@@ -87,7 +87,10 @@ export class TimelineBrief {
  get loadFailed(){return this.#loadFailed}
  #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
  constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void,options?:{readonly cache?:TimelineCachePort}){this.#store=new BoundedJsonStore(path,stateSchema);this.#cache=options?.cache}
- async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}this.#persisted=structuredClone(this.#state);this.#access=undefined;this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
+ async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}
+  // Older progress writes claimed the whole pool even when a batch failed or never finished.
+  if(this.#state.checkpoint.generation&&this.#state.checkpoint.generation===this.#state.key&&(this.#state.failure||this.#state.diagnostics?.failed_batches.length||this.#state.diagnostics?.pending_batches))this.#state.checkpoint={last_success_at:null,input_versions:[],generation:''}
+  this.#persisted=structuredClone(this.#state);this.#access=undefined;this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
  startGeneration(){this.#defer=false;this.#schedule()}
  #save(){const state=structuredClone(this.#state);const run=this.#tail.then(async()=>{await this.#store.write(state);this.#persisted=state});this.#tail=run.catch(()=>undefined);return run}
  /** IDs only: each cached citation must be re-read under current source permissions. */
@@ -144,7 +147,7 @@ export class TimelineBrief {
  }
  #schedule(){
   clearTimeout(this.#timer);this.#timer=undefined
-  if(!this.#access?.allowed||this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.some(input=>!input.history_only)||this.#key()===this.#state.key&&this.#state.perspective_revision===1)return
+  if(!this.#access?.allowed||this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.some(input=>!input.history_only)||this.#key()===this.#state.checkpoint.generation&&this.#state.perspective_revision===1)return
   this.#timer=setTimeout(()=>{this.#timer=undefined;void this.refresh({force:false})},Math.max(1000,this.#state.last_attempt+300000-Date.now()));this.#timer.unref()
  }
  /** A manual refresh may force a new synthesis even when the checkpoint already covers the same inputs; the scheduled path never does. */
@@ -159,7 +162,7 @@ export class TimelineBrief {
   const inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only)).map(source=>{const input={...source};delete input.account_scope;return input}))
   const newInputIds=inputs.filter(input=>checkpointVersions.get(input.id)!==input.version).map(input=>input.id)
   const priorCards=this.#visibleCards().map(card=>({id:card.id,title:card.title,category:card.category,why_now:card.why_now.slice(0,120),anchor_date:card.time.anchor_date,evidence_ids:[...new Set(card.refs)].slice(0,TIMELINE_MAX_REFS)}))
-  const context:TimelineContext={local_date:this.#date,timezone:this.#timezone,...(priorCards.length?{prior_cards:priorCards}:{}),...(newInputIds.length?{new_input_ids:newInputIds}:{})},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
+  const context:TimelineContext={local_date:this.#date,timezone:this.#timezone,...(priorCards.length?{prior_cards:priorCards}:{}),new_input_ids:newInputIds},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
   this.#status='working';this.#error=null;this.changed()
   const publish=async(generated:TimelineGenerated,done:boolean)=>{
    if(signal.aborted||!this.#compatible(inputs,context.local_date,context.timezone)||!this.#opened)return
@@ -194,10 +197,14 @@ export class TimelineBrief {
    const merged=new Map(this.#state.cards.map(card=>[`${card.artifact_scope??''}:${card.id}`,card]))
    for(const card of cards)merged.set(`${card.artifact_scope}:${card.id}`,card)
    const retainedCards=[...merged.values()],changed=hash(retainedCards)!==hash(this.#state.cards)
-   const basis=this.#inputs.map(({id,version})=>({id,version})),now=new Date().toISOString()
+   const basis=inputs.map(({id,version})=>({id,version})),now=new Date().toISOString()
+   const completed=new Set(generated.completed_input_ids??(done&&!diagnostics.failed_batches.length&&!diagnostics.pending_batches?inputs.map(input=>input.id):[]))
+   const previous=new Map(this.#state.checkpoint.input_versions.map(input=>[input.id,input.version]))
+   const covered=basis.filter(input=>completed.has(input.id)||previous.get(input.id)===input.version)
+   const complete=done&&!diagnostics.failed_batches.length&&!diagnostics.pending_batches&&covered.length===basis.length
    diagnostics.published=cards.length
    // updated_at only moves when a card actually changed; a no-op or empty refresh keeps the earlier briefing timestamp.
-   this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis,cards:retainedCards,updated_at:changed?now:this.#state.updated_at,checkpoint:{last_success_at:now,input_versions:basis,generation:key}};await this.#save();this.#loadFailed=false;if(done)this.#status='ready';this.changed()
+   this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis,cards:retainedCards,updated_at:changed?now:this.#state.updated_at,checkpoint:{last_success_at:complete?now:this.#state.checkpoint.last_success_at,input_versions:covered,generation:complete?key:this.#state.checkpoint.generation}};await this.#save();this.#loadFailed=false;if(done)this.#status='ready';this.changed()
   }
   const work=(async()=>{try{
    this.#state.last_attempt=Date.now();this.#state.failure=null;await this.#save();signal.throwIfAborted()

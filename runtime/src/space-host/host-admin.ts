@@ -1,6 +1,8 @@
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 import {z} from 'zod';
+import {describeMissingBlockingEnvironment} from '../config/config.js';
 import {BoundedJsonStore} from '../storage/bounded-json.js';
 import type {PersonalAgentHost} from '../personal-agent/host.js';
 /** Phone-editable, non-secret Host settings. Each entry reuses the Host's own command handler and validation; build, plan, local-approval and notification-binding commands stay desktop-only. */
@@ -37,6 +39,11 @@ export function overlaySpaceSecrets(environment:NodeJS.ProcessEnv,configPath:str
  if(!text)return environment;let parsed:z.infer<typeof fileSchema>;
  try{parsed=fileSchema.parse(JSON.parse(text))}catch{onDiagnostic?.('space_secrets_invalid_dropped');return environment}
  const next={...environment};for(const [name,value]of Object.entries(parsed.secrets))if(SPACE_SECRET_NAMES.includes(name)&&!environment[name]?.trim())next[name]=value;return next;
+}
+/** Desktop preflight must see the same stored credentials as the runtime, without changing their source. */
+export function describeHostBlockingEnvironment(environment:NodeJS.ProcessEnv,textConversations=false){
+ const configPath=environment.NOVA_SPACE_HOST_CONFIG?resolve(environment.NOVA_SPACE_HOST_CONFIG):undefined;
+ return describeMissingBlockingEnvironment(overlaySpaceSecrets(environment,configPath),textConversations);
 }
 /** Never projects values. `damaged` tells the phone that a stored file was ignored, so it can prompt for the keys again. */
 export function credentialsView(store:HostSecretStore|undefined,environment:NodeJS.ProcessEnv){

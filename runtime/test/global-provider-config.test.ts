@@ -1,9 +1,19 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {loadSettings, requireIntegratedRealtime, describeMissingBlockingCredentials} from '../src/config/config.js'
+import {loadSettings, requireIntegratedRealtime, describeMissingBlockingCredentials,resolveSelectedModelConnection,resolveMemoryExtractionConnection} from '../src/config/config.js'
 import {requireSelectedCascadedLlmConfig} from '../src/config/cascaded-realtime-config.js'
 import {createChatCompletionsLlmFactory} from '../src/realtime/cascaded/chat-completions-llm.js'
 import {reportUsage} from '../src/realtime/usage.js'
+
+for(const dashscope of [undefined,'unrelated-voice-key'])test(`desktop default text model keeps DeepSeek support and extraction with DashScope key ${dashscope===undefined?'absent':'present'}`,()=>{
+ const settings=loadSettings({INTEGRATED_PROVIDER:'qwen',CASCADE_LLM_PROVIDER:'deepseek',DEEPSEEK_MODEL_BASE_URL:'https://text.example/v1',DEEPSEEK_API_KEY:'text-key',...(dashscope?{DASHSCOPE_API_KEY:dashscope}:{})},true)
+ assert.equal(requireSelectedCascadedLlmConfig(settings).provider,'deepseek')
+ assert.equal(resolveSelectedModelConnection(settings)?.provider,'deepseek')
+ assert.equal(resolveSelectedModelConnection(settings)?.apiKey,'text-key')
+ assert.equal(resolveMemoryExtractionConnection(settings).baseUrl,'https://text.example/v1')
+ assert.equal(resolveMemoryExtractionConnection(settings).apiKey,'text-key')
+ assert.equal(resolveMemoryExtractionConnection(settings).model,'deepseek-flash')
+})
 
 for (const provider of ['openai', 'gemini'] as const) {
   const keyName = `${provider.toUpperCase()}_API_KEY`

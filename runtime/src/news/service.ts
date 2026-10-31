@@ -8,7 +8,7 @@ const interest=z.object({id:z.string(),text:z.string().min(1).max(100),weight:z.
 const article=z.object({id:z.string(),source_id:z.string(),title:z.string().max(300),summary:z.string().max(1500),url:z.string().url(),published_at:z.string().nullable(),first_seen:z.string(),content_hash:z.string(),read:z.boolean(),saved:z.boolean(),ranking:scoreSchema.extend({profile_version:z.number(),ready_at:z.string()}).nullable()})
 const schema=z.object({version:z.literal(1),profile_version:z.number(),enabled:z.boolean(),explore:z.boolean(),interests:z.array(interest).max(8),/** Interests guessed from the Profile stay local: they order nothing until the user saves them. */interests_seeded:z.boolean().default(false),blocked:z.array(z.string()).max(20),items:z.array(article).max(500),sources:z.array(z.object({id:z.string(),last_attempt:z.string().nullable(),last_success:z.string().nullable(),error:z.string().nullable(),count:z.number()})),rank_error:z.string().nullable()})
 type State=z.infer<typeof schema>
-export interface NewsOptions {path:string;language?:string;sources?:NewsSource[];rank?:NewsRanker;fetcher?:typeof fetch;changed?:()=>void;/** Called after each ranked batch is saved, so the host can look for articles worth a push. */ranked?:()=>void;now?:()=>Date;/** Delay before the first automatic refresh after open, so launch work goes first; null turns automatic refresh off. */firstRefreshMs?:number|null}
+export interface NewsOptions {path:string;language?:string;sources?:NewsSource[];rank?:NewsRanker;fetcher?:typeof fetch;changed?:()=>void;/** Called after refresh and each saved ranking batch so the host can reconsider cached push candidates. */ranked?:()=>void;now?:()=>Date;/** Delay before the first automatic refresh after open, so launch work goes first; null turns automatic refresh off. */firstRefreshMs?:number|null}
 /** A push interrupts the user, so it needs a clearly strong match and news that is still news. */
 const PUSH_MIN_STRENGTH=0.85,PUSH_MAX_AGE_MS=NEWS_MAX_AGE_MS
 // ponytail: bounded 500-article cache; add indexed storage only if this measured ceiling grows.
@@ -87,7 +87,7 @@ export class NewsService{
   return (a.ranking.judgment===undefined||a.ranking.judgment.substance==='concrete')&&this.#pushStrength(a)>=PUSH_MIN_STRENGTH?'eligible':'ineligible'
  }
  refresh():Promise<void>{if(this.#run){this.#rerun=true;return this.#run}if(!this.#opened||!this.#state.enabled)return Promise.resolve()
-  const run=(async()=>{do{this.#rerun=false;await this.#refresh()}while(this.#rerun&&this.#opened&&this.#state.enabled)})();this.#run=run;this.options.changed?.();void run.finally(()=>{this.#run=undefined;this.options.changed?.()}).catch(()=>{/* optional cleanup/observer */});return run
+  const run=(async()=>{do{this.#rerun=false;await this.#refresh();try{this.options.ranked?.()}catch{/* optional host hook; refresh itself succeeded */}}while(this.#rerun&&this.#opened&&this.#state.enabled)})();this.#run=run;this.options.changed?.();void run.finally(()=>{this.#run=undefined;this.options.changed?.()}).catch(()=>{/* optional cleanup/observer */});return run
  }
  async #refresh(){const signal=this.#abort.signal
   for(const source of this.#sources){if(signal.aborted||!this.#state.enabled)return;if(this.#state.blocked.includes(source.id))continue

@@ -45,6 +45,17 @@ test('disposing the workbench releases presentation/window/overlay subscriptions
  assert.equal(stops(),4);assert.equal(listeners.size,0);assert.equal(document.getElementById('personal-workspace'),null)
 })
 
+test('a system notification opens main chat even when an unrelated approval is pending',async()=>{
+ const {view,sent,listeners}=await mount(),state=personalState(2)
+ state.pending_approvals=[{approval_id:'other-approval',conversation_id:'topic:review',task_id:'other-task',summary:'Unrelated approval'}] as any
+ await act(async()=>view.receive(state))
+ await act(async()=>view.controller.select('topic:review'))
+ await act(async()=>{listeners.get('presentation')!('workbench',{attention:true,conversationId:'chat:main'})})
+ await waitFor(()=>assert.equal(view.controller.selectedId,'chat:main'))
+ assert.equal(sent.some(frame=>frame.method==='tasks.get'&&frame.params.task_id==='other-task'),false)
+ assert.equal((document.getElementById('chat-pane') as HTMLElement).hidden,false)
+})
+
 test('unsaved workspace edits survive Tasks and return without changing the conversation',async()=>{
  const {view}=await mount()
  const tab=(page:string)=>document.querySelector<HTMLButtonElement>(`[role="tab"][data-page="${page}"]`)!

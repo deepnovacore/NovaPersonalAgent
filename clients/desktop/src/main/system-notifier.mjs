@@ -36,7 +36,7 @@ export function createSystemNotifier({Notification,platform=process.platform,isE
   const timeout=setTimeout(release,5*60_000);timeout.unref()
   notification.on('show',()=>{state='working';error=null})
   notification.on('failed',(_event,reason)=>{release();state='failed';error=String(reason??'unknown').slice(0,160);log('system_notification_failed')})
-  notification.on('click',()=>{release();activate()})
+  notification.on('click',()=>{release();activate({conversationId:'chat:main'})})
   notification.on('close',release)
   try{notification.show()}catch(error){release();throw error}
   return 'shown'

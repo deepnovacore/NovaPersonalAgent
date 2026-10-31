@@ -25,7 +25,7 @@ class StateGateway implements ModelGateway {
 }
 
 test('identical routine alerts are folded into their newest copy with a repeat count',async()=>{
- const inputs=[input('d0','disk usage alert on node-7','2026-10-17T00:00:00Z'),input('d1','disk usage alert on node-7','2026-10-17T01:00:00Z'),input('d2','disk usage alert on node-7','2026-10-17T02:00:00Z'),input('u1','unrelated project update','2026-10-17T03:00:00Z')]
+ const inputs=[...['00','01','02'].map((hour,i)=>({...input('d'+i,'disk usage alert on node-7',`2026-10-17T${hour}:00:00Z`),relation:'system' as const})),input('u1','unrelated project update','2026-10-17T03:00:00Z')]
  const gateway=new StateGateway({card:request=>{const body=JSON.parse(request.prompt) as {inputs:{key:string;text:string}[]};return card(body.inputs[0]!.key,body.inputs[0]!.text)}})
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,context,new AbortController().signal)
  assert.equal(result.diagnostics?.duplicates_folded,2)
@@ -117,4 +117,16 @@ test('a state change beyond a composition split blocks an earlier stale revision
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{...context,prior_cards:[prior('prior','old')],new_input_ids:inputs.slice(1).map(input=>input.id)},new AbortController().signal)
  assert.ok(result.cards.length)
  assert.ok(result.cards.every(card=>card.refs.includes('latest')))
+})
+
+test('identical person statements keep both speakers and user attribution',async()=>{
+ const inputs:TimelineInput[]=[
+  {...input('self','I will submit the report tomorrow','2026-10-17T00:00:00Z'),relation:'self',author:{key:'self',name:'User',kind:'person',is_user:true}},
+  {...input('peer','I will submit the report tomorrow','2026-10-17T01:00:00Z'),relation:'participant',author:{key:'peer',name:'Peer',kind:'person',is_user:false}},
+ ]
+ const gateway=new StateGateway({card:()=>[]})
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,context,new AbortController().signal)
+ const body=JSON.parse(gateway.requests.find(request=>request.usage?.operation==='compose')!.prompt) as {inputs:{author:{name:string;is_user:boolean}}[]}
+ assert.deepEqual(body.inputs.map(input=>[input.author.name,input.author.is_user]),[['User',true],['Peer',false]])
+ assert.equal(result.diagnostics?.duplicates_folded,0)
 })

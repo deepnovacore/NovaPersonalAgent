@@ -64,7 +64,7 @@ test('absent, empty or explicitly null MODEL_ROUTES keeps every legacy default',
     ['qwen-flash', 'qwen-flash', 'qwen-flash', 'qwen3-vl-plus'])
   const text = loadSettings({}, true)
   assert.equal(text.cascade_llm_provider, 'deepseek')
-  assert.equal(text.cascade_llm_model, null)
+  assert.equal(text.cascade_llm_model, 'deepseek-flash')
   assert.deepEqual([text.support_model, text.fast_model, text.compressor_model, text.watch_model],
     ['deepseek-flash', 'deepseek-flash', 'deepseek-flash', 'deepseek-flash'])
   assert.equal(text.embedding_model, 'text-embedding-v4')

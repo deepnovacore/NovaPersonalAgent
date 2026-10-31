@@ -51,7 +51,7 @@ import {
   WebContentsView,
 } from 'electron'
 import {
-  describeMissingBlockingEnvironment,
+  describeHostBlockingEnvironment,
   inspectProjectNativeHostFromResources,
   ManagedWorkspaceMaintenanceService,
 } from '@nova-personal-agent/runtime/desktop'
@@ -245,7 +245,7 @@ function enterBackground(){
 let trayUnread = 0
 const requestPresentation = (mode, options = {}) => {
   if(mode==='background')enterBackground()
-  sendToOrb('nova:personal:presentation-request',mode,options.attention===true)
+  sendToOrb('nova:personal:presentation-request',mode,options.attention===true,options.conversationId==='chat:main'?'chat:main':undefined)
 }
 let bootstrap = null
 let activeLaunchId = null
@@ -947,7 +947,7 @@ const systemNotifier = createSystemNotifier({
   Notification, platform: process.platform, shell, translate: t,
   isEnabled: () => currentSettings.systemNotifications !== false,
   windowState: () => ({visible: Boolean(mainWindow?.isVisible()) && presentationMode === 'workbench', focused: Boolean(mainWindow?.isFocused())}),
-  activate: () => { requestPresentation('workbench', {attention: true}) },
+  activate: options => { requestPresentation('workbench', options) },
   log: message => console.warn(`[nova-personal-agent-desktop] ${message}`),
 })
 
@@ -1310,7 +1310,7 @@ async function launchBackend(smokeChannel, onExit) {
     }
     computerLaunchEnvironment = spec.env
     if (codingUnavailable) spec.env.CODING_MODULE_ENABLED = 'false'
-    const blocking = describeMissingBlockingEnvironment(spec.env, true)
+    const blocking = describeHostBlockingEnvironment(spec.env, true)
     if (blocking && blocking.missing.length > 0) {
       runtimeCapabilities = Object.freeze({state: 'startup_failed', toolCount: null, toolBudget: 24,
         reason: 'configuration_required', pipeline: blocking.pipeline, missing: blocking.missing, generation, diskGeneration})

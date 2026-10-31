@@ -14,7 +14,7 @@ function setup(options={}){
  const state={visible:false,focused:false,enabled:true,activations:0,opened:[]}
  const notifier=createSystemNotifier({Notification:FakeNotification,platform:options.platform??'darwin',
   isEnabled:()=>state.enabled,windowState:()=>({visible:state.visible,focused:state.focused}),
-  activate:()=>{state.activations++},shell:{openExternal:async url=>{state.opened.push(url)}}})
+  activate:options=>{state.activations++;state.activation=options},shell:{openExternal:async url=>{state.opened.push(url)}}})
  return {notifier,shown,state,setSupported:value=>{supported=value}}
 }
 const item=(id,title,body='')=>({id,title,body})
@@ -43,6 +43,7 @@ test('a background arrival shows one notification and a click brings the workben
  assert.equal(notifier.notify({items:[item('feed:a','今天下午评审','材料还没发')]}),'shown')
  assert.equal(shown.length,1);assert.equal(shown[0].init.title,'今天下午评审');assert.equal(shown[0].init.body,'材料还没发')
  shown[0].handlers.click();assert.equal(state.activations,1)
+ assert.deepEqual(state.activation,{conversationId:'chat:main'})
 })
 test('arrivals together become one merged notification listing at most three titles',()=>{
  const {notifier,shown}=setup()

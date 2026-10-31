@@ -268,6 +268,15 @@ test('distinct concrete tasks sharing one preference remain distinct matters',as
  const host=new PersonalAgentHost({...f.host.options,evidence:ref=>({subject_key:ref,source:{type:'task',ref},task_ref:{work_id:ref}})});
  try{await host.open();const snapshot={...await host.discoverySnapshot(),evidence_refs:['task:one','task:two']};assert.equal(await host.admit({...proposal(),evidence_refs:['task:one']},snapshot),'admitted');assert.equal(await host.admit({...proposal(),evidence_refs:['task:two']},snapshot),'admitted');assert.equal(host.snapshot().feed.length,2)}finally{await host.close();await f.close()}
 })
+test('discovery keeps distinct concrete tasks that share background memory and coalesces one task across evidence refs',async()=>{
+ const f=await fixture();await f.host.close()
+ const host=new PersonalAgentHost({...f.host.options,evidenceRefs:()=>['task:one','task:one-again','task:two'],evidence:ref=>({subject_key:ref==='task:one-again'?'task:one':ref,source:{type:'task',ref},task_ref:{work_id:ref==='task:one-again'?'task:one':ref}}),discover:()=>Promise.resolve([
+  {...proposal(),kind:'question',summary:'First task',evidence_refs:['task:one']},
+  {...proposal(),kind:'notify',summary:'Same task again',evidence_refs:['task:one-again']},
+  {...proposal(),kind:'notify',summary:'Second task',evidence_refs:['task:two']},
+ ])})
+ try{await host.open();await host.discover();assert.deepEqual(host.snapshot().feed.map(item=>item.title),['First task','Second task'])}finally{await host.close();await f.close()}
+})
 test('private receipt replay explicitly requires a fresh projection',async()=>{
  const f=await fixture();try{const command={type:'personal.command',request_id:'page',method:'memory.list',params:{}};const first=await f.host.command(command) as {ok:boolean;data?:unknown};assert(first.ok&&first.data);const replay=await f.host.command(command) as {ok:boolean;data?:unknown;reload_required?:boolean};assert.equal(replay.ok,true);assert.equal(replay.reload_required,true);assert.equal(replay.data,undefined)}finally{await f.close()}
 })

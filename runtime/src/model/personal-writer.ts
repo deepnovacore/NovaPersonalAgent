@@ -139,7 +139,7 @@ export class GatewayPersonalWriter {
     try{
     // Prior-card ids and the new-input list guide an incremental synthesis; screening still sees only the ordinary context.
     const {prior_cards:priorCards,new_input_ids:newInputIds,...context}=rawContext
-    const delta=priorCards?.length||newInputIds?.length?{prior_cards:priorCards??[],new_input_ids:newInputIds??[]}:undefined
+    const delta=priorCards?.length||newInputIds!==undefined?{prior_cards:priorCards??[],new_input_ids:newInputIds??[]}:undefined
     const newIds=new Set(delta?.new_input_ids??[])
     const perspective=timelinePerspective(pool,context);
     const diagnostics:TimelineDiagnostics={input_count:pool.length,selected_inputs:0,screened_topics:0,composition_batches:0,pending_batches:0,failed_batches:[],stages:[],host_received:0,published:0,host_dropped:{},cache_reused_topics:0,cache_reused_inputs:0,cache_screened_inputs:0,cache_stage_hits:0,cache_stage_misses:0,cache_skipped_topics:0,duplicates_folded:0,stale_state_repairs:0,stale_state_dropped:0};
@@ -182,22 +182,26 @@ export class GatewayPersonalWriter {
       if(!isDirty){skippedTopics+=1;continue}
       dirty.push(withTimelineAnchors(topic,newIds,anchorIds))
     }
-    const batches=timelineCompositionBatches(dirty)
+    const batches=timelineCompositionBatches(dirty).filter(batch=>delta===undefined||batch.some(topic=>topic.inputs.some(input=>newIds.has(input.id))))
     diagnostics.selected_inputs=new Set(reconciled.flatMap(topic=>topic.inputs.map(input=>input.id))).size;diagnostics.screened_topics=reconciled.filter(topic=>topic.title).length;diagnostics.composition_batches=batches.length;diagnostics.pending_batches=batches.length;diagnostics.cache_skipped_topics=skippedTopics
-    const results:z.infer<typeof timelineReplySchema>['cards'][]=Array.from({length:batches.length},()=>[]);let next=0;
+    const results:z.infer<typeof timelineReplySchema>['cards'][]=Array.from({length:batches.length},()=>[]),completed=new Set<number>();let next=0;
+    const completedInputIds=()=>{
+      const unfinished=new Set(batches.flatMap((topics,batch)=>completed.has(batch)?[]:topics.flatMap(topic=>topic.inputs.map(input=>input.id))))
+      return pool.filter(input=>!unfinished.has(input.id)).map(input=>input.id)
+    };
     // Bound individual calls and concurrency without capping the number of independent updates.
     await Promise.all(Array.from({length:Math.min(2,batches.length)},async()=>{
       while(next<batches.length){
         signal.throwIfAborted();const batch=next++;
-        try{results[batch]=await this.#composeTimelineBatch(batches[batch]!,perspective,delta,signal,diagnostics,batch,stage,dirty)}
+        try{results[batch]=await this.#composeTimelineBatch(batches[batch]!,perspective,delta,signal,diagnostics,batch,stage,dirty);completed.add(batch)}
         catch(error){signal.throwIfAborted();diagnostics.failed_batches.push({batch,reason:error instanceof z.ZodError?'invalid_format':error instanceof SyntaxError?'invalid_json':error instanceof Error&&error.message==='invalid_timeline_evidence'?'invalid_evidence':'generation_failed'})}
-        diagnostics.pending_batches--;await progress?.({cards:results.flat(),diagnostics});
+        diagnostics.pending_batches--;await progress?.({cards:results.flat(),diagnostics,completed_input_ids:completedInputIds()});
       }
     }));
     diagnostics.failed_batches.sort((a,b)=>a.batch-b.batch);
     if(batches.length&&diagnostics.failed_batches.length===batches.length)throw Object.assign(Error('timeline_batches_failed'),{diagnostics});
     diagnostics.stages.sort((a,b)=>a.batch-b.batch||(a.phase==='compose'?-1:1));
-    return {cards:results.flat(),diagnostics};
+    return {cards:results.flat(),diagnostics,completed_input_ids:completedInputIds()};
     }finally{pending.abort();await handle?.commit()}
   }
   async #composeTimelineBatch(topics:TimelineTopic[],context:Parameters<TimelineGenerator>[1],delta:{prior_cards:NonNullable<TimelineContext['prior_cards']>;new_input_ids:string[]}|undefined,signal:AbortSignal,diagnostics:TimelineDiagnostics,batch:number,stage?:TimelineStagePort,allTopics:readonly TimelineTopic[]=topics):Promise<z.infer<typeof timelineReplySchema>['cards']>{

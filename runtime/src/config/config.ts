@@ -504,7 +504,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     profile_participant_messages: optionalBoolean(environment.PROFILE_PARTICIPANT_MESSAGES),
     ...(pipelineMode === 'integrated' ? {
       ...(textConversations ? {cascade_llm_provider: routedTextProvider ?? parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER),
-        cascade_llm_model: routedText?.model ?? rawEnvironmentValue(environment.CASCADE_LLM_MODEL),
+        cascade_llm_model: routedText?.model ?? rawEnvironmentValue(environment.CASCADE_LLM_MODEL) ?? cascadeModel,
         ark_api_key: optionalSecret(environment.ARK_API_KEY), deepseek_api_key: optionalSecret(environment.DEEPSEEK_API_KEY),
         volcengine_ark_base_url: rawEnvironmentValue(environment.VOLCENGINE_ARK_BASE_URL)} : {}),
       integrated_provider: integratedProvider,

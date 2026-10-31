@@ -24,6 +24,19 @@ function mount(options={}){
  return {body,sent,view,callbacks,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
 const feedState=(revision,selected='chat:main',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:main',kind:'chat',title:'主对话',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'T\n## 前瞻\n- 一条'}]},...extra})
+test('system notification destination returns the legacy view to main chat ahead of an unrelated approval',async()=>{
+ const m=mount();m.view.receive(feedState(1));await tick()
+ m.view.receive(feedState(2,'c',{pending_approvals:[{task_id:'other',conversation_id:'c',approval_id:'approval',summary:'Unrelated'}]}))
+ const start=m.sent.length,opening=m.callbacks.presentation('workbench',{attention:true,conversationId:'chat:main'})
+ await tick()
+ const presentation=m.sent.slice(start).find(frame=>frame.method==='presentation.set')
+ if(presentation){m.view.receive({type:'personal.result',request_id:presentation.request_id,ok:true,data:{mode:'workbench'}});await tick()}
+ const selected=m.sent.slice(start).find(frame=>frame.method==='conversations.select')
+ assert.equal(selected?.params.id,'chat:main')
+ m.view.receive({type:'personal.result',request_id:selected.request_id,ok:true,data:{...m.view.controller.snapshot.conversations,selected_id:'chat:main'}})
+ await opening;assert.equal(m.view.controller.selectedId,'chat:main')
+ assert.equal(m.sent.slice(start).some(frame=>frame.method==='tasks.get'),false)
+})
 test('workbench chrome and composer follow the selected language without translating conversation content',()=>{
  try{for(const [language,title,placeholder,status]of [['zh-CN','主对话','输入消息…','运行中 · 0 个后台任务'],['en','Main conversation','Type a message…','Running · 0 background tasks']]){
   setLanguage(language);const m=mount()

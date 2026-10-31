@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     showPresentationError: message => ipcRenderer.invoke('nova:personal:presentation-error', message),
     setPresentation: (mode,activate=true) => ipcRenderer.invoke('nova:personal:presentation', mode,activate),
     onPresentationRequest: callback => {
-      const listener = (_event, mode, attention) => { if (['background','workbench','orb'].includes(mode)) callback(mode, {attention: attention === true}) }
+      const listener = (_event, mode, attention, conversationId) => { if (['background','workbench','orb'].includes(mode)) callback(mode, {attention: attention === true,...(conversationId==='chat:main'?{conversationId}:{})}) }
       ipcRenderer.on('nova:personal:presentation-request', listener)
       return () => ipcRenderer.removeListener('nova:personal:presentation-request', listener)
     },

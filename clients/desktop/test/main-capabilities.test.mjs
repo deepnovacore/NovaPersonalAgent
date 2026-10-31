@@ -43,7 +43,7 @@ test('actual main turns Coding off instead of blocking on an unfinished manual C
     nodeRuntimeEntry: () => 'entry', packageRoot: '/pkg', realpathSync: value => value, existsSync: () => false, chatGptFile: () => '/tmp/fixture-chatgpt-accounts.enc', resolve: (...parts) => parts.join('/'), openSetupWindow: () => {},
     backendLaunchSpec: () => { const spec = {env: {}}; specs.push(spec); return spec },
     // Stop right after the spawn environment is built; the fork itself is not under test.
-    describeMissingBlockingEnvironment: (_environment, textConversations) => {assert.equal(textConversations, true); return {pipeline: 'cascaded', missing: ['DASHSCOPE_API_KEY']}}})
+    describeHostBlockingEnvironment: (_environment, textConversations) => {assert.equal(textConversations, true); return {pipeline: 'cascaded', missing: ['DASHSCOPE_API_KEY']}}})
   vm.runInContext(launch, context)
   await assert.rejects(context.launchBackend('node', {}), error => error.kind === 'configuration_required' && error.code !== 'manual_path_required')
   assert.equal(specs[0].env.CODING_MODULE_ENABLED, 'false')

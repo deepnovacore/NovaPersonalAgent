@@ -1800,8 +1800,9 @@ export class PersonalAgentHost {
     discover(): Promise<void> { if (this.#discovery)
         return this.#discovery; if (acceptanceEnabled() || !this.#opened || !this.#state.settings.discovery_enabled || !this.options.discover)
         return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const found = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); const proposals: Proposal[] = found === null ? [] : Array.isArray(found) ? (found as readonly Proposal[]).slice(0, MAX_PROPOSALS_PER_DISCOVERY) : [found as Proposal]; const matters = new Set<string>(); for (const proposal of proposals) { if (controller.signal.aborted || !this.#opened || !this.#state.settings.discovery_enabled) break;
-        // A question and a notification about the same evidence or memory are one matter, whatever their kind.
-        const refs = [...proposal.evidence_refs, ...proposal.memory_refs.map(ref => 'memory:' + ref.entry_id)]; if (refs.some(ref => matters.has(ref))) continue;
+        // Concrete evidence identifies the matter; a shared background memory must not merge separate tasks.
+        const resolved=(await Promise.all(proposal.evidence_refs.map(ref=>this.#evidence(ref)))).filter((e):e is Evidence=>e!==null),entities=resolved.filter(e=>e.task_ref!==undefined||e.source.type!=='conversation');
+        const refs=entities.length?entities.map(e=>e.subject_key):proposal.memory_refs.length?proposal.memory_refs.map(ref=>'memory:'+ref.entry_id):resolved.map(e=>e.subject_key);if(refs.some(ref=>matters.has(ref)))continue;
         if (await this.admit(proposal, snapshot) === 'admitted') refs.forEach(ref => matters.add(ref)); } })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
         this.#discovery = undefined; }).catch(() => { /* optional observer or cleanup already reported */ }); return run; }
     async admit(input:unknown,snapshot:DiscoverySnapshot):Promise<'admitted'|'rejected'|'suppressed_duplicate'>{

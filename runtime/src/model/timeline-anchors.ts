@@ -23,9 +23,9 @@ export interface FoldedAlerts {
 export function foldRepeatedAlerts(inputs:readonly TimelineInput[]):FoldedAlerts{
  const folded=new Map<string,{keep:TimelineInput;count:number}>()
  for(const input of inputs){
-  // Only a named conversation proves two copies are the same notification; without a group every
-  // message stays independent rather than risking two unrelated identical sentences collapsing.
-  const key=input.group?repeatedAlertKey(input):'id:'+input.id,existing=folded.get(key)
+  // Only explicit system notices in the same conversation can share an alert identity.
+  const system=input.author?.kind!=='person'&&(input.author?.kind==='system'||input.relation==='system')
+  const key=system&&input.group?repeatedAlertKey(input):'id:'+input.id,existing=folded.get(key)
   if(!existing){folded.set(key,{keep:input,count:1});continue}
   existing.count+=1
   if(input.observed_at>existing.keep.observed_at)existing.keep=input

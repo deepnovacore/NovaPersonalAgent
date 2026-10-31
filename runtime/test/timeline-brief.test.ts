@@ -406,7 +406,7 @@ test('incremental synthesis receives prior card summaries and only the changed i
   await brief.refresh()
   assert.equal(contexts[1]!.prior_cards?.length,1);assert.equal(contexts[1]!.prior_cards[0]!.id,brief.snapshot().cards[0]!.id)
   assert.deepEqual(contexts[1]!.prior_cards[0]!.evidence_ids,['message'],'prior cards carry the originals they were built from')
-  assert.equal(contexts[1]!.new_input_ids,undefined,'nothing changed since the checkpoint')
+  assert.deepEqual(contexts[1]!.new_input_ids,[],'nothing changed since the checkpoint')
   brief.update([{...input,version:'v2',text:'The node recovered'}],'2026-10-17','UTC');await brief.refresh()
   assert.deepEqual(contexts[2]!.new_input_ids,['message'])
   assert.equal(contexts[2]!.prior_cards?.length,1)

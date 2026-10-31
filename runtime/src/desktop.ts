@@ -33,6 +33,7 @@ export {
   type ModelRoutes,
 } from './config/model-routes.js'
 export {describeMissingBlockingEnvironment, resolveModelRoute, type ResolvedModelRoute} from './config/config.js'
+export {describeHostBlockingEnvironment} from './space-host/host-admin.js'
 export {stripLikePython} from './text/python-text.js'
 import {taskActionSchema} from './desktop/desktop-tasks.js'
 import { timingSafeEqual } from 'node:crypto'

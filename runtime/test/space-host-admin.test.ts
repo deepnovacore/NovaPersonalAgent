@@ -10,6 +10,7 @@ import {canonicalJson} from '../src/text/canonical-json.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets,secretClearSchema,secretPutSchema} from '../src/space-host/host-admin.js';
 import {environmentContract} from '../src/config/environment-contract.js';
+import {describeHostBlockingEnvironment as describeDesktopEnvironment} from '../src/desktop.js';
 
 async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown;feishuPollMs?:number}={}){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-admin-')),sent:Record<string,unknown>[]=[];const calls:string[]=[];
@@ -23,6 +24,19 @@ async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boo
  const stamps=new Map<string,number>(),send=async(from:string,op_id:string,kind:string,input:Record<string,unknown>)=>{if(!stamps.has(op_id))stamps.set(op_id,Date.now());await space.receive(from,{v:1,type:'intent',op_id,kind,input,created_at:stamps.get(op_id)});return sent.filter(row=>row.type==='receipt'&&row.op_id===op_id).at(-1)!};
  return {dir,host,space,send,sent,calls,secrets,close:async()=>{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}};
 }
+
+test('desktop startup admits a phone-stored provider key without changing its environment source',async()=>{
+ const f=await fixture({owner:'phone'});
+ try{
+  const receipt=await f.send('phone','desktop-key','secret.put',{name:'DEEPSEEK_API_KEY',value:'stored-text-key'});
+  assert.equal(receipt.status,'accepted');assert.equal(receipt.applies,'restart');
+  const environment={NOVA_SPACE_HOST_CONFIG:join(f.dir,'config.json'),CASCADE_LLM_PROVIDER:'deepseek'};
+  assert.deepEqual(describeDesktopEnvironment(environment,true)?.missing,[]);
+  assert.equal(Object.hasOwn(environment,'DEEPSEEK_API_KEY'),false);
+  await f.send('phone','desktop-clear','secret.clear',{name:'DEEPSEEK_API_KEY'});
+  assert.deepEqual(describeDesktopEnvironment(environment,true)?.missing,['DEEPSEEK_API_KEY']);
+ }finally{await f.close()}
+});
 
 test('admin intents are rejected for non-owner senders and when no owner exists',async()=>{
  for(const [owner,error] of [[undefined,'owner_unassigned'],['other','owner_required']] as const){const f=await fixture({...(owner?{owner}:{})});
