@@ -28,6 +28,7 @@ async function harness(t, overrides = {}) {
     configured: overrides.configured ?? (() => false),
     loadRuntime: async () => { calls.push(['load']); return runtime },
     persist: async path => { persisted.push(path) },
+    prepareRelay: overrides.prepareRelay,
   })
   return {root, directory, calls, persisted, handler}
 }
@@ -45,6 +46,23 @@ test('space create request accepts only a relay origin and a long bootstrap toke
     assert.deepEqual(parseSpaceCreateRequest({relayUrl, bootstrapToken: TOKEN}), {error: relayUrl.startsWith('ftp') ? 'relay_tls_required' : 'relay_url_invalid'}, relayUrl)
   assert.deepEqual(parseSpaceCreateRequest({relayUrl: 'https://relay.example', bootstrapToken: 'short-token'}), {error: 'bootstrap_token_too_short'})
   assert.deepEqual(parseSpaceCreateRequest({relayUrl: 'https://relay.example', bootstrapToken: TOKEN + '\u0000'}), {error: 'bootstrap_token_invalid'})
+})
+
+test('automatic mode resolves credentials only after sender validation and returns no secrets', async t => {
+  let prepares=0
+  const h=await harness(t,{prepareRelay:async()=>{prepares++;return {relayUrl:'https://relay.example',bootstrapToken:TOKEN}}})
+  await assert.rejects(h.handler({sender:{}},{mode:'tailscale'}),/space create rejected/)
+  assert.equal(prepares,0)
+  assert.deepEqual(await h.handler(settingsEvent,{mode:'tailscale'}),{ok:true})
+  assert.equal(prepares,1)
+  assert.equal(h.calls.find(([name])=>name==='init')[1].bootstrapToken,TOKEN)
+  await assert.rejects(h.handler(settingsEvent,{mode:'tailscale',directory:'/anywhere'}),/space create rejected/)
+})
+test('automatic preparation failures are closed codes and leave creation retryable', async t => {
+  let attempts=0
+  const h=await harness(t,{prepareRelay:async()=>{if(attempts++===0)throw Error('tailscale_not_running');return {relayUrl:'https://relay.example',bootstrapToken:TOKEN}}})
+  assert.deepEqual(await h.handler(settingsEvent,{mode:'tailscale'}),{ok:false,error:'tailscale_not_running'})
+  assert.deepEqual(await h.handler(settingsEvent,{mode:'tailscale'}),{ok:true})
 })
 
 test('space create is refused for any sender except the settings main frame, before touching the runtime', async t => {

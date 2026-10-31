@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:nova_mobile/space/notification_router.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/space/space_root.dart';
 import 'package:nova_mobile/space/space_storage.dart';
 import 'space_client_test.dart' show MemorySpacePersistence;
+
+class SlowCatalog extends SpaceCatalog {
+  SlowCatalog() : super(persistence: MemorySpacePersistence());
+  final release = Completer<void>();
+  int adds = 0;
+  @override
+  Future<void> add(SpaceRecord space) async {
+    adds++;
+    await release.future;
+    await super.add(space);
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +36,53 @@ void main() {
         );
   });
   tearDown(() => SpaceStorage.active = null);
+  testWidgets(
+    'Space creation ignores a second tap while persistence is pending',
+    (tester) async {
+      final catalog = SlowCatalog();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SpaceRoot(
+            catalog: catalog,
+            standaloneBuilder: (_) => const Text('Local'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('新建 Space'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'One');
+      final submit = tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '创建独立 Space'))
+          .onPressed!;
+      submit();
+      submit();
+      await tester.pump();
+      expect(catalog.adds, 1);
+      catalog.release.complete();
+      await tester.pumpAndSettle();
+      expect(catalog.spaces, hasLength(1));
+    },
+  );
+  test(
+    'opening a catalog twice never duplicates its persisted Spaces',
+    () async {
+      const record = SpaceRecord(
+        id: 'client',
+        name: 'Remote',
+        mode: SpaceMode.client,
+      );
+      final disk = MemorySpacePersistence()
+        ..value = jsonEncode({
+          'selected': record.id,
+          'spaces': [record.toJson()],
+        });
+      final catalog = SpaceCatalog(persistence: disk);
+      await Future.wait([catalog.open(), catalog.open()]);
+      await catalog.open();
+      expect(catalog.spaces.map((space) => space.id), ['client']);
+    },
+  );
   testWidgets(
     'unconfigured install asks user to choose a Space before starting runtime',
     (tester) async {

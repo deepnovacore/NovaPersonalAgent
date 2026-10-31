@@ -5,7 +5,7 @@ import {JSDOM} from 'jsdom'
 const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'http://localhost'})
 Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,HTMLInputElement:dom.window.HTMLInputElement,MutationObserver:dom.window.MutationObserver,IS_REACT_ACT_ENVIRONMENT:true})
 const {render,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react')
-const {SpaceHostPanel}=await import('../src/renderer/react/settings/space-host.tsx')
+const {SpaceHostPanel,SpaceCreateForm}=await import('../src/renderer/react/settings/space-host.tsx')
 afterEach(cleanup)
 test('React Space panel requires the phone fingerprint and explicit revocation confirmation',async()=>{
  const calls:any[]=[];let pending=true;
@@ -35,9 +35,25 @@ function independentApi(overrides:any={}){
   ...overrides}
  return api
 }
+test('Tailscale creation needs no typed credentials and opens a QR after restart',async()=>{
+ const api=independentApi(),v=render(<SpaceHostPanel api={api}/>)
+ await waitFor(()=>assert.ok(v.queryByRole('button',{name:'创建空间'})))
+ assert.ok(v.queryByLabelText('Bootstrap 凭据')===null)
+ await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})))
+ await waitFor(()=>assert.ok(v.queryByAltText('使用手机扫码绑定')))
+ assert.deepEqual(api.calls.find(([m]:any)=>m==='create')[1],{mode:'tailscale'})
+})
+test('creation completion survives Strict Mode effect cleanup',async()=>{
+ const api=independentApi();let ready=false
+ const v=render(<React.StrictMode><SpaceCreateForm api={api} label={zh=>zh} onReady={async()=>{ready=true}}/></React.StrictMode>)
+ await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})))
+ await waitFor(()=>assert.equal(ready,true))
+})
+
 test('an unconfigured Space offers in-page creation and validates before calling main',async()=>{
  const api=independentApi(),v=render(<SpaceHostPanel api={api}/>)
  await waitFor(()=>assert.ok(v.queryByRole('button',{name:'创建空间'}),'condition not met'))
+ fireEvent.change(v.getByLabelText('连接方式'),{target:{value:'manual'}})
  assert.match(v.container.textContent??'',/全新数据/);assert.match(v.container.textContent??'',/不会迁移/);assert.match(v.container.textContent??'',/nova-space-host init/)
  const token=v.getByLabelText('Bootstrap 凭据') as HTMLInputElement;assert.equal(token.type,'password')
  await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})));await waitFor(()=>assert.match(v.container.textContent??'',/填写 relay 地址/))
@@ -56,6 +72,7 @@ test('creating a Space restarts the backend, locks the form meanwhile, then open
  api.restart=()=>new Promise(resolve=>{finishRestart=()=>resolve(restart())})
  const v=render(<SpaceHostPanel api={api}/>)
  await waitFor(()=>assert.ok(v.queryByRole('button',{name:'创建空间'}),'condition not met'))
+ fireEvent.change(v.getByLabelText('连接方式'),{target:{value:'manual'}})
  fireEvent.change(v.getByLabelText('Relay 地址'),{target:{value:' https://relay.example '}});fireEvent.change(v.getByLabelText('Bootstrap 凭据'),{target:{value:TOKEN}})
  await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})))
  await waitFor(()=>assert.match(v.container.textContent??'',/正在创建空间/))
@@ -75,6 +92,7 @@ test('creation failures show a redacted reason and keep the form usable; a faile
  for(const [error,pattern] of [['bootstrap_denied',/拒绝了 bootstrap 凭据/],['relay_unreachable',/无法连接 relay/],['space_relay_mismatch',/https:\/\/old\.example/],['something_new',/创建失败/]] as const){
   const api=independentApi({spaceCreate:async()=>({ok:false,error,relayUrl:'https://old.example'})}),v=render(<SpaceHostPanel api={api}/>)
   await waitFor(()=>assert.ok(v.queryByRole('button',{name:'创建空间'}),'condition not met'))
+ fireEvent.change(v.getByLabelText('连接方式'),{target:{value:'manual'}})
   fireEvent.change(v.getByLabelText('Relay 地址'),{target:{value:'https://relay.example'}});fireEvent.change(v.getByLabelText('Bootstrap 凭据'),{target:{value:TOKEN}})
   await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})));await waitFor(()=>assert.match(v.container.textContent??'',pattern))
   assert.ok(!(v.container.textContent??'').includes(TOKEN),'condition not met');assert.equal((v.getByRole('button',{name:'创建空间'}) as HTMLButtonElement).disabled,false)
@@ -86,6 +104,7 @@ test('creation failures show a redacted reason and keep the form usable; a faile
  const status=api.personalCommand;api.personalCommand=async(method:string,params:any)=>method==='space.status'&&restarts>=2?{mode:'host',space:'new-space',clients:[]}:status(method,params)
  const v=render(<SpaceHostPanel api={api}/>)
  await waitFor(()=>assert.ok(v.queryByRole('button',{name:'创建空间'}),'condition not met'))
+ fireEvent.change(v.getByLabelText('连接方式'),{target:{value:'manual'}})
  fireEvent.change(v.getByLabelText('Relay 地址'),{target:{value:'https://relay.example'}});fireEvent.change(v.getByLabelText('Bootstrap 凭据'),{target:{value:TOKEN}})
  await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})));await waitFor(()=>assert.match(v.container.textContent??'',/后台未能重启/))
  await act(async()=>fireEvent.click(v.getByRole('button',{name:'重启后台'})));await waitFor(()=>assert.ok(v.queryByRole('button',{name:'生成一次性配对码'}),'condition not met'))
@@ -96,6 +115,7 @@ test('an already-created but not-yet-active Space offers a locked restart; an ac
  api.restart=async()=>{restarts++;return baseRestart()}
  const v=render(<SpaceHostPanel api={api}/>)
  await waitFor(()=>assert.ok(v.queryByRole('button',{name:'创建空间'}),'condition not met'))
+ fireEvent.change(v.getByLabelText('连接方式'),{target:{value:'manual'}})
  fireEvent.change(v.getByLabelText('Relay 地址'),{target:{value:'https://relay.example'}});fireEvent.change(v.getByLabelText('Bootstrap 凭据'),{target:{value:TOKEN}})
  await act(async()=>fireEvent.click(v.getByRole('button',{name:'创建空间'})))
  await waitFor(()=>assert.ok(v.queryByRole('button',{name:'重启后台'}),'condition not met'))
@@ -111,6 +131,7 @@ test('an already-created but not-yet-active Space offers a locked restart; an ac
  const base=active.personalCommand;active.personalCommand=async(method:string,params:any)=>method==='space.status'&&hostNow?{mode:'host',space:'x',clients:[]}:base(method,params)
  const w=render(<SpaceHostPanel api={active}/>)
  await waitFor(()=>assert.ok(w.queryByRole('button',{name:'创建空间'}),'condition not met'))
+ fireEvent.change(w.getByLabelText('连接方式'),{target:{value:'manual'}})
  fireEvent.change(w.getByLabelText('Relay 地址'),{target:{value:'https://relay.example'}});fireEvent.change(w.getByLabelText('Bootstrap 凭据'),{target:{value:TOKEN}})
  await act(async()=>fireEvent.click(w.getByRole('button',{name:'创建空间'})))
  await waitFor(()=>assert.match(w.container.textContent??'',/已经创建过空间/))

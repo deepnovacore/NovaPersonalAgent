@@ -1625,7 +1625,7 @@ test('a provider error event during setup is reported as realtime_session_reject
 })
 
 test('a credential-shaped provider error code never reaches telemetry', async () => {
-  for (const echoed of ['sk-0123456789abcdef0123456789abcdef', 'abcdefghijklmnopqrstuvwxyzabcdefghij', 'Key0123456789abcdef']) {
+  for (const echoed of ['sk-0123456789abcdef0123456789abcdef', 'abcdefghijklmnopqrstuvwxyzabcdefghij', 'Key0123456789abcdef', 'abcdefghijklmnopqrstuvwxyzabcdef', 'PrivateCredential']) {
     const {records, telemetry} = recordingTelemetry()
     const scripted = scriptedSocket([{type: 'error', error: {code: echoed, message: 'overdue'}}])
     const adapter = adapterFor(scripted, {apiKey: echoed, telemetry})

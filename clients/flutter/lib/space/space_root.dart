@@ -99,8 +99,7 @@ class _SpaceRootState extends State<SpaceRoot> {
     if (selected == null) return _SpaceChooser(catalog: catalog);
     return Column(
       children: [
-        // A Host client has its own title bar and keeps Space switching under
-        // 我的; only standalone mode still needs this strip.
+        // Client pages have their own title bar and Space switch.
         if (selected.mode == SpaceMode.standalone &&
             widget.standalonePageBuilder == null)
           StandaloneSpaceBar(
@@ -267,6 +266,7 @@ class _CreateSpaceState extends State<_CreateSpace> {
   }
 
   Future<void> create() async {
+    if (busy) return;
     if (name.text.trim().isEmpty) {
       setState(() => error = '请为 Space 命名');
       return;
@@ -432,6 +432,16 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
   final chat = TextEditingController();
   bool sending = false;
   int tab = 0;
+  Widget _switchSpaceButton() => Tooltip(
+    message: '切换 Space',
+    child: TextButton.icon(
+      onPressed: widget.onSwitchSpace,
+      style: TextButton.styleFrom(foregroundColor: Nova.secondary),
+      icon: const Icon(CupertinoIcons.arrow_swap, size: 17),
+      label: const Text('Space'),
+    ),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -1157,6 +1167,10 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     final c = controller;
     if (c == null) {
       return Scaffold(
+        appBar: AppBar(
+          title: Text(widget.space.name),
+          actions: [_switchSpaceButton()],
+        ),
         body: Center(
           child: startupError == null
               ? const CircularProgressIndicator()
@@ -1190,6 +1204,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
               icon: const Icon(CupertinoIcons.arrow_clockwise, size: 23),
               tooltip: '补拉 Host 状态',
             ),
+          _switchSpaceButton(),
           const SizedBox(width: 10),
         ],
       ),

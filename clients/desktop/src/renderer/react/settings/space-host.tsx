@@ -51,7 +51,7 @@ export function SpaceHostPanel({api}: any) {
      <Action disabled={busy} action={()=>setRevoke(null)}>{label('取消','Cancel')}</Action>
     </div>
    </div>}
-  </>:state?<SpaceCreateForm api={api} label={label} onReady={()=>command()}/>:null}
+  </>:state?<SpaceCreateForm api={api} label={label} onReady={async()=>{await command();setInvitation(await command('space.invitation'))}}/>:null}
  </div>
 }
 
@@ -59,6 +59,13 @@ const LOOPBACK=new Set(['127.0.0.1','localhost','[::1]'])
 // Codes come from main's closed list (space-create.mjs); anything else gets the generic message.
 function createFailure(code:string,relayUrl:string|undefined,label:(zh:string,en:string)=>string){
  const messages:Record<string,[string,string]>={
+  tailscale_not_installed:['请先安装 Tailscale，并登录电脑和手机。','Install Tailscale and sign in on your computer and phone first.'],
+  tailscale_unavailable:['无法读取 Tailscale，请打开 Tailscale 确认已登录并重试。','Cannot read Tailscale. Open it, check you are signed in, and retry.'],
+  tailscale_not_running:['请先连接 Tailscale，再重试创建。','Connect Tailscale before creating a Space.'],
+  tailscale_https_required:['请在 Tailscale 管理页开启 MagicDNS 和 HTTPS 证书，再重试。','Enable MagicDNS and HTTPS certificates in Tailscale, then retry.'],
+  tailscale_port_in_use:['Tailscale 的可用端口均已有服务。请保留现有服务并使用高级选项，或释放该端口后重试。','All supported Tailscale ports already host services. Use the advanced option, or free that port and retry.'],
+  tailscale_identity_changed:['此空间绑定的 Tailscale 电脑地址已改变。请恢复原地址后重试；现有数据已保留。','The Tailscale address for this Space changed. Restore the original address and retry; existing data is preserved.'],
+  tailscale_serve_failed:['Tailscale HTTPS 入口未能启动。请检查 HTTPS 授权和 Tailscale 版本后重试。','Tailscale HTTPS could not start. Check HTTPS authorization and your Tailscale version, then retry.'],
   bootstrap_denied:['Relay 拒绝了 bootstrap 凭据，请核对后重试。','The relay rejected the bootstrap credential. Check it and try again.'],
   relay_unreachable:['无法连接 relay。请检查地址与网络后重试；重试会沿用同一个空间身份。','Cannot reach the relay. Check the address and network, then retry; a retry keeps the same Space identity.'],
   relay_tls_required:['Relay 必须使用 HTTPS（仅本机地址可用 HTTP）。','The relay must use HTTPS (HTTP only for this computer).'],
@@ -77,11 +84,12 @@ function createFailure(code:string,relayUrl:string|undefined,label:(zh:string,en
  return label(message[0],message[1])
 }
 
-function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en:string)=>string;onReady:()=>Promise<unknown>}){
+export function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en:string)=>string;onReady:()=>Promise<unknown>}){
+ const [mode,setMode]=useState('tailscale')
  const [relayUrl,setRelayUrl]=useState(''),[token,setToken]=useState(''),[reveal,setReveal]=useState(false)
  const [phase,setPhase]=useState<'idle'|'creating'|'restarting'|'restart_failed'>('idle'),[problem,setProblem]=useState('')
  const active=useRef(true),lock=useRef(false)
- useEffect(()=>()=>{active.current=false},[])
+ useEffect(()=>{active.current=true;return ()=>{active.current=false}},[])
  const restart=async()=>{
   setPhase('restarting');setProblem('')
   let applied=false
@@ -95,14 +103,14 @@ function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en:string
   const url=relayUrl.trim(),secret=token.trim()
   let parsed:URL|undefined
   try{parsed=new URL(url)}catch{parsed=undefined}
-  if(!url||!parsed){setProblem(label('请填写 relay 地址，例如 https://relay.example.com。','Enter the relay address, e.g. https://relay.example.com.'));return}
-  if(parsed.protocol!=='https:'&&!(parsed.protocol==='http:'&&LOOPBACK.has(parsed.hostname))){setProblem(createFailure('relay_tls_required',undefined,label));return}
-  if(secret.length<32){setProblem(createFailure('bootstrap_token_too_short',undefined,label));return}
+  if(mode==='manual'&&(!url||!parsed)){setProblem(label('请填写 relay 地址，例如 https://relay.example.com。','Enter the relay address, e.g. https://relay.example.com.'));return}
+  if(mode==='manual'&&parsed&&parsed.protocol!=='https:'&&!(parsed.protocol==='http:'&&LOOPBACK.has(parsed.hostname))){setProblem(createFailure('relay_tls_required',undefined,label));return}
+  if(mode==='manual'&&secret.length<32){setProblem(createFailure('bootstrap_token_too_short',undefined,label));return}
   if(typeof api?.spaceCreate!=='function'){setProblem(createFailure('',undefined,label));return}
   lock.current=true;setPhase('creating');setProblem('')
   try{
    let result:any
-   try{result=await api.spaceCreate({relayUrl:url,bootstrapToken:secret})}catch{result={ok:false,error:'space_create_failed'}}
+   try{result=await api.spaceCreate(mode==='tailscale'?{mode:'tailscale'}:{relayUrl:url,bootstrapToken:secret})}catch{result={ok:false,error:'space_create_failed'}}
    if(!active.current)return
    if(result?.error==='space_already_created'){
     let hosted=false
@@ -117,12 +125,15 @@ function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en:string
  }
  const working=phase==='creating'||phase==='restarting'
  return <div className="space-host-create" aria-busy={working}>
-  <p className="space-host-empty">{label('尚未配置 Host Space。在这里新建一个空间：新空间是全新数据，不会迁移本机现有数据。需要一个可用的 HTTPS relay 及其 bootstrap 凭据。','No Host Space yet. Create one here: a new Space starts with fresh data and does not migrate existing data on this computer. You need a working HTTPS relay and its bootstrap credential.')}</p>
+  <p className="space-host-empty">{label('尚未配置 Host Space。在这里新建一个空间：新空间是全新数据，不会迁移本机现有数据。电脑和手机需登录同一个 Tailscale 网络，并开启电脑的 MagicDNS 与 HTTPS 证书。创建成功后即可扫码，配对时仍需核对手机指纹。','No Host Space yet. Create one here: a new Space starts with fresh data and does not migrate existing data on this computer. Sign in to the same Tailscale network on your computer and phone, with MagicDNS and HTTPS certificates enabled. Then scan the pairing code and compare the phone fingerprint.')}</p>
+  <Field label={label('连接方式','Connection')} value={mode} disabled={working||phase==='restart_failed'} options={[{value:'tailscale',label:label('Tailscale 自动配置','Tailscale automatic setup')},{value:'manual',label:label('高级：使用已有 Relay','Advanced: existing relay')}]} onChange={setMode}/>
+  {mode==='manual'&&<>
   <Field label={label('Relay 地址','Relay address')} value={relayUrl} placeholder="https://relay.example.com" disabled={working||phase==='restart_failed'} autoComplete="off" spellCheck={false} onChange={setRelayUrl}/>
   <div className="space-host-token">
    <Field label={label('Bootstrap 凭据','Bootstrap credential')} type={reveal?'text':'password'} value={token} disabled={working||phase==='restart_failed'} autoComplete="off" spellCheck={false} onChange={setToken}/>
    <Button type="button" variant="soft" disabled={working||phase==='restart_failed'} onClick={()=>setReveal(value=>!value)}>{reveal?label('隐藏凭据','Hide credential'):label('显示凭据','Show credential')}</Button>
   </div>
+  </>}
   <div className="space-host-actions">
    <Button type="button" disabled={working||phase==='restart_failed'} aria-busy={working} onClick={()=>void create()}>{label('创建空间','Create Space')}</Button>
    {phase==='restart_failed'&&<Button type="button" onClick={()=>void restart()}>{label('重启后台','Restart backend')}</Button>}

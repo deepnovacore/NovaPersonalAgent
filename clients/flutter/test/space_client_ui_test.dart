@@ -7,6 +7,24 @@ import 'support/space_client_fixture.dart';
 
 void main() {
   setUpAll(loadSpaceTestFonts);
+  testWidgets('every Client tab offers the same quick Space switch', (
+    tester,
+  ) async {
+    var switched = 0;
+    await pumpClient(tester, seededState(), onSwitchSpace: () => switched++);
+    for (final label in ['Nova', '任务', '时间线', '我的']) {
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomAppBarTabs),
+          matching: find.text(label),
+        ),
+      );
+      await tester.pump();
+      expect(find.byTooltip('切换 Space'), findsOneWidget);
+      await tester.tap(find.byTooltip('切换 Space'));
+    }
+    expect(switched, 4);
+  });
 
   testWidgets('bottom tabs match the local app: Nova, 任务, 时间线, 我的', (
     tester,

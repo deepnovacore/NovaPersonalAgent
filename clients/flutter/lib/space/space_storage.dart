@@ -159,9 +159,15 @@ class SpaceCatalog extends ChangeNotifier {
   final List<SpaceRecord> spaces = [];
   String? selectedId;
   bool ready = false;
+  Future<void>? _opening;
   SpaceRecord? get selected =>
       spaces.where((s) => s.id == selectedId).firstOrNull;
-  Future<void> open() async {
+  Future<void> open() {
+    if (ready) return Future.value();
+    return _opening ??= _load().whenComplete(() => _opening = null);
+  }
+
+  Future<void> _load() async {
     final raw = await persistence.read();
     if (raw != null) {
       final value = jsonDecode(raw) as Map;

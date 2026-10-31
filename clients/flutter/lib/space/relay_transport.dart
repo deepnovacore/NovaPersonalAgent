@@ -261,22 +261,46 @@ class SpaceInvitation {
     SpaceCatalog catalog, {
     bool allowLoopback = false,
   }) async {
-    final identity = await SpaceIdentity.generate();
-    final record = SpaceRecord(
-      id: newSpaceId(),
-      name: name,
-      mode: SpaceMode.client,
-      remoteSpace: value['space'] as String,
-      hostDevice: value['host'] as String,
-      hostSigningKey: Map<String, dynamic>.from(
-        value['hostSigningPublicKey'] as Map,
-      ),
-      relay: relay,
-      device: newSpaceId(),
-    );
-    await SpaceSecurePersistence(
+    final existing = catalog.spaces
+        .where(
+          (space) =>
+              space.mode == SpaceMode.client &&
+              space.remoteSpace == value['space'] &&
+              space.hostDevice == value['host'] &&
+              space.relay != null &&
+              relayUri(space.relay!, allowLoopback: allowLoopback).origin ==
+                  relayUri(relay, allowLoopback: allowLoopback).origin,
+        )
+        .toList();
+    final previous =
+        existing.where((space) => space.id == catalog.selectedId).firstOrNull ??
+        existing.lastOrNull;
+    final record =
+        previous ??
+        SpaceRecord(
+          id: newSpaceId(),
+          name: name,
+          mode: SpaceMode.client,
+          remoteSpace: value['space'] as String,
+          hostDevice: value['host'] as String,
+          hostSigningKey: Map<String, dynamic>.from(
+            value['hostSigningPublicKey'] as Map,
+          ),
+          relay: relay,
+          device: newSpaceId(),
+        );
+    final identityStore = SpaceSecurePersistence(
       'nova.space.identity.${record.id}',
-    ).write(jsonEncode(identity.toJson()));
+    );
+    final SpaceIdentity identity;
+    if (previous == null) {
+      identity = await SpaceIdentity.generate();
+      await identityStore.write(jsonEncode(identity.toJson()));
+    } else {
+      final raw = await identityStore.read();
+      if (raw == null) throw StateError('missing_client_identity');
+      identity = SpaceIdentity.fromJson(jsonMap(raw));
+    }
     // Persist identity and Space before admission. A lost HTTP response can be
     // recovered by logging in with the same device after Host confirmation.
 
@@ -286,30 +310,50 @@ class SpaceInvitation {
       SpaceSecurePersistence('nova.space.keys.${record.id}'),
     );
     final transport = SpaceRelayTransport(crypto, allowLoopback: allowLoopback);
-    final proofPayload = {
-      'v': 1,
-      'purpose': 'pair-request',
-      'invitationId': value['id'],
-      'secret': value['secret'],
-      'device': record.device,
-      'signingPublicKey': identity.signingPublic,
-      'encryptionPublicKey': identity.encryptionPublic,
-      'business_versions': [1],
-    };
-    final request = {
-      'invitationId': value['id'],
-      'secret': value['secret'],
-      'device': record.device,
-      'signingPublicKey': identity.signingPublic,
-      'encryptionPublicKey': identity.encryptionPublic,
-      'proof': await crypto.signControl(proofPayload),
-      'business_versions': [1],
-    };
-    await SpaceSecurePersistence(
-      'nova.space.pair-request.${record.id}',
-    ).write(jsonEncode(request));
-    await catalog.add(record);
     try {
+      if (previous != null) {
+        await crypto.load();
+        try {
+          await transport.login();
+          await catalog.select(record.id);
+          return record;
+        } on RelayFailure catch (error) {
+          if (![
+            'unknown_device',
+            'inactive_device',
+            'device_inactive',
+          ].contains(error.code)) {
+            rethrow;
+          }
+        }
+      }
+      final proofPayload = {
+        'v': 1,
+        'purpose': 'pair-request',
+        'invitationId': value['id'],
+        'secret': value['secret'],
+        'device': record.device,
+        'signingPublicKey': identity.signingPublic,
+        'encryptionPublicKey': identity.encryptionPublic,
+        'business_versions': [1],
+      };
+      final request = {
+        'invitationId': value['id'],
+        'secret': value['secret'],
+        'device': record.device,
+        'signingPublicKey': identity.signingPublic,
+        'encryptionPublicKey': identity.encryptionPublic,
+        'proof': await crypto.signControl(proofPayload),
+        'business_versions': [1],
+      };
+      await SpaceSecurePersistence(
+        'nova.space.pair-request.${record.id}',
+      ).write(jsonEncode(request));
+      if (previous == null) {
+        await catalog.add(record);
+      } else {
+        await catalog.select(record.id);
+      }
       await transport.request(
         'POST',
         '/v1/pairing/requests',

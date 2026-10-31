@@ -1346,10 +1346,8 @@ class ProviderSetupRejected extends Error {
     super('realtime_session_rejected')
     const detail = event.error
     const code = isJsonObject(detail) ? detail.code : undefined
-    // Provider codes are short word-shaped identifiers such as `Arrearage` or `invalid_api_key`.
-    // Digits, dashes and long runs are dropped so an echoed credential cannot reach telemetry.
-    this.providerCode = typeof code === 'string' && code.length <= 32
-      && /^(?:[A-Z][a-z]+)+$|^[a-z]+(?:_[a-z]+){0,4}$/u.test(code) ? code : undefined
+    // Shape checks still admit letter-only credentials; retain only known diagnostic codes.
+    this.providerCode = typeof code === 'string' && ['Arrearage', 'invalid_api_key'].includes(code) ? code : undefined
   }
 }
 

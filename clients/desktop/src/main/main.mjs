@@ -23,6 +23,7 @@ import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
 import {createSpaceCreateHandler} from './space-create.mjs'
+import {createTailscaleRelay} from './tailscale-relay.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
 import {parseCapabilityRegistry} from '@nova-personal-agent/runtime/desktop'
@@ -180,6 +181,7 @@ const developmentEnv = !app.isPackaged && existsSync(developmentEnvFile)
   ? parseEnv(readFileSync(developmentEnvFile, 'utf8')) : {}
 // Loaded only when the settings page creates a Host Space; the relay SDK stays out of startup.
 const loadSpaceHostRuntime = () => import('@nova-personal-agent/runtime/space-host')
+const tailscaleRelay = createTailscaleRelay({directory: () => resolve(app.getPath('userData'), 'space', 'relay')})
 // Preserve paths and launch flags already normalized by the source launcher.
 for (const name of Object.values(SECRET_ENV_MAP)) {
   if (developmentEnv[name] !== undefined) process.env[name] = developmentEnv[name]
@@ -1242,6 +1244,13 @@ const workspaceActions = createWorkspaceActions({
 })
 
 async function launchBackend(smokeChannel, onExit) {
+  const spaceConfig = process.env.NOVA_SPACE_HOST_CONFIG || currentSettings?.spaceHostConfigPath
+  if (spaceConfig && spaceConfig === resolve(app.getPath('userData'), 'space', 'config.json') && existsSync(spaceConfig)) {
+    try {
+      const runtime = await loadSpaceHostRuntime()
+      await tailscaleRelay.restore(runtime.readHostSpaceConfig(spaceConfig).relay_url)
+    } catch { console.error('[desktop-diagnostic] tailscale_relay_restore_failed') }
+  }
   capabilityEditorCache = null
   let launchDocument
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
@@ -2171,10 +2180,11 @@ async function startSelectedCamera(camera, smokeChannel) {
   // The bootstrap token stays in main memory; the reply is {ok} or a closed error code.
   // The renderer restarts the backend afterwards so NOVA_SPACE_HOST_CONFIG takes effect.
   ipcMain.handle('nova:space:create', createSpaceCreateHandler({
-    allowed: event => Boolean(settingsWindow) && event.sender === settingsWindow.webContents && event.senderFrame === event.sender.mainFrame,
+    allowed: event => !app.isQuitting && Boolean(settingsWindow) && event.sender === settingsWindow.webContents && event.senderFrame === event.sender.mainFrame,
     directory: () => resolve(app.getPath('userData'), 'space'),
     configured: () => Boolean(process.env.NOVA_SPACE_HOST_CONFIG) || (Boolean(currentSettings?.spaceHostConfigPath) && existsSync(currentSettings.spaceHostConfigPath)),
     loadRuntime: loadSpaceHostRuntime,
+    prepareRelay: () => tailscaleRelay.ensure(),
     persist: configPath => accessCredentials(() => settingsWriter({spaceHostConfigPath: configPath}, undefined, {preserveSecrets: true})),
   }))
   ipcMain.handle('nova:settings:set', async (event, payload, restart = false) => {
@@ -2596,7 +2606,8 @@ app.on('before-quit', event => {
     await maintenance?.close()
     sourceSmokeStage('maintenance_closed')
   }), wait(3000).then(() => sourceSmokeStage('maintenance_deadline'))])
-  const drain = Promise.all([backendDrain, maintenanceDrain, feishuSetupOwner.release()])
+  const relayDrain = backendDrain.finally(() => tailscaleRelay.close())
+  const drain = Promise.all([relayDrain, maintenanceDrain, feishuSetupOwner.release()])
   const resumeQuit = () => { quitDrained = true; sourceSmokeStage('quit_resumed'); app.quit() }
   quitDrain = drain.then(resumeQuit, resumeQuit)
 })

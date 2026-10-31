@@ -38,6 +38,7 @@
     "test:visual": "node scripts/react-visual-compare.mjs"
   },
   "dependencies": {
+    "@nova-personal-agent/relay": "1.0.0",
     "@nova-personal-agent/runtime": "1.0.0",
     "sherpa-onnx": "1.13.4",
     "tar-stream": "3.1.7",

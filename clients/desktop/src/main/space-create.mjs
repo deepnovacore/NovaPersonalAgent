@@ -13,6 +13,8 @@ function rejected() {
 
 /** Throws on a malformed request; returns {error} for a well-formed request with an unusable value. */
 export function parseSpaceCreateRequest(payload) {
+  if (payload && Object.getPrototypeOf(payload) === Object.prototype
+    && Object.keys(payload).join(',') === 'mode' && payload.mode === 'tailscale') return {mode: 'tailscale'}
   if (!payload || typeof payload !== 'object' || Object.getPrototypeOf(payload) !== Object.prototype
     || Object.keys(payload).sort().join(',') !== 'bootstrapToken,relayUrl'
     || typeof payload.relayUrl !== 'string' || typeof payload.bootstrapToken !== 'string'
@@ -31,6 +33,8 @@ export function parseSpaceCreateRequest(payload) {
 export function spaceCreateErrorCode(error) {
   const code = typeof error?.code === 'string' ? error.code : error?.message
   if (code === 'bootstrap_denied') return 'bootstrap_denied'
+  if (['tailscale_not_installed', 'tailscale_unavailable', 'tailscale_not_running', 'tailscale_https_required',
+    'tailscale_port_in_use', 'tailscale_identity_changed', 'tailscale_serve_failed'].includes(code)) return code
   if (['tls_required', 'origin_url_required', 'relay_tls_origin_required'].includes(code)) return 'relay_tls_required'
   if (code === 'space_personal_path_exists') return 'space_data_exists'
   if (['space_config_permissions', 'space_config_capacity', 'space_identity_mismatch', 'space_config_invalid'].includes(code)) return 'space_config_invalid'
@@ -50,16 +54,18 @@ async function privateDirectory(directory) {
  * (config written, relay unreachable) resumes the same identity on the same
  * relay; on a different relay it is archived and a new Space is created.
  */
-export function createSpaceCreateHandler({allowed, directory, configured, loadRuntime, persist}) {
+export function createSpaceCreateHandler({allowed, directory, configured, loadRuntime, persist, prepareRelay}) {
   let inFlight = false
   return async (event, payload) => {
     if (!allowed(event)) throw rejected()
-    const request = parseSpaceCreateRequest(payload)
+    let request = parseSpaceCreateRequest(payload)
     if (request.error) return {ok: false, error: request.error}
     if (configured()) return {ok: false, error: 'space_already_created'}
     if (inFlight) return {ok: false, error: 'space_create_busy'}
     inFlight = true
     try {
+      if (request.mode === 'tailscale') request = parseSpaceCreateRequest(await prepareRelay())
+      if (request.error) return {ok: false, error: request.error}
       const runtime = await loadRuntime()
       const root = directory(), configPath = join(root, 'config.json'), personalPath = join(root, 'personal.json')
       await privateDirectory(root)

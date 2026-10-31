@@ -9,7 +9,7 @@ Dependencies:
 - Vendored Objective-C glue is OpenMinis `b4c0661d5631ebab4d1a2e6f3fd4c805d4030a6c`; exact original files/hashes and modifications are recorded in `ios/Vendor/OpenMinis/UPSTREAM.json`, with its GPL-3.0 license alongside.
 - Build tooling uses Meson 1.7.2 and Ninja 1.11.1.4. LLVM `ld.lld` is required for the ARM64 VDSO; an installed Android NDK linker can supply it. The build-time fakefs converter also requires libarchive.
 
-Run from the repository root, with `NOVA_LINUX_ROOT` under the mounted external disk in the worktree/chat namespace:
+Run from the repository root, with `NOVA_LINUX_ROOT` on internal storage in the canonical-worktree/chat namespace:
 
 ```sh
 python3 clients/flutter/tool/linux/ios/build_runtime.py --output-root "$NOVA_LINUX_ROOT" --sdk iphoneos
@@ -17,7 +17,7 @@ python3 clients/flutter/tool/linux/ios/build_runtime.py --output-root "$NOVA_LIN
 NOVA_LINUX_ROOT="$NOVA_LINUX_ROOT" bash clients/flutter/tool/linux/ios/check_runtime.sh
 ```
 
-All generated libraries, rootfs resources, virtual environments, temporary files and compiler caches stay under that external directory. An unmounted disk is a hard failure. Set Xcode `NOVA_LINUX_ROOT`, `FLUTTER_BUILD_DIR`, derived data and compiler cache locations to the same namespace; use iOS 17 or newer and ARM64. C11 is required by iSH headers. Device builds must use the `iphoneos` libraries, simulator builds `iphonesimulator`.
+All generated libraries, rootfs resources, virtual environments, temporary files and compiler caches stay under that explicit internal directory. No shared output directory is selected automatically. Set Xcode `NOVA_LINUX_ROOT`, `FLUTTER_BUILD_DIR`, derived data and compiler cache locations to the same namespace; use iOS 17 or newer and ARM64. C11 is required by iSH headers. Device builds must use the `iphoneos` libraries, simulator builds `iphonesimulator`.
 
 `check_runtime.sh` runs standalone Swift channel validation, the hostile log-directory symlink regression, and real iSH Linux commands on a macOS ARM64 host. Guest checks cover Unicode paths shared with native files, pipelines, separate stderr, exit status, timeout, cancellation, stubborn descendants, unrelated concurrent commands, UTF-8 truncation and real log paths. Set `NOVA_TEST_INSTALL_PYTHON=1` to additionally install Python using APK and execute it; this requires working guest network access. `NOVA_TEST_APK_REPOSITORY` can select a signed Alpine v3.21 repository for this optional host check without changing the shipped repository configuration. Host harness success does not replace the app/device acceptance fixture at `test/support/workspace_device_acceptance.dart`.
 
@@ -38,8 +38,7 @@ unsigned device build, not an APNs delivery or physical-device acceptance test.
 
 CI explicitly passes `--ci-runner-temp` to the runtime builder and
 `NOVA_CI_RUNNER_TEMP=1` to its packaging phase. Both enforce `GITHUB_ACTIONS=true`
-and a canonical path strictly below `RUNNER_TEMP`; local builds still require a
-mounted external volume. Build sources, outputs and caches are namespaced by
+and a canonical path strictly below `RUNNER_TEMP`; local builds use an explicit isolated directory on internal storage. Build sources, outputs and caches are namespaced by
 Actions run ID and attempt. Flutter uses a relative `.build` symlink into that
 namespace because its build-dir setting rejects absolute paths. No shared build
 cache is restored. The workflow

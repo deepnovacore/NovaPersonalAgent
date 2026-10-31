@@ -23,9 +23,11 @@ dist/
 # JavaScript and Electron
 node_modules/
 build/
+.build/
 /clients/desktop/build
 /clients/desktop/dist
 /runtime/dist
+/relay/dist
 
 # Runtime state and local media
 data/

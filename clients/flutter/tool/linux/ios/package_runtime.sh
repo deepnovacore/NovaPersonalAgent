@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-: "${NOVA_LINUX_ROOT:?Set NOVA_LINUX_ROOT to the prepared external iOS build directory}"
+: "${NOVA_LINUX_ROOT:?Set NOVA_LINUX_ROOT to the isolated prepared iOS build directory}"
 if [ "${NOVA_CI_RUNNER_TEMP:-}" = 1 ]; then
   python3 - <<'PYCI'
 import os, pathlib
@@ -13,9 +13,13 @@ if root == parent or not root.is_relative_to(parent):
     raise SystemExit('CI runtime must stay under RUNNER_TEMP')
 PYCI
 else
-  case "$NOVA_LINUX_ROOT" in /Volumes/*/*) ;; *) echo 'Linux build outputs must be on an external volume' >&2; exit 1;; esac
-  volume="/Volumes/$(printf '%s' "$NOVA_LINUX_ROOT" | cut -d/ -f3)"
-  mount | grep -F " on $volume (" >/dev/null || { echo 'External build volume is not mounted' >&2; exit 1; }
+  python3 - <<'PYLOCAL'
+import os, pathlib
+configured = pathlib.Path(os.environ['NOVA_LINUX_ROOT'])
+root = configured.resolve()
+if not configured.is_absolute() or root == pathlib.Path(root.anchor) or root.is_relative_to('/Volumes'):
+    raise SystemExit('Linux build outputs require an explicit isolated directory on internal storage')
+PYLOCAL
 fi
 for item in libish.a libish_emu.a libfakefs.a; do
   test -s "$NOVA_LINUX_ROOT/build-$PLATFORM_NAME/$item"

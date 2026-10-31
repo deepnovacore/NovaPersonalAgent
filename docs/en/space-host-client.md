@@ -33,12 +33,14 @@ The scripts isolate build output by worktree path and run id. Call the output pa
 
 ## Create a Space from desktop settings
 
-Instead of the command line, you can create the Host Space under Settings > Space & phones on the desktop. You still need a working HTTPS relay (loopback HTTP for local development) and its bootstrap credential; starting a relay automatically over Tailscale is not supported yet.
+Under Settings > Space & phones, keep “Tailscale automatic setup” selected and choose Create Space. No relay address or bootstrap credential needs to be typed.
 
-1. Enter the relay address (only `https://host[:port]`) and the bootstrap credential (at least 32 characters), then choose Create Space. The credential is used only in the desktop main process's memory; it is not written to disk or sent back to the page.
-2. The config and data live in a fixed `space/` folder (mode `0700`) under the desktop app data directory; you cannot choose the path. A new Space starts with fresh data and does not migrate existing data on this computer; if the Host is lost, the Space cannot be recovered.
-3. After creation the desktop restarts its backend and the page shows "Create one-time pairing code"; pair the phone as in step 4 above. If the network drops during creation, choosing Create Space again resumes registration with the same identity; enter the same relay address.
-4. If `NOVA_SPACE_HOST_CONFIG` is already set in the launch environment, it takes precedence and the settings page does not create a Space.
+1. Connect the computer and phone to the same Tailscale network. MagicDNS and HTTPS certificates must be enabled by its administrator. Missing prerequisites produce actionable errors.
+2. The desktop runs a relay under `space/relay/` in its app data folder, listening only on `127.0.0.1`, with HTTPS provided by Tailscale Serve. Initial setup chooses a free port from 8443, 9443 and 10443 and pins the origin. Existing services are preserved; Funnel is never enabled. If that port becomes occupied later, data is preserved and the relay stays offline until the port is freed; its address does not silently change.
+3. The main process generates a random bootstrap credential in memory on each start. It is never saved or returned to the page. Quitting closes the relay and its foreground Serve session. Startup restores the original databases and origin; an exited Serve session is retried automatically. Keep the computer running.
+4. Creation restarts the backend and opens a one-time QR code. Choose Client on the phone, scan, compare the full fingerprint and confirm on the computer. Expired codes can be regenerated. Initial HTTPS certificate issuance can time out; retrying keeps the same Space identity.
+5. Config and data use the fixed private `space/` folder (mode `0700`). A new Space starts with fresh data and does not migrate existing data. Losing the Host loses the Space. A changed Tailscale node name requires restoring the original address; the desktop never recreates its identity automatically.
+6. For an existing relay, select “Advanced: existing relay” and enter its HTTPS origin and a bootstrap credential of at least 32 characters (loopback HTTP is allowed for local development). Creation and recovery use the same flow. An existing `NOVA_SPACE_HOST_CONFIG` environment variable takes precedence.
 
 ## Headless Host (Linux/macOS)
 

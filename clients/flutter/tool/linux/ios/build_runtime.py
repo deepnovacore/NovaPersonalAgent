@@ -28,8 +28,8 @@ def main():
         runner_temp = os.environ.get('RUNNER_TEMP')
         if os.environ.get('GITHUB_ACTIONS') != 'true' or not runner_temp or not out.is_relative_to(pathlib.Path(runner_temp).resolve()) or out == pathlib.Path(runner_temp).resolve():
             raise SystemExit('--ci-runner-temp requires an isolated output under GitHub Actions RUNNER_TEMP')
-    elif len(out.parts) < 4 or out.parts[1] != 'Volumes' or not os.path.ismount(pathlib.Path('/Volumes') / out.parts[2]):
-        raise SystemExit('--output-root must be on a mounted external volume; no internal fallback')
+    elif not args.output_root.is_absolute() or out == pathlib.Path(out.anchor) or out.is_relative_to('/Volumes'):
+        raise SystemExit('--output-root must be an explicit isolated directory on internal storage')
     out.mkdir(parents=True, exist_ok=True)
     downloads = out / 'downloads'; downloads.mkdir(exist_ok=True)
     env = os.environ.copy(); env['TMPDIR'] = str(out / 'tmp'); pathlib.Path(env['TMPDIR']).mkdir(exist_ok=True)
