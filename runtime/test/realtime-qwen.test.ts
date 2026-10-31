@@ -1624,6 +1624,21 @@ test('a provider error event during setup is reported as realtime_session_reject
   assert.ok(!JSON.stringify(records).includes('secret-key-value'))
 })
 
+test('a credential-shaped provider error code never reaches telemetry', async () => {
+  for (const echoed of ['sk-0123456789abcdef0123456789abcdef', 'abcdefghijklmnopqrstuvwxyzabcdefghij', 'Key0123456789abcdef']) {
+    const {records, telemetry} = recordingTelemetry()
+    const scripted = scriptedSocket([{type: 'error', error: {code: echoed, message: 'overdue'}}])
+    const adapter = adapterFor(scripted, {apiKey: echoed, telemetry})
+    await assert.rejects(
+      adapter.connect({tools: [], signal: new AbortController().signal}),
+      (error: unknown) => error instanceof QwenRealtimeError && error.message === 'realtime_session_rejected',
+    )
+    assert.equal(records[0]!.payload.code, 'realtime_session_rejected')
+    assert.equal(records[0]!.payload.provider_code, undefined, echoed)
+    assert.ok(!JSON.stringify(records).includes(echoed), echoed)
+  }
+})
+
 test('a setup that never answers times out as realtime_timeout', async () => {
   const adapter = adapterFor(scriptedSocket(), {connectTimeout: 0.02})
   await assert.rejects(

@@ -1346,8 +1346,10 @@ class ProviderSetupRejected extends Error {
     super('realtime_session_rejected')
     const detail = event.error
     const code = isJsonObject(detail) ? detail.code : undefined
-    // Provider codes are short identifiers such as `Arrearage`; anything else is dropped.
-    this.providerCode = typeof code === 'string' && /^[A-Za-z0-9_.-]{1,64}$/u.test(code) ? code : undefined
+    // Provider codes are short word-shaped identifiers such as `Arrearage` or `invalid_api_key`.
+    // Digits, dashes and long runs are dropped so an echoed credential cannot reach telemetry.
+    this.providerCode = typeof code === 'string' && code.length <= 32
+      && /^(?:[A-Z][a-z]+)+$|^[a-z]+(?:_[a-z]+){0,4}$/u.test(code) ? code : undefined
   }
 }
 
