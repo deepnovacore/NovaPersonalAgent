@@ -624,10 +624,15 @@ export class PersonalAgentHost {
         // Any goal in the summary that is gone, not active or muted voids the whole summary; the next tick rewrites it for the rest.
         if(message.source.type===goalCheckinSource){if(!this.#checkinEligible(guard?.goal_ids??[]))return 'invalid';if(!this.#online())return 'defer';}
         if(message.priority>=100)return 'valid';
-        if(isQuietTime(this.#state.settings,this.#now()))return 'defer';
         // News is capped on its own: it must never use up the allowance that briefs and suggestions share.
-        if(message.kind==='news'){const item=feedId===undefined?undefined:this.#state.feed.find(f=>f.id===feedId);if(!this.#state.settings.discovery_enabled||!this.news.snapshot().enabled||(item?.expires_at&&Date.parse(item.expires_at)<=this.#now().getTime()))return 'invalid'}
-        if(message.kind==='news')return this.notifications.deliveredToday(['news'],dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=NEWS_DAILY_CAP?'defer':'valid';
+        if(message.kind==='news'){
+            const item=feedId===undefined?undefined:this.#state.feed.find(f=>f.id===feedId);
+            if(!item||!this.#state.settings.discovery_enabled||!this.news.snapshot().enabled||(item.expires_at&&Date.parse(item.expires_at)<=this.#now().getTime()))return 'invalid';
+            const eligibility=this.news.pushEligibility(item.source.ref);
+            if(eligibility==='ineligible')return 'invalid';
+            return eligibility==='pending'||isQuietTime(this.#state.settings,this.#now())||this.notifications.deliveredToday(['news'],dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=NEWS_DAILY_CAP?'defer':'valid';
+        }
+        if(isQuietTime(this.#state.settings,this.#now()))return 'defer';
         const proactive=['brief','suggestion'] as const;
         return proactive.some(kind=>kind===message.kind)&&this.notifications.deliveredToday(proactive,dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=(this.#state.settings.proactive_daily_cap??5)?'defer':'valid';
     }

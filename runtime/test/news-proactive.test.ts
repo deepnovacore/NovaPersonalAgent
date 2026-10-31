@@ -1,12 +1,13 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath} from 'node:fs/promises'
+import {mkdtemp,rm,realpath,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {NewsService} from '../src/news/service.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import type {Score} from '../src/news/ranking.js'
+import {feedNotification} from '../src/notifications/feed.js'
 
 const NOW=new Date('2026-09-20T11:00:00Z')
 const source={id:'bbc',name:'BBC',url:'https://feeds.bbci.co.uk/news/rss.xml'}
@@ -48,6 +49,7 @@ test('the service reports every completed ranking so the host can act on new can
 })
 
 async function host(dir:string,options:Record<string,unknown>={}){
+ await writeFile(join(dir,'state.json.news.json'),JSON.stringify({version:1,profile_version:1,enabled:true,explore:false,interests:[{id:'voice',text:'Voice AI',weight:1}],blocked:[],sources:[],rank_error:null,items:[1,2,3,4].map(n=>({...article(n),ranking:{id:'a'+n,matches:[{interest_id:'voice',score:1,quote:article(n).title}],reason:reason(n),profile_version:1,ready_at:NOW.toISOString()}}))}),{mode:0o600})
  const h=new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0},path:join(dir,'state.json'),userScope:'u',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null,now:()=>NOW,...options})
  await h.open();return h
 }
@@ -173,4 +175,51 @@ test('news keeps the age it had when it was published, so a night in quiet hours
   f.at('2026-09-21T09:00:00Z');await f.h.flushNotifications()
   assert.equal(f.delivered(),0,'by the time quiet hours end it is 32 hours old and is dropped')
  }finally{await f.close()}
+})
+
+test('blocking the source invalidates queued news before quiet hours end',async()=>{
+ const f=await overnight()
+ try{
+  await f.h.admitNews(at('2026-09-20T22:00:00Z'),reason(1))
+  const message=feedNotification(f.h.snapshot().feed.find(x=>x.subject_key==='news:a1')!)
+  assert.equal(await f.h.notificationValidity(message),'defer')
+  await f.h.news.action({action:'block',source_id:'bbc',value:true})
+  assert.equal(f.h.news.pushEligibility('a1'),'ineligible')
+  assert.equal(await f.h.notificationValidity(message),'invalid')
+  f.at('2026-09-21T09:00:00Z');await f.h.flushNotifications();assert.equal(f.delivered(),0)
+ }finally{await f.close()}
+})
+
+for(const matches of [false,true])test(`interest edits hold queued news until current-profile ranking finishes (matches=${matches})`,async()=>{
+ const f=await overnight()
+ try{
+  await f.h.admitNews(at('2026-09-20T22:00:00Z'),reason(1))
+  const message=feedNotification(f.h.snapshot().feed.find(x=>x.subject_key==='news:a1')!)
+  await f.h.news.configure({enabled:true,interests:['Astronomy'],explore:false})
+  assert.equal(f.h.news.pushEligibility('a1'),'pending')
+  f.at('2026-09-21T09:00:00Z')
+  assert.equal(await f.h.notificationValidity(message),'defer')
+  await f.h.flushNotifications();assert.equal(f.delivered(),0)
+  f.h.news.options.now=()=>NOW
+  f.h.news.options.fetcher=()=>Promise.resolve(new Response('<rss><channel></channel></rss>'))
+  f.h.news.options.rank=(interests,articles)=>Promise.resolve(articles.map(a=>({id:a.id,matches:matches?[{interest_id:interests[0]!.id,score:1,quote:a.title}]:[],reason:matches?'相关':''})))
+  await f.h.news.refresh()
+  assert.equal(f.h.news.pushEligibility('a1'),matches?'eligible':'ineligible')
+  assert.equal(await f.h.notificationValidity(message),matches?'valid':'invalid')
+  await f.h.flushNotifications();assert.equal(f.delivered(),matches?1:0)
+ }finally{await f.close()}
+})
+
+test('disabled, expired and missing news is invalid even during quiet hours',async()=>{
+ for(const invalid of ['discovery','news','expired','missing']){
+  const f=await overnight()
+  try{
+   await f.h.admitNews({...at(invalid==='expired'?'2026-09-19T22:00:00Z':'2026-09-20T22:00:00Z'),id:invalid==='missing'?'missing':'a1'},reason(1))
+   const message=feedNotification(f.h.snapshot().feed.find(x=>x.subject_key.startsWith('news:'))!)
+   if(invalid==='discovery')await f.h.command({type:'personal.command',request_id:'off',method:'discovery.configure',params:{enabled:false}})
+   if(invalid==='news')await f.h.news.configure({enabled:false,interests:[],explore:false})
+   assert.equal(await f.h.notificationValidity(message),'invalid',invalid)
+   await f.h.flushNotifications();assert.equal(f.delivered(),0)
+  }finally{await f.close()}
+ }
 })

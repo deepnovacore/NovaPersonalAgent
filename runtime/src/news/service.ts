@@ -75,12 +75,16 @@ export class NewsService{
  /** Articles strong enough to interrupt the user for: confirmed interests only, fresh, concrete, best first. */
  pushCandidates(){
   const s=this.#state,now=this.#now().getTime()
-  if(!s.enabled||s.interests_seeded||!s.interests.length)return []
-  const strength=(a:typeof s.items[number])=>Math.max(0,...(a.ranking?.matches??[]).map(m=>m.score*Math.min(1,s.interests.find(i=>i.id===m.interest_id)?.weight??0)))
-  return s.items.filter(a=>this.#sources.some(source=>source.id===a.source_id)&&!s.blocked.includes(a.source_id)
-   &&a.ranking?.profile_version===s.profile_version&&now-Date.parse(a.published_at??a.first_seen)<PUSH_MAX_AGE_MS
-   &&(a.ranking.judgment===undefined||a.ranking.judgment.substance==='concrete')&&strength(a)>=PUSH_MIN_STRENGTH)
-   .sort((a,b)=>strength(b)-strength(a)).map(a=>({...a,summary:a.summary.slice(0,700)}))
+  return s.items.filter(a=>this.#pushEligibility(a)==='eligible'&&now-Date.parse(a.published_at??a.first_seen)<PUSH_MAX_AGE_MS)
+   .sort((a,b)=>this.#pushStrength(b)-this.#pushStrength(a)).map(a=>({...a,summary:a.summary.slice(0,700)}))
+ }
+ pushEligibility(articleId:string):'eligible'|'pending'|'ineligible'{return this.#pushEligibility(this.#state.items.find(a=>a.id===articleId))}
+ #pushStrength(a:State['items'][number]){return Math.max(0,...(a.ranking?.matches??[]).map(m=>m.score*Math.min(1,this.#state.interests.find(i=>i.id===m.interest_id)?.weight??0)))}
+ #pushEligibility(a:State['items'][number]|undefined):'eligible'|'pending'|'ineligible'{
+  const s=this.#state
+  if(!a||!s.enabled||s.interests_seeded||!s.interests.length||!this.#sources.some(source=>source.id===a.source_id)||s.blocked.includes(a.source_id))return 'ineligible'
+  if(a.ranking?.profile_version!==s.profile_version)return 'pending'
+  return (a.ranking.judgment===undefined||a.ranking.judgment.substance==='concrete')&&this.#pushStrength(a)>=PUSH_MIN_STRENGTH?'eligible':'ineligible'
  }
  refresh():Promise<void>{if(this.#run){this.#rerun=true;return this.#run}if(!this.#opened||!this.#state.enabled)return Promise.resolve()
   const run=(async()=>{do{this.#rerun=false;await this.#refresh()}while(this.#rerun&&this.#opened&&this.#state.enabled)})();this.#run=run;this.options.changed?.();void run.finally(()=>{this.#run=undefined;this.options.changed?.()}).catch(()=>{/* optional cleanup/observer */});return run
