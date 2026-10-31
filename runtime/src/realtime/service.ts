@@ -835,7 +835,18 @@ export class RealtimeService {
 
   #failUncertainDelivery(): void {
     this.#onDiagnostic('[realtime-diagnostic] uncertain_delivery_exhausted')
+    const alreadyFailed = this.#providerFailed
     this.#providerFailed = true
+    // The UI may still believe the voice session is live; tell lifecycle owners the
+    // service is stopping, exactly like #taskFailed does for loop failures.
+    if (!alreadyFailed) {
+      this.#notifyProviderEvent({
+        kind: 'provider_error',
+        session_epoch: this.session.sessionEpoch,
+        code: 'uncertain_delivery_failed',
+        recoverable: false,
+      })
+    }
     this.#host.releaseFailedDelivery()
     this.#stop.abort()
     this.#deliveryReady.set()
@@ -908,6 +919,7 @@ export class RealtimeService {
   ): Promise<boolean> {
     const requestedEpoch = options.expectedEpoch ?? this.session.sessionEpoch
     this.#telemetry?.record('provider.reconnect', {reason: options.reason, outcome: 'started'})
+    let replacementAnnounced = false
     try {
       return await this.#reconnectLock.run(async () => {
         if (this.session.sessionEpoch !== requestedEpoch) {
@@ -950,6 +962,14 @@ export class RealtimeService {
         this.#continuations.reconcileToolStateAfterReconnect(oldEpoch)
         this.#host.reopenFailedSemanticAcknowledgements()
         this.#host.reconcileSemanticAcknowledgementsAfterReconnect()
+        // Tell lifecycle owners before any queued delivery resumes, so a user
+        // whose transport just came back learns they can speak again without
+        // having to test the new session first.
+        this.#notifyProviderEvent({
+          kind: 'provider_reconnected',
+          session_epoch: this.session.sessionEpoch,
+        })
+        replacementAnnounced = true
         await this.driveContinuations()
         await this.#deliveryPass()
         this.#telemetry?.record('provider.reconnect', {
@@ -960,6 +980,17 @@ export class RealtimeService {
       })
     } catch (failure) {
       this.#telemetry?.record('provider.reconnect', {reason: options.reason, outcome: 'failed'})
+      // A failed replacement leaves no provider behind, so the transport will
+      // emit nothing else. Lifecycle owners must learn the outcome here. A failure after the
+      // replacement was announced is a delivery problem on a live session, not a dead transport.
+      if (!replacementAnnounced) {
+        this.#notifyProviderEvent({
+          kind: 'provider_error',
+          session_epoch: this.session.sessionEpoch,
+          code: 'reconnect_failed',
+          recoverable: false,
+        })
+      }
       throw failure
     }
   }
@@ -990,8 +1021,13 @@ export class RealtimeService {
         if (event.session_epoch !== this.session.sessionEpoch) continue
         received = true
         try {
+          // A provider error is transport news, not conversation state: handleEvent
+          // may spend seconds replacing the session inside its recoverable arm, so
+          // lifecycle owners are told first. Otherwise the "reconnecting" notice
+          // would arrive only after the reconnect had already finished.
+          if (event.kind === 'provider_error') this.#notifyProviderEvent(event)
           await this.handleEvent(event)
-          this.#notifyProviderEvent(event)
+          if (event.kind !== 'provider_error') this.#notifyProviderEvent(event)
         } catch (cause) {
           if (event.kind === 'response_terminal') this.#notifyProviderEvent(event)
           if (cause instanceof ItemDeliveryUncertainError) {
@@ -1115,11 +1151,23 @@ export class RealtimeService {
         `[realtime-diagnostic] provider_error code=${event.code} recoverable=${event.recoverable}`,
       )
       if (event.recoverable) {
-        await this.#reconnectProviderSession({
+        // Cleared before the reconnect so the empty final caption cannot land after
+        // "provider_reconnected" and make the desktop treat it as a fresh utterance.
+        this.#clearCaptions()
+        const replaced = await this.#reconnectProviderSession({
           reason: 'recoverable_provider_error',
           expectedEpoch: this.session.sessionEpoch,
         })
-        this.#clearCaptions()
+        // A false result means another reconnect replaced the session first, so
+        // its own completion notification may have landed before this error was
+        // reported. Re-state that the live epoch is usable, or a listener that
+        // announced the gap would wait for a recovery that already happened.
+        if (replaced === false) {
+          this.#notifyProviderEvent({
+            kind: 'provider_reconnected',
+            session_epoch: this.session.sessionEpoch,
+          })
+        }
       } else {
         this.#providerFailed = true
         this.#approvalHost.invalidateExecutorApproval('provider_failed')
@@ -1481,7 +1529,18 @@ export class RealtimeService {
       this.#onDiagnostic('[realtime-diagnostic] task_failure_from_previous_run')
       return
     }
+    const alreadyFailed = this.#providerFailed
     this.#providerFailed = true
+    // Owners were told "recovered" or "connected" earlier; without a terminal notice they would keep
+    // showing a live voice session after the service has stopped.
+    if (!alreadyFailed) {
+      this.#notifyProviderEvent({
+        kind: 'provider_error',
+        session_epoch: this.session.sessionEpoch,
+        code: 'service_task_failed',
+        recoverable: false,
+      })
+    }
     this.#approvalHost.invalidateExecutorApproval('task_failed')
     this.#host.releaseFailedDelivery()
     this.#stop.abort()

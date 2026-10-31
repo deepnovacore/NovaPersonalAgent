@@ -201,6 +201,17 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(turnToolTrace.length>16)turnToolTrace.shift()
    emit({type:'conversation.tool',name:event.name,state:event.state,summary:event.summary,...(assistantTurnId?{turn_id:assistantTurnId}:{})})
   }
+  // Voice transport recovery is a UI state, not another conversation turn: the
+  // service replaces the provider session underneath a live voice conversation,
+  // so the person speaking has to be told both when the gap starts and when it
+  // is safe to speak again. These flags live here because this runtime is the
+  // only owner of the conversation frame stream.
+  let providerReconnecting = false
+  let providerEpoch = 0
+  const emitVoiceNotice = (code: string, message: string) => {
+   if (mode !== 'voice') return
+   emit({type: 'conversation.notice', code, message})
+  }
   const graph=buildRealtimeAssembly({core,provider,usageContext,...(chatToolNames?{providerToolView:tools=>({...tools,schemas:tools.schemas.filter(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&chatToolNames.has(name)})}),toolGate:name=>chatToolNames.has(name),onTool:recordToolEvent}:{}),...(options.additionalAgentControllers?{additionalAgentControllers:options.additionalAgentControllers}:{}),...(!execution?{conversationContext:()=>options.host.scheduledConversationContext(conversation.id,conversation.generation,memoryConsumerFingerprint??null)}:{}),suppressMemoryAdaptation:!!execution,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(execution?{scopedTool:event=>scheduledTools!.accept(event),validateScopedContext:()=>scheduledTools!.validateContext()}:{scheduleHost:new ScheduleAgentController(options.host,core.gateway,options.settings.support_model,conversation.id,conversation.generation)}),
    ...(execution?{providerToolView:tools=>{if(options.host.schedules.getRun(execution!.run_id).processing)return {...tools,schemas:tools.schemas.filter(schema=>(schema.function as {name?:string}|undefined)?.name==='source__process')};const context=options.host.schedules.getRun(execution!.run_id).definition.context;return {...tools,schemas:tools.schemas.filter(schema=>{const fn=schema.function;if(!fn||typeof fn!=='object'||Array.isArray(fn)||typeof fn.name!=='string')return false;const binding=tools.bindings.get(fn.name);return fn.name==='app__context'||(context.memory||context.knowledge)&&['memory__recall','memory__evidence'].includes(fn.name)||context.search&&binding?.executor==='search'&&core.runtime.executors.get('search')?.manifest.ops.some(op=>op.name===binding.op&&op.readonly)===true})}}}:{}),
@@ -236,6 +247,32 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     emit({delivery_class:frame.role==='assistant'&&currentResponse?(graph.service.isTaskContinuationResponse(currentResponse)?'task_output':graph.service.isProactiveResponse(currentResponse)?'proactive':'reply'):'reply',type:'caption',...outgoing})
    },
    onProviderEvent:event=>{
+    if(event.kind==='provider_reconnected'){
+     // The transport replaced the provider session and the new epoch is live.
+     // This event exists so the recovery notice does not wait for the user to
+     // speak into the new session first.
+     if(providerReconnecting&&event.session_epoch>providerEpoch)emitVoiceNotice('voice_provider_recovered','语音连接已恢复，请再说一次')
+     providerReconnecting=false
+     providerEpoch=Math.max(providerEpoch,event.session_epoch)
+     return
+    }
+    if(event.kind==='provider_error'){
+     if(event.recoverable){
+      // First recoverable error of a gap: say it once, not once per event. A
+      // late error from an already-replaced epoch describes a session that is
+      // gone and must not reopen the reconnecting state.
+      if(event.session_epoch>=providerEpoch){
+       if(!providerReconnecting)emitVoiceNotice('voice_provider_reconnecting','语音连接中断，正在重连…')
+       providerReconnecting=true
+      }
+     }else{
+      // A transport that failed past recovery will not reconnect. Tell the user
+      // how to get out instead of leaving the orb listening at a dead session.
+      if(providerReconnecting||event.session_epoch>=providerEpoch)emitVoiceNotice('voice_provider_failed','语音连接已断开，请重新开启语音；若仍失败，请在设置中检查语音服务配置')
+      providerReconnecting=false
+     }
+     providerEpoch=Math.max(providerEpoch,event.session_epoch)
+    }
     if(event.kind==='provider_error'&&provider.capabilities?.model.nativeFullDuplex)emit({type:'conversation.notice',code:'native_session_ended',message:'原生语音连接已结束。请结束语音后重新开启；新连接不会恢复之前的对话上下文。'})
     // A recoverable error reconnects the provider before its old terminal can arrive.
     // Settle the bound delivery here so the durable task does not remain queued forever.
