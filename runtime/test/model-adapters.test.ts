@@ -192,26 +192,31 @@ test('compressor selects verified source records without accepting generated fac
 })
 
 test('discovery uses bounded Proactive gateway without speech or execution', async () => {
-  const gateway=new ScriptedGateway([],JSON.stringify({proposal:null}))
+  const gateway=new ScriptedGateway([],JSON.stringify({proposals:[]}))
   const proactive=new GatewayProactivity({gateway,model:'same-model',proactivityPreset:'balanced'})
   const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'Asia/Shanghai',memory:[],evidence_refs:[],recent_delivery:[]}
-  assert.equal(await proactive.discover(snapshot,new AbortController().signal),null)
+  assert.deepEqual(await proactive.discover(snapshot,new AbortController().signal),[])
   assert.match(gateway.completions[0]!.system,/json/i,'JSON mode requires an explicit JSON instruction even when source text has no JSON keyword')
   const conflicted=new GatewayProactivity({gateway:new ScriptedGateway([],JSON.stringify({speak:true,suggestion_id:'s-1',progress_class:null,reason:'bad',proposal:{kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}})),model:'same-model',proactivityPreset:'balanced'})
   await assert.rejects(conflicted.select(emptyView),/契约/)
 })
 
-test('discovery treats an unusable proposal as silence instead of failing the caller, and still returns a valid one',async()=>{
+test('discovery treats unusable proposals as silence instead of failing the caller, and still returns valid ones',async()=>{
  // Discovery is optional: a model that returns string memory_refs, an over-long summary or non-JSON text must not
  // throw into the source pipeline that awaits it. A well-formed proposal is returned unchanged.
  const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'Asia/Shanghai',memory:[],evidence_refs:['conversation:1'],recent_delivery:[]}
  const discover=(text:string)=>new GatewayProactivity({gateway:new ScriptedGateway([],text),model:'m',proactivityPreset:'balanced'}).discover(snapshot,new AbortController().signal)
  const base={kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}
- assert.equal(await discover(JSON.stringify({proposal:{...base,memory_refs:['entry-1']}})),null)
- assert.equal(await discover(JSON.stringify({proposal:{...base,summary:'x'.repeat(201)}})),null)
- assert.equal(await discover('not json at all'),null)
- assert.equal(await discover(JSON.stringify({proposal:{...base,extra:true}})),null)
- assert.deepEqual(await discover(JSON.stringify({proposal:base})),base)
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,memory_refs:['entry-1']}]})),[])
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,summary:'x'.repeat(201)}]})),[])
+ assert.deepEqual(await discover('not json at all'),[])
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,extra:true}]})),[])
+ assert.deepEqual(await discover(JSON.stringify({proposal:base})),[],'the single-proposal shape is gone')
+ assert.deepEqual(await discover(JSON.stringify({proposals:[base]})),[base])
+ const other={...base,summary:'R'}
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,extra:true},other]})),[other],'one unusable item does not cost the valid ones')
+ const four=['A','B','C','D'].map(summary=>({...base,summary}))
+ assert.deepEqual((await discover(JSON.stringify({proposals:four}))).map(p=>p.summary),['A','B','C'],'at most three per window')
 })
 
 test('read-only preparation makes one completion and rejects invented or stale snapshot references',async()=>{

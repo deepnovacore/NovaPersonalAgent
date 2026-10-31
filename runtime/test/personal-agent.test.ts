@@ -78,7 +78,7 @@ test('failed batch refresh remains retryable and arrivals during refresh are dra
   assert.equal(discoveries,1)
  }finally{await f.close()}
 })
-async function fixture() { const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-host-')); const entries = new Map([['plan', entry()]]); const memory = { get: (id: string) => Promise.resolve(entries.get(id) ?? null), list: () => Promise.resolve({ entries: [...entries.values()], cursor: null }) } as unknown as PersonalMemoryResource; const make = () => new PersonalAgentHost({ path: join(dir, 'feed.json'), userScope: 'local', memory: () => memory, pool: new SuggestionPool(), now: () => now, evidence: ref => ref.startsWith('task:') ? { subject_key: 'task:demo', source: { type: 'task', ref }, task_ref: { work_id: 'demo' } } : ref.startsWith('conversation:') ? {subject_key:ref,source:{type:'conversation',ref}} : null }); const host = make(); await host.open(); return { dir, entries, host, make, close: async () => { await host.close(); await rm(dir, { recursive: true, force: true }); } }; }
+async function fixture() { const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-host-')); const entries = new Map([['plan', entry()]]); const memory = { get: (id: string) => Promise.resolve(entries.get(id) ?? null), list: () => Promise.resolve({ entries: [...entries.values()], cursor: null }) } as unknown as PersonalMemoryResource; const make = () => new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0}, path: join(dir, 'feed.json'), userScope: 'local', memory: () => memory, pool: new SuggestionPool(), now: () => now, evidence: ref => ref.startsWith('task:') ? { subject_key: 'task:demo', source: { type: 'task', ref }, task_ref: { work_id: 'demo' } } : ref.startsWith('conversation:') ? {subject_key:ref,source:{type:'conversation',ref}} : null }); const host = make(); await host.open(); return { dir, entries, host, make, close: async () => { await host.close(); await rm(dir, { recursive: true, force: true }); } }; }
 test('ten positive deterministic admission cases with stable evidence; not live model quality', async () => { const f = await fixture(); try {
     const cases=JSON.parse(readFileSync(new URL('../../../tests/fixtures/personal-agent/v1/discovery-cases.json',import.meta.url),'utf8')) as {positive:{id:string;content:string;summary:string}[]};
     assert.equal(cases.positive.length,10);
@@ -464,7 +464,7 @@ test('all direct host store mutations reject outside the loaded lock lifetime',a
 })
 
 test('optional queued discovery failure cannot block opening the loaded personal store',async()=>{
- const dir=await mkdtemp(join(await realpath(tmpdir()),'host-startup-discovery-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'host-startup-discovery-')),host=new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0},path:join(dir,'personal.json'),userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  host.discover=()=>Promise.reject(Error('discovery offline'))
  try{await host.sourceChanged({revision:1,phase:'ready'});await host.open();await assert.rejects(host.sourceChanged({revision:1,phase:'ready'}),/discovery offline/);assert.equal(host.snapshot().conversations.selected_id,'chat:main')}
  finally{await host.close();await rm(dir,{recursive:true,force:true})}
@@ -659,4 +659,37 @@ test('assistant identity is durable user preference, rejects control characters 
   await f.host.close();await f.host.open()
   assert.equal((f.host.snapshot() as {settings:Record<string,unknown>}).settings.assistant_name,'小星')
  }finally{await f.close()}
+})
+test('source arrivals pool into one discovery once the stream goes quiet',async t=>{
+ const f=await fixture();await f.host.close();let discoveries=0
+ const host=new PersonalAgentHost({...f.host.options,discoveryWindow:{quietMs:3*60_000,maxMs:15*60_000}})
+ host.discover=()=>{discoveries++;return Promise.resolve()}
+ try{
+  await host.open();t.mock.timers.enable({apis:['setTimeout','Date']})
+  await host.sourceChanged({revision:1,phase:'ready'});t.mock.timers.tick(2*60_000)
+  await host.sourceChanged({revision:2,phase:'ready'});t.mock.timers.tick(2*60_000)
+  assert.equal(discoveries,0,'still inside the window')
+  t.mock.timers.tick(60_000);assert.equal(discoveries,1)
+ }finally{t.mock.timers.reset();await host.close();await f.close()}
+})
+test('closing the host drops a pending discovery window',async t=>{
+ const f=await fixture();await f.host.close();let discoveries=0
+ const host=new PersonalAgentHost({...f.host.options,discoveryWindow:{quietMs:3*60_000,maxMs:15*60_000}})
+ host.discover=()=>{discoveries++;return Promise.resolve()}
+ try{
+  await host.open();t.mock.timers.enable({apis:['setTimeout','Date']})
+  await host.sourceChanged({revision:1,phase:'ready'});await host.close();t.mock.timers.tick(30*60_000)
+  assert.equal(discoveries,0)
+ }finally{t.mock.timers.reset();await host.close();await f.close()}
+})
+test('one discovery may surface up to three matters, never a fourth',async()=>{
+ const f=await fixture();await f.host.close()
+ const ids=['a','b','c','d'];for(const id of ids)f.entries.set(id,entry(id))
+ const host=new PersonalAgentHost({...f.host.options,discover:()=>Promise.resolve(ids.map(id=>proposal(id)))})
+ try{await host.open();await host.discover();assert.equal(host.snapshot().feed.length,3)}finally{await host.close();await f.close()}
+})
+test('a single proposal from discovery is still admitted',async()=>{
+ const f=await fixture();await f.host.close()
+ const host=new PersonalAgentHost({...f.host.options,discover:()=>Promise.resolve(proposal())})
+ try{await host.open();await host.discover();assert.equal(host.snapshot().feed.length,1)}finally{await host.close();await f.close()}
 })

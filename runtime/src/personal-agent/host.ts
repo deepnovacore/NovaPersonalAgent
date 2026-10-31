@@ -49,6 +49,7 @@ import type {SourceChange} from '../memory-substrate/source-state.js'
 import {runInMemoryBackground} from '../memory-ledger/store-client.js'
 
 // Account, key, rate-limit and connectivity failures are shown in every mode; workbench modes also show model detail.
+const DEFAULT_DISCOVERY_WINDOW={quietMs:3*60_000,maxMs:15*60_000}
 const ACTIONABLE_FAILURE=/^model_(?:http_(?:auth|quota|rate_limited)|network|timeout|output_limit(?:_[a-z_]+)?|protocol_output_limit)$/u
 function conversationFailureReason(error:unknown,workbench:boolean):{reason?:string}{
     if(!(error instanceof Error))return {}
@@ -59,6 +60,7 @@ function conversationFailureReason(error:unknown,workbench:boolean):{reason?:str
 }
 import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
+import {DiscoveryWindow} from './discovery-window.js';
 import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool,nextConversationTitle,sourceTodoSchema, type ConversationRuntimeFactory,type ConversationRuntime,type ConversationTurnContext} from './conversations.js';
 import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.js';
 import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
@@ -69,7 +71,7 @@ import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
-import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, goalProgressSchema, type GoalProgress, type DiscussionReference, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
+import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, MAX_PROPOSALS_PER_DISCOVERY, versionSchema, goalProgressSchema, type GoalProgress, type DiscussionReference, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, PersonalStoreError, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
@@ -101,6 +103,8 @@ export interface DiscoverySnapshot {
     memory: MemoryEntry[];
     evidence_refs: string[];
     recent_delivery: FeedItem[];
+    /** Proactive deliveries still allowed today, so the model can keep only what cannot wait. */
+    daily_budget_remaining?: number;
 }
 export interface PersonalSources {
     acceptanceCounts?():Record<string,number>;
@@ -147,7 +151,9 @@ export interface HostOptions {
     memory: () => PersonalMemoryResource | undefined;
     pool: SuggestionPool;
     evidence: (ref: string) => Evidence | null;
-    discover?: (snapshot: DiscoverySnapshot, signal: AbortSignal) => Promise<Proposal | null>;
+    discover?: (snapshot: DiscoverySnapshot, signal: AbortSignal) => Promise<Proposal | readonly Proposal[] | null>;
+    /** Many-to-one pooling of source evidence before discovery; defaults to 3 minutes quiet, 15 minutes cap. */
+    discoveryWindow?: {quietMs: number; maxMs: number};
     prepareBrief?: (snapshot:DiscoverySnapshot,slot:DailyBriefSlot,signal:AbortSignal)=>Promise<PreparedMaterial|null>;
     prepareProposal?: (snapshot:DiscoverySnapshot,proposal:Proposal,signal:AbortSignal)=>Promise<PreparedMaterial|null>;
     proposeGoals?: GoalProposer;
@@ -993,6 +999,7 @@ export class PersonalAgentHost {
     #memoryReady = false;
     #lifecycle:Promise<void> = Promise.resolve();
     #sourceSignature = '';
+    #discoveryWindow!: DiscoveryWindow;
     #connectorsOpening:Promise<void>|undefined;
     #sourcePending={invalidated:0,ready:new Set<number>(),legacy:false};
     #sourceSeen={invalidated:0,ready:new Set<number>()};
@@ -1041,6 +1048,7 @@ export class PersonalAgentHost {
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
     constructor(readonly options: HostOptions) {
+      this.#discoveryWindow=new DiscoveryWindow({...(options.discoveryWindow??DEFAULT_DISCOVERY_WINDOW),fire:()=>this.discover()});
       this.workbench=new WorkbenchStore(options.path+'.workbench-agent');
       if(options.readingCopiesDirectory)this.#readingCopies=new ReadingCopies(options.readingCopiesDirectory,()=>{
         const state=this.snapshot(),account=typeof state.feishu==='object'&&state.feishu!==null&&'account_id' in state.feishu&&typeof state.feishu.account_id==='string'?state.feishu.account_id:undefined;
@@ -1191,6 +1199,7 @@ export class PersonalAgentHost {
         this.#sourceReady = false;
         this.#memoryReady = false;
         clearInterval(this.#scheduledTimer);
+        this.#discoveryWindow.cancel();
         await this.timeline.close();
         await this.#timelineRefresh;
         await this.#scheduledTail;
@@ -1762,12 +1771,12 @@ export class PersonalAgentHost {
         }
         const dueDate=(entry:MemoryEntry):string=>entry.life?.due??(entry.commitment?.due?new Date(entry.commitment.due).toLocaleDateString('en-CA',{timeZone:timezone}):'9999-12-31')
         relevant=relevant.filter((e,i,all)=>all.findIndex(a=>a.id===e.id)===i).sort((a,b)=>dueDate(a).localeCompare(dueDate(b)))
-        return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,memory:relevant.filter(memoryEligibleForDiscovery).slice(0,16),evidence_refs:[...new Set(interleave([(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),this.options.evidenceRefs?.()??[],(retrieval?.snippets??[]).map(item=>item.evidence_id)],48))].slice(0,16),recent_delivery:this.#state.feed.filter(f=>f.lifecycle!=='invalidated'&&Object.values(f.delivery).some(Boolean)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
+        return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,daily_budget_remaining:Math.max(0,(this.#state.settings.proactive_daily_cap??5)-this.notifications.deliveredToday(['brief','suggestion'],timezone,now.getTime())),memory:relevant.filter(memoryEligibleForDiscovery).slice(0,16),evidence_refs:[...new Set(interleave([(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),this.options.evidenceRefs?.()??[],(retrieval?.snippets??[]).map(item=>item.evidence_id)],48))].slice(0,16),recent_delivery:this.#state.feed.filter(f=>f.lifecycle!=='invalidated'&&Object.values(f.delivery).some(Boolean)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
     }
     discover(): Promise<void> { if (this.#discovery)
         return this.#discovery; if (acceptanceEnabled() || !this.#opened || !this.#state.settings.discovery_enabled || !this.options.discover)
-        return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const proposal = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); if (proposal && !controller.signal.aborted && this.#opened && this.#state.settings.discovery_enabled)
-        await this.admit(proposal, snapshot); })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
+        return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const found = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); const proposals = found === null ? [] : Array.isArray(found) ? found.slice(0, MAX_PROPOSALS_PER_DISCOVERY) : [found as Proposal]; for (const proposal of proposals) { if (controller.signal.aborted || !this.#opened || !this.#state.settings.discovery_enabled) break;
+        await this.admit(proposal, snapshot); } })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
         this.#discovery = undefined; }).catch(() => { /* optional observer or cleanup already reported */ }); return run; }
     async admit(input:unknown,snapshot:DiscoverySnapshot):Promise<'admitted'|'rejected'|'suppressed_duplicate'>{
         const parsed=proposalSchema.safeParse(input);if(!parsed.success)return 'rejected';
@@ -1842,7 +1851,7 @@ export class PersonalAgentHost {
                     await this.refreshMemory();await this.revalidate();await this.#serial(()=>this.#commit(structuredClone(this.#state)));
                     if(next.legacy||next.ready.length){
                         const signature=hash({refs:(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref).sort(),revision:next.ready});
-                        if(signature!==this.#sourceSignature){await this.discover();this.#sourceSignature=signature;}
+                        if(signature!==this.#sourceSignature){this.#sourceSignature=signature;await this.#discoveryWindow.touch();}
                     }
                     this.#sourceSeen.invalidated=Math.max(this.#sourceSeen.invalidated,next.invalidated);
                     for(const revision of next.ready){this.#sourceSeen.ready.add(revision);this.#sourcePending.ready.delete(revision);}
