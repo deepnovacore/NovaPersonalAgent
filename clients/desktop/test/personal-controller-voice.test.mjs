@@ -1,0 +1,97 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {PersonalController} from '../src/renderer/personal-controller.mjs'
+
+function makeController({voiceId='chat:main'}={}) {
+  const sent=[]
+  const controller=new PersonalController({send:frame=>{sent.push(frame);return true},start:async()=>{},stop:async()=>{},changed:()=>{}})
+  controller.connected=true
+  controller.snapshot={type:'personal.state',conversations:{selected_id:'chat:main',voice_id:voiceId,items:[{id:'chat:main',generation:1,kind:'chat',mode:'chat'}],messages:[]}}
+  controller.mode='voice'
+  return {controller,sent}
+}
+
+// Commands the controller issues (e.g. disabling voice on failure) are never answered here;
+// drop their 30s timeout timers so they cannot keep the test process alive.
+function settle(controller) {
+  for(const entry of controller.pending.values())clearTimeout(entry.timer)
+  controller.pending.clear()
+}
+
+test('voice reconnect notices reach the conversation state and the voice notice copy', () => {
+  const {controller}=makeController()
+  controller.receive({type:'conversation.notice',conversation_id:'chat:main',code:'voice_provider_reconnecting',message:'语音连接中断，正在重连…'})
+  assert.equal(controller.voiceState,'reconnecting')
+  assert.equal(controller.voiceNotice,'语音连接中断，正在重连…')
+  assert.equal(controller.state('chat:main').notice,'语音连接中断，正在重连…')
+  assert.equal(controller.voicePhase,'reconnecting')
+  // A reconnect notice must not be reported as a fatal conversation error.
+  assert.equal(controller.state('chat:main').error,'')
+
+  controller.receive({type:'conversation.notice',conversation_id:'chat:main',code:'voice_provider_recovered',message:'语音连接已恢复，请再说一次'})
+  assert.equal(controller.voiceState,'recovered')
+  assert.equal(controller.voiceNotice,'语音连接已恢复，请再说一次')
+
+  // The next user utterance consumes the recovery hint instead of leaving stale copy.
+  controller.receive({type:'caption',conversation_id:'chat:main',role:'user',final:true,text:'继续'})
+  assert.equal(controller.state('chat:main').notice,'')
+  assert.equal(controller.voiceNotice,'')
+  assert.equal(controller.voiceState,null)
+})
+
+test('an unrecoverable voice failure ends voice mode and surfaces an actionable error', () => {
+  const {controller,sent}=makeController()
+  controller.receive({type:'conversation.notice',conversation_id:'chat:main',code:'voice_provider_failed',message:'语音连接已断开，请重新开启语音；若仍失败，请在设置中检查语音服务配置'})
+  assert.equal(controller.voiceState,'failed')
+  assert.equal(controller.mode,'text')
+  assert.match(controller.voiceNotice,/语音连接已断开/)
+  assert.match(controller.state('chat:main').error,/语音服务配置/)
+  assert.ok(sent.some(frame=>frame.type==='conversation.notice')===false, 'renderer does not echo the notice back to the host')
+  assert.ok(sent.some(frame=>frame.type==='personal.command'&&frame.method==='conversations.voice'&&frame.params.enabled===false), 'voice is disabled on the host')
+  settle(controller)
+})
+
+test('starting a new voice session clears a stale reconnect notice', async () => {
+  const {controller}=makeController()
+  controller.receive({type:'conversation.notice',conversation_id:'chat:main',code:'voice_provider_reconnecting',message:'语音连接中断，正在重连…'})
+  controller.voiceState='reconnecting'
+  controller.voiceNotice='语音连接中断，正在重连…'
+  controller.connected=false
+  await controller.stopVoice()
+  assert.equal(controller.voiceState,null)
+  assert.equal(controller.voiceNotice,'')
+})
+
+test('an empty caption reset does not erase the recovery notice', () => {
+  const {controller}=makeController()
+  controller.receive({type:'conversation.notice',conversation_id:'chat:main',code:'voice_provider_recovered',message:'语音连接已恢复，请再说一次'})
+  controller.receive({type:'caption',conversation_id:'chat:main',role:'user',final:true,text:''})
+  assert.equal(controller.voiceState,'recovered')
+  assert.equal(controller.voiceNotice,'语音连接已恢复，请再说一次')
+})
+
+test('a late voice failure does not cancel an in-progress dictation', () => {
+  const {controller,sent}=makeController()
+  controller.mode='dictation'
+  controller.dictationId='dictation-1'
+  controller.dictationConversationId='chat:main'
+  const generation=controller.generation
+  controller.receive({type:'conversation.notice',conversation_id:'chat:main',code:'voice_provider_failed',message:'语音连接已断开'})
+  assert.equal(controller.mode,'dictation','the dictation capture keeps running')
+  assert.equal(controller.dictationId,'dictation-1')
+  assert.equal(controller.generation,generation,'no generation bump may stale the dictation startup')
+  assert.match(controller.voiceNotice,/语音连接已断开/)
+  assert.equal(sent.some(frame=>frame.type==='personal.command'),false,'no voice-disabling command is sent for the dictation')
+  settle(controller)
+})
+
+test('a terminal voice failure invalidates an in-flight voice startup', () => {
+  const {controller}=makeController()
+  controller.mode='starting'
+  const before=controller.generation
+  controller.receive({type:'conversation.notice',conversation_id:'chat:main',code:'voice_provider_failed',message:'语音连接已断开'})
+  assert.ok(controller.generation>before, 'pending voice() must see a stale generation and not re-enter voice mode')
+  assert.equal(controller.mode,'text')
+  settle(controller)
+})

@@ -15,7 +15,7 @@ import { Action, Field } from './settings/controls';
 import { SkinPanel, VisorPanel, PermissionsPanel, UsagePanel, SkillsPanel, KnowledgePanel, DisplayPanel } from './settings/panels';
 import { ProactivityPanel, ChatGptPanel } from './settings/live';
 import { CapabilitiesPanel, ModuleToggle } from './settings/capabilities';
-import { ConnectionsPanel, ImPanel } from './settings/integrations';
+import { ConnectorsPage } from './settings/connectors';
 import { ModelRoutesPanel } from './settings/models';
 import {SettingsCategoryIcon} from './settings/icons';
 import {NewsPreferencesPanel} from './settings/news';
@@ -137,6 +137,19 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         const { tag, props, children } = node, id = props.id ?? '', key = id || index;
         const categoryHidden = allSections.has(id) && !visibleSections.has(id);
         const active = !categoryHidden;
+        // Connector entry page: the two legacy sections become one card grid entry level.
+        if (id === 'im-section' || id === 'connections-section') {
+            if (category !== 'connectors')
+                return null;
+            if (id === 'connections-section')
+                return null;
+            return <section className="setting-section connectors-home" id="connectors-home" key={key}>
+                <h2>{t('连接器')}</h2>
+                <p className="hint">{t('把 Nova 连接到你常用的工具。选择一个连接器查看状态与配置。')}</p>
+                <ConnectorsPage api={api}/>
+            </section>;
+        }
+        // Space 与手机 has its own left-rail category and renders from a standalone section.
         if (id === 'capabilities-problems') { const problems=view.capabilities?.problems??[]; return <p key={key} id={id} className="warning" hidden={!problems.length} role="alert">{problems.map((problem:string)=>t(problem)).join(' · ')}</p>; }
         if (id === 'model-routes') return <ModelRoutesPanel key={key} view={view} stage={stage} hidden={modelPane !== 'routes'}/>;
         if (id === 'visor-section')
@@ -166,11 +179,11 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         if (id === 'desktop-permissions-panel')
             return category === 'permissions' ? <PermissionsPanel key={key} api={bridge?.welcome}/> : null;
         if (id === 'connections-panel')
-            return category === 'connectors' ? <React.Fragment key={key}><ConnectionsPanel api={api}/><SpaceHostPanel api={api}/></React.Fragment> : null;
+            return null;
         if (id === 'im-connection')
-            return category === 'connectors' ? <ImPanel key={key} api={api}/> : null;
+            return null;
         if (id === 'proactivity-panel' || id === 'diary-panel')
-            return category === (id === 'diary-panel' ? 'diary' : 'general') ? <React.Fragment key={key}>{id==='diary-panel'&&<NewsPreferencesPanel api={api} local={newsLocal} setLocal={setNewsLocal}/>}<ProactivityPanel api={api} diary={id === 'diary-panel'} briefingDraft={briefingDraft} onBriefingDraftChange={id==='diary-panel'?setBriefingDraft:undefined} keyMissing={!view.secretsPresent?.openrouterApiKey} memory={view.capabilities?.runtime?.modules?.memory}/></React.Fragment> : null;
+            return category === (id === 'diary-panel' ? 'diary' : 'general') ? <React.Fragment key={key}><ProactivityPanel api={api} diary={id === 'diary-panel'} briefingDraft={briefingDraft} onBriefingDraftChange={id==='diary-panel'?setBriefingDraft:undefined} keyMissing={!view.secretsPresent?.openrouterApiKey} memory={view.capabilities?.runtime?.modules?.memory}/>{id==='diary-panel'&&<NewsPreferencesPanel api={api} local={newsLocal} setLocal={setNewsLocal}/>}</React.Fragment> : null;
         if (id === 'capabilities-editor')
             return category === 'capabilities' ? <CapabilitiesPanel key={key} view={view} stage={stage} api={api}/> : null;
         if (id === 'camera-executor-toggle' || id === 'coding-executor-toggle')
@@ -212,7 +225,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         if (allSections.has(id))
             p.hidden = categoryHidden;
         if (id === 'pipeline') p.hidden = categoryHidden || modelPane !== 'pipeline';
-        if(props['data-endpoint']&&secretUsage(props['data-endpoint'])===t('必需'))p.open=true; if(id==='secrets-advanced')p.open=true; if(props.class==='secret'&&secretUsage(props['data-key']??'')===t('必需'))p['data-required']='true'; if (id === 'secrets' || id === 'codex-projects')
+        if(id==='secrets-advanced')p.open=true; if (id === 'secrets' || id === 'codex-projects')
             p.open = true;
         const hidden: any = { 'language-restart-hint': (view.language ?? 'zh-CN') === currentLanguage(), 'codex-manual-settings': view.codexBinaryMode !== 'manual', 'codex-rescan': view.codexBinaryMode === 'manual', 'codex-yolo-warning': view.codexApprovalMode !== 'yolo', 'integrated-pipeline': view.pipelineMode !== 'integrated', 'cascaded-pipeline': view.pipelineMode !== 'cascaded', 'gemini-live-limit': view.integratedProvider !== 'gemini', 'gemini-asr-settings': view.cascadedAsrProvider !== 'gemini', 'gemini-tts-settings': view.cascadedTtsProvider !== 'gemini', 'cascaded-tts-voice-settings': ['self-hosted', 'openai-compatible'].includes(view.cascadedTtsProvider), 'keyring-warning': view.keyringAvailable !== false, 'wake-word-retry': view.wakeWord?.status !== 'error', 'wake-word-status': !['error', 'loading'].includes(view.wakeWord?.status), 'workspace-retry-recovery': (view.managedWorkspaces?.recoveryStatus ?? 'idle') === 'idle', 'codex-discovery': !!GUIDANCE[view.codingBackend], 'codex-status': !!GUIDANCE[view.codingBackend], 'coding-acp-settings': !GUIDANCE[view.codingBackend], 'coding-config-field': !GUIDANCE[view.codingBackend]?.[1] };
         for (const { stage: s, provider } of COMPATIBLE_STAGES)
@@ -230,9 +243,10 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             const sk = id.slice(6), stored = view.secretsPresent?.[sk] === true, source = view.secretSources?.[sk];
             text[id] = t(source === 'dotenv' && !isEndpointSecret(sk) ? '来自 .env' : stored ? source === 'environment' ? '来自系统配置' : '已设置' : '未设置');
             p['data-present'] = stored ? '1' : '0';
+            p['data-source'] = source === 'dotenv' && !isEndpointSecret(sk) ? 'dotenv' : stored ? source === 'environment' ? 'environment' : 'stored' : 'none';
         }
         if (id.startsWith('usage-') && SECRET_LABELS[id.slice(6)])
-            text[id] = secretUsage(id.slice(6));
+            text[id] = '';
         if (id.startsWith('secret-tab-')) {
             const tab = id.slice(11);
             p['aria-selected'] = (custom.secretTab ?? 'models') === tab;
@@ -382,11 +396,19 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
         }
         if (Object.hasOwn(text, id))
             return createElement(tag, p, text[id]);
+        if (tag === 'main' && category === 'space') {
+            const spaceSection = <section className="setting-section space-host-section" id="space-host-section" key="space-host-section">
+                <h2>{t('Space 与手机')}</h2>
+                <p className="hint">{t('用一次性配对码把手机连接到当前 Host Space。')}</p>
+                <SpaceHostPanel api={api}/>
+            </section>;
+            return createElement(tag, p, spaceSection, ...children.map(renderNode));
+        }
         return createElement(tag, p, ...children.map(renderNode));
     }
     return <><header><div className="title-lockup"><span className="eyebrow">NOVA</span><h1><Settings size={23}/> {t('设置')}</h1></div><div><p id="startup-status" role="status" data-stage={view.startup?.stage ?? ''}>{startupMessage(view.startup)}</p>{view.startup?.stage === 'failed' && <Action disabled={snapshot.busy || maintenance} action={() => maintain(() => api.retryBackend(), 'restore')}>{t('重试')}</Action>}</div><span id="status" aria-live="polite">{status}</span></header><nav className="settings-nav" id="settings-nav" aria-label={t('设置分类')}>{SETTINGS_CATEGORIES.map((c: any) => <button key={c.id} ref={el => { categoryButtons.current[c.id] = el; }} type="button" className="nav-item" id={'category-' + c.id} aria-current={category === c.id ? 'true' : 'false'} tabIndex={category === c.id ? 0 : -1} onClick={() => setCategory(c.id)} onKeyDown={e => { const next = categoryTabForKey(category, e.key); if (next) {
         e.preventDefault();
         setCategory(next);
         categoryButtons.current[next]?.focus();
-    } }}><SettingsCategoryIcon id={c.id}/><span>{c.label}</span></button>)}</nav>{settingsLayout.map(renderNode)}<footer hidden={category === 'phone' || category === 'hub'}><div className="footer-copy"><p className="note">{t('服务配置保存后，点击重启生效。')}</p>{(notice || ['recovery_pending', 'recovery_failed'].includes(view.settingsApplyStatus)) && <p id="restart-notice" className="warning" role="status">{t(NOTICE[['recovery_pending', 'recovery_failed'].includes(view.settingsApplyStatus) ? view.settingsApplyStatus : notice] ?? '设置已生效')}</p>}</div>{view.settingsRecoveryAvailable && <Action id="settings-restore" disabled={snapshot.busy || maintenance || view.managedWorkspaces?.lifecycleBusy} action={() => maintain(() => api.retryBackend(), 'restore')}>{t('恢复上次可用设置')}</Action>}<Button id="settings-save" type="button" disabled={buttons.saveDisabled} onClick={() => void saveAll()}><Save size={15}/>{t('保存')}</Button><Button id="settings-restart" type="button" disabled={snapshot.busy || maintenance || view.managedWorkspaces?.lifecycleBusy} onClick={() => void maintain(() => api.restart())}><RefreshCw size={15}/>{t('重启')}</Button></footer></>;
+    } }}><SettingsCategoryIcon id={c.id}/><span>{c.label}</span></button>)}</nav>{settingsLayout.map(renderNode)}<footer hidden={category === 'phone' || category === 'hub' || category === 'space'}><div className="footer-copy"><p className="note">{t('服务配置保存后，点击重启生效。')}</p>{(notice || ['recovery_pending', 'recovery_failed'].includes(view.settingsApplyStatus)) && <p id="restart-notice" className="warning" role="status">{t(NOTICE[['recovery_pending', 'recovery_failed'].includes(view.settingsApplyStatus) ? view.settingsApplyStatus : notice] ?? '设置已生效')}</p>}</div>{view.settingsRecoveryAvailable && <Action id="settings-restore" disabled={snapshot.busy || maintenance || view.managedWorkspaces?.lifecycleBusy} action={() => maintain(() => api.retryBackend(), 'restore')}>{t('恢复上次可用设置')}</Action>}<Button id="settings-save" type="button" disabled={buttons.saveDisabled} onClick={() => void saveAll()}><Save size={15}/>{t('保存')}</Button><Button id="settings-restart" type="button" disabled={snapshot.busy || maintenance || view.managedWorkspaces?.lifecycleBusy} onClick={() => void maintain(() => api.restart())}><RefreshCw size={15}/>{t('重启')}</Button></footer></>;
 }

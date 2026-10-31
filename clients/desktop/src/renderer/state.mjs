@@ -65,6 +65,17 @@ const WINDOWS_PERMISSION_DENIED_LABEL =
 export function deriveOrbState(input) {
   const microphone = input.microphone
     ?? (input.permission === 'denied' ? 'permission_denied' : input.permission)
+  // Voice bring-up and voice transport recovery are not the same axis as the
+  // backend socket or the microphone: the controller owns them, and the window
+  // must say what the voice session is doing instead of falling back to
+  // "未启用" while a voice session is being created or reconnected.
+  const voicePhase = input.voiceFailed === true
+    ? 'failed'
+    : input.voiceReconnecting === true
+      ? 'reconnecting'
+      : input.voiceStarting === true
+        ? 'starting'
+        : null
   let name
   if (input.error) name = 'error'
   // A renderer that has not finished bootstrapping has not connected yet
@@ -82,6 +93,14 @@ export function deriveOrbState(input) {
   else if (microphone === 'device_busy') name = 'microphone-busy'
   else if (microphone === 'capture_unavailable') name = 'microphone-unavailable'
   else if (microphone === 'audio_pipeline_error') name = 'audio-pipeline-error'
+  // A voice session that is still being created or is reconnecting its own
+  // transport outranks booting/inactive: it is the state the user just asked
+  // for, and reporting it as "未启用" while the microphone is already hot reads
+  // as a bug. The visual vocabulary stays the existing booting/reconnecting/
+  // error states; only the copy carries the voice meaning.
+  else if (voicePhase === 'starting') name = 'booting'
+  else if (voicePhase === 'reconnecting') name = 'reconnecting'
+  else if (voicePhase === 'failed') name = 'error'
   else if (input.booting) name = 'booting'
   else if (!input.activated) name = 'inactive'
   // A deliberate mute outranks capture and playback: the mic being off is the
@@ -122,15 +141,32 @@ export function deriveOrbState(input) {
     ? 'confirmation'
     : projectLabel === '' ? 'hidden' : 'project'
   const codexLabel = pendingConfirmation ? project.join('\n') : projectLabel
-  const label = name === 'permission-denied' && input.platform === 'win32'
-    ? WINDOWS_PERMISSION_DENIED_LABEL
-    : LABELS[name]
+  // The voice axis owns its copy: the reused visual state names above must not
+  // leak their app-startup/backend wording into a voice-specific situation.
+  const voiceStatusLine = voicePhase === 'starting'
+    ? t("正在启用语音…")
+    : voicePhase === 'reconnecting'
+      ? t("语音连接中断，正在重连…")
+      : voicePhase === 'failed' ? t("语音连接已断开") : ''
+  const voiceLabel = voicePhase === 'starting'
+    ? t("正在启用语音…")
+    : voicePhase === 'reconnecting'
+      ? t("语音连接中断，正在重连…")
+      : voicePhase === 'failed'
+        ? t("语音连接已断开，请重新开启语音；若仍失败，请在设置中检查语音服务配置")
+        : ''
+  const label = voiceLabel
+    || (name === 'permission-denied' && input.platform === 'win32'
+      ? WINDOWS_PERMISSION_DENIED_LABEL
+      : LABELS[name])
   return Object.freeze({
     name,
     label,
+    voicePhase,
     statusLine: pendingConfirmation
       ? t("需要你的确认")
-      : name === 'idle' && input.codex === 'preparing' ? t("正在安排任务") : compactOrbLabel(name),
+      : voiceStatusLine
+        || (name === 'idle' && input.codex === 'preparing' ? t("正在安排任务") : compactOrbLabel(name)),
     // Only the missing-configuration line acts: it opens first-run setup.
     statusAction: name === 'configuration-required' && !pendingConfirmation ? 'setup' : null,
     codexLabel,

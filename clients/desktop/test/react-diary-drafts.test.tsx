@@ -15,8 +15,10 @@ async function mount(controlled=true){
  await act(async()=>root.render(<Harness/>))
  const field=(label:string)=>host.querySelector(`[aria-label="${label}"]`) as HTMLInputElement
  const click=async(label:string)=>{const node=[...host.querySelectorAll('button')].find(n=>n.textContent===label);assert.ok(node,label);await act(async()=>node.click())}
- const time=async(value:string)=>act(async()=>{const input=field('早间时间');Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));input.dispatchEvent(new dom.window.Event('change',{bubbles:true}))})
- return {host,field,time,click,calls,draft:()=>currentDraft,setReject:(value:boolean)=>{reject=value},hold:(value:any)=>{hold=value},setServerTime:(value:string)=>{state={...state,settings:{...state.settings,briefing_outlook_time:value}}},toggleDiary:async()=>act(async()=>field('写每日日记').click()),show:async(visible:boolean)=>act(async()=>setVisible(visible)),close:async()=>{await act(async()=>root.unmount());host.remove()}}
+ const setTime=async(label:string,value:string)=>act(async()=>{const input=field(label);assert.ok(input,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));input.dispatchEvent(new dom.window.Event('change',{bubbles:true}))})
+ const time=async(value:string)=>setTime('早间时间',value)
+ const toggle=async(label:string)=>{const input=field(label);assert.ok(input,label);await act(async()=>input.click())}
+ return {host,field,time,setTime,toggle,click,calls,draft:()=>currentDraft,setReject:(value:boolean)=>{reject=value},hold:(value:any)=>{hold=value},setServerTime:(value:string)=>{state={...state,settings:{...state.settings,briefing_outlook_time:value}}},toggleDiary:async()=>act(async()=>field('写每日日记').click()),show:async(visible:boolean)=>act(async()=>setVisible(visible)),close:async()=>{await act(async()=>root.unmount());host.remove()}}
 }
 test('briefing draft survives diary toggle and category navigation, failure retains it, success releases it',async()=>{
  const p=await mount();try{
@@ -39,4 +41,27 @@ test('pending briefing save locks fields and rejects duplicate submission',async
 })
 test('an older save response preserves a newer briefing draft after category navigation',async()=>{
  const p=await mount();let release:any;try{await p.time('09:45');p.hold(new Promise(resolve=>{release=resolve}));await p.click('保存简报设置');await p.show(false);await p.show(true);await p.time('10:15');await act(async()=>release());assert.equal(p.field('早间时间').value,'10:15');assert.equal(p.draft().briefing_outlook_time,'10:15')}finally{release?.();await p.close()}
+})
+test('diary and brief rows use switches, weekday chips and quiet-hours time inputs',async()=>{
+ const p=await mount();try{
+  assert.equal(p.field('写每日日记').getAttribute('role'),'switch')
+  assert.equal((p.field('早间简报') as HTMLInputElement).checked,true)
+  assert.equal((p.field('晚间简报') as HTMLInputElement).checked,false)
+  assert.equal(p.field('晚间时间').disabled,true)
+  await p.toggle('晚间简报');assert.equal(p.field('晚间时间').disabled,false)
+  await p.setTime('晚间时间','19:15')
+  await p.toggle('周六');await p.toggle('周一')
+  await p.setTime('免打扰开始','21:30');await p.setTime('免打扰结束','07:15')
+  await p.click('保存简报设置')
+  assert.deepEqual(p.calls.filter(([method])=>method==='discovery.configure').at(-1)[1],{briefing_outlook_enabled:true,briefing_outlook_time:'08:30',briefing_review_enabled:true,briefing_review_time:'19:15',briefing_weekdays:[2,3,4,5,6],quiet_start:'21:30',quiet_end:'07:15'})
+ }finally{await p.close()}
+})
+test('briefing save refuses a schedule without a weekday',async()=>{
+ const p=await mount();try{
+  for(const day of ['周一','周二','周三','周四','周五'])await p.toggle(day)
+  const before=p.calls.filter(([method])=>method==='discovery.configure').length
+  await p.click('保存简报设置')
+  assert.equal(p.calls.filter(([method])=>method==='discovery.configure').length,before)
+  assert.match(p.host.textContent??'',/请选择至少一天/)
+ }finally{await p.close()}
 })

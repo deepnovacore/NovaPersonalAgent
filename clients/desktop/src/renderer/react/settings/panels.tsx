@@ -1,6 +1,6 @@
 import {PermissionCards} from '../windows/welcome';
 import React, { useEffect, useRef, useState } from 'react';
-import { Monitor } from 'lucide-react';
+import { FilePlus2, FolderPlus, Monitor, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 import { Action, Card, Field, useCommand } from './controls';
 import { t } from '../../locale.mjs';
 import { DEFAULT_SKIN, MAX_SKIN_BYTES, importSkin, removeSkin, selectedSkin } from '../../orb-skins.mjs';
@@ -60,25 +60,89 @@ export function SkillsPanel({ skills, api }: any) { const [query, setQuery] = us
 catch {
     setError(t('暂时无法读取技能，请稍后刷新。'));
 } }}>{t('刷新')}</Action><p role="status">{error}</p>{!Array.isArray(list) ? <p>{t('暂时无法读取技能，请稍后刷新。')}</p> : list.filter((s: any) => JSON.stringify(s).toLowerCase().includes(query.toLowerCase())).map((s: any, i: number) => <Card key={s.name ?? i} icon={s.id === 'computer-use' ? Monitor : undefined} title={s.name ?? s.title ?? 'Skill'} description={s.description}><span className="skill-state" data-state={s.id==='computer-use'?'session':'on'}>{t(s.id==='computer-use'?'按会话':'已启用')}</span><p>{s.source ?? s.path}</p>{s.error && <p role="alert">{s.error}</p>}</Card>)}</>; }
-export function KnowledgePanel({ api, view }: any) { const enabled = view.capabilities?.runtime?.modules?.knowledge?.enabled === true; const [state, setState] = useState<any>({}), [url, setUrl] = useState(''), [note, setNote] = useState(t('点击刷新查看知识库。')); const epoch = useRef(0), lock = useRef(false); useEffect(() => { epoch.current++; setState({}); setNote(t('点击刷新查看知识库。')); return () => { epoch.current++; }; }, [enabled, view.embeddingProvider, view.embeddingModel]); async function run(input: any) { if (!enabled || lock.current)
-    return; const rev = epoch.current; lock.current = true; setNote(t('处理中…')); try {
-    if (['files', 'folder', 'url', 'reindex'].includes(input.action))
-        input = { ...input, consent: true };
-    const result = await api.knowledgeAction(input);
-    if (result?.error)
-        throw Error();
-    const next = input.action === 'status' ? result : await api.knowledgeAction({ action: 'status' });
-    if (next?.error)
-        throw Error();
-    if (rev === epoch.current) {
-        setState(next);
-        setNote(t('{0} 个来源', next.sources?.length ?? 0) + (next.fts === false ? t('；FTS5 不可用，已使用基础词法匹配（无相关性排序）。') : next.fts === true ? t('；FTS5 已启用。') : '') + ((next.jobs ?? []).some((j: any) => j.state === 'failed') ? t('；有失败任务，请检查文件格式、敏感内容或服务连接后重试。') : ''));
+/**
+ * Knowledge sources keep the ids and commands the main process already binds
+ * (#knowledge-files / -folder / -refresh / -add-url). The page is a toolbar,
+ * a URL row and a compact source list instead of stacked bare buttons.
+ */
+export function KnowledgePanel({ api, view }: any) {
+    const enabled = view.capabilities?.runtime?.modules?.knowledge?.enabled === true;
+    const [state, setState] = useState<any>({}), [url, setUrl] = useState(''), [note, setNote] = useState(t('点击刷新查看知识库。')), [tone, setTone] = useState('info'), [busy, setBusy] = useState(false), [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+    const epoch = useRef(0), lock = useRef(false);
+    useEffect(() => {
+        epoch.current++;
+        setConfirmRemove(null);
+        setState({});
+        setNote(t('点击刷新查看知识库。'));
+        setTone('info');
+        return () => { epoch.current++; };
+    }, [enabled, view.embeddingProvider, view.embeddingModel]);
+    async function run(input: any) {
+        if (!enabled || lock.current)
+            return;
+        const rev = epoch.current;
+        lock.current = true;
+        setConfirmRemove(null);
+        let ok = false;
+        setBusy(true);
+        setNote(t('处理中…'));
+        setTone('busy');
+        try {
+            if (['files', 'folder', 'url', 'reindex'].includes(input.action))
+                input = { ...input, consent: true };
+            const result = await api.knowledgeAction(input);
+            if (result?.error)
+                throw Error();
+            const next = input.action === 'status' ? result : await api.knowledgeAction({ action: 'status' });
+            if (next?.error)
+                throw Error();
+            ok = true;
+            if (rev === epoch.current) {
+                setState(next);
+                const failures = (next.jobs ?? []).filter((job: any) => job.state === 'failed').length;
+                setNote(t('{0} 个来源{1}{2}', next.sources?.length ?? 0, next.fts === false ? t('；FTS5 不可用，已使用基础词法匹配（无相关性排序）。') : next.fts === true ? t('；FTS5 已启用。') : '', failures ? t('；{0} 个失败任务，请检查文件格式、敏感内容或服务连接后重试。', failures) : ''));
+                setTone(failures ? 'warn' : 'info');
+            }
+        }
+        catch {
+            if (rev === epoch.current) {
+                setNote(t('知识库操作失败；请确认模块已启用、后端正在运行，或检查文档与服务连接。'));
+                setTone('error');
+            }
+        }
+        finally {
+            lock.current = false;
+            setBusy(false);
+        }
+        return ok;
     }
+    const sources: any[] = (state.sources ?? []).slice(0, 100);
+    return <div id="knowledge-panel" hidden={!enabled} aria-busy={busy}>
+        <p className="hint">{t('支持文本、Markdown、代码、PDF、DOCX，单文件最多 10 MB。更换模型后需重建来源。')}</p>
+        <div className="knowledge-actions" role="toolbar" aria-label={t('知识库操作')}>
+            <Action id="knowledge-files" className="knowledge-action soft" disabled={!enabled || busy} action={() => run({ action: 'files' })}><FilePlus2 size={16} aria-hidden="true"/><span>{t('添加文件')}</span></Action>
+            <Action id="knowledge-folder" className="knowledge-action soft" disabled={!enabled || busy} action={() => run({ action: 'folder' })}><FolderPlus size={16} aria-hidden="true"/><span>{t('添加文件夹')}</span></Action>
+            <Action id="knowledge-refresh" className="knowledge-action ghost" disabled={!enabled || busy} action={() => run({ action: 'status' })}><RefreshCw size={16} aria-hidden="true"/><span>{t('刷新')}</span></Action>
+        </div>
+        <div className="knowledge-url">
+            <input id="knowledge-url" type="url" maxLength={2048} aria-label={t('公开网页 URL')} placeholder={t('粘贴网页链接')} value={url} disabled={!enabled || busy} onChange={(event: any) => setUrl(event.target.value)}/>
+            <Action id="knowledge-add-url" className="knowledge-action" disabled={!enabled || busy || !url.trim()} action={async () => { if (await run({ action: 'url', url })) setUrl(''); }}>{t('导入网页')}</Action>
+        </div>
+        <p id="knowledge-status" className="knowledge-status" role="status" aria-live="polite" data-tone={tone}>{note}</p>
+        {sources.length ? <ul id="knowledge-sources">
+            {sources.map((source: any) => {
+                const status = source.status === 'ready' ? 'ready' : source.status === 'failed' ? 'failed' : 'unknown';
+                return <li className="knowledge-source" key={source.id}>
+                    <div className="knowledge-source-copy">
+                        <span className="knowledge-source-title">{source.title}</span>
+                        <span className="knowledge-source-state" data-state={status}>{t(status === 'ready' ? '就绪' : status === 'failed' ? '失败' : '处理中')}</span>
+                    </div>
+                    <div className="knowledge-source-actions">
+                        <Action className="knowledge-source-action" aria-label={`${t('重建索引')} ${source.title}`} title={t('重建索引')} disabled={busy} action={() => run({ action: 'reindex', id: source.id })}><RotateCcw size={15} aria-hidden="true"/></Action>
+                        <Action className="knowledge-source-action destructive" data-armed={confirmRemove === source.id ? 'true' : undefined} aria-label={`${confirmRemove === source.id ? t('确认移除') : t('移除')} ${source.title}`} title={confirmRemove === source.id ? t('再点一次确认移除') : t('移除')} disabled={busy} action={async () => { if (confirmRemove !== source.id) { setConfirmRemove(source.id); return; } setConfirmRemove(null); await run({ action: 'remove', id: source.id }); }}><Trash2 size={15} aria-hidden="true"/></Action>
+                    </div>
+                </li>;
+            })}
+        </ul> : Array.isArray(state.sources) ? <p className="knowledge-empty">{t('还没有添加来源。')}</p> : null}
+    </div>;
 }
-catch {
-    if (rev === epoch.current)
-        setNote(t('知识库操作失败；请确认模块已启用、后端正在运行，或检查文档与服务连接。'));
-}
-finally {
-    lock.current = false;
-} } return <div id="knowledge-panel" hidden={!enabled}><p>{t('支持文本、Markdown、代码、PDF、DOCX，单文件最多 10 MB。更换模型后需重建来源。')}</p>{[['files', '添加文件'], ['folder', '添加文件夹'], ['status', '刷新']].map(([action, label]) => <Action key={action} disabled={!enabled} action={() => run({ action })}>{t(label)}</Action>)}<Field label="公开网页 URL" type="url" value={url} maxLength={2048} onChange={setUrl}/><Action disabled={!enabled} action={() => run({ action: 'url', url })}>{t('导入网页')}</Action><p role="status">{note}</p><ul>{(state.sources ?? []).slice(0, 100).map((s: any) => <li key={s.id}>{s.title} · {s.status}{[['reindex', '重建索引'], ['remove', '移除']].map(([action, label]) => <Action key={action} action={() => run({ action, id: s.id })}>{t(label)}</Action>)}</li>)}</ul></div>; }

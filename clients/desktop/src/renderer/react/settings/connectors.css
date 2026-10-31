@@ -1,0 +1,376 @@
+/* Connectors entry page styles (owned by task-3).
+   Imported from entries/settings.tsx so esbuild bundles it into react/settings.css
+   and Node-based renderer tests never have to load a .css module. Every selector is
+   scoped to the settings-owned #connectors-home section so detail panels keep the
+   shared settings card/token styles. */
+
+#connectors-home .connectors-page { display: grid; gap: 12px; }
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+#connectors-home .connectors-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+#connectors-home .connector-refresh.rt-Button { flex: none; }
+#connectors-home .connector-refresh[aria-busy="true"]::before { display: none; }
+#connectors-home .connector-refresh[aria-busy="true"] svg { animation: refresh-icon 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  #connectors-home .connector-refresh[aria-busy="true"] svg { animation: none; }
+}
+#connectors-home .connectors-error {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 10px;
+  background: var(--warn-wash);
+  color: var(--warn);
+  font-size: 12px;
+}
+#connectors-home .connectors-empty { margin: 0; color: var(--ink-dim); font-size: 12px; }
+
+/* ── Entry card grid ─────────────────────────────────────────────────────── */
+#connectors-home .connector-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  #connectors-home .connector-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+#connectors-home .connector-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 92px;
+  margin: 0;
+  padding: 16px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .14s ease, background-color .14s ease, box-shadow .14s ease, transform .14s ease;
+}
+#connectors-home .connector-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--surface-raised);
+  box-shadow: 0 8px 20px #00000010;
+  transform: translateY(-1px);
+}
+#connectors-home .connector-card:active { transform: none; }
+#connectors-home .connector-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+#connectors-home .connector-card-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent-wash);
+  color: var(--accent-strong, var(--accent));
+}
+#connectors-home .connector-card[data-tone="ok"] .connector-card-icon {
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+#connectors-home .connector-card[data-tone="warn"] .connector-card-icon,
+#connectors-home .connector-card[data-tone="error"] .connector-card-icon {
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+#connectors-home .connector-card[data-tone="muted"] .connector-card-icon {
+  background: var(--surface-raised);
+  color: var(--ink-faint);
+}
+
+#connectors-home .connector-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+#connectors-home .connector-card-title {
+  font-size: 13.5px;
+  font-weight: 620;
+  line-height: 1.5;
+  color: var(--ink);
+}
+#connectors-home .connector-card-description {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+#connectors-home .connector-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+#connectors-home .connector-card-chevron {
+  color: var(--ink-faint);
+  transition: transform .14s ease, color .14s ease;
+}
+#connectors-home .connector-card:hover .connector-card-chevron {
+  color: var(--accent);
+  transform: translateX(2px);
+}
+
+/* ── Status pills ────────────────────────────────────────────────────────── */
+#connectors-home .connector-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+#connectors-home .connector-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+#connectors-home .connector-status[data-tone="ok"] {
+  border-color: color-mix(in srgb, var(--ok) 32%, transparent);
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+#connectors-home .connector-status[data-tone="progress"] {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--accent-wash);
+  color: var(--accent-strong, var(--accent));
+}
+#connectors-home .connector-status[data-tone="warn"],
+#connectors-home .connector-status[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--warn) 38%, transparent);
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+#connectors-home .connector-status[data-tone="muted"] {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink-faint);
+}
+
+/* ── Loading skeleton ────────────────────────────────────────────────────── */
+#connectors-home .connector-card-skeleton {
+  grid-template-columns: auto minmax(0, 1fr);
+  pointer-events: none;
+  background: var(--surface);
+}
+#connectors-home .connector-card-skeleton .connector-card-icon { background: var(--surface-raised); }
+#connectors-home .connector-skeleton-line {
+  display: block;
+  width: 82%;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--surface-raised), var(--line), var(--surface-raised));
+  background-size: 200% 100%;
+  animation: connector-skeleton 1.4s ease-in-out infinite;
+}
+#connectors-home .connector-skeleton-line.short { width: 56%; }
+@keyframes connector-skeleton {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #connectors-home .connector-skeleton-line { animation: none; }
+}
+
+/* ── Detail view ─────────────────────────────────────────────────────────── */
+#connectors-home .connector-detail { display: grid; gap: 12px; }
+#connectors-home .connector-detail-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+#connectors-home .connector-detail-crumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+#connectors-home .connector-back.rt-Button { flex: none; }
+#connectors-home .connector-detail-divider {
+  color: var(--ink-faint);
+  font-size: 13px;
+  user-select: none;
+}
+#connectors-home .connector-detail-crumb h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 620;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#connectors-home .connector-detail-body { display: grid; gap: 14px; }
+#connectors-home .connector-panel { display: grid; gap: 14px; }
+
+/* Detail panels reuse the shared im-card markup but live outside the legacy
+   #im-section / #connections-section ids those rules were scoped to. */
+#connectors-home .connector-detail-body .im-card {
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+#connectors-home .connector-detail-body .im-card p {
+  margin: 8px 0;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+#connectors-home .connector-detail-body .im-card h3 { color: var(--ink); }
+#connectors-home .connector-detail-body .im-card p[role="alert"] { color: var(--warn); }
+#connectors-home .connector-detail-body .im-card > :is(.rt-Button, button):not(:disabled) { margin: 4px 8px 4px 0; }
+#connectors-home .connector-detail-body .im-card details { margin: 10px 0; }
+#connectors-home .connector-detail-body .im-card summary {
+  cursor: pointer;
+  padding: 4px 0;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+#connectors-home .connector-detail-body .im-card .selection-list { margin: 12px 0; }
+#connectors-home .connector-detail-body .source-list { margin: 0; }
+#connectors-home .connector-detail-body .source-list > li > .im-card { margin: 0; }
+#connectors-home .connector-panel-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── Dark and forced-colors modes ────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  #connectors-home .connector-card:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+  #connectors-home .connectors-error { border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
+}
+@media (forced-colors: active) {
+  #connectors-home .connector-card,
+  #connectors-home .connector-detail-body .im-card {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+  #connectors-home .connector-card:focus-visible,
+  #connectors-home .connector-back:focus-visible,
+  #connectors-home .connector-refresh:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  #connectors-home .connector-status {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+  #connectors-home .connector-status::before { background: CanvasText; }
+  #connectors-home .connector-card-icon {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+  #connectors-home .connector-card-description,
+  #connectors-home .connector-detail-divider { color: GrayText; }
+}
+
+/* ── Space 与手机 page (#space-host-section, owned by task-3) ─────────────
+   The category section owns the page heading, so the panel lays out plain rows
+   instead of nesting another card. Commands and copy are unchanged. */
+#space-host-section .space-host-panel { display: grid; gap: 12px; }
+#space-host-section .space-host-panel > p { margin: 0; }
+#space-host-section .space-host-space {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+#space-host-section .space-host-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+#space-host-section .space-host-actions .rt-Button { margin: 0; }
+#space-host-section .space-host-invitation,
+#space-host-section .space-host-pairings {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+#space-host-section .space-host-pairing {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+#space-host-section .space-host-pairing p { margin: 0; color: var(--ink); }
+#space-host-section .space-host-pairing-fingerprint {
+  color: var(--ink-faint) !important;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+#space-host-section .space-host-devices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#space-host-section .space-host-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 12px;
+  background: var(--warn-wash);
+}
+#space-host-section .space-host-confirm > p { margin: 0; color: var(--ink-dim); font-size: 12px; }
+#space-host-section .space-host-invitation img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  background: var(--plate);
+}
+#space-host-section .space-host-empty { color: var(--ink-dim); font-size: 12.5px; line-height: 1.7; }
+@media (forced-colors: active) {
+  #space-host-section .space-host-space,
+  #space-host-section .space-host-invitation,
+  #space-host-section .space-host-pairings,
+  #space-host-section .space-host-pairing,
+  #space-host-section .space-host-confirm {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+}

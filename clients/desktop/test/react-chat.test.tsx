@@ -11,7 +11,7 @@ async function mount(overrides:any={},props:any={}){
  dom.window.HTMLMediaElement.prototype.play=()=>Promise.resolve()
  const {createRoot}=await import('react-dom/client')
  const states:any={'chat:main':{draft:'',references:[]}},calls:any[]=[]
- const c:any={selectedId:'chat:main',connected:true,presentationReady:true,inputInstance:'input',capabilities:['text_input','dictation'],mode:'text',snapshot:{conversations:{items:[{id:'chat:main',kind:'chat',mode:'chat'}],messages:[]}},state(id='chat:main'){return states[id]??=( {draft:'',references:[]})},get selectedConversation(){return this.snapshot.conversations.items.find((i:any)=>i.id===this.selectedId)},get draft(){return this.state(this.selectedId).draft},set draft(v){this.state(this.selectedId).draft=v},isBuildFinished:()=>false,command:async(m:any,p:any)=>{calls.push([m,p]);return{}},submit:async()=>{calls.push(['submit',c.draft]);return true},dictate:async()=>{calls.push(['dictate'])},finish:async()=>{calls.push(['finish'])},voice:async()=>{calls.push(['voice'])},stopVoice:async()=>{calls.push(['stopVoice'])},home:async()=>{},changed:()=>{},...overrides}
+ const c:any={selectedId:'chat:main',connected:true,presentationReady:true,inputInstance:'input',capabilities:['text_input','dictation'],mode:'text',snapshot:{conversations:{items:[{id:'chat:main',kind:'chat',mode:'chat'}],messages:[]}},state(id='chat:main'){return states[id]??=( {draft:'',references:[]})},get selectedConversation(){return this.snapshot.conversations.items.find((i:any)=>i.id===this.selectedId)},get draft(){return this.state(this.selectedId).draft},set draft(v){this.state(this.selectedId).draft=v},isBuildFinished:()=>false,command:async(m:any,p:any)=>{calls.push([m,p]);return{}},openFeed:async(id:any,label:any)=>{calls.push(['openFeed',id,label])},submit:async()=>{calls.push(['submit',c.draft]);return true},dictate:async()=>{calls.push(['dictate'])},finish:async()=>{calls.push(['finish'])},voice:async()=>{calls.push(['voice'])},stopVoice:async()=>{calls.push(['stopVoice'])},home:async()=>{},changed:()=>{},...overrides}
  const root=createRoot(document.getElementById('root')!),ref=createRef<any>();const render=()=>root.render(<ChatPane ref={ref} c={c} run={(f:any)=>Promise.resolve().then(f).catch(()=>{})} api={{}} onHome={async()=>{}} openTask={()=>{}} openSchedule={()=>{}} onPreviewPlan={()=>{}} {...props} />)
  c.changed=()=>render();await act(async()=>{render()});
  return {c,calls,ref,dom,replace:async(node:any)=>act(async()=>root.render(node)),render:async()=>act(async()=>{render()}),close:async()=>{await act(async()=>root.unmount());dom.window.close()},click:async(node:any)=>act(async()=>{node.click()}),key:async(node:any,init:any)=>act(async()=>node.dispatchEvent(new dom.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,...init}))),byLabel:(label:string)=>document.querySelector(`[aria-label="${label}"]`) as any}
@@ -236,4 +236,123 @@ test('the pet voice aura follows the validated orb state',async()=>{
   assert.equal(document.querySelector('.companion-aura'),null)
   assert.ok(document.querySelector('.voice-stage-orb'))
  } finally { await orb.close() }
+})
+
+
+const goalProposalFeed={id:'f1',kind:'question',title:'想把「练口语」设为目标吗？',why_now:'建议节奏：每天陪你练一点',goal_proposal:{title:'练口语',success_criteria:'每天开口 10 分钟',cadence:'daily',topic_key:'topic',revision:'rev1',evidence_refs:['m1']},evidence_refs:[],memory_refs:[],source:{type:'conversation',ref:'m1'},suggestion_id:null,task_ref:null,subject_key:'goal:topic',priority:40,created_at:'2026-10-31T01:00:00.000Z',updated_at:'2026-10-31T01:00:00.000Z',expires_at:null,user_state:'new',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null}}
+
+test('goal proposal feed renders a complete card and revision-bound actions',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.feed=[goalProposalFeed]
+  h.c.snapshot.conversations.messages=[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',text:'fallback'}]
+  await h.render()
+  const card=document.querySelector('.message-feed .feed-card')! as HTMLElement
+  assert.ok(card,'feed card replaces bare markdown')
+  assert.equal(card.getAttribute('data-kind'),'goal_proposal')
+  assert.ok(card.querySelector('.feed-overline')!.textContent!.includes('新目标建议'))
+  assert.ok(card.querySelector('h3')!.textContent!.includes('想把「练口语」设为目标吗？'))
+  assert.deepEqual([...card.querySelectorAll('.feed-row')].map(row=>row.textContent),['目标练口语','怎样算达成每天开口 10 分钟','建议节奏每天陪你练一点'])
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='设为目标'))
+  assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'adopt_goal',goal_revision:'rev1'}])
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='不用了'))
+  assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'decline_goal'}])
+ } finally { await h.close() }
+})
+
+test('a terminal voice failure stays visible in the chat pane',async()=>{
+ const h=await mount();try{
+  // What the controller leaves behind after voice_provider_failed: voice ended, copy in voiceNotice.
+  h.c.voiceState='failed';h.c.voiceNotice='语音连接已断开，请重新开启语音'
+  await h.render()
+  assert.ok(document.body.textContent!.includes('语音连接已断开'),'failure copy must not disappear with the voice stage')
+ } finally { await h.close() }
+})
+
+test('a declined goal proposal keeps no action buttons',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.feed=[{...goalProposalFeed,user_state:'dismissed'}]
+  h.c.snapshot.conversations.messages=[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',text:'fallback'}]
+  await h.render()
+  const card=document.querySelector('.message-feed .feed-card')! as HTMLElement
+  assert.equal(card.querySelectorAll('button').length,0)
+  assert.ok(card.querySelector('.feed-unavailable')!.textContent!.includes('已忽略'))
+ } finally { await h.close() }
+})
+
+test('goal proposal card explains unavailable actions instead of offering them',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.feed=[goalProposalFeed]
+  h.c.snapshot.conversations.messages=[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',text:'fallback'}]
+  h.c.connected=false
+  await h.render()
+  assert.ok(document.querySelector('.feed-unavailable')!.textContent!.includes('连接后可继续讨论'))
+  assert.equal(document.querySelectorAll('.feed-actions').length,0)
+  h.c.connected=true;h.c.snapshot.feed=[{...goalProposalFeed,lifecycle:'resolved'}]
+  await h.render()
+  assert.ok(document.querySelector('.feed-unavailable')!.textContent!.includes('已设为目标'))
+  assert.ok(document.querySelector('.feed-tag')!.textContent!.includes('已设为目标'))
+  assert.equal(document.querySelectorAll('.feed-actions').length,0)
+ } finally { await h.close() }
+})
+
+test('goal check-in card focuses the goal reference and can mute reminders',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.life={goals:[{id:'g1',title:'学英语',version:3,cadence:'daily'}]}
+  h.c.snapshot.feed=[{...goalProposalFeed,id:'f2',goal_proposal:undefined,title:'问问你的目标',goal_checkin:{local_date:'2026-10-31',items:[{goal_id:'g1',goal_version:3,text:'「学英语」最近怎么样？',recalled:'上次说到练发音'}]}}]
+  h.c.snapshot.conversations.messages=[{id:'feed:f2',conversation_id:'chat:main',role:'assistant',text:'checkin'}]
+  await h.render()
+  const card=document.querySelector('.feed-card')! as HTMLElement
+  assert.equal(card.getAttribute('data-kind'),'goal_checkin')
+  assert.ok(card.textContent!.includes('上次说到练发音'))
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='回复进展'))
+  assert.deepEqual(h.c.state().references,[{kind:'goal',id:'g1',version:3}])
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='不再提醒'))
+  assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f2',action:'goal_checkin_mute',goal_id:'g1'}])
+ } finally { await h.close() }
+})
+
+test('generic feed card renders tags and opens the item before snoozing or dismissing',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.feed=[{...goalProposalFeed,id:'f3',goal_proposal:undefined,title:'有个新发现',why_now:'你昨天聊到的话题有新进展',prepared:{trust:'untrusted_external',text:'## 详情\n\n- 第一条',evidence_refs:[]}}]
+  h.c.snapshot.conversations.messages=[{id:'feed:f3',conversation_id:'chat:main',role:'assistant',text:'fallback'}]
+  await h.render()
+  const card=document.querySelector('.feed-card')! as HTMLElement
+  assert.equal(card.getAttribute('data-kind'),'generic')
+  assert.ok(card.querySelector('.md h2')!.textContent==='详情')
+  assert.ok(card.textContent!.includes('待回应'))
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='回复这个问题'))
+  assert.deepEqual(h.calls.at(-1),['openFeed','f3','回复这个问题'])
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='稍后'))
+  const snooze=h.calls.at(-1)!
+  assert.equal(snooze[0],'feed.action');assert.equal(snooze[1].id,'f3');assert.equal(snooze[1].action,'snooze');assert.ok(Date.parse(snooze[1].snooze_until)>Date.now()+3500000)
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='忽略'))
+  assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f3',action:'dismiss'}])
+ } finally { await h.close() }
+})
+
+test('voice stage shows activation progress instead of a stale disabled label',async()=>{
+ const h=await mount({isVoiceConversation:true,mode:'starting'});try{
+  h.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  await act(async()=>h.ref.current.setOrb({name:'inactive',statusLine:'未启用'}))
+  await h.render()
+  const stage=document.querySelector('.voice-stage')! as HTMLElement
+  assert.equal(stage.getAttribute('data-state'),'starting')
+  assert.ok(stage.querySelector('.voice-stage-spinner'))
+  assert.ok(stage.querySelector('.voice-stage-label')!.textContent!.includes('正在启用语音'))
+  assert.equal(stage.textContent!.includes('未启用'),false)
+  await h.click([...stage.querySelectorAll('button')].find(node=>node.textContent==='取消'))
+  assert.deepEqual(h.calls.at(-1),['stopVoice'])
+ } finally { await h.close() }
+})
+
+test('voice stage surfaces the conversation notice while voice is active',async()=>{
+ const h=await mount({isVoiceConversation:true,mode:'voice'});try{
+  h.c.state().notice='语音连接中断，正在重连…'
+  h.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  await act(async()=>h.ref.current.setOrb({name:'listening',statusLine:'聆听中'}))
+  await h.render()
+  const notice=document.querySelector('.voice-stage .voice-stage-notice')! as HTMLElement
+  assert.equal(notice.getAttribute('role'),'alert')
+  assert.equal(notice.textContent,'语音连接中断，正在重连…')
+ } finally { await h.close() }
 })

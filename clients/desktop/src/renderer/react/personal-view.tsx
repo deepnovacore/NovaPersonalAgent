@@ -6,7 +6,7 @@ import {DesktopTheme,ErrorBoundary} from './theme'
 import {Workbench} from './workbench'
 
 export type DesktopBridge=Record<string,any>
-export type WorkbenchOptions={send:(frame:any)=>any;start:(options?:any)=>any;stop:()=>any;tasks:()=>any;taskAction?:(...args:any[])=>any;results:()=>any;api:DesktopBridge;applyPresentation?:(...args:any[])=>any;speakingLevel?:()=>number;onUnreadChange?:(count:number)=>void}
+export type WorkbenchOptions={send:(frame:any)=>any;start:(options?:any)=>any;stop:()=>any;tasks:()=>any;taskAction?:(...args:any[])=>any;results:()=>any;api:DesktopBridge;applyPresentation?:(...args:any[])=>any;speakingLevel?:()=>number;onUnreadChange?:(count:number)=>void;onChange?:()=>void}
 export class WorkbenchRuntime{
  controller:any
  revision=0
@@ -25,7 +25,7 @@ export class WorkbenchRuntime{
  }
  subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener)}}
  snapshot=()=>this.revision
- refresh=()=>{if(this.disposed)return;this.revision++;for(const listener of this.listeners)listener()}
+ refresh=()=>{if(this.disposed)return;this.revision++;for(const listener of this.listeners)listener();this.options.onChange?.()}
  confirm=(answer:boolean)=>{const pending=this.confirmation;this.confirmation=null;pending?.resolve(answer);this.refresh()}
  run=async(action:()=>any)=>{
   const c=this.controller

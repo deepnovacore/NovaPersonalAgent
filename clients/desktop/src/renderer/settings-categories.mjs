@@ -15,6 +15,7 @@ export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'skills', label: t('技能'), sections: Object.freeze(['skills-section'])}),
   Object.freeze({id: 'capabilities', label: t("执行器与 MCP"), sections: Object.freeze(['capabilities-section'])}),
   Object.freeze({id: 'connectors', label: t("连接器"), sections: Object.freeze(['im-section','connections-section'])}),
+  Object.freeze({id: 'space', label: t("Space 与手机"), sections: Object.freeze([])}),
   Object.freeze({id: 'permissions', label: t("权限"), sections: Object.freeze(['desktop-permissions-section','codex-approval-section'])}),
   Object.freeze({id: 'privacy', label: t("隐私与数据"), sections: Object.freeze(['privacy-section'])}),
   Object.freeze({id: 'knowledge', label: t("知识库"), sections: Object.freeze(['knowledge-section'])}),
@@ -27,8 +28,8 @@ export const SETTINGS_CATEGORIES = Object.freeze([
 /** Old deep links keep working after the settings categories were split. */
 const CATEGORY_ALIASES = Object.freeze({
   im: 'connectors',
-  hub: 'connectors',
-  phone: 'connectors',
+  hub: 'space',
+  phone: 'space',
   connections: 'connectors',
   pipeline: 'models',
 })

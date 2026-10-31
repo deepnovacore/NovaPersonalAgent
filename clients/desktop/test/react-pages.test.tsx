@@ -49,8 +49,8 @@ test('brief pagination preserves date grouping and historical action restriction
 test('source cards expose their evidence from the keyboard context menu',async()=>{
  const p=await mount('ideas',{life:{...life,ideas:[{...life.ideas[0],sources:[{type:'file',label:'Evidence.txt',summary:'Grounded',url:'javascript:alert(1)'}]}]}});const card=p.host.querySelector('[data-life-id="i1"]')!;await act(async()=>{card.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true}))});assert.ok(p.host.querySelector('[role="menuitem"]'));await act(async()=>{(p.host.querySelector('[role="menuitem"]') as HTMLButtonElement).click()});assert.ok(document.querySelector('[role="dialog"]')?.textContent?.includes('Evidence.txt'));assert.equal(document.querySelector('[role="dialog"] a'),null);await p.close()
 })
-test('saved empty lists beside suggestions explain that suggestions require adoption',async()=>{
- const p=await mount('ideas',{life:{...life,ideas:[]},workbench_context:{cards:[{id:'s1',tab:'ideas',title:'Suggestion',body:'Grounded suggestion'}]}});assert.equal(p.host.textContent?.includes('还没有保存想法'),false);assert.ok(p.host.textContent?.includes('不会自动加进来'));await p.close()
+test('saved empty lists beside suggestions explain that suggestions stay separate from saved ideas',async()=>{
+ const p=await mount('ideas',{life:{...life,ideas:[]},workbench_context:{cards:[{id:'s1',tab:'ideas',title:'Suggestion',body:'Grounded suggestion'}]}});assert.equal(p.host.textContent?.includes('还没有保存想法'),false);assert.ok(p.host.textContent?.includes('不会自动加入'));await p.close()
 })
 test('soul conflicts retain the role draft and show the specific stale message',async()=>{
  const p=await mount('assistant',{life,soul:{available:true,role:'Helpful',version:5,assistant_name:'Nova'}},async()=>{throw Object.assign(Error('stale'),{refusal_code:'stale'})});const card=p.host.querySelector('.soul-card')!;await act(async()=>{([...card.querySelectorAll('button')].find(b=>b.textContent==='编辑') as HTMLButtonElement).click()});await p.input('角色设定','Direct and helpful');await act(async()=>{([...card.querySelectorAll('button')].find(b=>b.textContent==='保存') as HTMLButtonElement).click()});assert.deepEqual(p.calls[0],['soul.set',{role:'Direct and helpful',expected_version:5}]);assert.equal((p.host.querySelector('[aria-label="角色设定"]') as HTMLTextAreaElement).value,'Direct and helpful');assert.ok(p.host.querySelector('[role="alert"]')?.textContent?.includes('草稿还在'));await p.close()
@@ -71,8 +71,13 @@ test('about me hides history and generation mechanics while preserving current c
  try{
   assert.equal(p.host.querySelector('h2')?.textContent,'关于我')
   assert.equal(p.host.querySelector('.profile-about')?.textContent,'Current portrait')
-  for(const text of ['历史版本','只读','每天最多','上次尝试','资料需要更新','资料尚未更新','Archived portrait'])assert.equal(p.host.textContent!.includes(text),false,text)
+  const card=p.host.querySelector('.profile-main')!
+  for(const text of ['历史版本','只读','每天最多','资料需要更新','资料尚未更新','Archived portrait'])assert.equal(card.textContent!.includes(text),false,text)
   assert.equal(p.host.querySelector('.profile-history'),null)
+  // The profile card no longer hides generation state: the warmup strip at the top owns it.
+  const warmup=p.host.querySelector('.warmup-status')!
+  assert.ok(warmup.textContent!.includes('画像暂时未能更新'))
+  assert.ok(warmup.textContent!.includes('上次尝试'))
   assert.equal(p.calls.length,0)
   await p.click('更新一下');assert.deepEqual(p.calls,[['profile.refresh',{}]])
  }finally{await p.close()}
@@ -118,4 +123,68 @@ test('assistant rename uses the existing local identity store and preserves a fa
 
 test('assistant display follows the real saved identity envelope while runtime soul metadata lags',async()=>{
  const p=await mount('assistant',{life,soul:{available:true,role:'Helpful',assistant_name:'Old name'}});p.props.identity={profile:{assistantName:'小星'}};await p.render();assert.ok(p.host.querySelector('.soul-intro')?.textContent?.includes('我叫小星。'),'intro uses saved local identity');assert.equal(p.host.querySelector('.soul-row p')?.textContent,'小星');await p.close()
+})
+
+
+test('timeline no longer hosts suggestions awaiting confirmation',async()=>{
+ const suggestions=[{id:'s1',kind:'idea',title:'Side project',body:'A grounded idea',project_id:null,todo_id:null,due:null,refs:[]},{id:'s2',kind:'goal',title:'Read weekly',body:'A grounded direction',project_id:null,todo_id:null,due:null,refs:[]}]
+ const p=await mount('timeline',{life,timeline:{status:'ready',generation_id:'g1',cards:[]},derived_understanding:{projects:[],suggestions,sources:[]}})
+ try{
+  assert.equal(p.host.querySelector('.timeline-suggestions'),null)
+  assert.equal(p.host.textContent!.includes('待确认建议'),false)
+  for(const text of ['Side project','Read weekly','加入想法','加入目标'])assert.equal(p.host.textContent!.includes(text),false,text)
+  assert.ok(p.host.textContent!.includes('这里展示已记录的事项，不代表完整日程。'))
+  assert.ok(p.host.textContent!.includes('近期简报'))
+ }finally{await p.close()}
+})
+
+test('ideas tab shows Nova suggestions with only ignore and goal adoption',async()=>{
+ const suggestions=[{id:'s1',kind:'idea',title:'整理灵感',body:'把零散的想法收在一起',project_id:null,todo_id:null,due:null,refs:[]},{id:'s2',kind:'goal',title:'每周读一本书',body:'长期坚持的方向',project_id:null,todo_id:null,due:null,refs:[]}]
+ const p=await mount('ideas',{life,derived_understanding:{projects:[],suggestions,sources:[]}})
+ try{
+  const section=p.host.querySelector('.nova-suggestions')!
+  assert.ok(section,'Nova suggestion section')
+  assert.equal(section.querySelector('h2')?.textContent,'Nova 的建议')
+  const cards=[...section.querySelectorAll('.nova-suggestion')]
+  assert.equal(cards.length,2)
+  assert.equal(cards[0].getAttribute('data-suggestion-kind'),'idea')
+  assert.ok(cards[0].textContent!.includes('整理灵感'))
+  assert.ok(cards[0].textContent!.includes('把零散的想法收在一起'))
+  assert.ok(cards[0].textContent!.includes('想法'))
+  assert.ok(cards[1].textContent!.includes('目标建议'))
+  assert.deepEqual([...cards[0].querySelectorAll('button')].map(node=>node.textContent),['忽略'])
+  assert.deepEqual([...cards[1].querySelectorAll('button')].map(node=>node.textContent),['设为目标','忽略'])
+  for(const text of ['加入想法','加入目标'])assert.equal(section.textContent!.includes(text),false,text)
+ }finally{await p.close()}
+})
+
+test('Nova suggestions dismiss and adopt through understanding commands then hide',async()=>{
+ const suggestions=[{id:'s1',kind:'idea',title:'Idea A',body:'Body A',project_id:null,todo_id:null,due:null,refs:[]},{id:'s2',kind:'goal',title:'Goal B',body:'Body B',project_id:null,todo_id:null,due:null,refs:[]}]
+ const p=await mount('ideas',{life,derived_understanding:{projects:[],suggestions,sources:[]}})
+ try{
+  await p.click('忽略',p.host)
+  assert.deepEqual(p.calls[0],['understanding.dismiss',{id:'s1'}])
+  assert.equal(p.host.querySelector('[data-suggestion-id="s1"]'),null)
+  assert.ok(p.host.querySelector('[data-suggestion-id="s2"]'))
+  await p.click('设为目标',p.host)
+  assert.deepEqual(p.calls[1],['understanding.adopt',{id:'s2'}])
+  assert.equal(p.host.querySelector('[data-suggestion-id="s2"]'),null)
+ }finally{await p.close()}
+})
+
+test('profile shows warmup status, icon work cards and read-only interest tags',async()=>{
+ const p=await mount('profile',{life:{...life,profile:{version:0,about:''}},profile_preparation:{status:'working',draft:{about:{text:'Portrait',refs:[]},work:[{title:'Earlier project',text:'Complete saved work description',refs:[]},{title:'Second project',text:'Another description',refs:[]}],interests:[{text:'摄影'},{text:'城市漫步'}]},sources:[]}})
+ try{
+  const warmup=p.host.querySelector('.warmup-status')!
+  assert.ok(warmup.textContent!.includes('正在后台更新画像'))
+  const work=p.host.querySelectorAll('.profile-work-item')
+  assert.equal(work.length,2)
+  assert.equal(p.host.querySelectorAll('.profile-work-icon').length,2)
+  assert.equal(p.host.querySelector('.profile-work-icon svg')?.getAttribute('aria-hidden'),'true')
+  assert.equal(p.host.querySelector('.profile-interests h4')?.textContent,'关注')
+  assert.deepEqual([...p.host.querySelectorAll('.profile-interests .interest-tag')].map(node=>node.textContent),['摄影','城市漫步'])
+  assert.equal(p.host.querySelector('.profile-interests input, .profile-interests textarea, .profile-interests button'),null)
+  assert.equal(p.host.querySelector('.soul-card'),null)
+  assert.equal(p.host.querySelector('[aria-label="资讯兴趣"]'),null)
+ }finally{await p.close()}
 })

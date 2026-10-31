@@ -453,3 +453,162 @@ body.nova-window-setup::before{position:fixed;inset:0;z-index:0;pointer-events:n
  .nova-window-setup .key-input input{background:Canvas;color:CanvasText;border:1px solid CanvasText}
  .nova-window-setup #start.rt-Button{background:Highlight;color:HighlightText;border:1px solid HighlightText}
 }
+
+/* ── Settings window app frame (React window) ─────────────────────────────
+   The legacy sheet keeps a fixed footer with a body padding-bottom that a
+   fixed 100%-height body cannot turn into trailing scroll space, so the last
+   row of a long page stayed under the footer. Make the window a three-row
+   frame instead: header/nav fixed, main owns the scroll, footer is a normal
+   grid row that can never cover content. */
+body.nova-window-settings {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+body.nova-window-settings header {
+  position: static;
+  flex: none;
+  margin-bottom: 8px;
+}
+body.nova-window-settings .settings-nav {
+  position: static;
+  align-self: stretch;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 4px 3px 10px;
+}
+body.nova-window-settings main {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0 6px 32px 0;
+  scroll-padding-bottom: 24px;
+}
+body.nova-window-settings main > :last-child { margin-bottom: 8px; }
+body.nova-window-settings footer {
+  position: static;
+  z-index: auto;
+  margin: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+  background: var(--page);
+  backdrop-filter: none;
+  box-shadow: none;
+}
+@media (max-width: 640px) {
+  body.nova-window-settings { padding: 0 14px; }
+  body.nova-window-settings .settings-nav {
+    align-self: start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 2px;
+  }
+  body.nova-window-settings main { padding: 0 0 24px; }
+  body.nova-window-settings footer { padding: 12px 14px; }
+}
+@media (prefers-contrast: more) {
+  body.nova-window-settings footer { border-top-color: var(--line-strong); }
+}
+@media (forced-colors: active) {
+  body.nova-window-settings footer { border-top: 1px solid CanvasText; }
+}
+
+/* ── Buttons and action groups ────────────────────────────────────────────
+   One chrome for every settings action: neutral secondary by default, a
+   single accent primary (page-add / save), quiet for tertiary, destructive
+   for removal. Rows share a gap so buttons stop stacking with legacy margins. */
+.nova-window-settings .rt-Button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-family: var(--default-font-family);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1;
+  letter-spacing: 0;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease, color .12s ease, opacity .12s ease;
+}
+.nova-window-settings .rt-Button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-active);
+  color: var(--ink);
+}
+.nova-window-settings .rt-Button:active:not(:disabled) { background: var(--surface); }
+.nova-window-settings .rt-Button:disabled { opacity: .45; cursor: default; }
+.nova-window-settings .rt-Button[aria-busy="true"] { cursor: progress; opacity: .8; }
+.nova-window-settings .rt-Button:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--accent);
+  outline-offset: var(--focus-ring-offset, 2px);
+}
+.nova-window-settings .rt-Button svg { width: 15px; height: 15px; flex: none; }
+/* Radix solid/soft variants both start from the neutral chrome; intent comes
+   from the explicit classes below so a page with many actions stays calm. */
+.nova-window-settings .rt-Button.rt-variant-solid,
+.nova-window-settings .rt-Button.rt-variant-soft { background: var(--surface-raised); color: var(--ink); }
+.nova-window-settings .rt-Button.soft,
+.nova-window-settings .rt-Button.rt-variant-soft.soft {
+  border-color: transparent;
+  background: var(--accent-wash);
+  color: var(--accent-strong, var(--accent));
+}
+.nova-window-settings .rt-Button.soft:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: transparent; }
+.nova-window-settings .rt-Button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-dim);
+}
+.nova-window-settings .rt-Button.ghost:hover:not(:disabled) { border-color: transparent; background: var(--surface); color: var(--ink); }
+.nova-window-settings .rt-Button.quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-faint);
+}
+.nova-window-settings .rt-Button.quiet:hover:not(:disabled) { border-color: transparent; background: transparent; color: var(--ink); text-decoration: underline; }
+.nova-window-settings .rt-Button.page-add,
+.nova-window-settings .rt-Button.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink, #fff);
+}
+.nova-window-settings .rt-Button.page-add:hover:not(:disabled),
+.nova-window-settings .rt-Button.primary:hover:not(:disabled) { background: var(--accent-strong); border-color: transparent; color: var(--accent-ink, #fff); }
+.nova-window-settings .rt-Button.destructive { border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: transparent; color: var(--warn); }
+.nova-window-settings .rt-Button.destructive:hover:not(:disabled) { border-color: var(--warn); background: var(--warn-wash); color: var(--warn); }
+
+.nova-window-settings #settings-save.rt-Button { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); }
+.nova-window-settings #settings-save.rt-Button:hover:not(:disabled) { background: var(--accent-strong); color: var(--accent-ink, #fff); }
+.nova-window-settings #settings-restart.rt-Button { background: var(--surface-raised); border-color: var(--line); color: var(--ink); }
+.nova-window-settings #settings-restore.rt-Button { background: transparent; border-color: transparent; color: var(--accent-strong, var(--accent)); }
+
+/* Every action row shares one alignment and gap; legacy per-card margins are
+   dropped inside these rows so the buttons read as one group. */
+.nova-window-settings :is(.preference-actions, .card-actions, .page-toolbar-actions, .timeline-actions, .knowledge-actions, .actions, .im-feishu-actions, .im-sync-actions, .site-actions) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.nova-window-settings :is(.preference-actions, .card-actions, .page-toolbar-actions, .timeline-actions, .knowledge-actions, .actions, .im-feishu-actions, .im-sync-actions) > .rt-Button,
+.nova-window-settings :is(.preference-actions, .card-actions, .page-toolbar-actions, .timeline-actions, .knowledge-actions, .actions, .im-feishu-actions, .im-sync-actions) > button { margin: 0; }
+.nova-window-settings :is(.im-card, .preference-card) :is(p[role="status"], .preference-caption) { margin-bottom: 10px; }
+
+/* Workbench buttons keep their own compact chrome, aligned with settings. */
+.workbench .rt-Button { min-height: 30px; border-radius: 8px; font-weight: 550; }
+.workbench .rt-Button.page-add { background: var(--accent); color: var(--accent-ink, #fff); border-color: transparent; }

@@ -6,7 +6,7 @@ Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLEle
 dom.window.HTMLMediaElement.prototype.pause=function(){}
 const {act,fireEvent,waitFor}=await import('@testing-library/react')
 const {mountPersonalView}=await import('../src/renderer/react/personal-view.tsx')
-const {personalState}=await import('./react-fixtures/personal-state.mjs')
+const {personalState,fixedNow}=await import('./react-fixtures/personal-state.mjs')
 const views:any[]=[]
 afterEach(async()=>{for(const view of views.splice(0))await act(async()=>view.dispose());document.body.innerHTML='<div id="personal-root"></div><div id="personal-orb-host"></div>';localStorage.clear()})
 async function mount(){
@@ -120,4 +120,21 @@ test('assistant tab follows the saved user name and stays beside the personal pr
  await act(async()=>fireEvent.click(tab));assert.equal(tab.getAttribute('aria-selected'),'true');assert.ok(document.querySelector('.soul-card'));
  const {setLanguage}=await import('../src/renderer/locale.mjs');try{await act(async()=>{setLanguage('en');view.identity({profile:{assistantName:'设置'}})});assert.equal(tab.textContent,'设置','user names are displayed without translation')}finally{setLanguage('zh-CN')}
  await act(async()=>fireEvent.keyDown(tab,{key:'ArrowRight'}));assert.equal(document.querySelector('[data-page="timeline"]')?.getAttribute('aria-selected'),'true');
+})
+
+
+test('a mirrored goal-proposal feed renders an actionable card in the main conversation',async()=>{
+ const {view,sent}=await mount(),state=personalState(2)
+ state.feed=[{id:'goal1',kind:'question',title:'想把「练口语」设为目标吗？',why_now:'建议节奏：每天陪你练一点',goal_proposal:{title:'练口语',success_criteria:'每天开口 10 分钟',cadence:'daily',topic_key:'topic',revision:'rev1',evidence_refs:['message:user']},evidence_refs:[],memory_refs:[],source:{type:'conversation',ref:'message:user'},suggestion_id:null,task_ref:null,subject_key:'goal:topic',priority:40,created_at:fixedNow,updated_at:fixedNow,expires_at:null,user_state:'new',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null}}]
+ state.conversations.messages.push({id:'feed:goal1',conversation_id:'chat:main',role:'assistant',text:'fallback'})
+ await act(async()=>view.receive(state))
+ const card=document.querySelector<HTMLElement>('#chat-pane .message-feed .feed-card')!
+ assert.ok(card,'feed message renders its card')
+ assert.equal(card.getAttribute('data-kind'),'goal_proposal')
+ assert.ok(card.textContent!.includes('新目标建议'))
+ const adopt=[...card.querySelectorAll<HTMLButtonElement>('button')].find(node=>node.textContent==='设为目标')!
+ await act(async()=>fireEvent.click(adopt))
+ const action=sent.filter(frame=>frame.method==='feed.action'&&frame.params?.action==='adopt_goal').at(-1)
+ assert.ok(action,'adopt_goal command sent')
+ assert.equal(action.params.goal_revision,'rev1')
 })

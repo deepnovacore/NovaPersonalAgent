@@ -1,4 +1,5 @@
 import '@radix-ui/themes/styles.css'
+import '../settings/connectors.css'
 import React from "react"
 import {createRoot} from "react-dom/client"
 import {DesktopTheme,ErrorBoundary} from "../theme"

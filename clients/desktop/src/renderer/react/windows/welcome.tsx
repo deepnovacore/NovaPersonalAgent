@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react'
-import {ShieldCheck, Mic, Monitor, Accessibility} from 'lucide-react'
+import {ShieldCheck, Mic, Monitor, Accessibility, ExternalLink} from 'lucide-react'
 import {t} from '../../locale.mjs'
 import {startupMessage} from '../../startup-notice.mjs'
 import {OrbDragGesture} from '../../drag-gesture.mjs'
@@ -17,7 +17,24 @@ const labels: any={granted:'已授权',denied:'未授权',restricted:'受系统�
 export function PermissionCards({api, value, onChange}:any) {
  const [busy,setBusy]=useState(''),[error,setError]=useState('')
  const run=async(kind:string)=>{if(busy)return;setBusy(kind);setError('');try{const next=kind==='refresh'?await api.get():await api.permission(kind);onChange(next)}catch{setError(t('无法打开系统设置，请手动前往隐私与安全性。'))}finally{setBusy('')}}
- return <>{permissions.map(([kind,title,description,Icon])=>{const status=value?.[kind]??'unknown';return <article className="permission-row" key={kind}><span className="permission-icon"><Icon/></span><div className="permission-copy"><h3>{t(title)}</h3><p>{t(description)}</p></div><div className="permission-aside"><span className="permission-state" data-status={status}>{t(labels[status]??labels.unknown)}</span><button type="button" aria-label={t('设置{0}权限',t(title))} hidden={['granted','not_required','unsupported'].includes(status)} disabled={!!busy} onClick={()=>void run(kind)}>{t('去设置')}</button></div></article>})}<p className="permission-note">{t(['granted','not_required'].includes(value?.screen)&&['granted','not_required'].includes(value?.accessibility)?'系统权限已就绪。在 Build 中打开 Computer Use 即可使用，执行前仍会请求批准。':'授权后可在 Build 中使用电脑操作；默认使用主屏幕和当前对话模型。')}</p><button type="button" disabled={!!busy} onClick={()=>void run('refresh')}>{t('重新检查权限')}</button><p className="welcome-error" role="alert" hidden={!error}>{error}</p></>
+ // Permission rows keep the shared icon tile + copy + status aside shape. The
+ // settings window adds page-scoped polish in settings.css; the welcome flow
+ // keeps its own welcome.css treatment for the same markup.
+ return <>
+  {permissions.map(([kind,title,description,Icon])=>{const status=value?.[kind]??'unknown';return <article className="permission-row" key={kind}>
+   <span className="permission-icon"><Icon/></span>
+   <div className="permission-copy"><h3>{t(title)}</h3><p>{t(description)}</p></div>
+   <div className="permission-aside">
+    <span className="permission-state" data-status={status}>{t(labels[status]??labels.unknown)}</span>
+    <button type="button" className="permission-settings" title={t('打开系统设置')} aria-label={t('设置{0}权限',t(title))} hidden={['granted','not_required','unsupported'].includes(status)} disabled={!!busy} onClick={()=>void run(kind)}><ExternalLink size={16} aria-hidden="true"/></button>
+   </div>
+  </article>})}
+  <div className="permission-actions">
+   <p className="permission-note">{t(['granted','not_required'].includes(value?.screen)&&['granted','not_required'].includes(value?.accessibility)?'系统权限已就绪。在 Build 中打开 Computer Use 即可使用，执行前仍会请求批准。':'授权后可在 Build 中使用电脑操作；默认使用主屏幕和当前对话模型。')}</p>
+   <button type="button" className="permission-refresh" aria-busy={busy==='refresh'} disabled={!!busy} onClick={()=>void run('refresh')}>{t('重新检查权限')}</button>
+  </div>
+  <p className="welcome-error" role="alert" hidden={!error}>{error}</p>
+ </>
 }
 export function WelcomeScreen({api,startup,onProfile,onVisible}:any) {
  const [view,setView]=useState<any>(null),[entered,setEntered]=useState(false),[skip,setSkip]=useState(false),[error,setError]=useState(false),[busy,setBusy]=useState(false)

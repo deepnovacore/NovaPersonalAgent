@@ -954,3 +954,63 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
   .workbench .chat-companion[data-form=pet]::after,
   .workbench .voice-stage-pet-frame .companion-aura{border-color:CanvasText;box-shadow:none;opacity:1}
 }
+
+/* ── Proactive feed cards in the main conversation ───────────────────────
+   The host mirrors every feed item as a `feed:<id>` assistant message. Those
+   turns are complete cards with their own actions, never bare Markdown. */
+.workbench .message-feed .feed-card{display:grid;gap:12px;padding:20px 22px 18px;border:1px solid color-mix(in srgb,var(--surface-raised) 72%,var(--line));border-radius:var(--radius-xl);background:var(--timeline-card);box-shadow:none}
+.workbench .message-feed .feed-card[data-kind="goal_proposal"]{--feed-accent:var(--tag-progress-ink);--feed-wash:var(--tag-progress-wash)}
+.workbench .message-feed .feed-card[data-kind="goal_checkin"]{--feed-accent:var(--tag-waiting-ink);--feed-wash:var(--tag-waiting-wash)}
+.feed-overline{display:flex;align-items:center;gap:6px;font:600 11px/1.4 var(--mono);letter-spacing:.06em;color:var(--feed-accent,var(--ink-faint));text-transform:none}
+.feed-overline svg{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.workbench .feed-card h3{font-size:18px;line-height:1.5;font-weight:650;color:var(--ink);padding-right:0;overflow-wrap:anywhere}
+.feed-why{margin:0;font-size:13px;line-height:1.7;color:var(--ink-dim)}
+.feed-body-text{min-width:0}
+.feed-body-text .md{display:grid;gap:8px;font-size:13px;color:var(--ink)}
+.feed-rows{margin:0;display:grid;gap:10px;padding:14px 16px;border-radius:12px;background:var(--timeline-inset)}
+.feed-row{display:grid;grid-template-columns:5.5em minmax(0,1fr);gap:10px;align-items:baseline}
+.feed-row dt{font:500 11px/1.6 var(--mono);letter-spacing:.02em;color:var(--ink-faint)}
+.feed-row dd{margin:0;font-size:13px;line-height:1.65;color:var(--ink);overflow-wrap:anywhere}
+.feed-tags{display:flex;flex-wrap:wrap;gap:6px}
+.feed-tag{display:inline-flex;align-items:center;font:11px/1.5 var(--font);border-radius:999px;padding:3px 9px;color:var(--ink-dim);background:var(--surface-inset);border:1px solid transparent}
+.feed-tag[data-tone="time"]{color:var(--tag-time-ink);background:var(--tag-time-wash)}
+.feed-tag[data-tone="waiting"]{color:var(--tag-waiting-ink);background:var(--tag-waiting-wash)}
+.feed-tag[data-tone="progress"]{color:var(--tag-progress-ink);background:var(--tag-progress-wash)}
+.feed-tag[data-tone="attention"]{color:var(--tag-attention-ink);background:var(--tag-attention-wash)}
+.workbench .feed-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:2px}
+.workbench .feed-actions button{min-height:32px;border-radius:9px;padding:0 14px;font-size:12px}
+.workbench .feed-actions button.soft{border:1px solid transparent;background:var(--feed-wash,var(--tag-time-wash));color:var(--feed-accent,var(--tag-time-ink));font-weight:600}
+.workbench .feed-actions button.soft:hover:not(:disabled){border-color:color-mix(in srgb,var(--feed-accent,var(--tag-time-ink)) 22%,transparent);background:var(--feed-wash,var(--tag-time-wash))}
+.workbench .feed-card .feed-unavailable{margin:0;padding:8px 11px;border-radius:9px;background:var(--tag-attention-wash);color:var(--tag-attention-ink);font-size:12px;line-height:1.6}
+.feed-checkin{display:grid;gap:8px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised)}
+.feed-checkin-text{margin:0;font-size:13px;line-height:1.7;color:var(--ink)}
+.feed-recalled{margin:0;font-size:12px;line-height:1.6;color:var(--ink-faint)}
+.feed-hint{margin:0;font-size:12px;line-height:1.6;color:var(--ink-faint);align-self:center}
+.feed-error{margin:0;font-size:12px;line-height:1.6;color:var(--warn)}
+.feed-card .feed-actions .feed-hint{padding:0 2px}
+@media(max-width:600px){.workbench .message-feed .feed-card{padding:16px;border-radius:var(--radius-lg)}.feed-row{grid-template-columns:minmax(0,1fr);gap:2px}.feed-rows{padding:12px 13px;gap:12px}}
+
+/* Voice activation is a state, not an absence: show progress instead of the stale "off" label. */
+.voice-stage-label{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:18px}
+.voice-stage[data-state="starting"] .voice-stage-label{color:var(--ink);font-weight:500}
+.voice-stage-spinner{width:13px;height:13px;flex:none;border:2px solid var(--line-strong);border-top-color:var(--accent);border-radius:50%;animation:warmup-spin .8s linear infinite}
+.voice-stage-notice{margin:0;max-width:min(420px,88%);padding:7px 11px;border-radius:9px;background:var(--tag-attention-wash);color:var(--tag-attention-ink);font-size:12px;line-height:1.6;text-align:center}
+.voice-stage-actions{display:flex;align-items:center;gap:8px}
+.voice-stage-actions button{min-height:28px;font-size:12px}
+@media(prefers-reduced-motion:reduce){.voice-stage-spinner{animation:none}}
+
+/* ── About-me: icon work cards and read-only interest tags ─────────────── */
+.workbench .profile-work-item{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:start;gap:12px;padding:14px;border-radius:12px;background:var(--surface)}
+.workbench .profile-work-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--accent-wash);color:var(--accent)}
+.workbench .profile-work-icon svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.workbench .profile-work-copy{display:grid;gap:4px;min-width:0}
+.profile-interests{display:grid;gap:9px;padding-top:14px;border-top:1px solid var(--line)}
+.profile-interests h4{font-size:12px;font-weight:600;line-height:1.4;color:var(--ink-dim)}
+.profile-interests .interest-chips{gap:7px}
+/* Suggestions moved from the briefing into the ideas tab: one calm card per candidate. */
+.workbench .nova-suggestion{position:relative;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface-raised);padding:14px 16px 12px 18px}
+.workbench .nova-suggestion::before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.workbench .nova-suggestion .card-actions{gap:6px}
+.workbench .nova-suggestion .card-tag{font-weight:500}
+.workbench .voice-failure{flex:1 0 100%;order:-1;margin:0 0 4px;font-size:12px;color:var(--warn)}
+.workbench .composer-actions:has(.voice-failure){flex-wrap:wrap}

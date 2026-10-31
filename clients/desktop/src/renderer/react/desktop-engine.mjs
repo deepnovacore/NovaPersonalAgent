@@ -352,7 +352,11 @@ track(()=>{approvalObserver.disconnect();document.removeEventListener('scroll',a
 
 function render() {
   if(disposed)return
-  const state = deriveOrbState({...axes, tasks: taskBanner?.state().tasks ?? []})
+  const voiceController = personalView?.controller
+  const voiceStarting = (voiceController?.mode === 'starting' && !voiceController.dictationId) || axes.activationPending
+  const voiceReconnecting = voiceController?.voiceState === 'reconnecting'
+  const voiceFailed = voiceController?.voiceState === 'failed'
+  const state = deriveOrbState({...axes, tasks: taskBanner?.state().tasks ?? [], voiceStarting, voiceReconnecting, voiceFailed})
   const sleeping = axes.wakeState === 'sleeping'
   const setupAction = !sleeping && state.statusAction === 'setup'
   if (lastReportedConfirmationMode !== state.confirmationVisible) {
@@ -1294,6 +1298,7 @@ async function boot() {
 
 personalView = mountPersonalView({send,
   onUnreadChange:count=>ui.set({unread:count>0}),
+  onChange:()=>render(),
   speakingLevel: () => getPlaybackLevel(),
   start: async ({wake = true} = {}) => {
     if (await refreshMicrophonePermission() !== 'granted') throw new Error('麦克风权限不可用，原有草稿已保留')

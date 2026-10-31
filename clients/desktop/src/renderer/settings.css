@@ -569,44 +569,99 @@ button:disabled { cursor: default; opacity: .45; }
   padding-top: 2px;
 }
 
+/* API key rows are one line: fixed-name label, the colored state pill, then
+   the write-only input (only while unset or being cleared) and its actions.
+   Presence and source are carried by the badge colour, so the old
+   必需/当前未使用 hint is hidden instead of squeezing the row. */
 .secret {
-  display: grid;
-  grid-template-columns: minmax(100px, 140px) auto minmax(120px, 1fr) minmax(60px, 120px) auto auto;
-  grid-template-areas: "name badge input usage clear link";
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
-  padding: 9px 2px;
+  gap: 6px 10px;
+  padding: 10px 2px;
   border-bottom: 1px solid var(--line);
 }
 
-.secret > label { grid-area: name; color: var(--ink-dim); }
-.secret > .badge { grid-area: badge; justify-self: start; }
-.secret > .key-usage { grid-area: usage; }
-.secret > input { grid-area: input; min-width: 0; width: 100%; }
-.secret > button { grid-area: clear; }
+.secret > label {
+  flex: 0 0 120px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.secret > .badge { flex: none; }
+
+.secret > .key-usage { display: none; }
+
+.secret > input[type="password"] {
+  flex: 1 1 180px;
+  width: auto;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.secret > input[type="password"]:disabled { opacity: .55; cursor: default; }
+
+.secret > button {
+  flex: none;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.secret > button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-active);
+  color: var(--ink);
+}
+
+.secret > .key-link {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-dim);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.secret > .key-link:hover { color: var(--accent-strong); text-decoration: underline; }
 
 .badge {
-  padding: 1px 6px;
+  padding: 2px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
+  background: var(--surface);
   color: var(--ink-faint);
-  font-size: 9.5px;
+  font-size: 10.5px;
+  font-weight: 550;
+  line-height: 1.5;
   white-space: nowrap;
 }
 
 .badge[data-present="1"] {
-  border-color: rgba(200, 103, 18, .35);
-  background: var(--accent-wash);
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
+  background: var(--ok-wash);
+  color: var(--ok);
 }
 
-.key-usage {
-  overflow: hidden;
-  color: var(--ink-faint);
-  font-size: 10px;
-  overflow-wrap: anywhere;
-  white-space: normal;
+/* Keys supplied by the repo .env or the OS environment are informational:
+   they are visible here but edited outside the app. */
+.secret > .badge[data-source="dotenv"],
+.secret > .badge[data-source="environment"] {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-wash);
+  color: var(--accent-strong);
 }
+
+.key-usage { display: none; }
 
 #settings-save {
   min-width: 104px;
@@ -758,8 +813,6 @@ footer {
 
 #frontend-usage, #frontend-usage-details { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 
-.secret > .key-link { grid-area: link; justify-self: end; color: var(--ink-dim); font-size: 11px; }
-
 /* Form layout: long descriptions wrap, controls have a consistent touch target. */
 main :is(p, small, label, span, summary, td, th) { overflow-wrap: anywhere; }
 main :is(p, small) { line-height: 1.65; }
@@ -777,14 +830,85 @@ button { min-height: var(--control-height-lg); padding: 7px 12px; }
 :is(#capabilities-editor, .executor-card) .checkbox-field { grid-template-columns: minmax(0, 1fr) 38px; align-items: center; gap: 18px; padding: 14px 16px; margin: 0; border-bottom: 1px solid var(--line); background: var(--surface); cursor: pointer; }
 #capabilities-editor legend { position: static; width: auto; height: auto; margin: 0; padding: 0 6px; clip-path: none; white-space: normal; font-weight: 600; }
 #capabilities-editor textarea { padding: 10px 12px; line-height: 1.6; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+/* Knowledge sources: a compact toolbar, a URL row and one row per source
+   instead of a stack of full-width buttons. */
 #knowledge-section .field { margin: 0; }
-#knowledge-panel { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
-.knowledge-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
-#knowledge-status { padding: 12px; background: var(--surface); border-radius: var(--radius-sm); color: var(--ink-dim); font-size: 12px; white-space: pre-line; }
-#knowledge-sources { list-style: none; padding: 0; margin: 12px 0; }
-#knowledge-sources li { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }
-#knowledge-sources li > span { width: 100%; min-width: 0; line-height: 1.6; }
-#knowledge-sources li > button { background: var(--plate); }
+#knowledge-panel { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+#knowledge-panel[aria-busy="true"] { cursor: progress; }
+.knowledge-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 12px; }
+.knowledge-url { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+#knowledge-panel .knowledge-url > input { flex: 1 1 220px; width: auto; min-width: 0; min-height: 32px; }
+#knowledge-panel .knowledge-url > .rt-Button { flex: none; }
+.knowledge-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+.knowledge-status::before {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+.knowledge-status[data-tone="busy"]::before { animation: knowledge-pulse 1.2s ease-in-out infinite; }
+.knowledge-status[data-tone="warn"],
+.knowledge-status[data-tone="error"] { border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-wash); color: var(--warn); }
+.knowledge-status[data-tone="warn"]::before,
+.knowledge-status[data-tone="error"]::before { background: var(--warn); }
+@keyframes knowledge-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .knowledge-status[data-tone="busy"]::before { animation: none; } }
+#knowledge-sources { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; }
+#knowledge-panel .knowledge-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+#knowledge-panel .knowledge-source:last-child { border-bottom: 0; }
+.knowledge-source-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; flex: 1 1 220px; }
+.knowledge-source-title { min-width: 0; color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.knowledge-source-state {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  font-weight: 550;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.knowledge-source-state[data-state="ready"] { background: var(--ok-wash); color: var(--ok); }
+.knowledge-source-state[data-state="failed"] { background: var(--warn-wash); color: var(--warn); }
+.knowledge-source-actions { display: flex; flex: none; align-items: center; gap: 6px; }
+#knowledge-panel .knowledge-source-action.rt-Button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 8px;
+}
+#knowledge-panel .knowledge-source-action.rt-Button svg { width: 15px; height: 15px; }
+#knowledge-panel .knowledge-source-action.rt-Button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface-active); color: var(--ink); }
+#knowledge-panel .knowledge-source-action.rt-Button.destructive { border-color: transparent; background: transparent; color: var(--warn); }
+#knowledge-panel .knowledge-source-action.rt-Button.destructive:hover:not(:disabled) { border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-wash); color: var(--warn); }
+.knowledge-empty { margin: 4px 0 0; padding: 12px 0 2px; color: var(--ink-faint); font-size: 12px; line-height: 1.6; }
 @media (forced-colors: active) {
   input[type="checkbox"][role="switch"] { appearance: auto; }
   input[type="checkbox"]::after { content: none; }
@@ -802,12 +926,10 @@ button { min-height: var(--control-height-lg); padding: 7px 12px; }
 #frontend-usage-section details { border-top: 1px solid var(--line); padding-top: 12px; }
 #frontend-usage-section summary { color: var(--ink-dim); font-size: 12px; cursor: pointer; }
 #frontend-usage-details { padding: 14px 16px; border-radius: 10px; background: var(--surface); font-size: 12px; line-height: 1.8; }
-@container (max-width: 760px) {
-  .secret {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    grid-template-areas: "name badge usage" "input input clear" "link link link";
-  }
-  .secret:has(input[hidden]) { grid-template-areas: "name badge clear" "usage usage link"; }
+/* Narrow settings windows: the key input takes its own full-width line while
+   the label, badge and actions stay compact above/below it. */
+@container (max-width: 560px) {
+  .secret > input[type="password"] { flex-basis: 100%; }
 }
 
 
@@ -935,7 +1057,7 @@ input:is([type="date"], [type="time"]) { min-height: var(--control-height-lg); p
 #connections-section fieldset .personal-consent { margin: 4px 0; padding: 6px; }
 @media (forced-colors: active) { input[type="checkbox"] { accent-color: auto; } }
 @media (prefers-color-scheme: dark) {
-  :root { color-scheme: dark; --plate: #191c20; --surface: #22262c; --surface-raised: #2b3038; --surface-active: #292e35; --line: rgba(235, 240, 248, .12); --line-strong: rgba(235, 240, 248, .25); --ink: #eef1f5; --ink-dim: #b0b8c5; --ink-faint: #8b95a5; --accent: #efa866; --accent-strong: #ffc18b; --accent-wash: rgba(239, 168, 102, .12); }
+  :root { color-scheme: dark; --plate: #191c20; --surface: #22262c; --surface-raised: #2b3038; --surface-active: #292e35; --line: rgba(235, 240, 248, .12); --line-strong: rgba(235, 240, 248, .25); --ink: #eef1f5; --ink-dim: #b0b8c5; --ink-faint: #8b95a5; --accent: #efa866; --accent-strong: #ffc18b; --accent-wash: rgba(239, 168, 102, .12); --accent-ink: #191c20; --ok: #8dd9a5; --ok-wash: rgba(141, 217, 165, .12); }
   input::placeholder { color: var(--ink-faint); }
   #settings-save { color: #191c20; }
 }
@@ -1365,3 +1487,246 @@ label.toggle-row:last-child,
 @media (forced-colors: active) {
   .field, .toggle-row { border-bottom-color: CanvasText; }
 }
+
+/* ── 日记与简报: one switch row per option ─────────────────────────────────
+ * The legacy sheet already owns the card/switch geometry; these rows only add
+ * the clock inputs, the weekday chips group and the quiet-hours disclosure.
+ * Rows are horizontal (label left, control right) instead of a column of
+ * centred legacy labels. */
+#diary-section .im-card { padding: 18px 20px; }
+#diary-section .brief-slot { gap: 16px; }
+#diary-section .brief-toggle { min-height: 24px; }
+#diary-section .brief-toggle input[role="switch"] { order: 0; flex: none; margin: 0; }
+#diary-section .brief-toggle span { font-weight: 550; }
+#diary-section .brief-slot input[type="time"],
+#diary-section .brief-quiet input[type="time"] {
+  flex: none;
+  width: 108px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+#diary-section .brief-slot input[type="time"]:disabled,
+#diary-section .brief-quiet input[type="time"]:disabled { opacity: .45; }
+#diary-section .brief-days { align-items: center; gap: 6px; padding: 14px 0 10px; }
+#diary-section .day-chip span { padding: 6px 12px; }
+#diary-section .brief-advanced { margin: 0 0 14px; padding-top: 10px; }
+#diary-section .brief-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  list-style: none;
+  user-select: none;
+}
+#diary-section .brief-advanced > summary::-webkit-details-marker { display: none; }
+#diary-section .brief-advanced > summary::after {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-right: 1.5px solid var(--ink-dim);
+  border-bottom: 1.5px solid var(--ink-dim);
+  content: "";
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 140ms ease;
+}
+#diary-section .brief-advanced[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
+#diary-section .brief-quiet { gap: 8px; padding: 10px 0 4px; }
+#diary-section .brief-quiet span { color: var(--ink-dim); font-size: 12px; }
+#diary-section .brief-advanced .personal-hint { margin: 4px 0 0; }
+#diary-section .brief-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+#diary-section .brief-actions .rt-Button { margin: 0; }
+
+/* ── 电脑操作与系统权限: rows, status pills and the advanced disclosure ────
+ * Scoped to the permissions page so the first-run welcome screen keeps its own
+ * welcome.css treatment of the shared permission card markup. */
+.nova-window-settings #desktop-permissions-section .permission-row {
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+}
+.nova-window-settings #desktop-permissions-section .permission-row:last-of-type { border-bottom: 0; }
+.nova-window-settings #desktop-permissions-section .permission-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+.nova-window-settings #desktop-permissions-section .permission-icon svg { width: 21px; height: 21px; }
+.nova-window-settings #desktop-permissions-section .permission-copy h3 {
+  margin: 0 0 3px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 620;
+  line-height: 1.5;
+}
+.nova-window-settings #desktop-permissions-section .permission-copy p {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.nova-window-settings #desktop-permissions-section .permission-aside {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.nova-window-settings #desktop-permissions-section .permission-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.nova-window-settings #desktop-permissions-section .permission-state::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+.nova-window-settings #desktop-permissions-section .permission-state[data-status="granted"] { background: var(--ok-wash); color: var(--ok); }
+.nova-window-settings #desktop-permissions-section .permission-state[data-status="denied"],
+.nova-window-settings #desktop-permissions-section .permission-state[data-status="restricted"] { background: var(--warn-wash); color: var(--warn); }
+.nova-window-settings #desktop-permissions-section .permission-state[data-status="not-determined"] { background: var(--accent-wash); color: var(--accent-strong); }
+.nova-window-settings #desktop-permissions-section .permission-settings {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+.nova-window-settings #desktop-permissions-section .permission-settings:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-active);
+  color: var(--ink);
+}
+.nova-window-settings #desktop-permissions-section .permission-settings svg { width: 16px; height: 16px; }
+.nova-window-settings #desktop-permissions-section .permission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.nova-window-settings #desktop-permissions-section .permission-note {
+  flex: 1 1 280px;
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.nova-window-settings #desktop-permissions-section .permission-refresh {
+  flex: none;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.nova-window-settings #desktop-permissions-section .permission-refresh:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-active);
+}
+.nova-window-settings #desktop-permissions-section .permission-refresh:disabled { opacity: .45; cursor: default; }
+.nova-window-settings #desktop-permissions-section #desktop-permissions-panel .welcome-error {
+  margin: 10px 0 0;
+  color: var(--warn);
+  font-size: 12px;
+}
+.nova-window-settings #desktop-permissions-section .computer-configuration {
+  overflow: hidden;
+  margin: 16px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.nova-window-settings #desktop-permissions-section .computer-configuration > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.5;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 120ms ease;
+}
+.nova-window-settings #desktop-permissions-section .computer-configuration > summary::-webkit-details-marker { display: none; }
+.nova-window-settings #desktop-permissions-section .computer-configuration > summary:hover { background: var(--surface-active); }
+.nova-window-settings #desktop-permissions-section .computer-configuration > summary::after {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-right: 1.5px solid var(--ink-dim);
+  border-bottom: 1.5px solid var(--ink-dim);
+  content: "";
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 140ms ease;
+}
+.nova-window-settings #desktop-permissions-section .computer-configuration[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
+.nova-window-settings #desktop-permissions-section .computer-configuration > p {
+  margin: 0;
+  padding: 0 14px 10px;
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.nova-window-settings #desktop-permissions-section .computer-configuration > p:last-child { padding-bottom: 14px; }
+.nova-window-settings #desktop-permissions-section .computer-configuration[open] > summary { border-bottom: 1px solid var(--line); }
+@media (max-width: 640px) {
+  .nova-window-settings #desktop-permissions-section .permission-row { grid-template-columns: 40px minmax(0, 1fr); }
+  .nova-window-settings #desktop-permissions-section .permission-aside {
+    grid-column: 2;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+@media (forced-colors: active) {
+  .nova-window-settings #desktop-permissions-section .permission-settings,
+  .nova-window-settings #desktop-permissions-section .permission-refresh,
+  .nova-window-settings #desktop-permissions-section .computer-configuration { border: 1px solid CanvasText; }
+  .nova-window-settings #desktop-permissions-section .permission-state { border: 1px solid CanvasText; }
+  .nova-window-settings #desktop-permissions-section .permission-state[data-status="granted"] { color: Highlight; border-color: Highlight; }
+  .nova-window-settings #desktop-permissions-section .permission-state[data-status="denied"],
+  .nova-window-settings #desktop-permissions-section .permission-state[data-status="restricted"] { color: Mark; border-color: Mark; }
+}
+@media (forced-colors: active) {
+  #diary-section .day-chip input:checked + span { border-color: Highlight; color: Highlight; }
+  #diary-section .brief-slot,
+  #diary-section .brief-days,
+  #diary-section .brief-advanced { border-color: CanvasText; }
+  .knowledge-status,
+  .knowledge-source-state { border: 1px solid CanvasText; }
+  #knowledge-panel .knowledge-source { border-bottom-color: CanvasText; }
+}
+#knowledge-panel .knowledge-source-action.rt-Button.destructive[data-armed="true"] { border-color: var(--warn); background: var(--warn-wash); }

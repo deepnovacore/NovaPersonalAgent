@@ -873,3 +873,18 @@ body:hover #last-result, #last-result:focus-visible { opacity: 1; pointer-events
   --companion-ring:#ff7b83;--companion-glow:rgba(255,90,105,.24);
   --companion-aura-animation:none;--companion-aura-duration:4s;--companion-aura-opacity:.78;
 }
+
+/* Collapsed orb: the task summary moves to the window's top edge, which is empty
+   in the pet form, so it can never cover the status label under the orb. The
+   confirmation banner keeps priority (the extras are already hidden then). */
+body[data-presentation-mode='orb'] #personal-orb-host .personal-orb-extras {
+  top: 6px;
+  bottom: auto;
+  left: 8px;
+  right: 8px;
+}
+/* While a task chip is visible the extra top inset keeps it clear of the unread
+   dot and of the orb itself on the shortest collapsed windows. */
+body[data-presentation-mode='orb'] #personal-orb-host .personal-orb-task {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .22);
+}

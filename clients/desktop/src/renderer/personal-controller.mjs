@@ -40,7 +40,7 @@ function dropDraftIntent(state){
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{}}) {
     this.confirmBuildSwitch=confirmBuildSwitch
-    Object.assign(this,{startRequests:new Map(),send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
+    Object.assign(this,{startRequests:new Map(),send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false,voiceState:null,voiceNotice:''})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get selectedConversation(){return this.snapshot?.conversations?.items?.find(item=>item.id===this.selectedId)??null}
@@ -50,7 +50,11 @@ export class PersonalController {
   async guardBuildSwitch(){const active=this.activeBuild;if(!active)return true;if(!await this.confirmBuildSwitch())return false;await this.command('build.stop',{id:active.id});return true}
   get voiceCapabilities(){return this.connected&&this.voiceId?this.state(this.voiceId).voiceCapabilities?.capabilities??null:null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
-  state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',submission:null});return this.drafts.get(id)}
+  state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',notice:'',submission:null});return this.drafts.get(id)}
+  /** The voice transport is a distinct axis from text mode: the ChatPane and the orb read it for copy, never for input gating. */
+  get voicePhase(){return this.voiceState ?? (this.mode==='starting'?'starting':null)}
+  clearVoiceNotice(){this.voiceState=null;this.voiceNotice='';for(const state of this.drafts.values())state.notice=''}
+  setVoiceNotice(notice){this.voiceNotice=notice;const id=this.voiceId??this.selectedId;if(id!=null)this.state(id).notice=notice}
   /** The host just cleared or replaced this conversation's generation: its composer intent is stale. */
   resetDraftIntent(id){if(id!=null)dropDraftIntent(this.drafts.get(id))}
   /** A host snapshot is the sole owner of kind/mode; drop intents that contradict it or outlived it. */
@@ -148,6 +152,7 @@ export class PersonalController {
     this.changed()
   }
   async resumeVoice({wake=true}={}){
+    this.clearVoiceNotice()
     const id=this.voiceId
     if(!id||!this.connected||!this.presentationReady||this.presentationMode==='background'||this.capturePending||this.mode!=='text')return
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
@@ -163,7 +168,26 @@ export class PersonalController {
       const state=this.state(frame.conversation_id)
       if(valid&&frame.conversation_generation>=(state.voiceCapabilities?.generation??-1))state.voiceCapabilities={generation:frame.conversation_generation,capabilities:caps}
     }
-    if(frame.type==='conversation.notice'&&typeof frame.conversation_id==='string'&&typeof frame.message==='string')this.state(frame.conversation_id).error=frame.message
+    // Voice transport notices carry their own lifecycle copy (reconnecting / recovered /
+    // failed) so a provider reconnect is never mistaken for an idle "listening" session.
+    if(frame.type==='conversation.notice'&&typeof frame.conversation_id==='string'&&typeof frame.code==='string'&&frame.code.startsWith('voice_provider_')){
+      const message=typeof frame.message==='string'?frame.message.trim():''
+      const state=this.state(frame.conversation_id)
+      if(frame.code==='voice_provider_reconnecting'){this.voiceState='reconnecting';if(message)this.setVoiceNotice(message)}
+      else if(frame.code==='voice_provider_recovered'){this.voiceState='recovered';this.setVoiceNotice(message||'语音连接已恢复，请再说一次')}
+      else if(frame.code==='voice_provider_failed'){
+        this.voiceState='failed';this.setVoiceNotice(message||'语音连接已断开，请重新开启语音；若仍失败，请在设置中检查语音服务配置')
+        state.error=this.voiceNotice
+        // A late failure from a replaced voice session must not cancel the dictation or
+        // transcription the user has already started: keep that capture and only show the copy.
+        const dictating=this.dictationId!=null||this.mode==='dictation'||this.mode==='transcribing'
+        if(!dictating){this.generation++;this.mode='text';this.captureConversationId=null;const id=frame.conversation_id;void this.stop();if(this.connected)void this.command('conversations.voice',{id,enabled:false}).catch(()=>{})}
+      }
+      this.changed()
+    }
+    // A fresh user utterance consumes a reconnect/recovery hint instead of leaving stale copy on screen.
+    if(frame.type==='caption'&&frame.role==='user'&&frame.final===true&&typeof frame.text==='string'&&frame.text.trim()){if(this.voiceState==='recovered'||this.voiceState==='reconnecting'){const id=this.voiceId??this.selectedId;if(id!=null)this.state(id).notice='';this.voiceNotice='';this.voiceState=null}}
+    if(frame.type==='conversation.notice'&&typeof frame.conversation_id==='string'&&typeof frame.message==='string'&&!(typeof frame.code==='string'&&frame.code.startsWith('voice_provider_')))this.state(frame.conversation_id).error=frame.message
     if(frame.type==='conversation.error'&&typeof frame.conversation_id==='string')this.state(frame.conversation_id).error=typeof frame.reason==='string'&&Object.hasOwn(MODEL_FAILURES,frame.reason)?MODEL_FAILURES[frame.reason]:typeof frame.reason==='string'&&/^model_protocol(?:_[a-z_]{1,64})?$/u.test(frame.reason)?'模型回复格式异常，请重试。':'回复失败，请重试。'
     if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
       const request=state.submission
@@ -231,6 +255,7 @@ export class PersonalController {
     this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text';await this.stop();this.changed()
   }
   async stopVoice(){
+    this.clearVoiceNotice()
     const id=this.voiceId??this.captureConversationId
     this.generation++;await this.stop();this.captureConversationId=null;this.mode='text'
     if(id&&this.connected)await this.command('conversations.voice',{id,enabled:false})
@@ -239,6 +264,7 @@ export class PersonalController {
   // `wake:false` opens the microphone without leaving sleep, so a sleeping orb keeps listening for its wake word.
   async startCapture(options){this.capturePending=true;try{await this.start(options)}finally{this.capturePending=false}}
   async voice({wake=true}={}){
+    this.clearVoiceNotice()
     const id=this.selectedId
     if(!this.presentationReady||this.presentationMode==='background')throw new Error('请先切换到工作台或悬浮球')
     if(!id||!this.connected)throw new Error('尚未选择会话')
@@ -258,6 +284,7 @@ export class PersonalController {
     const id=this.selectedId
     if(!this.presentationReady||this.presentationMode==='background'||!id||!this.connected||!this.capabilities.includes('dictation'))return
     if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束持续对话，再使用录音')
+    this.clearVoiceNotice()
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.dictationConversationId=id;this.dictationId=crypto.randomUUID();this.changed()
     if(!this.send({type:'input.dictation',id:this.dictationId,action:'start',conversation_id:id})){await this.text();throw new Error('发送失败')}
     try{await this.startCapture();if(generation!==this.generation){await this.stop();return}this.mode='dictation'}

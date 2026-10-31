@@ -863,7 +863,7 @@ test('the settings rail, section cards and preference rows follow one pattern', 
   assert.match(css, /\.field > small,[\s\S]*?grid-area:\s*hint/)
   assert.match(css, /\.toggle-row \{[^}]*justify-content:\s*space-between/)
   assert.match(css, /\.toggle-copy/)
-  assert.match(css, /@container \(max-width: 760px\)/)
+  assert.match(css, /@container \(max-width: (760|560)px\)/)
 })
 
 test('the display section translations cover every visible string', async context => {
@@ -1210,15 +1210,18 @@ test('every settings block belongs to exactly one sidebar category', () => {
 
 test('the sidebar renders one button per category with the first current', () => {
   assert.match(html, /<nav class="settings-nav" id="settings-nav" aria-label="设置分类">/)
-  for (const category of settingsCategories.SETTINGS_CATEGORIES) {
+  // Categories with no legacy DOM sections (for example the Space tab, which is
+  // rendered by the React settings window) are not part of the static shell.
+  for (const category of settingsCategories.SETTINGS_CATEGORIES.filter(category => category.sections.length > 0)) {
     assert.match(html, new RegExp(
       `<button type="button" class="nav-item" id="category-${category.id}" data-category="${category.id}"`,
     ))
     assert.match(html, new RegExp(`${category.label}</button>`))
   }
   assert.match(html, /id="category-general" data-category="general" aria-current="true">/)
-  assert.equal((html.match(/class="nav-item"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length)
-  assert.equal((html.match(/class="nav-item"[^>]*tabindex="-1"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length - 1)
+  const legacyCategories = settingsCategories.SETTINGS_CATEGORIES.filter(category => category.sections.length > 0)
+  assert.equal((html.match(/class="nav-item"/g) || []).length, legacyCategories.length)
+  assert.equal((html.match(/class="nav-item"[^>]*tabindex="-1"/g) || []).length, legacyCategories.length - 1)
 })
 
 test('sidebar and icon-button glyphs come from the shared sprite, injected at boot', () => {
@@ -1237,7 +1240,7 @@ test('sidebar and icon-button glyphs come from the shared sprite, injected at bo
   const mapping = script.match(/const NAV_GLYPHS = Object\.freeze\(\{([\s\S]*?)\}\)\n/)?.[1]
   assert.ok(mapping, 'the rail keeps an explicit category-to-glyph table')
   const glyphs = [...mapping.matchAll(/: '([a-z][a-z0-9-]*)'/g)].map(match => match[1])
-  for (const category of settingsCategories.SETTINGS_CATEGORIES) {
+  for (const category of settingsCategories.SETTINGS_CATEGORIES.filter(category => category.sections.length > 0)) {
     assert.match(mapping, new RegExp(`\\b${category.id}: '[a-z]`), `${category.id} gets a glyph`)
   }
   for (const glyph of glyphs) assert.ok(iconSpriteGlyphs.includes(glyph), `${glyph} exists in the sprite`)
