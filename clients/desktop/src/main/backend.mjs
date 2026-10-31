@@ -2,6 +2,7 @@ import {NATIVE_VOICE_PROVIDERS} from '../renderer/native-voice.mjs'
 import {isEndpointSecret, COMPATIBLE_STAGES} from '../renderer/compatible-providers.mjs'
 import { createServer } from 'node:net'
 import { timingSafeEqual } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import {codingProfileRegistry} from './coding-settings.mjs'
 import { CONTROL_CHARACTERS, RUNTIME_DEFAULTS as SETTINGS_DEFAULTS, selectedTextLlmProvider } from './settings-defaults.mjs'
@@ -236,6 +237,11 @@ export function backendLaunchSpec({
     ['KNOWLEDGE_PATH', settings?.knowledgePath ?? SETTINGS_DEFAULTS.knowledgePath],
   ]) {
     if (typeof value === 'string' && value) env[name] = value
+  }
+  // A Space created from the settings page; an operator-set variable keeps precedence.
+  const spaceHostConfig = settings?.spaceHostConfigPath
+  if (!parentEnv.NOVA_SPACE_HOST_CONFIG && typeof spaceHostConfig === 'string' && isAbsolute(spaceHostConfig) && existsSync(spaceHostConfig)) {
+    env.NOVA_SPACE_HOST_CONFIG = spaceHostConfig
   }
   if (env.CAPABILITIES_CONFIG && !env.CAPABILITIES_CONFIG.startsWith('~/')) {
     env.CAPABILITIES_CONFIG = resolve(env.CAPABILITIES_CONFIG)

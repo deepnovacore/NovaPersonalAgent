@@ -258,6 +258,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     chooseDirectory: () => ipcRenderer.invoke('nova:personal:directory'),
     openFeishuVerification: url => ipcRenderer.invoke('nova:personal:feishu-verification', url),
     knowledgeAction: payload => ipcRenderer.invoke('nova:knowledge:action', payload),
+    spaceCreate: request => ipcRenderer.invoke('nova:space:create', request),
     onChanged: callback => {
       if (typeof callback !== 'function') return () => {}
       const listener = (_event, value) => callback(value)

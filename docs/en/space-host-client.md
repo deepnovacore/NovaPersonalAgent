@@ -31,6 +31,15 @@ The scripts isolate build output by worktree path and run id. Call the output pa
 4. On the phone choose "Client" and scan the QR. Compare the fingerprint on the phone and the desktop, then confirm on the desktop. The Client waits for key delivery and then pulls display data. While the Host is offline, state changes show as waiting and chat fails immediately; nothing is sent silently when the Host returns.
 5. Other Spaces created on the phone can be standalone or a Client of another Host; credentials, caches, intents and tool-run records stay isolated per Space. To use another Host Space on the desktop, start it with a separate config.
 
+## Create a Space from desktop settings
+
+Instead of the command line, you can create the Host Space under Settings > Space & phones on the desktop. You still need a working HTTPS relay (loopback HTTP for local development) and its bootstrap credential; starting a relay automatically over Tailscale is not supported yet.
+
+1. Enter the relay address (only `https://host[:port]`) and the bootstrap credential (at least 32 characters), then choose Create Space. The credential is used only in the desktop main process's memory; it is not written to disk or sent back to the page.
+2. The config and data live in a fixed `space/` folder (mode `0700`) under the desktop app data directory; you cannot choose the path. A new Space starts with fresh data and does not migrate existing data on this computer; if the Host is lost, the Space cannot be recovered.
+3. After creation the desktop restarts its backend and the page shows "Create one-time pairing code"; pair the phone as in step 4 above. If the network drops during creation, choosing Create Space again resumes registration with the same identity; enter the same relay address.
+4. If `NOVA_SPACE_HOST_CONFIG` is already set in the launch environment, it takes precedence and the settings page does not create a Space.
+
 ## Headless Host (Linux/macOS)
 
 A machine without a desktop UI can be the Host: one service process runs the Space Host and pairing happens in the terminal.

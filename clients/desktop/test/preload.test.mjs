@@ -85,7 +85,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   const { exposed, ipcRenderer, invokes } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
-    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'nativeVoiceCapabilities', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'openNotificationSettings', 'personalCommand', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'setSystemNotifications', 'systemNotifications', 'voicePreset', 'voiceprint',
+    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'nativeVoiceCapabilities', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'openNotificationSettings', 'personalCommand', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'setSystemNotifications', 'spaceCreate', 'systemNotifications', 'voicePreset', 'voiceprint',
   ])
   assert.ok(Object.isFrozen(exposed.settings))
 
@@ -99,6 +99,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   await exposed.settings.clearAllManagedWorkspaces()
   await exposed.settings.knowledgeAction({action: 'status'})
   await exposed.settings.nativeVoiceCapabilities('personaplex')
+  await exposed.settings.spaceCreate({relayUrl: 'https://relay.example', bootstrapToken: 'x'})
   assert.deepEqual(invokes, [
     { channel: 'nova:settings:get', payload: undefined },
     { channel: 'nova:settings:set', payload: {settingsPatch: {palette: 'graphite'}} },
@@ -110,6 +111,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
     { channel: 'nova:workspaces:clear-all', payload: undefined },
     { channel: 'nova:knowledge:action', payload: {action: 'status'} },
     { channel: 'nova:settings:native-voice', payload: 'personaplex' },
+    { channel: 'nova:space:create', payload: {relayUrl: 'https://relay.example', bootstrapToken: 'x'} },
   ])
 
   const seen = []

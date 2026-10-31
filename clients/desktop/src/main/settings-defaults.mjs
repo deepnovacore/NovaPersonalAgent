@@ -51,6 +51,8 @@ export const RUNTIME_DEFAULTS = Object.freeze({
   embeddingModel: 'text-embedding-v4',
   capabilitiesConfigPath: '',
   knowledgePath: '',
+  // Written only by main after the settings page creates a Host Space; never in publicSettings.
+  spaceHostConfigPath: '',
 })
 
 // Node refuses a C0 control character in a child's environment value and throws

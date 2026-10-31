@@ -355,6 +355,10 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     capabilitiesConfigPath: pick(acceptsV4Fields ? source.capabilitiesConfigPath : undefined, acceptsV4Fields ? fallback.capabilitiesConfigPath : undefined, DEFAULT_SETTINGS.capabilitiesConfigPath, validDesktopString),
     memoryPrerecallEnabled: pick(source.memoryPrerecallEnabled, fallback.memoryPrerecallEnabled, DEFAULT_SETTINGS.memoryPrerecallEnabled, validBoolean),
     knowledgePath: pick(acceptsV4Fields ? source.knowledgePath : undefined, acceptsV4Fields ? fallback.knowledgePath : undefined, DEFAULT_SETTINGS.knowledgePath, validDesktopString),
+    spaceHostConfigPath: pick(source.spaceHostConfigPath, fallback.spaceHostConfigPath, DEFAULT_SETTINGS.spaceHostConfigPath, value => {
+      const path = validDesktopString(value)
+      return path === '' || (path !== null && isAbsolute(path)) ? path : null
+    }),
     secrets: normalizeSecrets(source.secrets),
   }
 }

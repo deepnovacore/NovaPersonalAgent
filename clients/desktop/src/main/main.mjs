@@ -22,6 +22,7 @@ import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agen
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
+import {createSpaceCreateHandler} from './space-create.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
 import {parseCapabilityRegistry} from '@nova-personal-agent/runtime/desktop'
@@ -177,6 +178,8 @@ const packageRoot = resolve(here, '../..')
 const developmentEnvFile = resolve(packageRoot, '../../.env')
 const developmentEnv = !app.isPackaged && existsSync(developmentEnvFile)
   ? parseEnv(readFileSync(developmentEnvFile, 'utf8')) : {}
+// Loaded only when the settings page creates a Host Space; the relay SDK stays out of startup.
+const loadSpaceHostRuntime = () => import('@nova-personal-agent/runtime/space-host')
 // Preserve paths and launch flags already normalized by the source launcher.
 for (const name of Object.values(SECRET_ENV_MAP)) {
   if (developmentEnv[name] !== undefined) process.env[name] = developmentEnv[name]
@@ -2165,6 +2168,15 @@ async function startSelectedCamera(camera, smokeChannel) {
       return {ok: true}
     } catch { return {error: 'invalid_voice_preset'} }
   })
+  // The bootstrap token stays in main memory; the reply is {ok} or a closed error code.
+  // The renderer restarts the backend afterwards so NOVA_SPACE_HOST_CONFIG takes effect.
+  ipcMain.handle('nova:space:create', createSpaceCreateHandler({
+    allowed: event => Boolean(settingsWindow) && event.sender === settingsWindow.webContents && event.senderFrame === event.sender.mainFrame,
+    directory: () => resolve(app.getPath('userData'), 'space'),
+    configured: () => Boolean(process.env.NOVA_SPACE_HOST_CONFIG) || (Boolean(currentSettings?.spaceHostConfigPath) && existsSync(currentSettings.spaceHostConfigPath)),
+    loadRuntime: loadSpaceHostRuntime,
+    persist: configPath => accessCredentials(() => settingsWriter({spaceHostConfigPath: configPath}, undefined, {preserveSecrets: true})),
+  }))
   ipcMain.handle('nova:settings:set', async (event, payload, restart = false) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
       throw new Error('settings update rejected')

@@ -128,6 +128,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:setup:save',
     'nova:setup:status',
     'nova:setup:test-key',
+    'nova:space:create',
     'nova:visor:configure',
     'nova:visor:get',
     'nova:visor:refresh',

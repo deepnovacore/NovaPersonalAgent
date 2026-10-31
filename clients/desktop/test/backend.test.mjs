@@ -308,6 +308,20 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
   assert.equal('KNOWLEDGE_PATH' in empty.env, false)
 })
 
+test('a created Host Space reaches the backend only while its config exists, and the operator environment wins', async t => {
+  const {mkdtemp, writeFile, rm} = await import('node:fs/promises')
+  const {tmpdir} = await import('node:os')
+  const directory = await mkdtemp(posix.join(tmpdir(), 'nova-space-env-'))
+  t.after(() => rm(directory, {recursive: true, force: true}))
+  const config = posix.join(directory, 'config.json')
+  const launch = (settings, parentEnv = {}) => nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152', parentEnv, settings}).env
+  assert.equal('NOVA_SPACE_HOST_CONFIG' in launch({spaceHostConfigPath: config}), false, 'a missing config is not injected')
+  await writeFile(config, '{}', {mode: 0o600})
+  assert.equal(launch({spaceHostConfigPath: config}).NOVA_SPACE_HOST_CONFIG, config)
+  assert.equal(launch({spaceHostConfigPath: config}, {NOVA_SPACE_HOST_CONFIG: '/operator/config.json'}).NOVA_SPACE_HOST_CONFIG, '/operator/config.json')
+  assert.equal('NOVA_SPACE_HOST_CONFIG' in launch({spaceHostConfigPath: ''}), false)
+})
+
 test('plan generation settings override the parent environment and preserve explicit false', () => {
   for (const [settings, expected] of [[undefined, 'true'], [{generatePlan: true}, 'true'], [{generatePlan: false}, 'false']]) {
     const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152',

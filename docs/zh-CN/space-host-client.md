@@ -31,6 +31,15 @@ npm run test:space -- --output-root /your/build-disk --run-id your-task
 4. 手机选择“Client”，扫描二维码；在手机与桌面核对指纹后由桌面确认。Client 等待密钥投递后补拉展示数据。Host 离线时状态修改显示等待，聊天立即失败，不会等 Host 上线后悄悄发送。
 5. 在手机创建其他 Space 可选独立模式或另一 Host 的 Client；每个 Space 的凭据、缓存、意图和工具执行记录相互隔离。桌面切到另一个 Host Space 需使用另一份独立配置启动。
 
+## 在桌面设置页创建空间
+
+不想用命令行时，可以在桌面“设置 → Space 与手机”直接创建 Host Space。仍然需要先有一个可用的 HTTPS relay（本机开发可用 loopback HTTP）和它的 bootstrap 凭据；由 Tailscale 自动启动 relay 暂未支持。
+
+1. 填写 relay 地址（只能是 `https://主机[:端口]`）和 bootstrap 凭据（至少 32 个字符），点击“创建空间”。凭据只在桌面主进程内存中使用，不写盘，也不回传页面。
+2. 配置和数据固定保存在桌面应用数据目录下的 `space/`（目录权限 `0700`），不能自选路径。新空间是全新数据，不迁移本机现有数据；Host 损坏后此 Space 无法恢复。
+3. 创建成功后桌面会自动重启后台，页面随即出现“生成一次性配对码”，按上面第 4 步用手机扫码配对。若网络在创建时中断，再次点击“创建空间”会沿用同一身份继续注册，需要填写同一个 relay 地址。
+4. 若启动环境里已设置 `NOVA_SPACE_HOST_CONFIG`，以环境变量为准，设置页不再创建空间。
+
 ## 无桌面 Host（Linux / macOS）
 
 没有桌面界面的机器可以直接作为 Host：同一个服务进程运行 Space Host，配对在终端完成。

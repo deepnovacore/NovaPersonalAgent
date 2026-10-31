@@ -369,6 +369,11 @@
   background: var(--plate);
 }
 #space-host-section .space-host-empty { color: var(--ink-dim); font-size: 12.5px; line-height: 1.7; }
+#space-host-section .space-host-create { display: grid; gap: 12px; }
+#space-host-section .space-host-create > p { margin: 0; }
+#space-host-section .space-host-token { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+#space-host-section .space-host-token .field { flex: 1 1 240px; min-width: 0; }
+#space-host-section .space-host-token .rt-Button { margin: 0; }
 @media (forced-colors: active) {
   #space-host-section .space-host-space,
   #space-host-section .space-host-invitation,

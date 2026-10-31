@@ -69,3 +69,25 @@ test('news settings IPC permits only configuration from the owned settings frame
  const params={enabled:true,explore:false,interests:['科学'],expected_version:8};await assert.rejects(receive({sender:{}},{method:'news.configure',params}),/rejected/);await receive({sender},{method:'news.configure',params});
  await assert.rejects(receive({sender},{method:'news.refresh',params:{}}),/rejected/);assert.deepEqual(calls,[['news.configure',params]])
 })
+
+test('Host Space creation IPC is bound to the settings main frame, a fixed userData path and main-only persistence',async t=>{
+ const {createSpaceCreateHandler}=await import('../src/main/space-create.mjs')
+ const {mkdtemp,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join,resolve}=await import('node:path')
+ const userData=await mkdtemp(join(tmpdir(),'nova-space-ipc-'));t.after(()=>rm(userData,{recursive:true,force:true}))
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf("  ipcMain.handle('nova:space:create'"),block=source.slice(start,source.indexOf('\n  }))',start)+6)
+ assert.ok(start>0)
+ const token='operator-bootstrap-token-0123456789abcdef',sender={mainFrame:'main'},inits=[],writes=[];let receive,current={}
+ const runtime={initializeHostSpace:async options=>{inits.push(options);return {}},resumeHostSpaceRegistration:async()=>({}),readHostSpaceConfig:()=>({})}
+ new Function('ipcMain','settingsWindow','createSpaceCreateHandler','resolve','app','process','currentSettings','existsSync','loadSpaceHostRuntime','accessCredentials','settingsWriter',block)(
+  {handle:(_,fn)=>receive=fn},{webContents:sender},createSpaceCreateHandler,resolve,{getPath:name=>name==='userData'?userData:'/wrong'},{env:{}},current,()=>false,async()=>runtime,operation=>operation(),async(patch,prepare,options)=>{writes.push([patch,prepare,options])})
+ await assert.rejects(receive({sender:{},senderFrame:'main'},{relayUrl:'https://relay.example',bootstrapToken:token}),/rejected/)
+ await assert.rejects(receive({sender,senderFrame:'child'},{relayUrl:'https://relay.example',bootstrapToken:token}),/rejected/)
+ assert.deepEqual(await receive({sender,senderFrame:'main'},{relayUrl:'https://relay.example',bootstrapToken:token}),{ok:true})
+ assert.equal(inits[0].configPath,join(userData,'space','config.json'));assert.equal(inits[0].personalPath,join(userData,'space','personal.json'))
+ assert.deepEqual(writes,[[{spaceHostConfigPath:join(userData,'space','config.json')},undefined,{preserveSecrets:true}]])
+ assert.ok(!JSON.stringify(writes).includes(token))
+ let envReceive;new Function('ipcMain','settingsWindow','createSpaceCreateHandler','resolve','app','process','currentSettings','existsSync','loadSpaceHostRuntime','accessCredentials','settingsWriter',block)(
+  {handle:(_,fn)=>envReceive=fn},{webContents:sender},createSpaceCreateHandler,resolve,{getPath:()=>userData},{env:{NOVA_SPACE_HOST_CONFIG:'/operator/config.json'}},{},()=>false,async()=>runtime,operation=>operation(),async()=>{})
+ assert.deepEqual(await envReceive({sender,senderFrame:'main'},{relayUrl:'https://relay.example',bootstrapToken:token}),{ok:false,error:'space_already_created'})
+})

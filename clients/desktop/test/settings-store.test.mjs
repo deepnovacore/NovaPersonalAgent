@@ -132,6 +132,7 @@ test('the default settings are the documented schema', () => {
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
+    spaceHostConfigPath: '',
     memoryPrerecallEnabled: false,
     monitorCameraDeviceId: '', watchModel: '',
     secrets: {},
@@ -319,6 +320,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
+    spaceHostConfigPath: '',
     memoryPrerecallEnabled: false,
     monitorCameraDeviceId: '', watchModel: '',
     secrets: {},
@@ -414,6 +416,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'secrets',
     'selfHostedAsrUrl', 'selfHostedLlmBaseUrl', 'selfHostedTtsUrl',
     'skinId',
+    'spaceHostConfigPath',
     'startListeningOnLaunch',
     'startupView',
     'systemNotifications',
@@ -423,6 +426,14 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'watchModel',
     'workbenchMaximized',
   ])
+})
+
+test('the Host Space config path is main-owned: absolute only, kept across patches, never public', () => {
+  const stored = applySettingsUpdate(DEFAULT_SETTINGS, {spaceHostConfigPath: '/Users/a/Library/Application Support/nova/space/config.json'})
+  assert.equal(stored.spaceHostConfigPath, '/Users/a/Library/Application Support/nova/space/config.json')
+  assert.equal(applySettingsUpdate(stored, {proactivity: 'quiet'}).spaceHostConfigPath, stored.spaceHostConfigPath)
+  for (const value of ['relative/config.json', '/a\u0000b', 7]) assert.equal(normalizeSettings({spaceHostConfigPath: value}).spaceHostConfigPath, '')
+  assert.ok(!Object.hasOwn(publicSettings(stored), 'spaceHostConfigPath'))
 })
 
 test('JSON settings rebuild only declared fields and keep invalid nested values at defaults', () => {
