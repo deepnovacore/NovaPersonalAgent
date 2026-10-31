@@ -1,6 +1,7 @@
 import {z} from 'zod'
 import {newsArticleSchema} from '../personal-agent/life.js'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
+import {NEWS_MAX_AGE_MS} from '../personal-agent/contracts.js'
 import {NEWS_SOURCES,newsLanguage,digest,fetchFeed,type Article,type NewsSource} from './feeds.js'
 import {scoreSchema,validateScores,type NewsRanker} from './ranking.js'
 const interest=z.object({id:z.string(),text:z.string().min(1).max(100),weight:z.number().min(0).max(2)})
@@ -9,7 +10,7 @@ const schema=z.object({version:z.literal(1),profile_version:z.number(),enabled:z
 type State=z.infer<typeof schema>
 export interface NewsOptions {path:string;language?:string;sources?:NewsSource[];rank?:NewsRanker;fetcher?:typeof fetch;changed?:()=>void;/** Called after each ranked batch is saved, so the host can look for articles worth a push. */ranked?:()=>void;now?:()=>Date;/** Delay before the first automatic refresh after open, so launch work goes first; null turns automatic refresh off. */firstRefreshMs?:number|null}
 /** A push interrupts the user, so it needs a clearly strong match and news that is still news. */
-const PUSH_MIN_STRENGTH=0.85,PUSH_MAX_AGE_MS=24*3600_000
+const PUSH_MIN_STRENGTH=0.85,PUSH_MAX_AGE_MS=NEWS_MAX_AGE_MS
 // ponytail: bounded 500-article cache; add indexed storage only if this measured ceiling grows.
 export class NewsService{
  #store:BoundedJsonStore<State>;#state:State;#opened=false;#abort=new AbortController();#timer:ReturnType<typeof setInterval>|undefined;#first:ReturnType<typeof setTimeout>|undefined;#run:Promise<void>|undefined;#rerun=false;#tail:Promise<unknown>=Promise.resolve();#sources:NewsSource[]

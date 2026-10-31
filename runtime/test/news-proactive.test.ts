@@ -135,3 +135,42 @@ test('articles ranked while an earlier push is still running are not lost',async
   assert.ok(h.snapshot().feed.some(f=>f.subject_key==='news:a2'),'the article ranked during the first push was still pushed')
  }finally{await h.close();await rm(dir,{recursive:true,force:true})}
 })
+const at=(iso:string)=>({...article(1),published_at:iso,first_seen:iso})
+async function overnight(){
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-night-'));let current=new Date('2026-09-20T22:30:00Z')
+ const h=await host(dir,{now:()=>current})
+ await h.command({type:'personal.command',request_id:'tz',method:'discovery.configure',params:{timezone:'UTC'}})
+ return {h,dir,at:(iso:string)=>{current=new Date(iso)},delivered:()=>h.snapshot().conversations.messages.filter(m=>m.conversation_id==='chat:main'&&m.origin==='proactive').length,close:async()=>{await h.close();await rm(dir,{recursive:true,force:true})}}
+}
+test('an article whose text was edited after a push is the same article, so a dismissal stands',async()=>{
+ const f=await overnight()
+ try{
+  f.at('2026-09-20T12:00:00Z');assert.equal(await f.h.admitNews({...article(1),published_at:'2026-09-20T11:00:00Z'},reason(1)),'admitted')
+  const id=f.h.snapshot().feed.find(x=>x.subject_key==='news:a1')!.id
+  await f.h.command({type:'personal.command',request_id:'d',method:'feed.action',params:{id,action:'dismiss'}})
+  const edited={...article(1),content_hash:'edited',title:'Voice model 1 (updated)',published_at:'2026-09-20T11:00:00Z'}
+  assert.equal(await f.h.admitNews(edited,reason(1)),'suppressed_duplicate')
+  assert.equal(f.h.snapshot().feed.filter(x=>x.subject_key==='news:a1').length,1)
+ }finally{await f.close()}
+})
+test('news admitted during quiet hours is not delivered once discovery or news has been turned off',async()=>{
+ for(const off of ['discovery','news'] as const){
+  const f=await overnight()
+  try{
+   assert.equal(await f.h.admitNews(at('2026-09-20T22:00:00Z'),reason(1)),'admitted');assert.equal(f.delivered(),0,'quiet hours hold it')
+   if(off==='discovery')await f.h.command({type:'personal.command',request_id:'off',method:'discovery.configure',params:{enabled:false}})
+   else await f.h.news.configure({enabled:false,interests:[],explore:false})
+   f.at('2026-09-21T09:00:00Z');await f.h.flushNotifications()
+   assert.equal(f.delivered(),0,off+' off: the held article stays undelivered')
+  }finally{await f.close()}
+ }
+})
+test('news keeps the age it had when it was published, so a night in quiet hours cannot make it fresh again',async()=>{
+ const f=await overnight()
+ try{
+  assert.equal(await f.h.admitNews(at('2026-09-20T01:00:00Z'),reason(1)),'admitted','23 hours old at admission')
+  assert.equal(f.h.snapshot().feed.find(x=>x.subject_key==='news:a1')!.expires_at,'2026-09-21T01:00:00.000Z','expires 24 hours after publication, not after admission')
+  f.at('2026-09-21T09:00:00Z');await f.h.flushNotifications()
+  assert.equal(f.delivered(),0,'by the time quiet hours end it is 32 hours old and is dropped')
+ }finally{await f.close()}
+})

@@ -71,7 +71,7 @@ import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
-import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, MAX_PROPOSALS_PER_DISCOVERY, NEWS_DAILY_CAP, versionSchema, goalProgressSchema, type GoalProgress, type DiscussionReference, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
+import { identityNameSchema, userNameSchema, personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, MAX_PROPOSALS_PER_DISCOVERY, NEWS_DAILY_CAP, NEWS_MAX_AGE_MS, versionSchema, goalProgressSchema, type GoalProgress, type DiscussionReference, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, PersonalStoreError, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
@@ -626,6 +626,7 @@ export class PersonalAgentHost {
         if(message.priority>=100)return 'valid';
         if(isQuietTime(this.#state.settings,this.#now()))return 'defer';
         // News is capped on its own: it must never use up the allowance that briefs and suggestions share.
+        if(message.kind==='news'){const item=feedId===undefined?undefined:this.#state.feed.find(f=>f.id===feedId);if(!this.#state.settings.discovery_enabled||!this.news.snapshot().enabled||(item?.expires_at&&Date.parse(item.expires_at)<=this.#now().getTime()))return 'invalid'}
         if(message.kind==='news')return this.notifications.deliveredToday(['news'],dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=NEWS_DAILY_CAP?'defer':'valid';
         const proactive=['brief','suggestion'] as const;
         return proactive.some(kind=>kind===message.kind)&&this.notifications.deliveredToday(proactive,dailyBriefSettings(this.#state.settings).timezone,this.#now().getTime())>=(this.#state.settings.proactive_daily_cap??5)?'defer':'valid';
@@ -1826,15 +1827,16 @@ export class PersonalAgentHost {
         this.#newsPush=run;return run
     }
     /** One article worth interrupting for becomes a feed item (and so a chat:main message and a system notification). */
-    admitNews(article:{id:string;title:string;summary:string;url:string;content_hash:string},reason:string):Promise<'admitted'|'suppressed_duplicate'|'capped'|'disabled'>{
+    admitNews(article:{id:string;title:string;summary:string;url:string;published_at:string|null;first_seen:string},reason:string):Promise<'admitted'|'suppressed_duplicate'|'capped'|'disabled'>{
         return this.#serial(async()=>{
             if(!this.#opened||acceptanceEnabled()||!this.#state.settings.discovery_enabled)return 'disabled' as const
             const timezone=dailyBriefSettings(this.#state.settings).timezone,day=(at:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone}).format(at),now=this.#now()
-            const key=hash([this.options.userScope,'news',article.id,article.content_hash])
+            // A publisher editing a headline is still the same story: identity, not content, decides whether it was already pushed.
+            const key=hash([this.options.userScope,'news',article.id])
             if(this.#state.dedupe.includes(key))return 'suppressed_duplicate' as const
             // Counted when admitted, not only when delivered, so a quiet-hours backlog cannot pile up behind the delivery cap.
             if(this.#state.feed.filter(f=>f.subject_key.startsWith('news:')&&day(Date.parse(f.created_at))===day(now.getTime())).length>=NEWS_DAILY_CAP)return 'capped' as const
-            const item:FeedItem={id:randomUUID(),kind:'notify',title:article.title.slice(0,120),why_now:reason.slice(0,200),evidence_refs:[],memory_refs:[],source:{type:'news',ref:article.id},suggestion_id:null,task_ref:null,subject_key:'news:'+article.id,priority:30,created_at:now.toISOString(),updated_at:now.toISOString(),expires_at:new Date(now.getTime()+86400000).toISOString(),user_state:'new',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null},prepared:{trust:'untrusted_external',text:(article.summary.trim()?article.summary.trim()+'\n':'')+article.url,evidence_refs:[]}}
+            const item:FeedItem={id:randomUUID(),kind:'notify',title:article.title.slice(0,120),why_now:reason.slice(0,200),evidence_refs:[],memory_refs:[],source:{type:'news',ref:article.id},suggestion_id:null,task_ref:null,subject_key:'news:'+article.id,priority:30,created_at:now.toISOString(),updated_at:now.toISOString(),expires_at:new Date(Date.parse(article.published_at??article.first_seen)+NEWS_MAX_AGE_MS).toISOString(),user_state:'new',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null},prepared:{trust:'untrusted_external',text:(article.summary.trim()?article.summary.trim()+'\n':'')+article.url,evidence_refs:[]}}
             const next=structuredClone(this.#state);next.feed.push(item);next.dedupe.push(key);await this.#commit(next);return 'admitted' as const
         }).then(async result=>{await this.flushNotifications();return result})
     }
