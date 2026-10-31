@@ -4,6 +4,7 @@ import {Button,Tooltip} from '@radix-ui/themes'
 import {Settings,Minimize2,X,Minus,Square,Clock3,Lightbulb,Target,Newspaper,Zap,User,Bot,ArrowLeft} from 'lucide-react'
 import {t} from '../locale.mjs'
 import {attentionTarget} from '../attention-target.mjs'
+import {createProactiveNotifyDetector} from '../proactive-notify.mjs'
 import {OrbDragGesture} from '../drag-gesture.mjs'
 import {startupMessage} from '../startup-notice.mjs'
 import {createComputerUseIndicator} from '../computer-use-indicator.mjs'
@@ -67,6 +68,12 @@ export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
  },[revision])
  const unread=c.connected&&c.snapshot?((c.snapshot.conversations?.unread_count??0)+(c.snapshot.notifications?.local===false?0:pending.reduce((sum,item)=>sum+1+(item.queued??0),0))):null
  useEffect(()=>{if(Number.isSafeInteger(unread)&&unread!>=0)void api.personal?.setUnread?.(unread)},[unread,api])
+ const notifyDetector=useRef<any>(null)
+ useEffect(()=>{
+  notifyDetector.current??=createProactiveNotifyDetector()
+  const payload=notifyDetector.current.observe(c.snapshot,{connected:c.connected})
+  if(payload)void Promise.resolve(api.personal?.notify?.(payload)).catch(()=>{ /* a missed OS banner never blocks the workbench */ })
+ },[c.snapshot,c.connected,api])
  const orbUnread=(c.snapshot?.conversations?.items??[]).reduce((sum:number,item:any)=>sum+(item.unread_count??0),0)
  useEffect(()=>{runtime.options.onUnreadChange?.(orbUnread)},[orbUnread])
  const planRef=c.selectedConversation?.mode==='plan'&&c.selectedConversation.plan?JSON.stringify([c.selectedId,c.selectedConversation.plan.id,c.selectedConversation.plan.version]):''

@@ -11,6 +11,7 @@ import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowA
 import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,installAcceptanceSessionGate,acceptanceWakeSettings,acceptanceBackendSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
 import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend, trayClickAction} from './tray-unread.mjs'
+import {createSystemNotifier} from './system-notifier.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
@@ -38,6 +39,7 @@ import {
   nativeImage,
   nativeTheme,
   net,
+  Notification,
   protocol,
   safeStorage,
   session,
@@ -241,6 +243,14 @@ function enterBackground(){
   void nativeAudio?.deactivate().catch(()=>{})
 }
 let trayUnread = 0
+// OS notifications for proactive messages that land while the workbench is not in front of the user.
+const systemNotifier = createSystemNotifier({
+  Notification, platform: process.platform, shell,
+  isEnabled: () => currentSettings.systemNotifications !== false,
+  windowState: () => ({visible: Boolean(mainWindow?.isVisible()) && presentationMode === 'workbench', focused: Boolean(mainWindow?.isFocused())}),
+  activate: () => { requestPresentation('workbench', {attention: true}) },
+  log: message => console.warn(`[nova-personal-agent-desktop] ${message}`),
+})
 const requestPresentation = (mode, options = {}) => {
   if(mode==='background')enterBackground()
   sendToOrb('nova:personal:presentation-request',mode,options.attention===true)
@@ -1526,6 +1536,24 @@ async function startSelectedCamera(camera, smokeChannel) {
     // Sleep is an orb state: a workbench reached from a sleeping orb must hear its voice session, not the wake detector.
     if(mode==='workbench'&&['sleeping','blocked'].includes(wakeWord?.state))wakeWord.wake({show:false})
     if(activate){mainWindow.show();mainWindow.focus();return shown}
+  })
+  ipcMain.handle('nova:personal:notify', (event, payload) => {
+    if (event.sender !== mainWindow.webContents) throw new Error('notify request rejected')
+    return systemNotifier.notify(payload)
+  })
+  ipcMain.handle('nova:personal:notifications-status', event => {
+    if (event.sender !== mainWindow.webContents) throw new Error('notifications status rejected')
+    return {...systemNotifier.status(), platform: process.platform}
+  })
+  ipcMain.handle('nova:personal:notifications-enabled', async (event, value) => {
+    if (event.sender !== mainWindow.webContents) throw new Error('notifications setting rejected')
+    if (typeof value !== 'boolean') throw new Error('invalid notifications setting')
+    if ((currentSettings.systemNotifications !== false) !== value) await accessCredentials(() => settingsWriter({systemNotifications: value}, undefined, {preserveSecrets: true}))
+    return currentSettings.systemNotifications !== false
+  })
+  ipcMain.handle('nova:personal:notifications-settings', event => {
+    if (event.sender !== mainWindow.webContents) throw new Error('notifications settings rejected')
+    return systemNotifier.openSystemSettings()
   })
   ipcMain.handle('nova:personal:unread', (event, value) => {
     if (event.sender !== mainWindow.webContents || !Number.isSafeInteger(value) || value < 0 || value > 1000000) throw new Error('unread request rejected')

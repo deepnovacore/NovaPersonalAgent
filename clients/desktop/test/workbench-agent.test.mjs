@@ -257,3 +257,10 @@ test('a failed approval preview falls back to host text, keeps the decision enab
   assert.equal(retry.hidden,true,'a successful preview hides the retry action')
  }finally{globalThis.document=previousDocument}
 })
+test('system notifications default on, accept only booleans, and stay a desktop-local setting',async()=>{
+ const {normalizeSettings,backendSettings}=await import('../src/main/settings-store.mjs')
+ assert.equal(normalizeSettings({}).systemNotifications,true)
+ assert.equal(normalizeSettings({systemNotifications:false}).systemNotifications,false)
+ assert.equal(normalizeSettings({systemNotifications:'no'}).systemNotifications,true)
+ assert.equal('systemNotifications' in backendSettings({systemNotifications:false}),false)
+})
