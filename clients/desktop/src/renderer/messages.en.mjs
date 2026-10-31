@@ -1945,7 +1945,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "从": "From",
   "到": "To",
   "用对话模型判断资讯相关度": "Use the chat model to judge news relevance",
-  "agent 主动找你的消息每天最多几条；你自己发起的任务结果不计入。": "The most messages the agent may start with you per day; results of tasks you started do not count.",
+  "agent 主动找你的消息每天最多几条（资讯推送另计）；你自己发起的任务结果不计入。": "The most messages the agent may start with you per day (news pushes are counted separately); results of tasks you started do not count.",
   "减少上限": "Lower the cap",
   "增加上限": "Raise the cap",
   "删除": "Delete",

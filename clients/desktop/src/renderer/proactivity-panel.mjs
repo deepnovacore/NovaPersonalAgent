@@ -54,7 +54,7 @@ export function createProactivityPanel({document, api, moduleStatusNote = () => 
   discovery.append(select)
   }
   if (has('cap')) {
-  const cap = card(t('每日主动消息上限'), t('agent 主动找你的消息每天最多几条；你自己发起的任务结果不计入。'))
+  const cap = card(t('每日主动消息上限'), t('agent 主动找你的消息每天最多几条（资讯推送另计）；你自己发起的任务结果不计入。'))
   const row = el('div', undefined, 'cap-stepper'), input = el('input'), value = clampDailyCap(settings.proactive_daily_cap ?? DAILY_CAP_DEFAULT)
   input.type = 'number'; input.min = String(DAILY_CAP_MIN); input.max = String(DAILY_CAP_MAX); input.step = '1'; input.value = String(value); input.setAttribute('aria-label', t('每日主动消息上限')); input.disabled = !connected
   const apply = next => {const clamped = clampDailyCap(next); input.value = String(clamped); if (clamped !== value) void command('discovery.configure', {proactive_daily_cap: clamped}).catch(onError)}

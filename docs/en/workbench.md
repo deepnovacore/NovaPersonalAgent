@@ -60,7 +60,7 @@ Optional morning and evening briefs summarize your Todos, calendar events and di
 
 New content from Feishu, mail, the calendar and local files does not interrupt you one item at a time. Nova first gathers what arrives over a stretch of time, either until 3 minutes pass with nothing new or until 15 minutes after the first item, and then judges the whole batch for anything worth a reminder. A batch yields at most 3 reminders, and one matter is raised only once.
 
-News is judged article by article. Only an article that closely matches an interest you confirmed and was published within the last day is pushed; when the ranking provider also reports whether the content has substance, articles it judges thin are dropped. At most 2 a day, counted separately from the daily proactive message limit.
+News is judged article by article. Only an article that closely matches an interest you confirmed and was published within the last day is pushed; when the ranking provider also reports whether the content has substance, articles it judges thin or promotional are dropped. At most 2 a day, counted separately from the daily proactive message limit.
 
 Every proactive message (suggestions, briefs and news) appears in the main conversation. When you are away from the Workbench (the window is hidden, minimized or not focused), a system notification also appears, with one batch of these messages merged into one notification; clicking it returns you to the unread message. Turn it off in Settings → General → System notifications. System notifications depend on the operating system allowing them: the settings page shows whether the last one succeeded and opens the system notification settings. Turning off Proactive discovery stops source reminders and news pushes.
 
