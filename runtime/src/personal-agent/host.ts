@@ -1048,7 +1048,7 @@ export class PersonalAgentHost {
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
     constructor(readonly options: HostOptions) {
-      this.#discoveryWindow=new DiscoveryWindow({...(options.discoveryWindow??DEFAULT_DISCOVERY_WINDOW),fire:()=>this.discover()});
+      this.#discoveryWindow=new DiscoveryWindow({...(options.discoveryWindow??DEFAULT_DISCOVERY_WINDOW),fire:()=>this.discoverLatest()});
       this.workbench=new WorkbenchStore(options.path+'.workbench-agent');
       if(options.readingCopiesDirectory)this.#readingCopies=new ReadingCopies(options.readingCopiesDirectory,()=>{
         const state=this.snapshot(),account=typeof state.feishu==='object'&&state.feishu!==null&&'account_id' in state.feishu&&typeof state.feishu.account_id==='string'?state.feishu.account_id:undefined;
@@ -1773,10 +1773,19 @@ export class PersonalAgentHost {
         relevant=relevant.filter((e,i,all)=>all.findIndex(a=>a.id===e.id)===i).sort((a,b)=>dueDate(a).localeCompare(dueDate(b)))
         return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,daily_budget_remaining:Math.max(0,(this.#state.settings.proactive_daily_cap??5)-this.notifications.deliveredToday(['brief','suggestion'],timezone,now.getTime())),memory:relevant.filter(memoryEligibleForDiscovery).slice(0,16),evidence_refs:[...new Set(interleave([(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),this.options.evidenceRefs?.()??[],(retrieval?.snippets??[]).map(item=>item.evidence_id)],48))].slice(0,16),recent_delivery:this.#state.feed.filter(f=>f.lifecycle!=='invalidated'&&Object.values(f.delivery).some(Boolean)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
     }
+    /** Judges everything that has arrived: a run already in flight started from an older snapshot, so one more follows it. */
+    async discoverLatest(): Promise<void> {
+        const running=this.#discovery
+        if(running){await running.catch(()=>{ /* its own caller sees the failure; this run still owes the newer evidence */ })}
+        if(!this.#opened)return
+        await this.discover()
+    }
     discover(): Promise<void> { if (this.#discovery)
         return this.#discovery; if (acceptanceEnabled() || !this.#opened || !this.#state.settings.discovery_enabled || !this.options.discover)
-        return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const found = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); const proposals = found === null ? [] : Array.isArray(found) ? found.slice(0, MAX_PROPOSALS_PER_DISCOVERY) : [found as Proposal]; for (const proposal of proposals) { if (controller.signal.aborted || !this.#opened || !this.#state.settings.discovery_enabled) break;
-        await this.admit(proposal, snapshot); } })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
+        return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const found = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); const proposals: Proposal[] = found === null ? [] : Array.isArray(found) ? (found as readonly Proposal[]).slice(0, MAX_PROPOSALS_PER_DISCOVERY) : [found as Proposal]; const matters = new Set<string>(); for (const proposal of proposals) { if (controller.signal.aborted || !this.#opened || !this.#state.settings.discovery_enabled) break;
+        // A question and a notification about the same evidence or memory are one matter, whatever their kind.
+        const refs = [...proposal.evidence_refs, ...proposal.memory_refs.map(ref => 'memory:' + ref.entry_id)]; if (refs.some(ref => matters.has(ref))) continue;
+        if (await this.admit(proposal, snapshot) === 'admitted') refs.forEach(ref => matters.add(ref)); } })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
         this.#discovery = undefined; }).catch(() => { /* optional observer or cleanup already reported */ }); return run; }
     async admit(input:unknown,snapshot:DiscoverySnapshot):Promise<'admitted'|'rejected'|'suppressed_duplicate'>{
         const parsed=proposalSchema.safeParse(input);if(!parsed.success)return 'rejected';
@@ -1851,7 +1860,7 @@ export class PersonalAgentHost {
                     await this.refreshMemory();await this.revalidate();await this.#serial(()=>this.#commit(structuredClone(this.#state)));
                     if(next.legacy||next.ready.length){
                         const signature=hash({refs:(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref).sort(),revision:next.ready});
-                        if(signature!==this.#sourceSignature){this.#sourceSignature=signature;await this.#discoveryWindow.touch();}
+                        if(signature!==this.#sourceSignature){this.#sourceSignature=signature;if(this.#opened)await this.#discoveryWindow.touch();}
                     }
                     this.#sourceSeen.invalidated=Math.max(this.#sourceSeen.invalidated,next.invalidated);
                     for(const revision of next.ready){this.#sourceSeen.ready.add(revision);this.#sourcePending.ready.delete(revision);}

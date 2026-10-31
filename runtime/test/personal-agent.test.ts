@@ -693,3 +693,23 @@ test('a single proposal from discovery is still admitted',async()=>{
  const host=new PersonalAgentHost({...f.host.options,discover:()=>Promise.resolve(proposal())})
  try{await host.open();await host.discover();assert.equal(host.snapshot().feed.length,1)}finally{await host.close();await f.close()}
 })
+test('a window that fires while a discovery is running judges the newer evidence once that run settles',async()=>{
+ const f=await fixture();await f.host.close();let runs=0;let release!:()=>void
+ const first=new Promise<void>(resolve=>{release=resolve})
+ const host=new PersonalAgentHost({...f.host.options,discoveryWindow:{quietMs:0,maxMs:0},discover:async()=>{runs++;if(runs===1)await first;return []}})
+ try{
+  await host.open()
+  const running=host.discover();await new Promise(resolve=>setImmediate(resolve))
+  const arrival=host.discoverLatest()
+  release();await running;await arrival
+  assert.equal(runs,2,'the evidence that arrived during the first run is judged by a second run')
+  await host.discoverLatest();assert.equal(runs,3,'an idle discovery simply runs')
+ }finally{await host.close();await f.close()}
+})
+test('a question and a notification about the same matter in one window admit only the first',async()=>{
+ const f=await fixture();await f.host.close()
+ const same=[{...proposal('plan'),kind:'question' as const},{...proposal('plan'),kind:'notify' as const,summary:'Demo is today'}]
+ const other={...proposal('other'),summary:'A different matter'};f.entries.set('other',entry('other'))
+ const host=new PersonalAgentHost({...f.host.options,discover:()=>Promise.resolve([...same,other])})
+ try{await host.open();await host.discover();assert.deepEqual(host.snapshot().feed.map(item=>item.title),['Check demo materials?','A different matter'])}finally{await host.close();await f.close()}
+})
