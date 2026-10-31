@@ -915,3 +915,21 @@ test('timeline incremental synthesis carries prior card ids only in composition 
  }
  assert.equal(result.cards[0]?.prior_id,'card-1','the composition keeps the prior card id for the host to resolve')
 })
+
+test('timeline diagnostics default the incremental cache counters when no run is supplied',async()=>{
+ const inputs=Array.from({length:201},(_,i)=>({id:'m'+i,version:'1',kind:'im',text:'Update '+i,observed_at:'2026-10-17T00:00:00Z'}))
+ const card=(input:{key:string;text:string})=>({temporal:{kind:'event' as const,dates:[]},category:'Progress',title:input.text,why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.key}],uncertainty:'',actions:[],refs:[input.key]})
+ const gateway={complete:(request:CompleteRequest)=>{try{
+   if(request.usage?.operation==='reconcile'){const body=JSON.parse(request.prompt) as {topics:{id:string}[]};return Promise.resolve({text:JSON.stringify({groups:body.topics.map(topic=>({members:[topic.id]}))})})}
+   const prompt=JSON.parse(request.prompt) as {output_schema?:unknown;inputs:{key:string;text:string}[];cards?:unknown[]}
+   if(prompt.output_schema)return Promise.resolve({text:JSON.stringify({topics:prompt.inputs.slice(0,1).map(entry=>({title:entry.text,refs:[entry.key]}))})})
+   if(prompt.cards)return Promise.resolve({text:JSON.stringify({cards:prompt.cards})})
+   return Promise.resolve({text:JSON.stringify({cards:prompt.inputs.map(card)})})
+  }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.diagnostics?.cache_reused_topics,0)
+ assert.equal(result.diagnostics?.cache_reused_inputs,0)
+ assert.equal(result.diagnostics?.cache_screened_inputs,0)
+ assert.equal(result.diagnostics?.cache_stage_hits,0)
+ assert.equal(result.diagnostics?.cache_stage_misses,0)
+})

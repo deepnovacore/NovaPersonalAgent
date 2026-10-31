@@ -6,11 +6,19 @@ import {z} from 'zod'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {abortable} from '../core/camera-session.js'
 import {sourceTagSchema,type SourceTag} from '../memory/provenance.js'
+import type {TimelineCachePort,TimelineRunOptions} from './timeline-cache.js'
 
 export interface TimelineAccess {scope:string;allowed:boolean;legacy_refs:readonly string[]}
 export interface TimelineInput {account_scope?:string;history_only?:boolean;id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
 /** One already-published card, as a bounded index for an incremental synthesis. Never evidence. */
-export interface TimelinePriorCard {id:string;title:string;category:string;why_now:string;anchor_date:string|null}
+export interface TimelinePriorCard {id:string;title:string;category:string;why_now:string;anchor_date:string|null;evidence_ids?:string[]}
+/** Shared by generation and publication so omitted identities cannot bypass revision checks. */
+export function timelineRevisionId(priorId:string|undefined,refs:readonly string[],priorCards:readonly {id:string;evidence_ids?:readonly string[]}[],infer:boolean):string|undefined{
+ if(priorId&&priorCards.some(card=>card.id===priorId))return priorId
+ if(!infer)return undefined
+ const candidates=priorCards.filter(card=>card.evidence_ids?.some(id=>refs.includes(id)))
+ return candidates.length===1?candidates[0]!.id:undefined
+}
 export const TIMELINE_MAX_REFS=16
 const ref=z.string().min(1).max(600)
 export const timelineReplySchema=z.object({cards:z.array(z.object({
@@ -41,12 +49,18 @@ export const timelineDiagnosticsSchema=z.object({
  failed_batches:z.array(z.object({batch:count,reason:z.string()})).default([]),
  stages:z.array(z.object({batch:count,phase:z.enum(['compose','review']),received:count,accepted:count,dropped:z.record(z.string(),count)})),
  host_received:count.default(0),published:count.default(0),host_dropped:z.record(z.string(),count).default({}),
+ // Incremental cache counters are part of the persisted shape; parse would strip them otherwise.
+ cache_reused_topics:count.default(0),cache_reused_inputs:count.default(0),cache_screened_inputs:count.default(0),cache_stage_hits:count.default(0),cache_stage_misses:count.default(0),
+ /** Topics whose inputs were all already published, so their existing cards stay the answer. */
+ cache_skipped_topics:count.default(0),
+ /** Repeated routine alerts folded into one batch entry, and revisions that ignored a new state change. */
+ duplicates_folded:count.default(0),stale_state_repairs:count.default(0),stale_state_dropped:count.default(0),
 })
 export type TimelineDiagnostics=z.infer<typeof timelineDiagnosticsSchema>
-export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:TimelineDiagnostics}
+export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:z.input<typeof timelineDiagnosticsSchema>}
 /** `prior_cards` and `new_input_ids` only describe what is already published and what changed since the last checkpoint; they are never evidence. */
 export interface TimelineContext {local_date:string;timezone:string;viewer_names?:string[];prior_cards?:TimelinePriorCard[];new_input_ids?:string[]}
-export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>)=>Promise<TimelineGenerated>
+export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>,run?:TimelineRunOptions)=>Promise<TimelineGenerated>
 const cardSchema=timelineReplySchema.shape.cards.element.omit({prior_id:true}).extend({id:z.string(),version:z.string(),timezone:z.string().optional(),artifact_scope:z.string().optional(),evidence_basis:z.array(z.object({id:ref,version:z.string()})).optional(),policy_revision:z.number().int().optional(),sources:z.array(sourceTagSchema),time:resolvedTimeSchema})
 const failureSchema=z.object({name:z.string(),code:z.string(),issues:z.array(z.object({code:z.string(),path:z.array(z.union([z.string(),z.number()])),maximum:z.number().optional()})).optional()})
 /** State v2 stores the last successful synthesis as a checkpoint: which inputs it covered and which generation it produced. */
@@ -71,8 +85,8 @@ export class TimelineBrief {
  #persisted:State=empty()
  #loadFailed=false
  get loadFailed(){return this.#loadFailed}
- #access:TimelineAccess|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
- constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void){this.#store=new BoundedJsonStore(path,stateSchema)}
+ #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
+ constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void,options?:{readonly cache?:TimelineCachePort}){this.#store=new BoundedJsonStore(path,stateSchema);this.#cache=options?.cache}
  async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}this.#persisted=structuredClone(this.#state);this.#access=undefined;this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
  startGeneration(){this.#defer=false;this.#schedule()}
  #save(){const state=structuredClone(this.#state);const run=this.#tail.then(async()=>{await this.#store.write(state);this.#persisted=state});this.#tail=run.catch(()=>undefined);return run}
@@ -144,7 +158,7 @@ export class TimelineBrief {
   const checkpointVersions=new Map(this.#state.checkpoint.input_versions.map(({id,version})=>[id,version]))
   const inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only)).map(source=>{const input={...source};delete input.account_scope;return input}))
   const newInputIds=inputs.filter(input=>checkpointVersions.get(input.id)!==input.version).map(input=>input.id)
-  const priorCards=this.#visibleCards().slice(0,32).map(card=>({id:card.id,title:card.title,category:card.category,why_now:card.why_now.slice(0,120),anchor_date:card.time.anchor_date}))
+  const priorCards=this.#visibleCards().map(card=>({id:card.id,title:card.title,category:card.category,why_now:card.why_now.slice(0,120),anchor_date:card.time.anchor_date,evidence_ids:[...new Set(card.refs)].slice(0,TIMELINE_MAX_REFS)}))
   const context:TimelineContext={local_date:this.#date,timezone:this.#timezone,...(priorCards.length?{prior_cards:priorCards}:{}),...(newInputIds.length?{new_input_ids:newInputIds}:{})},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
   this.#status='working';this.#error=null;this.changed()
   const publish=async(generated:TimelineGenerated,done:boolean)=>{
@@ -155,7 +169,7 @@ export class TimelineBrief {
    const drop=(reason:string)=>{diagnostics.host_dropped[reason]=(diagnostics.host_dropped[reason]??0)+1;return []}
    const byId=new Map(inputs.map(input=>[input.id,input])),seen=new Set<string>()
    // A delta synthesis may revise an already published card; prior_id keeps that card's stable identity and history.
-   const priorIds=new Set(this.#state.cards.filter(card=>card.artifact_scope===this.#access!.scope).map(card=>card.id))
+   const revisionCards=priorCards
    const cards=result.cards.flatMap(raw=>{
     const card={...raw,people:groundedTimelinePeople(raw,byId)}
     const priorId=card.prior_id;delete card.prior_id
@@ -167,7 +181,12 @@ export class TimelineBrief {
     const time=resolveTimelineTime(card.temporal,refs.map(id=>byId.get(id)!),context);if(!time)return drop('invalid_time_or_background')
     const recentSince=new Date(Date.parse(context.local_date+'T00:00:00Z')-14*86400000).toISOString().slice(0,10)
     if(time.anchor_date&&time.anchor_date<recentSince&&(!time.last_reported_on||time.last_reported_on<recentSince)&&(!time.due_on||time.due_on<recentSince)&&(!time.scheduled_on||time.scheduled_on<recentSince))return drop('outside_window')
-    const id=priorId&&priorIds.has(priorId)?priorId:hash([card.title,refs.sort()]);if(seen.has(id))return drop('duplicate');seen.add(id)
+    const newInputs=context.new_input_ids??[]
+    const stable=timelineRevisionId(priorId,refs,revisionCards,newInputs.length>0)
+    // A revision has to be grounded in at least one new original: unchanged sources alone cannot
+    // justify rewriting a published conclusion, so the previous card is kept instead.
+    if(stable&&!refs.some(id=>newInputs.includes(id)))return drop('unsupported_revision')
+    const id=stable??hash([card.title,refs.sort()]);if(seen.has(id))return drop('duplicate');seen.add(id)
     const sources=refs.flatMap(id=>{const source=byId.get(id)!.source;return source?[{...source,summary:card.facts.filter(fact=>fact.ref===id).map(fact=>fact.quote).join('\n').slice(0,700)||source.summary}]:[]})
     return [{...card,time,timezone:context.timezone,artifact_scope:this.#access!.scope,evidence_basis:refs.map(id=>({id,version:byId.get(id)!.version})),policy_revision:1,refs,id,version:hash([card,refs.map(id=>byId.get(id)!.version)]),sources}]
    })
@@ -182,7 +201,8 @@ export class TimelineBrief {
   }
   const work=(async()=>{try{
    this.#state.last_attempt=Date.now();this.#state.failure=null;await this.#save();signal.throwIfAborted()
-   const generated=await abortable(this.generate!(inputs,context,signal,result=>publish(result,false)),signal)
+   // Every refresh is cache-first, manual ones included; the generator re-authorizes through the host wrapper and only pays for changed input.
+   const generated=await abortable(this.generate!(inputs,context,signal,result=>publish(result,false),{...(this.#cache?{cache:this.#cache}:{}),scope:this.#access?.scope??'local',force}),signal)
    signal.throwIfAborted();await publish(generated,true)
   }catch(error){if(!cancel.aborted){if(error instanceof Error&&'diagnostics' in error){const parsed=timelineDiagnosticsSchema.safeParse(error.diagnostics);if(parsed.success)this.#state.diagnostics=parsed.data}this.#state.failure={name:error instanceof Error?error.name:'unknown',code:error instanceof Error&&['invalid_timeline_evidence','invalid_timeline_selection','timeline_batches_failed','processing_consent_required'].includes(error.message)?error.message:error instanceof Error&&'classification' in error&&typeof error.classification==='string'?error.classification:'unavailable',...(error instanceof z.ZodError?{issues:error.issues.map(issue=>({code:issue.code,path:issue.path.map(part=>typeof part==='number'?part:String(part)),...('maximum' in issue&&typeof issue.maximum==='number'?{maximum:issue.maximum}:{})}))}:{})};await this.#save().catch(()=>undefined)}if(cancel.aborted){this.#status=this.#inputs.length?'queued':'idle';this.#error=null;this.#state.last_attempt=0}else{this.#status='failed';this.#error=timeout.aborted?'timeline_generation_timeout':'timeline_generation_failed'}}finally{this.#run=undefined;this.changed();this.#schedule()}})()
   this.#run=work;await work

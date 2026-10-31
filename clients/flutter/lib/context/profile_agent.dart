@@ -62,6 +62,8 @@ String profileRunErrorCode(Object error) {
     'profile_running',
     'profile_result_more_complete',
     'partial_profile_todo_unsupported',
+    // Legacy only: hard-cap acceptance builds could stop here. New failures
+    // never emit it; retained so old receipts stay diagnostic-stable.
     'profile_budget_exhausted',
     'profile_budget_model_unsupported',
     'profile_budget_request_unsupported',
@@ -187,13 +189,12 @@ class ProfileAgent extends ChangeNotifier {
       final raw = await SecureContextPersistence(receiptKey).read();
       var receipt = raw == null ? null : jsonDecode(raw);
       if (receipt is Map<String, dynamic>) {
-        final resumed = await recoverBudgetPause(
-          receipt,
-          errorKey: 'error_code',
-        );
-        if (resumed != null) {
-          await SecureContextPersistence(receiptKey).write(jsonEncode(resumed));
-          receipt = resumed;
+        // One-time migration: hard-cap acceptance builds could stop with this
+        // legacy code. Accounting-only builds clear it so the run resumes
+        // instead of waiting forever for a manual cap upgrade.
+        if (receipt['error_code'] == 'profile_budget_exhausted') {
+          receipt = {...receipt}..remove('error_code');
+          await SecureContextPersistence(receiptKey).write(jsonEncode(receipt));
         }
       }
       final failure = receipt is Map ? receipt['error_code'] : null;
@@ -294,29 +295,12 @@ class ProfileAgent extends ChangeNotifier {
       : ProfileBudget(
           SecureContextPersistence('nova.profile.budget.$budgetId'),
         );
-  static const budgetUpgradeId = String.fromEnvironment(
-    'NOVA_PROFILE_BUDGET_UPGRADE_ID',
-  );
-  static const previousBudgetCap = int.fromEnvironment(
-    'NOVA_PROFILE_BUDGET_PREVIOUS_LIMIT_MICROYUAN',
-  );
-  Map<String, dynamic> get _budgetMetadata => budget == null
-      ? {}
-      : {'budget_id': budgetId, 'budget_limit_microyuan': budget!.capMicroyuan};
-  Future<Map<String, dynamic>?> recoverBudgetPause(
-    Map<String, dynamic> state, {
-    String errorKey = 'terminal_code',
-  }) async => budget?.recoverExhaustedPause(
-    state,
-    budgetId: budgetId,
-    upgradeId: budgetUpgradeId,
-    previousCapMicroyuan: previousBudgetCap,
-    errorKey: errorKey,
-  );
+  Map<String, dynamic> get _budgetMetadata =>
+      budget == null ? {} : {'budget_id': budgetId};
 
   void _report(String value) {
     status =
-        '$value${budget == null ? '' : '\n验收预算 ¥${budget!.capMicroyuan / 1000000}；累计预留 ¥${(budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}（保守上限，非账单）'}';
+        '$value${budget == null ? '' : '\n已记账（保守估算）¥${(budget!.reservedMicroyuan / 1000000).toStringAsFixed(3)}；实际费用以账单为准'}';
     if (!_disposed) {
       onProgress?.call();
       notifyListeners();

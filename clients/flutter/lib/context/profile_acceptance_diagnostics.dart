@@ -126,7 +126,7 @@ class ProfileAcceptanceDiagnostics {
       ))
         'phase': state['phase'],
       'code': ?_code(state['code']),
-      ..._numbers(state, {'budget_cap_microyuan', 'budget_reserved_microyuan'}),
+      ..._numbers(state, {'budget_reserved_microyuan'}),
       'receipt': {
         if (const {
           'running',
@@ -180,13 +180,12 @@ class ProfileAcceptanceDiagnostics {
     ProfileAgent agent,
     ProfileGenerationCoordinator generation,
   ) async {
-    if (!const bool.fromEnvironment('NOVA_PROFILE_ACCEPTANCE_DIAGNOSTICS') ||
-        ProfileAgent.budgetId.isEmpty) {
+    if (!const bool.fromEnvironment('NOVA_PROFILE_ACCEPTANCE_DIAGNOSTICS')) {
       return null;
     }
     final scope = SpaceStorage.scope;
     final receipt = SecureContextPersistence(ProfileAgent.receiptKey);
-    final budget = agent.budget!;
+    final budget = agent.budget;
     try {
       final root = await getApplicationDocumentsDirectory();
       final diagnostics = ProfileAcceptanceDiagnostics(
@@ -199,15 +198,18 @@ class ProfileAcceptanceDiagnostics {
         readState: () async {
           final phase = generation.phase.name, code = generation.code;
           final validation = agent.lastPipelineValidation;
-          final ledger = await _read(budget.persistence);
+          final ledger = budget == null
+              ? null
+              : await _read(budget.persistence);
           return {
             'phase': phase,
             'code': code,
-            'budget_cap_microyuan': budget.capMicroyuan,
-            'budget_reserved_microyuan':
-                ledger != null && _number(ledger['reserved_microyuan'])
-                ? ledger['reserved_microyuan']
-                : budget.reservedMicroyuan,
+            // Accounting only appears when an acceptance ledger exists.
+            if (budget != null)
+              'budget_reserved_microyuan':
+                  ledger != null && _number(ledger['reserved_microyuan'])
+                  ? ledger['reserved_microyuan']
+                  : budget.reservedMicroyuan,
             'pipeline_validation': validation,
           };
         },

@@ -652,9 +652,7 @@ void main() {
             if (phase == ProfileGenerationPhase.paused) {
               expect(
                 find.text(
-                  language == 'zh'
-                      ? '已达到本次费用上限，现有内容会保留。'
-                      : 'Cost limit reached. Results kept.',
+                  language == 'zh' ? '已整理的内容会保留。' : 'Existing results kept.',
                 ),
                 findsOneWidget,
               );

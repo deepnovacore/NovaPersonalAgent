@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_generation_coordinator.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
@@ -266,7 +267,7 @@ void main() {
   );
 
   test(
-    'budget integrity failure stays stopped across scope changes and restart',
+    'budget integrity failure blocks the scope and fails closed on a new one',
     () async {
       final disk = MemoryLifePersistence();
       var scope = 'a';
@@ -295,18 +296,24 @@ void main() {
       await first.start();
       await first.poll();
       first.dispose();
-      scope = 'changed-account';
       time = time.add(const Duration(days: 1));
       final next = create();
       await next.start();
       await next.poll();
       expect(calls, 1);
       expect(next.phase, ProfileGenerationPhase.blocked);
+      expect(next.code, 'profile_budget_usage_invalid');
+      // Accounting is re-checked in every scope, but reserve/settle fail closed
+      // before any model request, so a new scope cannot spend past the ledger.
+      scope = 'changed-account';
+      await next.poll();
+      expect(calls, 2);
+      expect(next.phase, ProfileGenerationPhase.blocked);
+      expect(next.code, 'profile_budget_usage_invalid');
       next.dispose();
     },
   );
   for (final budgetFailure in [
-    'profile_budget_exhausted',
     'profile_budget_unavailable',
     'profile_budget_usage_invalid',
     'profile_budget_usage_exceeds_reservation',
@@ -314,7 +321,7 @@ void main() {
     'profile_budget_request_unsupported',
   ]) {
     test(
-      'pre-existing $budgetFailure receipt stops before any generation and persists',
+      'pre-existing $budgetFailure receipt blocks generation through inspection',
       () async {
         final disk = MemoryLifePersistence();
         var inspections = 0;
@@ -336,8 +343,11 @@ void main() {
         await c.start();
         await c.poll();
         await c.poll();
-        expect(inspections, 1);
-        expect(disk.value, contains(budgetFailure));
+        // Accounting integrity is enforced by inspection, not by re-reading a
+        // persisted cap: every poll consults the agent gate before generating.
+        expect(inspections, greaterThanOrEqualTo(1));
+        expect(c.phase, ProfileGenerationPhase.blocked);
+        expect(c.code, budgetFailure);
         c.dispose();
       },
     );
@@ -594,11 +604,24 @@ void main() {
     next.dispose();
   });
   test(
-    'failed requests back off across restart and budget exhaustion is terminal',
+    'legacy budget exhaustion is migrated away on start and manual pause is kept',
     () async {
-      final disk = MemoryLifePersistence();
+      final disk = MemoryLifePersistence()
+        ..value = jsonEncode({
+          'version': 1,
+          'scope': 's',
+          'stage': 'saved',
+          'status': 'blocked',
+          'terminal_code': 'profile_budget_exhausted',
+          'requires_explicit_retry': true,
+          'error_code': 'profile_budget_exhausted',
+          'retry_count': 2,
+          'manual_pause': true,
+          'budget_limit_microyuan': 5000000,
+          'budget_resume_approval': 'legacy-build',
+          'next_at': 0,
+        });
       var time = DateTime.utc(2026), calls = 0;
-      var failure = 'model_timeout';
       ProfileGenerationCoordinator create() => ProfileGenerationCoordinator(
         persistence: disk,
         autoSchedule: false,
@@ -613,29 +636,39 @@ void main() {
         generate:
             ({required savedObservationsOnly, required maxNewBatches}) async {
               calls++;
-              throw failure;
             },
         cancel: () {},
         failureCode: (e) => '$e',
       );
-      final first = create();
-      await first.start();
-      await first.poll();
+      final c = create();
+      await c.start();
+      final migrated = jsonDecode(disk.value!) as Map;
+      for (final key in [
+        'terminal_code',
+        'requires_explicit_retry',
+        'error_code',
+        'budget_limit_microyuan',
+        'budget_resume_approval',
+      ]) {
+        expect(migrated.containsKey(key), isFalse, reason: key);
+      }
+      expect(migrated['stage'], 'saved');
+      expect(migrated['retry_count'], 0);
+      // The legacy stop latch is gone, but an explicit user stop is preserved.
+      expect(migrated['manual_pause'], true);
+      final saved = disk.value;
+      // Re-running the migration on the same record is idempotent.
+      final reopened = create();
+      await reopened.start();
+      expect(disk.value, saved);
+      reopened.dispose();
+      await c.poll();
+      expect(c.phase, ProfileGenerationPhase.paused);
+      expect(calls, 0);
+      await c.retry();
+      await c.poll();
       expect(calls, 1);
-      first.dispose();
-      final next = create();
-      await next.start();
-      await next.poll();
-      expect(calls, 1);
-      time = time.add(const Duration(minutes: 1));
-      failure = 'profile_budget_exhausted';
-      await next.poll();
-      expect(calls, 2);
-      time = time.add(const Duration(days: 1));
-      await next.poll();
-      expect(calls, 2);
-      expect(next.phase, ProfileGenerationPhase.blocked);
-      next.dispose();
+      c.dispose();
     },
   );
   test(

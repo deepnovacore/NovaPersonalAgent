@@ -4,49 +4,13 @@ import '../agent_core/model_client.dart';
 import '../personal/local_life.dart';
 
 // shortcut: acceptance-only official DashScope/DeepSeek pricing; review prices before broader use.
+/// Acceptance-only accounting for `--dart-define=NOVA_PROFILE_BUDGET_ID` builds.
+/// It records conservative reservations for review but enforces no hard cap.
 class ProfileBudget {
-  ProfileBudget(this.persistence, {this.capMicroyuan = limitMicroyuan});
+  ProfileBudget(this.persistence);
   final LifePersistence persistence;
   static Future<void> _tail = Future.value();
-  static const limitMicroyuan = int.fromEnvironment(
-    'NOVA_PROFILE_BUDGET_LIMIT_MICROYUAN',
-    defaultValue: 5000000,
-  );
-  final int capMicroyuan;
   int reservedMicroyuan = 0;
-
-  /// Explicit build approval, scoped to the same acceptance ledger. This only
-  /// reads accounting: old reservations and pending tickets are never released.
-  Future<Map<String, dynamic>?> recoverExhaustedPause(
-    Map<String, dynamic> state, {
-    required String budgetId,
-    required String upgradeId,
-    required int previousCapMicroyuan,
-    String errorKey = 'error_code',
-  }) => _serialize(() async {
-    if (state[errorKey] != 'profile_budget_exhausted' ||
-        state['manual_pause'] == true ||
-        budgetId.isEmpty ||
-        upgradeId.isEmpty ||
-        previousCapMicroyuan <= 0 ||
-        capMicroyuan <= previousCapMicroyuan ||
-        state['budget_resume_approval'] == upgradeId ||
-        (state['budget_id'] != null && state['budget_id'] != budgetId)) {
-      return null;
-    }
-    final pausedCap = state['budget_limit_microyuan'];
-    // A cap-less legacy record requires the explicit from-cap build approval.
-    if (pausedCap != null && pausedCap != previousCapMicroyuan) return null;
-    final ledger = await _read(requireExisting: true);
-    reservedMicroyuan = ledger['reserved_microyuan'] as int;
-    if (reservedMicroyuan >= capMicroyuan) return null;
-    return {
-      ...state,
-      'budget_id': budgetId,
-      'budget_limit_microyuan': capMicroyuan,
-      'budget_resume_approval': upgradeId,
-    }..remove(errorKey);
-  });
 
   static int requestCost(
     ModelConfiguration model,
@@ -138,9 +102,6 @@ class ProfileBudget {
     final ledger = await _read();
     final spent = ledger['reserved_microyuan'] as int;
     reservedMicroyuan = spent;
-    if (spent + cost > capMicroyuan) {
-      throw const AgentFailure('profile_budget_exhausted');
-    }
     final pending = ledger['pending_reservations'] as Map<String, dynamic>;
     final random = Random.secure();
     final bytes = List.generate(16, (_) => random.nextInt(256));
@@ -203,10 +164,7 @@ class ProfileBudget {
     }
     final spent = decoded['reserved_microyuan'];
     final pending = decoded['pending_reservations'] ?? <String, dynamic>{};
-    if (spent is! int ||
-        spent < 0 ||
-        spent > capMicroyuan ||
-        pending is! Map<String, dynamic>) {
+    if (spent is! int || spent < 0 || pending is! Map<String, dynamic>) {
       throw const AgentFailure('profile_budget_unavailable');
     }
     var total = 0;

@@ -1,12 +1,14 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath} from 'node:fs/promises'
+import {mkdtemp,rm,realpath,readFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import type {TimelineInput} from '../src/personal-agent/timeline-brief.js'
+import {GatewayPersonalWriter} from '../src/model/personal-writer.js'
+import type {CompleteRequest} from '../src/model/model-gateway.js'
 
 test('restart restores the saved account before presenting cached timeline without generation',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-account-restart-'));
@@ -83,4 +85,56 @@ test('host forwards checked batch progress only after reauthorizing original sou
   assert.equal(historical[0]!.historical,true)
   assert.throws(()=>host.timeline.discussion(card.id,card.version),/stale_reference/)
  }finally{release?.();await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+/** Screening/reconciliation/composition fixture shared by the cache wiring tests. */
+const cacheGateway=()=>({completions:0,async *stream(){/* the writer only calls complete */},complete(request:CompleteRequest){
+ const operation=request.usage?.operation??''
+ if(operation.startsWith('select')){
+  const body=JSON.parse(request.prompt) as {inputs:{key:string;text:string}[]}
+  return Promise.resolve({text:JSON.stringify({topics:[{title:'batch '+body.inputs[0]!.text,refs:body.inputs.map(entry=>entry.key)}]})})
+ }
+ if(operation.startsWith('reconcile')){
+  const body=JSON.parse(request.prompt) as {topics:{id:string}[]}
+  return Promise.resolve({text:JSON.stringify({groups:body.topics.map(topic=>({members:[topic.id]}))})})
+ }
+ if(operation.startsWith('compose'))return Promise.resolve({text:JSON.stringify({cards:[]})})
+ throw Error('unexpected timeline operation '+operation)
+ }})
+
+test('host opens, scopes and flushes the incremental timeline cache',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-host-cache-'))
+ const inputs=Array.from({length:201},(_,i):TimelineInput=>({id:'m'+i,version:'1',kind:'im',text:'msg '+i,observed_at:new Date().toISOString()}))
+ const memory={timelineEvidence:()=>Promise.resolve(inputs)} as unknown as PersonalMemoryResource
+ const scopes:string[]=[]
+ const writer=new GatewayPersonalWriter({gateway:cacheGateway(),model:'fixture'})
+ const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateTimeline:(...args)=>{if(args[4])scopes.push(args[4].scope+':'+String(args[4].force));return writer.generateTimeline(...args)}})
+ try{
+  await host.open({deferBackground:true});await host.refreshTimeline();await host.timeline.refresh()
+  assert.deepEqual(scopes,['local:true'],'a manual refresh passes the account scope and recomputes')
+  await host.close()
+  const saved=JSON.parse(await readFile(join(dir,'state.json.timeline-cache.json'),'utf8')) as {version:number;topics:{members:{id:string}[]}[];stages:unknown[]}
+  assert.equal(saved.version,1)
+  assert.equal(saved.topics.length,2,'screening results were persisted through the host wiring')
+  assert.ok(saved.stages.length>=3,'stage replies were flushed on close')
+ }finally{await rm(dir,{recursive:true,force:true})}
+})
+
+test('a changed account scope clears the incremental timeline cache',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-host-scope-cache-'))
+ const inputs=Array.from({length:201},(_,i):TimelineInput=>({id:'m'+i,version:'1',kind:'im',text:'msg '+i,observed_at:new Date().toISOString()}))
+ const memory={timelineEvidence:()=>Promise.resolve(inputs)} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateTimeline:new GatewayPersonalWriter({gateway:cacheGateway(),model:'fixture'}).generateTimeline})
+ let account='account-a'
+ const connector={restore:()=>Promise.resolve(),snapshot:()=>({account_id:account}),open:()=>Promise.resolve(),close:()=>Promise.resolve(),command:()=>Promise.resolve(null)}
+ host.setFeishu(connector)
+ try{
+  await host.open({deferBackground:true});await host.refreshTimeline();await host.timeline.refresh()
+  assert.ok((JSON.parse(await readFile(join(dir,'state.json.timeline-cache.json'),'utf8')) as {topics:unknown[]}).topics.length>0)
+  account='account-b';await host.refreshTimeline()
+  await new Promise(resolve=>setTimeout(resolve,20))
+  await host.close()
+  const cleared=JSON.parse(await readFile(join(dir,'state.json.timeline-cache.json'),'utf8')) as {topics:unknown[];screened:unknown[]}
+  assert.deepEqual(cleared.topics,[]);assert.deepEqual(cleared.screened,[])
+ }finally{await rm(dir,{recursive:true,force:true})}
 })
