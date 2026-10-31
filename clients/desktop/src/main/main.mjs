@@ -1543,17 +1543,17 @@ async function startSelectedCamera(camera, smokeChannel) {
     return systemNotifier.notify(payload)
   })
   ipcMain.handle('nova:personal:notifications-status', event => {
-    if (event.sender !== mainWindow.webContents) throw new Error('notifications status rejected')
+    if ((event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) || event.senderFrame !== event.sender.mainFrame) throw new Error('notifications status rejected')
     return {...systemNotifier.status(), platform: process.platform}
   })
   ipcMain.handle('nova:personal:notifications-enabled', async (event, value) => {
-    if (event.sender !== mainWindow.webContents) throw new Error('notifications setting rejected')
+    if ((event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) || event.senderFrame !== event.sender.mainFrame) throw new Error('notifications setting rejected')
     if (typeof value !== 'boolean') throw new Error('invalid notifications setting')
     if ((currentSettings.systemNotifications !== false) !== value) await accessCredentials(() => settingsWriter({systemNotifications: value}, undefined, {preserveSecrets: true}))
     return currentSettings.systemNotifications !== false
   })
   ipcMain.handle('nova:personal:notifications-settings', event => {
-    if (event.sender !== mainWindow.webContents) throw new Error('notifications settings rejected')
+    if ((event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) || event.senderFrame !== event.sender.mainFrame) throw new Error('notifications settings rejected')
     return systemNotifier.openSystemSettings()
   })
   ipcMain.handle('nova:personal:unread', (event, value) => {

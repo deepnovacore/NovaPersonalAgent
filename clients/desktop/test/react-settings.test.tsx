@@ -134,6 +134,16 @@ test('news preferences save through settings with the original revision and reta
  assert.deepEqual(calls,[['news.configure',{enabled:true,explore:false,interests:['科学','音乐'],expected_version:8}]]);assert.ok(v.getByLabelText('自定义兴趣'));
 })
 
+test('system notifications render through the settings bridge and toggle the persisted setting',async()=>{
+ const b=bridge(base({focusCategory:'general'})),calls:boolean[]=[];let enabled=true
+ Object.assign(b.api,{systemNotifications:async()=>({supported:true,enabled,state:'unverified',platform:'darwin'}),setSystemNotifications:async(value:boolean)=>{calls.push(value);enabled=value},openNotificationSettings:async()=>true})
+ const v=render(<SettingsApp bridge={b.bridge}/>);
+ await waitFor(()=>assert.equal((v.getByLabelText('弹出系统通知') as HTMLInputElement).disabled,false))
+ fireEvent.click(v.getByLabelText('弹出系统通知'))
+ await waitFor(()=>assert.deepEqual(calls,[false]))
+ await waitFor(()=>assert.equal((v.getByLabelText('弹出系统通知') as HTMLInputElement).checked,false))
+})
+
 test('appearance form is a renderer-owned setting saved without a backend restart',async()=>{
  const b=bridge(base({focusCategory:'themes'}))
  const v=render(<SettingsApp bridge={b.bridge}/>)

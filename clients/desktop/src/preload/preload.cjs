@@ -236,6 +236,9 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     },
   }),
   settings: Object.freeze({
+    systemNotifications: () => ipcRenderer.invoke('nova:personal:notifications-status'),
+    setSystemNotifications: value => ipcRenderer.invoke('nova:personal:notifications-enabled', value),
+    openNotificationSettings: () => ipcRenderer.invoke('nova:personal:notifications-settings'),
     voicePreset: (action, settings) => ipcRenderer.invoke('nova:settings:voice-preset', action, settings),
     nativeVoiceCapabilities: provider => ipcRenderer.invoke('nova:settings:native-voice', provider),
     voiceprint: input => ipcRenderer.invoke('nova:settings:voiceprint', input),
