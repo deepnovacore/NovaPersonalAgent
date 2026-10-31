@@ -30,7 +30,7 @@ test('native notifications survive GC until click, close, failure or the timeout
    mock.timers.enable({apis:['setTimeout']});notifier.notify({items:[{id:event,title:event}]});
    await collect();assert.ok(weak.deref(),'retained before '+event);
    if(event==='timeout')mock.timers.tick(5*60_000);else weak.deref().handlers[event]();
-   mock.timers.reset();await collect();assert.equal(weak.deref(),undefined,'released after '+event);
+   await collect();assert.equal(weak.deref(),undefined,'released after '+event);mock.timers.reset();
   }
   assert.equal(notifier.status().enabled,true);
  `
