@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {cp, mkdtemp, readFile, mkdir, symlink, writeFile, rm} from 'node:fs/promises'
+import {cp, mkdtemp, readFile, mkdir, symlink, writeFile, rm, realpath} from 'node:fs/promises'
 import {spawnSync} from 'node:child_process'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url'
 import {buildRenderer, rendererEntries} from '../scripts/build-renderer.mjs'
 
 test('renderer builds at the desktop startup default without an output override',async()=>{
- const directory=await mkdtemp(join(tmpdir(),'nova-renderer-default-'))
+ const directory=await realpath(await mkdtemp(join(tmpdir(),'nova-renderer-default-')))
  try{
   await mkdir(join(directory,'scripts'))
   await cp(new URL('../scripts/build-renderer.mjs',import.meta.url),join(directory,'scripts/build-renderer.mjs'))
