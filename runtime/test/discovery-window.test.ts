@@ -4,10 +4,10 @@ import {DiscoveryWindow} from '../src/personal-agent/discovery-window.js'
 
 const MIN=60_000
 function window(t:TestContext,options:{quietMs?:number;maxMs?:number}={}){
- t.mock.timers.enable({apis:['setTimeout','Date']})
- let fires=0
- const w=new DiscoveryWindow({quietMs:options.quietMs??3*MIN,maxMs:options.maxMs??15*MIN,fire:()=>{fires++}})
- return {w,fires:()=>fires,tick:(ms:number)=>t.mock.timers.tick(ms)}
+ t.mock.timers.enable({apis:['setTimeout']})
+ let fires=0,now=0
+ const w=new DiscoveryWindow({quietMs:options.quietMs??3*MIN,maxMs:options.maxMs??15*MIN,now:()=>now,fire:()=>{fires++}})
+ return {w,fires:()=>fires,tick:(ms:number)=>{now+=ms;t.mock.timers.tick(ms)}}
 }
 
 test('fires once after the quiet period with no new arrivals',t=>{

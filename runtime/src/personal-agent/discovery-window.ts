@@ -3,13 +3,15 @@ export class DiscoveryWindow {
   readonly #quietMs: number
   readonly #maxMs: number
   readonly #fire: () => void | Promise<void>
+  readonly #now: () => number
   #timer: NodeJS.Timeout | undefined
   #openedAt = 0
 
-  constructor(options: {readonly quietMs: number; readonly maxMs: number; readonly fire: () => void | Promise<void>}) {
+  constructor(options: {readonly quietMs: number; readonly maxMs: number; readonly fire: () => void | Promise<void>; readonly now?: () => number}) {
     this.#quietMs = options.quietMs
     this.#maxMs = options.maxMs
     this.#fire = options.fire
+    this.#now = options.now ?? Date.now
   }
 
   get pending(): boolean { return this.#timer !== undefined }
@@ -18,7 +20,7 @@ export class DiscoveryWindow {
   touch(): void | Promise<void> {
     // No pooling: the caller owns the outcome, so a discovery failure reaches it as before.
     if (this.#quietMs <= 0) return this.#fire()
-    const now = Date.now()
+    const now = this.#now()
     if (this.#timer === undefined) this.#openedAt = now
     else clearTimeout(this.#timer)
     const wait = Math.max(0, Math.min(this.#quietMs, this.#openedAt + this.#maxMs - now))

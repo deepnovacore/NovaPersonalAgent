@@ -1056,7 +1056,7 @@ export class PersonalAgentHost {
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
     constructor(readonly options: HostOptions) {
-      this.#discoveryWindow=new DiscoveryWindow({...(options.discoveryWindow??DEFAULT_DISCOVERY_WINDOW),fire:async()=>{
+      this.#discoveryWindow=new DiscoveryWindow({...(options.discoveryWindow??DEFAULT_DISCOVERY_WINDOW),now:()=>this.#now().getTime(),fire:async()=>{
         try{await this.discoverLatest()}catch(error){this.#sourceSignature='';this.#sourcePending.legacy=true;throw error}
       }});
       this.workbench=new WorkbenchStore(options.path+'.workbench-agent');

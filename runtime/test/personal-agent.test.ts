@@ -682,6 +682,19 @@ test('closing the host drops a pending discovery window',async t=>{
   assert.equal(discoveries,0)
  }finally{t.mock.timers.reset();await host.close();await f.close()}
 })
+test('the source window cap follows the host clock without replacing global Date',async t=>{
+ const f=await fixture();await f.host.close();let discoveries=0,current=now.getTime()
+ const host=new PersonalAgentHost({...f.host.options,now:()=>new Date(current),discoveryWindow:{quietMs:3*60_000,maxMs:5*60_000}})
+ host.discover=()=>{discoveries++;return Promise.resolve()}
+ const tick=(ms:number)=>{current+=ms;t.mock.timers.tick(ms)}
+ try{
+  await host.open();t.mock.timers.enable({apis:['setTimeout']})
+  await host.sourceChanged({revision:1,phase:'ready'});tick(2*60_000)
+  await host.sourceChanged({revision:2,phase:'ready'});tick(2*60_000)
+  await host.sourceChanged({revision:3,phase:'ready'});tick(60_000)
+  assert.equal(discoveries,1,'the cap uses five minutes of the injected clock')
+ }finally{t.mock.timers.reset();await host.close();await f.close()}
+})
 for(const quietMs of [0,3*60_000])test(`a failed discovery retries the same evidence on the next source drain (quietMs=${quietMs})`,async t=>{
  const f=await fixture();await f.host.close();let discoveries=0
  const host=new PersonalAgentHost({...f.host.options,discoveryWindow:{quietMs,maxMs:15*60_000}})
