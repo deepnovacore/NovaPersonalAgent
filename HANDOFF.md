@@ -1,6 +1,8 @@
 # Mobile handoff — thinking, Space UX, voice, connectors, tab transitions
 
-> **2026-10-30 最新接手入口：[移动端飞书质量迁移交接](docs/handoffs/mobile-feishu-quality-next.md)。** Android build 18 已生成卡片，但主体归属内容验收失败；功能分支未合入、未 push。下文保留历史快照，以新交接现状和优先级为准。
+> **2026-10-31 最新接手入口：[Timeline/Profile 双端对齐交接](docs/handoffs/timeline-profile-parity.md)。** 分支 `fix/timeline-profile-parity`（未合入、未 push）：PC Timeline 增量缓存（screening 正/负索引 + 阶段结果缓存）+ 移动端移除 Profile 预算上限（保留验收记账）。
+>
+> **2026-10-30 移动端飞书质量迁移：[移动端飞书质量迁移交接](docs/handoffs/mobile-feishu-quality-next.md)。** Android build 18 已生成卡片，但主体归属内容验收失败；功能分支未合入、未 push。下文保留历史快照，以新交接现状和优先级为准。
 
 Date: 2026-10-29  
 Worktree: `<worktree>`
