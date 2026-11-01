@@ -110,6 +110,10 @@ class PhoneCopy {
     '在后台操作 App 时，你屏幕上的输入焦点可能短暂丢失，比如正在打字时被打断。建议用安卓 14 及以上。',
     'While Nova works in the background, the keyboard focus on your screen can be taken for a moment, for example while you type. Android 14 or later works best.',
   );
+  String get experimentalWizardNote => t(
+    '还差一步：安卓 12、13 上要先确认下面的提醒，确认前 Nova 仍在当前屏幕上操作 App。',
+    'One more step: on Android 12 and 13 confirm the note below first. Until then Nova keeps using apps on your current screen.',
+  );
   String get experimentalAck => t('我知道了，仍要使用', 'I understand, use it anyway');
   String get experimentalAcked => t('已确认，仍要使用', 'Acknowledged');
 
@@ -162,6 +166,8 @@ class PhoneCopy {
         'Nova needs Wi-Fi to start phone control (no internet needed). It resumes by itself once you join any Wi-Fi.',
       ),
     ),
+    // Reserved: the contract never reports it (no network-specific refusal can
+    // be detected); kept so an unknown future status still reads sensibly.
     HelperFailure.wifiNotAllowed => (
       title: t(
         '这个 Wi-Fi 还没允许无线调试',
@@ -274,8 +280,13 @@ class PhoneCopy {
   );
   String get allowNotifications => t('允许通知', 'Allow notifications');
   String get appInfoHint => t(
-    '打不开？先去应用信息里允许受限制的设置',
-    'Can’t turn it on? Allow restricted settings in App info first',
+    '打不开、选项是灰的？到「应用信息」里，点右上角 ⋮，选「允许受限制的设置」，再回来打开。',
+    'Can’t turn it on, or it’s greyed out? Open “App info”, tap ⋮ at the top right, choose “Allow restricted settings”, then come back.',
+  );
+  String get openAppInfo => t('打开应用信息', 'Open App info');
+  String get accessibilityOffNote => t(
+    '不打开也行：Nova 会改在当前屏幕上操作 App，和以前一样，只是不能在虚拟屏上后台操作。',
+    'You can leave it off: Nova then uses apps on your current screen as before, just not in the background on the virtual screen.',
   );
 
   ({String title, String body, String? action, String brief}) step(
@@ -352,6 +363,8 @@ class PhoneCopy {
     '大约 1 分钟。会临时建一块虚拟屏，在系统设置页上试一遍点按和打字，不会操作你的其他 App，不改设置，不联网。检查时请停留在这一页。',
     'About a minute. Nova briefly creates a virtual screen and tries tapping and typing on a system settings page. It doesn’t touch your other apps, change settings or use the internet. Stay on this page while it runs.',
   );
+  String get selfCheckCopy => t('复制自检详情', 'Copy self-check details');
+  String get selfCheckCopied => t('已复制', 'Copied');
   String get selfCheckStart => t('开始自检', 'Start self-check');
   String get selfCheckAgain => t('再查一次', 'Check again');
   String get selfCheckRunning => t('正在检查…', 'Checking…');
@@ -392,48 +405,76 @@ class PhoneCopy {
     SelfCheckOutcome.skipped => t('跳过', 'Skipped'),
   };
 
+  String get _again => t('再查一次', 'check again');
+  String get _stillFails => t(
+    '还不行，就点下面的「复制自检详情」发给我们。',
+    'If it still fails, tap “Copy self-check details” below and send it to us.',
+  );
+
   /// What the user can do about a row; null when it passed.
   String? selfCheckAdvice(SelfCheckResult r) {
     final outcome = selfCheckOutcome(r);
     if (outcome == SelfCheckOutcome.pass) return null;
-    final detail = r.detail;
-    return switch (detail) {
-      'run_active' => selfCheckRunActive,
+    return switch (r.detail) {
       'unsupported' => t(
         '系统低于安卓 12，手机操作用不了；聊天、网页照常能用。',
         'Below Android 12 phone control isn’t available; chat and web work as usual.',
       ),
       'not_running' || 'helper_unavailable' => t(
-        '内置助手没在运行：先完成设置，再查一次。',
-        'The helper isn’t running: finish setup, then check again.',
+        '内置助手没在运行：先完成设置（必要时重新配对），再查一次。',
+        'The helper isn’t running: finish setup (pair again if needed), then check again.',
       ),
       'accessibility_required' => t(
-        '无障碍没开：在上面打开 Nova 的无障碍。',
-        'Accessibility is off: turn on Nova’s accessibility above.',
+        '无障碍没开：在上面打开 Nova 的无障碍，再查一次。',
+        'Accessibility is off: turn on Nova’s accessibility above, then check again.',
       ),
-      'create_failed' => t(
-        '建不了虚拟屏。重新连接助手后再试；还不行请反馈给我们。',
-        'Couldn’t create the virtual screen. Reconnect the helper and try again; if it still fails, please report it.',
+      'accessibility_flags_failed' || 'accessibility_unavailable' => t(
+        '无障碍刚才断开或没能切换：把 Nova 的无障碍关掉再打开，然后再查一次。',
+        'Accessibility disconnected or couldn’t switch: turn Nova’s accessibility off and on, then $_again.',
+      ),
+      'create_failed' || 'display_unavailable' => t(
+        '虚拟屏建不起来或中途没了：点「重新配对」重新连接助手，再查一次。$_stillFails',
+        'The virtual screen couldn’t be created or went away: tap “Pair again” to reconnect the helper, then $_again. $_stillFails',
+      ),
+      'app_in_use_on_main' => t(
+        '检查用的系统设置页正开在你的屏幕上：按 Home 回到桌面，再查一次。',
+        'The settings page used for the check is open on your screen: go to the home screen, then $_again.',
+      ),
+      'app_not_launchable' => t(
+        '没能打开检查用的系统设置页：再查一次。$_stillFails',
+        'The settings page used for the check wouldn’t open: $_again. $_stillFails',
       ),
       'shared_focus' => t(
         '虚拟屏没有自己的焦点，Nova 在后台操作时你屏幕上的输入焦点可能短暂丢失，不影响使用。',
         'The virtual screen has no focus of its own, so your keyboard focus may drop for a moment while Nova works. It doesn’t stop anything from working.',
       ),
+      'unknown' => t(
+        '读不出虚拟屏会不会抢走你的输入焦点，只是提醒；Nova 在后台操作时你的输入可能短暂被打断。',
+        'Couldn’t tell whether the virtual screen can take your keyboard focus. Just a heads-up: your typing may drop for a moment while Nova works.',
+      ),
       'not_on_display' => t(
-        '页面没能开到虚拟屏上，请反馈给我们。',
-        'The page didn’t open on the virtual screen. Please report it.',
+        '页面没能开到虚拟屏上：再查一次。$_stillFails',
+        'The page didn’t open on the virtual screen: $_again. $_stillFails',
       ),
       'empty_tree' => t(
         '读不到页面上的控件。把 Nova 的无障碍关掉再打开，再查一次。',
         'Couldn’t read anything on the page. Turn Nova’s accessibility off and on, then check again.',
       ),
       'no_frame' || 'black_frame' => t(
-        '虚拟屏的画面是一片黑或没有画面，请反馈给我们。',
-        'The virtual screen is black or has no picture. Please report it.',
+        '虚拟屏的画面是一片黑或没有画面：再查一次；还不行就重新配对。$_stillFails',
+        'The virtual screen is black or has no picture: $_again; if it persists pair again. $_stillFails',
       ),
-      'no_free_point' || 'tap_refused' => t(
-        '点按没生效，请反馈给我们。',
-        'The tap didn’t work. Please report it.',
+      'no_free_point' => t(
+        '页面上没有找到可以安全点按的位置：再查一次。',
+        'No safe spot to tap was found on the page: $_again.',
+      ),
+      'gesture_uncertain' => t(
+        '系统没有确认点按是否生效，Nova 不会重复点未确认的操作：再查一次。',
+        'The system didn’t confirm the tap. Nova never repeats an unconfirmed tap: $_again.',
+      ),
+      'tap_refused' => t(
+        '点按被系统拒绝：把 Nova 的无障碍关掉再打开，再查一次。有的手机还要在开发者选项里允许「USB 调试（安全设置）」。$_stillFails',
+        'The system refused the tap: turn Nova’s accessibility off and on, then $_again. Some phones also need “USB debugging (Security settings)” allowed in Developer options. $_stillFails',
       ),
       'injection_only' => t(
         '点按走了备用方式，可以用。',
@@ -444,22 +485,43 @@ class PhoneCopy {
         'No text field was found to type into, so this wasn’t checked.',
       ),
       'text_not_set' => t(
-        '打字没生效，请反馈给我们。',
-        'Typing didn’t work. Please report it.',
+        '打字没生效：把 Nova 的无障碍关掉再打开，再查一次。$_stillFails',
+        'Typing didn’t work: turn Nova’s accessibility off and on, then $_again. $_stillFails',
       ),
       'injection_refused' || 'no_effect' => t(
-        '返回键没生效，请反馈给我们。',
-        'The back key didn’t work. Please report it.',
+        '返回键没生效：有的手机要在开发者选项里允许「USB 调试（安全设置）」；打开后再查一次。$_stillFails',
+        'The back key didn’t work: some phones need “USB debugging (Security settings)” allowed in Developer options; allow it and $_again. $_stillFails',
       ),
       'not_run' => t(
-        '前面的检查没通过，这一项没有检查。',
-        'An earlier check failed, so this one wasn’t run.',
+        '前面的检查没通过，这一项没有检查。先解决上面的问题。',
+        'An earlier check failed, so this one wasn’t run. Fix the problem above first.',
       ),
       _ =>
         outcome == SelfCheckOutcome.fail
-            ? t('这一项没通过，请反馈给我们。', 'This check failed. Please report it.')
+            ? t(
+                '这一项没通过：再查一次。$_stillFails',
+                'This check failed: $_again. $_stillFails',
+              )
             : null,
     };
+  }
+
+  /// A short text a user can paste into a report. Only fixed codes: no
+  /// package names, screen text, tokens or provider output.
+  String selfCheckReport(PhoneStatus s, List<SelfCheckResult> rows) {
+    String safe(String? code) =>
+        code == null || RegExp(r'^[a-z0-9_]{1,48}$').hasMatch(code)
+        ? (code ?? '')
+        : 'redacted';
+    return [
+      'Nova phone self-check',
+      'android_api=${s.apiLevel} tier=${s.tier.name} helper=${s.helper.name} '
+          'experimental=${s.experimental} experimental_ack=${s.experimentalAck} '
+          'accessibility=${s.accessibility}',
+      for (final r in rows)
+        '${safe(r.id)}: ${r.ok ? 'ok' : 'FAIL'}'
+            '${r.detail == null ? '' : ' (${safe(r.detail)})'}',
+    ].join('\n');
   }
 }
 
@@ -481,7 +543,9 @@ SelfCheckOutcome selfCheckOutcome(SelfCheckResult r) {
   if (r.ok) {
     return r.detail == null ? SelfCheckOutcome.pass : SelfCheckOutcome.partial;
   }
-  return r.detail == 'shared_focus'
+  // The focus row is a heads-up, never a failure: its flags may be unreadable.
+  return r.id == 'main_focus' &&
+          (r.detail == 'shared_focus' || r.detail == 'unknown')
       ? SelfCheckOutcome.partial
       : SelfCheckOutcome.fail;
 }

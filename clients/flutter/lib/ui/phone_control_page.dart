@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../agent/phone_channel.dart';
 import '../agent/phone_status_watcher.dart';
 import 'components.dart';
@@ -36,7 +37,7 @@ enum _Tone { ok, bad, warn, plain }
 class _PhoneControlPageState extends State<PhoneControlPage> {
   late final PhoneStatusWatcher watcher = PhoneStatusWatcher(widget.channel);
   PhoneCopy get c => PhoneCopy(widget.language);
-  bool selfChecking = false, failedAction = false;
+  bool selfChecking = false, failedAction = false, reportCopied = false;
   List<SelfCheckResult>? results;
   String? selfCheckError;
 
@@ -84,7 +85,12 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (value.isNotEmpty)
-          Flexible(
+          // The tile lays its trailing out unbounded, so the cap is explicit:
+          // a long value wraps instead of squeezing the title away.
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * .36,
+            ),
             child: Text(
               value,
               textAlign: TextAlign.end,
@@ -108,11 +114,6 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
 
   Future<void> _open(PhoneSettingsKind kind) =>
       _guard(() async => await widget.channel.openSettings(kind));
-
-  Future<void> _requestNotifications() => _guard(() async {
-    await widget.channel.requestNotifications();
-    await watcher.refresh();
-  });
 
   Future<void> _wizard({bool repair = false}) async {
     await openPhoneSetupWizard(
@@ -160,8 +161,14 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
   Future<void> _acknowledge() =>
       _guard(() => watcher.run(() => widget.channel.setExperimentalAck(true)));
 
+  Future<void> _copyReport(PhoneStatus s, List<SelfCheckResult> rows) async {
+    await Clipboard.setData(ClipboardData(text: c.selfCheckReport(s, rows)));
+    if (mounted) setState(() => reportCopied = true);
+  }
+
   Future<void> _selfCheck() async {
     setState(() {
+      reportCopied = false;
       selfChecking = true;
       results = null;
       selfCheckError = null;
@@ -299,7 +306,9 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
             subtitle: c.notificationsSub,
             value: s.notificationsAllowed ? c.on : c.off,
             tone: s.notificationsAllowed ? _Tone.ok : _Tone.warn,
-            onTap: s.notificationsAllowed ? null : _requestNotifications,
+            onTap: s.notificationsAllowed
+                ? null
+                : () => _open(PhoneSettingsKind.notifications),
           ),
           if (!tooOld) ...[
             _row(
@@ -494,7 +503,6 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
               ...results!.where((r) => r.id == id),
             ...results!.where((r) => !PhoneCopy.selfCheckOrder.contains(r.id)),
           ];
-    final runActive = rows.any((r) => r.detail == 'run_active');
     return [
       NovaSection(
         header: c.selfCheckHeader,
@@ -526,33 +534,34 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
               title: selfCheckError!,
               leading: const NovaIconTile(CupertinoIcons.info),
             ),
-          if (runActive)
+          for (final r in rows)
             NovaTile(
               surface: Nova.sheetCell,
-              title: c.selfCheckRunActive,
-              leading: const NovaIconTile(CupertinoIcons.hourglass),
-            )
-          else
-            for (final r in rows)
-              NovaTile(
-                surface: Nova.sheetCell,
-                title: c.selfCheckName(r.id),
-                subtitle: c.selfCheckAdvice(r) == null
-                    ? null
-                    : Text(c.selfCheckAdvice(r)!),
-                trailing: Text(
-                  c.selfCheckStatus(selfCheckOutcome(r)),
-                  style: TextStyle(
-                    color: switch (selfCheckOutcome(r)) {
-                      SelfCheckOutcome.pass => Nova.mint,
-                      SelfCheckOutcome.partial => Nova.amber,
-                      SelfCheckOutcome.fail => Nova.red,
-                      SelfCheckOutcome.skipped => Nova.tertiary,
-                    },
-                    fontSize: 14,
-                  ),
+              title: c.selfCheckName(r.id),
+              subtitle: c.selfCheckAdvice(r) == null
+                  ? null
+                  : Text(c.selfCheckAdvice(r)!),
+              trailing: Text(
+                c.selfCheckStatus(selfCheckOutcome(r)),
+                style: TextStyle(
+                  color: switch (selfCheckOutcome(r)) {
+                    SelfCheckOutcome.pass => Nova.mint,
+                    SelfCheckOutcome.partial => Nova.amber,
+                    SelfCheckOutcome.fail => Nova.red,
+                    SelfCheckOutcome.skipped => Nova.tertiary,
+                  },
+                  fontSize: 14,
                 ),
               ),
+            ),
+          if (rows.isNotEmpty)
+            NovaTile(
+              key: const ValueKey('phone-selfcheck-copy'),
+              surface: Nova.sheetCell,
+              leading: const NovaIconTile(CupertinoIcons.doc_on_clipboard),
+              title: reportCopied ? c.selfCheckCopied : c.selfCheckCopy,
+              onTap: () => _copyReport(s, rows),
+            ),
         ],
       ),
     ];

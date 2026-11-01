@@ -1,8 +1,10 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent/phone_channel.dart';
 import 'package:nova_mobile/ui/phone_control_page.dart';
+import 'package:nova_mobile/ui/phone_setup_copy.dart';
 import 'package:nova_mobile/ui/settings_sheet.dart';
 import 'package:nova_mobile/ui/theme.dart';
 import 'support/fake_phone_channel.dart';
@@ -88,9 +90,51 @@ void main() {
       ]);
       await tester.tap(_row('通知'));
       await tester.pump();
-      expect(channel.calls, contains('requestNotifications'));
+      // The runtime prompt cannot fix a disabled channel: open its settings.
+      expect(channel.opened.last, PhoneSettingsKind.notifications);
+      expect(channel.calls, isNot(contains('requestNotifications')));
     },
   );
+
+  testWidgets('a long status value at 2x text keeps the title readable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final channel = FakePhoneChannel(
+      const PhoneStatus(
+        apiLevel: 34,
+        helper: HelperState.wirelessDebuggingOff,
+        pairing: PairingState.paired,
+      ),
+    );
+    addTearDown(channel.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: novaTheme(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: PhoneControlPage(
+          channel: channel,
+          language: 'en',
+          platform: TargetPlatform.android,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    final title = tester.getRect(find.text('Helper').first);
+    final value = tester.getRect(find.text('Wireless debugging off').first);
+    expect(title.width, greaterThan(60));
+    expect(value.width, lessThanOrEqualTo(360 * .36 + 1));
+    expect(title.right, lessThanOrEqualTo(value.left + 1));
+  });
 
   testWidgets('a status event updates the page', (tester) async {
     final channel = FakePhoneChannel(const PhoneStatus(apiLevel: 34));
@@ -369,19 +413,92 @@ void main() {
       expect(find.text('再查一次'), findsOneWidget);
     });
 
-    testWidgets('run_active in a check reads as "a task is running"', (
+    testWidgets('every native detail code has a next step', (tester) async {
+      const failing = {
+        'helper': ['unsupported', 'not_running', 'helper_unavailable'],
+        'create_display': ['accessibility_flags_failed', 'create_failed'],
+        'start_app': [
+          'app_in_use_on_main',
+          'app_not_launchable',
+          'display_unavailable',
+          'accessibility_required',
+          'not_on_display',
+          'accessibility_unavailable',
+        ],
+        'read_tree': ['empty_tree', 'no_frame', 'black_frame'],
+        'tap': ['no_free_point', 'gesture_uncertain', 'tap_refused'],
+        'type': ['text_not_set'],
+        'back': ['injection_refused', 'no_effect'],
+      };
+      for (final entry in failing.entries) {
+        for (final detail in entry.value) {
+          final advice = const PhoneCopy('en').selfCheckAdvice(
+            SelfCheckResult(id: entry.key, ok: false, detail: detail),
+          );
+          expect(advice, isNotNull, reason: detail);
+          expect(
+            advice,
+            isNot(contains('Please report')),
+            reason: '$detail must say what to do',
+          );
+        }
+      }
+    });
+
+    testWidgets('an unreadable focus is a warning, not a failure', (
       tester,
     ) async {
       final channel = FakePhoneChannel(_ready)
         ..checks = const [
-          SelfCheckResult(id: 'helper', ok: false, detail: 'run_active'),
+          SelfCheckResult(id: 'helper', ok: true),
+          SelfCheckResult(id: 'main_focus', ok: false, detail: 'unknown'),
         ];
       addTearDown(channel.close);
       await _pump(tester, channel);
       await tester.tap(_row('开始自检'));
       await tester.pumpAndSettle();
-      expect(find.text('有任务正在进行，等它结束后再自检。'), findsOneWidget);
       expect(find.text('未通过'), findsNothing);
+      expect(find.text('部分可用'), findsOneWidget);
+    });
+
+    testWidgets('copies redacted details for a report', (tester) async {
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied = (call.arguments as Map)['text'] as String;
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final channel = FakePhoneChannel(_ready)
+        ..checks = const [
+          SelfCheckResult(id: 'helper', ok: true),
+          SelfCheckResult(id: 'tap', ok: false, detail: 'tap_refused'),
+          SelfCheckResult(
+            id: 'type',
+            ok: false,
+            detail: 'Bearer sk-secret leaked text',
+          ),
+        ];
+      addTearDown(channel.close);
+      await _pump(tester, channel);
+      await tester.tap(_row('开始自检'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('phone-selfcheck-copy')));
+      await tester.pumpAndSettle();
+      expect(copied, contains('android_api=34'));
+      expect(copied, contains('tap: FAIL (tap_refused)'));
+      expect(copied, contains('type: FAIL (redacted)'));
+      expect(copied, isNot(contains('sk-secret')));
+      expect(find.text('已复制'), findsOneWidget);
     });
 
     testWidgets('run_active as a channel error reads the same', (tester) async {
