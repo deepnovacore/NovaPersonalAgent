@@ -206,6 +206,10 @@ export class DesktopSocketBridge {
   #approvalView: ExecutorApprovalView | null
   #lastApprovalViewSent: ExecutorApprovalView | null = null
   #uplinkFrames = 0
+  /** Time spent handing frames on, and how many were handled; shows whether frames wait in line before the provider. */
+  #uplinkHandledMs = 0
+  #uplinkHandled = 0
+  #uplinkSlowestMs = 0
   #uplinkBytes = 0
   #uplinkFlushedAt: number
   readonly #pingSent = new Map<string, number>()
@@ -536,6 +540,15 @@ export class DesktopSocketBridge {
 
   async receiveAudio(raw: Uint8Array): Promise<void> {
     this.#recordUplink(raw.length)
+    const startedAt = Date.now()
+    try { await this.#receiveAudioFrame(raw) } finally {
+      const took = Date.now() - startedAt
+      this.#uplinkHandled += 1; this.#uplinkHandledMs += took; if (took > this.#uplinkSlowestMs) this.#uplinkSlowestMs = took
+      this.flushUplink()
+    }
+  }
+
+  async #receiveAudioFrame(raw: Uint8Array): Promise<void> {
     const pcm = validateInputPcm(raw)
     if (this.#dictation) {
       const draft = this.#dictation
@@ -931,9 +944,15 @@ export class DesktopSocketBridge {
       frames: this.#uplinkFrames,
       bytes: this.#uplinkBytes,
       elapsed: now - this.#uplinkFlushedAt,
+      handled: this.#uplinkHandled,
+      handled_ms: this.#uplinkHandledMs,
+      slowest_ms: this.#uplinkSlowestMs,
     })
     this.#uplinkFrames = 0
     this.#uplinkBytes = 0
+    this.#uplinkHandled = 0
+    this.#uplinkHandledMs = 0
+    this.#uplinkSlowestMs = 0
     this.#uplinkFlushedAt = now
   }
 

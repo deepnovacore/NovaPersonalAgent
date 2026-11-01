@@ -93,6 +93,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   }
   if(conversation.kind==='schedule'&&!execution)throw Error('scheduled_execution_required')
   const processing=execution&&options.host.schedules.getRun(execution.run_id).processing
+  const audioDrops:Record<string,number>={};let audioDropReportedAt=0
   const telemetry:RealtimeTelemetry|undefined=options.telemetry?{
    record:(kind,payload)=>options.telemetry!.record(kind,{...payload,conversation_id:conversation.id,conversation_generation:conversation.generation}),
    close:()=>{/* the deployment owns the shared telemetry sink */},
@@ -403,10 +404,13 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    deliverSuggestion:(suggestion,reason)=>graph.service.onSuggestionSelected(suggestion,reason),
    ownsWork:id=>core.runtime.inFlightDelegate(id)!==undefined,bridgeService:graph.service,sendAudio:async(pcm)=>{
     const generation=audioGeneration,epoch=graph.service.session.sessionEpoch
-    const current=()=>!closed&&!lifetime.aborted&&voiceEnabled&&generation===audioGeneration&&epoch===graph.service.session.sessionEpoch&&options.host.presentationMode!=='background'&&options.host.conversationSnapshot().voice_id===conversation.id
-    if(!current())return
+    const reason=()=>closed||lifetime.aborted?'closed':!voiceEnabled?'voice_off':generation!==audioGeneration?'generation':epoch!==graph.service.session.sessionEpoch?'epoch':options.host.presentationMode==='background'?'background':options.host.conversationSnapshot().voice_id!==conversation.id?'other_voice_owner':undefined
+    const current=()=>reason()===undefined
+    // Frames dropped here are otherwise invisible; count them by reason and report at most every five seconds.
+    const dropped=(why:string)=>{audioDrops[why]=(audioDrops[why]??0)+1;const now=Date.now();if(now-audioDropReportedAt>=5000){audioDropReportedAt=now;telemetry?.record('voice.audio_dropped',{...audioDrops});for(const key of Object.keys(audioDrops))delete audioDrops[key]}}
+    if(!current()){dropped(reason()??'unknown');return}
     await syncIdentity(AbortSignal.any([lifetime,AbortSignal.timeout(10000)]))
-    if(current())await graph.service.sendAudio(pcm)
+    if(current())await graph.service.sendAudio(pcm);else dropped(reason()??'unknown')
    },
    runTurn:async(text,callerSignal,context)=>{
     const deadline=createTurnDeadline({clock:core.runtime.clock,parent:callerSignal,isWaiting:()=>(approval?.pending===true||projectConfirmation?.pending===true),subscribe:listener=>{waitingListeners.add(listener);return()=>waitingListeners.delete(listener)}})

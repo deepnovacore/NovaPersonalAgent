@@ -170,6 +170,13 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
   #queueWaiter: (() => void) | undefined
   #socket: QwenSocket | undefined
   #readySocket: QwenSocket | undefined
+  /** Bounded per-session counters that answer "did sound go out and what came back" without recording any content. */
+  #audioFramesSent = 0
+  #audioBytesSent = 0
+  #audioReports = 0
+  #audioPeak = 0
+  #audioReportedAt = 0
+  #serverEvents = new Map<string, number>()
   #historyRestoring=false
   #historyRestored=false
   #conversationUsed=false
@@ -257,6 +264,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
       stage = 'session_updated'
       const updated = await this.#untilDeadline(this.#receiveJson(socket), deadline)
       if (updated.type === 'error') throw new ProviderSetupRejected(updated)
+      this.#recordAcceptedSession(updated)
       if (sessionId(updated, 'session.updated') !== providerSessionId) {
         throw new QwenRealtimeError('qwen realtime session identity changed during setup')
       }
@@ -287,6 +295,8 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
     this.#responseAdaptationUncertain = false
     this.#responseAdaptationTail = Promise.resolve()
     this.#readySocket = socket
+    this.#audioFramesSent = 0;this.#audioBytesSent = 0;this.#audioPeak = 0;this.#audioReports = 0;this.#audioReportedAt = 0
+    this.#serverEvents.clear()
     if (this.#instructions() !== initialInstructions) {
       await this.#sendJson({type: 'session.update', session: {instructions: this.#instructions()}})
     }
@@ -364,6 +374,17 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
           type: 'input_audio_buffer.append',
           audio: Buffer.from(this.#wireProfile.inputPcm(pcm)).toString('base64'),
         }))
+        this.#audioFramesSent += 1
+        this.#audioBytesSent += pcm.byteLength
+        const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength)
+        for (let i = 0; i + 1 < pcm.byteLength; i += 2) { const level = Math.abs(view.getInt16(i, true)); if (level > this.#audioPeak) this.#audioPeak = level }
+        // Level and volume only, never samples: reported at most every two seconds while audio flows, and never beyond 60 reports.
+        const now = Date.now()
+        if (this.#audioFramesSent === 1 || (now - this.#audioReportedAt >= 2000 && this.#audioReports < 60)) {
+          this.#audioReportedAt = now; this.#audioReports += 1
+          this.#recordSession({audio_frames_sent: this.#audioFramesSent, audio_bytes_sent: this.#audioBytesSent, audio_peak: this.#audioPeak})
+          this.#audioPeak = 0
+        }
       } catch (error) {
         if (error instanceof QwenSocketClosedError) return
         throw error
@@ -884,6 +905,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
           this.#confirmDelete(identity)
           continue
         }
+        this.#noteServerEvent(event)
         const normalized = this.#normalizeEvent(event, epoch)
         if (normalized !== undefined && !this.#publish(normalized, epoch)) return
         if (normalized?.kind === 'provider_error') return
@@ -1246,6 +1268,41 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
     if (this.#socket !== owner) {
       throw new QwenRealtimeError('qwen realtime connection was replaced')
     }
+  }
+
+  /** Server event types are an allowlisted vocabulary; anything else is counted as `other`. Error codes are limited to a safe shape. */
+  #noteServerEvent(event: Readonly<Record<string, JsonValue>>): void {
+    try {
+      const raw = typeof event.type === 'string' ? event.type : 'other'
+      const type = /^[a-z_]+(?:\.[a-z_]+){0,3}$/u.test(raw) ? raw : 'other'
+      const count = (this.#serverEvents.get(type) ?? 0) + 1
+      if (this.#serverEvents.size >= 40 && !this.#serverEvents.has(type)) return
+      this.#serverEvents.set(type, count)
+      // Rare, decisive events are recorded each time; chatty ones only on first sight.
+      const rare = type === 'error' || type.startsWith('input_audio_buffer.speech') || type === 'conversation.item.input_audio_transcription.completed'
+      if (count === 1 || (rare && count <= 20)) {
+        const detail = event.error
+        const code = type === 'error' && detail !== null && typeof detail === 'object' && !Array.isArray(detail) && typeof detail.code === 'string' && /^[A-Za-z0-9_.-]{1,60}$/u.test(detail.code) ? detail.code : undefined
+        this.#recordSession({server_event: type, count, ...(code === undefined ? {} : {error_code: code})})
+      }
+    } catch { /* diagnostic only */ }
+  }
+
+  /** What the service says it accepted: only short, shape-checked configuration names, never instructions or tools. */
+  #recordAcceptedSession(updated: Readonly<Record<string, JsonValue>>): void {
+    try {
+      const session = updated.session
+      if (session === null || typeof session !== 'object' || Array.isArray(session)) return
+      const short = (value: JsonValue | undefined): string | undefined => typeof value === 'string' && /^[A-Za-z0-9_.-]{1,40}$/u.test(value) ? value : undefined
+      const detection = session.turn_detection, detectionType = detection !== null && typeof detection === 'object' && !Array.isArray(detection) ? short(detection.type) : (detection === null ? 'none' : undefined)
+      const out: Record<string, JsonValue> = {accepted: true}
+      for (const [name, value] of [['input_audio_format', short(session.input_audio_format)], ['output_audio_format', short(session.output_audio_format)], ['model', short(session.model)], ['turn_detection', detectionType]] as const) if (value !== undefined) out[name] = value
+      this.#recordSession(out)
+    } catch { /* diagnostic only */ }
+  }
+
+  #recordSession(payload: Readonly<Record<string, JsonValue>>): void {
+    try { this.#telemetry?.record('integrated.session', {provider: this.#wireProfile.provider, ...payload}) } catch { /* diagnostic only */ }
   }
 
   #recordConnect(payload: Readonly<Record<string, JsonValue>>): void {

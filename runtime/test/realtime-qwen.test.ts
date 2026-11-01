@@ -1651,7 +1651,8 @@ test('a successful connect records integrated.connect without the credential', a
   const {records, telemetry} = recordingTelemetry()
   const adapter = adapterFor(scriptedSocket([...handshake]), {apiKey: 'secret-key-value', telemetry})
   await adapter.connect({tools: [], signal: new AbortController().signal})
-  assert.deepEqual(records.map(record => [record.kind, record.payload.provider, record.payload.outcome]), [['integrated.connect', 'qwen', 'connected']])
+  assert.deepEqual(records.filter(record => record.kind === 'integrated.connect').map(record => [record.kind, record.payload.provider, record.payload.outcome]), [['integrated.connect', 'qwen', 'connected']])
+  assert.ok(records.some(record => record.kind === 'integrated.session' && record.payload.accepted === true), 'the accepted session shape is recorded')
   assert.ok(!JSON.stringify(records).includes('secret-key-value'))
 })
 
@@ -1672,4 +1673,22 @@ test('an unclassified connect failure records its stage and a bounded cause with
     assert.ok(!JSON.stringify(records).includes('secret-key-value'))
     assert.ok(!JSON.stringify(records).includes('example.invalid'))
   }
+})
+
+test('session telemetry counts audio sent and names server events and error codes without content', async () => {
+  const {records, telemetry} = recordingTelemetry()
+  const scripted = scriptedSocket([...handshake])
+  const adapter = adapterFor(scripted, {telemetry})
+  await adapter.connect({tools: [], signal: new AbortController().signal})
+  await adapter.sendAudio(new Uint8Array(new Int16Array([0, 600]).buffer), new AbortController().signal)
+  const events = adapter.events(new AbortController().signal)[Symbol.asyncIterator]()
+  scripted.push({type: 'input_audio_buffer.speech_started', item_id: 'i1', audio_start_ms: 10})
+  scripted.push({type: 'error', error: {code: 'InvalidParameter', message: 'private text secret-key'}})
+  scripted.end()
+  for (let n = 0; n < 4; n++) { const step = await Promise.race([events.next(), new Promise<{done: true}>(resolve => setTimeout(() => resolve({done: true}), 500))]); if (step.done) break }
+  const session = records.filter(r => r.kind === 'integrated.session').map(r => r.payload)
+  assert.ok(session.some(p => p.audio_frames_sent === 1))
+  assert.ok(session.some(p => p.server_event === 'input_audio_buffer.speech_started'))
+  assert.ok(session.some(p => p.server_event === 'error' && p.error_code === 'InvalidParameter'))
+  assert.ok(!JSON.stringify(records).includes('private text'))
 })
