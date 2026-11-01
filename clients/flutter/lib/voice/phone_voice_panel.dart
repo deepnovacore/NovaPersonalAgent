@@ -3,8 +3,10 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import '../agent/phone_run.dart';
 import '../ui/theme.dart';
 import '../ui/pet_avatar.dart';
+import '../ui/virtual_screen_pip.dart';
 import 'phone_voice_session.dart';
 import 'voice_companion.dart';
 
@@ -21,7 +23,12 @@ class PhoneVoicePanel extends StatefulWidget {
     this.onMinimize,
     this.onExpand,
     this.onEnd,
+    this.phoneRun,
   });
+
+  /// While a phone task runs on the virtual screen, its live picture is shown
+  /// next to the character.
+  final PhoneRunTracker? phoneRun;
   final PhoneVoiceSession session;
   final PetAvatarStore petAvatar;
   final VoidCallback onSettings, onStart;
@@ -248,51 +255,100 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final short = constraints.maxHeight < 360;
-                return SingleChildScrollView(
+                final wide = constraints.maxWidth >= 560;
+                Widget stage(PhoneRun? screen) => Column(
+                  children: [
+                    SizedBox(
+                      height: short
+                          ? 112
+                          : screen != null && !wide
+                          ? 88
+                          : (constraints.maxHeight * .43).clamp(190.0, 270.0),
+                      width: double.infinity,
+                      child: ValueListenableBuilder<double>(
+                        valueListenable: session.audioLevel,
+                        builder: (context, level, _) => VoicePetVisual(
+                          petAvatar: widget.petAvatar,
+                          status:
+                              widget.startupError != null ||
+                                  session.error != null
+                              ? 'error'
+                              : session.muted
+                              ? 'muted'
+                              : session.status,
+                          inputLevel: session.muted ? 0 : level,
+                          isUserSpeaking: session.isUserSpeaking,
+                          isPlaying: session.isPlaying,
+                        ),
+                      ),
+                    ),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _status,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Nova.secondary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                          letterSpacing: .6,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+                Widget visual(PhoneRun? run) {
+                  final tracker = widget.phoneRun;
+                  if (tracker == null || run == null) return stage(null);
+                  final screen = VirtualScreenView(
+                    key: const ValueKey('voice-virtual-screen'),
+                    tracker: tracker,
+                    run: run,
+                    language: widget.language,
+                    maxWidth: wide ? 180 : 110,
+                    maxHeight: wide ? 300 : 120,
+                  );
+                  return wide
+                      ? Row(
+                          key: const ValueKey('voice-pet-and-screen-row'),
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(child: stage(run)),
+                            const SizedBox(width: 24),
+                            screen,
+                          ],
+                        )
+                      : Column(
+                          key: const ValueKey('voice-pet-and-screen-column'),
+                          children: [
+                            stage(run),
+                            const SizedBox(height: 8),
+                            screen,
+                          ],
+                        );
+                }
+
+                Widget content(PhoneRun? run) => SingleChildScrollView(
                   key: const ValueKey('voice-call-content'),
                   padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Column(
                     children: [
-                      SizedBox(height: short ? 0 : constraints.maxHeight * .10),
                       SizedBox(
-                        height: short
-                            ? 112
-                            : (constraints.maxHeight * .43).clamp(190.0, 270.0),
-                        width: double.infinity,
-                        child: ValueListenableBuilder<double>(
-                          valueListenable: session.audioLevel,
-                          builder: (context, level, _) => VoicePetVisual(
-                            petAvatar: widget.petAvatar,
-                            status:
-                                widget.startupError != null ||
-                                    session.error != null
-                                ? 'error'
-                                : session.muted
-                                ? 'muted'
-                                : session.status,
-                            inputLevel: session.muted ? 0 : level,
-                            isUserSpeaking: session.isUserSpeaking,
-                            isPlaying: session.isPlaying,
-                          ),
-                        ),
+                        height: short || (run != null && !wide)
+                            ? 0
+                            : constraints.maxHeight * .10,
                       ),
-                      Semantics(
-                        liveRegion: true,
-                        child: Text(
-                          _status,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Nova.secondary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w400,
-                            letterSpacing: .6,
-                          ),
-                        ),
-                      ),
+                      visual(run),
                       const SizedBox(height: 28),
                       SizedBox(
                         key: const ValueKey('voice-captions'),
-                        height: short ? 116 : 164,
+                        // Beside a narrow phone's virtual screen the captions
+                        // give up height so the end of the content stays near.
+                        height: short
+                            ? 116
+                            : (run != null && !wide)
+                            ? 96
+                            : 164,
                         width: double.infinity,
                         child: SingleChildScrollView(
                           child: Column(
@@ -377,6 +433,14 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                     ],
                   ),
                 );
+
+                final tracker = widget.phoneRun;
+                return tracker == null
+                    ? content(null)
+                    : ListenableBuilder(
+                        listenable: tracker,
+                        builder: (context, _) => content(tracker.activeVirtual),
+                      );
               },
             ),
           ),

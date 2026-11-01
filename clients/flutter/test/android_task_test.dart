@@ -12,6 +12,7 @@ class Device implements LocalAgent {
   bool appsFail = false;
   Completer<void>? appsGate;
   Completer<Map<String, dynamic>>? runGate;
+  String? runTier;
   Map<String, dynamic> terminal = {
     'phase': 'verifying',
     'summary': '小红书已在前台',
@@ -34,7 +35,11 @@ class Device implements LocalAgent {
     if (method == 'run') {
       dispatched = input;
       return runGate == null
-          ? {'id': input['id'], 'phase': 'running'}
+          ? {
+              'id': input['id'],
+              'phase': 'running',
+              if (runTier != null) 'tier': runTier,
+            }
           : await runGate!.future;
     }
     if (method == 'tasks') {
@@ -197,6 +202,41 @@ void main() {
       expect(device.calls.where((call) => call == 'run').length, 1);
     },
   );
+
+  test('a virtual run outlives the 5 minute budget of a main run', () async {
+    NativeChatTaskRunner runner(Device device) => NativeChatTaskRunner(
+      agent: device,
+      pollInterval: const Duration(milliseconds: 5),
+      timeout: Duration.zero,
+      virtualTimeout: const Duration(seconds: 5),
+    );
+    const request = {'scope': 'calendar', 'goal': 'g', 'acceptance': 'a'};
+
+    final main = Device()
+      ..runTier = 'main'
+      ..terminal = {'phase': 'running'};
+    expect((await runner(main).run(request, 'm'))['reason'], 'task_timeout');
+
+    final virtual = Device()
+      ..runTier = 'virtual'
+      ..terminal = {'phase': 'running'};
+    Timer(
+      const Duration(milliseconds: 80),
+      () => virtual.terminal = {'phase': 'completed', 'summary': 'ok'},
+    );
+    final result = await runner(virtual).run(request, 'v');
+    expect(result['status'], 'completed');
+    expect(
+      virtual.calls.where((call) => call == 'tasks').length,
+      greaterThan(2),
+    );
+  });
+
+  test('the default budgets are 5 minutes and 15 plus a margin', () {
+    final runner = NativeChatTaskRunner(agent: Device());
+    expect(runner.timeout, const Duration(minutes: 5));
+    expect(runner.virtualTimeout, greaterThan(const Duration(minutes: 15)));
+  });
 
   test(
     'apps preflight failure never dispatches or becomes an unknown action',

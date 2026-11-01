@@ -21,6 +21,21 @@ List<(String, String, IconData)> conversationSettingsRows(String language) => [
   ),
 ];
 
+/// The phone-control entry; Android only, and only where a phone bridge is
+/// available. iOS has no counterpart.
+List<(String, String, IconData)> phoneControlSettingsRows(
+  String language, {
+  bool available = true,
+}) => available
+    ? [
+        (
+          'phone_control',
+          language == 'zh' ? '手机操作' : 'Phone control',
+          CupertinoIcons.hand_raised,
+        ),
+      ]
+    : const [];
+
 Future<String?> showSettingsSheet(
   BuildContext context, {
   required String language,
