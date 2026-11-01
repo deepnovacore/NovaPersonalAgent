@@ -50,6 +50,47 @@ class LocalGuiModelTest {
         try { LocalGuiModel.parseResponse(response,"responses"); fail("incomplete accepted") } catch(_: IllegalArgumentException) { }
     }
 
+    private fun virtualScreen() = JSONObject().put("snapshot_id", "ph-1").put("tier", "virtual").put("package", "test.app")
+        .put("width", 1080).put("height", 2400).put("image", "YWJj").put("changed_during_read", false).put("secure_frame", true)
+        .put("elements", org.json.JSONArray().put(JSONObject().put("ref", "@e1").put("role", "Button").put("name", "Search")))
+    @Test fun virtualTierPromptsWithRefsSnapshotAndHandToUser() {
+        val task = JSONObject().put("goal", "Search").put("acceptance", "Results visible").put("target_package", "test.app")
+        for (protocol in listOf("chatCompletions", "responses", "chatgptResponses")) {
+            val body = LocalGuiModel.requestBody("m", task, virtualScreen(), 2, protocol, tier = com.nova.nova_mobile.phone.PhoneTier.VIRTUAL)
+            val messages = body.getJSONArray(if (protocol == "chatCompletions") "messages" else "input")
+            val instructions = messages.getJSONObject(0).getString("content")
+            assertTrue(instructions.contains("snapshot_id") && instructions.contains("hand_to_user(reason)") && instructions.contains("automatically authorized"))
+            val part = messages.getJSONObject(1).getJSONArray("content").getJSONObject(0)
+            val context = JSONObject(part.getString("text"))
+            assertEquals("ph-1", context.getString("snapshot_id"))
+            assertEquals("test.app", context.getString("target_package"))
+            assertEquals("@e1", context.getJSONArray("untrusted_elements").getJSONObject(0).getString("ref"))
+            assertTrue(context.getBoolean("secure_frame"))
+            assertFalse(context.has("untrusted_screen_tree"))
+        }
+        val schema = LocalGuiModel.requestBody("m", task, virtualScreen(), 0, tier = com.nova.nova_mobile.phone.PhoneTier.VIRTUAL)
+            .getJSONArray("tools").getJSONObject(0).getJSONObject("function").getJSONObject("parameters")
+            .getJSONObject("properties").getJSONObject("action").getJSONObject("properties")
+        val types = schema.getJSONObject("type").getJSONArray("enum").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
+        assertEquals(setOf("tap", "type", "scroll", "swipe", "open_app", "back", "hand_to_user"), types)
+        for (key in listOf("ref", "snapshot_id", "direction", "package", "reason")) assertTrue(schema.has(key))
+    }
+    @Test fun mainTierPromptIsUnchangedByTheVirtualTier() {
+        val task = JSONObject().put("goal", "Search").put("acceptance", "Results visible")
+        val screen = JSONObject().put("image", "YWJj").put("package", "test.app").put("tree", "Search").put("width", 100).put("height", 200)
+        val body = LocalGuiModel.requestBody("m", task, screen, 0)
+        val types = body.getJSONArray("tools").getJSONObject(0).getJSONObject("function").getJSONObject("parameters")
+            .getJSONObject("properties").getJSONObject("action").getJSONObject("properties").getJSONObject("type").getJSONArray("enum")
+        assertEquals(listOf("tap", "swipe", "type", "back"), (0 until types.length()).map { types.getString(it) })
+        assertTrue(body.getJSONArray("messages").getJSONObject(0).getString("content").contains("Never tap the floating Nova stop control"))
+    }
+    @Test fun virtualResponsesParseTheVirtualActionSet() {
+        val call = """{"type":"function","function":{"name":"next_step","arguments":"{\"kind\":\"action\",\"summary\":\"Login\",\"action\":{\"type\":\"hand_to_user\",\"reason\":\"Login required\"}}"}}"""
+        val value = JSONObject("""{"choices":[{"message":{"tool_calls":[$call]}}]}""")
+        val decision = LocalGuiModel.parseResponse(value, tier = com.nova.nova_mobile.phone.PhoneTier.VIRTUAL)
+        assertEquals(com.nova.nova_mobile.phone.PhoneAction.HandToUser("Login required"), decision.phoneAction)
+        try { LocalGuiModel.parseResponse(value); fail("virtual action accepted on main") } catch(_: IllegalArgumentException) { }
+    }
     @Test fun plainTextCannotBecomeAnExecutableAction() {
         val value = JSONObject("""{"choices":[{"message":{"content":"tap(10,20)"}}]}""")
         try { LocalGuiModel.parseResponse(value); fail("free text was executed") } catch(_: Exception) { }
