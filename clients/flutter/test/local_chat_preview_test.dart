@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
 import 'package:nova_mobile/ui/tool_step.dart';
+import 'package:nova_mobile/ui/tool_timeline.dart';
 import 'package:nova_mobile/agent_core/agent_workspace.dart';
 import 'package:nova_mobile/agent_core/tool_registry.dart';
 import 'package:nova_mobile/conversation/local_chat_panel.dart';
@@ -225,7 +226,9 @@ void main() {
               .dy,
         ),
       );
-      expect(find.byType(ExpansionTile), findsNWidgets(7));
+      // The two adjacent edits form one timeline; the rest stay single lines.
+      expect(find.byType(ExpansionTile), findsNWidgets(6));
+      expect(find.byType(ToolTimeline), findsOneWidget);
       expect(
         tester
             .widgetList<ToolStepGroup>(find.byType(ToolStepGroup))

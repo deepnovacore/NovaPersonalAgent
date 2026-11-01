@@ -1,6 +1,15 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'tool_timeline.dart';
 
 /// Tool payloads stay in storage; the conversation shows only safe metadata.
+///
+/// The optional fields feed the trajectory timeline (`tool_timeline.dart`).
+/// They carry display-safe text only (file name, host, app name; never raw
+/// payloads). Phone steps map in directly: `step` -> [stepIndex], `tool` ->
+/// [name], `label` -> [narration], `ref` -> [refLabel], and the status of the
+/// step event -> [status] using this class's vocabulary ('completed', 'failed',
+/// ...). A step screenshot arrives lazily through [frame].
 class ToolStep extends StatelessWidget {
   const ToolStep({
     super.key,
@@ -8,9 +17,58 @@ class ToolStep extends StatelessWidget {
     required this.status,
     this.completedReadPath,
     this.language = 'zh',
+    this.target,
+    this.narration,
+    this.reasoning,
+    this.stepIndex,
+    this.refLabel,
+    this.frame,
   });
   final String name, status, language;
   final String? completedReadPath;
+
+  /// Where the tool acted (file name, host, app name). Equal consecutive
+  /// targets of observe-like tools merge into one timeline row.
+  final String? target;
+
+  /// The model's own one-line description of this step; wins over the tool
+  /// label as the row title.
+  final String? narration;
+
+  /// Longer model text behind [narration]; shown when the row is tapped.
+  final String? reasoning;
+
+  /// The agent's own step number (phone loops); defaults to list position.
+  final int? stepIndex;
+
+  /// Element reference the step acted on, e.g. `@e12`.
+  final String? refLabel;
+
+  /// Loads the screen as it was at this step (JPEG/PNG bytes), or null.
+  final Future<Uint8List?> Function()? frame;
+
+  /// Whether the step carries nothing the timeline would add to the legacy
+  /// single-line rendering.
+  bool get isPlain =>
+      narration == null &&
+      reasoning == null &&
+      stepIndex == null &&
+      refLabel == null &&
+      frame == null;
+
+  ToolStep withNarration({String? narration, String? reasoning}) => ToolStep(
+    key: key,
+    name: name,
+    status: status,
+    completedReadPath: completedReadPath,
+    language: language,
+    target: target,
+    narration: narration ?? this.narration,
+    reasoning: reasoning ?? this.reasoning,
+    stepIndex: stepIndex,
+    refLabel: refLabel,
+    frame: frame,
+  );
   bool get completed => status == 'completed';
   String get label {
     String t(String zh, String en) => language == 'zh' ? zh : en;
@@ -40,29 +98,31 @@ class ToolStep extends StatelessWidget {
   Widget build(BuildContext context) => ToolStepGroup(steps: [this]);
 }
 
+/// One run's tool steps. A lone plain step keeps the compact legacy line;
+/// anything longer renders as a [ToolTimeline]: while [running] the last
+/// [toolTimelineVisibleSteps] rows, once finished one expandable summary line
+/// (with [elapsed] when known).
 class ToolStepGroup extends StatelessWidget {
-  const ToolStepGroup({super.key, required this.steps});
+  const ToolStepGroup({
+    super.key,
+    required this.steps,
+    this.running = false,
+    this.elapsed,
+  });
   final List<ToolStep> steps;
+  final bool running;
+  final Duration? elapsed;
 
   @override
   Widget build(BuildContext context) {
-    String t(String zh, String en) => steps.first.language == 'zh' ? zh : en;
-    final files = {
-      for (final step in steps)
-        if (step.name == 'file_read' &&
-            step.completed &&
-            step.completedReadPath != null)
-          step.completedReadPath!,
-    };
-    final done = steps.every((step) => step.completed);
-    final summary = steps.length == 1
-        ? '${steps.first.label} · ${steps.first.state}'
-        : [
-            if (files.isNotEmpty)
-              t('查看了 ${files.length} 个文件', 'Read ${files.length} files'),
-            t('${steps.length} 次工具调用', '${steps.length} tool calls'),
-            if (!done) t('有未完成或待核实', 'Some incomplete or unverified'),
-          ].join(' · ');
+    if (steps.length > 1 || !steps.first.isPlain) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: ToolTimeline(steps: steps, running: running, elapsed: elapsed),
+      );
+    }
+    final step = steps.first;
+    String t(String zh, String en) => step.language == 'zh' ? zh : en;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
@@ -74,24 +134,24 @@ class ToolStepGroup extends StatelessWidget {
         shape: const Border(),
         collapsedShape: const Border(),
         leading: Icon(
-          done ? Icons.check_circle_outline : Icons.info_outline,
+          step.completed ? Icons.check_circle_outline : Icons.info_outline,
           size: 15,
         ),
-        title: Text(summary, style: Theme.of(context).textTheme.bodySmall),
+        title: Text(
+          '${step.label} · ${step.state}',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
         children: [
-          for (final step in steps)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Text(
-                  steps.length == 1
-                      ? '${t('工具', 'Tool')}: ${step.name}\n${t('状态', 'Status')}: ${step.state}'
-                      : '${step.label} · ${step.state}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Text(
+                '${t('工具', 'Tool')}: ${step.name}\n${t('状态', 'Status')}: ${step.state}',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
+          ),
         ],
       ),
     );

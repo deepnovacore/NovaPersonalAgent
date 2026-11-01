@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 import 'package:nova_mobile/agent_core/tool_registry.dart';
+import 'package:nova_mobile/ui/thinking_block.dart';
 import 'package:nova_mobile/ui/tool_step.dart';
 import 'package:nova_mobile/personal/life_reducer.dart';
 import 'package:flutter/material.dart';
@@ -360,13 +361,19 @@ void main() {
       expect(
         groups.map((group) => group.steps.map((step) => step.name).toList()),
         [
-          ['file_read', 'file_read', 'file_read'],
-          ['file_edit'],
+          ['file_read', 'file_read', 'file_read', 'file_edit'],
           ['shell_execute'],
           ['web_fetch'],
         ],
       );
-      expect(find.text('查看了 1 个文件 · 3 次工具调用 · 有未完成或待核实'), findsOneWidget);
+      // Reasoning that only precedes tools does not split the run; it becomes
+      // the narration of the step it introduced.
+      expect(find.byType(ThinkingBlock), findsNothing);
+      expect(find.textContaining('做了 4 步'), findsOneWidget);
+      expect(find.textContaining('有未完成或待核实'), findsOneWidget);
+      await tester.tap(find.textContaining('做了 4 步'));
+      await tester.pumpAndSettle();
+      expect(find.text('Check next step'), findsOneWidget);
       expect(
         tester.getTopLeft(find.text('Check next step')).dy,
         lessThan(

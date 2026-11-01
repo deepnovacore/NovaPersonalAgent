@@ -9,6 +9,7 @@ import 'package:nova_mobile/conversation/local_chat_panel.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'package:nova_mobile/ui/assistant_text.dart';
 import 'package:nova_mobile/ui/thinking_block.dart';
+import 'package:nova_mobile/ui/tool_timeline.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 import 'local_chat_preview_test.dart' show PreviewWorkspace;
 
@@ -98,22 +99,25 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        // Think A and B only introduce tools: they are narration inside the
+        // first run's timeline, so the visible thoughts are C and D.
         final thoughts = find.byType(ThinkingBlock);
-        final tools = find.byType(ExpansionTile);
+        expect(thoughts, findsNWidgets(2));
+        final tools = find.byWidgetPredicate(
+          (widget) => widget is ExpansionTile || widget is ToolTimeline,
+        );
         Finder reply(String text) => find.ancestor(
           of: find.text(text, findRichText: true),
           matching: find.byType(AssistantText),
         );
         double gap(Finder before, Finder after) =>
             tester.getTopLeft(after).dy - tester.getBottomLeft(before).dy;
-        expect(gap(thoughts.at(0), tools.at(0)), closeTo(8, .01));
-        expect(gap(tools.at(0), thoughts.at(1)), closeTo(8, .01));
-        expect(gap(thoughts.at(1), tools.at(1)), closeTo(8, .01));
-        expect(gap(tools.at(1), thoughts.at(2)), closeTo(8, .01));
-        expect(gap(thoughts.at(2), reply('Tool preamble')), closeTo(8, .01));
-        expect(gap(reply('Tool preamble'), tools.at(2)), closeTo(8, .01));
+        expect(find.byType(ToolTimeline), findsOneWidget);
+        expect(gap(tools.at(0), thoughts.at(0)), closeTo(8, .01));
+        expect(gap(thoughts.at(0), reply('Tool preamble')), closeTo(8, .01));
+        expect(gap(reply('Tool preamble'), tools.at(1)), closeTo(8, .01));
         expect(
-          gap(find.widgetWithText(ListTile, 'page.html'), thoughts.at(3)),
+          gap(find.widgetWithText(ListTile, 'page.html'), thoughts.at(1)),
           closeTo(16, .01),
         );
         expect(
@@ -124,7 +128,7 @@ void main() {
           (widget) =>
               widget is Container && widget.constraints?.maxWidth == 300,
         );
-        expect(gap(users.first, thoughts.first), closeTo(24, .01));
+        expect(gap(users.first, tools.at(0)), closeTo(24, .01));
         expect(gap(reply('Final paragraph two'), users.last), closeTo(24, .01));
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());

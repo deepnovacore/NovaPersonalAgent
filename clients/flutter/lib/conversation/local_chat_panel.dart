@@ -5,6 +5,7 @@ import '../ui/theme.dart';
 import '../ui/chat_activity.dart';
 import '../ui/thinking_block.dart';
 import '../ui/tool_step.dart';
+import '../ui/tool_timeline.dart';
 import 'phone_dictation.dart';
 import 'package:nova_audio/nova_audio.dart';
 import '../voice/voice_settings.dart';
@@ -419,7 +420,11 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     }
   }
 
-  Widget _message(Map message, {Set<String>? seenPreviews}) {
+  Widget _message(
+    Map message, {
+    Set<String>? seenPreviews,
+    String? toolTarget,
+  }) {
     if (message['role'] == 'tool') {
       String status = '';
       String? preview, title, previewKey, completedReadPath;
@@ -456,6 +461,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
         status: status,
         completedReadPath: completedReadPath,
         language: widget.language,
+        target: toolTarget,
       );
       if (status == 'completed' &&
           preview != null &&
@@ -602,16 +608,39 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       final messageWidgets = <Widget>[];
       final seenPreviews = <String>{};
       final toolSteps = <ToolStep>[];
+      final targets = toolTargetsByCallId(messages);
+      DateTime? lastToolTime, firstToolTime;
+      var firstToolIndex = 0;
+      DateTime? timeOf(Map message) =>
+          DateTime.tryParse(message['time'] as String? ?? '');
       var finalReplyShown = false;
-      void flushTools() {
+      // Widgets stored after the newest group that belong to the same run.
+      var runInternalWidgets = 0;
+      // [boundary] is the message that ended the run (its time starts the
+      // clock); null when the run reaches the start of the conversation.
+      void flushTools(Map? boundary) {
         if (toolSteps.isEmpty) return;
-        messageWidgets.add(ToolStepGroup(steps: toolSteps.reversed.toList()));
+        final start =
+            (boundary == null ? null : timeOf(boundary)) ?? firstToolTime;
+        final elapsed = start == null || lastToolTime == null
+            ? null
+            : lastToolTime!.difference(start);
+        messageWidgets.add(
+          ToolStepGroup(
+            key: ValueKey('tools:$firstToolIndex'),
+            steps: toolSteps.reversed.toList(),
+            // While the run goes on, only its own plan messages follow it.
+            running: runningHere && messageWidgets.length == runInternalWidgets,
+            elapsed: elapsed == null || elapsed.isNegative ? null : elapsed,
+          ),
+        );
         toolSteps.clear();
+        lastToolTime = firstToolTime = null;
       }
 
       // Walk backwards so each user turn keeps its last successful preview.
-      for (final stored in messages.reversed) {
-        var message = stored as Map;
+      for (var index = messages.length - 1; index >= 0; index--) {
+        var message = messages[index] as Map;
         if (message['role'] == 'user') {
           seenPreviews.clear();
           finalReplyShown = false;
@@ -640,15 +669,54 @@ class LocalChatPanelState extends State<LocalChatPanel> {
             message['interrupted'] != true) {
           continue;
         }
-        final item = _message(message, seenPreviews: seenPreviews);
+        // Reasoning that only introduces tool calls is the narration of the
+        // steps right after it, not a boundary of the run.
+        final reasoning = message['reasoning_content'];
+        if (toolSteps.isNotEmpty &&
+            message['role'] == 'assistant' &&
+            message['interrupted'] != true &&
+            (message['content'] as String? ?? '').trim().isEmpty &&
+            reasoning is String &&
+            reasoning.trim().isNotEmpty) {
+          final narration = clipNarration(thinkingSummary(reasoning));
+          for (var i = 0; i < toolSteps.length; i++) {
+            if (toolSteps[i].narration == null) {
+              toolSteps[i] = toolSteps[i].withNarration(
+                narration: narration,
+                reasoning: reasoning.trim(),
+              );
+            }
+          }
+          firstToolIndex = index;
+          firstToolTime = timeOf(message) ?? firstToolTime;
+          continue;
+        }
+        final item = _message(
+          message,
+          seenPreviews: seenPreviews,
+          toolTarget: message['role'] == 'tool'
+              ? targets[message['tool_call_id']]
+              : null,
+        );
         if (item is ToolStep) {
           toolSteps.add(item);
+          final time = timeOf(message);
+          lastToolTime ??= time;
+          firstToolTime = time ?? firstToolTime;
+          firstToolIndex = index;
         } else {
-          flushTools();
+          flushTools(message);
+          if (message['role'] == 'assistant' &&
+              message['interrupted'] != true &&
+              (message['tool_calls'] is List &&
+                      (message['tool_calls'] as List).isNotEmpty ||
+                  (message['content'] as String? ?? '').isEmpty)) {
+            runInternalWidgets++;
+          }
           messageWidgets.add(item);
         }
       }
-      flushTools();
+      flushTools(null);
       final liveReasoning = host.reasoning.trim();
       return LayoutBuilder(
         builder: (context, constraints) {
