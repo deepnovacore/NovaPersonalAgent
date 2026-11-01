@@ -136,9 +136,12 @@ class PhoneTaskPet with WidgetsBindingObserver {
   void _failed(String id, Object error) {
     if (_disposed) return;
     _blocked.add(id);
+    // A timed-out start may still bring the overlay up late: keep its id so
+    // the run's end still hides it. Other failures mean nothing is shown.
+    final timedOut = error is PlatformException && error.code == 'timeout';
     if (_overlayId == id) {
-      _overlayId = null;
-      _sent = null;
+      if (!timedOut) _overlayId = null;
+      _sent = null; // allow one retry after resume either way
     }
     if (error is PlatformException && error.code == 'overlay_permission') {
       _hint();
@@ -176,8 +179,11 @@ class PhoneTaskPet with WidgetsBindingObserver {
         final id = _runId ?? _overlayId;
         final run = id == null ? null : tracker.run(id);
         if (id == null || run == null || !run.active) return;
+        // Dedupe repeated taps while one stop is in flight; if the run is
+        // still active afterwards (the stop failed), allow another try.
         if (!_stopRequested.add(id)) return;
         onStop(id);
+        Timer(const Duration(seconds: 5), () => _stopRequested.remove(id));
       case 'task_takeover':
         final id = _runId;
         final run = id == null ? null : tracker.run(id);
