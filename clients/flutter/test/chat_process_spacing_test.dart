@@ -112,7 +112,8 @@ void main() {
         );
         double gap(Finder before, Finder after) =>
             tester.getTopLeft(after).dy - tester.getBottomLeft(before).dy;
-        expect(find.byType(ToolTimeline), findsOneWidget);
+        // The saved page's card follows its run instead of splitting it.
+        expect(find.byType(ToolTimeline), findsNWidgets(2));
         expect(gap(tools.at(0), thoughts.at(0)), closeTo(8, .01));
         expect(gap(thoughts.at(0), reply('Tool preamble')), closeTo(8, .01));
         expect(gap(reply('Tool preamble'), tools.at(1)), closeTo(8, .01));

@@ -420,91 +420,87 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     }
   }
 
-  Widget _message(
+  /// A tool result as a timeline step, plus the card that opens the page or
+  /// artifact it saved (shown after the run, never inside it).
+  ({ToolStep step, Widget? card}) _toolResult(
     Map message, {
     Set<String>? seenPreviews,
-    String? toolTarget,
+    ToolTarget? target,
   }) {
-    if (message['role'] == 'tool') {
-      String status = '';
-      String? preview, title, previewKey, completedReadPath;
-      try {
-        final result = jsonDecode(message['content'] as String) as Map;
-        status = result['status'] as String? ?? '';
-        final data = result['data'];
-        if (status == 'completed' &&
-            message['tool_name'] == 'file_read' &&
-            data is Map &&
-            data['type'] != 'directory' &&
-            data['path'] is String) {
-          completedReadPath = data['path'] as String;
-        }
-        if (data is Map && message['tool_name'] != 'file_read') {
-          if (data['artifact'] is Map) {
-            final artifact = data['artifact'] as Map;
-            preview = artifact['id'] as String?;
-            previewKey = preview;
-            title = artifact['title'] as String?;
-          } else if (data['path'] is String &&
-              RegExp(
-                r'\.html?$',
-                caseSensitive: false,
-              ).hasMatch(data['path'] as String)) {
-            preview = data['url'] as String? ?? data['path'] as String;
-            previewKey = data['path'] as String;
-            title = (data['path'] as String).split('/').last;
-          }
-        }
-      } catch (_) {}
-      final step = ToolStep(
-        name: message['tool_name'] as String? ?? '',
-        status: status,
-        completedReadPath: completedReadPath,
-        language: widget.language,
-        target: toolTarget,
-      );
+    String status = '';
+    String? preview, title, previewKey, completedReadPath;
+    try {
+      final result = jsonDecode(message['content'] as String) as Map;
+      status = result['status'] as String? ?? '';
+      final data = result['data'];
       if (status == 'completed' &&
-          preview != null &&
-          widget.host.tools?.registry.workspace != null) {
-        if (seenPreviews != null && !seenPreviews.add(previewKey!)) {
-          return step;
-        }
-        final target = preview;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            step,
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Material(
-                color: Nova.cell,
-                borderRadius: BorderRadius.circular(18),
-                child: ListTile(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  leading: const Icon(
-                    CupertinoIcons.doc_richtext,
-                    color: Nova.mint,
-                  ),
-                  title: Text(
-                    title ?? t('打开页面', 'Open page'),
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(t('已保存 · 点此打开', 'Saved · Tap to open')),
-                  trailing: const Icon(
-                    CupertinoIcons.arrow_up_right_square,
-                    size: 20,
-                  ),
-                  onTap: () => _openArtifact(target),
-                ),
-              ),
-            ),
-          ],
-        );
+          message['tool_name'] == 'file_read' &&
+          data is Map &&
+          data['type'] != 'directory' &&
+          data['path'] is String) {
+        completedReadPath = data['path'] as String;
       }
-      return step;
+      if (data is Map && message['tool_name'] != 'file_read') {
+        if (data['artifact'] is Map) {
+          final artifact = data['artifact'] as Map;
+          preview = artifact['id'] as String?;
+          previewKey = preview;
+          title = artifact['title'] as String?;
+        } else if (data['path'] is String &&
+            RegExp(
+              r'\.html?$',
+              caseSensitive: false,
+            ).hasMatch(data['path'] as String)) {
+          preview = data['url'] as String? ?? data['path'] as String;
+          previewKey = data['path'] as String;
+          title = pathBaseName(data['path'] as String);
+        }
+      }
+    } catch (_) {}
+    final step = ToolStep(
+      name: message['tool_name'] as String? ?? '',
+      status: status,
+      completedReadPath: completedReadPath,
+      language: widget.language,
+      target: target?.label,
+      targetKey: target?.key,
+    );
+    if (status != 'completed' ||
+        preview == null ||
+        widget.host.tools?.registry.workspace == null ||
+        (seenPreviews != null && !seenPreviews.add(previewKey!))) {
+      return (step: step, card: null);
     }
+    final openTarget = preview;
+    return (
+      step: step,
+      card: Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Material(
+          color: Nova.cell,
+          borderRadius: BorderRadius.circular(18),
+          child: ListTile(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            leading: const Icon(CupertinoIcons.doc_richtext, color: Nova.mint),
+            title: Text(
+              title ?? t('打开页面', 'Open page'),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(t('已保存 · 点此打开', 'Saved · Tap to open')),
+            trailing: const Icon(
+              CupertinoIcons.arrow_up_right_square,
+              size: 20,
+            ),
+            onTap: () => _openArtifact(openTarget),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _message(Map message) {
     final reasoning =
         widget.showProcess &&
             message['role'] == 'assistant' &&
@@ -609,33 +605,28 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       final seenPreviews = <String>{};
       final toolSteps = <ToolStep>[];
       final targets = toolTargetsByCallId(messages);
-      DateTime? lastToolTime, firstToolTime;
+      // Call id of each entry of [toolSteps] (null when the result has none).
+      final toolStepCallIds = <String?>[];
       var firstToolIndex = 0;
-      DateTime? timeOf(Map message) =>
-          DateTime.tryParse(message['time'] as String? ?? '');
+      // First [toolSteps] entry after the assistant message walked last: the
+      // results of the round now being reached.
+      var roundStart = 0;
       var finalReplyShown = false;
       // Widgets stored after the newest group that belong to the same run.
       var runInternalWidgets = 0;
-      // [boundary] is the message that ended the run (its time starts the
-      // clock); null when the run reaches the start of the conversation.
-      void flushTools(Map? boundary) {
+      void flushTools() {
         if (toolSteps.isEmpty) return;
-        final start =
-            (boundary == null ? null : timeOf(boundary)) ?? firstToolTime;
-        final elapsed = start == null || lastToolTime == null
-            ? null
-            : lastToolTime!.difference(start);
         messageWidgets.add(
           ToolStepGroup(
             key: ValueKey('tools:$firstToolIndex'),
             steps: toolSteps.reversed.toList(),
             // While the run goes on, only its own plan messages follow it.
             running: runningHere && messageWidgets.length == runInternalWidgets,
-            elapsed: elapsed == null || elapsed.isNegative ? null : elapsed,
           ),
         );
         toolSteps.clear();
-        lastToolTime = firstToolTime = null;
+        toolStepCallIds.clear();
+        roundStart = 0;
       }
 
       // Walk backwards so each user turn keeps its last successful preview.
@@ -667,10 +658,11 @@ class LocalChatPanelState extends State<LocalChatPanel> {
             (message['content'] as String? ?? '').isEmpty &&
             (message['reasoning_content'] as String? ?? '').trim().isEmpty &&
             message['interrupted'] != true) {
+          roundStart = toolSteps.length;
           continue;
         }
-        // Reasoning that only introduces tool calls is the narration of the
-        // steps right after it, not a boundary of the run.
+        // Reasoning that only introduces tool calls is the narration of
+        // exactly those calls' steps, not a boundary of the run.
         final reasoning = message['reasoning_content'];
         if (toolSteps.isNotEmpty &&
             message['role'] == 'assistant' &&
@@ -678,34 +670,53 @@ class LocalChatPanelState extends State<LocalChatPanel> {
             (message['content'] as String? ?? '').trim().isEmpty &&
             reasoning is String &&
             reasoning.trim().isNotEmpty) {
-          final narration = clipNarration(thinkingSummary(reasoning));
-          for (var i = 0; i < toolSteps.length; i++) {
-            if (toolSteps[i].narration == null) {
-              toolSteps[i] = toolSteps[i].withNarration(
-                narration: narration,
-                reasoning: reasoning.trim(),
-              );
+          final calls = message['tool_calls'];
+          final ids = {
+            if (calls is List)
+              for (final call in calls)
+                if (call is Map && call['id'] is String) call['id'] as String,
+          };
+          // Without call ids the message introduces the steps of its round.
+          final introduced = [
+            for (var i = 0; i < toolSteps.length; i++)
+              if (ids.isEmpty
+                  ? i >= roundStart
+                  : toolStepCallIds[i] != null &&
+                        ids.contains(toolStepCallIds[i]))
+                i,
+          ];
+          if (introduced.isNotEmpty) {
+            final narration = clipNarration(thinkingSummary(reasoning));
+            for (final i in introduced) {
+              if (toolSteps[i].narration == null) {
+                toolSteps[i] = toolSteps[i].withNarration(
+                  narration: narration,
+                  reasoning: reasoning.trim(),
+                );
+              }
             }
+            firstToolIndex = index;
+            roundStart = toolSteps.length;
+            continue;
           }
-          firstToolIndex = index;
-          firstToolTime = timeOf(message) ?? firstToolTime;
-          continue;
         }
-        final item = _message(
-          message,
-          seenPreviews: seenPreviews,
-          toolTarget: message['role'] == 'tool'
-              ? targets[message['tool_call_id']]
-              : null,
-        );
-        if (item is ToolStep) {
-          toolSteps.add(item);
-          final time = timeOf(message);
-          lastToolTime ??= time;
-          firstToolTime = time ?? firstToolTime;
+        if (message['role'] == 'tool') {
+          final callId = message['tool_call_id'];
+          final result = _toolResult(
+            message,
+            seenPreviews: seenPreviews,
+            target: callId is String ? targets[callId] : null,
+          );
+          toolSteps.add(result.step);
+          toolStepCallIds.add(callId is String ? callId : null);
           firstToolIndex = index;
+          if (result.card != null) {
+            runInternalWidgets++;
+            messageWidgets.add(result.card!);
+          }
         } else {
-          flushTools(message);
+          flushTools();
+          roundStart = 0;
           if (message['role'] == 'assistant' &&
               message['interrupted'] != true &&
               (message['tool_calls'] is List &&
@@ -713,10 +724,10 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                   (message['content'] as String? ?? '').isEmpty)) {
             runInternalWidgets++;
           }
-          messageWidgets.add(item);
+          messageWidgets.add(_message(message));
         }
       }
-      flushTools(null);
+      flushTools();
       final liveReasoning = host.reasoning.trim();
       return LayoutBuilder(
         builder: (context, constraints) {

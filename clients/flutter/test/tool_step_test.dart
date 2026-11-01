@@ -37,7 +37,7 @@ void main() {
     expect(find.text('查看了 1 个文件 · 4 次工具调用 · 有未完成或待核实'), findsOneWidget);
     expect(
       tester.getSize(find.byType(ToolTimeline)).height,
-      lessThanOrEqualTo(40),
+      lessThanOrEqualTo(48),
     );
     expect(find.textContaining('shell_execute'), findsNothing);
     await tester.tap(find.byType(ToolTimeline));
@@ -82,5 +82,27 @@ void main() {
     );
     expect(find.byType(ToolTimeline), findsNothing);
     expect(find.text('读取文件 · 已完成'), findsOneWidget);
+  });
+
+  testWidgets('a lone step with a target keeps it in the compact line', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: ToolStepGroup(
+            steps: [
+              ToolStep(
+                name: 'file_read',
+                status: 'completed',
+                target: 'notes.txt',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.byType(ToolTimeline), findsNothing);
+    expect(find.text('读取文件 · notes.txt · 已完成'), findsOneWidget);
   });
 }

@@ -13,6 +13,9 @@ import 'tool_step.dart';
 /// state; every earlier row is [ok] (its own failure shows as the subtitle).
 enum ToolStepState { ok, run, wait, dim }
 
+/// Minimum height of anything the user can tap.
+const _tapTargetHeight = 44.0;
+
 /// While a run is going, only this many of its latest rows are listed.
 const toolTimelineVisibleSteps = 5;
 
@@ -22,17 +25,35 @@ const toolNarrationMaxChars = 80;
 const _observeTools = {
   'file_read',
   'web_fetch',
+  'web_search',
   'browser',
   'browser_open',
   'observe',
+  'computer_screenshot',
 };
 
 /// Read-only tools: consecutive calls on one target are one timeline row.
 bool isObserveTool(String name) => _observeTools.contains(name);
 
-/// Display-safe target of a tool call: a file name or a host, never the full
-/// path, URL, query or any other argument. Null when unknown.
-String? toolTargetLabel(String name, Object? arguments) {
+/// Where a tool call acted. [label] is display-safe (a file name or host,
+/// never the full path, URL, query or any other argument); [key] is the
+/// undisplayed raw identity (full path or host) used to merge repeated reads,
+/// so equal basenames in different directories stay apart.
+class ToolTarget {
+  const ToolTarget({required this.label, required this.key});
+  final String label, key;
+}
+
+final _pathSeparator = RegExp(r'[\\/]');
+
+/// Last component of a POSIX or Windows path; null when it has none.
+String? pathBaseName(String path) {
+  final parts = path.split(_pathSeparator).where((part) => part.isNotEmpty);
+  return parts.isEmpty ? null : parts.last;
+}
+
+/// Target of a tool call, or null when unknown.
+ToolTarget? toolTarget(String name, Object? arguments) {
   Object? decoded = arguments;
   if (decoded is String) {
     try {
@@ -45,44 +66,71 @@ String? toolTargetLabel(String name, Object? arguments) {
   switch (name) {
     case 'file_read' || 'file_write' || 'file_edit':
       final path = decoded['path'];
-      if (path is! String) return null;
-      final parts = path.split('/').where((part) => part.isNotEmpty);
-      return parts.isEmpty ? null : parts.last;
+      final label = path is String ? pathBaseName(path) : null;
+      return label == null
+          ? null
+          : ToolTarget(label: label, key: (path as String).trim());
     case 'web_fetch' || 'browser' || 'browser_open':
       final url = decoded['url'];
       final host = url is String ? Uri.tryParse(url)?.host : null;
-      return host == null || host.isEmpty ? null : host;
+      return host == null || host.isEmpty
+          ? null
+          : ToolTarget(label: host, key: host);
+    case 'computer_screenshot':
+      final application = decoded['application'];
+      final label = application is String ? application.trim() : '';
+      return label.isEmpty ? null : ToolTarget(label: label, key: label);
   }
   return null;
 }
 
-final _targetCache = Expando<Map<String, String>>('toolTargets');
+/// Display-safe target label of a tool call; see [ToolTarget.label].
+String? toolTargetLabel(String name, Object? arguments) =>
+    toolTarget(name, arguments)?.label;
 
-Map<String, String> _targetsOf(Map message) {
-  final targets = <String, String>{};
-  for (final call in message['tool_calls'] as List) {
-    if (call is! Map || call['id'] is! String || call['function'] is! Map) {
-      continue;
-    }
-    final function = call['function'] as Map;
-    final target = toolTargetLabel(
-      function['name'] as String? ?? '',
-      function['arguments'],
-    );
-    if (target != null) targets[call['id'] as String] = target;
+/// Stored messages are deep-copied on every read, so parsed targets are kept
+/// by call content. Bounded, least recently used first out; oversized
+/// arguments (file bodies) are parsed each time instead of being retained.
+const _targetCacheLimit = 256;
+const _targetCacheMaxArgumentChars = 4096;
+final _targetCache = <String, ToolTarget?>{};
+
+ToolTarget? _cachedTarget(String name, Object? arguments) {
+  if (arguments is! String || arguments.length > _targetCacheMaxArgumentChars) {
+    return toolTarget(name, arguments);
   }
-  return targets;
+  final key = '$name\u0000$arguments';
+  if (_targetCache.containsKey(key)) {
+    final hit = _targetCache.remove(key);
+    _targetCache[key] = hit;
+    return hit;
+  }
+  final target = toolTarget(name, arguments);
+  _targetCache[key] = target;
+  if (_targetCache.length > _targetCacheLimit) {
+    _targetCache.remove(_targetCache.keys.first);
+  }
+  return target;
 }
 
-/// Display-safe targets of every tool call in [messages], by call id. Parsed
-/// once per stored assistant message.
-Map<String, String> toolTargetsByCallId(List messages) {
-  final targets = <String, String>{};
+/// Targets of every tool call in [messages], by call id.
+Map<String, ToolTarget> toolTargetsByCallId(List messages) {
+  final targets = <String, ToolTarget>{};
   for (final message in messages) {
     if (message is! Map || message['role'] != 'assistant') continue;
     final calls = message['tool_calls'];
-    if (calls is! List || calls.isEmpty) continue;
-    targets.addAll(_targetCache[message] ??= _targetsOf(message));
+    if (calls is! List) continue;
+    for (final call in calls) {
+      if (call is! Map || call['id'] is! String || call['function'] is! Map) {
+        continue;
+      }
+      final function = call['function'] as Map;
+      final target = _cachedTarget(
+        function['name'] as String? ?? '',
+        function['arguments'],
+      );
+      if (target != null) targets[call['id'] as String] = target;
+    }
   }
   return targets;
 }
@@ -94,18 +142,6 @@ String clipNarration(String text) {
   return runes.length <= toolNarrationMaxChars
       ? line
       : '${String.fromCharCodes(runes.take(toolNarrationMaxChars - 1))}…';
-}
-
-/// "1 分 20 秒" / "1m 20s"; never shorter than one second.
-String formatToolElapsed(Duration elapsed, String language) {
-  final total = math.max(1, elapsed.inSeconds.clamp(0, 86400 * 7));
-  final minutes = total ~/ 60, seconds = total % 60;
-  if (language == 'zh') {
-    if (minutes == 0) return '$seconds 秒';
-    return seconds == 0 ? '$minutes 分' : '$minutes 分 $seconds 秒';
-  }
-  if (minutes == 0) return '${seconds}s';
-  return seconds == 0 ? '${minutes}m' : '${minutes}m ${seconds}s';
 }
 
 /// The single line a finished run collapses to. Keeps Nova's established
@@ -229,8 +265,8 @@ List<ToolTimelineRow> buildToolSteps(
     if (previous != null &&
         isObserveTool(step.name) &&
         step.name == previous.first.name &&
-        step.target != null &&
-        step.target == previous.first.target &&
+        step.mergeKey != null &&
+        step.mergeKey == previous.first.mergeKey &&
         step.status == previous.last.status &&
         _narrationOf(step) == _narrationOf(previous.first)) {
       previous
@@ -272,15 +308,9 @@ List<ToolTimelineRow> buildToolSteps(
 
 /// A run's steps: the live rail while running, one expandable line when done.
 class ToolTimeline extends StatefulWidget {
-  const ToolTimeline({
-    super.key,
-    required this.steps,
-    this.running = false,
-    this.elapsed,
-  });
+  const ToolTimeline({super.key, required this.steps, this.running = false});
   final List<ToolStep> steps;
   final bool running;
-  final Duration? elapsed;
 
   @override
   State<ToolTimeline> createState() => _ToolTimelineState();
@@ -291,6 +321,7 @@ class _ToolTimelineState extends State<ToolTimeline> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.steps.isEmpty) return const SizedBox.shrink();
     final language = widget.steps.first.language;
     String t(String zh, String en) => language == 'zh' ? zh : en;
     final rows = buildToolSteps(widget.steps, running: widget.running);
@@ -315,6 +346,12 @@ class _ToolTimelineState extends State<ToolTimeline> {
         ? Padding(padding: const EdgeInsets.fromLTRB(8, 0, 8, 6), child: rail)
         : const SizedBox(width: double.infinity);
     final bodySmall = Theme.of(context).textTheme.bodySmall;
+    final summary = toolTimelineSummary(
+      language: language,
+      steps: widget.steps,
+      incomplete: incomplete,
+    );
+    void toggle() => setState(() => open = !open);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -322,12 +359,15 @@ class _ToolTimelineState extends State<ToolTimeline> {
         Semantics(
           button: true,
           expanded: open,
+          label: summary,
+          excludeSemantics: true,
+          onTap: toggle,
           onTapHint: open ? t('收起步骤', 'Hide steps') : t('展开步骤', 'Show steps'),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => open = !open),
+            onTap: toggle,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 36),
+              constraints: const BoxConstraints(minHeight: _tapTargetHeight),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Row(
@@ -340,16 +380,7 @@ class _ToolTimelineState extends State<ToolTimeline> {
                       size: 15,
                     ),
                     const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        toolTimelineSummary(
-                          language: language,
-                          steps: widget.steps,
-                          incomplete: incomplete,
-                        ),
-                        style: bodySmall,
-                      ),
-                    ),
+                    Flexible(child: Text(summary, style: bodySmall)),
                     const SizedBox(width: 4),
                     Icon(
                       open ? Icons.expand_less : Icons.expand_more,
@@ -584,7 +615,9 @@ class _RailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget row = ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 28),
+      constraints: BoxConstraints(
+        minHeight: onTap == null ? 28 : _tapTargetHeight,
+      ),
       child: IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -614,6 +647,8 @@ class _RailRow extends StatelessWidget {
       row = Semantics(
         button: true,
         label: semanticsLabel,
+        excludeSemantics: true,
+        onTap: onTap,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onTap,

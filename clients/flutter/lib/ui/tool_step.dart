@@ -18,6 +18,7 @@ class ToolStep extends StatelessWidget {
     this.completedReadPath,
     this.language = 'zh',
     this.target,
+    this.targetKey,
     this.narration,
     this.reasoning,
     this.stepIndex,
@@ -30,6 +31,13 @@ class ToolStep extends StatelessWidget {
   /// Where the tool acted (file name, host, app name). Equal consecutive
   /// targets of observe-like tools merge into one timeline row.
   final String? target;
+
+  /// Undisplayed raw identity of [target] (full path, host); merging compares
+  /// it so equal names in different places stay separate rows.
+  final String? targetKey;
+
+  /// What equal consecutive observe steps are compared by.
+  String? get mergeKey => targetKey ?? target;
 
   /// The model's own one-line description of this step; wins over the tool
   /// label as the row title.
@@ -63,6 +71,7 @@ class ToolStep extends StatelessWidget {
     completedReadPath: completedReadPath,
     language: language,
     target: target,
+    targetKey: targetKey,
     narration: narration ?? this.narration,
     reasoning: reasoning ?? this.reasoning,
     stepIndex: stepIndex,
@@ -79,6 +88,12 @@ class ToolStep extends StatelessWidget {
       'shell_execute' => t('执行命令', 'Run command'),
       'web_fetch' => t('读取网页', 'Read webpage'),
       'browser' || 'browser_open' => t('检查网页', 'Check webpage'),
+      'web_search' => t('搜索网页', 'Search the web'),
+      'computer_screenshot' => t('查看屏幕', 'View screen'),
+      'computer_click' => t('点击屏幕', 'Tap screen'),
+      'computer_type' => t('输入文字', 'Type text'),
+      'computer_scroll' => t('滚动屏幕', 'Scroll screen'),
+      'computer_key' => t('按键', 'Press keys'),
       _ => t('使用工具', 'Use tool'),
     };
   }
@@ -98,27 +113,23 @@ class ToolStep extends StatelessWidget {
   Widget build(BuildContext context) => ToolStepGroup(steps: [this]);
 }
 
-/// One run's tool steps. A lone plain step keeps the compact legacy line;
+/// One run's tool steps. A lone plain step keeps the compact legacy line
+/// (`label · target · state`);
 /// anything longer renders as a [ToolTimeline]: while [running] the last
 /// [toolTimelineVisibleSteps] rows, once finished one expandable summary line
 /// in the established "查看了 N 个文件 · N 次工具调用" wording.
 class ToolStepGroup extends StatelessWidget {
-  const ToolStepGroup({
-    super.key,
-    required this.steps,
-    this.running = false,
-    this.elapsed,
-  });
+  const ToolStepGroup({super.key, required this.steps, this.running = false});
   final List<ToolStep> steps;
   final bool running;
-  final Duration? elapsed;
 
   @override
   Widget build(BuildContext context) {
+    if (steps.isEmpty) return const SizedBox.shrink();
     if (steps.length > 1 || !steps.first.isPlain) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: ToolTimeline(steps: steps, running: running, elapsed: elapsed),
+        child: ToolTimeline(steps: steps, running: running),
       );
     }
     final step = steps.first;
@@ -138,7 +149,7 @@ class ToolStepGroup extends StatelessWidget {
           size: 15,
         ),
         title: Text(
-          '${step.label} · ${step.state}',
+          [step.label, ?step.target, step.state].join(' · '),
           style: Theme.of(context).textTheme.bodySmall,
         ),
         children: [

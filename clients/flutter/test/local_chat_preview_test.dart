@@ -226,14 +226,14 @@ void main() {
               .dy,
         ),
       );
-      // The two adjacent edits form one timeline; the rest stay single lines.
-      expect(find.byType(ExpansionTile), findsNWidgets(6));
-      expect(find.byType(ToolTimeline), findsOneWidget);
+      // Saved-page cards sit after their run and no longer split it.
+      expect(find.byType(ExpansionTile), findsNothing);
+      expect(find.byType(ToolTimeline), findsNWidgets(3));
       expect(
         tester
             .widgetList<ToolStepGroup>(find.byType(ToolStepGroup))
             .map((group) => group.steps.length),
-        [2, 1, 1, 1, 1, 1, 1],
+        [2, 4, 2],
       );
       expect(find.text('other.html'), findsOneWidget);
       expect(find.text('read-only.html'), findsNothing);
@@ -314,4 +314,83 @@ void main() {
       host.dispose();
     },
   );
+
+  testWidgets('a saved page keeps its step in the run, card after the group', (
+    tester,
+  ) async {
+    final workspace = PreviewWorkspace();
+    final registry = ToolRegistry(
+      snapshot: () => {},
+      mutate: (input, {required operationId}) async => {},
+      hasConflict: () => false,
+      fetch: (_) async => {},
+      workspace: workspace,
+    );
+    final store = ConversationStore(MemoryPersistence());
+    await store.open();
+    final id = await store.create();
+    await store.append(id, {'role': 'user', 'content': 'build it'});
+    for (final (call, name, data) in [
+      ('a', 'file_read', <String, Object?>{}),
+      (
+        'b',
+        'file_write',
+        <String, Object?>{
+          'path': '/workspace/index.html',
+          'url': 'nova-file:///workspace/index.html',
+        },
+      ),
+      ('c', 'shell_execute', <String, Object?>{}),
+    ]) {
+      await store.append(id, {
+        'role': 'assistant',
+        'content': '',
+        'tool_calls': [
+          {
+            'id': call,
+            'function': {'name': name, 'arguments': '{}'},
+          },
+        ],
+      });
+      await store.append(id, {
+        'role': 'tool',
+        'tool_name': name,
+        'tool_call_id': call,
+        'content': jsonEncode({'status': 'completed', 'data': data}),
+      });
+    }
+    final host =
+        AgentCoreHost(
+            store: store,
+            settings: FixtureSettings(),
+            tools: ToolRunner(
+              registry: registry,
+              journal: ToolJournal(MemoryPersistence()),
+            ),
+          )
+          ..busy = true
+          ..activeConversationId = id;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalChatPanel(host: host, conversationId: id, language: 'en'),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    final group = tester.widget<ToolStepGroup>(find.byType(ToolStepGroup));
+    expect(group.steps.map((step) => step.name), [
+      'file_read',
+      'file_write',
+      'shell_execute',
+    ]);
+    expect(group.running, isTrue);
+    expect(find.text('Saved · Tap to open'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Saved · Tap to open')).dy,
+      greaterThan(tester.getBottomLeft(find.byType(ToolStepGroup)).dy),
+    );
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+  });
 }

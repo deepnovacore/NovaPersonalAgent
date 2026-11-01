@@ -211,4 +211,99 @@ void main() {
     expect(find.textContaining('3 次工具调用'), findsOneWidget);
     expect(find.text('idea 0'), findsNothing);
   });
+
+  testWidgets('a round without reasoning does not inherit the previous one', (
+    tester,
+  ) async {
+    final (store, id) = await _openStore();
+    await store.append(id, {'role': 'user', 'content': 'go'});
+    await _plan(store, id, 'first idea', 'a', 'file_read', {});
+    await _result(store, id, 'a', 'file_read');
+    await _plan(store, id, '', 'b', 'file_edit', {});
+    await _result(store, id, 'b', 'file_edit');
+    await _plan(store, id, 'third idea', 'c', 'shell_execute', {});
+    await _result(store, id, 'c', 'shell_execute');
+    await store.append(id, {'role': 'assistant', 'content': 'done'});
+    await _pump(tester, store, id);
+    final group = tester.widget<ToolStepGroup>(find.byType(ToolStepGroup));
+    expect(group.steps.map((step) => step.narration), [
+      'first idea',
+      null,
+      'third idea',
+    ]);
+  });
+
+  testWidgets('one assistant message with several calls narrates each', (
+    tester,
+  ) async {
+    final (store, id) = await _openStore();
+    await store.append(id, {'role': 'user', 'content': 'go'});
+    await store.append(id, {
+      'role': 'assistant',
+      'content': '',
+      'reasoning_content': 'read both files',
+      'tool_calls': [
+        for (final call in ['a', 'b'])
+          {
+            'id': call,
+            'function': {
+              'name': 'file_read',
+              'arguments': jsonEncode({'path': '/w/$call.txt'}),
+            },
+          },
+      ],
+    });
+    await _result(store, id, 'a', 'file_read');
+    await _result(store, id, 'b', 'file_read');
+    await store.append(id, {'role': 'assistant', 'content': 'done'});
+    await _pump(tester, store, id);
+    final group = tester.widget<ToolStepGroup>(find.byType(ToolStepGroup));
+    expect(group.steps.map((step) => step.target), ['a.txt', 'b.txt']);
+    expect(group.steps.map((step) => step.narration), [
+      'read both files',
+      'read both files',
+    ]);
+    expect(find.byType(ThinkingBlock), findsNothing);
+    expect(find.textContaining('2 次工具调用'), findsOneWidget);
+  });
+
+  testWidgets('windows paths and same-name files in other folders', (
+    tester,
+  ) async {
+    final (store, id) = await _openStore();
+    await store.append(id, {'role': 'user', 'content': 'go'});
+    final paths = [
+      r'C:\Users\me\.ssh\id_rsa',
+      '/one/notes.txt',
+      '/two/notes.txt',
+    ];
+    for (var i = 0; i < paths.length; i++) {
+      await _plan(store, id, '', 'c$i', 'file_read', {'path': paths[i]});
+      await _result(store, id, 'c$i', 'file_read');
+    }
+    await _pump(tester, store, id);
+    await tester.tap(find.textContaining('3 次工具调用'));
+    await tester.pumpAndSettle();
+    expect(find.text('读取文件 · id_rsa'), findsOneWidget);
+    expect(find.text('读取文件 · notes.txt'), findsNWidgets(2));
+    expect(find.textContaining('Users'), findsNothing);
+    expect(find.textContaining('.ssh'), findsNothing);
+  });
+
+  testWidgets('a live run whose last tool failed keeps the rail', (
+    tester,
+  ) async {
+    final (store, id) = await _openStore();
+    await store.append(id, {'role': 'user', 'content': 'go'});
+    await _plan(store, id, 'try', 'a', 'shell_execute', {});
+    await _result(store, id, 'a', 'shell_execute');
+    await _plan(store, id, 'again', 'b', 'shell_execute', {});
+    await _result(store, id, 'b', 'shell_execute', 'failed');
+    await _pump(tester, store, id, running: true);
+    final group = tester.widget<ToolStepGroup>(find.byType(ToolStepGroup));
+    expect(group.running, isTrue);
+    expect(group.steps.last.status, 'failed');
+    expect(find.text('again'), findsOneWidget);
+    expect(find.text('未完成'), findsOneWidget);
+  });
 }

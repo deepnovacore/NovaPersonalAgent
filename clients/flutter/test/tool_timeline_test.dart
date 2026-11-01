@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/ui/theme.dart';
 import 'package:nova_mobile/ui/tool_step.dart';
@@ -13,7 +14,6 @@ Future<void> _pumpGroup(
   WidgetTester tester,
   List<ToolStep> steps, {
   bool running = false,
-  Duration? elapsed,
   bool reduceMotion = false,
 }) => tester.pumpWidget(
   MaterialApp(
@@ -23,7 +23,7 @@ Future<void> _pumpGroup(
     ),
     home: Scaffold(
       body: SingleChildScrollView(
-        child: ToolStepGroup(steps: steps, running: running, elapsed: elapsed),
+        child: ToolStepGroup(steps: steps, running: running),
       ),
     ),
   ),
@@ -82,6 +82,43 @@ void main() {
         const ToolStep(name: 'file_edit', status: 'completed', target: 'a.txt'),
       ]);
       expect(rows, hasLength(7));
+    });
+
+    test('same file name in different directories does not merge', () {
+      ToolStep read(String path) => ToolStep(
+        name: 'file_read',
+        status: 'completed',
+        target: 'notes.txt',
+        targetKey: path,
+      );
+      expect(
+        buildToolSteps([read('/a/notes.txt'), read('/b/notes.txt')]),
+        hasLength(2),
+      );
+      final merged = buildToolSteps([
+        read('/a/notes.txt'),
+        read('/a/notes.txt'),
+      ]);
+      expect(merged.single.count, 2);
+    });
+
+    test('runtime tool names have their own labels', () {
+      String label(String name, [String language = 'zh']) =>
+          ToolStep(name: name, status: 'completed', language: language).label;
+      for (final name in [
+        'web_search',
+        'computer_screenshot',
+        'computer_click',
+        'computer_type',
+        'computer_scroll',
+        'computer_key',
+      ]) {
+        expect(label(name), isNot('使用工具'), reason: name);
+        expect(label(name, 'en'), isNot('Use tool'), reason: name);
+      }
+      expect(isObserveTool('web_search'), isTrue);
+      expect(isObserveTool('computer_screenshot'), isTrue);
+      expect(isObserveTool('computer_click'), isFalse);
     });
 
     test('non-observe tools read tool and target', () {
@@ -188,6 +225,73 @@ void main() {
       expect(toolTargetLabel('file_read', '{"path":"/"}'), isNull);
       expect(toolTargetLabel('web_fetch', '{"url":"nonsense"}'), isNull);
     });
+
+    test('windows paths keep only the file name too', () {
+      expect(
+        toolTargetLabel('file_read', {'path': r'C:\Users\me\.ssh\id_rsa'}),
+        'id_rsa',
+      );
+      expect(toolTargetLabel('file_edit', {'path': r'a/b\c.txt'}), 'c.txt');
+      expect(toolTargetLabel('file_read', {'path': r'C:\'}), 'C:');
+      expect(pathBaseName(r'\\'), isNull);
+    });
+
+    test('the merge identity keeps the raw path out of the label', () {
+      final a = toolTarget('file_read', {'path': '/one/notes.txt'})!;
+      final b = toolTarget('file_read', {'path': '/two/notes.txt'})!;
+      expect(a.label, b.label);
+      expect(a.key, isNot(b.key));
+    });
+
+    test('computer screenshots are labeled by application only', () {
+      expect(
+        toolTargetLabel('computer_screenshot', {'application': ' 微信 '}),
+        '微信',
+      );
+      expect(toolTargetLabel('computer_screenshot', {}), isNull);
+      expect(toolTargetLabel('computer_click', {'x': 1, 'y': 2}), isNull);
+    });
+
+    test('targets by call id survive re-read copies and a full cache', () {
+      Map message(int i) => {
+        'role': 'assistant',
+        'tool_calls': [
+          {
+            'id': 'c$i',
+            'function': {
+              'name': 'file_read',
+              'arguments': jsonEncode({'path': '/d/f$i.txt'}),
+            },
+          },
+        ],
+      };
+      for (var round = 0; round < 2; round++) {
+        final targets = toolTargetsByCallId([
+          for (var i = 0; i < 600; i++) message(i),
+        ]);
+        expect(targets, hasLength(600));
+        expect(targets['c0']!.label, 'f0.txt');
+        expect(targets['c599']!.key, '/d/f599.txt');
+      }
+      final big = toolTargetsByCallId([
+        {
+          'role': 'assistant',
+          'tool_calls': [
+            {
+              'id': 'big',
+              'function': {
+                'name': 'file_write',
+                'arguments': jsonEncode({
+                  'path': '/d/out.txt',
+                  'content': 'x' * 10000,
+                }),
+              },
+            },
+          ],
+        },
+      ]);
+      expect(big['big']!.label, 'out.txt');
+    });
   });
 
   group('copy and thresholds', () {
@@ -224,11 +328,6 @@ void main() {
       );
     });
 
-    test('elapsed is never shorter than one second', () {
-      expect(formatToolElapsed(Duration.zero, 'zh'), '1 秒');
-      expect(formatToolElapsed(const Duration(milliseconds: 400), 'en'), '1s');
-    });
-
     test('running shows the last five rows', () {
       expect(hiddenEarlierSteps(5, running: true), 0);
       expect(hiddenEarlierSteps(6, running: true), 1);
@@ -260,18 +359,83 @@ void main() {
       }
     });
 
+    testWidgets('an empty step list renders nothing', (tester) async {
+      await _pumpGroup(tester, const []);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ToolTimeline), findsNothing);
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: ToolTimeline(steps: [])),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a live run whose last step failed ends on a dim dot', (
+      tester,
+    ) async {
+      await _pumpGroup(tester, [
+        ..._shells(2),
+        const ToolStep(name: 'shell_execute', status: 'failed'),
+      ], running: true);
+      final painters = tester
+          .widgetList<CustomPaint>(
+            find.descendant(
+              of: find.byType(StepRail),
+              matching: find.byType(CustomPaint),
+            ),
+          )
+          .map((paint) => paint.painter)
+          .whereType<StepRailPainter>()
+          .toList();
+      expect(painters.last.state, ToolStepState.dim);
+      expect(find.text('未完成'), findsOneWidget);
+      expect(find.textContaining('次工具调用'), findsNothing);
+    });
+
+    testWidgets('the summary and tappable rows are single semantics buttons', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _pumpGroup(tester, _shells(3));
+      final summary = tester.getSemantics(find.text('3 次工具调用'));
+      expect(summary.label, '3 次工具调用');
+      expect(summary.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+      expect(
+        tester.getSize(find.byType(ToolTimeline)).height,
+        greaterThanOrEqualTo(44),
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await _pumpGroup(tester, [
+        ToolStep(
+          name: 'shell_execute',
+          status: 'completed',
+          narration: '检查依赖',
+          reasoning: '先检查依赖',
+        ),
+        const ToolStep(name: 'shell_execute', status: 'completed'),
+      ], running: true);
+      final row = tester.getSemantics(find.text('检查依赖'));
+      expect(row.label, '检查依赖');
+      expect(row.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('tool-step:1:0'))).height,
+        greaterThanOrEqualTo(44),
+      );
+      handle.dispose();
+    });
+
     testWidgets('running with five rows or fewer has no link', (tester) async {
       await _pumpGroup(tester, _shells(5), running: true);
       expect(find.textContaining('更早'), findsNothing);
       expect(find.text('执行命令 · step0'), findsOneWidget);
     });
 
-    testWidgets('finished: the established summary line expands', (tester) async {
-      await _pumpGroup(
-        tester,
-        _shells(8),
-        elapsed: const Duration(minutes: 1, seconds: 20),
-      );
+    testWidgets('finished: the established summary line expands', (
+      tester,
+    ) async {
+      await _pumpGroup(tester, _shells(8));
       expect(find.text('8 次工具调用'), findsOneWidget);
       expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
       expect(find.text('执行命令 · step0'), findsNothing);
