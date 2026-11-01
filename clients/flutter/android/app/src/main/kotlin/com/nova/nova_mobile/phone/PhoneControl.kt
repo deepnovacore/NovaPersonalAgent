@@ -3,7 +3,7 @@ package com.nova.nova_mobile.phone
 import com.nova.nova_mobile.phone.shell.INovaShell
 
 // Contract types for native phone control. Owned by the contract; see
-// docs/development/mobile-virtual-display.md. JSON keys are the snake_case names in `wire`/comments.
+// docs/specs/mobile-virtual-display.md. JSON keys are the snake_case names in `wire`/comments.
 
 /** MethodChannel carrying JSON-string arguments and JSON-string results. */
 const val PHONE_METHOD_CHANNEL = "nova/phone/v1"

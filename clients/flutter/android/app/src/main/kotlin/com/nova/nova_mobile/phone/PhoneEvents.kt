@@ -2,7 +2,7 @@ package com.nova.nova_mobile.phone
 
 import org.json.JSONObject
 
-// Event and frame channel contract. See docs/development/mobile-virtual-display.md "Channels".
+// Event and frame channel contract. See docs/specs/mobile-virtual-display.md "Channels".
 
 /** EventChannel of JSON strings, each an object with `type` in [PhoneEventType]. */
 const val PHONE_EVENT_CHANNEL = "nova/phone/events"

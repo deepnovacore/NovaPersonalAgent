@@ -7,7 +7,7 @@ import android.view.Surface;
 /**
  * Privileged service running as the shell user (uid 2000) inside the Nova helper process
  * (`app_process`, launched over the device's own wireless-debugging adbd). Contract:
- * docs/development/mobile-virtual-display.md.
+ * docs/specs/mobile-virtual-display.md.
  *
  * Every call is rejected with SecurityException unless Binder.getCallingUid() is Nova's app uid.
  * "Own display" means a display created by this service instance through createDisplay and not yet

@@ -1,7 +1,7 @@
 package com.nova.nova_mobile.phone
 
 // Numbered snapshot contract (virtual tier observation). Derived in shape from Mika UiElement/NodeIds
-// (Apache-2.0, commit 5f630d9); see docs/development/mobile-virtual-display.md "Numbered snapshots".
+// (Apache-2.0, commit 5f630d9); see docs/specs/mobile-virtual-display.md "Numbered snapshots".
 
 /** Normalized coordinate space of [UiElement.bounds]: 0..999 inclusive on each axis. */
 const val SNAPSHOT_BOUNDS_MAX = 999

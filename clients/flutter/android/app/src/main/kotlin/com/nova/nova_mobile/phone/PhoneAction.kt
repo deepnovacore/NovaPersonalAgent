@@ -2,7 +2,7 @@ package com.nova.nova_mobile.phone
 
 import org.json.JSONObject
 
-// Model action schema for ToolDecision.action. Rules: docs/development/mobile-virtual-display.md "Action schema".
+// Model action schema for ToolDecision.action. Rules: docs/specs/mobile-virtual-display.md "Action schema".
 
 enum class ScrollDirection(val wire: String) { UP("up"), DOWN("down"), LEFT("left"), RIGHT("right") }
 
