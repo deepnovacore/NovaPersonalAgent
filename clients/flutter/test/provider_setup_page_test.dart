@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:ui' show Tristate;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/model_catalog.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
@@ -8,6 +11,7 @@ import 'package:nova_mobile/agent_core/model_presets.dart';
 import 'package:nova_mobile/agent_core/model_probe.dart';
 import 'package:nova_mobile/settings/model_settings_backend.dart';
 import 'package:nova_mobile/ui/model_settings_editor.dart';
+import 'package:nova_mobile/ui/provider_setup_copy.dart';
 import 'package:nova_mobile/ui/provider_setup_page.dart';
 import 'package:nova_mobile/ui/theme.dart';
 
@@ -191,6 +195,47 @@ void main() {
     expect(find.byType(ProviderSetupPage), findsNothing);
   });
 
+  testWidgets('English readers get English provider names', (tester) async {
+    await _open(tester, _Backend(), language: 'en');
+    for (final id in [
+      'qwen',
+      'moonshot-cn',
+      'zhipu',
+      'ark',
+      'stepfun',
+      'hunyuan',
+      'qianfan',
+    ]) {
+      final preset = ModelPreset.byId(id)!;
+      expect(preset.nameEn, isNotNull, reason: id);
+      expect(
+        find.descendant(
+          of: _key('provider.chip.$id'),
+          matching: find.text(preset.nameEn!),
+        ),
+        findsOneWidget,
+        reason: id,
+      );
+      expect(find.text(preset.name), findsNothing, reason: id);
+    }
+  });
+
+  testWidgets('OpenCode Go is hidden on iOS, where chat cannot send its '
+      'session header', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await _open(tester, _Backend());
+    expect(_key('provider.chip.opencode-go'), findsNothing);
+    expect(_key('provider.chip.deepseek'), findsOneWidget);
+    expect(_key('provider.chip.custom'), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(_key('provider.chip.opencode-go'), findsOneWidget);
+  });
+
   testWidgets('the ChatGPT sign-in group reuses the supplied sign-in', (
     tester,
   ) async {
@@ -217,13 +262,24 @@ void main() {
     bool obscured() =>
         tester.widget<TextField>(_key('provider.key')).obscureText;
     expect(obscured(), isTrue);
+    final semantics = tester.ensureSemantics();
+    SemanticsNode toggle() => tester.getSemantics(_key('provider.key.toggle'));
+    expect(
+      toggle().getSemanticsData().flagsCollection.isToggled,
+      Tristate.isFalse,
+    );
     await tester.tap(_key('provider.key.toggle'));
     await tester.pump();
     expect(obscured(), isFalse);
     expect(find.text('隐藏'), findsOneWidget);
+    expect(
+      toggle().getSemanticsData().flagsCollection.isToggled,
+      Tristate.isTrue,
+    );
     await tester.tap(_key('provider.key.toggle'));
     await tester.pump();
     expect(obscured(), isTrue);
+    semantics.dispose();
   });
 
   testWidgets(
@@ -296,7 +352,7 @@ void main() {
     },
   );
 
-  testWidgets('no model passing keeps the key but selects nothing', (
+  testWidgets('no model calling the tool keeps the key but selects nothing', (
     tester,
   ) async {
     final backend = _Backend()
@@ -313,6 +369,103 @@ void main() {
       find.textContaining('试了 deepseek-a、deepseek-b，都没测试通过'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('models the provider never answered about store nothing', (
+    tester,
+  ) async {
+    // Every listed model names another protocol, so none is even tried.
+    final backend = _Backend()
+      ..lister = ((_) => const ModelListOk([
+        ListedModel(id: 'deepseek-a', protocols: [WireProtocol.messages]),
+      ]));
+    await _open(tester, backend);
+    await _chip(tester, 'deepseek');
+    await _type(tester, 'provider.key', 'sk-unproven');
+    await _test(tester);
+    expect(backend.probeCalls, isEmpty);
+    expect(backend.saves, isEmpty);
+    expect(backend.credentialSaves, isEmpty);
+    expect(_key('provider.failed'), findsOneWidget);
+    expect(find.textContaining('不走你选的接口类型'), findsOneWidget);
+    expect(find.text('服务商'), findsNothing);
+
+    // Only server errors: also unproven.
+    backend
+      ..lister = ((_) => ModelListOk([_m('deepseek-a'), _m('deepseek-b')]))
+      ..prober = ((_) => ProbeFailed(
+        const ModelRequestFailure('model_http_500', status: 500, body: '{}'),
+      ));
+    await _test(tester);
+    expect(backend.credentialSaves, isEmpty);
+    expect(_key('provider.failed'), findsOneWidget);
+
+    // The provider says the model is not available: it read the key.
+    backend.prober = (_) => ProbeFailed(
+      const ModelRequestFailure(
+        'model_http_403',
+        status: 403,
+        body: '{"error":{"message":"no access to model deepseek-a"}}',
+      ),
+    );
+    await _test(tester);
+    expect(backend.saves, isEmpty);
+    expect(backend.credentialSaves.single.newKey, 'sk-unproven');
+  });
+
+  test('the example model is the preset\'s own recommended model', () {
+    const copy = ProviderSetupCopy('en');
+    expect(
+      copy.exampleModel(ProviderKind.anthropic),
+      'e.g. ${ModelPreset.byId('anthropic')!.recommendedModels.first}',
+    );
+    expect(
+      copy.exampleModel(ProviderKind.gemini),
+      'e.g. ${ModelPreset.byId('gemini')!.recommendedModels.first}',
+    );
+    expect(
+      copy.exampleModel(ProviderKind.openAiResponses),
+      'e.g. ${ModelPreset.byId('openai')!.recommendedModels.first}',
+    );
+    expect(
+      ProviderSetupCopy('zh').exampleModel(ProviderKind.anthropic),
+      '例如 claude-sonnet-5-5',
+    );
+  });
+
+  testWidgets('the Test and save note says what is stored when', (
+    tester,
+  ) async {
+    await _open(tester, _Backend());
+    expect(find.textContaining('只保存 Key'), findsOneWidget);
+    expect(find.textContaining('什么都不保存'), findsOneWidget);
+    expect(find.textContaining('都成了才保存'), findsNothing);
+  });
+
+  testWidgets('Test and save drops the keyboard', (tester) async {
+    final gate = Completer<void>();
+    final backend = _Backend()
+      ..gate = gate.future
+      ..lister = ((_) => ModelListOk([_m('deepseek-a')]));
+    await _open(tester, backend);
+    await _chip(tester, 'deepseek');
+    await _type(tester, 'provider.key', 'sk');
+    bool focused() => tester
+        .widget<EditableText>(
+          find.descendant(
+            of: _key('provider.key'),
+            matching: find.byType(EditableText),
+          ),
+        )
+        .focusNode
+        .hasFocus;
+    expect(focused(), isTrue);
+    await tester.tap(_key('provider.test'));
+    await tester.pump();
+    expect(find.text('正在测试…'), findsOneWidget);
+    expect(focused(), isFalse);
+    gate.complete();
+    await tester.pumpAndSettle();
   });
 
   testWidgets('a rejected key blocks the save and names the reason', (
@@ -758,14 +911,90 @@ void main() {
         isTrue,
       );
       await tester.enterText(_key('provider.newKey'), '  new-secret ');
+      await tester.tap(_key('provider.newKey.toggle'));
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(_key('provider.newKey')).obscureText,
+        isFalse,
+      );
       await tester.tap(_key('provider.newKey.save'));
       await tester.pumpAndSettle();
+      // The new key was listed and tried before it replaced the stored one.
+      expect(backend.listCalls.map((c) => c.newKey), contains('new-secret'));
+      expect(backend.probeCalls.single.newKey, 'new-secret');
       expect(backend.credentialSaves.single.newKey, 'new-secret');
       expect(
         backend.credentialSaves.single.endpoint,
         'https://api.groq.com/openai/v1',
       );
       expect(backend.saves, isEmpty);
+    });
+
+    testWidgets('a new key the provider rejects does not replace the old', (
+      tester,
+    ) async {
+      final backend = withProviders()
+        ..prober = ((_) => ProbeFailed(
+          const ModelRequestFailure('model_http_401', status: 401, body: '{}'),
+        ));
+      await _open(tester, backend);
+      await tester.tap(find.byKey(const ValueKey('provider.saved.b')));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('provider.key.row'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_key('provider.newKey'), 'typo');
+      await tester.tap(_key('provider.newKey.save'));
+      await tester.pumpAndSettle();
+      expect(backend.credentialSaves, isEmpty);
+      expect(find.textContaining('API Key 无效或没有权限'), findsOneWidget);
+
+      // A listing that refuses the key stops before any probe.
+      backend.probeCalls.clear();
+      backend.lister = (_) =>
+          const ModelListFailed(ListFailure.auth, status: 401);
+      await tester.tap(_key('provider.key.row'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_key('provider.newKey'), 'typo2');
+      await tester.tap(_key('provider.newKey.save'));
+      await tester.pumpAndSettle();
+      expect(backend.probeCalls, isEmpty);
+      expect(backend.credentialSaves, isEmpty);
+    });
+
+    testWidgets('leaving while a new key is checked does nothing odd', (
+      tester,
+    ) async {
+      final gate = Completer<void>();
+      final backend = withProviders();
+      await _open(tester, backend);
+      await tester.tap(find.byKey(const ValueKey('provider.saved.b')));
+      await tester.pumpAndSettle();
+      backend.gate = gate.future;
+      await tester.tap(_key('provider.key.row'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_key('provider.newKey'), 'k2');
+      await tester.tap(_key('provider.newKey.save'));
+      await tester.pump();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byType(ProviderDetailPage), findsNothing);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a listing cut at the page cap says so', (tester) async {
+      final backend = withProviders()
+        ..lister = ((_) =>
+            ModelListOk([_m('m-1'), _m('m-2')], truncated: true));
+      await _open(tester, backend);
+      await tester.tap(find.byKey(const ValueKey('provider.saved.b')));
+      await tester.pumpAndSettle();
+      expect(find.text('只显示了前 2 个模型，这家列出的比这更多。'), findsOneWidget);
+      backend.lister = (_) => ModelListOk([_m('m-1')]);
+      await tester.tap(find.text('刷新'));
+      await tester.pumpAndSettle();
+      expect(_key('provider.truncated'), findsNothing);
     });
 
     testWidgets('deleting asks first; the provider in use cannot be deleted', (

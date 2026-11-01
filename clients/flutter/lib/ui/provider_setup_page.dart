@@ -4,6 +4,7 @@
 import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -242,6 +243,8 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
 
   Future<void> _testAndSave() async {
     if (!_canTest) return;
+    // The keyboard would otherwise cover the result.
+    FocusScope.of(context).unfocus();
     final copy = _copy;
     final revision = ++_revision;
     void checkFresh() {
@@ -349,6 +352,20 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
             });
             return;
           case final ProviderTestDone result:
+            if (!result.keyProven) {
+              // No model got an answer from the provider, so nothing says the
+              // key works: show why and store nothing.
+              setState(() {
+                _test = _Test.failed;
+                _failure = copy.failed(
+                  copy.probeFailed(
+                    result.rejected.first.failure,
+                    example: copy.exampleModel(_exampleKind),
+                  ),
+                );
+              });
+              return;
+            }
             selected = result.main;
             note = copy.probeNote(result);
         }
@@ -435,7 +452,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
                     NovaTile(
                       key: ValueKey('provider.saved.${p.id}'),
                       leading: const NovaIconTile(CupertinoIcons.cloud),
-                      title: p.label,
+                      title: p.labelFor(widget.language),
                       subtitle: Text(
                         _shortUrl(p.endpoint) +
                             (_isCurrent(p.endpoint)
@@ -478,12 +495,16 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
                   runSpacing: 8,
                   children: [
                     for (final p in _view.providers)
-                      ChoiceChip(
-                        key: ValueKey('provider.chip.${p.id}'),
-                        label: Text(p.name),
-                        selected: _presetId == p.id,
-                        onSelected: (_) => _choose(p.id),
-                      ),
+                      // Providers iOS cannot chat with stay hidden, unless it is
+                      // the one already chosen.
+                      if (p.availableOn(defaultTargetPlatform) ||
+                          _presetId == p.id)
+                        ChoiceChip(
+                          key: ValueKey('provider.chip.${p.id}'),
+                          label: Text(p.label(widget.language)),
+                          selected: _presetId == p.id,
+                          onSelected: (_) => _choose(p.id),
+                        ),
                     if (_view.customEndpoint)
                       ChoiceChip(
                         key: const ValueKey('provider.chip.custom'),
@@ -517,10 +538,11 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
                 helper: _hasSavedKey ? copy.keySavedHint : null,
                 obscure: !_showKey,
                 onChanged: _invalidate,
-                suffix: TextButton(
+                suffix: _KeyToggle(
                   key: const ValueKey('provider.key.toggle'),
+                  shown: _showKey,
+                  copy: copy,
                   onPressed: () => setState(() => _showKey = !_showKey),
-                  child: Text(_showKey ? copy.hide : copy.show),
                 ),
               ),
               if (_showModel)
@@ -574,7 +596,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
                 _text(urlProblem, color: Nova.red),
               if (suggestion != null) ...[
                 _text(
-                  copy.presetMatch(suggestion.name),
+                  copy.presetMatch(suggestion.label(widget.language)),
                   key: const ValueKey('provider.suggestion'),
                   color: Nova.amber,
                 ),
@@ -585,7 +607,9 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
                     child: TextButton(
                       key: const ValueKey('provider.usePreset'),
                       onPressed: () => _choose(suggestion.id, keepKey: true),
-                      child: Text(copy.usePreset(suggestion.name)),
+                      child: Text(
+                        copy.usePreset(suggestion.label(widget.language)),
+                      ),
                     ),
                   ),
                 ),
@@ -809,6 +833,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       );
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() => _listing = null);
     ModelListResult result;
     try {
@@ -906,43 +931,129 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     if (use == true && mounted) await _use(option);
   }
 
+  /// Lists and probes with [key] before it replaces the stored one, so a
+  /// mistyped key cannot overwrite a working key. Returns what to tell the user
+  /// when the provider did not accept it, or null when it did (or when nothing
+  /// is available to ask).
+  Future<String?> _checkKey(String key) async {
+    final copy = _copy;
+    final backend = widget.backend;
+    final preset = _preset;
+    final example = copy.exampleModel(
+      preset?.providerKind ?? ProviderKind.openAiCompat,
+    );
+    ModelListResult listed;
+    try {
+      listed = await backend.listModelsDetailed(_input('', key: key));
+    } catch (_) {
+      listed = const ModelListFailed(ListFailure.network);
+    }
+    if (listed is ModelListFailed &&
+        listed.reason != ListFailure.notSupported) {
+      return copy.failed(copy.listFailure(listed));
+    }
+    final models = listed is ModelListOk ? listed.models : <ListedModel>[];
+    final inUse = _isCurrent ? _view.model : null;
+    if (models.isEmpty) {
+      // No list to choose from: ask the model in use, or the preset's own.
+      final model = inUse ?? preset?.recommendedModels.firstOrNull;
+      if (model == null) return null;
+      final result = await backend.probe(_input(model, key: key));
+      if (result is ProbeFailed) {
+        final failure = classifyProbeFailure(result.error, model);
+        if (!failure.keyAccepted) {
+          return copy.failed(copy.probeFailed(failure, example: example));
+        }
+      }
+      return null;
+    }
+    final done = await probeListedModels(
+      models: models,
+      base: preset?.capabilities ?? const ProviderCapabilities(),
+      familyTokens: preset?.familyTokens ?? const [],
+      recommended: preset?.recommendedModels ?? const [],
+      protocol: _protocol == ModelProtocol.responses
+          ? WireProtocol.responses
+          : WireProtocol.chatCompletions,
+      baseUrl: widget.provider.endpoint,
+      preferred: inUse,
+      probe: (model) => backend.probe(_input(model, key: key)),
+    );
+    switch (done) {
+      case ProviderTestBlocked(:final failure):
+        return copy.failed(copy.probeFailed(failure, example: example));
+      case ProviderTestDone(rejected: []):
+        return null;
+      case final ProviderTestDone result when !result.keyProven:
+        return copy.failed(
+          copy.probeFailed(result.rejected.first.failure, example: example),
+        );
+      case ProviderTestDone():
+        return null;
+    }
+  }
+
   Future<void> _changeKey() async {
     final copy = _copy;
     final key = TextEditingController();
+    var shown = false;
     try {
       final value = await showLocalDialog<String>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: Text(copy.changeKey),
-          content: TextField(
-            key: const ValueKey('provider.newKey'),
-            controller: key,
-            obscureText: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            enableIMEPersonalizedLearning: false,
-            decoration: InputDecoration(hintText: copy.newKeyHint),
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialog) => AlertDialog(
+            title: Text(copy.changeKey),
+            content: TextField(
+              key: const ValueKey('provider.newKey'),
+              controller: key,
+              obscureText: !shown,
+              autocorrect: false,
+              enableSuggestions: false,
+              enableIMEPersonalizedLearning: false,
+              decoration: InputDecoration(
+                hintText: copy.newKeyHint,
+                suffixIcon: _KeyToggle(
+                  key: const ValueKey('provider.newKey.toggle'),
+                  shown: shown,
+                  copy: copy,
+                  onPressed: () => setDialog(() => shown = !shown),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(copy.cancel),
+              ),
+              TextButton(
+                key: const ValueKey('provider.newKey.save'),
+                onPressed: () => Navigator.pop(context, key.text.trim()),
+                child: Text(copy.save),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(copy.cancel),
-            ),
-            TextButton(
-              key: const ValueKey('provider.newKey.save'),
-              onPressed: () => Navigator.pop(context, key.text.trim()),
-              child: Text(copy.save),
-            ),
-          ],
         ),
       );
       if (value == null || value.isEmpty || !mounted) return;
+      setState(() {
+        _busy = true;
+        _message = copy.checkingKey;
+      });
+      String? problem;
       try {
-        await widget.backend.saveCredential(_input('', key: value));
-        await _load();
+        problem = await _checkKey(value);
+        if (problem == null) {
+          await widget.backend.saveCredential(_input('', key: value));
+        }
       } catch (_) {
-        if (mounted) setState(() => _message = copy.actionFailed);
+        problem = copy.actionFailed;
       }
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _message = problem;
+      });
+      if (problem == null) await _load();
     } finally {
       key.dispose();
     }
@@ -953,7 +1064,9 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     final confirmed = await showLocalDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(copy.deleteTitle(widget.provider.label)),
+        title: Text(
+          copy.deleteTitle(widget.provider.labelFor(widget.language)),
+        ),
         content: Text(copy.deleteBody),
         actions: [
           TextButton(
@@ -995,7 +1108,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       _ => copy.t('OpenAI 兼容', 'OpenAI-compatible'),
     };
     return NovaPage(
-      title: widget.provider.label,
+      title: widget.provider.labelFor(widget.language),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.only(top: 8, bottom: 32),
@@ -1064,7 +1177,9 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                     onTap: () => Navigator.of(context).push<void>(
                       MaterialPageRoute(
                         builder: (_) => _AllModelsPage(
-                          title: copy.allModelsTitle(widget.provider.label),
+                          title: copy.allModelsTitle(
+                            widget.provider.labelFor(widget.language),
+                          ),
                           options: options,
                           copy: copy,
                           currentId: _isCurrent ? _view.model : null,
@@ -1078,6 +1193,15 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                   ),
               ],
             ),
+            if (listing is ModelListOk && listing.truncated)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Text(
+                  copy.truncatedNote(listing.models.length),
+                  key: const ValueKey('provider.truncated'),
+                  style: const TextStyle(color: Nova.secondary, fontSize: 13),
+                ),
+              ),
             if (options.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -1115,6 +1239,33 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       ),
     );
   }
+}
+
+/// The show/hide control of a key field. It reads as one toggle whose state is
+/// announced, rather than a button whose label changes.
+class _KeyToggle extends StatelessWidget {
+  const _KeyToggle({
+    super.key,
+    required this.shown,
+    required this.copy,
+    required this.onPressed,
+  });
+  final bool shown;
+  final ProviderSetupCopy copy;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    toggled: shown,
+    label: copy.showKey,
+    onTap: onPressed,
+    excludeSemantics: true,
+    child: TextButton(
+      onPressed: onPressed,
+      child: Text(shown ? copy.hide : copy.show),
+    ),
+  );
 }
 
 const _modelIdStyle = TextStyle(

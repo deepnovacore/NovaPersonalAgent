@@ -2,6 +2,7 @@
 // Copyright 2026 wangzan101. Modified by Nova: ModelSetupCopy / ModelsCopy
 // wording reused with Nova's name and bilingual (zh/en) lookups.
 import '../agent_core/model_catalog.dart';
+import '../agent_core/model_presets.dart';
 import '../agent_core/model_probe.dart';
 
 /// Wording for the provider setup and provider detail pages, in one place.
@@ -32,6 +33,7 @@ class ProviderSetupCopy {
     'Saved keys stay hidden. Leave blank to use the saved key.',
   );
   String get show => t('显示', 'Show');
+  String get showKey => t('显示密钥', 'Show key');
   String get hide => t('隐藏', 'Hide');
   String get baseUrl => t('接口地址', 'API URL');
   String get baseUrlHelp =>
@@ -43,8 +45,8 @@ class ProviderSetupCopy {
   String get testAndSave => t('测试并保存', 'Test and save');
   String get testing => t('正在测试…', 'Testing…');
   String get testNote => t(
-    '先列出这家的模型，再试着让其中一个调用一次工具，都成了才保存。',
-    'Lists this provider’s models, then asks one to call a tool once. Saved only if both work.',
+    '先列出这家的模型，再让其中一个调用一次工具。通过的会被选为对话模型；服务商有回应但没有模型通过时，只保存 Key；连不上、Key 不对或你填的模型试调用失败，则什么都不保存。',
+    'Lists this provider’s models, then asks one to call a tool once. A model that does is selected for chat. If the provider answers but no model passes, only the key is saved. If it cannot be reached, rejects the key, or the model you typed fails, nothing is saved.',
   );
   String get manualOn => t('手动填写模型名', 'Enter a model name');
   String get manualOff => t('不填模型名', 'Don’t enter a model name');
@@ -83,18 +85,19 @@ class ProviderSetupCopy {
     '未能保存，请检查模型名称和密钥后重试。',
     'Could not save. Check the model name and key, then retry.',
   );
-  String exampleModel(ProviderKind kind) => switch (kind) {
-    ProviderKind.gemini => t(
-      '例如 gemini-flash-latest',
-      'e.g. gemini-flash-latest',
-    ),
-    ProviderKind.anthropic => t(
-      '例如 claude-sonnet-4-5',
-      'e.g. claude-sonnet-4-5',
-    ),
-    ProviderKind.openAiResponses => t('例如 gpt-5-mini', 'e.g. gpt-5-mini'),
-    ProviderKind.openAiCompat => t('例如 deepseek-chat', 'e.g. deepseek-chat'),
-  };
+
+  /// An example model id; for a provider with a preset it is the preset's own
+  /// recommended model, so the hint and the seeded model never disagree.
+  String exampleModel(ProviderKind kind) {
+    final preset = switch (kind) {
+      ProviderKind.gemini => ModelPreset.byId('gemini'),
+      ProviderKind.anthropic => ModelPreset.byId('anthropic'),
+      ProviderKind.openAiResponses => ModelPreset.byId('openai'),
+      ProviderKind.openAiCompat => null,
+    };
+    final model = preset?.recommendedModels.firstOrNull ?? 'deepseek-chat';
+    return t('例如 $model', 'e.g. $model');
+  }
 
   // Probe results.
   String listFailure(ModelListFailed failure) => failure.message(language);
@@ -228,6 +231,7 @@ class ProviderSetupCopy {
   String get change => t('更换', 'Change');
   String get changeKey => t('更换 API Key', 'Change API key');
   String get newKeyHint => t('粘贴新的 Key', 'Paste the new key');
+  String get checkingKey => t('正在验证新的 Key…', 'Checking the new key…');
   String get save => t('保存', 'Save');
   String get cancel => t('取消', 'Cancel');
   String get models => t('模型', 'Models');
@@ -237,6 +241,10 @@ class ProviderSetupCopy {
   String get modelsNote => t(
     '标签是服务商给的信息，只作参考；点一个模型可以拿它当对话模型。',
     'Tags come from the provider and are for reference. Tap a model to use it for chat.',
+  );
+  String truncatedNote(int n) => t(
+    '只显示了前 $n 个模型，这家列出的比这更多。',
+    'Only the first $n models are shown; this provider lists more.',
   );
   String get noListNote => t(
     '这家不提供模型列表。要用它的模型，回到「添加服务商」手填模型名。',

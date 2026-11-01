@@ -385,6 +385,17 @@ class ProbeFailure {
     ProbeProblem.modelRejected => true,
     _ => false,
   };
+
+  /// The provider read the request and judged the model (no tools, no access,
+  /// not found, refused options), so it accepted the key. A server error or a
+  /// model that was never reached proves nothing about the key.
+  bool get keyAccepted => switch (problem) {
+    ProbeProblem.noTools ||
+    ProbeProblem.notAvailable ||
+    ProbeProblem.notFound ||
+    ProbeProblem.modelRejected => true,
+    _ => false,
+  };
 }
 
 /// Reads a failed model call: HTTP status, then the provider's error code and
@@ -472,6 +483,9 @@ class ProbeRejection {
   /// Never tried: the listing says it does not use the configured protocol.
   final bool skipped;
   bool get notAvailable => failure.problem == ProbeProblem.notAvailable;
+
+  /// The model was tried and the provider answered about it.
+  bool get answered => !skipped && failure.keyAccepted;
   bool get serverSide => failure.problem == ProbeProblem.server;
 }
 
@@ -486,6 +500,10 @@ class ProviderTestDone extends ProviderTestResult {
   const ProviderTestDone(this.main, this.rejected);
   final String? main;
   final List<ProbeRejection> rejected;
+
+  /// At least one model got an answer from the provider, so the key works even
+  /// if no model passed.
+  bool get keyProven => main != null || rejected.any((r) => r.answered);
 }
 
 /// The first model failed for a reason that is not about that model (key,
