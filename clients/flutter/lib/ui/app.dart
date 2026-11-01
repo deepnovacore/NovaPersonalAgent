@@ -14,6 +14,7 @@ import '../agent_core/scheduled_agent_runner.dart';
 import '../agent_core/schedule_wake.dart';
 import '../voice/audio_owner.dart';
 import '../voice/voice_companion.dart';
+import '../voice/phone_task_pet.dart';
 import '../voice/phone_voice_session.dart';
 import '../voice/phone_voice_panel.dart';
 import '../voice/voice_delegate.dart';
@@ -205,6 +206,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   final localConversation = GlobalKey<LocalChatPanelState>();
   PhoneChannel? phoneChannel;
   PhoneRunTracker? phoneRun;
+
+  /// One companion for the call and the phone-task pet: the native channel has
+  /// a single callback handler.
+  NativeVoiceCompanion? _companion;
+  PhoneTaskPet? _taskPet;
   PetAvatarStore? _petAvatarStore;
   int _tab = 0;
   AgentCoreHost? agentCore;
@@ -244,6 +250,18 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     requestMicrophone =
         widget.requestMicrophone ?? nativeAudio.requestMicrophone;
     phoneAudio = OwnedAudioPort(audio, audioOwner);
+    if (audio is ChannelAudio) _companion = NativeVoiceCompanion();
+    final companion = _companion;
+    if (phoneRun != null && companion != null && nativePhoneBridgeAvailable) {
+      _taskPet = PhoneTaskPet(
+        tracker: phoneRun!,
+        companion: companion,
+        actions: companion.actions,
+        onStop: _stopPhoneRun,
+        onOpen: _openFromTaskPet,
+        onOverlayPermissionNeeded: _overlayPermissionHint,
+      )..start(avatar: petAvatarStore);
+    }
     language =
         WidgetsBinding.instance.platformDispatcher.locale.languageCode == 'zh'
         ? 'zh'
@@ -374,7 +392,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         agentCore = host;
         phoneVoice = PhoneVoiceSession(
           audio: phoneAudio,
-          companion: audio is ChannelAudio ? NativeVoiceCompanion() : null,
+          companion: _companion,
           requestMicrophone: requestMicrophone,
           store: host.store,
         )..addListener(_phoneVoiceChanged);
@@ -1336,6 +1354,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   @override
   void dispose() {
+    // Before the tracker and the avatar store it uses.
+    _taskPet?.dispose();
     phoneRun?.dispose();
     phoneVoice?.removeListener(_phoneVoiceChanged);
     phoneVoice?.dispose();
@@ -1359,11 +1379,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   /// Stops the task shown in the virtual-screen picture: native stops the run
   /// by its id, then the turn or voice delegate that owns it is cancelled.
-  void _stopPhoneTask() {
-    final run = phoneRun?.activeVirtual;
-    if (run != null) {
+  void _stopPhoneTask() => _stopPhoneRun(phoneRun?.activeVirtual?.taskId);
+
+  /// The Stop path of the picture and of the floating pet.
+  void _stopPhoneRun(String? taskId) {
+    if (taskId != null) {
       unawaited(
-        phoneChannel?.stopTask(run.taskId).catchError((Object _) {}) ??
+        phoneChannel?.stopTask(taskId).catchError((Object _) {}) ??
             Future<void>.value(),
       );
     }
@@ -1374,6 +1396,39 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     } else if (voice != null && voice.active && voiceDelegates?.busy == true) {
       voice.cancelDelegate();
     }
+  }
+
+  /// The pet carried a task, so native routed its tap to the task: during a
+  /// call it still restores the call screen, which shows the virtual screen.
+  /// Without a call the in-app picture already floats over every tab.
+  void _openFromTaskPet() {
+    final call = phoneVoice;
+    if (call != null && call.active) {
+      unawaited(
+        call.onRestorePresentation?.call().catchError((Object _) => false),
+      );
+    }
+  }
+
+  void _overlayPermissionHint() {
+    final companion = _companion;
+    if (!mounted || companion == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _t(
+            '允许 Nova 显示在其他应用上层后，切到别的 App 时也能看到任务进度。',
+            'Allow Nova to display over other apps to see task progress while you use other apps.',
+          ),
+        ),
+        action: SnackBarAction(
+          label: _t('去允许', 'Allow'),
+          onPressed: () => unawaited(
+            companion.requestOverlayPermission().catchError((Object _) {}),
+          ),
+        ),
+      ),
+    );
   }
 
   /// The Nova home is the only tab with a branded title; every other tab is

@@ -1,0 +1,265 @@
+import 'dart:async';
+import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/widgets.dart'
+    show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
+import '../agent/phone_run.dart';
+import '../ui/pet_avatar.dart';
+import 'voice_companion.dart';
+
+/// Mirrors the virtual-tier phone run on the Android floating pet
+/// (packages/nova_audio/FLOATING_PET.md "Integration contract").
+///
+/// Status: a running run is `running`, a requested or active takeover
+/// `needs_user`, a `completed` run `done`, a `failed`/`interrupted` run
+/// `failed`. A cancelled run (the user stopped it) or a run that ended without
+/// a `done` event releases the overlay at once. Pet actions are executed here:
+/// `task_stop` through [onStop] (the PiP Stop path), `task_takeover` through
+/// the tracker, `open` through [onOpen] (native has already brought Nova
+/// forward). A task whose overlay could not be shown is not retried until Nova
+/// is resumed again, so a blocked overlay never turns into a retry loop.
+class PhoneTaskPet with WidgetsBindingObserver {
+  PhoneTaskPet({
+    required this.tracker,
+    required this.companion,
+    required Stream<String> actions,
+    required this.onStop,
+    this.onOpen,
+    this.onOverlayPermissionNeeded,
+  }) : _actionSource = actions;
+
+  final PhoneRunTracker tracker;
+  final TaskCompanion companion;
+  final Stream<String> _actionSource;
+
+  /// Stops the run [taskId] natively and cancels the turn that owns it.
+  final void Function(String taskId) onStop;
+
+  /// The user tapped the pet; Nova is already being brought to the front.
+  final void Function()? onOpen;
+
+  /// The overlay needs the display-over-other-apps permission. Called at most
+  /// once per lifetime, so the hint never nags.
+  final void Function()? onOverlayPermissionNeeded;
+
+  /// The active run mirrored on the pet.
+  String? _runId;
+
+  /// The task the overlay currently carries (a finished run keeps it during
+  /// its three-second terminal state).
+  String? _overlayId;
+  (String, String, String, int?)? _sent;
+  final _blocked = <String>{};
+  final _stopRequested = <String>{};
+  bool _started = false, _disposed = false, _hinted = false;
+  bool _previewHeld = false;
+  final _subscriptions = <StreamSubscription<Object?>>[];
+  void Function()? _unbindAvatar;
+
+  /// Starts mirroring. [avatar] is bound to the pet portrait until [dispose].
+  void start({
+    PetAvatarStore? avatar,
+    void Function(Object, StackTrace)? onAvatarError,
+  }) {
+    if (_started || _disposed) return;
+    _started = true;
+    tracker.addListener(_sync);
+    WidgetsBinding.instance.addObserver(this);
+    _subscriptions
+      ..add(_actionSource.listen(_onAction))
+      ..add(companion.taskDisappearances.listen(_onGone))
+      ..add(companion.previewChanges.listen((_) => _syncPreview()));
+    if (avatar != null) {
+      final report = onAvatarError ?? (Object _, StackTrace _) {};
+      unawaited(
+        bindTaskAvatar(companion, avatar, onError: report).then((unbind) {
+          if (_disposed) {
+            unbind();
+          } else {
+            _unbindAvatar = unbind;
+          }
+        }, onError: report),
+      );
+    }
+    _sync();
+  }
+
+  void _sync() {
+    if (_disposed) return;
+    final id = _runId;
+    if (id != null) {
+      final run = tracker.run(id);
+      if (run == null) {
+        _runId = null;
+        _hide(id);
+      } else if (!run.active) {
+        _runId = null;
+        _finish(run);
+      }
+    }
+    final next = tracker.activeVirtual;
+    // A newer run replaces the overlay's task in place; no hide in between, so
+    // the task service is never restarted from the background.
+    if (next != null && next.taskId != _runId) _runId = next.taskId;
+    final current = _runId == null ? null : tracker.run(_runId!);
+    if (current != null) {
+      _show(current, current.needsUser ? 'needs_user' : 'running');
+    }
+    _syncPreview();
+  }
+
+  void _finish(PhoneRun run) {
+    final outcome = run.done?.outcome;
+    if (outcome == null || outcome == 'cancelled') {
+      _hide(run.taskId);
+    } else {
+      // Native holds done/failed for three seconds, then releases the task.
+      _show(run, outcome == 'completed' ? 'done' : 'failed');
+    }
+  }
+
+  void _show(PhoneRun run, String status) {
+    final id = run.taskId;
+    if (_blocked.contains(id)) return;
+    final events = run.stepEvents;
+    final last = events.isEmpty ? null : events.last;
+    final state = (id, status, last?.label ?? '', last?.step);
+    if (state == _sent) return;
+    _sent = state;
+    _overlayId = id;
+    unawaited(
+      companion
+          .showTask(
+            taskId: id,
+            status: status,
+            label: state.$3,
+            step: state.$4,
+          )
+          .then<void>((_) {}, onError: (Object error) => _failed(id, error)),
+    );
+  }
+
+  void _failed(String id, Object error) {
+    if (_disposed) return;
+    _blocked.add(id);
+    if (_overlayId == id) {
+      _overlayId = null;
+      _sent = null;
+    }
+    if (error is PlatformException && error.code == 'overlay_permission') {
+      _hint();
+    }
+    // foreground_blocked, overlay_blocked, timeout: silent; the in-app
+    // picture and controls still work.
+    _syncPreview();
+  }
+
+  void _hide(String id) {
+    if (_overlayId != id) return;
+    _overlayId = null;
+    _sent = null;
+    unawaited(companion.hideTask(taskId: id).catchError((Object _) {}));
+  }
+
+  void _onGone(TaskOverlayGone gone) {
+    if (_disposed || gone.taskId != _overlayId) return;
+    _overlayId = null;
+    _sent = null;
+    // `expired` ends a terminal state and `hidden` is our own hide; anything
+    // else (permission revoked, OEM block, notification stop) is not re-shown
+    // for this task until Nova is resumed.
+    if (gone.reason != 'expired' && gone.reason != 'hidden') {
+      _blocked.add(gone.taskId);
+    }
+    if (gone.reason == 'overlay_permission') _hint();
+    _syncPreview();
+  }
+
+  void _onAction(String action) {
+    if (_disposed) return;
+    switch (action) {
+      case 'task_stop':
+        final id = _runId ?? _overlayId;
+        final run = id == null ? null : tracker.run(id);
+        if (id == null || run == null || !run.active) return;
+        if (!_stopRequested.add(id)) return;
+        onStop(id);
+      case 'task_takeover':
+        final id = _runId;
+        final run = id == null ? null : tracker.run(id);
+        if (id == null || run == null || !run.active || run.takeoverActive) {
+          return;
+        }
+        unawaited(tracker.takeover(id));
+      case 'open':
+        // Call-only `open` arrives here too; it is ours only while the
+        // overlay carries a task.
+        if (_overlayId != null) onOpen?.call();
+    }
+  }
+
+  void _hint() {
+    if (_hinted) return;
+    _hinted = true;
+    onOverlayPermissionNeeded?.call();
+  }
+
+  /// Frames go to the pet only while its preview is expanded and the run is
+  /// working on the virtual screen; never during a takeover.
+  void _syncPreview() {
+    final id = _runId;
+    final run = id == null ? null : tracker.run(id);
+    final wanted =
+        !_disposed &&
+        companion.previewWanted &&
+        run != null &&
+        run.active &&
+        !run.needsUser &&
+        _overlayId == id;
+    if (wanted == _previewHeld) return;
+    _previewHeld = wanted;
+    if (wanted) {
+      tracker.preview.retain();
+      tracker.preview.frame.addListener(_forwardFrame);
+      _forwardFrame();
+    } else {
+      tracker.preview.frame.removeListener(_forwardFrame);
+      tracker.preview.release();
+    }
+  }
+
+  void _forwardFrame() {
+    final frame = tracker.preview.frame.value;
+    final id = _runId;
+    final run = id == null ? null : tracker.run(id);
+    if (frame == null || run == null || run.needsUser) return;
+    unawaited(companion.taskFrame(frame).catchError((Object _) {}));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || _blocked.isEmpty) return;
+    // Back in Nova: a permission may have been granted and the task service
+    // may start again. One retry per resume.
+    _blocked.clear();
+    _sync();
+  }
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    if (_started) {
+      tracker.removeListener(_sync);
+      WidgetsBinding.instance.removeObserver(this);
+    }
+    for (final subscription in _subscriptions) {
+      unawaited(subscription.cancel());
+    }
+    _syncPreview();
+    _unbindAvatar?.call();
+    final id = _overlayId;
+    _overlayId = null;
+    if (id != null) {
+      unawaited(companion.hideTask(taskId: id).catchError((Object _) {}));
+    }
+  }
+}
