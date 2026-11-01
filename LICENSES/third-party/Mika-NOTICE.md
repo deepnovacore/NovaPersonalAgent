@@ -32,10 +32,13 @@ Not derived from Mika: the floating pet (`packages/nova_audio`, an extension of 
 phone channel and run tracking (`lib/agent/phone_*.dart`, `lib/voice/phone_task_pet.dart`), the native bridge
 (`phone/PhoneBridge.kt`), the agent loop, journal and approval code. Apache-2.0 material is combined into Nova under
 GPL-3.0-or-later; the Apache-2.0 attribution and NOTICE obligations above continue to apply to that material.
-Mika's name, logo, images and release binaries are not redistributed.
+Mika's name, logo, images and release binaries are not redistributed. Tests for derived units that have no Mika
+counterpart (for example `NodeIdsTest`, `SnapshotReaderTest`, `NovaShellServiceTest`) were written by Nova and carry
+no Mika header; tests copied from Mika keep it.
 
 ## scrcpy (via Mika)
 
 - Project: https://github.com/Genymobile/scrcpy — Apache-2.0, Copyright (C) Genymobile / Romain Vimont.
 - Mika's shell-context technique (system Context obtained as the shell user) follows scrcpy; the derived Nova file keeps
-  that attribution in its header.
+  that attribution in its header. Nova took this code from Mika revision `5f630d9`, not directly from a scrcpy release,
+  so the applicable scrcpy revision is the one Mika consulted.

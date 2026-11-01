@@ -292,7 +292,7 @@ None of these may be weakened. Each must have a JVM or device test where practic
 | M2 native helper/pairing | new `phone-core/**` (adb, shell, `uistate/Accuracy.kt` only; no second `UiElement`), `settings.gradle.kts`, `app/build.gradle.kts` dependencies, `app/proguard-rules.pro`, `phone/shell/**` (HelperMain, HelperProcess, HelperHub, HandoffProvider, ShellContext, NovaShellService, adb/*), `phone/setup/**`, `phone/PhoneBridge.kt` (registers all three channels and implements `ShellProvider` and `PhoneEventSink`), the one-line hook in `MainActivity.kt`, `AndroidManifest.xml` provider/receiver/service entries |
 | M3 display/agent | `phone/display/**` (AgentDisplay, LazyDisplay, FrameMath), `phone/a11y/**` (NodeIds, snapshot reader, VirtualScreen), `phone/Takeover.kt` (`PhoneTakeover`), `phone/PhoneSelfCheck` implementation, `LocalGuiService.kt`, `res/xml/local_gui_service.xml`, `LocalToolLoop.kt`, `LocalGuiModel.kt`, `LocalAgentController.kt` |
 | UI lanes (Flutter) | `lib/agent/phone_channel.dart` (Dart client of the three channels), `lib/ui/{phone_control_page,phone_setup_wizard,virtual_screen_pip,tool_timeline}.dart`, the settings/chat/voice integration points |
-| Integration | `LICENSES/README.md`, NOTICE, `LICENSES/third-party/Mika-NOTICE.md`, `docs/guides/mobile.md` |
+| Integration | `LICENSES/README.md`, `LICENSES/third-party/Mika-NOTICE.md`, `docs/guides/mobile.md` |
 
 Lanes do not edit files they don't own. If a lane needs a seam that isn't here, it asks for a contract change.
 
