@@ -194,6 +194,44 @@ void main() {
     },
   );
   test(
+    'failed final retains sanitized reason across persistence and snapshot',
+    () async {
+      final persistence = MemorySpacePersistence();
+      final state = SpaceClientState(persistence);
+      await state.open();
+      await state.apply({
+        'v': 1,
+        'type': 'chat.final',
+        'op_id': 'turn',
+        'message_id': 'failure',
+        'conversation_id': 'chat:main',
+        'status': 'failed',
+        'text': '',
+        'error': 'authentication',
+      });
+      final restored = SpaceClientState(persistence);
+      await restored.open();
+      expect(restored.messages.single['error'], 'authentication');
+      await restored.apply({
+        'v': 1,
+        'type': 'snapshot',
+        'snapshot': {
+          'schema_version': 1,
+          'chat': [
+            {
+              'id': 'user_turn',
+              'role': 'user',
+              'status': 'failed',
+              'failure_reason': 'network',
+              'text': 'hi',
+            },
+          ],
+        },
+      });
+      expect(restored.messages.last['failure_reason'], 'network');
+    },
+  );
+  test(
     'unknown display cards retain generic text and future fields ignored',
     () async {
       final state = SpaceClientState(MemorySpacePersistence());

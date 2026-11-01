@@ -197,3 +197,91 @@ test('news feeds pass the gate only when the manifest turns news on, and only as
  assert.ok(!JSON.stringify(on).includes('bbc'),'counts carry no feed identity')
  }finally{f.close()}
 })
+
+test('relay origins are opt-in HTTPS origins and cannot overlap model providers',()=>{
+ const f=fixture();try{
+  assert.deepEqual(loadAcceptanceManifest(f.env)?.relayOrigins,[]);
+  for(const relayOrigins of [['http://relay.invalid'],['wss://relay.invalid'],['https://relay.invalid/v1'],['https://provider.invalid']]){
+   writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,relayOrigins}));assert.throws(()=>loadAcceptanceManifest(f.env),/relay_origin_invalid/);
+  }
+ }finally{f.close()}
+});
+
+test('existing-results gate permits configured relay HTTPS and WSS with normal TLS while model and arbitrary egress stay blocked',async()=>{
+ const https=await import('node:https'),{WebSocketServer}=await import('ws'),{spawn}=await import('node:child_process');
+ const f=fixture(),key=join(f.root,'test-key.pem'),cert=join(f.root,'test-cert.pem');
+ const generated=spawnSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-keyout',key,'-out',cert,'-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1'],{encoding:'utf8'});
+ assert.equal(generated.status,0,'local TLS fixture certificate generation failed');
+ let requests=0,upgrades=0;
+ const server=https.createServer({key:readFileSync(key),cert:readFileSync(cert)},(req,res)=>{requests++;if(req.url==='/v1/redirect'){res.writeHead(302,{location:'https://unknown.invalid/v1/stolen'});res.end();return}res.setHeader('content-type','application/json');res.end('{}')});
+ const live=new WebSocketServer({server,path:'/v1/live'});live.on('connection',socket=>{upgrades++;socket.close()});
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();assert.ok(address&&typeof address==='object');const origin='https://127.0.0.1:'+address.port;
+ try{
+  writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,readExistingOnly:true,relayOrigins:[origin]}));
+  const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href;
+  const code=`import assert from 'node:assert/strict';import net from 'node:net';import https from 'node:https';import {request as undiciRequest} from 'undici';import WebSocket from 'ws';import {installAcceptanceGate,assertAcceptanceUrl,acceptanceCounts} from ${JSON.stringify(moduleUrl)};
+  installAcceptanceGate();const origin=${JSON.stringify(origin)};
+  assert.equal((await fetch(origin+'/v1/mailbox?after=0',{method:'GET'})).status,200);
+  assert.equal((await fetch(origin+'/v1/auth/challenge',{method:'POST',body:'{}'})).status,200);
+  await new Promise((resolve,reject)=>{const socket=new WebSocket(origin.replace('https:','wss:')+'/v1/live',{followRedirects:false});socket.once('open',()=>resolve());socket.once('error',reject)});
+  await assert.rejects(fetch(origin+'/v1/redirect'),/fetch failed/);
+  await assert.rejects(fetch(origin+'/admin'),/unknown_outbound/);
+  await assert.rejects(fetch(origin+'/v1/mailbox',{method:'PUT'}),/relay_method_invalid/);
+  await assert.rejects(fetch(new Request(origin+'/v1/mailbox')),/relay_method_invalid/);
+  await assert.rejects(fetch('https://unknown.invalid/v1/mailbox'),/unknown_outbound/);
+  await assert.rejects(fetch('https://provider.invalid/v1/chat/completions',{method:'POST',body:JSON.stringify({model:'model'})}),/generation_paused/);
+  assert.throws(()=>net.connect({host:'127.0.0.1',port:${address.port}}),/unknown_socket/);
+  assert.throws(()=>https.request(origin+'/v1/mailbox'),/unapproved_http_transport/);
+  assert.throws(()=>https.request(origin+'/v1/live',{headers:{Upgrade:'websocket'},rejectUnauthorized:false}),/unapproved_http_transport/);
+  await assert.rejects(undiciRequest(origin+'/v1/mailbox'),/unapproved_dispatcher/);
+  assert.throws(()=>assertAcceptanceUrl(origin.replace('https:','http:')+'/v1/live'),/unknown_outbound/);
+  assert.throws(()=>assertAcceptanceUrl(origin+'/v1/%2fadmin'),/unknown_outbound/);
+  assert.equal(acceptanceCounts().model_calls,0);`;
+  const child=spawn(process.execPath,['--input-type=module','-e',code],{env:{...f.env,NODE_EXTRA_CA_CERTS:cert},stdio:['ignore','pipe','pipe']});
+  let stderr='';child.stderr.on('data',chunk=>{stderr+=String(chunk)});
+  const status=await new Promise<number|null>((resolve,reject)=>{child.once('exit',resolve);child.once('error',reject)});
+  assert.equal(status,0,stderr);assert.equal(requests,3);assert.equal(upgrades,1);
+ }finally{for(const socket of live.clients)socket.terminate();await new Promise<void>(resolve=>live.close(()=>resolve()));server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));f.close()}
+});
+
+test('cached-results acceptance permits paused or empty source grants while retaining probe, path and model fences',()=>{
+ const f=fixture();try{
+  const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href;
+  for(const sources of [[],[{view:{state:'paused'},processing_consent:{extraction_provider:null,embedding_provider:null}}]])for(const readExistingOnly of [false,true]){
+   writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,readExistingOnly}));
+   const sourcePath=f.manifest.originalBlackboardPath+'.personal.json.sources.json';writeFileSync(sourcePath,JSON.stringify({sources}));
+   const before=readFileSync(sourcePath,'utf8');
+   const code=`import assert from 'node:assert/strict';import {installAcceptanceGate,assertAcceptanceGrant,assertPersistedAcceptanceGrant,probeAcceptanceGate,acceptanceCounts} from ${JSON.stringify(moduleUrl)};
+   let sent=0;globalThis.fetch=async()=>{sent++;return new Response('{}')};
+   ${readExistingOnly?`installAcceptanceGate();
+   assert.throws(()=>assertPersistedAcceptanceGrant(undefined,${JSON.stringify(f.manifest.originalBlackboardPath+'.personal.json')}),/gate_probe_missing/);
+   await probeAcceptanceGate();
+   assert.throws(()=>assertPersistedAcceptanceGrant(undefined,${JSON.stringify(f.manifest.originalBlackboardPath)}),/wrong_host_path/);
+   assertAcceptanceGrant(undefined,[]);assertAcceptanceGrant({extraction_provider:null,embedding_provider:null},[]);
+   assertPersistedAcceptanceGrant(undefined,${JSON.stringify(f.manifest.originalBlackboardPath+'.personal.json')});
+   await assert.rejects(fetch('https://provider.invalid/v1/chat/completions',{method:'POST',body:JSON.stringify({model:'model'})}),/generation_paused/);
+   assert.equal(sent,0);assert.equal(acceptanceCounts().model_calls,0);`:`assert.throws(()=>installAcceptanceGate(),/no_active_sources/);`}`;
+   const child=spawnSync(process.execPath,['--input-type=module','-e',code],{env:f.env,encoding:'utf8'});assert.equal(child.status,0,child.stderr);
+   assert.equal(readFileSync(sourcePath,'utf8'),before,'cached reads never change processing consent');
+  }
+ }finally{f.close()}
+});
+
+
+test('existing-data chat grant bounds streaming calls and leaves background generation blocked',()=>{
+ const f=fixture();try{
+ writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,readExistingOnly:true,chatCallLimit:2}));
+ const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href;
+ const code=`import assert from 'node:assert/strict';import {installAcceptanceGate,acceptanceCounts} from ${JSON.stringify(moduleUrl)};
+ const sent=[];globalThis.fetch=async(_url,init)=>{sent.push(JSON.parse(init.body));return new Response('{}')};installAcceptanceGate();
+ const post=body=>fetch('https://provider.invalid/chat/completions',{method:'POST',body:JSON.stringify({model:'model',...body})});
+ await assert.rejects(post({stream:false}),/generation_paused/);
+ await assert.rejects(post({stream:true,messages:['x'.repeat(256*1024)]}),/chat_input_limit/);
+ await post({stream:true,max_tokens:9000});await post({stream:true,max_tokens:9000,max_completion_tokens:32768,n:20});
+ await assert.rejects(post({stream:true}),/chat_call_limit/);
+ assert.equal(sent[0].max_tokens,2048);assert.equal(sent[1].max_completion_tokens,2048);assert.equal('max_tokens' in sent[1],false);assert.equal(sent[1].n,1);assert.equal(acceptanceCounts().model_calls,2);`;
+ const child=spawnSync(process.execPath,['--input-type=module','-e',code],{env:f.env,encoding:'utf8'});
+ assert.equal(child.status,0,child.stderr);
+ }finally{f.close()}
+});

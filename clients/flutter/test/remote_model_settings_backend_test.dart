@@ -66,6 +66,7 @@ void main() {
       expect(view.providerId, 'deepseek');
       expect(view.customEndpoint, false);
       expect(view.modelDiscovery, false);
+      expect(view.allowKeyEntry, false);
       expect(await backend.hasCredential('deepseek', ''), true);
       expect(view.notice, contains('重启'));
       expect(nativeCalls, 0);

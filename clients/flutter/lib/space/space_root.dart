@@ -2,6 +2,7 @@ import 'push_invitation_dialog.dart';
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../ui/app.dart' show BottomAppBarTabs;
 import '../ui/components.dart';
@@ -23,6 +24,13 @@ import 'host_panel.dart';
 import 'source_panel.dart';
 import 'space_dialog.dart';
 import 'chat_message.dart';
+import 'binding_cleanup.dart';
+import 'personal_adapter.dart';
+import '../ui/workbench_page.dart';
+import '../ui/timeline_page.dart';
+import '../ui/timeline_briefs.dart';
+import '../ui/conversation_home.dart';
+import 'connection_status.dart';
 
 class SpaceRoot extends StatefulWidget {
   const SpaceRoot({
@@ -31,9 +39,11 @@ class SpaceRoot extends StatefulWidget {
     this.catalog,
     this.clientBuilder,
     this.standalonePageBuilder,
+    this.connectionProbe = probeSpaceConnection,
   });
   final Widget Function(SpaceRecord) standaloneBuilder;
   final SpaceCatalog? catalog;
+  final SpaceConnectionProbe connectionProbe;
   final Widget Function(SpaceRecord)? clientBuilder;
   final Widget Function(SpaceRecord, VoidCallback)? standalonePageBuilder;
   @override
@@ -101,7 +111,9 @@ class _SpaceRootState extends State<SpaceRoot> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final selected = catalog.selected;
-    if (selected == null) return _SpaceChooser(catalog: catalog);
+    if (selected == null) {
+      return _SpaceChooser(catalog: catalog, probe: widget.connectionProbe);
+    }
     return Column(
       children: [
         // Client pages have their own title bar and Space switch.
@@ -150,9 +162,165 @@ class _SpaceRootState extends State<SpaceRoot> {
   }
 }
 
-class _SpaceChooser extends StatelessWidget {
-  const _SpaceChooser({required this.catalog});
+class _SpaceChooser extends StatefulWidget {
+  const _SpaceChooser({required this.catalog, required this.probe});
   final SpaceCatalog catalog;
+  final SpaceConnectionProbe probe;
+  @override
+  State<_SpaceChooser> createState() => _SpaceChooserState();
+}
+
+class _SpaceChooserState extends State<_SpaceChooser>
+    with WidgetsBindingObserver {
+  SpaceCatalog get catalog => widget.catalog;
+  final statuses = <String, SpaceConnectionStatus>{};
+  Timer? timer;
+  bool refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => refresh());
+    timer = Timer.periodic(const Duration(seconds: 15), (_) => refresh());
+  }
+
+  Future<void> refresh() async {
+    if (!mounted ||
+        refreshing ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed ||
+        ModalRoute.of(context)?.isCurrent == false) {
+      return;
+    }
+    refreshing = true;
+    try {
+      await Future.wait([
+        for (final space in catalog.visibleSpaces)
+          if (space.mode == SpaceMode.client)
+            (() async {
+              SpaceConnectionStatus status;
+              try {
+                status = await widget.probe(space);
+              } catch (_) {
+                status = SpaceConnectionStatus.unreachable;
+              }
+              if (mounted) setState(() => statuses[space.id] = status);
+            })(),
+      ]);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(refresh());
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  (IconData, Color, String) connection(SpaceRecord space) =>
+      switch (statuses[space.id] ?? SpaceConnectionStatus.checking) {
+        SpaceConnectionStatus.online => (
+          CupertinoIcons.checkmark_circle_fill,
+          Nova.mint,
+          '电脑在线',
+        ),
+        SpaceConnectionStatus.offline => (
+          CupertinoIcons.desktopcomputer,
+          Nova.secondary,
+          '电脑离线',
+        ),
+        SpaceConnectionStatus.unreachable => (
+          CupertinoIcons.wifi_exclamationmark,
+          Nova.amber,
+          '暂时无法连接',
+        ),
+        SpaceConnectionStatus.awaitingApproval => (
+          CupertinoIcons.lock,
+          Nova.amber,
+          '等待电脑批准',
+        ),
+        SpaceConnectionStatus.checking => (
+          CupertinoIcons.desktopcomputer,
+          Nova.secondary,
+          '正在检查连接',
+        ),
+      };
+  Future<void> manageBindings(BuildContext context, SpaceRecord space) async {
+    final bindings = catalog.bindings(space);
+    var keep = space, busy = false;
+    String? problem;
+    final result = await showDialog<SpaceRecord>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('清理旧绑定'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('选择保留的有效所有者绑定。确认后将断开其他旧设备绑定，仅保留一条连接；原记录保留在私有恢复信息中。'),
+                for (final binding in bindings)
+                  ListTile(
+                    selected: keep.id == binding.id,
+                    trailing: Icon(
+                      keep.id == binding.id
+                          ? CupertinoIcons.checkmark_circle_fill
+                          : CupertinoIcons.circle,
+                    ),
+                    title: Text(binding.name),
+                    subtitle: Text(
+                      '设备 ${binding.device?.substring(0, binding.device!.length.clamp(0, 8)) ?? "未知"}',
+                    ),
+                    onTap: busy ? null : () => update(() => keep = binding),
+                  ),
+                if (busy) const LinearProgressIndicator(),
+                if (problem != null) Text(problem!),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      update(() {
+                        busy = true;
+                        problem = null;
+                      });
+                      try {
+                        await consolidateClientBindings(catalog, keep);
+                        if (context.mounted) Navigator.pop(context, keep);
+                      } catch (_) {
+                        if (context.mounted) {
+                          update(() {
+                            busy = false;
+                            problem =
+                                '未确认清理完成，原绑定已保留。请连接 Host，并选择已获所有者授权的绑定后重试。';
+                          });
+                        }
+                      }
+                    },
+              child: const Text('保留所选并清理其他'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result != null) await catalog.select(result.id);
+  }
+
   @override
   Widget build(BuildContext context) => NovaPage(
     title: 'Space',
@@ -198,21 +366,30 @@ class _SpaceChooser extends StatelessWidget {
           NovaSection(
             surface: Nova.sheetCell,
             children: [
-              for (final space in catalog.spaces)
+              for (final space in catalog.visibleSpaces)
                 NovaTile(
                   surface: Nova.sheetCell,
                   title: space.name,
                   subtitle: Text(
                     space.mode == SpaceMode.client
-                        ? '由 Host 处理聊天与后台任务'
+                        ? connection(space).$3
                         : '在此设备独立运行',
                   ),
                   leading: NovaIconTile(
                     space.mode == SpaceMode.client
-                        ? CupertinoIcons.desktopcomputer
+                        ? connection(space).$1
                         : CupertinoIcons.device_phone_portrait,
+                    color: space.mode == SpaceMode.client
+                        ? connection(space).$2
+                        : Nova.mint,
                   ),
-                  trailing: const CupertinoListTileChevron(),
+                  trailing: catalog.bindings(space).length > 1
+                      ? IconButton(
+                          tooltip: '清理旧绑定',
+                          icon: const Icon(CupertinoIcons.ellipsis_circle),
+                          onPressed: () => manageBindings(context, space),
+                        )
+                      : const CupertinoListTileChevron(),
                   onTap: () => catalog.select(space.id),
                 ),
             ],
@@ -220,11 +397,14 @@ class _SpaceChooser extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: FilledButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => _CreateSpace(catalog: catalog),
-              ),
-            ),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => _CreateSpace(catalog: catalog),
+                ),
+              );
+              await refresh();
+            },
             icon: const Icon(CupertinoIcons.add, size: 20),
             label: const Text('新建 Space'),
           ),
@@ -255,6 +435,7 @@ class _CreateSpaceState extends State<_CreateSpace> {
   }
 
   void parse(String value) {
+    if (busy || !mounted || mode != SpaceMode.client) return;
     try {
       final parsed = SpaceInvitation.parse(
         value,
@@ -265,14 +446,64 @@ class _CreateSpaceState extends State<_CreateSpace> {
         error = null;
         scanning = false;
       });
+      unawaited(create());
     } catch (e) {
-      setState(() => error = '$e');
+      setState(
+        () => error = e is FormatException && e.message == 'pairing_expired'
+            ? '邀请码已过期，请在电脑上重新生成。'
+            : '无法读取邀请码，请重新扫描或粘贴完整内容。',
+      );
     }
+  }
+
+  Future<bool> confirmConnection() async {
+    if (name.text.trim().isEmpty) name.text = '我的电脑';
+    return await showSpaceDialog<bool>(
+          context: context,
+          builder: (context) => StatefulBuilder(
+            builder: (context, update) => AlertDialog(
+              title: const Text('连接电脑'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('请核对电脑上的 Host 指纹'),
+                    const SizedBox(height: 8),
+                    SelectableText(invitation!.hostFingerprint),
+                    const SizedBox(height: 12),
+                    const Text('确认后请在电脑上核对此设备指纹，并批准连接。'),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: name,
+                      autofocus: true,
+                      onChanged: (_) => update(() {}),
+                      decoration: const InputDecoration(labelText: 'Space 名称'),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('取消'),
+                ),
+                TextButton(
+                  onPressed: name.text.trim().isEmpty
+                      ? null
+                      : () => Navigator.pop(context, true),
+                  child: const Text('确认绑定'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
   }
 
   Future<void> create() async {
     if (busy) return;
-    if (name.text.trim().isEmpty) {
+    if (mode == SpaceMode.standalone && name.text.trim().isEmpty) {
       setState(() => error = '请为 Space 命名');
       return;
     }
@@ -291,7 +522,11 @@ class _CreateSpaceState extends State<_CreateSpace> {
           ),
         );
       } else {
-        if (invitation == null) throw StateError('请先扫描 Host 邀请码');
+        if (invitation == null) {
+          setState(() => error = '请先扫描电脑上的邀请码');
+          return;
+        }
+        if (!await confirmConnection() || !mounted) return;
         await invitation!.pair(
           name.text.trim(),
           widget.catalog,
@@ -302,7 +537,13 @@ class _CreateSpaceState extends State<_CreateSpace> {
       }
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (mounted) {
+        setState(
+          () => error = mode == SpaceMode.client
+              ? '暂时无法连接电脑，请检查网络后重试。'
+              : '无法创建 Space，请重试。',
+        );
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -314,11 +555,13 @@ class _CreateSpaceState extends State<_CreateSpace> {
     body: ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        TextField(
-          controller: name,
-          decoration: const InputDecoration(labelText: '名称'),
-        ),
-        const SizedBox(height: 24),
+        if (mode == SpaceMode.standalone) ...[
+          TextField(
+            controller: name,
+            decoration: const InputDecoration(labelText: '名称'),
+          ),
+          const SizedBox(height: 24),
+        ],
         RadioGroup<SpaceMode>(
           groupValue: mode,
           onChanged: (v) {
@@ -353,6 +596,7 @@ class _CreateSpaceState extends State<_CreateSpace> {
               height: 260,
               child: MobileScanner(
                 onDetect: (capture) {
+                  if (!scanning || busy) return;
                   final value = capture.barcodes.firstOrNull?.rawValue;
                   if (value != null) parse(value);
                 },
@@ -371,25 +615,7 @@ class _CreateSpaceState extends State<_CreateSpace> {
             onPressed: () => parse(code.text),
             child: const Text('读取邀请码'),
           ),
-          if (invitation != null)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '请核对电脑上的 Host 指纹',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    SelectableText(invitation!.hostFingerprint),
-                    const SizedBox(height: 12),
-                    Text('连接：${invitation!.relay}'),
-                    const Text('确认后请在电脑上核对此设备指纹，并批准连接。'),
-                  ],
-                ),
-              ),
-            ),
+          if (invitation != null) const Text('已读取电脑邀请码，可继续确认连接。'),
         ],
         if (error != null)
           Padding(
@@ -406,7 +632,7 @@ class _CreateSpaceState extends State<_CreateSpace> {
             busy
                 ? '正在创建…'
                 : mode == SpaceMode.client
-                ? '确认指纹并绑定 Host'
+                ? '确认连接电脑'
                 : '创建独立 Space',
           ),
         ),
@@ -433,6 +659,9 @@ class SpaceClientScreen extends StatefulWidget {
 
 class _SpaceClientScreenState extends State<SpaceClientScreen> {
   SpaceClientController? controller;
+  RemotePersonalAdapter? personal;
+  String? taskConversation;
+  bool taskOpen = false;
   String? startupError;
   final chat = TextEditingController();
   final petAvatar = PetAvatarStore();
@@ -458,6 +687,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         return;
       }
       controller = value;
+      personal = RemotePersonalAdapter(value.state, onSync: value.sync);
       value.state.addListener(_changed);
       setState(() {});
     } catch (e) {
@@ -472,6 +702,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
   @override
   void dispose() {
     chat.dispose();
+    personal?.dispose();
     petAvatar.dispose();
     controller?.state.removeListener(_changed);
     unawaited(controller?.dispose() ?? Future.value());
@@ -506,12 +737,32 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     }
   }
 
+  bool _readOnlyTask(Map? row) =>
+      row == null ||
+      !['chat', 'topic'].contains(row['kind']) ||
+      row['mode'] == 'plan';
+
   Future<void> send() async {
+    if (tab == 1 &&
+        _readOnlyTask(
+          controller!.state
+              .cards('conversations')
+              .where((row) => row['id'] == taskConversation)
+              .firstOrNull,
+        )) {
+      message('请在电脑上继续处理此任务。');
+      return;
+    }
     final text = chat.text;
     if (text.trim().isEmpty) return;
     setState(() => sending = true);
     try {
-      await controller!.sendChat(text);
+      await controller!.sendChat(
+        text,
+        conversationId: tab == 1
+            ? taskConversation ?? 'chat:main'
+            : 'chat:main',
+      );
       chat.clear();
     } catch (error) {
       message(
@@ -524,134 +775,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     }
   }
 
-  Future<void> editEntity(String kind, {Map<String, dynamic>? entity}) async {
-    final title = TextEditingController(
-      text: entity?['title'] as String? ?? '',
-    );
-    final note = TextEditingController(text: entity?['note'] as String? ?? '');
-    String? goalId = entity?['goal_id'] as String?;
-    final pendingGoals = controller!.state.pending
-        .where(
-          (p) =>
-              p['kind'] == 'life.mutate' &&
-              (p['input'] as Map)['op'] == 'create' &&
-              (p['input'] as Map)['kind'] == 'goal' &&
-              p['temp_id'] != null,
-        )
-        .toList();
-    final saved = await showSpaceDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${entity == null ? '创建' : '编辑'}${_kindNames[kind]}'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: title,
-                decoration: const InputDecoration(labelText: '标题'),
-              ),
-              TextField(
-                controller: note,
-                decoration: const InputDecoration(labelText: '备注'),
-              ),
-              if (kind != 'goal')
-                DropdownButtonFormField<String>(
-                  initialValue: goalId,
-                  decoration: const InputDecoration(labelText: '关联目标'),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('无')),
-                    for (final p in pendingGoals)
-                      DropdownMenuItem(
-                        value: p['temp_id'] as String,
-                        child: Text(
-                          '${(p['input'] as Map)['title']} · 等待 Host',
-                        ),
-                      ),
-                    for (final g in controller!.state.cards('goals'))
-                      DropdownMenuItem(
-                        value: g['id'] as String,
-                        child: Text(g['title'] as String? ?? ''),
-                      ),
-                  ],
-                  onChanged: (v) => goalId = v,
-                ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('发送给 Host'),
-          ),
-        ],
-      ),
-    );
-    if (saved == true && title.text.trim().isNotEmpty) {
-      await controller!.state.enqueue(
-        'life.mutate',
-        {
-          'op': entity == null ? 'create' : 'update',
-          'kind': kind,
-          if (entity != null) 'id': entity['id'],
-          'title': title.text.trim(),
-          'note': note.text,
-          if (kind != 'goal') 'goal_id': goalId,
-        },
-        tempId: entity == null ? 'temp_${newSpaceId()}' : null,
-        dependsOn: pendingGoals
-            .where((p) => p['temp_id'] == goalId)
-            .map((p) => p['op_id'] as String)
-            .toList(),
-        baseVersion: entity?['version'] as int?,
-      );
-      unawaited(controller!.sync());
-    }
-    title.dispose();
-    note.dispose();
-  }
-
-  Future<void> profile() async {
-    final value = (controller!.state.snapshot['profile'] as Map? ?? {});
-    final text = TextEditingController(text: value['about'] as String? ?? '');
-    final save = await showSpaceDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('个人资料'),
-        content: TextField(controller: text, maxLines: 8, maxLength: 5000),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('发送给 Host'),
-          ),
-        ],
-      ),
-    );
-    if (save == true) {
-      await controller!.state.enqueue('life.mutate', {
-        'op': 'profile',
-        'about': text.text,
-      }, baseVersion: value['version'] as int? ?? 0);
-      unawaited(controller!.sync());
-    }
-    text.dispose();
-  }
-
   static const _kindNames = {'goal': '目标', 'todo': '待办', 'idea': '想法'};
-  static const _statusNames = {
-    'done': '已完成',
-    'active': '进行中',
-    'archived': '已归档',
-  };
-
   Widget _empty(String text) => Center(
     child: Padding(
       padding: const EdgeInsets.all(32),
@@ -671,7 +795,15 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     final body = card['body'] as String? ?? card['note'] as String? ?? '';
     return NovaTile(
       title: card['title'] as String? ?? '新内容',
-      subtitle: body.isEmpty ? null : Text(body, maxLines: 12),
+      subtitle: body.isEmpty && card['date'] == null
+          ? null
+          : Text(
+              [
+                if (card['date'] is String) card['date'] as String,
+                if (body.isNotEmpty) body,
+              ].join('\n'),
+              maxLines: 12,
+            ),
       trailing: collection == null
           ? null
           : IconButton(
@@ -761,6 +893,59 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
   /// Quiet one-line status above the page, only when the Host is unreachable
   /// or reported a problem.
   Widget? _notice(SpaceClientState state) {
+    if (state.waitingForApproval ||
+        state.hostOnline && state.snapshot.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    state.waitingForApproval
+                        ? '配对中，等待电脑确认绑定。'
+                        : '已连接，正在同步电脑资料…',
+                    style: const TextStyle(color: Nova.secondary, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            if (state.waitingForApproval && controller != null) ...[
+              const SizedBox(height: 8),
+              const Text(
+                '请在电脑核对此手机指纹',
+                style: TextStyle(color: Nova.secondary, fontSize: 12),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: SelectableText(
+                      controller!.fingerprint,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '复制手机指纹',
+                    icon: const Icon(CupertinoIcons.doc_on_clipboard, size: 18),
+                    onPressed: () => Clipboard.setData(
+                      ClipboardData(text: controller!.fingerprint),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      );
+    }
     final lines = [
       if (!state.hostOnline) 'Host 不在线 · 展示上次缓存',
       if (state.error != null) _connectionText(state.error!),
@@ -770,115 +955,107 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         : NovaNotice(lines.join('\n'), tone: NovaTone.warning);
   }
 
-  Widget _timeline(SpaceClientState state) {
-    final cards = <(Map<String, dynamic>, String?)>[
-      for (final card in state.cards('notifications')) (card, null),
-      for (final card
-          in state.cards('feed').where((c) => c['dismissed'] != true))
-        (card, 'feed'),
-      for (final card
-          in state.cards('timeline').where((c) => c['dismissed'] != true))
-        (card, 'timeline'),
-    ];
-    if (cards.isEmpty) {
-      return _empty(state.snapshot.isEmpty ? '等待 Host 提供空间快照。' : '暂无动态');
-    }
-    return ListView(
-      padding: const EdgeInsets.only(top: 8, bottom: 24),
-      children: [
-        NovaSection(
-          children: [
-            for (final (card, collection) in cards)
-              _card(card, collection: collection),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _entity(String kind, Map<String, dynamic> entity) {
-    final done = entity['status'] == 'done';
-    final note = (entity['note'] as String? ?? '').trim();
-    final status = kind == 'todo' ? null : _statusNames[entity['status']];
-    final subtitle = [if (note.isNotEmpty) note, ?status].join(' · ');
-    return NovaTile(
-      title: entity['title'] as String? ?? '',
-      subtitle: subtitle.isEmpty ? null : Text(subtitle),
-      onTap: () => editEntity(kind, entity: entity),
-      trailing: kind != 'todo'
-          ? null
-          : done
-          ? const Icon(
-              CupertinoIcons.checkmark_circle_fill,
-              size: 24,
-              color: Nova.mint,
-            )
-          : IconButton(
-              tooltip: '标记完成',
-              icon: const Icon(
-                CupertinoIcons.circle,
-                size: 24,
-                color: Nova.tertiary,
-              ),
-              onPressed: () async {
-                await controller!.state.enqueue('life.mutate', {
-                  'op': 'update',
-                  'kind': 'todo',
-                  'id': entity['id'],
-                  'status': 'done',
-                }, baseVersion: entity['version'] as int?);
-                unawaited(controller!.sync());
-              },
-            ),
-    );
-  }
-
-  Future<void> _create() async {
-    final kind = await showCupertinoModalPopup<String>(
-      context: context,
-      builder: (sheet) => CupertinoActionSheet(
-        actions: [
-          for (final entry in _kindNames.entries)
-            CupertinoActionSheetAction(
-              onPressed: () => Navigator.pop(sheet, entry.key),
-              child: Text(
-                entry.value,
-                style: const TextStyle(color: Nova.mint),
-              ),
-            ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.pop(sheet),
-          child: const Text('取消', style: TextStyle(color: Nova.secondary)),
+  Widget _workbench(int page) => Column(
+    children: [
+      _pending(controller!.state),
+      Expanded(
+        child: WorkbenchPage(
+          store: personal!.store,
+          page: page,
+          showHeading: false,
+          language: 'zh',
+          onSettings: () => _settings(controller!),
         ),
       ),
+    ],
+  );
+
+  Widget _timeline(SpaceClientState state) {
+    final entries = (state.snapshot['timeline_entries'] as List? ?? [])
+        .whereType<Map>()
+        .toList();
+    return TimelinePage(
+      store: personal!.store,
+      language: 'zh',
+      sourceTimeline: TimelineBriefs(
+        entries: entries,
+        availableEvidenceIds:
+            state.snapshot['timeline_available_evidence_ids'] as List? ?? [],
+      ),
+      onDiscuss: (text) => setState(() {
+        tab = 0;
+        chat.text = text;
+      }),
     );
-    if (kind != null && mounted) await editEntity(kind);
   }
 
-  Widget _tasks(SpaceClientState state) {
-    final kinds = [
-      for (final kind in _kindNames.keys)
-        if (state.cards('${kind}s').isNotEmpty) kind,
-    ];
-    if (kinds.isEmpty && !state.pending.any(_needsAttention)) {
-      return _empty('还没有目标、待办或想法。\n点右下角 + 创建。');
-    }
-    return ListView(
-      padding: const EdgeInsets.only(top: 8, bottom: 96),
-      children: [
-        _pending(state),
-        for (final kind in kinds)
-          NovaSection(
-            header: _kindNames[kind],
-            children: [
-              for (final entity in state.cards('${kind}s'))
-                _entity(kind, entity),
-            ],
-          ),
-      ],
+  Widget _executionActivity(SpaceClientState state) {
+    final events = state.cards('notifications');
+    if (events.isEmpty) return _empty('暂无执行动态');
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      itemCount: events.length,
+      itemBuilder: (context, index) =>
+          NovaSection(children: [_card(events[index])]),
     );
   }
+
+  Widget _tasks(SpaceClientState state) => Column(
+    children: [
+      _pending(state),
+      if (state.cards('notifications').isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () =>
+                  _openPersonalPage('执行动态', () => _executionActivity(state)),
+              icon: const Icon(CupertinoIcons.bell, size: 17),
+              label: const Text('执行动态'),
+            ),
+          ),
+        ),
+      Expanded(
+        child: ConversationHome(
+          changes: state,
+          conversations: () => state
+              .cards('conversations')
+              .where((row) => row['id'] != 'chat:main' && row['kind'] != 'main')
+              .toList(),
+          showSchedules: false,
+          onNew: null,
+          onOpen: (id) {
+            final row = state
+                .cards('conversations')
+                .where((row) => row['id'] == id)
+                .first;
+            if (_readOnlyTask(row)) {
+              showSpaceDialog<void>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text('${row['title'] ?? '任务'}'),
+                  content: Text('${row['preview'] ?? ''}\n\n请在电脑上继续处理此任务。'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('完成'),
+                    ),
+                  ],
+                ),
+              );
+            } else {
+              setState(() {
+                taskConversation = id;
+                taskOpen = true;
+                chat.clear();
+              });
+            }
+          },
+        ),
+      ),
+    ],
+  );
 
   Widget _chat(SpaceClientController c) {
     final state = c.state;
@@ -889,8 +1066,32 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
             children: [
-              for (final m in state.messages) SpaceChatMessage(message: m),
-              for (final preview in state.previews.values)
+              for (final m in state.messages.where(
+                (m) =>
+                    (m['conversation_id'] ?? 'chat:main') ==
+                    (tab == 1 ? taskConversation : 'chat:main'),
+              ))
+                SpaceChatMessage(
+                  message: m,
+                  onRetry: () {
+                    final original = state.messages
+                        .where(
+                          (v) =>
+                              v['role'] == 'user' &&
+                              v['turn_id'] == m['turn_id'],
+                        )
+                        .firstOrNull;
+                    if (original != null) {
+                      chat.text = original['text'] as String? ?? '';
+                      setState(() {});
+                    }
+                  },
+                ),
+              for (final preview in state.previews.values.where(
+                (m) =>
+                    (m['conversation_id'] ?? 'chat:main') ==
+                    (tab == 1 ? taskConversation : 'chat:main'),
+              ))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 22),
                   child: Column(
@@ -965,6 +1166,8 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
                           disabledBorder: InputBorder.none,
                           hintText: state.hostOnline
                               ? '发送给 Host'
+                              : state.waitingForApproval
+                              ? '等待电脑确认绑定'
                               : 'Host 离线，聊天不可用',
                           hintStyle: const TextStyle(color: Nova.tertiary),
                         ),
@@ -1018,7 +1221,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         builder: (_) => AnimatedBuilder(
           animation: controller!.state,
           builder: (context, _) => Scaffold(
-            backgroundColor: Nova.ink,
+            backgroundColor: Nova.sheet,
             appBar: AppBar(title: Text(title), centerTitle: true),
             body: content(),
           ),
@@ -1027,34 +1230,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     );
   }
 
-  Widget _profileDetails(SpaceClientState state) {
-    final value = state.snapshot['profile'] as Map? ?? {};
-    final about = value['about'] as String? ?? '';
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      children: [
-        NovaSection(
-          header: '个人介绍',
-          footer: state.hostOnline ? '来自当前 Space' : 'Host 不在线，显示上次同步的资料',
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: SelectableText(about.isEmpty ? '还没有个人介绍' : about),
-              ),
-            ),
-            NovaTile(
-              title: '编辑个人资料',
-              trailing: const CupertinoListTileChevron(),
-              onTap: profile,
-            ),
-          ],
-        ),
-        _pending(state),
-      ],
-    );
-  }
+  Widget _profileDetails(SpaceClientState state) => _workbench(5);
 
   Widget _feeds(SpaceClientState state) {
     final cards = state
@@ -1074,7 +1250,10 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
 
   Widget _me(SpaceClientController c) => MyOverview(
     life: c.state.snapshot,
-    draft: const {},
+    draft: {
+      'about':
+          (c.state.snapshot['profile_presentation'] as Map?)?['about'] ?? '',
+    },
     onOpen: (page) {
       if (page == 5) {
         _openPersonalPage('个人资料', () => _profileDetails(c.state));
@@ -1082,19 +1261,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         _openPersonalPage('资讯', () => _feeds(c.state));
       } else {
         final kind = {2: 'todo', 3: 'idea', 4: 'goal'}[page]!;
-        _openPersonalPage(_kindNames[kind]!, () {
-          final rows = c.state.cards('${kind}s');
-          if (rows.isEmpty) return _empty('暂无${_kindNames[kind]}');
-          return ListView(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            children: [
-              _pending(c.state),
-              NovaSection(
-                children: [for (final row in rows) _entity(kind, row)],
-              ),
-            ],
-          );
-        });
+        _openPersonalPage(_kindNames[kind]!, () => _workbench(page));
       }
     },
   );
@@ -1106,7 +1273,13 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
       builder: (context) => ListView(
         padding: const EdgeInsets.fromLTRB(4, 20, 4, 28),
         children: [
-          SettingsGroup(title: '对话', rows: conversationSettingsRows('zh')),
+          SettingsGroup(
+            title: '对话',
+            rows: [
+              ...conversationSettingsRows('zh'),
+              ('api_keys', 'API 密钥', CupertinoIcons.lock),
+            ],
+          ),
           const SettingsGroup(
             title: '更多',
             rows: [
@@ -1123,6 +1296,8 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         await _openPersonalPage('设备', () => _devices(c));
       case 'model_services':
         await _openPersonalPage('模型服务', () => _modelServices(c));
+      case 'api_keys':
+        await _openPersonalPage('API 密钥', () => _hostSection(c, 'credentials'));
       case 'pet_avatar':
         await showPetAvatarSettings(context, petAvatar);
       case 'assistant':
@@ -1218,22 +1393,16 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
             RemoteModelSettingsBackend(c.state, onSync: c.sync, lane: lane),
             title: labels[lane],
             description: '修改将加密发送到电脑，重启电脑上的助手后生效。',
-            onManageCredentials: (context) =>
-                _openPersonalPage('模型密钥', () => _hostSection(c, 'models')),
           ),
         ),
-        NovaSection(
-          footer: models['locked'] == true
-              ? '模型由电脑的启动配置管理，请在电脑上修改。'
-              : '模型和密钥保存在当前 Space；密钥不会传回手机。',
-          children: [
-            NovaTile(
-              title: '模型密钥',
-              trailing: const CupertinoListTileChevron(),
-              onTap: () =>
-                  _openPersonalPage('模型密钥', () => _hostSection(c, 'models')),
-            ),
-          ],
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 6),
+          child: Text(
+            models['locked'] == true
+                ? '模型由电脑的启动配置管理，请在电脑上修改。'
+                : '模型选择将加密发送到电脑。请在设置中的 API 密钥管理服务密钥。',
+            style: const TextStyle(color: Nova.secondary, fontSize: 13),
+          ),
         ),
         _pending(c.state),
       ],
@@ -1251,7 +1420,13 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           children: [
             NovaTile(
               title: widget.space.name,
-              subtitle: Text(state.hostOnline ? 'Host 在线' : 'Host 不在线'),
+              subtitle: Text(
+                state.waitingForApproval
+                    ? '等待电脑确认绑定'
+                    : state.hostOnline
+                    ? 'Host 在线'
+                    : 'Host 不在线',
+              ),
               leading: const NovaIconTile(CupertinoIcons.desktopcomputer),
             ),
             NovaTile(
@@ -1337,7 +1512,13 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 64,
-        leading: tab == 3
+        leading: tab == 1 && taskOpen
+            ? IconButton(
+                tooltip: '返回任务',
+                icon: const Icon(CupertinoIcons.back),
+                onPressed: () => setState(() => taskOpen = false),
+              )
+            : tab == 3
             ? null
             : IconButton(
                 tooltip: '刷新',
@@ -1366,13 +1547,6 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           const SizedBox(width: 10),
         ],
       ),
-      floatingActionButton: tab == 1
-          ? FloatingActionButton(
-              tooltip: '创建',
-              onPressed: _create,
-              child: const Icon(CupertinoIcons.add),
-            )
-          : null,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1380,7 +1554,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           Expanded(
             child: switch (tab) {
               0 => _chat(c),
-              1 => _tasks(state),
+              1 => taskOpen ? _chat(c) : _tasks(state),
               2 => _timeline(state),
               _ => _me(c),
             },

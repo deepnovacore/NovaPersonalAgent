@@ -29,6 +29,7 @@ async function harness(t, overrides = {}) {
     loadRuntime: async () => { calls.push(['load']); return runtime },
     persist: async path => { persisted.push(path) },
     prepareRelay: overrides.prepareRelay,
+    existingPersonalPath: overrides.existingPersonalPath,
   })
   return {root, directory, calls, persisted, handler}
 }
@@ -191,4 +192,23 @@ test('an empty config.json left by an interrupted write is removed and creation 
   const bad = await harness(t, {runtime: {readHostSpaceConfig: path => JSON.parse(readFileSync(path, 'utf8'))}})
   await seed(bad, '{not json')
   assert.deepEqual(await bad.handler(settingsEvent, {relayUrl: 'https://relay.example', bootstrapToken: TOKEN}), {ok: false, error: 'space_config_invalid'})
+})
+
+
+test('existing data is attached only from the trusted main callback, including automatic relay setup', async t => {
+  const original=join(tmpdir(),'trusted-original.personal.json')
+  const h=await harness(t,{existingPersonalPath:()=>original,prepareRelay:async()=>({relayUrl:'https://relay.example',bootstrapToken:TOKEN}),runtime:{attachExistingHostSpace:async options=>{h.calls.push(['attach',options]);await writeFile(options.configPath,'{}',{mode:0o600})}}})
+  assert.deepEqual(await h.handler(settingsEvent,{mode:'tailscale',dataMode:'existing'}),{ok:true})
+  assert.equal(h.calls.find(([name])=>name==='attach')[1].personalPath,original)
+  assert.ok(!h.calls.some(([name])=>name==='init'))
+  for(const payload of [{mode:'tailscale',dataMode:'existing',personalPath:original},{relayUrl:'https://relay.example',bootstrapToken:TOKEN,dataMode:'existing',personalPath:original},{mode:'tailscale',dataMode:'unknown'}])await assert.rejects(h.handler(settingsEvent,payload),/space create rejected/)
+})
+test('missing original path or interrupted config for another mode cannot attach or replace data', async t => {
+  const missing=await harness(t)
+  assert.deepEqual(await missing.handler(settingsEvent,{relayUrl:'https://relay.example',bootstrapToken:TOKEN,dataMode:'existing'}),{ok:false,error:'space_existing_data_unavailable'})
+  const h=await harness(t,{existingPersonalPath:()=>join(tmpdir(),'original.personal.json'),runtime:{readHostSpaceConfig:()=>({relay_url:'https://relay.example',data_mode:'isolated'})}})
+  await seed(h,'{}')
+  assert.deepEqual(await h.handler(settingsEvent,{relayUrl:'https://relay.example',bootstrapToken:TOKEN,dataMode:'existing'}),{ok:false,error:'space_config_invalid'})
+  assert.deepEqual(h.calls.map(([name])=>name),['load'])
+  assert.equal(await readFile(join(h.directory,'config.json'),'utf8'),'{}')
 })

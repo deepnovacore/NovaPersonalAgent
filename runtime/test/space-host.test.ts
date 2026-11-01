@@ -11,10 +11,10 @@ import {SuggestionPool} from '../src/core/suggestions.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {displaySnapshot} from '../src/space-host/projection.js';
 
-test('source processing display exports only bounded aggregate status and never profile inference details',async()=>{
+test('source processing display exposes bounded profile text without inference source details',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-source-status-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'one-space',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  try{await host.open({deferBackground:true});const read=host.snapshot.bind(host);host.snapshot=()=>({...read(),profile_preparation:{...read().profile_preparation,status:'working',needs_update:true,draft:{about:{text:'private inferred portrait',refs:[]},work:[],interests:[]},sources:[{id:'private-ref',version:'private-version',observed_at:new Date().toISOString(),label:'private source'}]}}) as ReturnType<typeof host.snapshot>;
-  const snapshot=displaySnapshot(host) as unknown as Record<string,unknown>;assert.deepEqual(snapshot.source_processing,{status:'working',needs_update:true});assert.equal(JSON.stringify(snapshot).includes('private'),false);assert.equal('profile_preparation' in snapshot,false);
+  const snapshot=displaySnapshot(host) as unknown as Record<string,unknown>;assert.deepEqual(snapshot.source_processing,{status:'working',needs_update:true});assert.equal(JSON.stringify(snapshot).includes('private-ref'),false);assert.equal(JSON.stringify(snapshot).includes('private source'),false);assert.equal((snapshot.profile_presentation as {about:string}).about,'private inferred portrait');assert.equal('profile_preparation' in snapshot,false);
   host.snapshot=()=>({...read(),profile_preparation:{...read().profile_preparation,status:'future-private-status',needs_update:false}}) as unknown as ReturnType<typeof host.snapshot>;assert.deepEqual((displaySnapshot(host) as unknown as Record<string,unknown>).source_processing,{status:'idle',needs_update:false});
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 });
@@ -46,6 +46,18 @@ test('real PersonalAgentHost model path streams preview, survives disconnect and
  try{await host.open({deferBackground:true});await space.open();await space.receive('phone',value);await space.receive('phone',value);await new Promise(r=>setImmediate(r));assert.equal(calls,1);assert.equal(previews[0]?.type,'chat.delta');offline=true;finish();await space.waitForChats();offline=false;await space.flush();assert.equal(sent.filter(x=>x.type==='chat.final').length,1);assert.equal(sent.find(x=>x.type==='chat.final')?.text,'durable reply');assert.equal(space.snapshot().chat.find(row=>row.role==='user')?.id,'user_chat-1');assert.equal(space.snapshot().chat.find(row=>row.role==='user')?.turn_id,'chat-1');assert.ok(host.snapshot().notifications.pending_intents>0||host.notifications.snapshot().deliveries.some(row=>row.source.type==='space_chat'));await space.receive('phone',value);assert.equal(calls,1)}finally{finish();await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
 });
 
+test('model failure reason survives final delivery, snapshot and Host restart without provider details',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-failure-')),sent:Record<string,unknown>[]=[];
+ const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ let host=make();host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.reject(Object.assign(Error('sk-secret https://private.example'),{reason:'provider_http_auth'})),close:()=>Promise.resolve()}),()=>{});
+ const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{}),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone']};
+ const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport});
+ try{await host.open({deferBackground:true});await space.open();await space.receive('phone',{v:1,type:'intent',op_id:'chat',kind:'chat.send',created_at:Date.now(),expires_at:Date.now()+30000,input:{conversation_id:'chat:main',text:'hi'}});await space.waitForChats();
+  assert.equal(sent.find(row=>row.type==='chat.final')?.error,'authentication');assert.equal(space.snapshot().chat.find(row=>row.role==='user')?.failure_reason,'authentication');assert.equal(JSON.stringify(sent).includes('sk-secret'),false);assert.equal((await readFile(join(dir,'personal.json'),'utf8')).includes('sk-secret'),false);
+  await space.close();await host.close();host=make();await host.open({deferBackground:true});assert.equal(host.spaceChatMessages().find(row=>row.role==='user')?.failure_reason,'authentication');
+ }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
+});
+
 test('Host cancellation aborts active model and rejects goal-shaped mobile actions',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-cancel-'));let calls=0;const sent:Record<string,unknown>[]=[];
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
@@ -63,9 +75,9 @@ test('key delivery persists one randomized envelope per epoch and recipient acro
 test('pairing computes fingerprint locally, pins returned keys, and invitation uses local Host key',async()=>{
  const {SpaceHostController}=await import('../src/space-host/config.js');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-pinning-'));const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  const pinned={selected_version:1,device:'phone',signingPublicKey:{x:'signed'},encryptionPublicKey:{x:'encrypted'}},identity={device:'host',signingPublicKey:{x:'host-sign'},signingPrivateKey:{d:'host'},encryptionPublicKey:{x:'host-enc'},encryptionPrivateKey:{d:'enc'}};
- let confirmations=0;const sdk={crypto:{deviceFingerprint:()=> 'local-fingerprint'},RelayClient:class { pendingPairings(){return Promise.resolve([{...pinned,id:'request',space:'s',expiresAt:Date.now()+10000,fingerprint:'relay-forged'}]);} confirmPairing(){confirmations++;return Promise.resolve({...pinned,encryptionPublicKey:{x:'attacker'}});} createInvitation(){return Promise.resolve({id:'invite',space:'attacker',host:'attacker',hostSigningPublicKey:{x:'attacker'}});}}} as unknown as SpaceHostModules;
+ let confirmations=0,requestState:'valid'|'missing'|'expired'='valid';const sdk={crypto:{deviceFingerprint:()=> 'local-fingerprint'},RelayClient:class { pendingPairings(){return Promise.resolve(requestState==='missing'?[]:[{...pinned,id:'request',space:'s',expiresAt:Date.now()+(requestState==='expired'?-1:10000),fingerprint:'relay-forged'}]);} confirmPairing(){confirmations++;return Promise.resolve({...pinned,encryptionPublicKey:{x:'attacker'}});} createInvitation(){return Promise.resolve({id:'invite',space:'attacker',host:'attacker',hostSigningPublicKey:{x:'attacker'}});}}} as unknown as SpaceHostModules;
  const config={v:1 as const,mode:'host' as const,space:'s',personal_path:host.path,relay_url:'https://relay.example',epoch:1,identity,content_key:'x'.repeat(43),members:[]};const controller=new SpaceHostController(join(dir,'config.json'),config,host,sdk);
- try{await assert.rejects(controller.confirmPairing('request','relay-forged'),/pairing_fingerprint_mismatch/);assert.equal(confirmations,0);await assert.rejects(controller.confirmPairing('request','local-fingerprint'),/pairing_key_mismatch/);assert.equal(config.members.length,0);const invitation=await controller.invitation();assert.deepEqual(invitation.hostSigningPublicKey,identity.signingPublicKey);assert.equal(invitation.space,'s');assert.equal(invitation.host,'host')}finally{await rm(dir,{recursive:true,force:true})}
+ try{requestState='missing';await assert.rejects(controller.confirmPairing('request','local-fingerprint'),/pairing_request_expired/);requestState='expired';await assert.rejects(controller.confirmPairing('request','local-fingerprint'),/pairing_request_expired/);assert.equal(confirmations,0);assert.equal(config.members.length,0);requestState='valid';await assert.rejects(controller.confirmPairing('request','relay-forged'),/pairing_fingerprint_mismatch/);assert.equal(confirmations,0);await assert.rejects(controller.confirmPairing('request','local-fingerprint'),/pairing_key_mismatch/);assert.equal(config.members.length,0);const invitation=await controller.invitation();assert.deepEqual(invitation.hostSigningPublicKey,identity.signingPublicKey);assert.equal(invitation.space,'s');assert.equal(invitation.host,'host')}finally{await rm(dir,{recursive:true,force:true})}
 });
 
 test('mobile model tool schema advertises explicit actions and rejects a planning goal',async()=>{
@@ -144,4 +156,21 @@ test('a caller flush returns without chasing rows queued after it started, and t
   assert.equal(delivered.some(row=>row.id==='follow-up'),true);
   assert.deepEqual(await queued(),[],'the journal outbox must be empty once the follow-up row was delivered');
  }finally{release();await Promise.race([Promise.allSettled([initial,followUp]),new Promise(resolve=>setTimeout(resolve,2000))]);await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
+});
+
+
+test('Host rejects stale Client chat targeting a conversation now in plan mode',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-plan-read-only-'));let calls=0;const sent:Record<string,unknown>[]=[];
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ host.setConversationRuntime(()=>Promise.resolve({runTurn:async()=>{calls++;return {assistant:'should not run'}},close:()=>Promise.resolve()}),()=>{});
+ const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>{}),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve()};
+ const space=new SpaceHost({path:join(dir,'space.json'),space:'test',host,transport});
+ try{
+  await host.open({deferBackground:true});await space.open();
+  const show=await host.command({type:'personal.command',request_id:'show',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(show.ok,true);
+  const mode=await host.command({type:'personal.command',request_id:'plan-mode',method:'conversations.mode',params:{id:'chat:main',mode:'plan'}},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(mode.ok,true);
+  await space.receive('phone',{v:1,type:'intent',op_id:'stale-chat',kind:'chat.send',input:{conversation_id:'chat:main',text:'continue'},created_at:Date.now(),expires_at:Date.now()+30000});await space.waitForChats();
+  assert.equal(calls,0);assert.equal(sent.find(row=>row.type==='receipt'&&row.op_id==='stale-chat')?.error,'conversation_read_only');
+  assert.equal(host.spaceChatMessages().length,0);
+ }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
 });

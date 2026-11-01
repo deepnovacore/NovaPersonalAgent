@@ -2287,6 +2287,10 @@ async function startSelectedCamera(camera, smokeChannel) {
     directory: () => resolve(app.getPath('userData'), 'space'),
     configured: () => Boolean(process.env.NOVA_SPACE_HOST_CONFIG) || (Boolean(currentSettings?.spaceHostConfigPath) && existsSync(currentSettings.spaceHostConfigPath)),
     loadRuntime: loadSpaceHostRuntime,
+    existingPersonalPath: runtime => {
+      if(backendStatus.state!=='connected')throw Error('space_existing_data_unavailable')
+      return runtime.existingHostPersonalPath(computerLaunchEnvironment)
+    },
     prepareRelay: () => tailscaleRelay.ensure(),
     persist: configPath => accessCredentials(() => settingsWriter({spaceHostConfigPath: configPath}, undefined, {preserveSecrets: true})),
   }))

@@ -956,6 +956,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     final suggested = version > 0 ? '' : draft['about'] as String? ?? '';
     final work = version > 0 ? const [] : _rows(draft['work']);
     final about = confirmed.isNotEmpty ? confirmed : suggested;
+    final interests = (draft['interests'] as List? ?? [])
+        .whereType<String>()
+        .toList();
     final memory = snapshot?.object('memory') ?? {};
     final overview = memory['overview'] as Map?;
     final entries = _rows(
@@ -1044,6 +1047,19 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 titleLines: 1,
                 subtitle: Text('${item['text'] ?? ''}'),
               ),
+          ],
+        ),
+      if (interests.isNotEmpty)
+        NovaSection(
+          header: widget.language == 'zh' ? '关注' : 'Interests',
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(interests.join(' · ')),
+              ),
+            ),
           ],
         ),
       if (overview != null && '${overview['summary'] ?? ''}'.isNotEmpty)

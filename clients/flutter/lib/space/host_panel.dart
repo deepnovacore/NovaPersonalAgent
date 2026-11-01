@@ -89,8 +89,34 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
     return value == null || value.isEmpty ? null : value;
   }
 
+  String _providerLabel(String name) =>
+      const {
+        'ARK_API_KEY': '火山方舟',
+        'AUTOGLM_API_KEY': 'AutoGLM',
+        'CODEX_API_KEY': 'Codex',
+        'COMPATIBLE_ASR_API_KEY': '兼容语音识别服务',
+        'COMPATIBLE_TTS_API_KEY': '兼容语音合成服务',
+        'DASHSCOPE_API_KEY': '通义千问 / DashScope',
+        'DEEPSEEK_API_KEY': 'DeepSeek',
+        'DOUBAO_BIGMODEL_API_KEY': '豆包语音',
+        'EMBEDDING_API_KEY': '向量模型服务',
+        'GEMINI_API_KEY': 'Gemini',
+        'OPENAI_API_KEY': 'OpenAI',
+        'OPENAI_COMPATIBLE_API_KEY': 'OpenAI 兼容服务',
+        'OPENROUTER_API_KEY': 'OpenRouter',
+        'SELF_HOSTED_ASR_API_KEY': '自托管语音识别',
+        'SELF_HOSTED_LLM_API_KEY': '自托管模型',
+        'SELF_HOSTED_TTS_API_KEY': '自托管语音合成',
+        'STEPFUN_API_KEY': '阶跃星辰 / StepFun',
+      }[name] ??
+      '其他模型服务';
+
   Future<void> _putSecret(String name) async {
-    final secret = await _ask('$name（保存到 Host）', '', secret: true);
+    final secret = await _ask(
+      '${_providerLabel(name)} API 密钥',
+      '',
+      secret: true,
+    );
     if (secret == null) return;
     await _send('secret.put', {'name': name, 'value': secret});
   }
@@ -219,9 +245,9 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
               ),
             ],
           ),
-        if (widget.section == null || widget.section == 'models')
+        if (widget.section == null || widget.section == 'credentials')
           NovaSection(
-            header: 'Host 模型密钥',
+            header: 'API 密钥',
             footer: credentialsDamaged
                 ? 'Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'
                 : '密钥只发送给 Host，不会回显；写入后需重启 Host 生效，Host 环境变量中已设置的密钥优先。',
@@ -229,7 +255,7 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
               for (final c in credentials)
                 NovaTile(
                   key: ValueKey('host.credential.${c['name']}'),
-                  title: '${c['name']}',
+                  title: _providerLabel('${c['name']}'),
                   subtitle: Text(
                     c['configured'] == true
                         ? '已配置 · ${c['source'] == 'environment' ? '来自 Host 环境' : '来自 Space'} · ${c['fingerprint']}'

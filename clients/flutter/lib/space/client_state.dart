@@ -21,6 +21,7 @@ class SpaceClientState extends ChangeNotifier {
   final Map<String, Map<String, dynamic>> chunks = {};
   int cursor = 0;
   bool hostOnline = false;
+  bool waitingForApproval = false;
   String? error;
   Future<void> _tail = Future.value();
   bool _disposed = false;
@@ -304,21 +305,25 @@ class SpaceClientState extends ChangeNotifier {
         await save();
         changed();
       });
-  Future<void> beginChat(String id, String text, int now) =>
-      transaction(() async {
-        chatRequests[id] = {'status': 'sending', 'created_at': now};
-        messages.add({
-          'id': 'user_$id',
-          'turn_id': id,
-          'role': 'user',
-          'conversation_id': 'chat:main',
-          'text': text,
-          'created_at': now,
-          'status': 'sending',
-        });
-        await save();
-        changed();
-      });
+  Future<void> beginChat(
+    String id,
+    String text,
+    int now, {
+    String conversationId = 'chat:main',
+  }) => transaction(() async {
+    chatRequests[id] = {'status': 'sending', 'created_at': now};
+    messages.add({
+      'id': 'user_$id',
+      'turn_id': id,
+      'role': 'user',
+      'conversation_id': conversationId,
+      'text': text,
+      'created_at': now,
+      'status': 'sending',
+    });
+    await save();
+    changed();
+  });
   Future<void> markChat(String id, String status, {String? error}) =>
       transaction(() async {
         final request = chatRequests[id];
@@ -366,6 +371,7 @@ class SpaceClientState extends ChangeNotifier {
           'role': 'assistant',
           'text': event['text'],
           'status': event['status'],
+          if (event['error'] != null) 'error': event['error'],
         };
         final existing = messages.indexWhere((m) => m['id'] == id);
         if (existing < 0) {
@@ -449,6 +455,11 @@ class SpaceClientState extends ChangeNotifier {
         'todos',
         'ideas',
         'profile',
+        'profile_presentation',
+        'timeline_entries',
+        'timeline_available_evidence_ids',
+        'conversations',
+        'schedules',
         'timeline',
         'feed',
         'notifications',

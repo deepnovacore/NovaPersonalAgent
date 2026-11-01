@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:async';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:nova_mobile/space/notification_router.dart';
@@ -8,6 +10,7 @@ import 'package:nova_mobile/space/native_scope.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/space/space_root.dart';
 import 'package:nova_mobile/space/space_storage.dart';
+import 'package:nova_mobile/space/space_crypto.dart';
 import 'space_client_test.dart' show MemorySpacePersistence;
 
 class SlowCatalog extends SpaceCatalog {
@@ -19,6 +22,23 @@ class SlowCatalog extends SpaceCatalog {
     adds++;
     await release.future;
     await super.add(space);
+  }
+}
+
+class PairingCatalog extends SpaceCatalog {
+  PairingCatalog() : super(persistence: MemorySpacePersistence());
+  int pairingCalls = 0;
+  SpaceRecord? created;
+  @override
+  Future<SpaceRecord> pairOnce(Future<SpaceRecord> Function() work) {
+    pairingCalls++;
+    return super.pairOnce(work);
+  }
+
+  @override
+  Future<void> add(SpaceRecord space) async {
+    created = space;
+    throw const HandshakeException('https://private-relay.example failed');
   }
 }
 
@@ -64,6 +84,113 @@ void main() {
       expect(catalog.spaces, hasLength(1));
     },
   );
+  testWidgets(
+    'Client scan opens one fingerprint and name confirmation before pairing',
+    (tester) async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('dev.steenbakker.mobile_scanner/scanner/method'),
+        (call) async => switch (call.method) {
+          'state' => 1,
+          'start' => {
+            'textureId': 1,
+            'size': {'width': 640.0, 'height': 480.0},
+          },
+          _ => null,
+        },
+      );
+      for (final channel in ['event', 'deviceOrientation']) {
+        messenger.setMockMethodCallHandler(
+          MethodChannel('dev.steenbakker.mobile_scanner/scanner/$channel'),
+          (_) async => null,
+        );
+      }
+      final catalog = PairingCatalog();
+      final identity = (await tester.runAsync(SpaceIdentity.generate))!;
+      final fingerprint = signingFingerprint(identity.signingPublic);
+      final invitation = jsonEncode({
+        'id': 'invitation',
+        'space': fingerprint,
+        'host': 'host',
+        'hostSigningPublicKey': identity.signingPublic,
+        'relay': 'https://relay.example',
+        'secret': 'one-time-secret',
+        'expiresAt': DateTime.now().millisecondsSinceEpoch + 60000,
+        'business_versions': [1],
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SpaceRoot(
+            catalog: catalog,
+            standaloneBuilder: (_) => const Text('Local'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('新建 Space'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, '名称'), findsOneWidget);
+      await tester.tap(find.text('连接 Host'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, '名称'), findsNothing);
+      await tester.tap(find.text('扫描 Host 邀请码'));
+      await tester.pump();
+      final detect = tester
+          .widget<MobileScanner>(find.byType(MobileScanner))
+          .onDetect!;
+      final capture = BarcodeCapture(barcodes: [Barcode(rawValue: invitation)]);
+      detect(capture);
+      detect(capture);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('连接电脑'), findsOneWidget);
+      expect(find.text(fingerprint), findsOneWidget);
+      expect(find.text('我的电脑'), findsOneWidget);
+      expect(find.text('Space 名称'), findsOneWidget);
+      expect(catalog.pairingCalls, 0);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(find.text('已读取电脑邀请码，可继续确认连接。'), findsOneWidget);
+      expect(catalog.pairingCalls, 0);
+      expect(catalog.created, isNull);
+      expect(await const FlutterSecureStorage().readAll(), isEmpty);
+      detect(capture);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('确认连接电脑'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('确认连接电脑'));
+      await tester.pumpAndSettle();
+      expect(find.text(fingerprint), findsOneWidget);
+      final name = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(name, '书房电脑');
+      await tester.tap(find.text('确认绑定'));
+      await tester.runAsync(() async {
+        for (
+          var attempts = 0;
+          attempts < 100 && catalog.created == null;
+          attempts++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+      await tester.pumpAndSettle();
+      expect(catalog.pairingCalls, 1);
+      expect(catalog.created?.name, '书房电脑');
+      expect(catalog.created?.mode, SpaceMode.client);
+      expect(find.text('暂时无法连接电脑，请检查网络后重试。'), findsOneWidget);
+      expect(find.textContaining('HandshakeException'), findsNothing);
+      expect(find.textContaining('private-relay'), findsNothing);
+    },
+  );
+
   test(
     'opening a catalog twice never duplicates its persisted Spaces',
     () async {

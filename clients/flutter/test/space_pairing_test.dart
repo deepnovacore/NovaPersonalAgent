@@ -18,7 +18,7 @@ void main() {
       final host = await SpaceIdentity.generate();
       final requests = <Map<String, dynamic>>[];
       var admitted = false;
-      final subscription = server.listen((request) async {
+      Future<void> handle(HttpRequest request) async {
         final body = jsonMap(await utf8.decoder.bind(request).join());
         request.response.headers.contentType = ContentType.json;
         if (request.uri.path == '/v1/auth/challenge') {
@@ -63,7 +63,9 @@ void main() {
           );
         }
         await request.response.close();
-      });
+      }
+
+      final subscription = server.listen(handle);
       final catalog = SpaceCatalog(persistence: MemorySpacePersistence());
       await catalog.open();
       final invitation = SpaceInvitation.parse(
@@ -126,6 +128,37 @@ void main() {
           saved,
           reason: 'an existing content key must survive a new scan',
         );
+        final moved = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        final movedSubscription = moved.listen(handle);
+        try {
+          final movedInvite = SpaceInvitation.parse(
+            jsonEncode({
+              ...invitation.value,
+              'relay': 'http://127.0.0.1:${moved.port}',
+            }),
+            allowLoopback: true,
+          );
+          final rebound = await movedInvite.pair(
+            'Renamed computer',
+            catalog,
+            allowLoopback: true,
+          );
+          expect(rebound.id, first.id);
+          expect(rebound.device, first.device);
+          expect(catalog.spaces, hasLength(1));
+          expect(catalog.spaces.single.relay, 'http://127.0.0.1:${moved.port}');
+          expect(catalog.spaces.single.name, 'Renamed computer');
+          expect(await keys.read(), saved);
+          expect(
+            await SpaceSecurePersistence(
+              'nova.space.identity.${first.id}',
+            ).read(),
+            identity,
+          );
+        } finally {
+          await movedSubscription.cancel();
+          await moved.close(force: true);
+        }
       } finally {
         catalog.dispose();
         SpaceStorage.active = null;

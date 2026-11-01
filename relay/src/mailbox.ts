@@ -108,12 +108,25 @@ export class MailboxStore {
         return {seq: Number(old.seq),duplicate:true};
       }
       this.now();
-      const global = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM mailbox_messages').get()!;
-      const local = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM mailbox_messages WHERE space=? AND recipient=?')
-        .get(p.space,envelope.to)!;
-      if (Number(global.count) >= this.limits.maxMessages || Number(local.count) >= this.limits.maxMessagesPerDevice ||
-          Number(global.bytes) + bytes > this.limits.maxBytes || Number(local.bytes) + bytes > this.limits.maxBytesPerDevice) {
-        throw new RelayError('capacity_exceeded');
+      const pressure = () => {
+        const global = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM mailbox_messages').get()!;
+        const local = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM mailbox_messages WHERE space=? AND recipient=?')
+          .get(p.space,envelope.to)!;
+        return {global:Number(global.count) >= this.limits.maxMessages || Number(global.bytes) + bytes > this.limits.maxBytes,
+          local:Number(local.count) >= this.limits.maxMessagesPerDevice || Number(local.bytes) + bytes > this.limits.maxBytesPerDevice};
+      };
+      let full = pressure();
+      if (full.global || full.local) {
+        // ACKed ciphertext is disposable; retain its permanent ID hash and an explicit recovery floor.
+        const space = full.global ? null : p.space, device = full.global ? null : envelope.to;
+        this.db.prepare(`UPDATE mailbox_devices SET floor=max(floor,ack) WHERE (space,device) IN (
+          SELECT m.space,m.recipient FROM mailbox_messages m JOIN mailbox_devices d ON d.space=m.space AND d.device=m.recipient
+          WHERE m.seq<=d.ack AND (? IS NULL OR (m.space=? AND m.recipient=?)))`).run(space,space,device);
+        this.db.prepare(`DELETE FROM mailbox_messages WHERE (? IS NULL OR (space=? AND recipient=?)) AND EXISTS (
+          SELECT 1 FROM mailbox_devices d WHERE d.space=mailbox_messages.space AND d.device=mailbox_messages.recipient
+          AND mailbox_messages.seq<=d.ack)`).run(space,space,device);
+        full = pressure();
+        if (full.global || full.local) throw new RelayError('capacity_exceeded');
       }
       const history = this.db.prepare('SELECT count(*) AS count FROM mailbox_history').get()!;
       const localHistory = this.db.prepare('SELECT count(*) AS count FROM mailbox_history WHERE space=? AND recipient=?').get(p.space,envelope.to)!;

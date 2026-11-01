@@ -117,6 +117,10 @@ void main() {
       'method': 'discovery.configure',
       'params': {'enabled': true},
     });
+    expect(find.text('OpenAI'), findsOneWidget);
+    expect(find.text('Gemini'), findsOneWidget);
+    expect(find.text('OPENAI_API_KEY'), findsNothing);
+    expect(find.text('GEMINI_API_KEY'), findsNothing);
     await tester.tap(
       find.byKey(const ValueKey('host.credential.GEMINI_API_KEY')),
     );

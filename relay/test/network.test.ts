@@ -277,3 +277,19 @@ test('maximum chat text survives encryption, HTTP admission and SDK WebSocket de
   }
  }finally{stop?.();f.h.stop();f.p.stop();await f.service.close()}
 });
+
+test('HTTP mailbox recovers payload capacity after ACK without weakening dedup or retaining an expired cursor',async()=>{
+ const f=await fixture({mailbox:{maxMessagesPerDevice:1}});
+ try{
+  await paired(f);
+  const first=await signEnvelope({v:1,space:f.space,id:'capacity-first',from:f.host.device,to:f.phone.device,chan:'mailbox',epoch:1,expiresAt:null,body:await encryptBody({text:'first'},generateContentKey())},f.host.signingPrivateKey);
+  const second=await signEnvelope({...first,id:'capacity-second'},f.host.signingPrivateKey);
+  assert.deepEqual(await f.h.send(first),{seq:1,duplicate:false});
+  await assert.rejects(f.h.send(second),/capacity_exceeded/);
+  const page=await f.p.read();assert.equal(page.messages[0]?.envelope.id,first.id);await f.p.acknowledge(page.nextCursor);
+  assert.deepEqual(await f.h.send(second),{seq:2,duplicate:false});
+  assert.deepEqual(await f.h.send(first),{seq:1,duplicate:true});
+  await assert.rejects(f.p.read({after:0}),/cursor_expired/);
+  const remaining=await f.p.read();assert.equal(remaining.messages[0]?.envelope.id,second.id);assert.equal(remaining.nextCursor,2);
+ }finally{f.h.stop();f.p.stop();await f.service.close();}
+});

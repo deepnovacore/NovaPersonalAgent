@@ -96,6 +96,37 @@ void main() {
     await fixture.close(tester);
   });
 
+  testWidgets(
+    'microphone tap shows an inline hint without covering the composer',
+    (tester) async {
+      final fixture = _ComposerFixture();
+      await fixture.open();
+      await tester.pumpWidget(fixture.panel(fixture.first));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Keep my draft');
+      await tester.tap(find.byIcon(CupertinoIcons.mic_fill));
+      await tester.pumpAndSettle();
+      final hint = find.text('按住麦克风说话，松开后转成文字');
+      expect(hint, findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(
+        tester.getBottomLeft(hint).dy,
+        lessThan(tester.getTopLeft(find.byType(TextField)).dy),
+      );
+      final send = find.widgetWithIcon(IconButton, CupertinoIcons.arrow_up);
+      expect(tester.widget<IconButton>(send).onPressed, isNotNull);
+      expect(fixture.microphoneRequests, 0);
+      expect(fixture.audio.startCount, 0);
+      expect(fixture.key.currentState!.input.text, 'Keep my draft');
+      final gesture = await fixture.record(tester);
+      expect(hint, findsNothing);
+      await fixture.key.currentState!.cancelDictation();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await fixture.close(tester);
+    },
+  );
+
   testWidgets('recording disables sending an existing draft without autosend', (
     tester,
   ) async {

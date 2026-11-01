@@ -72,6 +72,7 @@ class RemoteModelSettingsBackend extends ModelSettingsBackend {
       providers: providers,
       customEndpoint: false,
       modelDiscovery: false,
+      allowKeyEntry: false,
       canFollow: true,
       followLabel: '使用电脑默认模型',
       following: following,
@@ -83,7 +84,7 @@ class RemoteModelSettingsBackend extends ModelSettingsBackend {
           : following
           ? '当前使用电脑的默认模型。保存后将改用所选模型。'
           : null,
-      securityText: '模型选择和新密钥将加密发送到电脑，保存在当前 Space。已有密钥不会传回手机。',
+      securityText: '模型选择将加密发送到电脑。请在设置中的 API 密钥管理服务密钥。',
     );
   }
 

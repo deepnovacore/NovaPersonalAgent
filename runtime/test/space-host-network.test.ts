@@ -9,7 +9,7 @@ import {SuggestionPool} from '../src/core/suggestions.js';
 import {SpaceHostController,type HostSpaceConfig,readHostSpaceConfig} from '../src/space-host/config.js';
 import type {SignedEnvelope,SpaceIdentity} from '../src/space-host/relay-transport.js';
 
-test('real HTTP and WebSocket Host pairing, Life, model stream/final and retry dedupe',async t=>{
+test('real HTTP/WebSocket Host pairing, Life, stream dedupe and owner revocation restart',async t=>{
 const {RelayServer,RelayClient,crypto}=await loadRelayFixture();
 const dir=await mkdtemp(join(await realpath(tmpdir()),'host-network-'));
 const cleanup:(()=>void|Promise<void>)[]=[()=>rm(dir,{recursive:true,force:true})];
@@ -21,7 +21,7 @@ const h=make(identity),p=make(phone),record={device:identity.device,signingPubli
 let calls=0;const makeHost=()=>{const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:space,memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
 host.setConversationRuntime((_conversation,emit)=>Promise.resolve(({runTurn:()=>{calls++;emit({type:'caption',role:'assistant',text:'preview',final:false});return Promise.resolve({assistant:'real network final'});},close:()=>{;return Promise.resolve();}})),()=>{ /* Test callback intentionally has no side effects. */ });return host;};let host=makeHost();
 let config:HostSpaceConfig={v:1,mode:'host',space,personal_path:host.path,relay_url:url,epoch:1,identity,content_key:Buffer.from(key).toString('base64url'),members:[]};
-let loseConfirm=true,loseRevoke=true;class FaultRelayClient extends RelayClient {override async confirmPairing(id:string,opId:string){const value=await super.confirmPairing(id,opId);if(loseConfirm){loseConfirm=false;throw Error('lost confirm response')}return value}override async revokeDevice(device:string,opId:string){const value=await super.revokeDevice(device,opId);if(loseRevoke){loseRevoke=false;throw Error('lost revoke response')}return value}}
+let loseConfirm=true,loseRevoke=true,revocationCalls=0;class FaultRelayClient extends RelayClient {override async confirmPairing(id:string,opId:string){const value=await super.confirmPairing(id,opId);if(loseConfirm){loseConfirm=false;throw Error('lost confirm response')}return value}override async revokeDevice(device:string,opId:string){revocationCalls++;const value=await super.revokeDevice(device,opId);if(loseRevoke){loseRevoke=false;throw Error('lost revoke response')}return value}}
 let controller=new SpaceHostController(join(dir,'config.json'),config,host,{crypto,RelayClient:FaultRelayClient});host.setSpaceHost(controller);cleanup.push(()=>host.close());
 let stop:(()=>void)|undefined=undefined;cleanup.push(()=>stop?.());
 await host.open({deferBackground:true});
@@ -42,6 +42,42 @@ await host.open({deferBackground:true});
  await controller.service!.close();await secondClient.send(await crypto.signEnvelope({v:1,space,id:'stale-revoked-intent',from:second.device,to:identity.device,chan:'mailbox',epoch:1,expiresAt:null,body:await crypto.encryptBody({v:1,type:'intent',op_id:'revoked-old',kind:'life.mutate',created_at:Date.now(),input:{op:'create',kind:'todo',title:'must-not-apply'}},key)},second.signingPrivateKey));
  await assert.rejects(controller.revoke(second.device),/lost revoke response/);assert.ok(config.pending_revoke);await host.close();config=readHostSpaceConfig(join(dir,'config.json'));host=makeHost();controller=new SpaceHostController(join(dir,'config.json'),config,host,{crypto,RelayClient:FaultRelayClient});host.setSpaceHost(controller);await host.open({deferBackground:true});assert.equal(config.pending_revoke,undefined);assert.equal(config.epoch,2);await until(()=>installedEpoch===2);
  await send({v:1,type:'intent',op_id:'after-rotation',kind:'life.mutate',created_at:Date.now(),input:{op:'create',kind:'todo',title:'after rotation'}},'post-rotation');await until(()=>messages.some(m=>m.type==='receipt'&&m.op_id==='after-rotation'));assert.equal(host.life.snapshot().todos.some(todo=>todo.title==='must-not-apply'),false);assert.equal(host.life.snapshot().todos[0]?.title,'after rotation');
+ // Exercise the real transport receive -> controller revoke -> service close/restart chain.
+ // Calling receive directly would miss a deadlock in the transport's ordered callback.
+ const third=await crypto.generateDeviceIdentity(),thirdClient=make(third);cleanup.push(()=>thirdClient.stop());
+ const thirdInvite=await controller.invitation(),thirdInput={v:1,purpose:'pair-request',invitationId:thirdInvite.id,secret:thirdInvite.secret,device:third.device,signingPublicKey:third.signingPublicKey,encryptionPublicKey:third.encryptionPublicKey,business_versions:[1]};
+ const thirdRequest=await thirdClient.requestPairing({...thirdInput,proof:await crypto.signControl(thirdInput,third.signingPrivateKey)});
+ await controller.confirmPairing(thirdRequest.id,crypto.deviceFingerprint(third.signingPublicKey,third.encryptionPublicKey));
+ assert.equal(config.owner_device,phone.device);
+ const beforeRevocation=revocationCalls;
+ // Non-owner and owner-self requests must not rotate keys or remove any member.
+ await thirdClient.send(await crypto.signEnvelope({v:1,space,id:'non-owner-revoke',from:third.device,to:identity.device,chan:'mailbox',epoch:config.epoch,expiresAt:null,body:await crypto.encryptBody({v:1,type:'intent',op_id:'non-owner-revoke',kind:'device.revoke',created_at:Date.now(),input:{device:phone.device}},activeKey)},third.signingPrivateKey));
+ await send({v:1,type:'intent',op_id:'owner-self-revoke',kind:'device.revoke',created_at:Date.now(),input:{device:phone.device}},'owner-self-revoke');
+ await until(()=>messages.some(m=>m.type==='receipt'&&m.op_id==='owner-self-revoke'&&m.status==='rejected'));
+ const thirdMailbox=await thirdClient.read({after:0,limit:100});
+ const thirdBodies=await Promise.all(thirdMailbox.messages.map(async row=>{try{return await crypto.decryptBody(row.envelope.body,activeKey) as Record<string,unknown>}catch{return null}}));
+ assert.ok(thirdBodies.some(m=>m?.type==='receipt'&&m.op_id==='non-owner-revoke'&&m.status==='rejected'));
+ assert.equal(revocationCalls,beforeRevocation);assert.equal(config.epoch,2);assert.equal(config.members.length,2);
+ const revokeIntent={v:1,type:'intent',op_id:'owner-network-revoke',kind:'device.revoke',created_at:Date.now(),input:{device:third.device}};
+ const originalService=controller.service;
+ await send(revokeIntent,'owner-network-revoke');
+ await until(()=>config.epoch===3&&controller.service!==originalService&&controller.service!==undefined);
+ await until(()=>installedEpoch===3);
+ assert.ok(messages.some(m=>m.type==='receipt'&&m.op_id===revokeIntent.op_id&&m.status==='pending'));
+ assert.equal(config.members.some(member=>member.device===third.device),false);assert.equal(config.pending_revoke,undefined);
+ assert.equal(revocationCalls,beforeRevocation+1);
+ const settings=controller.service!.snapshot(phone.device).host_settings as {devices:string[]};
+ assert.deepEqual(settings.devices,[phone.device]);assert.equal(controller.service!.snapshot(third.device).host_settings,undefined);
+ // Replay the same operation with the new epoch: pending resolves to accepted only once removal is observed.
+ await send(revokeIntent,'owner-network-revoke-retry');
+ await until(()=>messages.some(m=>m.type==='receipt'&&m.op_id===revokeIntent.op_id&&m.status==='accepted'));
+ await send(revokeIntent,'owner-network-revoke-second-retry');
+ await send({v:1,type:'intent',op_id:'after-owner-revoke',kind:'life.mutate',created_at:Date.now(),input:{op:'create',kind:'todo',title:'owner still connected'}},'after-owner-revoke');
+ await until(()=>messages.some(m=>m.type==='receipt'&&m.op_id==='after-owner-revoke'&&m.status==='accepted'));
+ assert.equal(config.epoch,3);assert.equal(revocationCalls,beforeRevocation+1);
+ assert.equal(config.revoked_members?.filter(member=>member.device===third.device).length,1);
+ assert.equal(host.life.snapshot().todos.filter(todo=>todo.title==='owner still connected').length,1);
+
 
 
 

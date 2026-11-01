@@ -398,13 +398,14 @@ export class RealtimeAssembly {
     this.#spaceHostConfigPath=input.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
     this.#spaceHostEnvironment=input.spaceHostEnvironment
     const spaceConfig=this.#spaceHostConfigPath?readHostSpaceConfig(memoryPath(this.#spaceHostConfigPath)):undefined
+    if(spaceConfig?.data_mode==='existing'&&!input.sharedPersonal&&spaceConfig.personal_path!==input.core.personalAgentConfig?.path)throw Error('space_existing_data_mismatch')
     this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
       ...((spaceConfig?.personal_path??input.core.personalAgentConfig?.path)?{readingCopiesDirectory:dirname(memoryPath(spaceConfig?.personal_path??input.core.personalAgentConfig!.path))}:{}),
       onDiagnostic:code=>this.#diagnose(code),
       newsLanguage: input.core.personalAgentConfig?.newsLanguage ?? 'en',
       profileParticipantMessages: input.core.personalAgentConfig?.profileParticipantMessages === true,
       path: spaceConfig?.personal_path ?? input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),
-      userScope: spaceConfig?.space ?? input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
+      userScope: (spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space) ?? input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
       explicitMemoryConsumer:()=>input.memoryConsumerFingerprint,
       pool: input.core.runtime.core.suggestions,
       evidence: ref => { try {const [channel,seq]=parseMemoryRef(ref);const item=input.core.runtime.memory.channels.get(channel)?.items.find(item=>item.seq===seq);if(!item)return null;const work=item.content.work_id??item.content.delegate_id;return {subject_key:typeof work==='string'?'task:'+work:ref,source:{type:typeof work==='string'?'task':'conversation',ref},...(typeof work==='string'?{task_ref:{work_id:work}}:{})}}catch{return null}},
@@ -1214,7 +1215,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       } else service.onSuggestionSelected(suggestion, reason)
     },
   )
-  const personalMemory = options.sharedPersonal?.memory ?? options.createPersonalMemory?.()
+  const personalMemory = options.sharedPersonal ? options.sharedPersonal.memory : options.createPersonalMemory?.()
   personalMemoryHolder.current = personalMemory
   return assignAssembly(new RealtimeAssembly({
     ...(options.spaceHostConfigPath?{spaceHostConfigPath:options.spaceHostConfigPath}:{}),
@@ -1463,13 +1464,14 @@ export function composeRealtime(
   const spaceConfig=spaceConfigPath?readHostSpaceConfig(memoryPath(spaceConfigPath)):undefined
   const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;extraction?:{baseUrl:string;apiKey:string};embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
   let sharedClient: MemoryLedgerClient | undefined
-  const getClient = () => sharedClient ??= new MemoryLedgerClient(spaceConfig?spaceConfig.personal_path+'.memory.sqlite':memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
+  const getClient = () => sharedClient ??= new MemoryLedgerClient(spaceConfig&&spaceConfig.data_mode!=='existing'?spaceConfig.personal_path+'.memory.sqlite':memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
   const extraction=local?.extraction??(()=>{const connection=resolveMemoryExtractionConnection(options.settings);return {baseUrl:connection.baseUrl,apiKey:connection.apiKey}})()
   const memoryGateway=local?(extraction.apiKey.trim()?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),...extraction,clock:new RealClock()}):unconfiguredModelGateway):core.gateway
-  const useLocalLedger=spaceConfig!==undefined||local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
+  const isolatedSpace=spaceConfig!==undefined&&spaceConfig.data_mode!=='existing'
+  const useLocalLedger=isolatedSpace||local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
   const createPersonalMemory = useLocalLedger ? () => {
-    const memory = new SubstrateMemoryResource({client:getClient(),userId:spaceConfig?.space??local?.userId??options.settings.memory_user_id,
+    const memory = new SubstrateMemoryResource({client:getClient(),userId:(spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space)??local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?resolveEmbeddingConnection(options.settings).baseUrl:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       sourceProcessingLlm:extraction,
       extractionFingerprint:embeddingHash('sha256').update(extraction.baseUrl+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
@@ -1478,9 +1480,9 @@ export function composeRealtime(
       conversationRecipients:Object.fromEntries((['text','voice'] as const).flatMap(mode=>{const recipient=configuredMemoryRecipient(options.settings,mode);return recipient?[[recipient.consumer,recipient.provider]]:[]})),
       consolidation:{enabled:options.settings.memory_consolidation_enabled,timezone:options.settings.memory_consolidation_timezone,hour:options.settings.memory_consolidation_hour},
       gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
-      ...(local&&!spaceConfig?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
+      ...(local&&!isolatedSpace?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
     })
-    if(local||spaceConfig){
+    if(local||isolatedSpace){
       return memory
     }
     // Knowledge-only mode owns A originals, without enabling personal capture or B projections.
@@ -1496,6 +1498,7 @@ export function composeRealtime(
     core,
     provider,
     ...(options.memoryReadMode === undefined ? {} : {memoryReadMode: options.memoryReadMode}),
+    ...(options.sharedPersonal===undefined?{}:{sharedPersonal:options.sharedPersonal}),
     ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
     ...(options.intake === undefined ? {} : {intake: options.intake}),
     ...(options.onExecutorSuggestion === undefined ? {} : {onExecutorSuggestion: options.onExecutorSuggestion}),

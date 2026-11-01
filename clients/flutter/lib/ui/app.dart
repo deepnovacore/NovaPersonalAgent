@@ -1449,6 +1449,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           !fullCall &&
                           (phoneVoice!.active || phoneVoice!.connecting))
                         PhoneVoicePanel(
+                          petAvatar: petAvatarStore,
                           session: phoneVoice!,
                           language: language,
                           compact: true,
@@ -1569,6 +1570,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           if (fullCall)
             Positioned.fill(
               child: PhoneVoicePanel(
+                petAvatar: petAvatarStore,
                 session: phoneVoice!,
                 startupError: _phoneVoiceStartError,
                 language: language,

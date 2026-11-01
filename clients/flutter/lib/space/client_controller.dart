@@ -10,13 +10,19 @@ import 'space_crypto.dart';
 import 'space_storage.dart';
 
 class SpaceClientController with WidgetsBindingObserver {
-  SpaceClientController(this.state, this.transport, {SpaceMobileTools? tools}) {
+  SpaceClientController(
+    this.state,
+    this.transport, {
+    SpaceMobileTools? tools,
+    this.bindingCleanup = false,
+  }) {
     mobile = SpaceMobileActions(
       state,
       tools ?? NativeSpaceMobileTools(),
       isForeground: () => foreground,
     );
   }
+  final bool bindingCleanup;
   final SpaceClientState state;
   final SpaceRelayTransport transport;
   late final SpaceMobileActions mobile;
@@ -26,7 +32,14 @@ class SpaceClientController with WidgetsBindingObserver {
   bool foreground = true, _disposed = false;
   Future<void>? _pumping;
   String get fingerprint => deviceFingerprint(transport.crypto.identity);
-  static Future<SpaceClientController> open(SpaceRecord space) async {
+  static Future<SpaceClientController> openForBindingCleanup(
+    SpaceRecord space,
+  ) => open(space, bindingCleanup: true);
+
+  static Future<SpaceClientController> open(
+    SpaceRecord space, {
+    bool bindingCleanup = false,
+  }) async {
     if (space.mode != SpaceMode.client) throw StateError('not_a_client_space');
     final raw = await SpaceSecurePersistence(
       'nova.space.identity.${space.id}',
@@ -52,7 +65,9 @@ class SpaceClientController with WidgetsBindingObserver {
         crypto,
         allowLoopback: const bool.fromEnvironment('NOVA_ALLOW_LOOPBACK_RELAY'),
       ),
+      bindingCleanup: bindingCleanup,
     );
+    if (bindingCleanup) return controller;
     controller.push = SpacePushClient(space, state, onWake: controller.sync);
     controller.start();
     unawaited(
@@ -65,6 +80,7 @@ class SpaceClientController with WidgetsBindingObserver {
   }
 
   void start() {
+    if (bindingCleanup) return;
     foreground =
         WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
@@ -77,8 +93,13 @@ class SpaceClientController with WidgetsBindingObserver {
         state.changed();
       },
     );
-    _timer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (foreground) unawaited(sync());
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (foreground &&
+          (state.waitingForApproval ||
+              state.snapshot.isEmpty ||
+              timer.tick % 3 == 0)) {
+        unawaited(sync());
+      }
     });
     unawaited(sync());
   }
@@ -124,10 +145,12 @@ class SpaceClientController with WidgetsBindingObserver {
   }
 
   Future<void> _sync() async {
+    var presenceConfirmed = false;
     try {
       try {
         await transport.login();
       } on RelayFailure catch (error) {
+        if (bindingCleanup) rethrow;
         if (![
           'unknown_device',
           'inactive_device',
@@ -139,6 +162,7 @@ class SpaceClientController with WidgetsBindingObserver {
           'nova.space.pair-request.${transport.crypto.space.id}',
         ).read();
         if (pendingPair != null) {
+          state.waitingForApproval = state.snapshot.isEmpty;
           final request = jsonMap(pendingPair);
           if (request.containsKey('invitationId')) {
             try {
@@ -161,9 +185,14 @@ class SpaceClientController with WidgetsBindingObserver {
         rethrow;
       }
       if (_disposed) return;
-      unawaited(push?.flushPendingKeys() ?? Future.value());
-      await transport.connectLive();
+      state.waitingForApproval = false;
+      if (!bindingCleanup) {
+        unawaited(push?.flushPendingKeys() ?? Future.value());
+        await transport.connectLive();
+      }
       state.hostOnline = await transport.hostOnline();
+      presenceConfirmed = true;
+      state.changed();
       var more = true;
       while (more && !_disposed) {
         Map<String, dynamic> page;
@@ -188,8 +217,18 @@ class SpaceClientController with WidgetsBindingObserver {
             Map<String, dynamic>.from(item['envelope'] as Map),
           );
           if (_disposed) return;
-          if (payload?['type'] == 'push.key') await push?.acceptKey(payload!);
-          if (payload?['type'] == 'mobile.action') await _action(payload!);
+          if (payload?['type'] == 'push.key') {
+            if (bindingCleanup) {
+              throw const RelayFailure('cleanup_waiting_for_push_key');
+            }
+            await push?.acceptKey(payload!);
+          }
+          if (payload?['type'] == 'mobile.action') {
+            if (bindingCleanup) {
+              throw const RelayFailure('cleanup_waiting_for_mobile_action');
+            }
+            await _action(payload!);
+          }
           if (payload != null) {
             await state.apply(payload, sequence: item['seq'] as int);
           } else {
@@ -218,6 +257,13 @@ class SpaceClientController with WidgetsBindingObserver {
         for (final pending in List<Map<String, dynamic>>.from(state.pending)) {
           if (_disposed) return;
           if (pending['status'] != 'pending') continue;
+          if (bindingCleanup &&
+              ![
+                'device.revoke',
+                'snapshot.request',
+              ].contains(pending['kind'])) {
+            continue;
+          }
           final dependencies = (pending['depends_on'] as List? ?? [])
               .cast<String>();
           if (dependencies.any(
@@ -243,12 +289,15 @@ class SpaceClientController with WidgetsBindingObserver {
       state.error = null;
     } catch (error) {
       state.error = '$error';
-      state.hostOnline = false;
+      if (!presenceConfirmed) state.hostOnline = false;
     }
     if (!_disposed) state.changed();
   }
 
-  Future<String> sendChat(String text) async {
+  Future<String> sendChat(
+    String text, {
+    String conversationId = 'chat:main',
+  }) async {
     if (text.trim().isEmpty) throw StateError('empty_chat');
     await transport.login();
     if (!await transport.hostOnline()) {
@@ -262,7 +311,7 @@ class SpaceClientController with WidgetsBindingObserver {
       'op_id': id,
       'created_at': now,
       'expires_at': now + 45000,
-      'input': {'conversation_id': 'chat:main', 'text': text},
+      'input': {'conversation_id': conversationId, 'text': text},
     };
     final envelope = await transport.crypto.seal(
       payload,
@@ -274,7 +323,7 @@ class SpaceClientController with WidgetsBindingObserver {
         utf8.encode(jsonEncode(envelope)).length > 64 * 1024) {
       throw StateError('chat_message_too_large');
     }
-    await state.beginChat(id, text, now);
+    await state.beginChat(id, text, now, conversationId: conversationId);
     try {
       await transport.send(envelope); // No durable offline queue or retry.
       await state.markChat(id, 'sent');

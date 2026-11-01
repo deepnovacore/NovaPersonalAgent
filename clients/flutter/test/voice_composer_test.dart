@@ -5,6 +5,7 @@ import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/conversation/local_chat_panel.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'package:nova_mobile/voice/phone_voice_panel.dart';
+import 'package:nova_mobile/ui/pet_avatar.dart';
 import 'package:nova_mobile/voice/phone_voice_session.dart';
 import 'package:nova_mobile/voice/voice_delegate.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
@@ -86,6 +87,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: PhoneVoicePanel(
+            petAvatar: PetAvatarStore(),
             session: session,
             onSettings: () {},
             onStart: () {},

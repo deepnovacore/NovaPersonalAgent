@@ -13,7 +13,7 @@ import {HostModelRoutesStore} from '../src/space-host/model-settings.js';
 import {environmentContract} from '../src/config/environment-contract.js';
 import {describeHostBlockingEnvironment as describeDesktopEnvironment} from '../src/desktop.js';
 
-async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown;feishuPollMs?:number}={}){
+async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown;feishuPollMs?:number;revokeDevice?:(device:string)=>Promise<unknown>}={}){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-admin-')),sent:Record<string,unknown>[]=[];const calls:string[]=[];
  const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{ /* Test callback intentionally has no side effects. */ }),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone','other']};
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>options.memory as never,pool:new SuggestionPool(),evidence:()=>null});
@@ -21,7 +21,7 @@ async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boo
  if(options.feishuConnector)host.setFeishu(options.feishuConnector);
  const secrets=new HostSecretStore(join(dir,'config.json.secrets.json')),env=options.env??{};
  const models=new HostModelRoutesStore(join(dir,'config.json'),env,{credentialConfigured:name=>!!secrets.value(name)?.trim()});
- const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>options.owner,secrets,models,environment:env,feishuPollMs:options.feishuPollMs??10});
+ const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>options.owner,secrets,models,environment:env,...(options.revokeDevice?{revokeDevice:options.revokeDevice}:{}),feishuPollMs:options.feishuPollMs??10});
  await host.open({deferBackground:true});await space.open();
  const stamps=new Map<string,number>(),send=async(from:string,op_id:string,kind:string,input:Record<string,unknown>,depends_on?:string[])=>{if(!stamps.has(op_id))stamps.set(op_id,Date.now());await space.receive(from,{v:1,type:'intent',op_id,kind,input,created_at:stamps.get(op_id),...(depends_on?{depends_on}:{})});return sent.filter(row=>row.type==='receipt'&&row.op_id===op_id).at(-1)!};
  return {dir,host,space,send,sent,calls,secrets,models,close:async()=>{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}};
@@ -440,5 +440,16 @@ test('a model write surviving before its service receipt replays after a newer e
   const replay=await f.send('phone','lost-receipt','settings.patch',{method:'models.configure',params});
   assert.deepEqual([replay.status,replay.version],['accepted',1]);
   assert.equal(f.models.view().version,2);assert.deepEqual(f.models.view().routes,{});
+ }finally{await f.close()}
+});
+
+test('only owner can revoke another device and completion requires observed membership removal',async()=>{
+ let revoked:string|undefined;const f=await fixture({owner:'phone',revokeDevice:async device=>{revoked=device}});
+ try{
+  assert.equal((await f.send('other','bad-revoke','device.revoke',{device:'phone'})).status,'rejected');
+  assert.equal((await f.send('phone','self-revoke','device.revoke',{device:'phone'})).status,'rejected');
+  assert.equal((await f.send('phone','revoke','device.revoke',{device:'other'})).status,'pending');
+  assert.equal(revoked,'other');
+  assert.equal((await f.send('phone','noop','device.revoke',{device:'not-paired'})).status,'accepted');
  }finally{await f.close()}
 });

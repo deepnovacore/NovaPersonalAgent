@@ -203,3 +203,85 @@ test('byte-budgeted mailbox pages expose only returned cursors and reject an und
   const next=f.store.read(client,{...options,after:1});assert.equal(next.messages[0]?.seq,2);
  }finally{f.close();}
 });
+
+test('payload pressure reclaims only the ACKed prefix and preserves retry history after restart',()=>{
+ const bytes=Buffer.byteLength(JSON.stringify(envelope('a')));
+ for(const options of [{maxMessagesPerDevice:2},{maxBytesPerDevice:bytes*2}]){
+  const f=setup(options);try{
+   f.store.send(sender,envelope('a'));f.store.send(sender,envelope('b'));
+   f.store.read(client,{limit:1});f.store.acknowledge(client,1);
+   assert.equal(f.store.status(client).retainedAfter,0,'ACK alone must preserve existing explicit-cursor reads');
+   assert.deepEqual(f.store.read(client,{after:0}).messages.map(row=>row.envelope.id),['a','b']);
+   assert.deepEqual(f.store.send(sender,envelope('c')),{seq:3,duplicate:false});
+   assert.equal(f.store.status(client).retainedAfter,1);
+   assert.throws(()=>f.store.read(client,{after:0}),/cursor_expired/);
+   assert.deepEqual(f.store.read(client).messages.map(row=>row.envelope.id),['b','c'],'unACKed payloads remain deliverable');
+   f.restart();
+   assert.deepEqual(f.store.send(sender,envelope('a')),{seq:1,duplicate:true});
+   assert.throws(()=>f.store.send(sender,envelope('a',{body:'Yw=='})),/id_conflict/);
+   assert.equal(f.store.status(client).ackCursor,1);assert.equal(f.store.status(client).retainedAfter,1);
+   assert.deepEqual(f.store.read(client).messages.map(row=>row.envelope.id),['b','c']);
+  }finally{f.close();}
+ }
+});
+test('local pressure cannot reclaim other recipients or spaces and authorization runs first',()=>{
+ const f=setup({maxMessagesPerDevice:1});try{
+  const otherClient={...client,device:'c2'},otherSpace={...client,space:'other'};
+  f.store.send(sender,envelope('a'));f.store.read(client);f.store.acknowledge(client,1);
+  f.store.send(sender,envelope('x',{to:'c2'}));f.store.read(otherClient);f.store.acknowledge(otherClient,1);
+  f.store.send({...sender,space:'other'},envelope('x',{space:'other'}));f.store.read(otherSpace);f.store.acknowledge(otherSpace,1);
+  f.revoked.add(sender.device);assert.throws(()=>f.store.send(sender,envelope('b')),/revoked/);f.revoked.delete(sender.device);
+  assert.equal(f.store.status(client).retainedAfter,0);
+  f.store.send(sender,envelope('b'));
+  assert.equal(f.store.status(client).retainedAfter,1);
+  for(const recipient of [otherClient,otherSpace]){
+   assert.equal(f.store.status(recipient).retainedAfter,0);
+   assert.deepEqual(f.store.read(recipient,{after:0}).messages.map(row=>row.envelope.id),['x']);
+  }
+ }finally{f.close();}
+});
+test('global pressure reclaims each recipient only through its own ACK and duplicate retries do not collect',()=>{
+ const f=setup({maxMessages:2});try{
+  const second={...client,device:'c2'};
+  f.store.send(sender,envelope('a'));f.store.read(client);f.store.acknowledge(client,1);
+  f.store.send(sender,envelope('b',{to:'c2'}));f.store.send(sender,envelope('c',{to:'c3'}));
+  assert.equal(f.store.status(client).retainedAfter,1);
+  assert.equal(f.store.status(second).retainedAfter,0);
+  assert.deepEqual(f.store.read(second).messages.map(row=>row.envelope.id),['b']);f.store.acknowledge(second,1);
+  assert.deepEqual(f.store.send(sender,envelope('a')),{seq:1,duplicate:true});
+  assert.equal(f.store.status(second).retainedAfter,0,'a deduplicated send must not trigger collection');
+  assert.deepEqual(f.store.read(second,{after:0}).messages.map(row=>row.envelope.id),['b']);
+  f.store.send(sender,envelope('d',{to:'c3'}));assert.equal(f.store.status(second).retainedAfter,1);
+  assert.deepEqual(f.store.read({...client,device:'c3'}).messages.map(row=>row.envelope.id),['c','d']);
+ }finally{f.close();}
+});
+test('failed capacity or history admission rolls payload collection, floors and sequence back atomically',()=>{
+ const bytes=Buffer.byteLength(JSON.stringify(envelope('a'))),f=setup({maxBytes:bytes*2});try{
+  f.store.send(sender,envelope('a'));f.store.send(sender,envelope('b'));f.store.read(client,{limit:1});f.store.acknowledge(client,1);
+  const before=f.store.status(client);
+  assert.throws(()=>f.store.send(sender,envelope('c',{body:Buffer.alloc(1000).toString('base64')})),/capacity_exceeded/);
+  assert.deepEqual(f.store.status(client),before);
+  assert.deepEqual(f.store.read(client,{after:0}).messages.map(row=>row.envelope.id),['a','b']);
+  assert.deepEqual(f.store.send(sender,envelope('c')),{seq:3,duplicate:false});
+  assert.deepEqual(f.store.read(client).messages.map(row=>row.envelope.id),['b','c']);
+ }finally{f.close();}
+ const h=setup({maxMessagesPerDevice:1,maxHistoryPerDevice:1});try{
+  h.store.send(sender,envelope('a'));h.store.read(client);h.store.acknowledge(client,1);
+  assert.throws(()=>h.store.send(sender,envelope('b')),/history_capacity_exceeded/);
+  assert.equal(h.store.status(client).retainedAfter,0);
+  assert.equal(h.store.read(client,{after:0}).messages[0]?.envelope.id,'a');
+  h.restart();assert.deepEqual(h.store.send(sender,envelope('a')),{seq:1,duplicate:true});
+ }finally{h.close();}
+});
+test('collection never lowers an explicitly pruned floor beyond the last ACK',()=>{
+ const f=setup({maxMessages:2});try{
+  f.store.send(sender,envelope('a'));f.store.send(sender,envelope('b'));f.store.read(client,{limit:1});f.store.acknowledge(client,1);f.store.prune(client,2);
+  f.store.send(sender,envelope('c'));f.store.send(sender,envelope('d',{to:'c2'}));
+  const second={...client,device:'c2'};f.store.read(second);f.store.acknowledge(second,1);
+  f.store.send(sender,envelope('e',{to:'c3'}));
+  assert.deepEqual(f.store.status(client),{lastCursor:3,ackCursor:1,deliveredCursor:1,retainedAfter:2});
+  assert.throws(()=>f.store.read(client),/cursor_expired/);
+  assert.deepEqual(f.store.read(client,{after:2}).messages.map(row=>row.envelope.id),['c']);
+  f.restart();assert.equal(f.store.status(client).retainedAfter,2);
+ }finally{f.close();}
+});

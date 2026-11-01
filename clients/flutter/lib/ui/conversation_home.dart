@@ -12,16 +12,22 @@ import 'theme.dart';
 class ConversationHome extends StatefulWidget {
   const ConversationHome({
     super.key,
-    required this.host,
+    this.host,
+    this.conversations,
+    this.changes,
+    this.showSchedules = true,
     required this.onOpen,
     required this.onNew,
     this.language = 'zh',
     this.activeConversationId,
     this.schedules,
-  });
-  final AgentCoreHost host;
+  }) : assert(host != null || (conversations != null && changes != null));
+  final AgentCoreHost? host;
+  final List<Map<String, dynamic>> Function()? conversations;
+  final Listenable? changes;
+  final bool showSchedules;
   final ValueChanged<String> onOpen;
-  final VoidCallback onNew;
+  final VoidCallback? onNew;
   final String language;
   final String? activeConversationId;
 
@@ -39,25 +45,28 @@ class _ConversationHomeState extends State<ConversationHome> {
   String t(String zh, String en) => widget.language == 'zh' ? zh : en;
 
   static String _latestTime(Map<String, dynamic> row) {
-    final messages = row['messages'] as List;
-    return messages.isEmpty ? '' : (messages.last['time'] as String? ?? '');
+    final messages = row['messages'] as List? ?? [];
+    return row['updated_at'] as String? ??
+        (messages.isEmpty ? '' : (messages.last['time'] as String? ?? ''));
   }
 
   static String _title(Map<String, dynamic> row, String fallback) {
-    final user = (row['messages'] as List)
+    final user = (row['messages'] as List? ?? [])
         .where((m) => m['role'] == 'user')
         .firstOrNull;
     return row['title'] as String? ?? user?['content'] as String? ?? fallback;
   }
 
   static String _preview(Map<String, dynamic> row, String fallback) {
-    final message = (row['messages'] as List)
+    final message = (row['messages'] as List? ?? [])
         .where(
           (m) =>
               m['role'] != 'tool' && (m['content'] as String).trim().isNotEmpty,
         )
         .lastOrNull;
-    return message?['content'] as String? ?? fallback;
+    return row['preview'] as String? ??
+        message?['content'] as String? ??
+        fallback;
   }
 
   static bool _isToday(String? iso) {
@@ -68,9 +77,10 @@ class _ConversationHomeState extends State<ConversationHome> {
   /// First user message to last message, as a compact session duration. Rows
   /// with a single message keep the older relative-time label.
   String _trailingLabel(Map<String, dynamic> row) {
-    final messages = row['messages'] as List;
+    final messages = row['messages'] as List? ?? [];
     final fallback = relativeTime(
-      messages.isEmpty ? null : messages.last['time'] as String?,
+      row['updated_at'] as String? ??
+          (messages.isEmpty ? null : messages.last['time'] as String?),
       widget.language,
     );
     if (messages.length < 2) return fallback;
@@ -91,15 +101,16 @@ class _ConversationHomeState extends State<ConversationHome> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.host,
+    listenable: widget.host ?? widget.changes!,
     builder: (context, _) {
       // Opening a composer is not yet a conversation in the history.
       // Keep empty records intact, including any active in-memory draft.
-      final rows = widget.host.store.conversations
+      final rows = (widget.host?.store.conversations ?? widget.conversations!())
           .where(
             (row) =>
                 row['id'] != ConversationStore.mainId &&
-                ((row['messages'] as List).isNotEmpty ||
+                ((row['messages'] as List? ?? []).isNotEmpty ||
+                    row['preview'] != null ||
                     row['source_todo'] != null ||
                     row['id'] == widget.activeConversationId),
           )
@@ -118,25 +129,26 @@ class _ConversationHomeState extends State<ConversationHome> {
           .toList();
       return Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 6, 20, 2),
-            child: CupertinoSlidingSegmentedControl<bool>(
-              groupValue: schedules,
-              backgroundColor: Nova.cell,
-              thumbColor: Nova.sheetCell,
-              children: {
-                false: Text(
-                  t('全部', 'All'),
-                  style: const TextStyle(color: Nova.text, fontSize: 13),
-                ),
-                true: Text(
-                  t('定时', 'Scheduled'),
-                  style: const TextStyle(color: Nova.text, fontSize: 13),
-                ),
-              },
-              onValueChanged: (value) => _selectSegment(value ?? false),
+          if (widget.showSchedules)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 2),
+              child: CupertinoSlidingSegmentedControl<bool>(
+                groupValue: schedules,
+                backgroundColor: Nova.cell,
+                thumbColor: Nova.sheetCell,
+                children: {
+                  false: Text(
+                    t('全部', 'All'),
+                    style: const TextStyle(color: Nova.text, fontSize: 13),
+                  ),
+                  true: Text(
+                    t('定时', 'Scheduled'),
+                    style: const TextStyle(color: Nova.text, fontSize: 13),
+                  ),
+                },
+                onValueChanged: (value) => _selectSegment(value ?? false),
+              ),
             ),
-          ),
           Expanded(
             child: schedules ? _schedulesBody() : _tasksBody(rows, visible),
           ),
@@ -283,7 +295,7 @@ class _ConversationHomeState extends State<ConversationHome> {
       );
 
   Widget _taskRow(Map<String, dynamic> row) {
-    final messages = row['messages'] as List;
+    final messages = row['messages'] as List? ?? [];
     return NovaTile(
       title: _title(row, t('新任务', 'New task')),
       titleLines: 1,
@@ -311,7 +323,8 @@ class _ConversationHomeState extends State<ConversationHome> {
               _trailingLabel(row),
               style: const TextStyle(fontSize: 12, color: Nova.secondary),
             ),
-      onTap: widget.host.busy && row['id'] != widget.activeConversationId
+      onTap:
+          widget.host?.busy == true && row['id'] != widget.activeConversationId
           ? null
           : () => widget.onOpen(row['id'] as String),
     );

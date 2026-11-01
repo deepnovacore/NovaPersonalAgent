@@ -260,6 +260,13 @@ class SpaceInvitation {
     String name,
     SpaceCatalog catalog, {
     bool allowLoopback = false,
+  }) => catalog.pairOnce(
+    () => _pair(name, catalog, allowLoopback: allowLoopback),
+  );
+  Future<SpaceRecord> _pair(
+    String name,
+    SpaceCatalog catalog, {
+    required bool allowLoopback,
   }) async {
     final existing = catalog.spaces
         .where(
@@ -267,28 +274,40 @@ class SpaceInvitation {
               space.mode == SpaceMode.client &&
               space.remoteSpace == value['space'] &&
               space.hostDevice == value['host'] &&
-              space.relay != null &&
-              relayUri(space.relay!, allowLoopback: allowLoopback).origin ==
-                  relayUri(relay, allowLoopback: allowLoopback).origin,
+              space.hostSigningKey != null &&
+              ['kty', 'crv', 'x', 'y'].every(
+                (key) =>
+                    space.hostSigningKey![key] ==
+                    (value['hostSigningPublicKey'] as Map)[key],
+              ),
         )
         .toList();
     final previous =
         existing.where((space) => space.id == catalog.selectedId).firstOrNull ??
         existing.lastOrNull;
-    final record =
-        previous ??
-        SpaceRecord(
-          id: newSpaceId(),
-          name: name,
-          mode: SpaceMode.client,
-          remoteSpace: value['space'] as String,
-          hostDevice: value['host'] as String,
-          hostSigningKey: Map<String, dynamic>.from(
-            value['hostSigningPublicKey'] as Map,
-          ),
-          relay: relay,
-          device: newSpaceId(),
-        );
+    final record = previous != null
+        ? SpaceRecord(
+            id: previous.id,
+            name: name,
+            mode: previous.mode,
+            remoteSpace: previous.remoteSpace,
+            hostDevice: previous.hostDevice,
+            hostSigningKey: previous.hostSigningKey,
+            relay: relay,
+            device: previous.device,
+          )
+        : SpaceRecord(
+            id: newSpaceId(),
+            name: name,
+            mode: SpaceMode.client,
+            remoteSpace: value['space'] as String,
+            hostDevice: value['host'] as String,
+            hostSigningKey: Map<String, dynamic>.from(
+              value['hostSigningPublicKey'] as Map,
+            ),
+            relay: relay,
+            device: newSpaceId(),
+          );
     final identityStore = SpaceSecurePersistence(
       'nova.space.identity.${record.id}',
     );
@@ -315,7 +334,7 @@ class SpaceInvitation {
         await crypto.load();
         try {
           await transport.login();
-          await catalog.select(record.id);
+          await catalog.updateBinding(record);
           return record;
         } on RelayFailure catch (error) {
           if (![
@@ -352,7 +371,7 @@ class SpaceInvitation {
       if (previous == null) {
         await catalog.add(record);
       } else {
-        await catalog.select(record.id);
+        await catalog.updateBinding(record);
       }
       await transport.request(
         'POST',

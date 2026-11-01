@@ -100,6 +100,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   String? model;
   PhoneDictation? dictation;
   String _dictationBase = '';
+  bool _showDictationHint = false;
   late final VoiceSettings _voiceSettings =
       widget.voiceSettings ?? VoiceSettings();
   bool atBottom = true;
@@ -135,6 +136,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   void _beginDictation() {
     if (widget.voiceBusy || !widget.active || widget.host.busy) return;
     FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _showDictationHint = false);
     _dictationBase = input.text;
     unawaited(dictation?.begin(widget.language));
   }
@@ -942,6 +944,23 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                       ],
                     ),
                   ),
+                if (_showDictationHint && dictation?.busy != true)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      t(
+                        '按住麦克风说话，松开后转成文字',
+                        'Hold the microphone, then release to transcribe',
+                      ),
+                      style: const TextStyle(
+                        color: Nova.secondary,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
                 SafeArea(
                   top: false,
                   child: Padding(
@@ -998,16 +1017,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                               triggerMode: TooltipTriggerMode.manual,
                               child: GestureDetector(
                                 onTap: () =>
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          t(
-                                            '按住麦克风说话，松开后转成文字',
-                                            'Hold the microphone, then release to transcribe',
-                                          ),
-                                        ),
-                                      ),
-                                    ),
+                                    setState(() => _showDictationHint = true),
                                 onLongPressStart: widget.voiceBusy
                                     ? null
                                     : (_) => _beginDictation(),

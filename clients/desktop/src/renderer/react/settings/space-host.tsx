@@ -9,7 +9,9 @@ import {currentLanguage} from '../../locale.mjs'
 export function SpaceHostPanel({api}: any) {
  const {state, busy, error, command}=useCommand(api,'personalCommand','space.status')
  const [pending,setPending]=useState<any[]>([]),[pairingError,setPairingError]=useState(''),[fingerprints,setFingerprints]=useState<Record<string,string>>({}),[invitation,setInvitation]=useState<any>(null),[revoke,setRevoke]=useState<string|null>(null)
+ const [detailsOpen,setDetailsOpen]=useState(false)
  const label=(zh:string,en:string)=>currentLanguage()==='en'?en:zh
+ const pairingMessage=(reason:string)=>reason==='pairing_request_expired'?label('配对请求已过期，请重新生成配对码并扫码。','The pairing request expired. Generate a new code and scan it again.'):reason==='pairing_fingerprint_mismatch'?label('手机指纹不匹配，请核对手机上显示的完整指纹。','The phone fingerprint does not match. Check the full fingerprint displayed on your phone.'):/^[a-z_]+$/.test(reason)?label('连接未完成，请刷新后重试。','Connection was not completed. Refresh and try again.'):reason
  useEffect(()=>{
   let active=true;setPending([]);setPairingError('')
   if(state?.mode==='host')void api.personalCommand('space.pairings',{}).then((result:any)=>{if(result?.error)throw Error(result.error);if(active)setPending(Array.isArray(result)?result:[])}).catch((e:any)=>{if(active)setPairingError(e?.message??'unavailable')})
@@ -17,35 +19,46 @@ export function SpaceHostPanel({api}: any) {
  },[api,state])
  const {qr_image,...wire}=invitation??{}
  return <div className="space-host-panel" aria-busy={busy}>
-  <p className="personal-hint">{label('Host 保存全部数据。Host 损坏后此 Space 无法恢复；撤销设备会轮换密钥，但无法收回已下载历史。','The Host keeps all data. Losing the Host loses this Space. Revocation rotates keys but cannot erase previously downloaded history.')}</p>
-  {(error||pairingError)&&<p role="alert">{error||pairingError}</p>}
+  <h3>{label('连接手机','Connect your phone')}</h3>
+  <p className="personal-hint">{label('扫码后，在电脑确认手机指纹。','Scan the code, then confirm your phone’s fingerprint on this computer.')}</p>
+  {(error||pairingError)&&<p role="alert">{pairingMessage(error||pairingError)}</p>}
   {state?.mode==='host'?<>
-   <p className="space-host-space"><strong>{label('当前 Space','Current Space')}</strong> · {state.space}</p>
    <div className="space-host-actions">
     <Action disabled={busy} action={()=>command()}>{label('刷新设备','Refresh devices')}</Action>
     <Action disabled={busy} action={async()=>setInvitation(await command('space.invitation'))}>{label('生成一次性配对码','Create one-time pairing code')}</Action>
    </div>
    {invitation&&<div className="space-host-invitation">
     {typeof qr_image==='string'&&qr_image.startsWith('data:image/png;base64,')&&<img src={qr_image} width={240} height={240} alt={label('使用手机扫码绑定','Scan with your phone to pair')}/>}
-    <p>{label('只交给你要绑定的手机；配对码会过期。扫码后刷新并核对手机显示的指纹。','Share only with your phone; this code expires. After scanning, refresh and compare the fingerprint shown on the phone.')}</p>
-    <Field label={label('配对内容','Pairing payload')} type="textarea" readOnly value={JSON.stringify(wire)} onChange={()=>{}}/>
    </div>}
    {pending.length>0&&<div className="space-host-pairings">
-    {pending.map(request=><article key={request.id} className="space-host-pairing">
-     <p className="space-host-pairing-device"><strong>{request.device}</strong></p><p className="space-host-pairing-fingerprint">{request.fingerprint}</p>
+    {pending.map(request=>{const expired=typeof request.expiresAt==='number'&&request.expiresAt<=Date.now();return <article key={request.id} className="space-host-pairing">
+     <p className="space-host-pairing-device"><strong>{label('待连接的手机','Phone waiting to connect')}</strong></p><p className="space-host-pairing-fingerprint">{request.fingerprint}</p>
      <Field label={label('输入手机显示的完整指纹','Enter the full fingerprint shown on the phone')} value={fingerprints[request.id]??''} disabled={busy} onChange={(value:string)=>setFingerprints(previous=>({...previous,[request.id]:value}))}/>
-     <Action disabled={busy} action={async()=>{
+     {expired&&<><p role="status">{pairingMessage('pairing_request_expired')}</p><Action disabled={busy} action={async()=>{setInvitation(await command('space.invitation'))}}>{label('重新生成配对码','Generate a new pairing code')}</Action></>}
+     <Action disabled={busy||expired} action={async()=>{
       const fingerprint=(fingerprints[request.id]??'').trim()
       if(fingerprint!==request.fingerprint)throw Error(label('指纹不匹配，未绑定','Fingerprint mismatch; device not paired'))
-      await command('space.confirm_pairing',{id:request.id,fingerprint});setInvitation(null)
+      try{await command('space.confirm_pairing',{id:request.id,fingerprint});setInvitation(null)}catch(e:any){
+       try{const result=await api.personalCommand('space.pairings',{});if(!result?.error)setPending(Array.isArray(result)?result:[])}catch{/* Keep the confirmation error visible if refreshing also fails. */}
+       throw Error(pairingMessage(e?.message??'unavailable'))
+      }
      }}>{label('确认绑定','Confirm pairing')}</Action>
-    </article>)}
+    </article>})}
    </div>}
-   {(state.clients??[]).length>0&&<div className="space-host-devices">
-    {(state.clients??[]).map((device:string)=><Action key={device} disabled={busy} action={()=>setRevoke(device)}>{label('撤销 '+device,'Revoke '+device)}</Action>)}
-   </div>}
+   <details open={detailsOpen} onToggle={event=>setDetailsOpen(event.currentTarget.open)}>
+    <summary>{label('连接详情','Connection details')}</summary>
+    {detailsOpen&&<>
+     <p className="space-host-space">{state.space}</p>
+     <p>{label('数据保存在这台电脑，请定期备份。电脑数据丢失后无法恢复连接历史。断开手机不会删除其已下载的内容。','Your data stays on this computer. Back it up regularly; lost data cannot be recovered. Disconnecting a phone does not erase content it has already downloaded.')}</p>
+     {invitation&&<Field label={label('配对内容','Pairing payload')} type="textarea" readOnly value={JSON.stringify(wire)} onChange={()=>{}}/>}
+     {pending.map(request=><p key={request.id}>{request.device}</p>)}
+     {(state.clients??[]).length>0&&<div className="space-host-devices">
+      {(state.clients??[]).map((device:string)=><Action key={device} disabled={busy} action={()=>setRevoke(device)}>{label('撤销 '+device,'Revoke '+device)}</Action>)}
+     </div>}
+    </>}
+   </details>
    {revoke&&<div className="space-host-confirm" role="group" aria-label={label('确认撤销设备','Confirm device revocation')}>
-    <p>{label('撤销 '+revoke+' 后，该设备将无法读取新消息。','After revoking '+revoke+', it cannot read new messages.')}</p>
+    <p>{label('断开后，这部手机将无法读取新消息，已下载的内容仍会保留。','After disconnecting, this phone cannot read new messages. Downloaded content remains on it.')}</p>
     <div className="space-host-actions">
      <Action disabled={busy} action={async()=>{await command('space.revoke',{device:revoke});setRevoke(null);setInvitation(null)}}>{label('确认撤销并轮换密钥','Confirm revocation and rotate keys')}</Action>
      <Action disabled={busy} action={()=>setRevoke(null)}>{label('取消','Cancel')}</Action>
@@ -75,6 +88,7 @@ function createFailure(code:string,relayUrl:string|undefined,label:(zh:string,en
   bootstrap_token_invalid:['Bootstrap 凭据含有无效字符。','The bootstrap credential contains invalid characters.'],
   space_already_created:['已经创建过空间。请点击重启后台使其生效。','A Space already exists. Restart the backend to use it.'],
   space_create_busy:['正在创建空间，请稍候。','A Space is already being created.'],
+  space_existing_data_unavailable:['请先启动本机后台并确认现有数据可用，再重试连接。','Start the local backend and confirm existing data is available, then retry.'],
   space_data_exists:['空间数据目录已存在，无法新建。','The Space data folder already exists; a new Space cannot be created.'],
   space_directory_not_private:['空间目录权限过宽，需仅当前用户可访问。','The Space folder must be accessible only to your user.'],
   space_config_invalid:['上次未完成的空间配置已损坏，无法继续。','The unfinished Space configuration is damaged and cannot be resumed.'],
@@ -85,7 +99,7 @@ function createFailure(code:string,relayUrl:string|undefined,label:(zh:string,en
 }
 
 export function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en:string)=>string;onReady:()=>Promise<unknown>}){
- const [mode,setMode]=useState('tailscale')
+ const [mode,setMode]=useState('tailscale'),[dataMode,setDataMode]=useState('isolated')
  const [relayUrl,setRelayUrl]=useState(''),[token,setToken]=useState(''),[reveal,setReveal]=useState(false)
  const [phase,setPhase]=useState<'idle'|'creating'|'restarting'|'restart_failed'>('idle'),[problem,setProblem]=useState('')
  const active=useRef(true),lock=useRef(false)
@@ -110,7 +124,7 @@ export function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en
   lock.current=true;setPhase('creating');setProblem('')
   try{
    let result:any
-   try{result=await api.spaceCreate(mode==='tailscale'?{mode:'tailscale'}:{relayUrl:url,bootstrapToken:secret})}catch{result={ok:false,error:'space_create_failed'}}
+   try{result=await api.spaceCreate(mode==='tailscale'?{mode:'tailscale',dataMode}:{relayUrl:url,bootstrapToken:secret,dataMode})}catch{result={ok:false,error:'space_create_failed'}}
    if(!active.current)return
    if(result?.error==='space_already_created'){
     let hosted=false
@@ -125,7 +139,9 @@ export function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en
  }
  const working=phase==='creating'||phase==='restarting'
  return <div className="space-host-create" aria-busy={working}>
-  <p className="space-host-empty">{label('尚未配置 Host Space。在这里新建一个空间：新空间是全新数据，不会迁移本机现有数据。电脑和手机需登录同一个 Tailscale 网络，并开启电脑的 MagicDNS 与 HTTPS 证书。创建成功后即可扫码，配对时仍需核对手机指纹。','No Host Space yet. Create one here: a new Space starts with fresh data and does not migrate existing data on this computer. Sign in to the same Tailscale network on your computer and phone, with MagicDNS and HTTPS certificates enabled. Then scan the pairing code and compare the phone fingerprint.')}</p>
+  <p className="space-host-empty">{label('连接本机数据，或新建一个全新空间。','Connect your existing data, or start a new Space.')}</p>
+  <Field label={label('空间数据','Space data')} value={dataMode} disabled={working||phase==='restart_failed'} options={[{value:'isolated',label:label('新建空白空间','Start a new Space')},{value:'existing',label:label('连接本机现有数据','Connect existing data on this computer')}]} onChange={setDataMode}/>
+  {dataMode==='existing'&&<p>{label('连接后，配对的手机可查看本机数据。','Paired phones will be able to view your data on this computer.')}</p>}
   <Field label={label('连接方式','Connection')} value={mode} disabled={working||phase==='restart_failed'} options={[{value:'tailscale',label:label('Tailscale 自动配置','Tailscale automatic setup')},{value:'manual',label:label('高级：使用已有 Relay','Advanced: existing relay')}]} onChange={setMode}/>
   {mode==='manual'&&<>
   <Field label={label('Relay 地址','Relay address')} value={relayUrl} placeholder="https://relay.example.com" disabled={working||phase==='restart_failed'} autoComplete="off" spellCheck={false} onChange={setRelayUrl}/>
@@ -135,12 +151,12 @@ export function SpaceCreateForm({api,label,onReady}:{api:any;label:(zh:string,en
   </div>
   </>}
   <div className="space-host-actions">
-   <Button type="button" disabled={working||phase==='restart_failed'} aria-busy={working} onClick={()=>void create()}>{label('创建空间','Create Space')}</Button>
+   <Button type="button" disabled={working||phase==='restart_failed'} aria-busy={working} onClick={()=>void create()}>{dataMode==='existing'?label('连接本机数据','Connect existing data'):label('创建空间','Create Space')}</Button>
    {phase==='restart_failed'&&<Button type="button" onClick={()=>void restart()}>{label('重启后台','Restart backend')}</Button>}
   </div>
   {phase==='creating'&&<p role="status">{label('正在创建空间…','Creating the Space…')}</p>}
   {phase==='restarting'&&<p role="status">{label('空间已创建，正在重启后台…','Space created. Restarting the backend…')}</p>}
   {problem&&<p role="alert">{problem}</p>}
-  <p className="space-host-empty">{label('也可以用命令行 nova-space-host init 创建，再以 NOVA_SPACE_HOST_CONFIG 启动桌面端。','You can also create one with nova-space-host init and launch the desktop with NOVA_SPACE_HOST_CONFIG.')}</p>
+  <details><summary>{label('连接详情','Connection details')}</summary><p>{label('电脑和手机需登录同一个 Tailscale 网络，并开启电脑的 MagicDNS 与 HTTPS 证书。数据保存在电脑，请定期备份。','Use the same Tailscale network on both devices, with MagicDNS and HTTPS certificates enabled on this computer. Back up your data regularly.')}</p></details>
  </div>
 }

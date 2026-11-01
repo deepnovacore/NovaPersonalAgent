@@ -4,14 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../ui/theme.dart';
+import '../ui/pet_avatar.dart';
 import 'phone_voice_session.dart';
-import 'voice_call_visual.dart';
 import 'voice_companion.dart';
 
 class PhoneVoicePanel extends StatefulWidget {
   const PhoneVoicePanel({
     super.key,
     required this.session,
+    required this.petAvatar,
     required this.onSettings,
     required this.onStart,
     this.language = 'zh',
@@ -22,6 +23,7 @@ class PhoneVoicePanel extends StatefulWidget {
     this.onEnd,
   });
   final PhoneVoiceSession session;
+  final PetAvatarStore petAvatar;
   final VoidCallback onSettings, onStart;
   final VoidCallback? onMinimize, onExpand, onEnd;
   final String language;
@@ -121,7 +123,7 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
             if (_nativePip)
               _pipSource(72, 48)
             else
-              const Icon(CupertinoIcons.phone, color: Nova.mint, size: 20),
+              PetAvatar(store: widget.petAvatar, size: 36),
             const SizedBox(width: 10),
             Expanded(
               child: Padding(
@@ -259,8 +261,15 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                         width: double.infinity,
                         child: ValueListenableBuilder<double>(
                           valueListenable: session.audioLevel,
-                          builder: (context, level, _) => VoiceCallVisual(
-                            status: session.status,
+                          builder: (context, level, _) => VoicePetVisual(
+                            petAvatar: widget.petAvatar,
+                            status:
+                                widget.startupError != null ||
+                                    session.error != null
+                                ? 'error'
+                                : session.muted
+                                ? 'muted'
+                                : session.status,
                             inputLevel: session.muted ? 0 : level,
                             isUserSpeaking: session.isUserSpeaking,
                             isPlaying: session.isPlaying,
@@ -516,4 +525,122 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
       ),
     );
   }
+}
+
+/// Matches the desktop pet voice stage: selected portrait, semantic state aura.
+/// Voice ownership and audio levels remain entirely with the session.
+class VoicePetVisual extends StatefulWidget {
+  const VoicePetVisual({
+    super.key,
+    required this.petAvatar,
+    required this.status,
+    required this.inputLevel,
+    required this.isUserSpeaking,
+    required this.isPlaying,
+  });
+  final PetAvatarStore petAvatar;
+  final String status;
+  final double inputLevel;
+  final bool isUserSpeaking, isPlaying;
+  @override
+  State<VoicePetVisual> createState() => _VoicePetVisualState();
+}
+
+class _VoicePetVisualState extends State<VoicePetVisual>
+    with SingleTickerProviderStateMixin {
+  late final _pulse = AnimationController(vsync: this);
+  bool _reduced = false;
+  bool get _moving =>
+      !_reduced &&
+      const [
+        'connecting',
+        'thinking',
+        'listening',
+        'speaking',
+      ].contains(widget.status);
+  Duration get _period => Duration(
+    milliseconds: switch (widget.status) {
+      'connecting' || 'thinking' => 2400,
+      'speaking' => 980,
+      'listening' => 1700,
+      _ => 5200,
+    },
+  );
+  Color get _color => switch (widget.status) {
+    'error' => const Color(0xffff7b83),
+    'muted' => const Color(0xffcdd0da),
+    'connecting' || 'thinking' => const Color(0xffb8a7ff),
+    'speaking' => const Color(0xffffb46b),
+    'listening' => const Color(0xff86e5ff),
+    _ => const Color(0xffffe4c2),
+  };
+  void _sync() {
+    if (_moving) {
+      if (!_pulse.isAnimating || _pulse.duration != _period) {
+        _pulse.duration = _period;
+        _pulse.repeat(reverse: true);
+      }
+    } else {
+      _pulse.stop();
+      _pulse.value = 0;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduced = MediaQuery.disableAnimationsOf(context);
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant VoicePetVisual oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync();
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: FittedBox(
+      child: AnimatedBuilder(
+        animation: _pulse,
+        child: PetAvatar(
+          store: widget.petAvatar,
+          size: 148,
+          borderRadius: BorderRadius.circular(74),
+        ),
+        builder: (context, avatar) {
+          final level = widget.isUserSpeaking && widget.inputLevel.isFinite
+              ? widget.inputLevel.clamp(0.0, 1.0)
+              : 0.0;
+          final scale = _reduced ? 1.0 : 1 + _pulse.value * .012 + level * .025;
+          return Transform.scale(
+            scale: scale,
+            child: DecoratedBox(
+              key: ValueKey('voice-pet-${widget.status}'),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: _color, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: _color.withValues(
+                      alpha: widget.status == 'muted' ? 0 : .20,
+                    ),
+                    blurRadius: 22 + (_reduced ? 0 : _pulse.value * 6),
+                  ),
+                ],
+              ),
+              child: Padding(padding: const EdgeInsets.all(3), child: avatar),
+            ),
+          );
+        },
+      ),
+    ),
+  );
 }

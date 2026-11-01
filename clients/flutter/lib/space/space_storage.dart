@@ -151,6 +151,24 @@ class SpaceStorage {
   }
 }
 
+bool sameClientHost(SpaceRecord a, SpaceRecord b) {
+  if (a.mode != SpaceMode.client ||
+      b.mode != SpaceMode.client ||
+      a.remoteSpace == null ||
+      a.hostSigningKey == null ||
+      b.hostSigningKey == null) {
+    return false;
+  }
+  return a.remoteSpace == b.remoteSpace &&
+      a.hostDevice == b.hostDevice &&
+      [
+        'kty',
+        'crv',
+        'x',
+        'y',
+      ].every((k) => a.hostSigningKey![k] == b.hostSigningKey![k]);
+}
+
 class SpaceCatalog extends ChangeNotifier {
   SpaceCatalog({SpacePersistence? persistence})
     : persistence =
@@ -159,6 +177,52 @@ class SpaceCatalog extends ChangeNotifier {
   final List<SpaceRecord> spaces = [];
   String? selectedId;
   bool ready = false;
+  bool _pairing = false;
+  final List<SpaceRecord> retired = [];
+  Future<SpaceRecord> pairOnce(Future<SpaceRecord> Function() work) async {
+    if (_pairing) throw StateError('pairing_in_progress');
+    _pairing = true;
+    try {
+      return await work();
+    } finally {
+      _pairing = false;
+    }
+  }
+
+  List<SpaceRecord> bindings(SpaceRecord space) => spaces
+      .where((v) => v.id == space.id || sameClientHost(v, space))
+      .toList();
+  List<SpaceRecord> get visibleSpaces {
+    final result = <SpaceRecord>[];
+    for (final space in spaces) {
+      final index = result.indexWhere((v) => sameClientHost(v, space));
+      if (index < 0) {
+        result.add(space);
+      } else if (space.id == selectedId) {
+        result[index] = space;
+      }
+    }
+    return result;
+  }
+
+  Future<void> retireBindings(SpaceRecord keep) async {
+    final obsolete = bindings(keep).where((v) => v.id != keep.id).toList();
+    final previous = List<SpaceRecord>.of(spaces),
+        retiredCount = retired.length;
+    retired.addAll(obsolete);
+    spaces.removeWhere((v) => obsolete.any((old) => old.id == v.id));
+    try {
+      await _save();
+    } catch (_) {
+      spaces
+        ..clear()
+        ..addAll(previous);
+      retired.removeRange(retiredCount, retired.length);
+      rethrow;
+    }
+    notifyListeners();
+  }
+
   Future<void>? _opening;
   SpaceRecord? get selected =>
       spaces.where((s) => s.id == selectedId).firstOrNull;
@@ -176,6 +240,11 @@ class SpaceCatalog extends ChangeNotifier {
           (v) => SpaceRecord.fromJson(Map<String, dynamic>.from(v as Map)),
         ),
       );
+      retired.addAll(
+        (value['retired'] as List? ?? []).map(
+          (v) => SpaceRecord.fromJson(Map<String, dynamic>.from(v as Map)),
+        ),
+      );
       selectedId = value['selected'] as String?;
     }
     ready = true;
@@ -187,15 +256,38 @@ class SpaceCatalog extends ChangeNotifier {
     jsonEncode({
       'v': 1,
       'selected': selectedId,
+      'retired': retired.map((s) => s.toJson()).toList(),
       'spaces': spaces.map((s) => s.toJson()).toList(),
     }),
   );
   Future<void> add(SpaceRecord space) async {
+    if (spaces.any((v) => sameClientHost(v, space))) {
+      throw StateError('client_binding_exists');
+    }
     if (spaces.any((v) => v.id == space.id)) throw StateError('space_exists');
     spaces.add(space);
     selectedId = space.id;
     await _save();
     SpaceStorage.active = space;
+    notifyListeners();
+  }
+
+  Future<void> updateBinding(SpaceRecord record) async {
+    final index = spaces.indexWhere((v) => v.id == record.id);
+    if (index < 0 || !sameClientHost(spaces[index], record)) {
+      throw StateError('binding_identity_changed');
+    }
+    final previous = spaces[index], selected = selectedId;
+    spaces[index] = record;
+    selectedId = record.id;
+    try {
+      await _save();
+    } catch (_) {
+      spaces[index] = previous;
+      selectedId = selected;
+      rethrow;
+    }
+    SpaceStorage.active = record;
     notifyListeners();
   }
 
