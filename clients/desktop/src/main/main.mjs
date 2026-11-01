@@ -152,6 +152,7 @@ import {
   validateBootstrap,
 } from './security.mjs'
 import {probeApiKey, probeKeyForSettings, canProbeKey} from './key-probe.mjs'
+import {planSecretChange, rotationPayload} from './credential-hot-apply.mjs'
 import {SETUP_KEYS, setupCommit} from './setup-choice.mjs'
 import {selectedTextLlmProvider} from './settings-defaults.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
@@ -671,8 +672,18 @@ async function applyLiveCodingBackend(backend) {
   if (reply?.backend !== backend) throw new Error('coding default update failed')
 }
 
-async function rollbackLiveSettings(previousSettings) {
+/** Hands replaced keys to the running backend. Values travel only over the private control channel and are never returned. */
+async function applyLiveCredentials(plan, {reverse = false} = {}) {
+  if (plan.rotations.length === 0) return
+  if (!backendControl) throw new Error('credential update failed')
+  const payload = rotationPayload(reverse ? {rotations: plan.rotations.map(({from, to}) => ({from: to, to: from}))} : plan)
+  const reply = await backendControl.request('credentials.rotate', payload)
+  if (reply?.applied !== payload.rotations.length) throw new Error('credential update failed')
+}
+
+async function rollbackLiveSettings(previousSettings, secretPlan) {
   // A live default change never replaced capability files or stopped work, even if delivery failed.
+  if (secretPlan) await applyLiveCredentials(secretPlan, {reverse: true}).catch(() => undefined)
   if (previousSettings.codingBackend !== currentSettings.codingBackend) await applyLiveCodingBackend(previousSettings.codingBackend)
   await saveSettings(settingsFile(), previousSettings)
   currentSettings = previousSettings
@@ -849,13 +860,21 @@ async function applyDesktopSettings(payload, restart = false) {
   const previousSettings = currentSettings
   const recoveryPending = settingsRecoveryAvailable
   let capabilitiesChanged = false
+  // Saved keys are compared by what the backend would actually use, so a replaced key can be handed over live
+  // while everything else in the settings still decides whether a restart is needed.
+  let beforeSecrets, secretPlan = {changed: [], rotations: [], needsRestart: false}, liveCredentialsFailed = false
+  const withoutSecrets = settings => { const {secrets: _secrets, ...rest} = backendSettings(settings); return JSON.stringify(rest) }
+  const liveReady = () => backendControl !== null && backendStatus.state === 'connected'
   const changesRequireRestart = () => restart || recoveryPending || capabilitiesChanged
-    || JSON.stringify(backendSettings(previousSettings)) !== JSON.stringify(backendSettings(currentSettings))
-  const applied = await applySettingsTransaction({
+    || withoutSecrets(previousSettings) !== withoutSecrets(currentSettings)
+    || secretPlan.needsRestart || (secretPlan.rotations.length > 0 && !liveReady())
+  let applied = await applySettingsTransaction({
     deferRestart: !restart,
     needsBackendRestart: () => pendingRestart || changesRequireRestart(),
     applyLive: async () => {
       if (previousSettings.codingBackend !== currentSettings.codingBackend) await applyLiveCodingBackend(currentSettings.codingBackend)
+      // A failed hand-over keeps the saved key and asks for a restart instead of discarding the save.
+      if (liveReady()) await applyLiveCredentials(secretPlan).catch(() => { liveCredentialsFailed = true })
     },
     coordinator: lifecycleCoordinator,
     patch: payload,
@@ -864,11 +883,14 @@ async function applyDesktopSettings(payload, restart = false) {
         if (settingsRecoveryAvailable) await rollbackSettings(false)
         const commit = parseSettingsCommit(value)
         capabilitiesChanged = commit.capabilitiesDocument !== undefined
-        return await accessCredentials(() => settingsWriter(commit.settingsPatch ?? {}, next => {
+        try { beforeSecrets = await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec)) } catch { beforeSecrets = undefined }
+        let afterSecrets
+        const written = await accessCredentials(() => settingsWriter(commit.settingsPatch ?? {}, next => {
           validatePreparedSettings(commit.settingsPatch, publicSettings(next))
           if ([resolve(settingsFile()), resolve(`${settingsFile()}.recovery`)].includes(capabilityPath(next, process.env))) throw invalidCommit('capability_settings_path_conflict')
           const document = commit.capabilitiesDocument ?? readCapabilityDocument(next, process.env)
           const secrets = decryptSecretsForSpawn(next, secretCodec)
+          afterSecrets = secrets
           return prepareCapabilityCommit({settings: next, sourceSettings: currentSettings, document: commit.capabilitiesDocument, expectedRevision: commit.capabilitiesBaseRevision,
             environment: capabilityEnvironment(next, secrets, process.env, document), knownSecrets: Object.values(secrets),
             beforeWrite: async capability => {
@@ -876,13 +898,17 @@ async function applyDesktopSettings(payload, restart = false) {
               settingsRecoveryAvailable = true
             }})
         }), {retry: true})
+        secretPlan = !afterSecrets ? {changed: [], rotations: [], needsRestart: false}
+          : !beforeSecrets ? {changed: ['unknown'], rotations: [], needsRestart: true}
+          : planSecretChange(beforeSecrets, afterSecrets)
+        return written
       } catch (error) {
         console.error('[desktop-diagnostic] settings_save_failure')
         throw error
       }
     },
     publishCommitted: publishCommittedSettings,
-    rollback: () => changesRequireRestart() ? rollbackSettings() : rollbackLiveSettings(previousSettings),
+    rollback: () => changesRequireRestart() ? rollbackSettings() : rollbackLiveSettings(previousSettings, secretPlan),
     complete: completeSettings,
     prepareConfiguration: async () => {
       try {
@@ -897,6 +923,10 @@ async function applyDesktopSettings(payload, restart = false) {
     restartBackend: restartSettingsBackend,
     publishStatus: publishSettingsApplyStatus,
   })
+  if (liveCredentialsFailed && applied.operationStatus === 'applied') {
+    applied = Object.freeze({...applied, operationStatus: 'pending_restart'})
+    publishSettingsApplyStatus('pending_restart')
+  }
   if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
   else if (applied.operationStatus === 'applied') settingsRestartPending = false
   if (['applied', 'pending_restart'].includes(applied.operationStatus)) await refreshSettingsCapabilities()

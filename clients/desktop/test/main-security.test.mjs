@@ -121,6 +121,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:settings:open',
     'nova:settings:personal',
     'nova:settings:set',
+    'nova:settings:test-key',
     'nova:settings:voice-preset',
     'nova:settings:voiceprint',
     'nova:setup:changed',
@@ -996,6 +997,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const {default: vm} = await import('node:vm')
   const {backendSettings, DEFAULT_SETTINGS} = await import('../src/main/settings-store.mjs')
+  const {planSecretChange} = await import('../src/main/credential-hot-apply.mjs')
   const start = source.indexOf("  ipcMain.handle('nova:settings:set'")
   const sharedStart = source.indexOf('async function applyDesktopSettings')
   const sharedSource = source.slice(sharedStart, source.indexOf('\n}', sharedStart) + 2)
@@ -1025,6 +1027,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
       readCapabilityDocument: () => ({}), decryptSecretsForSpawn: () => ({}), secretCodec: {},
       capabilityEnvironment: () => ({}), prepareCapabilityCommit() {}, process: {env: {}},
       commitDesktopConfiguration() {}, discardDesktopConfiguration() {}, publishSettingsApplyStatus() {},
+      planSecretChange, backendControl: null, backendStatus: {state: 'stopped'}, applyLiveCredentials: async () => {},
       settingsView: () => ({}), console, settingsRecoveryAvailable: pendingRecovery,
       publishCommittedSettings() {}, rollbackSettings() {}, completeSettings() {}, restartSettingsBackend() {},
     })

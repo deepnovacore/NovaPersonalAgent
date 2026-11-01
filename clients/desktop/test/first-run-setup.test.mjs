@@ -180,3 +180,18 @@ test('settings key tests: DashScope also checks the realtime handshake, and unsu
   assert.equal(canProbeKey('tavilyApiKey'), false); assert.equal(canProbeKey('arkApiKey'), true)
   assert.equal((await probeKeyForSettings('tavilyApiKey', 'x', {fetch: fetchOk})).status, 'unsupported')
 })
+
+test('a replaced key is handed over live only when the backend already uses it and nothing else shares it', async () => {
+  const {planSecretChange, rotationPayload, HOT_APPLY_KEYS} = await import('../src/main/credential-hot-apply.mjs')
+  const replaced = planSecretChange({dashscopeApiKey: 'old', deepseekApiKey: 'd'}, {dashscopeApiKey: 'new', deepseekApiKey: 'd'})
+  assert.deepEqual(replaced, {changed: ['dashscopeApiKey'], rotations: [{name: 'dashscopeApiKey', from: 'old', to: 'new'}], needsRestart: false})
+  assert.deepEqual(rotationPayload(replaced), {rotations: [{from: 'old', to: 'new'}]})
+  // A lane that had no key was built unconfigured; clearing leaves nothing to send; unknown modules need a restart.
+  assert.equal(planSecretChange({}, {dashscopeApiKey: 'new'}).needsRestart, true)
+  assert.equal(planSecretChange({dashscopeApiKey: 'old'}, {}).needsRestart, true)
+  assert.equal(planSecretChange({tavilyApiKey: 'a'}, {tavilyApiKey: 'b'}).needsRestart, true)
+  // Two names holding the same old value must not both receive one provider's new key.
+  assert.equal(planSecretChange({dashscopeApiKey: 'same', openaiApiKey: 'same'}, {dashscopeApiKey: 'new', openaiApiKey: 'same'}).needsRestart, true)
+  assert.deepEqual(planSecretChange({dashscopeApiKey: 'a'}, {dashscopeApiKey: 'a'}), {changed: [], rotations: [], needsRestart: false})
+  assert.ok(HOT_APPLY_KEYS.includes('deepseekApiKey') && !HOT_APPLY_KEYS.includes('tavilyApiKey') && !HOT_APPLY_KEYS.includes('composioApiKey'))
+})

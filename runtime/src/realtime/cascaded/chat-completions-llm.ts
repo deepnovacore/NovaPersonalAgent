@@ -20,6 +20,7 @@ import {
   type CascadedLlmTool,
 } from './llm.js'
 
+import {rotatedCredential} from '../../config/credential-rotation.js'
 export {MAX_CASCADED_LLM_HISTORY_CODEPOINTS, MAX_CASCADED_LLM_HISTORY_ITEMS} from './llm.js'
 const MAX_EVENT_BYTES = 512 * 1024
 /** Per-response bound for display-only thinking text; it never grows provider history. */
@@ -148,7 +149,7 @@ class Session implements CascadedLlmSession {
       if (object(event.usage)) usage = mergeModelUsage(usage,event.usage)
     }
     try {
-      const request = (current: Record<string, JsonValue>): Promise<Response> => this.#timed(this.#fetch(this.#endpoint, {method: 'POST', redirect: ['self-hosted','openai-compatible'].includes(this.#provider) ? 'error' : 'follow', headers: {...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}), 'content-type': 'application/json', accept: 'text/event-stream'}, body: JSON.stringify(current), signal: active.controller.signal}), active)
+      const request = (current: Record<string, JsonValue>): Promise<Response> => this.#timed(this.#fetch(this.#endpoint, {method: 'POST', redirect: ['self-hosted','openai-compatible'].includes(this.#provider) ? 'error' : 'follow', headers: {...(this.#apiKey ? {authorization: `Bearer ${rotatedCredential(this.#apiKey)}`} : {}), 'content-type': 'application/json', accept: 'text/event-stream'}, body: JSON.stringify(current), signal: active.controller.signal}), active)
       const send = async (): Promise<Response> => {
         try { return await request(buildBody(reasoning)) }
         catch (error) { if (error instanceof ChatCompletionsLlmFailure) throw error; throw fail(input.signal.aborted ? 'aborted' : this.#closed ? 'closed' : 'network') }

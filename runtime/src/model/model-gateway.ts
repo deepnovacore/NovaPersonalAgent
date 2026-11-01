@@ -16,6 +16,7 @@ import { z } from 'zod'
 import type { Clock } from '../core/clock.js'
 import type { JsonValue } from '../core/events.js'
 
+import {rotatedCredential} from '../config/credential-rotation.js'
 export interface GatewayTextDelta {
   readonly kind: 'text'
   readonly text: string
@@ -388,7 +389,7 @@ export class OpenAIModelGateway implements ModelGateway {
         redirect: this.#redirect,
         headers: {
           // The credential rides in the header and never in a log line or metric.
-          ...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}),
+          ...(this.#apiKey ? {authorization: `Bearer ${rotatedCredential(this.#apiKey)}`} : {}),
           'content-type': 'application/json',
           accept: body.stream === true ? 'text/event-stream' : 'application/json',
         },

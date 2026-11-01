@@ -97,6 +97,7 @@ export class QwenRealtimeError extends Error {
 import {RealtimeConnectError, RealtimeSocketClosedError as QwenSocketClosedError} from './transport.js'
 import type {RealtimeTelemetry} from './telemetry.js'
 import type {RealtimeSocket as QwenSocket, RealtimeConnector as QwenConnector, RealtimeAdapterOptions as QwenAdapterOptions} from './transport.js'
+import {rotatedCredential} from '../config/credential-rotation.js'
 // Compatibility exports for existing Qwen consumers. Native providers depend on transport.ts directly.
 export {RealtimeSocketClosedError as QwenSocketClosedError} from './transport.js'
 export type {RealtimeSocket as QwenSocket, RealtimeConnector as QwenConnector, RealtimeConnectorOptions as QwenConnectorOptions, RealtimeAdapterOptions as QwenAdapterOptions} from './transport.js'
@@ -237,7 +238,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
     try {
       socket = await this.#connector({
         endpoint,
-        headers: {Authorization: `Bearer ${this.#apiKey}`},
+        headers: {Authorization: `Bearer ${rotatedCredential(this.#apiKey)}`},
         openTimeout: this.#remaining(deadline),
         signal: options.signal,
       })

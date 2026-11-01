@@ -8,6 +8,7 @@ import type {CapabilityStatus} from '../config/capability-registry.js'
 import type {DesktopStopParentSource} from './desktop-session.js'
 import {reportUsage, type UsageReport} from '../realtime/usage.js'
 import {CODING_BACKEND_IDS, type CodingBackendId} from '../config/coding-backends.js'
+import {rotateCredential} from '../config/credential-rotation.js'
 
 type ParentPort = DesktopStopParentSource & {postMessage(message: unknown): void}
 export interface DesktopCapabilityState extends Partial<CapabilityStatus> {
@@ -63,6 +64,18 @@ export function installDesktopControl(options: {
           }
           options.updateCodingBackend(params.backend as CodingBackendId)
           result = {backend: params.backend}
+        } else if (method === 'credentials.rotate') {
+          // Replaces keys that are already in use; the reply only counts them and never carries a value.
+          const params = value.params as {rotations?: unknown} | null
+          const list = params !== null && typeof params === 'object' && !Array.isArray(params) && Object.keys(params).length === 1 ? params.rotations : undefined
+          if (!Array.isArray(list) || list.length < 1 || list.length > 8) throw new Error('invalid_credentials')
+          let applied = 0
+          for (const entry of list) {
+            const pair = entry as {from?: unknown; to?: unknown} | null
+            if (pair === null || typeof pair !== 'object' || Object.keys(pair).length !== 2 || !rotateCredential(pair.from, pair.to)) throw new Error('invalid_credentials')
+            applied += 1
+          }
+          result = {applied}
         } else result = method === 'capabilities.status' ? options.status() : await options.handle?.(method, value.params)
         if (!disposed) port?.postMessage({type: 'nova.control.reply', id, ...(result === undefined ? {error: 'not_ready'} : {result})})
       } catch {
