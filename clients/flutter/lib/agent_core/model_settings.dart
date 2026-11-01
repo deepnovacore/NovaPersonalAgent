@@ -247,12 +247,15 @@ class ModelSettings {
       key: key.isEmpty ? credential?.key ?? '' : key,
     );
     try {
-      final saved = key.isEmpty
-          ? credential!
+      // The credential also records the protocol, so the provider list can
+      // reopen a custom endpoint with the API it was saved with.
+      final saved = key.isEmpty && credential!.protocol == protocol
+          ? credential
           : await credentials.save(
               id: credential?.id,
               endpoint: address,
               key: key,
+              protocol: protocol,
             );
       // Dart is authoritative; a failed projection is visible and can be retried.
       await storage.write(

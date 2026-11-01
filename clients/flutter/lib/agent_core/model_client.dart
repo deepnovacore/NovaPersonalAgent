@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'chatgpt_accounts.dart';
+import 'model_catalog.dart';
+import 'model_presets.dart';
 
 class AgentFailure implements Exception {
   const AgentFailure(this.code);
@@ -81,6 +84,9 @@ class ModelConfiguration {
     'key': key,
     'protocol': protocol.name,
   };
+
+  /// Header name the provider requires for a conversation session id, if any.
+  String? get sessionHeader => ModelPreset.forEndpoint(endpoint)?.sessionHeader;
   bool get isOfficialDeepSeekFlash =>
       protocol == ModelProtocol.chatCompletions &&
       model == 'deepseek-flash' &&
@@ -106,9 +112,14 @@ class ModelClient {
     this.collectUsage = false,
     this.disableThinking = false,
     this.jsonObject = false,
+    this.maxOutputTokens,
   });
   final bool collectUsage;
   final bool jsonObject;
+
+  /// Caps the reply (reasoning included) for short calls such as the
+  /// connection test; unset keeps each protocol's own default budget.
+  final int? maxOutputTokens;
 
   /// Background profile/voice turns skip thinking; chat explicitly enables it
   /// on supported providers so visible reasoning can stream to the UI.
@@ -118,6 +129,9 @@ class ModelClient {
   final int maxBytes, maxOutputBytes;
   HttpClient? _http;
   bool _cancelled = false;
+
+  /// Sent to providers that require a session id on every request.
+  final String sessionId = newSessionId();
   void cancel() {
     _cancelled = true;
     _http?.close(force: true);
@@ -162,6 +176,8 @@ class ModelClient {
       request.headers.contentType = ContentType.json;
       request.headers.set('Authorization', 'Bearer ${configuration.key}');
       request.headers.set('Accept', 'text/event-stream');
+      final sessionHeader = configuration.sessionHeader;
+      if (sessionHeader != null) request.headers.set(sessionHeader, sessionId);
       request.write(
         jsonEncode({
           ...modelRequestBody(
@@ -171,6 +187,7 @@ class ModelClient {
             disableThinking: disableThinking,
             jsonObject: jsonObject,
             includeUsage: usage != null,
+            maxOutputTokens: maxOutputTokens,
           ),
         }),
       );
@@ -326,59 +343,78 @@ Uri compatibleEndpoint(String endpoint, String route) {
 
 /// Model ids from `{base}/models`. Public catalogues may accept invalid keys,
 /// so a successful response does not establish access to inference.
-/// Input validation is shared with [ModelConfiguration].
+/// Input validation is shared with [ModelConfiguration]. This is the id-only
+/// view of [listModelsDetailed]; failures keep their `model_http_NNN` codes.
 Future<List<String>> listModels({
   required String endpoint,
   required String key,
+  ProviderKind kind = ProviderKind.openAiCompat,
   Duration timeout = const Duration(seconds: 15),
 }) async {
   ModelConfiguration(endpoint: endpoint, model: '-', key: key);
-  final http = HttpClient()..connectionTimeout = timeout;
-  try {
-    final request = await http
-        .getUrl(compatibleEndpoint(endpoint, 'models'))
-        .timeout(timeout);
-    request.followRedirects = false;
-    request.headers.set('Authorization', 'Bearer $key');
-    request.headers.set('Accept', 'application/json');
-    final response = await request.close().timeout(timeout);
-    var count = 0;
-    final body = await utf8.decoder
-        .bind(
-          response.map((bytes) {
-            count += bytes.length;
-            if (count > 1024 * 1024) {
-              throw const AgentFailure('model_response_too_large');
-            }
-            return bytes;
-          }),
-        )
-        .join()
-        .timeout(timeout);
-    if (response.statusCode != 200) {
-      throw ModelRequestFailure(
-        'model_http_${response.statusCode}',
-        status: response.statusCode,
-      );
-    }
-    final data = (jsonDecode(body) as Map)['data'] as List;
-    final ids = {
-      for (final item in data)
-        if (item is Map && item['id'] is String)
-          (item['id'] as String).replaceFirst(RegExp(r'^models/'), ''),
-    }.where((id) => id.isNotEmpty && id.length <= 200).toList()..sort();
-    return ids.take(500).toList();
-  } on AgentFailure {
-    rethrow;
-  } on FormatException {
-    throw const AgentFailure('invalid_model_response');
-  } on TypeError {
-    throw const AgentFailure('invalid_model_response');
-  } catch (_) {
-    throw const AgentFailure('model_request_failed');
-  } finally {
-    http.close(force: true);
+  final result = await listModelsDetailed(
+    endpoint: endpoint,
+    key: key,
+    kind: kind,
+    timeout: timeout,
+  );
+  switch (result) {
+    case ModelListOk(:final models):
+      final ids = {
+        for (final model in models)
+          if (model.usable && model.id.length <= 200) model.id,
+      }.toList()..sort();
+      return ids.take(500).toList();
+    case ModelListFailed(:final reason, :final status):
+      throw switch (reason) {
+        ListFailure.badUrl => const AgentFailure('invalid_model_settings'),
+        ListFailure.network => const AgentFailure('model_request_failed'),
+        ListFailure.badResponse when status == null => const AgentFailure(
+          'invalid_model_response',
+        ),
+        _ when status != null => ModelRequestFailure(
+          'model_http_$status',
+          status: status,
+        ),
+        _ => const AgentFailure('invalid_model_response'),
+      };
   }
+}
+
+/// Lists a provider's models with capabilities and a typed failure reason.
+/// [endpoint] may be a Base URL or a saved complete route. Only the protocols
+/// the model client can call ([ModelProtocol.chatCompletions] and
+/// [ModelProtocol.responses]) make a model usable. [key] may be empty for
+/// OpenAI-compatible local services.
+Future<ModelListResult> listModelsDetailed({
+  required String endpoint,
+  required String key,
+  ProviderKind kind = ProviderKind.openAiCompat,
+  Map<String, String> headers = const {},
+  Duration timeout = const Duration(seconds: 15),
+}) {
+  if (key.length > 8192 || key.contains('\n') || key.contains('\r')) {
+    return Future.value(const ModelListFailed(ListFailure.auth));
+  }
+  final headersWithSession = {...headers, ...?_sessionHeaders(endpoint)};
+  return ModelCatalog(
+    timeout: timeout,
+    speaks: const {WireProtocol.chatCompletions, WireProtocol.responses},
+  ).list(kind, catalogBase(endpoint), key, headers: headersWithSession);
+}
+
+Map<String, String>? _sessionHeaders(String endpoint) {
+  final name = ModelPreset.forEndpoint(endpoint)?.sessionHeader;
+  return name == null ? null : {name: newSessionId()};
+}
+
+/// A fresh opaque conversation id for providers that require one.
+String newSessionId() {
+  final random = Random.secure();
+  return [
+    for (var i = 0; i < 16; i++)
+      random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ].join();
 }
 
 /// Chat Completions history: provider-private thinking is replayed only to the
@@ -408,9 +444,16 @@ Map<String, dynamic> modelRequestBody(
   bool disableThinking = false,
   bool jsonObject = false,
   bool includeUsage = false,
+  int? maxOutputTokens,
 }) {
   if (config.protocol == ModelProtocol.chatCompletions) {
     final deepseek = config.requestUri.host == 'api.deepseek.com';
+    // OpenAI's reasoning models reject `max_tokens` and every one of its chat
+    // models accepts `max_completion_tokens`, so each request to that host
+    // uses it. Other hosts keep `max_tokens`, which they all understand.
+    final capName = config.requestUri.host == 'api.openai.com'
+        ? 'max_completion_tokens'
+        : 'max_tokens';
     return {
       'model': config.model,
       'stream': true,
@@ -421,7 +464,8 @@ Map<String, dynamic> modelRequestBody(
           config.supportsJsonObject)
         'response_format': {'type': 'json_object'},
       // DeepSeek shares this budget between thinking and generated tool source.
-      'max_tokens': deepseek && !disableThinking ? 65536 : 12000,
+      capName:
+          maxOutputTokens ?? (deepseek && !disableThinking ? 65536 : 12000),
       if (deepseek)
         'thinking': {'type': disableThinking ? 'disabled' : 'enabled'},
       if (['qwen-flash', 'qwen3-vl-plus'].contains(config.model) &&
@@ -473,6 +517,7 @@ Map<String, dynamic> modelRequestBody(
     'stream': true,
     'store': false,
     'include': ['reasoning.encrypted_content'],
+    'max_output_tokens': ?maxOutputTokens,
     'input': input,
     if (tools.isNotEmpty)
       'tools': config.protocol == ModelProtocol.chatgptResponses

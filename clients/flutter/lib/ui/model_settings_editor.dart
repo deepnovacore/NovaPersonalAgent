@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../agent_core/model_client.dart';
@@ -5,6 +6,7 @@ import '../agent_core/model_presets.dart';
 import '../settings/model_settings_backend.dart';
 import 'local_dialog.dart';
 import 'provider_credentials_sheet.dart';
+import 'provider_setup_page.dart';
 import 'theme.dart';
 
 /// One presentation for local secure storage and paired Host model settings.
@@ -20,6 +22,19 @@ Future<void> showModelSettingsEditor(
   String t(String zh, String en) => language == 'zh' ? zh : en;
   final view = await backend.load();
   if (!context.mounted) return;
+  if (view.supportsProviderSetup) {
+    // Device-owned keys get the full setup page; Host lanes and the
+    // follow-the-chat-model lane keep the compact dialog below.
+    return showProviderSetupPage(
+      context,
+      backend,
+      view,
+      language: language,
+      title: title,
+      onManageCredentials: onManageCredentials,
+      onChatGpt: onChatGpt,
+    );
+  }
   final endpoint = TextEditingController(text: view.endpoint);
   final model = TextEditingController(text: view.model);
   final key = TextEditingController();
@@ -316,10 +331,17 @@ Future<void> showModelSettingsEditor(
                     ),
                     items: [
                       for (final p in view.providers)
-                        DropdownMenuItem(
-                          value: p.id,
-                          child: Text(p.name, overflow: TextOverflow.ellipsis),
-                        ),
+                        // Providers iOS cannot chat with stay hidden, unless
+                        // it is the one already chosen.
+                        if (p.availableOn(defaultTargetPlatform) ||
+                            p.id == providerId)
+                          DropdownMenuItem(
+                            value: p.id,
+                            child: Text(
+                              p.label(language),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                       if (view.providerId != null &&
                           findProvider(view.providerId) == null)
                         DropdownMenuItem(

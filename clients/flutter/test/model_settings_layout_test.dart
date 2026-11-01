@@ -6,6 +6,8 @@ import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/conversation/local_chat_panel.dart';
 import 'package:nova_mobile/ui/theme.dart';
 
+import 'support/fake_model_http.dart';
+
 class _Models extends ModelSettings {
   @override
   Future<ModelConfiguration?> read() async => ModelConfiguration(
@@ -60,48 +62,52 @@ void main() {
             ),
           ),
         );
+        final http = installModelHttp();
         await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
         expect(
-          find.text(language == 'zh' ? '模型服务' : 'Model provider'),
+          find.text(language == 'zh' ? '配置模型' : 'Set up a model'),
           findsOneWidget,
         );
+        // The saved custom address is shown, and no saved key is echoed.
+        final list = find.byType(Scrollable).first;
+        Future<TextField> reveal(String name) async {
+          final field = find.byKey(ValueKey(name));
+          await tester.scrollUntilVisible(field, 200, scrollable: list);
+          await tester.ensureVisible(field);
+          await tester.pumpAndSettle();
+          return tester.widget<TextField>(field);
+        }
+
         expect(
-          find.text(
-            language == 'zh' ? 'API 密钥：未配置' : 'API key: Not configured',
-          ),
-          findsOneWidget,
-        );
-        final fields = tester
-            .widgetList<TextField>(find.byType(TextField))
-            .toList();
-        expect(
-          fields[0].controller!.text,
+          (await reveal('provider.baseUrl')).controller!.text,
           'https://model.example/compatible-mode/v1/chat/completions',
         );
-        expect(fields[1].controller!.text, 'example-model');
-        await tester.ensureVisible(find.byType(TextField).last);
-        await tester.tap(find.byType(TextField).last);
-        await tester.showKeyboard(find.byType(TextField).last);
-        await tester.pumpAndSettle();
-        expect(
-          find.text(
-            language == 'zh'
-                ? '已保存的密钥不会回显；留空时使用此服务已配置的密钥'
-                : 'Saved keys stay hidden. Leave blank to use this provider’s configured key.',
-          ),
-          findsOneWidget,
+        final key = await reveal('provider.key');
+        expect(key.controller!.text, isEmpty);
+        await tester.tap(find.byKey(const ValueKey('provider.key')));
+        await tester.showKeyboard(find.byKey(const ValueKey('provider.key')));
+        await tester.enterText(
+          find.byKey(const ValueKey('provider.key')),
+          'typed-key',
         );
-        await tester.ensureVisible(find.text(language == 'zh' ? '保存' : 'Save'));
-        await tester.tap(find.text(language == 'zh' ? '保存' : 'Save'));
         await tester.pumpAndSettle();
+        final test = find.byKey(const ValueKey('provider.test'));
+        await tester.ensureVisible(test);
+        await tester.tap(test);
+        await tester.pump();
+        await http.lists.single.complete(tester, ['example-model']);
+        await http.probes.single.callTool(tester);
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('provider.failed')),
+        );
         expect(find.textContaining('model_settings_failed'), findsNothing);
         expect(
           find.textContaining(language == 'zh' ? '未能保存' : 'Could not save'),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);
-        await tester.tap(find.text(language == 'zh' ? '取消' : 'Cancel'));
+        await tester.pageBack();
         await tester.pumpAndSettle();
         await tester.pumpWidget(const SizedBox());
       });

@@ -1,7 +1,12 @@
-import '../agent_core/model_client.dart' hide listModels;
-import '../agent_core/model_client.dart' as discovery show listModels;
+import '../agent_core/model_catalog.dart';
+import '../agent_core/model_client.dart' hide listModels, listModelsDetailed;
+import '../agent_core/model_client.dart'
+    as discovery
+    show listModels, listModelsDetailed;
 import '../agent_core/model_presets.dart';
+import '../agent_core/model_probe.dart';
 import '../agent_core/model_settings.dart';
+import '../agent_core/provider_credentials.dart';
 
 /// Editable selection and capabilities only. Credentials never enter this view.
 class ModelSettingsView {
@@ -28,6 +33,40 @@ class ModelSettingsView {
   final bool customEndpoint, modelDiscovery, canFollow, following, readOnly;
   final bool allowKeyEntry;
   final String? notice, securityText, followLabel;
+
+  /// The device owns the key and the model: the full provider setup page
+  /// applies. Host-driven lanes and the follow-the-chat-model lane keep the
+  /// compact editor.
+  bool get supportsProviderSetup =>
+      allowKeyEntry &&
+      customEndpoint &&
+      modelDiscovery &&
+      !canFollow &&
+      !readOnly;
+}
+
+/// A provider with a key on this device; the key itself never leaves storage.
+class SavedProvider {
+  const SavedProvider({
+    required this.id,
+    required this.endpoint,
+    required this.label,
+    this.presetId,
+    this.protocol = ModelProtocol.chatCompletions,
+  });
+  final String id, endpoint, label;
+
+  /// The preset this endpoint belongs to, if any: its name can be shown in the
+  /// reader's language, unlike [label].
+  final String? presetId;
+
+  /// The API the endpoint was saved with. Records without one read as the
+  /// preset's protocol, or Chat Completions.
+  final ModelProtocol protocol;
+
+  /// [label], or the preset's name in [language] when there is a preset.
+  String labelFor(String language) =>
+      ModelPreset.byId(presetId ?? '')?.label(language) ?? label;
 }
 
 /// A newly typed key is write-only and must never be copied into a view.
@@ -52,6 +91,22 @@ abstract class ModelSettingsBackend {
   Future<void> follow() => throw UnsupportedError('follow');
   Future<List<String>> listModels(ModelSettingsInput input) =>
       throw UnsupportedError('modelDiscovery');
+
+  /// Listing with capabilities and a typed failure; device-owned keys only.
+  Future<ModelListResult> listModelsDetailed(ModelSettingsInput input) =>
+      throw UnsupportedError('modelDiscovery');
+
+  /// Asks [ModelSettingsInput.model] to call one tool with the resolved key.
+  Future<ProbeResult> probe(ModelSettingsInput input) =>
+      throw UnsupportedError('probe');
+
+  Future<List<SavedProvider>> savedProviders() async => const [];
+
+  /// Stores or replaces a provider's key without choosing a model.
+  Future<void> saveCredential(ModelSettingsInput input) =>
+      throw UnsupportedError('credentials');
+  Future<void> deleteProvider(String id) =>
+      throw UnsupportedError('credentials');
 }
 
 class LocalModelSettingsBackend extends ModelSettingsBackend {
@@ -125,11 +180,80 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
   @override
   Future<void> follow() => settings.resetSupport();
 
+  Future<String> _key(ModelSettingsInput input) async => input.newKey.isNotEmpty
+      ? input.newKey
+      : (await settings.credentials.resolve(input.endpoint))?.key ?? '';
+
   @override
-  Future<List<String>> listModels(ModelSettingsInput input) async {
-    final key = input.newKey.isNotEmpty
-        ? input.newKey
-        : (await settings.credentials.resolve(input.endpoint))?.key ?? '';
-    return await discovery.listModels(endpoint: input.endpoint, key: key);
+  Future<List<String>> listModels(ModelSettingsInput input) async =>
+      await discovery.listModels(
+        endpoint: input.endpoint,
+        key: await _key(input),
+        kind: _kind(input),
+      );
+
+  @override
+  Future<ModelListResult> listModelsDetailed(ModelSettingsInput input) async =>
+      await discovery.listModelsDetailed(
+        endpoint: input.endpoint,
+        key: await _key(input),
+        kind: _kind(input),
+      );
+
+  /// The preset's own API family decides how its models are listed.
+  ProviderKind _kind(ModelSettingsInput input) =>
+      ModelPreset.byId(input.providerId ?? '')?.providerKind ??
+      ModelPreset.forEndpoint(input.endpoint)?.providerKind ??
+      ProviderKind.openAiCompat;
+
+  @override
+  Future<ProbeResult> probe(ModelSettingsInput input) async {
+    final ModelConfiguration config;
+    try {
+      config = ModelConfiguration(
+        endpoint: input.endpoint.trim(),
+        model: input.model.trim(),
+        key: await _key(input),
+        protocol: input.protocol,
+      );
+    } on AgentFailure catch (failure) {
+      return ProbeFailed(failure);
+    }
+    return await probeModelTool(config);
+  }
+
+  @override
+  Future<List<SavedProvider>> savedProviders() async => [
+    for (final entry in await settings.credentials.list())
+      if (entry.endpoint.startsWith('http'))
+        _saved(entry, ModelPreset.forEndpoint(entry.endpoint)),
+  ];
+
+  SavedProvider _saved(ProviderCredential entry, ModelPreset? preset) =>
+      SavedProvider(
+        id: entry.id,
+        endpoint: entry.endpoint,
+        label: preset?.name ?? entry.label,
+        presetId: preset?.id,
+        protocol:
+            entry.protocol ?? preset?.protocol ?? ModelProtocol.chatCompletions,
+      );
+
+  @override
+  Future<void> saveCredential(ModelSettingsInput input) async {
+    final existing = await settings.credentials.resolve(input.endpoint);
+    final saved = await settings.credentials.save(
+      id: existing?.id,
+      endpoint: input.endpoint.trim(),
+      key: input.newKey,
+      protocol: input.protocol,
+    );
+    await settings.refreshApiKeyProjection(saved.id);
+  }
+
+  @override
+  Future<void> deleteProvider(String id) async {
+    await settings.credentials.delete(id);
+    await settings.refreshApiKeyProjection(id);
   }
 }

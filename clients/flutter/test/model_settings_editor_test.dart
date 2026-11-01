@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/model_presets.dart';
@@ -9,8 +10,10 @@ class _Backend extends ModelSettingsBackend {
     this.readOnly = false,
     this.unselected = false,
     this.failSave = false,
+    this.extraProviders = const [],
   });
   final bool readOnly, unselected, failSave;
+  final List<ModelPreset> extraProviders;
   ModelSettingsInput? saved;
   var followed = false;
 
@@ -19,14 +22,15 @@ class _Backend extends ModelSettingsBackend {
     providerId: unselected ? null : 'host-provider',
     endpoint: '',
     model: unselected ? '' : 'host-model',
-    providers: const [
-      ModelPreset(
+    providers: [
+      const ModelPreset(
         id: 'host-provider',
         name: 'Host provider',
         endpoint: '',
         recommendedModels: ['host-model'],
         keyUrl: '',
       ),
+      ...extraProviders,
     ],
     customEndpoint: false,
     modelDiscovery: false,
@@ -133,6 +137,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(backend.saved!.providerId, 'host-provider');
     expect(backend.saved!.model, 'host-model');
+  });
+
+  testWidgets('the compact editor names providers in the reader\'s language '
+      'and hides those iOS cannot chat with', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final backend = _Backend(
+      unselected: true,
+      extraProviders: [
+        ModelPreset.byId('zhipu')!,
+        ModelPreset.byId('opencode-go')!,
+      ],
+    );
+    await _open(tester, backend);
+    await tester.ensureVisible(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('Zhipu GLM'), findsOneWidget);
+    expect(find.text('智谱 GLM'), findsNothing);
+    expect(find.text('OpenCode Go'), findsNothing);
+    await tester.tap(find.text('Host provider').last);
+    await tester.pumpAndSettle();
+    debugDefaultTargetPlatformOverride = null;
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('OpenCode Go'), findsOneWidget);
   });
 
   testWidgets('Host save error names the visible provider and model fields', (
