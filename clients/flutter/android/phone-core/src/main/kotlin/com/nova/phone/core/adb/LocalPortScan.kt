@@ -21,7 +21,7 @@ import java.util.concurrent.ConcurrentHashMap
 /** 连接端口的一个候选:本机的哪个地址、哪个端口。 */
 data class AdbEndpoint(val host: String, val port: Int)
 
-/** Mika 自己在本机开着的监听端口(如登录回调):扫端口时跳过,免得连到自己。 */
+/** 本 App 自己在本机开着的监听端口(如登录回调):扫端口时跳过,免得连到自己。 */
 object OwnListeningPorts {
     private val ports = ConcurrentHashMap.newKeySet<Int>()
     fun add(port: Int) { ports += port }

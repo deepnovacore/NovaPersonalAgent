@@ -6,10 +6,30 @@ lifetimes: the MethodChannel has one callback handler. Task APIs are Android-onl
 
 ## Integration contract
 
-M5 supplies the bridge, not production phone-event or avatar-store wiring. The app
-integration must bind its loaded `PetAvatarStore`, map phone events to `showTask`,
-and execute action requests. No task or selected portrait is automatically wired
-by constructing a companion.
+This package supplies the bridge; constructing a companion wires no task or portrait.
+The app wiring is `PhoneTaskPet` (`lib/voice/phone_task_pet.dart`), created by the
+standalone workbench shell on Android with the native phone bridge. It shares the
+call's `NativeVoiceCompanion` instance, follows the app-lifetime `PhoneRunTracker`
+and mirrors only virtual-tier runs:
+
+| Run | Pet |
+| --- | --- |
+| step events, takeover `returned` | `running`, label/step of the latest step |
+| takeover `requested`/`active` | `needs_user` |
+| `done` `completed` | `done` (native expires it after three seconds) |
+| `done` `failed`/`interrupted` | `failed` |
+| `done` `cancelled`, or the run's result arrived without `done` | `hideTask(taskId:)` at once |
+
+A newer run replaces the task in place (no hide in between). `task_stop` runs the
+same path as the in-app picture's Stop (native `stop` by task id, then the owning
+chat turn or voice delegate is cancelled), once per task; `task_takeover` calls the
+tracker's takeover; `open` restores an active call's screen (native has already
+brought Nova forward). `bindTaskAvatar` binds the shell's `PetAvatarStore` and is
+unbound on teardown before the store is disposed. `overlay_permission` (as a
+`showTask` error or a disappearance) shows one in-app hint per session with a
+`requestOverlayPermission()` action; `foreground_blocked`, `overlay_blocked` and
+`timeout` are silent. A task whose overlay failed or was taken away is not shown
+again until Nova is next resumed (one retry per resume), so there is no retry loop.
 
 - `setAvatar(pngBytes: ...)` or `setAvatar(filePath: ...)` accepts a portrait;
   omitting both restores the generic orb. **A null customPath is not the default
@@ -41,6 +61,9 @@ by constructing a companion.
 - `previewWanted` and `previewChanges` report whether the current task's preview
   is expanded, visible and running. **Subscribe/unsubscribe from frame capture
   and JPEG encoding using this signal**, not just `showTask` completion.
+  `PhoneTaskPet` holds the shared `PhonePreview` (the same `nova/phone/frames`
+  subscription and `setPreview` count as the in-app picture) only while this is
+  true and the run is not waiting for the user, and forwards those frames.
   `taskFrame(Uint8List jpeg)` skips the bridge while unwanted, throttles to 5fps,
   and drops sends while another send is in flight. Native independently gates
   frames. Never forward secure/takeover frames. Frames clear on task replacement,

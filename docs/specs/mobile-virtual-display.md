@@ -221,6 +221,16 @@ Binary JPEG per event (`Uint8List`), shown with `Image.memory(gaplessPlayback: t
 the last `setPreview` was `visible:true` and a virtual display exists. Limits: at most 8 fps, width 360..480, quality 65, identical frames skipped.
 No frames are sent during takeover or for secure (black) frames; Dart shows a placeholder. `Texture`/`SurfaceProducer` is a later optimization.
 
+### Floating pet
+
+Outside Nova, a virtual run is mirrored on the floating pet of `packages/nova_audio` (`FLOATING_PET.md`), wired by
+`lib/voice/phone_task_pet.dart` from the same `PhoneRunTracker`: step → `running`, takeover `requested`/`active` →
+`needs_user`, `done` → `done`/`failed` (`cancelled` hides). Its preview reuses the shared `nova/phone/frames`
+subscription and `setPreview` count, at most 5 fps, only while the pet's preview is expanded and the run is not waiting
+for the user; takeover frames are never forwarded. The pet window has `FLAG_SECURE` while it carries a task. The pet's
+Stop and take-over buttons use the same `stop` and `takeover` calls as the in-app picture. Main-tier runs emit no phone
+events and so never reach the pet.
+
 ## Takeover
 
 `hand_to_user` or a `takeover` call → `requested` → `moveTask(topTaskId(display), 0)` → `active` (loop paused, app audible
