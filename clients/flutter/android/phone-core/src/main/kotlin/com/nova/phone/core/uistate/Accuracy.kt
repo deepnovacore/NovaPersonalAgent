@@ -92,4 +92,3 @@ internal fun stationary(before: List<ElementLocator>, after: List<ElementLocator
     }
     return shared >= 2 && inPlace >= shared * 0.8
 }
-
