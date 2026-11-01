@@ -94,6 +94,15 @@ class ToolStep extends StatelessWidget {
       'computer_type' => t('输入文字', 'Type text'),
       'computer_scroll' => t('滚动屏幕', 'Scroll screen'),
       'computer_key' => t('按键', 'Press keys'),
+      // Phone-control steps (`nova/phone/events`).
+      'observe' => t('查看屏幕', 'View screen'),
+      'tap' => t('点击', 'Tap'),
+      'type' => t('输入文字', 'Type text'),
+      'scroll' => t('滚动', 'Scroll'),
+      'swipe' => t('滑动', 'Swipe'),
+      'open_app' => t('打开 App', 'Open app'),
+      'back' => t('返回', 'Go back'),
+      'hand_to_user' => t('请你接手', 'Hand over to you'),
       _ => t('使用工具', 'Use tool'),
     };
   }
@@ -102,6 +111,7 @@ class ToolStep extends StatelessWidget {
     String t(String zh, String en) => language == 'zh' ? zh : en;
     return switch (status) {
       'completed' => t('已完成', 'Completed'),
+      'running' => t('进行中', 'In progress'),
       'cancelled' => t('已取消', 'Cancelled'),
       'rejected' || 'denied' => t('未执行', 'Not executed'),
       'failed' || 'error' => t('未完成', 'Failed'),

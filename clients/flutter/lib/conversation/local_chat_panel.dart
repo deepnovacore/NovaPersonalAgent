@@ -6,6 +6,7 @@ import '../ui/chat_activity.dart';
 import '../ui/thinking_block.dart';
 import '../ui/tool_step.dart';
 import '../ui/tool_timeline.dart';
+import '../agent/phone_run.dart';
 import 'phone_dictation.dart';
 import 'package:nova_audio/nova_audio.dart';
 import '../voice/voice_settings.dart';
@@ -75,7 +76,12 @@ class LocalChatPanel extends StatefulWidget {
     this.externalTaskBusy = false,
     this.onCancelExternalTask,
     this.header,
+    this.phoneRun,
   });
+
+  /// Steps of phone tasks (`nova/phone/events`). A task's steps replace its
+  /// single `device_run_task` result and join the group it sits in.
+  final PhoneRunTracker? phoneRun;
   final Widget? header;
   final AgentCoreHost host;
   final AudioOwner? audioOwner;
@@ -422,17 +428,21 @@ class LocalChatPanelState extends State<LocalChatPanel> {
 
   /// A tool result as a timeline step, plus the card that opens the page or
   /// artifact it saved (shown after the run, never inside it).
-  ({ToolStep step, Widget? card}) _toolResult(
+  ({ToolStep step, Widget? card, String? taskId}) _toolResult(
     Map message, {
     Set<String>? seenPreviews,
     ToolTarget? target,
   }) {
     String status = '';
-    String? preview, title, previewKey, completedReadPath;
+    String? preview, title, previewKey, completedReadPath, taskId;
     try {
       final result = jsonDecode(message['content'] as String) as Map;
       status = result['status'] as String? ?? '';
       final data = result['data'];
+      if (message['tool_name'] == 'device_run_task') {
+        final id = data is Map ? data['task_id'] : result['task_id'];
+        if (id is String && id.isNotEmpty) taskId = id;
+      }
       if (status == 'completed' &&
           message['tool_name'] == 'file_read' &&
           data is Map &&
@@ -469,11 +479,12 @@ class LocalChatPanelState extends State<LocalChatPanel> {
         preview == null ||
         widget.host.tools?.registry.workspace == null ||
         (seenPreviews != null && !seenPreviews.add(previewKey!))) {
-      return (step: step, card: null);
+      return (step: step, card: null, taskId: taskId);
     }
     final openTarget = preview;
     return (
       step: step,
+      taskId: taskId,
       card: Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Material(
@@ -594,7 +605,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.host,
+    listenable: Listenable.merge([widget.host, ?widget.phoneRun]),
     builder: (context, _) {
       final host = widget.host;
       final runningHere =
@@ -609,6 +620,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           : const <String, ToolTarget>{};
       // Call id of each entry of [toolSteps] (null when the result has none).
       final toolStepCallIds = <String?>[];
+      // Phone task id of each entry of [toolSteps] (null for other tools).
+      final toolStepTaskIds = <String?>[];
       var firstToolIndex = 0;
       // First [toolSteps] entry after the assistant message walked last: the
       // results of the round now being reached.
@@ -618,17 +631,59 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       var runInternalWidgets = 0;
       void flushTools() {
         if (toolSteps.isEmpty) return;
+        final ordered = toolSteps.reversed.toList();
+        final taskIds = toolStepTaskIds.reversed.toList();
+        // A phone task is one group member per step it took, not one line.
+        final steps = <ToolStep>[
+          for (var i = 0; i < ordered.length; i++)
+            ...(() {
+              final run = taskIds[i] == null
+                  ? null
+                  : widget.phoneRun?.run(taskIds[i]!);
+              final phoneSteps = run?.toolSteps(widget.language);
+              return phoneSteps == null || phoneSteps.isEmpty
+                  ? [ordered[i]]
+                  : phoneSteps;
+            })(),
+        ];
         messageWidgets.add(
           ToolStepGroup(
             key: ValueKey('tools:$firstToolIndex'),
-            steps: toolSteps.reversed.toList(),
+            steps: steps,
             // While the run goes on, only its own plan messages follow it.
             running: runningHere && messageWidgets.length == runInternalWidgets,
           ),
         );
         toolSteps.clear();
         toolStepCallIds.clear();
+        toolStepTaskIds.clear();
         roundStart = 0;
+      }
+
+      // The task still running has no stored result yet: its live steps close
+      // the turn as one group.
+      final phone = widget.phoneRun;
+      final liveRun = phone?.latest;
+      if (runningHere &&
+          liveRun != null &&
+          liveRun.active &&
+          widget.showProcess &&
+          liveRun.stepEvents.isNotEmpty &&
+          !messages.any(
+            (m) =>
+                m is Map &&
+                m['role'] == 'tool' &&
+                m['tool_name'] == 'device_run_task' &&
+                (m['content'] as String? ?? '').contains(liveRun.taskId),
+          )) {
+        messageWidgets.add(
+          ToolStepGroup(
+            key: ValueKey('phone-run:${liveRun.taskId}'),
+            steps: liveRun.toolSteps(widget.language),
+            running: true,
+          ),
+        );
+        runInternalWidgets++;
       }
 
       // Walk backwards so each user turn keeps its last successful preview.
@@ -711,6 +766,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           );
           toolSteps.add(result.step);
           toolStepCallIds.add(callId is String ? callId : null);
+          toolStepTaskIds.add(result.taskId);
           firstToolIndex = index;
           if (result.card != null) {
             runInternalWidgets++;

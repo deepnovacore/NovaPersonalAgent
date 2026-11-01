@@ -21,6 +21,10 @@ import '../voice/voice_settings.dart';
 import '../voice/voice_settings_sheet.dart';
 import '../voice/voice_provider_factory.dart';
 import '../agent/native_chat_task.dart';
+import '../agent/phone_channel.dart';
+import '../agent/phone_run.dart';
+import 'phone_control_page.dart';
+import 'virtual_screen_pip.dart';
 import '../agent_core/agent_workspace.dart';
 import '../agent_core/workspace_shell.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
@@ -113,12 +117,17 @@ class NovaApp extends StatelessWidget {
     this.preferences,
     this.lifeHost,
     this.agentCore,
+    this.phoneChannel,
   });
   final AudioPort? audio;
   final Future<bool> Function()? requestMicrophone;
   final Preferences? preferences;
   final LifeHost? lifeHost;
   final AgentCoreHost? agentCore;
+
+  /// Android phone control; tests substitute a fake. Null uses the platform
+  /// bridge on Android and nothing elsewhere.
+  final PhoneChannel? phoneChannel;
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -137,11 +146,16 @@ class NovaApp extends StatelessWidget {
             preferences: preferences,
             lifeHost: lifeHost,
             agentCore: agentCore,
+            phoneChannel: phoneChannel,
           )
         : SpaceRoot(
-            standaloneBuilder: (_) => const _WorkbenchShell(),
-            standalonePageBuilder: (space, onSwitch) =>
-                _WorkbenchShell(space: space, onSwitchSpace: onSwitch),
+            standaloneBuilder: (_) =>
+                _WorkbenchShell(phoneChannel: phoneChannel),
+            standalonePageBuilder: (space, onSwitch) => _WorkbenchShell(
+              space: space,
+              onSwitchSpace: onSwitch,
+              phoneChannel: phoneChannel,
+            ),
           ),
   );
 }
@@ -155,7 +169,9 @@ class _WorkbenchShell extends StatefulWidget {
     this.preferences,
     this.lifeHost,
     this.agentCore,
+    this.phoneChannel,
   });
+  final PhoneChannel? phoneChannel;
   final SpaceRecord? space;
   final VoidCallback? onSwitchSpace;
   final AudioPort? audio;
@@ -187,6 +203,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   bool _phoneVoiceWasActive = false, _phoneVoiceWasConnecting = false;
   String? _phoneVoiceStartError, _reportedCleanupError;
   final localConversation = GlobalKey<LocalChatPanelState>();
+  PhoneChannel? phoneChannel;
+  PhoneRunTracker? phoneRun;
   PetAvatarStore? _petAvatarStore;
   int _tab = 0;
   AgentCoreHost? agentCore;
@@ -212,6 +230,12 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   }
 
   void _initialize() {
+    phoneChannel =
+        widget.phoneChannel ??
+        (phoneControlSupported() ? const NativePhoneChannel() : null);
+    phoneRun = phoneChannel == null
+        ? null
+        : (PhoneRunTracker(phoneChannel!)..start());
     lifeHost = widget.lifeHost ?? LifeHost();
     lifeHost.addListener(_lifeChanged);
     unawaited(lifeHost.open().catchError((Object _) {}));
@@ -990,6 +1014,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               CupertinoIcons.text_bubble,
             ),
             ('language', _t('语言', 'Language'), CupertinoIcons.globe),
+            ...phoneControlSettingsRows(
+              language,
+              available: phoneChannel != null,
+            ),
             (
               'local_schedules',
               _t('手机定时任务', 'Phone schedules'),
@@ -1028,6 +1056,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           petAvatarStore,
           language: language,
         );
+      case 'phone_control':
+        final channel = phoneChannel;
+        if (channel != null && mounted) {
+          await openPhoneControlPage(context, channel, language: language);
+        }
       case 'message_display':
         await _messageDisplaySettings();
       case 'language':
@@ -1295,6 +1328,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   @override
   void dispose() {
+    phoneRun?.dispose();
     phoneVoice?.removeListener(_phoneVoiceChanged);
     phoneVoice?.dispose();
     voiceDelegates?.removeListener(_voiceChanged);
@@ -1313,6 +1347,17 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     emptyStore.dispose();
     if (widget.audio == null) unawaited(audio.disconnect());
     super.dispose();
+  }
+
+  /// Stops the task shown in the virtual-screen picture: the voice call's
+  /// delegate when one runs, else the chat turn that owns it.
+  void _stopPhoneTask() {
+    final voice = phoneVoice;
+    if (voice != null && voice.active && voiceDelegates?.busy == true) {
+      voice.cancelDelegate();
+    } else {
+      agentCore?.cancel();
+    }
   }
 
   /// The Nova home is the only tab with a branded title; every other tab is
@@ -1442,125 +1487,152 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   // in standalone mode the Space strip already consumed it.
                   top: appBar == null,
                   bottom: false,
-                  child: Column(
+                  child: Stack(
+                    fit: StackFit.expand,
                     children: [
-                      if (_phoneVoiceShown &&
-                          phoneVoice != null &&
-                          !fullCall &&
-                          (phoneVoice!.active || phoneVoice!.connecting))
-                        PhoneVoicePanel(
-                          petAvatar: petAvatarStore,
-                          session: phoneVoice!,
-                          language: language,
-                          compact: true,
-                          onExpand: _expandPhoneVoice,
-                          onMinimize: _minimizePhoneVoice,
-                          onEnd: _dismissPhoneVoice,
-                          onSettings: () => unawaited(_voiceSettings()),
-                          onStart: () => unawaited(_startPhoneVoice()),
-                        ),
-                      Expanded(
-                        child: IndexedStack(
-                          index: host == null && _tab < 2
-                              ? 0
-                              : _tab == 0
-                              ? 1
-                              : _tab == 1
-                              ? (_taskOpen ? 1 : 0)
-                              : _tab,
-                          children: [
-                            if (host != null)
-                              ConversationHome(
-                                host: host,
-                                activeConversationId: taskChatId,
-                                language: language,
-                                schedules: localSchedules,
-                                onNew: _newChat,
-                                onOpen: (id) => setState(() {
-                                  taskChatId = id;
-                                  _taskOpen = true;
-                                }),
-                              )
-                            else
-                              Center(
-                                child: startupError == null
-                                    ? const CircularProgressIndicator()
-                                    : Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(startupError!),
-                                          TextButton(
-                                            onPressed: () {
-                                              setState(
-                                                () => startupError = null,
-                                              );
-                                              unawaited(_openAgentCore());
-                                            },
-                                            child: Text(_t('重试', 'Retry')),
-                                          ),
-                                        ],
-                                      ),
-                              ),
-                            if (hasChat)
-                              LocalChatPanel(
-                                key: localConversation,
-                                onVoice: _openVoice,
-                                voiceBusy:
-                                    phoneVoice?.active == true ||
-                                    phoneVoice?.connecting == true,
-                                audioOwner: audioOwner,
-                                dictationAudio: audio,
-                                requestMicrophone: requestMicrophone,
-                                voiceSettings: voiceSettings,
-                                externalTaskBusy:
-                                    voiceDelegates?.busy == true &&
-                                    phoneVoice?.conversationId == chatId,
-                                onCancelExternalTask:
-                                    phoneVoice?.cancelDelegate,
-                                onVoiceText:
-                                    phoneVoice?.active == true &&
-                                        phoneVoice?.conversationId == chatId
-                                    ? phoneVoice!.submitText
-                                    : null,
-                                active:
-                                    (_tab == 0 || (_tab == 1 && _taskOpen)) &&
-                                    !fullCall,
-                                header: _taskContext(host),
-                                host: host,
-                                conversationId: chatId!,
-                                language: language,
-                                showProcess: showProcess,
-                                modelRevision: _modelRevision,
-                                onModelSettings: _settings,
-                              )
-                            else
-                              const SizedBox(),
-                            TimelinePage(
-                              store: lifeHost.store ?? emptyStore,
+                      Column(
+                        children: [
+                          if (_phoneVoiceShown &&
+                              phoneVoice != null &&
+                              !fullCall &&
+                              (phoneVoice!.active || phoneVoice!.connecting))
+                            PhoneVoicePanel(
+                              petAvatar: petAvatarStore,
+                              session: phoneVoice!,
                               language: language,
-                              sourceTimeline: connector == null
-                                  ? null
-                                  : LocalProfileResults(
-                                      host: connector,
-                                      publication: lifeHost.publication,
-                                      kind: 'timeline',
-                                      repository: profileAgent?.repository,
-                                      generation: profileGeneration,
-                                      language: language,
-                                      revision: _profileRevision,
-                                      emptyHint: profileHint.hint,
-                                      onOpenConnectors: profileHint.connect
-                                          ? () => unawaited(_openConnectors())
-                                          : null,
-                                    ),
-                              onDiscuss: (text) => unawaited(_delegate(text)),
-                              onStartTask: (todo) =>
-                                  unawaited(_startTodoTask(todo)),
+                              compact: true,
+                              onExpand: _expandPhoneVoice,
+                              onMinimize: _minimizePhoneVoice,
+                              onEnd: _dismissPhoneVoice,
+                              onSettings: () => unawaited(_voiceSettings()),
+                              onStart: () => unawaited(_startPhoneVoice()),
                             ),
-                            _myPage(),
-                          ],
-                        ),
+                          Expanded(
+                            child: IndexedStack(
+                              index: host == null && _tab < 2
+                                  ? 0
+                                  : _tab == 0
+                                  ? 1
+                                  : _tab == 1
+                                  ? (_taskOpen ? 1 : 0)
+                                  : _tab,
+                              children: [
+                                if (host != null)
+                                  ConversationHome(
+                                    host: host,
+                                    activeConversationId: taskChatId,
+                                    language: language,
+                                    schedules: localSchedules,
+                                    onNew: _newChat,
+                                    onOpen: (id) => setState(() {
+                                      taskChatId = id;
+                                      _taskOpen = true;
+                                    }),
+                                  )
+                                else
+                                  Center(
+                                    child: startupError == null
+                                        ? const CircularProgressIndicator()
+                                        : Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(startupError!),
+                                              TextButton(
+                                                onPressed: () {
+                                                  setState(
+                                                    () => startupError = null,
+                                                  );
+                                                  unawaited(_openAgentCore());
+                                                },
+                                                child: Text(_t('重试', 'Retry')),
+                                              ),
+                                            ],
+                                          ),
+                                  ),
+                                if (hasChat)
+                                  LocalChatPanel(
+                                    key: localConversation,
+                                    onVoice: _openVoice,
+                                    voiceBusy:
+                                        phoneVoice?.active == true ||
+                                        phoneVoice?.connecting == true,
+                                    audioOwner: audioOwner,
+                                    dictationAudio: audio,
+                                    requestMicrophone: requestMicrophone,
+                                    voiceSettings: voiceSettings,
+                                    externalTaskBusy:
+                                        voiceDelegates?.busy == true &&
+                                        phoneVoice?.conversationId == chatId,
+                                    onCancelExternalTask:
+                                        phoneVoice?.cancelDelegate,
+                                    onVoiceText:
+                                        phoneVoice?.active == true &&
+                                            phoneVoice?.conversationId == chatId
+                                        ? phoneVoice!.submitText
+                                        : null,
+                                    active:
+                                        (_tab == 0 ||
+                                            (_tab == 1 && _taskOpen)) &&
+                                        !fullCall,
+                                    header: _taskContext(host),
+                                    phoneRun: phoneRun,
+                                    host: host,
+                                    conversationId: chatId!,
+                                    language: language,
+                                    showProcess: showProcess,
+                                    modelRevision: _modelRevision,
+                                    onModelSettings: _settings,
+                                  )
+                                else
+                                  const SizedBox(),
+                                TimelinePage(
+                                  store: lifeHost.store ?? emptyStore,
+                                  language: language,
+                                  sourceTimeline: connector == null
+                                      ? null
+                                      : LocalProfileResults(
+                                          host: connector,
+                                          publication: lifeHost.publication,
+                                          kind: 'timeline',
+                                          repository: profileAgent?.repository,
+                                          generation: profileGeneration,
+                                          language: language,
+                                          revision: _profileRevision,
+                                          emptyHint: profileHint.hint,
+                                          onOpenConnectors: profileHint.connect
+                                              ? () =>
+                                                    unawaited(_openConnectors())
+                                              : null,
+                                        ),
+                                  onDiscuss: (text) =>
+                                      unawaited(_delegate(text)),
+                                  onStartTask: (todo) =>
+                                      unawaited(_startTodoTask(todo)),
+                                ),
+                                _myPage(),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
+                      if (phoneRun != null)
+                        Positioned.fill(
+                          child: VirtualScreenPip(
+                            tracker: phoneRun!,
+                            language: language,
+                            visible: !fullCall,
+                            // Off the model row and the composer in chat.
+                            topInset: hasChat && (_tab == 0 || _tab == 1)
+                                ? 52
+                                : 8,
+                            bottomInset:
+                                hasChat &&
+                                    (_tab == 0 || (_tab == 1 && _taskOpen))
+                                ? 96
+                                : 12,
+                            onStop: _stopPhoneTask,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1579,6 +1651,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 onExpand: _expandPhoneVoice,
                 onSettings: () => unawaited(_voiceSettings()),
                 onStart: () => unawaited(_startPhoneVoice()),
+                phoneRun: phoneRun,
               ),
             ),
         ],

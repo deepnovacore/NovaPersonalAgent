@@ -232,6 +232,7 @@ class _Draft {
 
 ToolStepState _liveState(String status, bool running) => switch (status) {
   'completed' => running ? ToolStepState.run : ToolStepState.ok,
+  'running' => ToolStepState.run,
   'failed' ||
   'error' ||
   'cancelled' ||
@@ -493,6 +494,26 @@ class _StepTileState extends State<_StepTile> {
         row.text,
         if (row.subtitle.isNotEmpty) row.subtitle,
       ].join(' · '),
+      extra: row.frame == null
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _FrameButton(
+                  key: ValueKey('tool-step-frame:${row.step}'),
+                  label: showFrame
+                      ? t('收起当时的画面', 'Hide that screen')
+                      : t('查看当时的画面', 'View that screen'),
+                  expanded: showFrame,
+                  onTap: () => setState(() {
+                    showFrame = !showFrame;
+                    frameBytes ??= row.frame!();
+                  }),
+                ),
+                if (showFrame && frameBytes != null)
+                  _FramePreview(bytes: frameBytes!, language: widget.language),
+              ],
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -529,33 +550,56 @@ class _StepTileState extends State<_StepTile> {
                 ),
               ),
             ),
-          if (row.frame != null)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() {
-                showFrame = !showFrame;
-                frameBytes ??= row.frame!();
-              }),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  showFrame
-                      ? t('收起当时的画面', 'Hide that screen')
-                      : t('查看当时的画面', 'View that screen'),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Nova.mint,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
-              ),
-            ),
-          if (showFrame && frameBytes != null)
-            _FramePreview(bytes: frameBytes!, language: widget.language),
         ],
       ),
     );
   }
+}
+
+/// The per-step "view that screen" toggle. It sits beside the row's own
+/// button semantics, not inside them, so a screen reader reaches it, and it is
+/// at least [_tapTargetHeight] tall.
+class _FrameButton extends StatelessWidget {
+  const _FrameButton({
+    super.key,
+    required this.label,
+    required this.expanded,
+    required this.onTap,
+  });
+  final String label;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    expanded: expanded,
+    label: label,
+    excludeSemantics: true,
+    onTap: onTap,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          minHeight: _tapTargetHeight,
+          minWidth: _tapTargetHeight,
+        ),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          widthFactor: 1,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Nova.mint,
+              decoration: TextDecoration.underline,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _FramePreview extends StatelessWidget {
@@ -609,6 +653,7 @@ class _RailRow extends StatelessWidget {
     required this.child,
     required this.semanticsLabel,
     this.onTap,
+    this.extra,
   });
   final bool first, last;
   final ToolStepState state;
@@ -616,9 +661,27 @@ class _RailRow extends StatelessWidget {
   final String semanticsLabel;
   final VoidCallback? onTap;
 
+  /// Interactive content below [child] that must stay reachable on its own;
+  /// [child] alone is folded into the row's single button semantics.
+  final Widget? extra;
+
   @override
   Widget build(BuildContext context) {
-    Widget row = ConstrainedBox(
+    Widget content = Align(alignment: Alignment.centerLeft, child: child);
+    if (onTap != null) {
+      content = Semantics(
+        button: true,
+        label: semanticsLabel,
+        excludeSemantics: true,
+        onTap: onTap,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: content,
+        ),
+      );
+    }
+    return ConstrainedBox(
       constraints: BoxConstraints(
         minHeight: onTap == null ? 28 : _tapTargetHeight,
       ),
@@ -640,27 +703,17 @@ class _RailRow extends StatelessWidget {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Align(alignment: Alignment.centerLeft, child: child),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [content, ?extra],
+                ),
               ),
             ),
           ],
         ),
       ),
     );
-    if (onTap != null) {
-      row = Semantics(
-        button: true,
-        label: semanticsLabel,
-        excludeSemantics: true,
-        onTap: onTap,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
-          child: row,
-        ),
-      );
-    }
-    return row;
   }
 }
 
