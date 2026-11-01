@@ -30,7 +30,6 @@ class FrameMathTest {
         val a = FrameMath.lumaGrid(w, h) { _, _ -> white }
         val b = FrameMath.lumaGrid(w, h) { _, y -> if (y < h / 2) black else white }
         assertTrue(FrameMath.differs(a, b))
-        assertTrue(FrameMath.pageChanged(a, b))
     }
 
     @Test fun cursorBlinkDoesNotDiffer() {

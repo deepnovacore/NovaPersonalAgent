@@ -18,7 +18,6 @@ object FrameMath {
     private const val CELL_SAMPLES = 4
     private const val CELL_DELTA = 16
     private const val MIN_CELLS = 3
-    private const val PAGE_SHARE = 0.25
     private const val BLACK_SAMPLES = 24
     private const val BLACK_LEVEL = 8
     /** Longest side of the model screenshot (contract: `image` longest side <= 1280). */
@@ -44,12 +43,6 @@ object FrameMath {
     fun differs(a: IntArray?, b: IntArray?): Boolean {
         if (a == null || b == null || a.size != b.size) return false
         return a.indices.count { abs(a[it] - b[it]) > CELL_DELTA } >= MIN_CELLS
-    }
-
-    /** At least [PAGE_SHARE] of the cells changed: a new page (or the whole screen moving), not a local animation. */
-    fun pageChanged(a: IntArray?, b: IntArray?): Boolean {
-        if (a == null || b == null || a.size != b.size) return false
-        return a.indices.count { abs(a[it] - b[it]) > CELL_DELTA } >= a.size * PAGE_SHARE
     }
 
     /** Black (FLAG_SECURE) when at least 99.5% of evenly spread samples are <= [BLACK_LEVEL] on every channel. */

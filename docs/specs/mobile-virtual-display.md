@@ -43,7 +43,8 @@ Flutter ── nova/phone/v1 (MethodChannel, JSON strings) ───────
 6. **Accessibility on displayId**: `LocalGuiService` (no second service) reads `windowsOnAllDisplays[displayId]`, dispatches
    gestures with `GestureDescription.Builder().setDisplayId(displayId)`, finds input focus inside that display's window tree
    (never `rootInActiveWindow`), and filters events by `AccessibilityEvent.displayId` (API 33+) or window id. The XML config
-   adds only `typeWindowsChanged`; notification events stay off. `flagIncludeNotImportantViews` is set at runtime through
+   adds only the event type `typeWindowsChanged`; it already sets `flagRetrieveInteractiveWindows` (required for
+   `windowsOnAllDisplays`) and `flagReportViewIds`; notification events stay off. `flagIncludeNotImportantViews` is set at runtime through
    `serviceInfo` only while a virtual run or the self-check holds a lease on it, so the main-tier tree and fingerprint stay
    byte-for-byte unchanged. Acquiring the lease is transactional (a failed `serviceInfo` write leaves no lease); the run's
    lease is released synchronously when the run ends, before another run is admitted (the display itself may be released
@@ -107,7 +108,7 @@ element `{ref:"@eN", role, name, bounds:[l,t,r,b] 0..999, resource_id?, clickabl
   same preceding label; semantic name changes do not match) → found → act on the new node; otherwise `ref_expired`.
 - `ref_expired` is handled like `screen_changed`: observe again and ask the model (shares the `stalePlans < 3` budget). The old action is never retried.
 - `secret` elements: `type` into them fails with `private_input_requires_user`. Editable and secret elements are named
-  only by their hint or their label view (`labelFor`), never by their text or description, which may be typed input.
+  only by their hint or their label view (`labeledBy`), never by their text or description, which may be typed input.
 - `secure_frame` (FLAG_SECURE): true only when the frame is (near-)black **and** application windows on the display still
   have visible elements (elements of system windows such as the status bar do not count); a dark splash, video or
   switched-off screen without readable app elements is not secure. While the
