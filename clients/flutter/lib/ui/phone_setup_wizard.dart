@@ -27,6 +27,7 @@ PhoneSetupStep _stepOf(HelperFailure failure) => switch (failure) {
   HelperFailure.authorizationRevoked ||
   HelperFailure.keyUnreadable => PhoneSetupStep.pairingCode,
   HelperFailure.noWifi ||
+  // `wifiNotAllowed` is reserved: native never reports it today.
   HelperFailure.wifiNotAllowed => PhoneSetupStep.wirelessDebugging,
   _ => PhoneSetupStep.connect,
 };
@@ -93,6 +94,39 @@ class PhoneSetupProgress {
   }
 }
 
+const _fullWidthZero = 0xff10;
+
+/// Full-width digits (０-９) as ASCII, so a code typed with a Chinese keyboard
+/// reads the same.
+String asciiDigits(String text) => String.fromCharCodes(
+  text.runes.map(
+    (r) => r >= _fullWidthZero && r <= _fullWidthZero + 9
+        ? 0x30 + r - _fullWidthZero
+        : r,
+  ),
+);
+
+/// The 6-digit pairing code from what the user typed or pasted, or null.
+String? parsePairingCode(String raw) {
+  final digits = asciiDigits(raw).replaceAll(RegExp(r'[\s-]'), '');
+  return RegExp(r'^\d{6}$').hasMatch(digits) ? digits : null;
+}
+
+/// The pairing port from what the user typed or pasted: a bare number, or
+/// "192.168.1.5:41235" (the part after the last colon). Empty input is "no
+/// port" (`valid`, null); anything else that is not 1..65535 is invalid.
+({bool valid, int? port}) parsePairingPort(String raw) {
+  var text = asciiDigits(raw).trim();
+  final colon = text.lastIndexOf(RegExp('[:：]'));
+  if (colon >= 0) text = text.substring(colon + 1);
+  text = text.replaceAll(RegExp(r'\s'), '');
+  if (text.isEmpty) return (valid: raw.trim().isEmpty, port: null);
+  final port = RegExp(r'^\d{1,5}$').hasMatch(text) ? int.parse(text) : null;
+  return port != null && port >= 1 && port <= 65535
+      ? (valid: true, port: port)
+      : (valid: false, port: null);
+}
+
 Future<void> openPhoneSetupWizard(
   BuildContext context,
   PhoneChannel channel, {
@@ -107,6 +141,22 @@ Future<void> openPhoneSetupWizard(
     ),
   ),
 );
+
+/// Maps full-width digits to ASCII and drops everything else.
+class _DigitsFormatter extends TextInputFormatter {
+  const _DigitsFormatter();
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final text = asciiDigits(newValue.text).replaceAll(RegExp(r'\D'), '');
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
 
 class PhoneSetupWizard extends StatefulWidget {
   const PhoneSetupWizard({
@@ -125,7 +175,8 @@ class PhoneSetupWizard extends StatefulWidget {
   State<PhoneSetupWizard> createState() => _PhoneSetupWizardState();
 }
 
-class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
+class _PhoneSetupWizardState extends State<PhoneSetupWizard>
+    with WidgetsBindingObserver {
   late final PhoneStatusWatcher watcher = PhoneStatusWatcher(widget.channel);
   PhoneCopy get c => PhoneCopy(widget.language);
   final confirmed = <PhoneSetupStep>{};
@@ -145,6 +196,7 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
   void initState() {
     super.initState();
     if (widget.startAtPairing) viewing = PhoneSetupStep.pairingCode;
+    WidgetsBinding.instance.addObserver(this);
     watcher.addListener(_changed);
     watcher.start();
   }
@@ -186,8 +238,21 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
     }
   }
 
+  /// The pairing window is open only for a while and the user leaves for the
+  /// system pairing screen: coming back on the pairing step arms it again.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed ||
+        current != PhoneSetupStep.pairingCode) {
+      return;
+    }
+    pairingRequested = false;
+    _maybeStartPairing();
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     watcher.removeListener(_changed);
     watcher.dispose();
     code.dispose();
@@ -201,14 +266,24 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
   Future<void> _stepAction(PhoneSetupStep step) => switch (step) {
     PhoneSetupStep.developer => _open(PhoneSettingsKind.developer),
     PhoneSetupStep.accessibility => _open(PhoneSettingsKind.accessibility),
-    PhoneSetupStep.notifications => _guard(() async {
-      await widget.channel.requestNotifications();
-      await watcher.refresh();
-    }),
+    PhoneSetupStep.notifications => _allowNotifications(),
     PhoneSetupStep.wirelessDebugging ||
     PhoneSetupStep.pairingCode => _open(PhoneSettingsKind.wirelessDebugging),
     PhoneSetupStep.connect => Future.value(),
   };
+
+  /// The system prompt first; if notifications stay blocked (denied for good,
+  /// or the pairing channel is off) the app's notification settings.
+  Future<void> _allowNotifications() => _guard(() async {
+    await widget.channel.requestNotifications();
+    await watcher.refresh();
+    if (watcher.status?.notificationsAllowed != true) {
+      await widget.channel.openSettings(PhoneSettingsKind.notifications);
+    }
+  });
+
+  Future<void> _acknowledge() =>
+      _guard(() => watcher.run(() => widget.channel.setExperimentalAck(true)));
 
   Future<void> _fix(HelperFix fix) async {
     switch (fix) {
@@ -228,22 +303,17 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
   }
 
   Future<void> _submit() async {
-    final digits = code.text.trim();
-    final rawPort = port.text.trim();
-    final parsedPort = rawPort.isEmpty ? null : int.tryParse(rawPort);
+    final digits = parsePairingCode(code.text);
+    final parsedPort = parsePairingPort(port.text);
     setState(() {
-      codeError = RegExp(r'^\d{6}$').hasMatch(digits) ? null : c.codeInvalid;
-      portError =
-          rawPort.isEmpty ||
-              (parsedPort != null && parsedPort >= 1 && parsedPort <= 65535)
-          ? null
-          : c.portInvalid;
+      codeError = digits != null ? null : c.codeInvalid;
+      portError = parsedPort.valid ? null : c.portInvalid;
     });
-    if (codeError != null || portError != null) return;
+    if (digits == null || !parsedPort.valid) return;
     setState(() => busy = true);
     await _guard(
       () => watcher.run(
-        () => widget.channel.submitCode(digits, port: parsedPort),
+        () => widget.channel.submitCode(digits, port: parsedPort.port),
       ),
     );
     if (mounted) setState(() => busy = false);
@@ -280,16 +350,61 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
                   : const CircularProgressIndicator(),
             )
           : _body(status),
+      bottomNavigationBar: status == null || _showsSuccess(status)
+          ? null
+          : _laterBar(),
     );
   }
+
+  bool _showsSuccess(PhoneStatus s) =>
+      progress.firstOpen == null && viewing == null && !_needsAck(s);
+
+  /// Android 12/13: the focus warning has to be accepted before the virtual
+  /// screen is used, so the wizard is not finished until it is.
+  bool _needsAck(PhoneStatus s) =>
+      s.supported && s.experimental && !s.experimentalAck;
+
+  /// "Not now" stays in reach however long the steps above grow.
+  Widget _laterBar() => SafeArea(
+    top: false,
+    child: DecoratedBox(
+      decoration: const BoxDecoration(
+        color: Nova.sheet,
+        border: Border(top: BorderSide(color: Nova.separator, width: .5)),
+      ),
+      child: Align(
+        alignment: Alignment.center,
+        heightFactor: 1,
+        child: TextButton(
+          key: const ValueKey('phone-wizard-later'),
+          style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+          onPressed: () => Navigator.maybePop(context),
+          child: Text(c.later),
+        ),
+      ),
+    ),
+  );
 
   Widget _body(PhoneStatus s) {
     final p = progress;
     final open = current;
-    final allDone = p.firstOpen == null;
+    final needsAck = _needsAck(s);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
       children: [
+        if (!s.supported)
+          Padding(
+            key: const ValueKey('phone-wizard-too-old'),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+            child: Text(
+              c.tooOldLine,
+              style: const TextStyle(
+                color: Nova.amber,
+                fontSize: 13,
+                height: 1.45,
+              ),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
           child: Text(
@@ -324,10 +439,56 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
               style: const TextStyle(color: Nova.red, fontSize: 13),
             ),
           ),
-        if (allDone && viewing == null) _success() else _footer(),
+        if (needsAck) _experimentalCard(p.firstOpen == null),
+        if (_showsSuccess(s)) _success() else _footer(),
       ],
     );
   }
+
+  Widget _experimentalCard(bool stepsDone) => Container(
+    key: const ValueKey('phone-wizard-experimental'),
+    margin: const EdgeInsets.only(top: 14),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: Nova.amber.withValues(alpha: .08),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Nova.amber.withValues(alpha: .35)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          c.experimentalTitle,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          stepsDone ? c.experimentalWizardNote : c.experimentalBody,
+          style: const TextStyle(
+            color: Nova.secondary,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
+        if (stepsDone) ...[
+          const SizedBox(height: 4),
+          Text(
+            c.experimentalBody,
+            style: const TextStyle(
+              color: Nova.secondary,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
+        FilledButton.tonal(
+          onPressed: _acknowledge,
+          child: Text(c.experimentalAck),
+        ),
+      ],
+    ),
+  );
 
   Widget _success() => Padding(
     key: const ValueKey('phone-wizard-success'),
@@ -372,10 +533,6 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
             fontSize: 13,
             height: 1.4,
           ),
-        ),
-        TextButton(
-          onPressed: () => Navigator.maybePop(context),
-          child: Text(c.later),
         ),
       ],
     ),
@@ -466,16 +623,27 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
           ),
       ],
     );
-    return Semantics(
-      container: true,
-      label: '${index + 1}. ${copy.title}',
-      selected: isCurrent,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
+    // The header is one node ("2. Title, summary, state"); the badge number
+    // and texts under it are not announced again, and the step's own body
+    // keeps its separate nodes.
+    final spoken = [
+      '${index + 1}. ${copy.title}',
+      if (!isCurrent) copy.brief,
+      if (failed) c.stepFailedLabel else if (done) c.doneValue(step),
+    ].join(', ');
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            container: true,
+            label: spoken,
+            selected: isCurrent,
+            button: canRevisit,
+            excludeSemantics: true,
+            onTap: canRevisit ? () => _revisit(step) : null,
+            child: InkWell(
               onTap: canRevisit ? () => _revisit(step) : null,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 48),
@@ -485,13 +653,13 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
                 ),
               ),
             ),
-            if (isCurrent)
-              Padding(
-                padding: const EdgeInsets.only(left: 42, bottom: 14),
-                child: _stepBody(step, s, p),
-              ),
-          ],
-        ),
+          ),
+          if (isCurrent)
+            Padding(
+              padding: const EdgeInsets.only(left: 42, bottom: 14),
+              child: _stepBody(step, s, p),
+            ),
+        ],
       ),
     );
   }
@@ -592,7 +760,7 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
             s.pairingStage == PairingStage.connecting ||
             s.pairingStage == PairingStage.pairing) {
           children.add(_working(c.working));
-        } else if (!s.helperRunning && failure == null) {
+        } else if (!s.helperRunning && failure == null && s.supported) {
           children.add(_working(c.scanning));
         }
       case PhoneSetupStep.notifications:
@@ -602,7 +770,16 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
         break;
     }
     if (step == PhoneSetupStep.accessibility) {
-      children.add(_text(c.appInfoHint));
+      children
+        ..add(_text(c.appInfoHint))
+        ..add(
+          _button(
+            c.openAppInfo,
+            () => unawaited(_open(PhoneSettingsKind.appInfo)),
+            tonal: true,
+          ),
+        )
+        ..add(_text(c.accessibilityOffNote));
     }
     final action = copy.action;
     if (action != null && step != PhoneSetupStep.pairingCode) {
@@ -635,12 +812,11 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
     return [
       if (!s.notificationsAllowed && !s.accessibility) ...[
         _text(c.needNotifications, color: Nova.amber),
-        _button(c.allowNotifications, () async {
-          await _guard(() async {
-            await widget.channel.requestNotifications();
-            await watcher.refresh();
-          });
-        }, tonal: true),
+        _button(
+          c.allowNotifications,
+          () => unawaited(_allowNotifications()),
+          tonal: true,
+        ),
       ],
       if (s.accessibility)
         _text(c.autoRead)
@@ -670,7 +846,7 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
         controller: code,
         keyboardType: TextInputType.number,
         inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
+          const _DigitsFormatter(),
           LengthLimitingTextInputFormatter(6),
         ],
         decoration: InputDecoration(
@@ -681,8 +857,8 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
       const SizedBox(height: 8),
       TextField(
         controller: port,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        // Not digits-only: a pasted "192.168.1.5:41235" keeps its port.
+        keyboardType: TextInputType.text,
         decoration: InputDecoration(
           labelText: c.portLabel,
           helperText: c.portHint,

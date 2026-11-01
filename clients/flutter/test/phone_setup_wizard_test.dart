@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent/phone_channel.dart';
 import 'package:nova_mobile/ui/phone_setup_copy.dart';
@@ -564,5 +565,267 @@ void main() {
     expect(find.text('Turn on Developer options'), findsOneWidget);
     expect(find.text('I’ve turned it on, next'), findsOneWidget);
     expect(find.text('Not now'), findsOneWidget);
+  });
+
+  group('pairing code and port input', () {
+    test('a pasted address keeps only the port; full-width digits count', () {
+      expect(parsePairingPort('192.168.1.5:41235'), (valid: true, port: 41235));
+      expect(parsePairingPort('192.168.1.5：41235'), (valid: true, port: 41235));
+      expect(parsePairingPort(' ４１２３５ '), (valid: true, port: 41235));
+      expect(parsePairingPort(''), (valid: true, port: null));
+      expect(parsePairingPort('   '), (valid: true, port: null));
+      expect(parsePairingPort('70000').valid, isFalse);
+      expect(parsePairingPort('0').valid, isFalse);
+      expect(parsePairingPort('abc').valid, isFalse);
+      expect(parsePairingPort('192.168.1.5:').valid, isFalse);
+      expect(parsePairingCode('１２３４５６'), '123456');
+      expect(parsePairingCode('123 456'), '123456');
+      expect(parsePairingCode('12345'), isNull);
+    });
+
+    testWidgets('pasting host:port into the form sends the port', (
+      tester,
+    ) async {
+      final channel = FakePhoneChannel(
+        const PhoneStatus(
+          apiLevel: 34,
+          notificationsAllowed: true,
+          pairing: PairingState.searching,
+          pairingStage: PairingStage.waitingCode,
+        ),
+      );
+      addTearDown(channel.close);
+      await _pump(tester, channel, startAtPairing: true);
+      await tester.tap(find.text('通知没出来？在这里填'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField).first, '１２３４５６');
+      await tester.enterText(find.byType(TextField).last, '192.168.1.5:41235');
+      await tester.tap(find.widgetWithText(FilledButton, '配对'));
+      await tester.pump();
+      await tester.pump();
+      expect(channel.submitted, [('123456', 41235)]);
+    });
+  });
+
+  testWidgets('returning to the pairing step arms the search again', (
+    tester,
+  ) async {
+    final channel = FakePhoneChannel(
+      const PhoneStatus(
+        apiLevel: 34,
+        notificationsAllowed: true,
+        pairing: PairingState.searching,
+        pairingStage: PairingStage.waitingCode,
+      ),
+    );
+    addTearDown(channel.close);
+    await _pump(tester, channel, startAtPairing: true);
+    int starts() => channel.calls.where((c) => c == 'startPairing').length;
+    expect(starts(), 1);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump();
+    expect(starts(), 2);
+  });
+
+  testWidgets('resuming on another step does not start pairing', (
+    tester,
+  ) async {
+    final channel = FakePhoneChannel(_fresh);
+    addTearDown(channel.close);
+    await _pump(tester, channel);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump();
+    expect(channel.calls, isNot(contains('startPairing')));
+  });
+
+  testWidgets('restricted settings: text and a button to App info', (
+    tester,
+  ) async {
+    final channel = FakePhoneChannel(
+      const PhoneStatus(apiLevel: 34, pairing: PairingState.searching),
+    );
+    addTearDown(channel.close);
+    await _pump(tester, channel);
+    expect(find.textContaining('允许受限制的设置'), findsOneWidget);
+    expect(find.textContaining('不打开也行'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '打开应用信息'));
+    await tester.pump();
+    expect(channel.opened, [PhoneSettingsKind.appInfo]);
+  });
+
+  testWidgets('notifications that stay blocked open the notification page', (
+    tester,
+  ) async {
+    final channel = FakePhoneChannel(
+      const PhoneStatus(
+        apiLevel: 34,
+        accessibility: true,
+        pairing: PairingState.searching,
+      ),
+    );
+    addTearDown(channel.close);
+    await _pump(tester, channel);
+    await tester.tap(find.widgetWithText(FilledButton, '允许通知').last);
+    await tester.pump();
+    await tester.pump();
+    expect(channel.calls, contains('requestNotifications'));
+    expect(channel.opened, [PhoneSettingsKind.notifications]);
+  });
+
+  group('Android 12/13 acknowledgement', () {
+    const ready = PhoneStatus(
+      apiLevel: 33,
+      experimental: true,
+      accessibility: true,
+      notificationsAllowed: true,
+      pairing: PairingState.paired,
+      helper: HelperState.running,
+    );
+
+    testWidgets('all steps done is not "set up" until it is accepted', (
+      tester,
+    ) async {
+      final channel = FakePhoneChannel(ready);
+      addTearDown(channel.close);
+      await _pump(tester, channel);
+      expect(
+        find.byKey(const ValueKey('phone-wizard-experimental')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('phone-wizard-success')), findsNothing);
+      await tester.tap(find.widgetWithText(FilledButton, '我知道了，仍要使用'));
+      await tester.pump();
+      await tester.pump();
+      expect(channel.calls, contains('setExperimentalAck:true'));
+      expect(
+        find.byKey(const ValueKey('phone-wizard-experimental')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('phone-wizard-success')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a failed acknowledgement stays open and says so', (
+      tester,
+    ) async {
+      final channel = FakePhoneChannel(ready)
+        ..ackError = const PhoneChannelException('unavailable');
+      addTearDown(channel.close);
+      await _pump(tester, channel);
+      await tester.tap(find.widgetWithText(FilledButton, '我知道了，仍要使用'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('操作没有成功，请重试。'), findsOneWidget);
+      expect(find.byKey(const ValueKey('phone-wizard-success')), findsNothing);
+    });
+
+    testWidgets('Android 14 needs none', (tester) async {
+      final channel = FakePhoneChannel(
+        const PhoneStatus(
+          apiLevel: 34,
+          accessibility: true,
+          notificationsAllowed: true,
+          pairing: PairingState.paired,
+          helper: HelperState.running,
+        ),
+      );
+      addTearDown(channel.close);
+      await _pump(tester, channel);
+      expect(
+        find.byKey(const ValueKey('phone-wizard-experimental')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('phone-wizard-success')),
+        findsOneWidget,
+      );
+    });
+  });
+
+  testWidgets('a too-old Android says so inside the wizard', (tester) async {
+    final channel = FakePhoneChannel(
+      const PhoneStatus(apiLevel: 30, helper: HelperState.unsupported),
+    );
+    addTearDown(channel.close);
+    await _pump(tester, channel);
+    expect(find.byKey(const ValueKey('phone-wizard-too-old')), findsOneWidget);
+    expect(find.text('正在本机查找无线调试…'), findsNothing);
+    expect(channel.calls, isNot(contains('startPairing')));
+  });
+
+  testWidgets('each step is announced once, not by container and texts', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final channel = FakePhoneChannel(_fresh);
+    addTearDown(channel.close);
+    await _pump(tester, channel);
+    expect(find.bySemanticsLabel(RegExp(r'^1\. 打开开发者选项$')), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp(r'^2\. 打开 Nova 的无障碍')), findsOneWidget);
+    // The title text and the numbered badge add no nodes of their own; the
+    // one bare match is the step's action button, which has the same words.
+    expect(find.bySemanticsLabel('打开开发者选项'), findsOneWidget);
+    expect(find.bySemanticsLabel('1'), findsNothing);
+    final current = tester.getSemantics(
+      find.bySemanticsLabel(RegExp(r'^1\. 打开开发者选项$')),
+    );
+    // ignore: deprecated_member_use
+    expect(current.hasFlag(SemanticsFlag.isSelected), isTrue);
+    semantics.dispose();
+  });
+
+  testWidgets('"Not now" stays on screen however long the steps are', (
+    tester,
+  ) async {
+    final channel = FakePhoneChannel(
+      const PhoneStatus(
+        apiLevel: 34,
+        notificationsAllowed: true,
+        pairing: PairingState.searching,
+        pairingStage: PairingStage.waitingCode,
+      ),
+    );
+    addTearDown(channel.close);
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: novaTheme(),
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(360, 640),
+            textScaler: TextScaler.linear(2),
+          ),
+          child: PhoneSetupWizard(channel: channel, startAtPairing: true),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.ensureVisible(find.text('通知没出来？在这里填'));
+    await tester.tap(find.text('通知没出来？在这里填'));
+    await tester.pump();
+    final later = tester.getRect(
+      find.byKey(const ValueKey('phone-wizard-later')),
+    );
+    expect(later.bottom, lessThanOrEqualTo(640));
+    expect(later.top, greaterThanOrEqualTo(0));
+    expect(later.height, greaterThanOrEqualTo(48));
+    // Scrolled to the very top it is still there.
+    await tester.drag(find.byType(ListView), const Offset(0, 4000));
+    await tester.pump();
+    expect(
+      tester.getRect(find.byKey(const ValueKey('phone-wizard-later'))).bottom,
+      lessThanOrEqualTo(640),
+    );
   });
 }

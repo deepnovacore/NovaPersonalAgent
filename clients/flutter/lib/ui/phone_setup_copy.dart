@@ -232,6 +232,7 @@ class PhoneCopy {
   String get revisitNote =>
       t('点上面任一步，可以回去重做。', 'Tap any step above to go back and redo it.');
   String get done => t('完成', 'Done');
+  String get stepFailedLabel => t('出错了', 'Needs attention');
   String get success => t('手机操作已经设置好了', 'Phone control is set up');
   String get successNote => t(
     '手机重启后，连上 Wi-Fi 并打开「无线调试」即可自动重连。',
