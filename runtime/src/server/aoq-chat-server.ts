@@ -435,7 +435,7 @@ export class AoqChatServer implements DesktopServerTransport {
       const frame = {type: 'aoq.credentials', connection_id: c.id, request_id: requestId, credentials,
         ...(this.#options.runtime ? {mode: 'runtime'} : {session: {modalities: ['text', 'audio'], voice: this.#options.voice ?? 'longanqian',
           input_audio_format: 'pcm', output_audio_format: 'pcm',
-          instructions: translateSystemPrompt('你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行主机工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。', c.language ?? this.#options.language),
+          instructions: translateSystemPrompt('你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。', c.language ?? this.#options.language),
           turn_detection: {type: 'smart_turn'}}})}
       if (Buffer.byteLength(JSON.stringify(frame)) >= MAX_JSON_BYTES) { this.#unavailable(c); return }
       if (this.#options.runtime) {

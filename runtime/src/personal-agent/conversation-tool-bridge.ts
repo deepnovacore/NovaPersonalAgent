@@ -42,7 +42,7 @@ export function conversationToolBridge(core:Assembly,graph:RealtimeAssembly,opti
  const allowed=options.chat===true?new Set(chatTools.map(tool=>tool.name)):new Set(tools.map(tool=>tool.name))
  type Invoke=NonNullable<ConversationRuntime['toolBridge']>['invoke']
  const invoke=async(text:Parameters<Invoke>[0],call:Parameters<Invoke>[1],signal:AbortSignal,task?:Parameters<Invoke>[3]):Promise<JsonValue>=>{
-  if(!allowed.has(call.name))return {code:options.chat===true?'chat_tool_forbidden':'unknown_tool',state:'refused',message:options.chat===true?'请切换到 Plan 或 Build 后执行':'unknown tool'}
+  if(!allowed.has(call.name))return {code:options.chat===true?'chat_tool_forbidden':'unknown_tool',state:'refused',message:options.chat===true?'本会话处于 Chat 模式，没有执行能力；请用户把本会话切换到 Plan 或 Build 后再执行':'unknown tool'}
   signal.throwIfAborted()
   const origin=await graph.bridge.acceptUserTranscript(text),epoch=graph.service.session.sessionEpoch
   const terminals=new Map<string,JsonValue>(),listeners=new Set<()=>void>()
