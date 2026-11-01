@@ -3,6 +3,8 @@
 // change hash) and ScreenPort.normalize emitting the contract UiElement; no UiTreeNode/wheel/aggregate trees; element and name caps.
 package com.nova.nova_mobile.phone.a11y
 
+import com.nova.phone.core.uistate.ElementLocator
+
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
