@@ -335,13 +335,55 @@ function renderBadges(present, sources) {
     const badge = document.querySelector(`#badge-${key}`)
     const stored = present?.[key] === true
     const fromFile = sources?.[key] === 'dotenv' && !isEndpointSecret(key)
-    badge.textContent = fromFile ? t("来自 .env") : stored ? (sources?.[key] === 'environment' ? t("来自系统配置") : t("已设置")) : t("未设置")
+    const fromEnvironment = sources?.[key] === 'environment'
+    // A staged edit shows immediately: clearing says so before the save lands, and typing says the new value is not saved yet.
+    const staged = dirtySecretKeys.has(key)
+    const stagedValue = staged ? secretInput(key).value : ''
+    badge.textContent = staged ? (stagedValue === '' ? t("将清除（保存后生效）") : t("待保存"))
+      : fromFile ? t("来自 .env") : stored ? (fromEnvironment ? t("来自系统环境变量") : t("已设置")) : t("未设置")
     secretInput(key).hidden = stored && !dirtySecretKeys.has(key)
     secretInput(key).disabled = fromFile
     secretClearButton(key).disabled = fromFile
-    secretClearButton(key).title = fromFile ? t("此密钥由 .env 管理，请在文件中清除并重启") : t("清除并输入新密钥")
+    secretClearButton(key).title = fromFile ? t("此密钥由 .env 管理，请在文件中清除并重启")
+      : fromEnvironment ? t("此密钥来自系统环境变量，清除这里保存的值后仍会使用环境变量；需在启动环境中移除") : t("清除并输入新密钥")
     secretInput(key).placeholder = fromFile ? t("在 repo .env 中修改，重启后生效") : t("输入新密钥")
     badge.dataset.present = stored ? '1' : '0'
+    badge.dataset.staged = staged ? '1' : '0'
+  }
+}
+
+const TEST_RESULT_TEXT = Object.freeze({
+  ok: t("密钥有效"),
+  rejected: t("密钥被拒绝，请检查是否复制完整、是否已停用"),
+  forbidden: t("密钥有效，但这个账号无权使用该服务"),
+  network: t("暂时无法连接服务，请检查网络后重试"),
+  missing: t("请先输入或保存密钥"),
+  unreadable: t("无法读取已保存的密钥，请重新输入"),
+  unsupported: '',
+})
+function testResultNode(key) { return document.querySelector(`#test-result-${key}`) }
+async function testSecret(key) {
+  const button = document.querySelector(`button.test[data-key="${key}"]`), result = testResultNode(key)
+  if (!button || !result) return
+  button.disabled = true
+  result.dataset.status = 'testing'
+  result.textContent = t("测试中…")
+  try {
+    const reply = await api.testKey(key, secretInput(key).value)
+    let text = TEST_RESULT_TEXT[reply?.status] ?? TEST_RESULT_TEXT.network
+    // Model listing can pass while the voice endpoint still refuses the key.
+    if (reply?.status === 'ok' && reply.realtime && reply.realtime !== 'ok') {
+      text = reply.realtime === 'rejected' ? t("密钥可用于文字模型，但实时语音服务拒绝了它（401）：请确认它属于北京站")
+        : reply.realtime === 'forbidden' ? t("密钥可用于文字模型，但这个账号无权使用实时语音模型（403）")
+        : t("文字模型可用，实时语音暂时无法连接，请检查网络后重试")
+    } else if (reply?.status === 'ok' && reply.realtime === 'ok') text = t("密钥有效，实时语音也可用")
+    result.dataset.status = reply?.status === 'ok' && (!reply.realtime || reply.realtime === 'ok') ? 'ok' : 'warn'
+    result.textContent = text
+  } catch {
+    result.dataset.status = 'warn'
+    result.textContent = TEST_RESULT_TEXT.network
+  } finally {
+    button.disabled = false
   }
 }
 
@@ -980,9 +1022,13 @@ for (const key of SECRET_KEYS) {
   secretInput(key).addEventListener('input', () => {
     secretRevisions.noteInput(key)
     dirtySecretKeys.add(key)
+    const stale = testResultNode(key)
+    if (stale) { stale.textContent = ''; stale.dataset.status = '' }
+    renderBadges(currentView?.secretsPresent, currentView?.secretSources)
     updateButtons()
   })
 }
+for (const button of document.querySelectorAll('button.test')) button.addEventListener('click', () => { void testSecret(button.dataset.key) })
 for (const key of SECRET_KEYS) {
   secretClearButton(key).addEventListener('click', () => {
     const input = secretInput(key)
@@ -991,6 +1037,7 @@ for (const key of SECRET_KEYS) {
     input.focus()
     secretRevisions.noteInput(key)
     dirtySecretKeys.add(key)
+    renderBadges(currentView?.secretsPresent, currentView?.secretSources)
     updateButtons()
   })
 }

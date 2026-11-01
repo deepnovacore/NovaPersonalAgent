@@ -151,7 +151,7 @@ import {
   setupWindowOptions,
   validateBootstrap,
 } from './security.mjs'
-import {probeApiKey} from './key-probe.mjs'
+import {probeApiKey, probeKeyForSettings, canProbeKey} from './key-probe.mjs'
 import {SETUP_KEYS, setupCommit} from './setup-choice.mjs'
 import {selectedTextLlmProvider} from './settings-defaults.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
@@ -2294,6 +2294,18 @@ async function startSelectedCamera(camera, smokeChannel) {
     prepareRelay: () => tailscaleRelay.ensure(),
     persist: configPath => accessCredentials(() => settingsWriter({spaceHostConfigPath: configPath}, undefined, {preserveSecrets: true})),
   }))
+  // Tests one key from the settings page: the typed value, or the saved one decrypted here. Replies carry a status only.
+  ipcMain.handle('nova:settings:test-key', async (event, key, value) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('settings update rejected')
+    if (typeof key !== 'string' || !SECRET_KEYS.includes(key) || (value !== undefined && typeof value !== 'string')) throw new Error('settings update rejected')
+    if (!canProbeKey(key)) return Object.freeze({status: 'unsupported'})
+    let candidate = typeof value === 'string' ? value : ''
+    if (candidate.trim() === '') {
+      try { candidate = (await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec)))[key] ?? '' }
+      catch { return Object.freeze({status: 'unreadable'}) }
+    }
+    return probeKeyForSettings(key, candidate)
+  })
   ipcMain.handle('nova:settings:set', async (event, payload, restart = false) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
       throw new Error('settings update rejected')

@@ -1315,6 +1315,30 @@ test('清除 reveals the empty field that saving will commit', async () => {
   assert.equal(panel.node('#settings-save').disabled, false, 'clearing stages a change')
 })
 
+test('清除 updates the badge at once and says when an environment key will still be used', async () => {
+  const panel = await mountSettingsPanel(publicView({secretsPresent: {dashscopeApiKey: true}, secretSources: {dashscopeApiKey: 'settings'}}), {
+    set: async patch => publicView({...patch, secretsPresent: {}, secretSources: {}, rejectedSecrets: []}),
+  })
+  assert.equal(panel.node('#badge-dashscopeApiKey').textContent, '已设置')
+  await panel.click('button.clear[data-key="dashscopeApiKey"]')
+  assert.equal(panel.node('#badge-dashscopeApiKey').textContent, '将清除（保存后生效）')
+  assert.equal(panel.node('#badge-dashscopeApiKey').dataset.staged, '1')
+  await panel.click('#settings-save')
+  assert.equal(panel.node('#badge-dashscopeApiKey').textContent, '未设置')
+  assert.equal(panel.node('#badge-dashscopeApiKey').dataset.staged, '0')
+
+  const env = await mountSettingsPanel(publicView({secretsPresent: {tavilyApiKey: true}, secretSources: {tavilyApiKey: 'environment'}}))
+  assert.equal(env.node('#badge-tavilyApiKey').textContent, '来自系统环境变量')
+  assert.match(env.node('button.clear[data-key="tavilyApiKey"]').title, /系统环境变量/)
+})
+
+test('a typed value shows as not saved until it is saved', async () => {
+  const panel = await mountSettingsPanel(publicView({secretsPresent: {}}))
+  panel.node('#dashscopeApiKey').value = 'typed-key'
+  panel.node('#dashscopeApiKey').listeners.input()
+  assert.equal(panel.node('#badge-dashscopeApiKey').textContent, '待保存')
+})
+
 test('an accepted save clears plaintext and keeps the input editable', async () => {
   const panel = await mountSettingsPanel(publicView({secretsPresent: {}}), {
     set: async patch => publicView({

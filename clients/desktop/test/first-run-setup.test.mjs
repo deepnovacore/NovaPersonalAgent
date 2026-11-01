@@ -157,3 +157,26 @@ test('the conversation model key is accepted with every voice path, and voice ke
   assert.throws(() => setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'openai'}), /invalid setup choice/u)
   assert.throws(() => setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'ark', secrets: {deepseekApiKey: 'd'}}), /invalid setup choice/u)
 })
+
+test('settings key tests: DashScope also checks the realtime handshake, and unsupported keys have no test', async () => {
+  const {probeKeyForSettings, canProbeKey} = await import('../src/main/key-probe.mjs')
+  const {EventEmitter} = await import('node:events')
+  const fetchOk = async () => ({ok: true, status: 200, body: null})
+  const socketFor = outcome => class extends EventEmitter {
+    constructor(url, options) { super(); this.url = url; assert.equal(options.headers.Authorization, 'Bearer sk-private'); setImmediate(() => outcome(this)) }
+    terminate() {}
+  }
+  const ok = await probeKeyForSettings('dashscopeApiKey', ' sk-private ', {fetch: fetchOk, WebSocketImpl: socketFor(s => s.emit('open'))})
+  assert.deepEqual({...ok}, {status: 'ok', realtime: 'ok'})
+  const refused = await probeKeyForSettings('dashscopeApiKey', 'sk-private', {fetch: fetchOk, WebSocketImpl: socketFor(s => s.emit('error', new Error('Unexpected server response: 401')))})
+  assert.equal(refused.status, 'ok'); assert.equal(refused.realtime, 'rejected'); assert.equal(refused.realtimeHttpStatus, 401)
+  const forbidden = await probeKeyForSettings('dashscopeApiKey', 'sk-private', {fetch: fetchOk, WebSocketImpl: socketFor(s => s.emit('unexpected-response', {}, {statusCode: 403}))})
+  assert.equal(forbidden.realtime, 'forbidden')
+  // A key the model listing rejects never reaches the realtime check, and other keys skip it.
+  const rejected = await probeKeyForSettings('dashscopeApiKey', 'sk-private', {fetch: async () => ({ok: false, status: 401, body: null}), WebSocketImpl: socketFor(() => assert.fail('no handshake'))})
+  assert.equal(rejected.status, 'rejected'); assert.equal(rejected.realtime, undefined)
+  assert.deepEqual({...(await probeKeyForSettings('deepseekApiKey', 'd', {fetch: fetchOk}))}, {status: 'ok'})
+  for (const result of [ok, refused, forbidden, rejected]) assert.ok(!JSON.stringify(result).includes('sk-private'))
+  assert.equal(canProbeKey('tavilyApiKey'), false); assert.equal(canProbeKey('arkApiKey'), true)
+  assert.equal((await probeKeyForSettings('tavilyApiKey', 'x', {fetch: fetchOk})).status, 'unsupported')
+})

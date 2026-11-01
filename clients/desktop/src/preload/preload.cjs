@@ -249,6 +249,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     clearAllManagedWorkspaces: () => ipcRenderer.invoke('nova:workspaces:clear-all'),
     // The payload may carry plaintext key values on their way *into* main; the
     // reply never carries any back out.
+    testKey: (key, value) => ipcRenderer.invoke('nova:settings:test-key', key, value),
     set: commit => ipcRenderer.invoke('nova:settings:set', commit),
     restart: () => ipcRenderer.invoke('nova:settings:set', {settingsPatch: {}}, true),
     probeCapabilities: payload => ipcRenderer.invoke('nova:capabilities:probe', payload),

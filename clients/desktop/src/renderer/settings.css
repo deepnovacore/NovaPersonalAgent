@@ -1733,3 +1733,10 @@ label.toggle-row:last-child,
   #knowledge-panel .knowledge-source { border-bottom-color: CanvasText; }
 }
 #knowledge-panel .knowledge-source-action.rt-Button.destructive[data-armed="true"] { border-color: var(--warn); background: var(--warn-wash); }
+
+.secret > button.test { flex: none; }
+.secret > .key-test-result { flex: 1 0 100%; min-height: 0; font-size: 12px; line-height: 1.5; color: var(--ink-dim); }
+.secret > .key-test-result:empty { display: none; }
+.secret > .key-test-result[data-status="ok"] { color: var(--ok, #2f9e6f); }
+.secret > .key-test-result[data-status="warn"] { color: var(--warn, #c9822b); }
+.secret > .badge[data-staged="1"] { color: var(--warn, #c9822b); }
