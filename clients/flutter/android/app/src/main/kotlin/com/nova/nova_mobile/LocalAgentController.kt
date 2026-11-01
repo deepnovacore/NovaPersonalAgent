@@ -19,6 +19,7 @@ import com.nova.nova_mobile.phone.RunTakeover
 import com.nova.nova_mobile.phone.ShellProvider
 import com.nova.nova_mobile.phone.TakeoverState
 import com.nova.nova_mobile.phone.VirtualSelfCheck
+import com.nova.nova_mobile.phone.onMainLooper
 import com.nova.nova_mobile.phone.a11y.PHONE_EXPERIMENTAL_ACK
 import com.nova.nova_mobile.phone.a11y.PHONE_PREFERENCES
 import com.nova.nova_mobile.phone.a11y.RuntimeFlagLeases
@@ -189,7 +190,7 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
             AgentDisplay(provider.shell?:throw IllegalStateException(PhoneActionErrors.HELPER_UNAVAILABLE),width,height,metrics.densityDpi,events)
         }
         val screen=VirtualScreen(service,provider,display,scope)
-        val takeover=RunTakeover(run.id,screen.takeoverPort(),{ event -> events?.emit(event.toJson()) },SystemClock::elapsedRealtime)
+        val takeover=RunTakeover(run.id,screen.takeoverPort(),{ event -> events?.emit(event.toJson()) },SystemClock::elapsedRealtime,onMainLooper)
         val host=VirtualRunHost(run.id,scope,screen,takeover,virtualGate(run),events?.let { sink -> { event:JSONObject -> sink.emit(event) } })
         // Owned by the run before anything is acquired, so the run's end releases whatever was set up.
         val virtual=VirtualRun(screen,takeover,host)

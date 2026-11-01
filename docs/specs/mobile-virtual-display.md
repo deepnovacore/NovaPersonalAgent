@@ -193,6 +193,11 @@ and the run ends `interrupted`/`takeover_unavailable`. Locked screen, payment, l
 (`secure_page`, see `secure_frame`). Takeover moves are serialized with effects: a `takeover` call waits for an effect in
 progress, and nothing planned before it is dispatched afterwards. `takeover`/`handBack` fail with `task_not_running` when
 the task is not the current virtual run, and `handBack` with `no_takeover` before any takeover.
+The bridge must call `takeover` and `handBack` off the main thread (`PhoneBridge` runs them on `Dispatchers.IO`): the
+effect a takeover waits for can be a gesture, and Android delivers gesture results through the main thread even when a
+callback handler is given. `RunTakeover.request` on the main thread therefore fails at once with
+`takeover_on_main_thread` and changes nothing. Inside M3 only the run's loop worker requests takeovers; service
+callbacks (stop button, interrupt, reconnect) only end the run and never reach `request`.
 
 ## Security invariants
 
@@ -311,4 +316,4 @@ carry no reason. `<stage>` is the loop stage: `observation`, `model` or `tool`.
 | `<stage>_failed` | both | Any other failure (no detail, so no screen content or provider body leaks). |
 
 Method error codes of `nova/phone/v1` that are not run reasons: `task_not_running` and `no_takeover` (`takeover`,
-`handBack`), `run_active` (`selfCheck`).
+`handBack`), `takeover_on_main_thread` (`takeover` called on the main thread, a bridge bug), `run_active` (`selfCheck`).

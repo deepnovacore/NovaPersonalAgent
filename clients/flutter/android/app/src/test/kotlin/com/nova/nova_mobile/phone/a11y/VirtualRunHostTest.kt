@@ -89,7 +89,7 @@ class VirtualRunHostTest {
     private var ids = 0
     private fun host(device: Device, gate: Gate, takeover: RunTakeover) =
         VirtualRunHost("t1", VirtualScope(target, "com.nova.app", "com.example.ime"), device, takeover, gate, { events += it }, { "a${++ids}" })
-    private fun takeover(port: Port = Port()) = RunTakeover("t1", port, {}, System::currentTimeMillis)
+    private fun takeover(port: Port = Port()) = RunTakeover("t1", port, {}, System::currentTimeMillis, { false })
     private fun decision(action: String) = ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Do it","action":$action}"""), PhoneTier.VIRTUAL)
     private fun steps() = events.filter { it.getString("type") == "step" }.map { "${it.getInt("step")}:${it.getString("tool")}:${it.getString("status")}" }
 
@@ -204,7 +204,7 @@ class VirtualRunHostTest {
         val gate = Gate()
         val port = Port()
         val reasons = mutableListOf<String?>()
-        val t = RunTakeover("t1", port, { reasons += it.reason }, System::currentTimeMillis)
+        val t = RunTakeover("t1", port, { reasons += it.reason }, System::currentTimeMillis, { false })
         val h = host(device, gate, t)
         h.observe()
         try { h.execute(JSONObject("""{"type":"tap","ref":"@e1","snapshot_id":"ph-1"}""")); fail() }
@@ -381,7 +381,7 @@ class VirtualRunHostTest {
 
     @Test fun takeoverTimeoutStopsTheRun() {
         var clock = 0L
-        val t = RunTakeover("t1", Port(), {}, { clock }, timeoutMs = 1000)
+        val t = RunTakeover("t1", Port(), {}, { clock }, { false }, timeoutMs = 1000)
         val h = host(Device(target), Gate(), t)
         h.observe()
         t.request(byModel = false, reason = null)

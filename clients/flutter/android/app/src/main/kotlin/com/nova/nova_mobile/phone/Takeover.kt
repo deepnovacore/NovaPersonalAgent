@@ -3,10 +3,16 @@
 // takeover/Takeover.kt; no queue, web tabs, sound or input watching; states and timeout from the Nova contract.
 package com.nova.nova_mobile.phone
 
+import android.os.Looper
 import kotlin.math.min
 
 /** Longest time the task may stay on the main display before the run ends with `takeover_timeout`. */
 const val TAKEOVER_TIMEOUT_MS = 10 * 60 * 1000L
+/** [RunTakeover.request] was called on the main thread, which must stay free to deliver gesture results. */
+const val TAKEOVER_ON_MAIN_THREAD = "takeover_on_main_thread"
+
+/** The calling thread is the main Looper's thread. */
+val onMainLooper: () -> Boolean = { Looper.myLooper() == Looper.getMainLooper() }
 
 /** Device side of a takeover for the run's virtual display. Calls may throw; a throw counts as failure. */
 interface TakeoverPort {
@@ -25,12 +31,15 @@ interface TakeoverPort {
  * (two Binder calls); the agent loop blocks in [await] while a takeover is ACTIVE. Every state change goes to [emit].
  * [request] is serialized against effects run through [withoutMoves]: it waits for an effect in progress and bumps
  * [generation] before it moves anything, so an effect admitted later can see that its plan is stale.
+ * An effect can be a gesture whose result Android delivers through the main thread (even with a callback handler), so
+ * [request] fails fast with [TAKEOVER_ON_MAIN_THREAD] when [onMainThread] holds instead of stalling that gesture.
  */
 class RunTakeover(
     private val taskId: String,
     private val port: TakeoverPort,
     private val emit: (PhoneTakeoverEvent) -> Unit,
     private val now: () -> Long,
+    private val onMainThread: () -> Boolean,
     private val timeoutMs: Long = TAKEOVER_TIMEOUT_MS,
 ) {
     private val lock = Object()
@@ -59,8 +68,16 @@ class RunTakeover(
     /** Runs [block] (one effect on the run's display) while no takeover move can start. */
     fun <T> withoutMoves(block: () -> T): T = synchronized(moveLock, block)
 
-    /** Starts a takeover; a pending or final one is returned unchanged. Waits for an effect in progress first. */
-    fun request(byModel: Boolean, reason: String?): TakeoverState = synchronized(moveLock) { synchronized(lock) {
+    /**
+     * Starts a takeover; a pending or final one is returned unchanged. Waits for an effect in progress first, so it
+     * must run off the main thread (throws IllegalStateException([TAKEOVER_ON_MAIN_THREAD]) there, changing nothing).
+     */
+    fun request(byModel: Boolean, reason: String?): TakeoverState {
+        check(!onMainThread()) { TAKEOVER_ON_MAIN_THREAD }
+        return requestOffMain(byModel, reason)
+    }
+
+    private fun requestOffMain(byModel: Boolean, reason: String?): TakeoverState = synchronized(moveLock) { synchronized(lock) {
         state?.let { if (it != TakeoverState.RETURNED) return it }
         check(!cancelled) { "task_not_running" }
         this.byModel = byModel

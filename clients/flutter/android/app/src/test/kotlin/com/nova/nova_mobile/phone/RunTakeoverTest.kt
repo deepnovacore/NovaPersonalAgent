@@ -18,7 +18,7 @@ class RunTakeoverTest {
     }
     private var clock = 0L
     private val events = mutableListOf<PhoneTakeoverEvent>()
-    private fun takeover(port: Port, timeout: Long = TAKEOVER_TIMEOUT_MS) = RunTakeover("t1", port, { events += it }, { clock }, timeout)
+    private fun takeover(port: Port, timeout: Long = TAKEOVER_TIMEOUT_MS) = RunTakeover("t1", port, { events += it }, { clock }, { false }, timeout)
 
     @Test fun modelTakeoverMovesTheTopTaskToMainAndBack() {
         val port = Port()
@@ -74,7 +74,28 @@ class RunTakeoverTest {
             override fun moveBack(taskId: Int) = true
             override fun paused(paused: Boolean) {}
         }
-        assertEquals(TakeoverState.FAILED, RunTakeover("t", port, {}, { 0L }).request(true, null))
+        assertEquals(TakeoverState.FAILED, RunTakeover("t", port, {}, { 0L }, { false }).request(true, null))
+    }
+
+    @Test fun requestOnTheMainThreadFailsFastWithoutWaitingForAnEffect() {
+        val port = Port()
+        var onMain = true
+        val t = RunTakeover("t1", port, { events += it }, { clock }, { onMain })
+        // A gesture holds off moves; its result would need the main thread that a waiting request blocks.
+        val effectStarted = CompletableFuture<Unit>()
+        val effectMayEnd = CompletableFuture<Unit>()
+        val effect = Thread { t.withoutMoves { effectStarted.complete(Unit); effectMayEnd.get(5, TimeUnit.SECONDS) } }.apply { start() }
+        effectStarted.get(5, TimeUnit.SECONDS)
+        val refused = CompletableFuture<String?>()
+        Thread { refused.complete(runCatching { t.request(byModel = false, reason = null) }.exceptionOrNull()?.message) }.start()
+        assertEquals(TAKEOVER_ON_MAIN_THREAD, refused.get(1, TimeUnit.SECONDS))
+        effectMayEnd.complete(Unit)
+        effect.join(5000)
+        assertNull(t.state)
+        assertEquals(0, t.generation)
+        assertTrue(port.moves.isEmpty() && events.isEmpty())
+        onMain = false
+        assertEquals(TakeoverState.ACTIVE, t.request(byModel = false, reason = null))
     }
 
     @Test fun handBackWithoutTakeoverIsRejected() {
@@ -97,7 +118,7 @@ class RunTakeoverTest {
     }
 
     @Test fun awaitBlocksUntilTheUserHandsBack() {
-        val t = RunTakeover("t1", Port(), {}, System::currentTimeMillis)
+        val t = RunTakeover("t1", Port(), {}, System::currentTimeMillis, { false })
         t.request(false, null)
         val result = CompletableFuture<TakeoverState?>()
         val loop = Thread { result.complete(t.await { true }) }.apply { start() }
@@ -109,7 +130,7 @@ class RunTakeoverTest {
     }
 
     @Test fun cancelWakesTheLoopAndBlocksNewTakeovers() {
-        val t = RunTakeover("t1", Port(), {}, System::currentTimeMillis)
+        val t = RunTakeover("t1", Port(), {}, System::currentTimeMillis, { false })
         t.request(false, null)
         val result = CompletableFuture<TakeoverState?>()
         Thread { result.complete(t.await { true }) }.start()
