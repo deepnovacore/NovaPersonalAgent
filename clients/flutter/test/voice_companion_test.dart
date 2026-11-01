@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/voice/voice_companion.dart';
+import 'package:nova_mobile/ui/pet_avatar.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -134,6 +138,23 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     late NativeVoiceCompanion companion;
     late List<MethodCall> calls;
+    var now = 0;
+    Future<void> event(
+      String method,
+      String id,
+      Map<String, Object?> fields,
+    ) async {
+      await messenger.handlePlatformMessage(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          MethodCall(method, {'taskId': id, ...fields}),
+        ),
+        (_) {},
+      );
+    }
+
+    Future<void> wantsFrames([bool wanted = true]) =>
+        event('previewWanted', 'one', {'wanted': wanted});
     Future<void> action(String id, String value) async {
       await messenger.handlePlatformMessage(
         channel.name,
@@ -146,7 +167,8 @@ void main() {
 
     setUp(() {
       calls = [];
-      companion = NativeVoiceCompanion();
+      now = 0;
+      companion = NativeVoiceCompanion(frameMilliseconds: () => now);
       messenger.setMockMethodCallHandler(channel, (call) async {
         calls.add(call);
         return call.method == 'showTask' ? true : null;
@@ -223,17 +245,26 @@ void main() {
     );
 
     test(
-      'permission denial returns false and ignores task actions and frames',
+      'permission denial is typed and ignores task actions and frames',
       () async {
         messenger.setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
-          return false;
+          if (call.method == 'showTask') {
+            throw PlatformException(code: 'overlay_permission');
+          }
+          return null;
         });
         final actions = <String>[];
         final sub = companion.actions.listen(actions.add);
-        expect(
-          await companion.showTask(taskId: 'one', status: 'running'),
-          isFalse,
+        await expectLater(
+          companion.showTask(taskId: 'one', status: 'running'),
+          throwsA(
+            isA<PlatformException>().having(
+              (e) => e.code,
+              'code',
+              'overlay_permission',
+            ),
+          ),
         );
         await action('one', 'task_stop');
         await companion.taskFrame(Uint8List.fromList([1, 2]));
@@ -249,9 +280,11 @@ void main() {
         final jpeg = Uint8List.fromList([255, 216, 255]);
         await companion.taskFrame(jpeg);
         await companion.showTask(taskId: 'one', status: 'running');
+        await companion.taskFrame(jpeg); // Hidden/collapsed: no bridge copies.
+        await wantsFrames();
         await companion.taskFrame(jpeg);
         await companion.taskFrame(jpeg);
-        await Future<void>.delayed(const Duration(milliseconds: 210));
+        now += 210;
         await companion.taskFrame(jpeg);
         await companion.hideTask();
         await companion.taskFrame(jpeg);
@@ -264,7 +297,7 @@ void main() {
     );
 
     test(
-      'superseded show response cannot clear newer state for the same task',
+      'coalesced show responses preserve newer state for the same task',
       () async {
         final first = Completer<bool>();
         var shows = 0;
@@ -278,8 +311,8 @@ void main() {
         final sub = companion.actions.listen(actions.add);
         final pending = companion.showTask(taskId: 'one', status: 'running');
         await companion.showTask(taskId: 'one', status: 'needs_user');
-        first.complete(false);
-        expect(await pending, isFalse);
+        first.complete(true);
+        expect(await pending, isTrue);
         await action('one', 'task_takeover');
         expect(actions, ['task_takeover']);
         await sub.cancel();
@@ -294,13 +327,148 @@ void main() {
         return call.method == 'showTask' ? true : null;
       });
       await companion.showTask(taskId: 'one', status: 'running');
+      await wantsFrames();
       final first = companion.taskFrame(Uint8List(1));
-      await Future<void>.delayed(const Duration(milliseconds: 210));
+      now += 210;
       await companion.taskFrame(Uint8List(1));
       expect(calls.where((call) => call.method == 'taskFrame'), hasLength(1));
       pending.complete();
       await first;
     });
+
+    test('scoped hide cannot clear a replacement task', () async {
+      final actions = <String>[];
+      final sub = companion.actions.listen(actions.add);
+      await companion.showTask(taskId: 'one', status: 'done');
+      await companion.showTask(taskId: 'two', status: 'running');
+      await companion.hideTask(taskId: 'one');
+      await action('two', 'task_stop');
+      expect(actions, ['task_stop']);
+      expect(calls.where((c) => c.method == 'hideTask'), isEmpty);
+      await companion.hideTask(taskId: 'two');
+      expect(calls.last.arguments, {'taskId': 'two'});
+      await sub.cancel();
+    });
+
+    test(
+      'native disappearance clears preview and task, not call callbacks',
+      () async {
+        final changes = <bool>[];
+        final gone = <TaskOverlayGone>[];
+        final actions = <String>[];
+        final subscriptions = [
+          companion.previewChanges.listen(changes.add),
+          companion.taskDisappearances.listen(gone.add),
+          companion.actions.listen(actions.add),
+        ];
+        await companion.start();
+        final callId = (calls.last.arguments as Map)['callId'];
+        await companion.showTask(taskId: 'one', status: 'running');
+        await wantsFrames();
+        expect(companion.previewWanted, isTrue);
+        await event('taskGone', 'stale', {'reason': 'expired'});
+        expect(companion.previewWanted, isTrue);
+        await event('taskGone', 'one', {'reason': 'expired'});
+        await companion.taskFrame(Uint8List(1));
+        await action('one', 'task_stop');
+        await messenger.handlePlatformMessage(
+          channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('action', {'callId': callId, 'action': 'mute'}),
+          ),
+          (_) {},
+        );
+        expect(changes, [true, false]);
+        expect(gone.single.taskId, 'one');
+        expect(gone.single.reason, 'expired');
+        expect(actions, ['mute']);
+        expect(calls.where((c) => c.method == 'taskFrame'), isEmpty);
+        for (final sub in subscriptions) {
+          await sub.cancel();
+        }
+      },
+    );
+
+    test(
+      'typed startup errors retain an active call and permission is explicit',
+      () async {
+        await companion.start();
+        final callId = (calls.last.arguments as Map)['callId'];
+        final actions = <String>[];
+        final sub = companion.actions.listen(actions.add);
+        for (final code in [
+          'overlay_permission',
+          'foreground_blocked',
+          'timeout',
+          'overlay_blocked',
+        ]) {
+          messenger.setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            if (call.method == 'showTask') throw PlatformException(code: code);
+            return null;
+          });
+          await expectLater(
+            companion.showTask(taskId: 'one', status: 'running'),
+            throwsA(
+              isA<PlatformException>().having((e) => e.code, 'code', code),
+            ),
+          );
+        }
+        await companion.requestOverlayPermission();
+        expect(calls.last.method, 'requestOverlayPermission');
+        await messenger.handlePlatformMessage(
+          channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('action', {'callId': callId, 'action': 'mute'}),
+          ),
+          (_) {},
+        );
+        expect(actions, ['mute']);
+        await sub.cancel();
+      },
+    );
+
+    test(
+      'avatar binding sends bundled default, follows store and detaches',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'nova-avatar-binding-',
+        );
+        final file = File('${directory.path}/portrait.png');
+        await file.writeAsBytes([1]);
+        SharedPreferences.setMockInitialValues({
+          petAvatarPreferenceKey: jsonEncode({
+            'mode': 'custom',
+            'path': file.path,
+          }),
+        });
+        final store = PetAvatarStore(writePreference: (_) async => true);
+        final unbind = await bindTaskAvatar(
+          companion,
+          store,
+          onError: (e, s) => fail('$e'),
+        );
+        final bundled = await rootBundle.load(petAvatarAsset);
+        expect(
+          (calls.last.arguments as Map)['pngBytes'],
+          bundled.buffer.asUint8List(),
+        );
+        await store.load();
+        expect((calls.last.arguments as Map)['filePath'], file.path);
+        await store.resetToDefault();
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          (calls.last.arguments as Map)['pngBytes'],
+          bundled.buffer.asUint8List(),
+        );
+        unbind();
+        final count = calls.length;
+        await store.resetToDefault();
+        expect(calls.length, count);
+        store.dispose();
+        await directory.delete(recursive: true);
+      },
+    );
 
     test(
       'portrait bytes and reset; invalid inputs never cross channel',

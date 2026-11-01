@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
+import '../ui/pet_avatar.dart';
 
 /// Platform lifetime for an explicitly started call, separate from task lifetime.
 abstract interface class VoiceCompanion {
@@ -21,10 +22,11 @@ abstract interface class VoiceCompanion {
 /// Independent Android phone-task lifetime. Use the same instance as the call
 /// companion so task and call callbacks share one channel handler.
 abstract interface class TaskCompanion {
-  /// Pass PetAvatarStore.customPath, or portrait PNG bytes. Omit both to reset to orb.
+  /// Portrait PNG bytes or a device-local file. Use bindTaskAvatar for the default.
   Future<void> setAvatar({Uint8List? pngBytes, String? filePath});
 
-  /// Returns false if overlay permission or foreground-service startup is denied.
+  /// Returns true on success; throws PlatformException with overlay_permission,
+  /// foreground_blocked, timeout, or overlay_blocked on failure.
   /// Integration maps phone events to these statuses; this API starts no task.
   /// done/failed remain visible for three seconds, without ending an active call.
   Future<bool> showTask({
@@ -35,12 +37,68 @@ abstract interface class TaskCompanion {
   });
 
   /// Latest JPEG preview, dropped above 5fps or while a send is in flight.
-  /// Native also drops frames while hidden/collapsed. Subscribe to phone frames
-  /// separately; secure/takeover frames must not be forwarded.
+  /// Send only while previewWanted; use previewChanges to stop encoding/capture.
+  /// Secure/takeover frames must not be forwarded.
   Future<void> taskFrame(Uint8List jpeg);
 
   /// Releases only the task overlay lifetime, not the task or active call.
-  Future<void> hideTask();
+  Future<void> hideTask({String? taskId});
+  Future<void> requestOverlayPermission();
+  bool get previewWanted;
+  Stream<bool> get previewChanges;
+  Stream<TaskOverlayGone> get taskDisappearances;
+}
+
+class TaskOverlayGone {
+  const TaskOverlayGone(this.taskId, this.reason);
+  final String taskId;
+  final String reason;
+}
+
+/// Integration owns this binding; call the returned function before disposing
+/// the store. The default is the already-approved Flutter asset, not the orb.
+Future<void Function()> bindTaskAvatar(
+  TaskCompanion companion,
+  PetAvatarStore store, {
+  AssetBundle? bundle,
+  required void Function(Object, StackTrace) onError,
+}) async {
+  var revision = 0;
+  var disposed = false;
+  Future<void> apply() async {
+    final current = ++revision;
+    final path = store.customPath;
+    if (path != null) {
+      await companion.setAvatar(filePath: path);
+    } else {
+      final data = await (bundle ?? rootBundle).load(petAvatarAsset);
+      if (disposed || current != revision) return;
+      await companion.setAvatar(
+        pngBytes: data.buffer.asUint8List(
+          data.offsetInBytes,
+          data.lengthInBytes,
+        ),
+      );
+    }
+  }
+
+  void changed() {
+    unawaited(apply().catchError(onError));
+  }
+
+  store.addListener(changed);
+  try {
+    await apply();
+  } catch (_) {
+    disposed = true;
+    store.removeListener(changed);
+    rethrow;
+  }
+  return () {
+    disposed = true;
+    revision++;
+    store.removeListener(changed);
+  };
 }
 
 class NativeVoiceCompanion implements VoiceCompanion, TaskCompanion {
@@ -48,7 +106,27 @@ class NativeVoiceCompanion implements VoiceCompanion, TaskCompanion {
   String? _callId;
   String? _taskId;
   int _taskRevision = 0;
-  final _frameClock = Stopwatch()..start();
+  NativeVoiceCompanion({int Function()? frameMilliseconds})
+    : _frameMilliseconds =
+          frameMilliseconds ?? (Stopwatch()..start()).elapsedMillisecondsClock;
+  final int Function() _frameMilliseconds;
+  bool _previewWanted = false;
+  final _previewChanges = StreamController<bool>.broadcast(sync: true);
+  final _taskDisappearances = StreamController<TaskOverlayGone>.broadcast(
+    sync: true,
+  );
+  @override
+  bool get previewWanted => _previewWanted;
+  @override
+  Stream<bool> get previewChanges => _previewChanges.stream;
+  @override
+  Stream<TaskOverlayGone> get taskDisappearances => _taskDisappearances.stream;
+  void _setPreviewWanted(bool wanted) {
+    if (_previewWanted == wanted) return;
+    _previewWanted = wanted;
+    _previewChanges.add(wanted);
+  }
+
   int? _lastFrame;
   bool _framePending = false;
   @override
@@ -63,7 +141,18 @@ class NativeVoiceCompanion implements VoiceCompanion, TaskCompanion {
       if (arguments is Map) {
         if (arguments.containsKey('taskId')) {
           if (_taskId == null || arguments['taskId'] != _taskId) return false;
-          if (call.method == 'action' && arguments['action'] is String) {
+          if (call.method == 'previewWanted') {
+            _setPreviewWanted(arguments['wanted'] == true);
+          } else if (call.method == 'taskGone') {
+            final id = _taskId!;
+            _taskId = null;
+            _taskRevision++;
+            _lastFrame = null;
+            _setPreviewWanted(false);
+            _taskDisappearances.add(
+              TaskOverlayGone(id, arguments['reason'] as String? ?? 'hidden'),
+            );
+          } else if (call.method == 'action' && arguments['action'] is String) {
             _actions.add(arguments['action'] as String);
           }
           return null;
@@ -117,7 +206,11 @@ class NativeVoiceCompanion implements VoiceCompanion, TaskCompanion {
       throw ArgumentError('Invalid task state');
     }
     final revision = ++_taskRevision;
-    if (_taskId != taskId) _lastFrame = null;
+    if (_taskId != taskId) {
+      _lastFrame = null;
+      _setPreviewWanted(false);
+    }
+    if (status != 'running') _setPreviewWanted(false);
     _taskId = taskId;
     _installHandler();
     try {
@@ -129,10 +222,18 @@ class NativeVoiceCompanion implements VoiceCompanion, TaskCompanion {
             'step': step,
           }) ??
           false;
-      if (!shown && _taskRevision == revision) _taskId = null;
-      return shown;
+      if (!shown) {
+        throw PlatformException(
+          code: 'overlay_blocked',
+          message: 'Legacy overlay startup failed',
+        );
+      }
+      return true;
     } catch (_) {
-      if (_taskRevision == revision) _taskId = null;
+      if (_taskRevision == revision) {
+        _taskId = null;
+        _setPreviewWanted(false);
+      }
       rethrow;
     }
   }
@@ -140,8 +241,9 @@ class NativeVoiceCompanion implements VoiceCompanion, TaskCompanion {
   @override
   Future<void> taskFrame(Uint8List jpeg) async {
     final id = _taskId;
-    final now = _frameClock.elapsedMilliseconds;
+    final now = _frameMilliseconds();
     if (id == null ||
+        !_previewWanted ||
         _framePending ||
         (_lastFrame != null && now - _lastFrame! < 200)) {
       return;
@@ -159,18 +261,25 @@ class NativeVoiceCompanion implements VoiceCompanion, TaskCompanion {
   }
 
   @override
-  Future<void> hideTask() async {
+  Future<void> hideTask({String? taskId}) async {
+    if (taskId != null && taskId != _taskId) return;
+    final id = taskId ?? _taskId;
     _taskRevision++;
+    _setPreviewWanted(false);
     _taskId = null;
     _lastFrame = null;
     try {
-      await _channel.invokeMethod<void>('hideTask');
+      await _channel.invokeMethod<void>('hideTask', {'taskId': id});
     } finally {
       if (_callId == null && _taskId == null) {
         _channel.setMethodCallHandler(null);
       }
     }
   }
+
+  @override
+  Future<void> requestOverlayPermission() =>
+      _channel.invokeMethod<void>('requestOverlayPermission');
 
   @override
   Future<void> update({
@@ -199,4 +308,9 @@ class NativeVoiceCompanion implements VoiceCompanion, TaskCompanion {
       }
     }
   }
+}
+
+// Keep production and test throttle clocks monotonic without wall-clock sleeps.
+extension on Stopwatch {
+  int elapsedMillisecondsClock() => elapsedMilliseconds;
 }
