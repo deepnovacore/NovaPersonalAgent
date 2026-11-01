@@ -1,11 +1,116 @@
 package com.nova.nova_mobile
 
+import com.nova.nova_mobile.phone.PhoneAction
+import com.nova.nova_mobile.phone.PhoneActionErrors
+import com.nova.nova_mobile.phone.PhoneActionParser
+import com.nova.nova_mobile.phone.PhoneTier
+import com.nova.nova_mobile.phone.SNAPSHOT_ID_PREFIX
+import com.nova.nova_mobile.phone.SNAPSHOT_REF
+import com.nova.nova_mobile.phone.ScrollDirection
 import org.json.JSONObject
 
-/** Model output is a proposal. This parser grants no authority to execute it. */
-class ToolDecision private constructor(val kind: String, val summary: String, val action: JSONObject?) {
+/**
+ * Contract action parser (docs/specs/mobile-virtual-display.md "Action schema"): exact key sets, no I/O.
+ * MAIN keeps the legacy tap/swipe/type/back set with its original checks and error codes.
+ */
+object ToolActionParser : PhoneActionParser {
+    private val MAIN_FIELDS = mapOf(
+        "tap" to setOf("type", "x", "y"),
+        "swipe" to setOf("type", "x", "y", "to_x", "to_y"),
+        "type" to setOf("type", "text"),
+        "back" to setOf("type"),
+    )
+    private val PACKAGE = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$")
+    private val REF_KEYS = setOf("ref", "snapshot_id")
+
+    override fun parse(action: JSONObject, tier: PhoneTier): PhoneAction {
+        val type = action.getString("type")
+        val keys = action.keys().asSequence().toSet()
+        if(tier == PhoneTier.MAIN) {
+            val fields = MAIN_FIELDS[type] ?: throw IllegalArgumentException(PhoneActionErrors.UNSUPPORTED_ACTION)
+            require(keys == fields) { PhoneActionErrors.INVALID_ACTION_FIELDS }
+            val numbers = (fields - setOf("type", "text")).associateWith { coordinate(action, it) }
+            return when(type) {
+                "tap" -> PhoneAction.TapPoint(numbers.getValue("x"), numbers.getValue("y"))
+                "swipe" -> PhoneAction.Swipe(numbers.getValue("x"), numbers.getValue("y"), numbers.getValue("to_x"), numbers.getValue("to_y"))
+                "type" -> PhoneAction.Type(text(action), null, null)
+                else -> PhoneAction.Back
+            }
+        }
+        fun fields(vararg names: String) = setOf("type", *names)
+        return when(type) {
+            "tap" -> when(keys) {
+                fields("ref", "snapshot_id") -> PhoneAction.TapRef(ref(action), snapshotId(action))
+                fields("x", "y") -> PhoneAction.TapPoint(coordinate(action, "x"), coordinate(action, "y"))
+                else -> throw IllegalArgumentException(PhoneActionErrors.INVALID_ACTION_FIELDS)
+            }
+            "swipe" -> {
+                require(keys == fields("x", "y", "to_x", "to_y")) { PhoneActionErrors.INVALID_ACTION_FIELDS }
+                PhoneAction.Swipe(coordinate(action, "x"), coordinate(action, "y"), coordinate(action, "to_x"), coordinate(action, "to_y"))
+            }
+            "type" -> {
+                val referenced = optionalRef(keys, fields("text"))
+                val text = text(action)
+                if(referenced) PhoneAction.Type(text, ref(action), snapshotId(action)) else PhoneAction.Type(text, null, null)
+            }
+            "scroll" -> {
+                val referenced = optionalRef(keys, fields("direction"))
+                val name = action.get("direction")
+                val direction = ScrollDirection.entries.firstOrNull { it.wire == name } ?: throw IllegalArgumentException(PhoneActionErrors.INVALID_DIRECTION)
+                if(referenced) PhoneAction.Scroll(direction, ref(action), snapshotId(action)) else PhoneAction.Scroll(direction, null, null)
+            }
+            "open_app" -> {
+                require(keys == fields("package")) { PhoneActionErrors.INVALID_ACTION_FIELDS }
+                val name = action.get("package")
+                require(name is String && name.length <= 255 && PACKAGE.matches(name)) { PhoneActionErrors.INVALID_PACKAGE }
+                PhoneAction.OpenApp(name)
+            }
+            "back" -> {
+                require(keys == fields()) { PhoneActionErrors.INVALID_ACTION_FIELDS }
+                PhoneAction.Back
+            }
+            "hand_to_user" -> {
+                require(keys == fields("reason")) { PhoneActionErrors.INVALID_ACTION_FIELDS }
+                val reason = (action.get("reason") as? String)?.trim()
+                require(reason != null && reason.length in 1..500) { PhoneActionErrors.INVALID_REASON }
+                PhoneAction.HandToUser(reason)
+            }
+            else -> throw IllegalArgumentException(PhoneActionErrors.UNSUPPORTED_ACTION)
+        }
+    }
+
+    /** [keys] is [base] (false) or [base] plus ref and snapshot_id (true); anything else is invalid. */
+    private fun optionalRef(keys: Set<String>, base: Set<String>): Boolean = when(keys) {
+        base -> false
+        base + REF_KEYS -> true
+        else -> throw IllegalArgumentException(PhoneActionErrors.INVALID_ACTION_FIELDS)
+    }
+    private fun coordinate(action: JSONObject, key: String): Double {
+        val number = action.get(key)
+        require(number is Number && number.toDouble().isFinite() && number.toDouble() in 0.0..1.0) { PhoneActionErrors.INVALID_COORDINATE }
+        return number.toDouble()
+    }
+    private fun text(action: JSONObject): String {
+        val text = action.get("text")
+        require(text is String && text.length <= 4000) { PhoneActionErrors.INVALID_INPUT }
+        return text
+    }
+    private fun ref(action: JSONObject): String {
+        val ref = action.get("ref")
+        require(ref is String && SNAPSHOT_REF.matches(ref)) { PhoneActionErrors.INVALID_REF }
+        return ref
+    }
+    private fun snapshotId(action: JSONObject): String {
+        val id = action.get("snapshot_id")
+        require(id is String && id.length in 1..64 && id.startsWith(SNAPSHOT_ID_PREFIX)) { PhoneActionErrors.INVALID_SNAPSHOT_ID }
+        return id
+    }
+}
+
+/** Model output is a proposal. This parser grants no authority to execute it. [phoneAction] is [action] validated for [tier]. */
+class ToolDecision private constructor(val kind: String, val summary: String, val action: JSONObject?, val tier: PhoneTier, val phoneAction: PhoneAction?) {
     companion object {
-        fun parse(value: JSONObject): ToolDecision {
+        fun parse(value: JSONObject, tier: PhoneTier = PhoneTier.MAIN): ToolDecision {
             require(value.keys().asSequence().all { it in setOf("kind", "summary", "action") }) { "invalid_model_decision" }
             val kind = value.getString("kind")
             require(kind in setOf("action", "complete", "wait", "observe")) { "invalid_model_decision" }
@@ -13,23 +118,11 @@ class ToolDecision private constructor(val kind: String, val summary: String, va
             require(summary.isNotEmpty() && summary.length <= 2000) { "invalid_model_decision" }
             if (kind != "action") {
                 require(!value.has("action") || value.isNull("action")) { "unexpected_action" }
-                return ToolDecision(kind, summary, null)
+                return ToolDecision(kind, summary, null, tier, null)
             }
             val action = value.getJSONObject("action")
-            val fields = when(action.getString("type")) {
-                "tap" -> setOf("type", "x", "y")
-                "swipe" -> setOf("type", "x", "y", "to_x", "to_y")
-                "type" -> setOf("type", "text")
-                "back" -> setOf("type")
-                else -> throw IllegalArgumentException("unsupported_action")
-            }
-            require(action.keys().asSequence().toSet() == fields) { "invalid_action_fields" }
-            for(key in fields - setOf("type", "text")) {
-                val number = action.get(key)
-                require(number is Number && number.toDouble().isFinite() && number.toDouble() in 0.0..1.0) { "invalid_coordinate" }
-            }
-            if("text" in fields) require(action.get("text") is String && action.getString("text").length <= 4000) { "invalid_input" }
-            return ToolDecision(kind, summary, JSONObject(action.toString()))
+            val parsed = ToolActionParser.parse(action, tier)
+            return ToolDecision(kind, summary, JSONObject(action.toString()), tier, parsed)
         }
     }
 }
@@ -110,7 +203,8 @@ class LocalToolLoop(
                             // Both capture changes and stale frames occur before beginAttempt.
                             // Observe and ask the model again; never retry the old action.
                             // Errors after journaling are returned as unknown and stop the run.
-                            if(cause is IllegalStateException && cause.message in setOf("screen_changed", "screen_changed_during_capture") && stalePlans < 3) {
+                            // An expired ref (virtual tier) is the same: the element is gone or moved.
+                            if(cause is IllegalStateException && cause.message in setOf("screen_changed", "screen_changed_during_capture", PhoneActionErrors.REF_EXPIRED) && stalePlans < 3) {
                                 stalePlans++
                                 Thread.sleep(200)
                                 return@repeat
@@ -130,10 +224,17 @@ class LocalToolLoop(
             val cause = rootCause(error)
             val safeGuiCodes = setOf("screen_changed", "screen_changed_before_dispatch",
                 "screen_changed_during_capture", "screen_unavailable", "outside_target_app",
-                "approval_required", "accessibility_required", "blocking_gui_call_on_main")
+                "approval_required", "accessibility_required", "blocking_gui_call_on_main",
+                PhoneActionErrors.REF_EXPIRED, PhoneActionErrors.REF_NOT_EDITABLE, PhoneActionErrors.REF_NOT_SCROLLABLE,
+                PhoneActionErrors.NO_FOCUSED_INPUT, PhoneActionErrors.PRIVATE_INPUT_REQUIRES_USER,
+                PhoneActionErrors.APP_NOT_LAUNCHABLE, PhoneActionErrors.APP_IN_USE_ON_MAIN, PhoneActionErrors.APP_NOT_ALLOWED,
+                PhoneActionErrors.DISPLAY_UNAVAILABLE, PhoneActionErrors.HELPER_UNAVAILABLE,
+                PhoneActionErrors.TAKEOVER_UNAVAILABLE, PhoneActionErrors.TAKEOVER_TIMEOUT)
             val safeModelCodes = setOf("invalid_model_decision", "unexpected_action", "unsupported_action",
                 "invalid_action_fields", "invalid_coordinate", "invalid_input", "one_model_choice_required",
-                "one_tool_call_required", "function_required", "unsupported_model_tool", "invalid_model_response")
+                "one_tool_call_required", "function_required", "unsupported_model_tool", "invalid_model_response",
+                PhoneActionErrors.INVALID_REF, PhoneActionErrors.INVALID_SNAPSHOT_ID, PhoneActionErrors.INVALID_DIRECTION,
+                PhoneActionErrors.INVALID_PACKAGE, PhoneActionErrors.INVALID_REASON)
             val reason = when {
                 stage == "model" && cause is ModelHttpException -> "model_http_${cause.status}"
                 stage == "model" && cause is java.net.UnknownHostException -> "model_dns_failed"
