@@ -69,17 +69,19 @@ enum class SettingsKind(val wire: String) {
     DEVELOPER("developer"),
     WIRELESS_DEBUGGING("wireless_debugging"),
     WIFI("wifi"),
+    NOTIFICATIONS("notifications"),
+    APP_INFO("app_info"),
 }
 
 /**
  * Result of `status`, also pushed as the `status` event. Wire keys: schema_version, api_level, tier,
- * experimental, accessibility, overlay, battery_whitelisted, pairing, pairing_port?, helper,
+ * experimental, experimental_ack, accessibility, overlay, battery_whitelisted, pairing, pairing_port?, helper,
  * helper_failure?, helper_fix?, notifications_allowed, pairing_stage.
  */
 data class PhoneStatus(
     val apiLevel: Int,
     val tier: PhoneTier,
-    /** tier == VIRTUAL and apiLevel < [PHONE_VIRTUAL_STABLE_API]: the UI shows the focus warning. */
+    /** apiLevel in 31..33, independently of helper availability or acknowledgement. */
     val experimental: Boolean,
     val accessibility: Boolean,
     val overlay: Boolean,
@@ -90,6 +92,7 @@ data class PhoneStatus(
     val helperFailure: HelperFailure?,
     val notificationsAllowed: Boolean = false,
     val pairingStage: PairingStage = PairingStage.IDLE,
+    val experimentalAck: Boolean = false,
 )
 
 /**
