@@ -44,8 +44,20 @@ Flutter ── nova/phone/v1 (MethodChannel, JSON strings) ───────
    gestures with `GestureDescription.Builder().setDisplayId(displayId)`, finds input focus inside that display's window tree
    (never `rootInActiveWindow`), and filters events by `AccessibilityEvent.displayId` (API 33+) or window id. The XML config
    adds only `typeWindowsChanged`; notification events stay off. `flagIncludeNotImportantViews` is set at runtime through
-   `serviceInfo` only while a virtual run is active and the original flags are restored when it ends, so the main-tier
-   tree and fingerprint stay byte-for-byte unchanged. Gesture failure falls back to `injectTap`/`injectStroke`; keys always use `injectKey`.
+   `serviceInfo` only while a virtual run or the self-check holds a lease on it, so the main-tier tree and fingerprint stay
+   byte-for-byte unchanged. Acquiring the lease is transactional (a failed `serviceInfo` write leaves no lease); the run's
+   lease is released synchronously when the run ends, before another run is admitted (the display itself may be released
+   later). No run starts while the self-check holds the flag. On a service reconnect every lease owner is stopped first
+   (a run ends `interrupted`/`accessibility_unavailable`), then the saved flags are restored; releases from before the
+   reconnect are no-ops. Only a gesture the system *refused* before dispatch falls back to `injectTap`/`injectStroke`; a
+   cancelled, timed-out or interrupted gesture may have acted, is journaled `unknown` and is never injected again. Keys
+   always use `injectKey`.
+7. **Effect admission**: every effect on the display (each a11y action, gesture, injection or `startApp`, and each
+   fallback separately) is admitted immediately before it runs: the run must still be active (stop, fence, time limit)
+   and no takeover may have started since the observation the action was planned on. A takeover waits for an effect in
+   progress and then invalidates every prepared action; a refused effect dispatched nothing and is journaled `rejected`
+   (`execution_stopped`, or `screen_changed` → observe again). Stop never waits: an effect admitted before it counts as
+   earlier than the stop.
 
 ## Capability tiers
 
@@ -54,8 +66,12 @@ Flutter ── nova/phone/v1 (MethodChannel, JSON strings) ───────
 | Tier | Condition | Behaviour |
 |---|---|---|
 | `virtual` | api >= 31, accessibility on, helper `running` | Apps run on the helper display; user keeps the main screen. |
-| `virtual` + `experimental` | as above with api 31..33 | Same, with a settings warning: main-screen focus may be taken briefly. |
+| `virtual` + `experimental` | as above with api 31..33 **and** the user acknowledged the warning | Same, with a settings warning: main-screen focus may be taken briefly. Without the acknowledgement the run stays `main`. |
 | `main` | anything else | Existing main-screen path (`LocalGuiService.observe/perform`), unchanged, legacy action set. |
+
+The acknowledgement is the boolean `phone.experimental_ack` in the native SharedPreferences file `nova_phone`
+(`PHONE_PREFERENCES`/`PHONE_EXPERIMENTAL_ACK` in `phone/a11y/VirtualScope.kt`); the bridge writes it when the user
+accepts the Android 12/13 warning. api >= 34 needs no acknowledgement.
 
 Helper loss during a virtual run interrupts it with `helper_unavailable`; it never switches to `main` mid-run, because
 that would take over the user's screen. Reasons keep the loop's stage prefix (`observation_helper_unavailable`,
@@ -85,8 +101,13 @@ element `{ref:"@eN", role, name, bounds:[l,t,r,b] 0..999, resource_id?, clickabl
   the same locator → use it; old snapshot or a changed node → `relocate()` (role+name+resourceId unique before and after, bounded move,
   same preceding label; semantic name changes do not match) → found → act on the new node; otherwise `ref_expired`.
 - `ref_expired` is handled like `screen_changed`: observe again and ask the model (shares the `stalePlans < 3` budget). The old action is never retried.
-- `secret` elements: `type` into them fails with `private_input_requires_user`. Their names carry only the hint or label.
-- `secure_frame` (FLAG_SECURE): the image is black. The model should call `hand_to_user`.
+- `secret` elements: `type` into them fails with `private_input_requires_user`. Editable and secret elements are named
+  only by their hint or their label view (`labelFor`), never by their text or description, which may be typed input.
+- `secure_frame` (FLAG_SECURE): true only when the frame is (near-)black **and** an app window's tree on the display still
+  has visible elements; a dark splash, video or switched-off screen without readable elements is not secure. While the
+  observation is secure, only `back` and `hand_to_user` run (and the `observe`/`wait` decisions); any other action is not
+  dispatched and starts a takeover (`by:"model"`, `reason:"secure_page"`), after which the loop observes again. If the
+  takeover cannot start, the run ends `interrupted`/`secure_page`.
 - Main tier keeps the existing `{package, tree, fingerprint, width, height, image}` observation.
 
 ## Action schema
@@ -103,6 +124,7 @@ element `{ref:"@eN", role, name, bounds:[l,t,r,b] 0..999, resource_id?, clickabl
 | `scroll` | `direction` [+ `ref, snapshot_id`] | virtual | direction in `up|down|left|right` |
 | `open_app` | `package` | virtual | `^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$`, <= 255; anything but the run's `target_package` (and always Nova's own package) → `app_not_allowed` at execution |
 | `back` | (none) | both | |
+| `submit` | (none) | virtual | `injectKey(KEYCODE_ENTER)` on the run's display (the keyboard's action key: search, send); `type` never submits |
 | `hand_to_user` | `reason` | virtual | trimmed string 1..500 chars; needs no ActionApproval; starts a takeover |
 
 Parse errors (IllegalArgumentException, reported as `model_<code>`): `unsupported_action` (unknown type or wrong tier),
@@ -112,6 +134,12 @@ Parse errors (IllegalArgumentException, reported as `model_<code>`): `unsupporte
 `app_in_use_on_main` (START_IN_USE_ON_MAIN), `app_not_allowed`, `display_unavailable`, `helper_unavailable`,
 `takeover_unavailable`, `takeover_timeout`. M3 adds the new codes to the `LocalToolLoop` safe-code sets; `RunFence`,
 `ActionApproval` and `LocalAgentJournal` semantics are unchanged.
+
+Step labels: the model's summary for most actions, the fixed `输入文字` for every `type` and `提交` for every `submit`
+(summaries and field names can carry typed text), the package for `open_app`, the reason for `hand_to_user`.
+
+The journal record of a `native_model` task carries `tier: "virtual"|"main"` next to `target_package`; virtual-tier
+actions are journaled with the observation's `snapshot_id` as evidence (main tier: the fingerprint).
 
 ## Channels
 
@@ -128,7 +156,7 @@ Android-only; Dart guards with `Platform.isAndroid`.
 | `submitCode` | `{code: "123456", port?: int}` | `PhoneStatus` after the pairing attempt (failure in `helper_failure`) |
 | `ensureHelper` | `{}` | `PhoneStatus` immediately; progress arrives as `status` events |
 | `unpair` | `{}` | `PhoneStatus` (nonces cleared, shell dropped, key forgotten) |
-| `selfCheck` | `{}` | `{checks:[{id, ok, detail?}]}`; ids `helper`, `create_display`, `start_app`, `read_tree`, `tap`, `type`, `back`, `main_focus` |
+| `selfCheck` | `{}` | `{checks:[{id, ok, detail?}]}`; ids `helper`, `create_display`, `start_app`, `read_tree`, `tap`, `type`, `back`, `main_focus`. Fails with `run_active` while an agent run is active. |
 | `setPreview` | `{visible: bool}` | `{}` |
 | `takeover` | `{task_id}` | `{state: TakeoverState}` |
 | `handBack` | `{task_id}` | `{state: TakeoverState}` |
@@ -144,7 +172,9 @@ Each event is a JSON string object:
 
 - `{type:"status", status: PhoneStatus}`
 - `{type:"step", task_id, step, tool, label, status:"running"|"completed"|"failed"|"unknown", changed?, ref?, tier}`. Each
-  (task_id, step) is sent as `running` and then once with its final status. `label` never contains typed text.
+  (task_id, step) is sent as `running` and then once with its final status. `label` never contains typed text. An
+  `observe` decision is its own step (`tool:"observe"`, label = the model's summary, no `ref`/`changed`), sent `running`
+  then `completed`.
 - `{type:"takeover", task_id, state:"requested"|"active"|"returned"|"timed_out"|"failed", by:"model"|"user", reason?}`
 - `{type:"done", task_id, outcome:"completed"|"failed"|"cancelled"|"interrupted", reason?, summary?, steps, duration_ms}`
 
@@ -159,7 +189,10 @@ No frames are sent during takeover or for secure (black) frames; Dart shows a pl
 `hand_to_user` or a `takeover` call → `requested` → `moveTask(topTaskId(display), 0)` → `active` (loop paused, app audible
 on the main screen) → `handBack` → `moveTask(task, display)` → `returned` → loop resumes with a new observation (all refs are stale).
 `active` longer than 10 min → `timed_out` and the run ends `interrupted`/`takeover_timeout`. If `moveTask` fails, the state is `failed`
-and the run ends `interrupted`/`takeover_unavailable`. Locked screen, payment, login and FLAG_SECURE pages all go through takeover.
+and the run ends `interrupted`/`takeover_unavailable`. Locked screen, payment, login and FLAG_SECURE pages all go through takeover
+(`secure_page`, see `secure_frame`). Takeover moves are serialized with effects: a `takeover` call waits for an effect in
+progress, and nothing planned before it is dispatched afterwards. `takeover`/`handBack` fail with `task_not_running` when
+the task is not the current virtual run, and `handBack` with `no_takeover` before any takeover.
 
 ## Security invariants
 
@@ -187,8 +220,8 @@ None of these may be weakened. Each must have a JVM or device test where practic
 | API | Android | Tier | Notes |
 |---|---|---|---|
 | 24–30 | 7–11 | main | Helper path not offered (`helper: unsupported`). Screenshots need API 30, as today. |
-| 31–32 | 12/12L | virtual, experimental | No trusted or `TOUCH_FEEDBACK_DISABLED` flags. Launching on the display can take main-screen focus. Event display is found from the window id. |
-| 33 | 13 | virtual, experimental | Trusted flags if shell has `ADD_TRUSTED_DISPLAY`. No `OWN_FOCUS`. `AccessibilityEvent.displayId` is available. |
+| 31–32 | 12/12L | virtual, experimental (needs `phone.experimental_ack`) | No trusted or `TOUCH_FEEDBACK_DISABLED` flags. Launching on the display can take main-screen focus. Event display is found from the window id. |
+| 33 | 13 | virtual, experimental (needs `phone.experimental_ack`) | Trusted flags if shell has `ADD_TRUSTED_DISPLAY`. No `OWN_FOCUS`. `AccessibilityEvent.displayId` is available. |
 | 34+ | 14+ | virtual | `OWN_FOCUS|STEAL_TOP_FOCUS_DISABLED` when trusted. Untrusted fallback → self-check `main_focus` fails and a warning is shown. |
 
 ## OEM and FLAG_SECURE limits
@@ -216,9 +249,66 @@ Lanes do not edit files they don't own. If a lane needs a seam that isn't here, 
 - `LocalAgentController(context, spaceId, shells: ShellProvider?, events: PhoneEventSink?)`: `MainActivity` passes the
   `PhoneBridge` for both (null keeps every run on `main`). The controller implements `PhoneTakeover`; the bridge routes
   `takeover`/`handBack` to the current controller.
-- `VirtualSelfCheck(context, shells)` implements `PhoneSelfCheck`; call `run()` off the main thread. It drives system
+- `VirtualSelfCheck(context, shells, runs)` implements `PhoneSelfCheck`; `runs` is the current `LocalAgentController`
+  (`RunIdleGate`). Call `run()` off the main thread. It drives system
   Settings on a temporary display: `tap` goes to a point outside every clickable node, `back` uses `injectKey`, and `type`
   passes only when Settings shows an editable field (otherwise `{ok:false, detail:"no_text_field"}`). `main_focus` reads
   `displayFlags & FLAG_OWN_FOCUS`.
 - M3 serializes `step`/`takeover`/`done` events (`phone/PhoneEventJson.kt`) and emits them only for virtual-tier runs; the
   bridge serializes and emits `status`.
+
+## Helper constants
+
+`INovaShell` constants beyond `START_OK`/`START_IN_USE_ON_MAIN`/`START_NOT_FOUND`/`START_ERROR`:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `START_IN_USE_BY_OTHER` | 7 | `startApp`: the package already runs on another own display; nothing was started. Reported like `START_ERROR` as `display_unavailable`. |
+| `FLAG_TRUSTED` | 1024 | `displayFlags` bit: the display was created trusted (`VIRTUAL_DISPLAY_FLAG_TRUSTED`). Informational; the self-check reads only `FLAG_OWN_FOCUS`. |
+| `FLAG_OWN_FOCUS` | 16384 | `displayFlags` bit read by the self-check row `main_focus`. |
+
+## Self-check details
+
+`detail` codes per row (`ok:false` unless noted). A row that did not run is `{ok:false, detail:"not_run"}`.
+
+| Row | Details |
+|---|---|
+| `helper` | `unsupported` (api < 31), `not_running` (also asks the watchdog to start it), `helper_unavailable` |
+| `create_display` | `accessibility_flags_failed` (runtime a11y flag could not be set), `create_failed` |
+| `start_app` | `app_in_use_on_main`, `app_not_launchable`, `display_unavailable`, `helper_unavailable`, `accessibility_required`, `not_on_display` |
+| `read_tree` | `empty_tree`, `no_frame`, `black_frame` |
+| `tap` | `no_free_point`, `gesture_uncertain` (never followed by an injection), `tap_refused`; `injection_only` with `ok:true` |
+| `type` | `no_text_field`, `text_not_set` |
+| `back` | `injection_refused`, `no_effect` |
+| `main_focus` | `unknown` (flags unreadable), `shared_focus` |
+
+## Run reasons
+
+`reason` of an `interrupted` task (journal `reason`, `done` event `reason`). `cancelled` (user stop) and `completed`
+carry no reason. `<stage>` is the loop stage: `observation`, `model` or `tool`.
+
+| Reason | Tier | When |
+|---|---|---|
+| `time_limit` | both | Budget (main 5 min, virtual 15 min) ran out. |
+| `space_changed` | both | The Space was switched or closed. |
+| `accessibility_unavailable` | both | The accessibility service was interrupted, destroyed or reconnected. |
+| `virtual_setup_failed` | virtual | The run's display objects or the runtime a11y flag could not be set up. |
+| `launch_<code>` | virtual | The run's own `open_app` was refused before any effect: `launch_execution_stopped`, `launch_screen_changed`, `launch_app_in_use_on_main`, `launch_app_not_launchable`, `launch_display_unavailable`, `launch_helper_unavailable`, `launch_app_not_allowed`. |
+| `launch_failed` | virtual | The run's own `open_app` failed otherwise. |
+| `launch_outcome_<outcome>` | both | The launch attempt was journaled `rejected` or `unknown`. |
+| `native_loop_failed` | both | Unexpected failure outside the loop's own error mapping. |
+| `execution_interrupted` | both | The loop ended without finishing or interrupting the run. |
+| `secure_page` | virtual | A non-allowed action met a secure frame and no takeover could start. |
+| `model_needs_user` | both | The model chose `wait`. |
+| `model_observation_limit` | both | More than 3 consecutive `observe` decisions. |
+| `approval_declined` | both | The single-use permit could not be issued. |
+| `action_outcome_<outcome>` | both | An action was journaled `rejected` or `unknown`; it is never retried. |
+| `step_limit` | both | The loop used all its turns. |
+| `model_http_<status>`, `model_dns_failed`, `model_timeout`, `model_tls_failed`, `model_invalid_response` | both | Model transport failures. |
+| `model_<code>` | both | Invalid model output; `<code>` is a parse code (`invalid_model_decision`, `unexpected_action`, `unsupported_action`, `invalid_action_fields`, `invalid_coordinate`, `invalid_input`, `one_model_choice_required`, `one_tool_call_required`, `function_required`, `unsupported_model_tool`, `invalid_model_response`, `invalid_ref`, `invalid_snapshot_id`, `invalid_direction`, `invalid_package`, `invalid_reason`). |
+| `<stage>_<code>` | both | A safe execution code, e.g. `observation_outside_target_app`, `observation_takeover_timeout`, `tool_ref_not_editable`, `tool_screen_changed` (stale-plan budget used up), `tool_helper_unavailable`, `tool_takeover_unavailable`. |
+| `<stage>_timeout`, `<stage>_screenshot_unavailable_<n>` | both | A blocking call timed out; main-tier screenshot failure. |
+| `<stage>_failed` | both | Any other failure (no detail, so no screen content or provider body leaks). |
+
+Method error codes of `nova/phone/v1` that are not run reasons: `task_not_running` and `no_takeover` (`takeover`,
+`handBack`), `run_active` (`selfCheck`).
