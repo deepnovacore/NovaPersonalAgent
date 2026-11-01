@@ -22,6 +22,8 @@ sealed interface PhoneAction {
     data class OpenApp(val packageName: String) : PhoneAction
     /** {type:"back"}. */
     data object Back : PhoneAction
+    /** {type:"submit"} — virtual tier only; presses Enter (the keyboard's action key) on the run's display. */
+    data object Submit : PhoneAction
     /** {type:"hand_to_user", reason} — virtual tier only; starts a takeover, needs no ActionApproval. */
     data class HandToUser(val reason: String) : PhoneAction
 }

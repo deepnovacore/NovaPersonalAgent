@@ -60,6 +60,8 @@ class LocalGuiModelTest {
             val messages = body.getJSONArray(if (protocol == "chatCompletions") "messages" else "input")
             val instructions = messages.getJSONObject(0).getString("content")
             assertTrue(instructions.contains("snapshot_id") && instructions.contains("hand_to_user(reason)") && instructions.contains("automatically authorized"))
+            assertTrue(instructions.contains("changed_during_read is true") && instructions.contains("belong to the selected app"))
+            assertTrue(instructions.contains("secure_frame true") && instructions.contains("only submit does"))
             val part = messages.getJSONObject(1).getJSONArray("content").getJSONObject(0)
             val context = JSONObject(part.getString("text"))
             assertEquals("ph-1", context.getString("snapshot_id"))
@@ -72,7 +74,7 @@ class LocalGuiModelTest {
             .getJSONArray("tools").getJSONObject(0).getJSONObject("function").getJSONObject("parameters")
             .getJSONObject("properties").getJSONObject("action").getJSONObject("properties")
         val types = schema.getJSONObject("type").getJSONArray("enum").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
-        assertEquals(setOf("tap", "type", "scroll", "swipe", "open_app", "back", "hand_to_user"), types)
+        assertEquals(setOf("tap", "type", "scroll", "swipe", "open_app", "back", "submit", "hand_to_user"), types)
         for (key in listOf("ref", "snapshot_id", "direction", "package", "reason")) assertTrue(schema.has(key))
     }
     @Test fun mainTierPromptIsUnchangedByTheVirtualTier() {

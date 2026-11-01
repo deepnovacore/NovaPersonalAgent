@@ -171,24 +171,41 @@ class VirtualRunHost(
 
     override fun execute(action: JSONObject): String {
         val parsed = ToolActionParser.parse(action, PhoneTier.VIRTUAL)
-        val evidence = (observation ?: throw IllegalStateException("observation_required")).getString("snapshot_id")
+        val observed = observation ?: throw IllegalStateException("observation_required")
+        val evidence = observed.getString("snapshot_id")
         // A takeover since the observation moved the app: the plan is stale, never dispatch it.
         if (takeover.pending || takeover.generation != observedGeneration) {
             awaitTakeover()
             throw IllegalStateException(SCREEN_CHANGED)
         }
+        // On a secure page only back and hand_to_user run; anything else hands the screen to the user.
+        if (observed.getBoolean("secure_frame") && parsed !is PhoneAction.Back && parsed !is PhoneAction.HandToUser) securePage()
         val attemptId = newAttemptId()
         if (parsed is PhoneAction.HandToUser) return handToUser(attemptId, action, parsed, evidence)
         if (!scope.allows(device.topPackage())) throw IllegalStateException(SCREEN_CHANGED)
         val prepared = device.prepare(parsed)
-        // Typing is labelled by a fixed text: field names and summaries can carry typed or previously entered text.
-        val label = if (parsed is PhoneAction.Type) TYPE_LABEL else summary ?: prepared.label ?: scope.target
+        // Typing and submitting are labelled by a fixed text: field names and summaries can carry typed text.
+        val label = when (parsed) {
+            is PhoneAction.Type -> TYPE_LABEL
+            PhoneAction.Submit -> SUBMIT_LABEL
+            else -> summary ?: prepared.label ?: scope.target
+        }
         return journaled(attemptId, action, evidence, prepared, label, observedGeneration)
     }
 
     override fun finish(summary: String) = gate.complete(summary, (observation ?: throw IllegalStateException("observation_required")).getString("snapshot_id"))
 
     override fun interrupt(reason: String) = gate.interrupt(reason)
+
+    /**
+     * Nothing is dispatched on a secure page: a takeover (`secure_page`) starts and the plan is stale, so the loop
+     * observes again after the hand-back. Without a takeover the run ends with `secure_page`.
+     */
+    private fun securePage(): Nothing {
+        if (takeover.request(byModel = true, reason = SECURE_PAGE) == TakeoverState.ACTIVE) throw IllegalStateException(SCREEN_CHANGED)
+        gate.interrupt(SECURE_PAGE)
+        throw IllegalStateException(PhoneActionErrors.TAKEOVER_UNAVAILABLE)
+    }
 
     private fun handToUser(attemptId: String, action: JSONObject, parsed: PhoneAction.HandToUser, evidence: String): String {
         val step = startStep("hand_to_user", parsed.reason, null)
@@ -280,5 +297,9 @@ class VirtualRunHost(
         private const val LABEL_MAX = 200
         /** Step label of every `type` action. */
         const val TYPE_LABEL = "输入文字"
+        /** Step label of every `submit` action. */
+        const val SUBMIT_LABEL = "提交"
+        /** Takeover reason and run reason when a non-allowed action meets a secure frame. */
+        const val SECURE_PAGE = "secure_page"
     }
 }

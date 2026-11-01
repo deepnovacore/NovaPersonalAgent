@@ -235,6 +235,13 @@ internal fun nodeName(text: CharSequence?, description: CharSequence?, hint: Cha
     return clean(text) ?: clean(description) ?: clean(hint)
 }
 
+/**
+ * Contract `secure_frame`: the frame is (near-)black while an app window's tree still has visible elements, as a
+ * FLAG_SECURE page shows. A dark splash, video or switched-off screen without readable elements is not secure.
+ */
+internal fun isSecureFrame(black: Boolean, hasAppWindow: Boolean, visibleElements: Int): Boolean =
+    black && hasAppWindow && visibleElements > 0
+
 /** Pixel [p] on an axis of [size] pixels to the snapshot's 0..[SNAPSHOT_BOUNDS_MAX] space. */
 internal fun normalize(p: Int, size: Int): Int {
     if (size <= 1) return 0

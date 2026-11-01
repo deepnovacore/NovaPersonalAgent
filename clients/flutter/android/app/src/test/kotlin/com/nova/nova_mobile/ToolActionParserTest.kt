@@ -26,6 +26,7 @@ class ToolActionParserTest {
         assertEquals(PhoneAction.Scroll(ScrollDirection.LEFT, "@e9", "ph-1"), virtual("""{"type":"scroll","direction":"left","ref":"@e9","snapshot_id":"ph-1"}"""))
         assertEquals(PhoneAction.OpenApp("com.example.app"), virtual("""{"type":"open_app","package":"com.example.app"}"""))
         assertEquals(PhoneAction.Back, virtual("""{"type":"back"}"""))
+        assertEquals(PhoneAction.Submit, virtual("""{"type":"submit"}"""))
         assertEquals(PhoneAction.HandToUser("Login needed"), virtual("""{"type":"hand_to_user","reason":"  Login needed "}"""))
     }
 
@@ -37,6 +38,7 @@ class ToolActionParserTest {
         rejects("invalid_action_fields", v, """{"type":"type","text":"a","ref":"@e1"}""")
         rejects("invalid_action_fields", v, """{"type":"scroll","direction":"up","snapshot_id":"ph-1"}""")
         rejects("invalid_action_fields", v, """{"type":"back","extra":1}""")
+        rejects("invalid_action_fields", v, """{"type":"submit","text":"go"}""")
         rejects("invalid_action_fields", v, """{"type":"open_app"}""")
         rejects("invalid_ref", v, """{"type":"tap","ref":"@e0","snapshot_id":"ph-1"}""")
         rejects("invalid_ref", v, """{"type":"tap","ref":"@e12345","snapshot_id":"ph-1"}""")
@@ -58,7 +60,7 @@ class ToolActionParserTest {
         assertEquals(PhoneAction.Type("hello", null, null), main("""{"type":"type","text":"hello"}"""))
         assertEquals(PhoneAction.Back, main("""{"type":"back"}"""))
         val m = PhoneTier.MAIN
-        for (type in listOf("scroll", "open_app", "hand_to_user", "launch", "home")) rejects("unsupported_action", m, """{"type":"$type"}""")
+        for (type in listOf("scroll", "open_app", "hand_to_user", "submit", "launch", "home")) rejects("unsupported_action", m, """{"type":"$type"}""")
         rejects("invalid_action_fields", m, """{"type":"tap","ref":"@e1","snapshot_id":"ph-1"}""")
         rejects("invalid_action_fields", m, """{"type":"type","text":"a","ref":"@e1","snapshot_id":"ph-1"}""")
         rejects("invalid_coordinate", m, """{"type":"tap","x":true,"y":0}""")

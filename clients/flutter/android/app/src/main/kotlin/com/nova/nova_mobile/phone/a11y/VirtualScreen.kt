@@ -91,7 +91,7 @@ class VirtualScreen(
             elements = r.entries.map { it.element },
             image = image.jpegBase64,
             changedDuringRead = after != r.hash,
-            secureFrame = image.black && r.hasAppWindow,
+            secureFrame = isSecureFrame(image.black, r.hasAppWindow, r.entries.size),
         )
     }
 
@@ -123,6 +123,10 @@ class VirtualScreen(
             PhoneAction.Back -> {
                 requireDisplay()
                 Prepared("back", null, null, CHANGE_WAIT_MS, { shown, effects -> effects.admit { shell().injectKey(shown.displayId, KeyEvent.KEYCODE_BACK) } })
+            }
+            PhoneAction.Submit -> {
+                requireDisplay()
+                Prepared("submit", null, null, CHANGE_WAIT_MS, { shown, effects -> effects.admit { shell().injectKey(shown.displayId, KeyEvent.KEYCODE_ENTER) } })
             }
             is PhoneAction.HandToUser -> throw IllegalArgumentException("unsupported_action")
         }

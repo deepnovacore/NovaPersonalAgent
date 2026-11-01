@@ -32,15 +32,17 @@ class VirtualRunHostTest {
         val dispatched = mutableListOf<String>()
         override fun topPackage() = foreground
         var snapshotError: (() -> Exception)? = null
+        var secure = false
         override fun snapshot() = snapshotError?.let { error -> snapshotError = null; throw error() } ?: PhoneSnapshot("ph-${++snapshots}", foreground, 1080, 2400,
             listOf(UiElement("@e1", "EditText", "Search", listOf(0, 0, 999, 100), "search", false, true, false, false, false)),
-            "YWJj", false, false)
+            "YWJj", false, secure)
         override fun prepare(action: PhoneAction): PreparedAction {
             prepareError?.let { throw it }
             return when (action) {
                 is PhoneAction.TapRef -> PreparedAction("tap", action.ref, "Search")
                 is PhoneAction.Type -> PreparedAction("type", action.ref, "Search")
                 is PhoneAction.OpenApp -> PreparedAction("open_app", null, action.packageName)
+                PhoneAction.Submit -> PreparedAction("submit", null, null)
                 else -> PreparedAction("back", null, null)
             }
         }
@@ -185,6 +187,56 @@ class VirtualRunHostTest {
         assertTrue(events.none { it.toString().contains("hunter2") })
         // The field's name (here "Search", possibly its earlier contents on a device) is never the label either.
         assertEquals(listOf("输入文字"), events.map { it.getString("label") }.distinct())
+    }
+
+    @Test fun submitIsLabelledWithoutTheModelSummary() {
+        val device = Device(target)
+        val h = host(device, Gate(), takeover())
+        h.observe()
+        h.decided(decision("""{"type":"submit"}"""))
+        assertEquals("dispatched", h.execute(JSONObject("""{"type":"submit"}""")))
+        assertEquals(listOf("submit"), device.dispatched)
+        assertEquals(listOf("提交"), events.map { it.getString("label") }.distinct())
+    }
+
+    @Test fun securePageHandsOtherActionsToTheUserWithoutDispatching() {
+        val device = Device(target).apply { secure = true }
+        val gate = Gate()
+        val port = Port()
+        val reasons = mutableListOf<String?>()
+        val t = RunTakeover("t1", port, { reasons += it.reason }, System::currentTimeMillis)
+        val h = host(device, gate, t)
+        h.observe()
+        try { h.execute(JSONObject("""{"type":"tap","ref":"@e1","snapshot_id":"ph-1"}""")); fail() }
+        catch (e: IllegalStateException) { assertEquals("screen_changed", e.message) }
+        assertEquals(TakeoverState.ACTIVE, t.state)
+        assertEquals(listOf("main"), port.moves)
+        assertTrue(reasons.all { it == "secure_page" })
+        assertTrue(device.dispatched.isEmpty())
+        assertTrue(gate.begun.isEmpty())
+        assertNull(gate.interruption)
+    }
+
+    @Test fun securePageStillAllowsBackAndHandToUser() {
+        val device = Device(target).apply { secure = true }
+        val gate = Gate()
+        val t = takeover()
+        val h = host(device, gate, t)
+        h.observe()
+        assertEquals("dispatched", h.execute(JSONObject("""{"type":"back"}""")))
+        assertEquals("dispatched", h.execute(JSONObject("""{"type":"hand_to_user","reason":"Payment"}""")))
+        assertEquals(listOf("back"), device.dispatched)
+        assertEquals(TakeoverState.ACTIVE, t.state)
+    }
+
+    @Test fun securePageWithoutTakeoverEndsTheRun() {
+        val device = Device(target).apply { secure = true }
+        val gate = Gate()
+        val h = host(device, gate, takeover(Port(top = -1)))
+        h.observe()
+        try { h.execute(JSONObject("""{"type":"type","text":"1234"}""")); fail() } catch (_: IllegalStateException) { }
+        assertEquals("secure_page", gate.interruption)
+        assertTrue(device.dispatched.isEmpty())
     }
 
     @Test fun stopDuringPreparationRefusesTheEffect() {

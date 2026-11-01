@@ -69,6 +69,10 @@ object ToolActionParser : PhoneActionParser {
                 require(keys == fields()) { PhoneActionErrors.INVALID_ACTION_FIELDS }
                 PhoneAction.Back
             }
+            "submit" -> {
+                require(keys == fields()) { PhoneActionErrors.INVALID_ACTION_FIELDS }
+                PhoneAction.Submit
+            }
             "hand_to_user" -> {
                 require(keys == fields("reason")) { PhoneActionErrors.INVALID_ACTION_FIELDS }
                 val reason = (action.get("reason") as? String)?.trim()
