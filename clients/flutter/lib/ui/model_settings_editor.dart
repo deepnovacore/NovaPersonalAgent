@@ -5,6 +5,7 @@ import '../agent_core/model_presets.dart';
 import '../settings/model_settings_backend.dart';
 import 'local_dialog.dart';
 import 'provider_credentials_sheet.dart';
+import 'provider_setup_page.dart';
 import 'theme.dart';
 
 /// One presentation for local secure storage and paired Host model settings.
@@ -20,6 +21,19 @@ Future<void> showModelSettingsEditor(
   String t(String zh, String en) => language == 'zh' ? zh : en;
   final view = await backend.load();
   if (!context.mounted) return;
+  if (view.supportsProviderSetup) {
+    // Device-owned keys get the full setup page; Host lanes and the
+    // follow-the-chat-model lane keep the compact dialog below.
+    return showProviderSetupPage(
+      context,
+      backend,
+      view,
+      language: language,
+      title: title,
+      onManageCredentials: onManageCredentials,
+      onChatGpt: onChatGpt,
+    );
+  }
   final endpoint = TextEditingController(text: view.endpoint);
   final model = TextEditingController(text: view.model);
   final key = TextEditingController();
