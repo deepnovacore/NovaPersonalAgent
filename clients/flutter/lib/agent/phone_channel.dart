@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +10,10 @@ import '../agent_core/schedule_wake.dart';
 /// grow one.
 bool phoneControlSupported([TargetPlatform? platform]) =>
     !kIsWeb && (platform ?? defaultTargetPlatform) == TargetPlatform.android;
+
+/// The platform bridge exists only in a real Android process; a host-side
+/// test run that merely pretends to be Android has none.
+bool get nativePhoneBridgeAvailable => !kIsWeb && Platform.isAndroid;
 
 // Dart client of the Android phone-control channels. The wire format is the
 // contract in docs/specs/mobile-virtual-display.md: MethodChannel

@@ -373,6 +373,7 @@ class _VirtualScreenPipState extends State<VirtualScreenPip>
           top: 0,
           right: 0,
           child: Semantics(
+            container: true,
             button: true,
             label: t('收起', 'Collapse'),
             excludeSemantics: true,

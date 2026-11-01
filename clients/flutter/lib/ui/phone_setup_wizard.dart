@@ -80,6 +80,10 @@ class PhoneSetupProgress {
           (confirmed.contains(step) &&
               status.helper != HelperState.wirelessDebuggingOff));
 
+  /// Where the wizard should be: the step a failure belongs to, else the
+  /// first step that is not done; null when everything is done.
+  PhoneSetupStep? get target => failedStep ?? firstOpen;
+
   /// First step that is not done, or null when everything is.
   PhoneSetupStep? get firstOpen {
     for (final step in PhoneSetupStep.values) {
@@ -135,7 +139,7 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
   PhoneSetupProgress get progress =>
       PhoneSetupProgress(watcher.status ?? const PhoneStatus(), confirmed);
 
-  PhoneSetupStep? get current => viewing ?? progress.firstOpen;
+  PhoneSetupStep? get current => viewing ?? progress.target;
 
   @override
   void initState() {
@@ -150,7 +154,7 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
     setState(() {
       // Progress made elsewhere (the user came back from a settings page)
       // moves the wizard on; an explicit revisit stays until then.
-      final open = progress.firstOpen;
+      final open = progress.target;
       if (_lastOpen != open && watcher.status != null) {
         if (_lastOpen != null) viewing = null;
         _lastOpen = open;
@@ -610,7 +614,7 @@ class _PhoneSetupWizardState extends State<PhoneSetupWizard> {
           onPressed: () => setState(() {
             confirmed.add(step);
             viewing = null;
-            _lastOpen = progress.firstOpen;
+            _lastOpen = progress.target;
             _maybeStartPairing();
           }),
           child: Text(c.turnedOnNext),

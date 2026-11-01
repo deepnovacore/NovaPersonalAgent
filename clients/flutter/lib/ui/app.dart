@@ -232,7 +232,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   void _initialize() {
     phoneChannel =
         widget.phoneChannel ??
-        (phoneControlSupported() ? const NativePhoneChannel() : null);
+        (nativePhoneBridgeAvailable ? const NativePhoneChannel() : null);
     phoneRun = phoneChannel == null
         ? null
         : (PhoneRunTracker(phoneChannel!)..start());
