@@ -1,6 +1,7 @@
 package com.nova.nova_mobile
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Path
@@ -16,7 +17,11 @@ import android.view.Gravity
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import androidx.annotation.RequiresApi
 import android.widget.Button
+import com.nova.nova_mobile.phone.a11y.GestureOutcome
+import com.nova.nova_mobile.phone.a11y.RuntimeFlagLeases
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
@@ -26,17 +31,30 @@ import java.util.concurrent.Executors
 
 /** Android owns observation and input; no ADB, host process or Hub is used. */
 class LocalGuiService : AccessibilityService() {
-    companion object { @Volatile var current: LocalGuiService?=null }
+    companion object {
+        @Volatile var current: LocalGuiService?=null
+        private const val PAIRING_MAX_NODES=400
+    }
     private val main=Handler(Looper.getMainLooper())
     private val observations=Executors.newSingleThreadExecutor()
     private var stopButton: Button?=null
     private var nextScreenshotAt=0L
     var onStop: (() -> Unit)?=null
     var onUnavailable: (() -> Unit)?=null
-    override fun onServiceConnected(){ current=this }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onServiceConnected(){
+        // A reconnect may keep or reset the runtime configuration: stop virtual work that relied on it, restore the saved flags.
+        flagLeases.reconnect()
+        displayEvents.clear()
+        current=this
+    }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Only virtual-tier runs consume events; the main-tier path ignores them as before.
+        if(event==null||flagLeases.held==0)return
+        val displayId=displayOf(event)
+        if(displayId!=Display.INVALID_DISPLAY&&displayId!=Display.DEFAULT_DISPLAY)displayEvents[displayId]=SystemClock.uptimeMillis()
+    }
     override fun onInterrupt(){onUnavailable?.invoke()}
-    override fun onDestroy(){onUnavailable?.invoke();hideStop();current=null;observations.shutdownNow();super.onDestroy()}
+    override fun onDestroy(){onUnavailable?.invoke();hideStop();current=null;observations.shutdownNow();gestureThread.quitSafely();super.onDestroy()}
 
     private fun <T> onMain(run: () -> T): T {
         check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
@@ -156,4 +174,96 @@ class LocalGuiService : AccessibilityService() {
         }
     }
     fun hideStop(){main.post{stopButton?.let { getSystemService(WindowManager::class.java).removeView(it) };stopButton=null}}
+
+    // ---- Virtual display (derived from Mika ScreenAccessibility, Apache-2.0, commit 5f630d9; see phone/a11y) ----
+
+    private val displayEvents=java.util.concurrent.ConcurrentHashMap<Int,Long>()
+    /** Gesture callbacks of virtual runs: never the main thread, which may be waiting for a takeover move. */
+    private val gestureThread=android.os.HandlerThread("nova-virtual-gestures").apply { start() }
+    private val gestureHandler=Handler(gestureThread.looper)
+    private val flagLeases=RuntimeFlagLeases(object:RuntimeFlagLeases.Store {
+        override fun read():Int? = serviceInfo?.flags
+        override fun write(flags:Int) {
+            val info=serviceInfo?:return
+            if(info.flags!=flags){ info.flags=flags;serviceInfo=info }
+        }
+    },AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS)
+
+    /**
+     * Many apps mark result text as not important for accessibility. Include those views only while a virtual run or
+     * the self-check holds a lease, so the main-tier tree and fingerprint stay unchanged; releasing the last lease
+     * restores the original flags synchronously. Throws when the flags cannot be set (no lease is held then).
+     * [onVoided] runs when a service reconnect voids the lease; the holder must stop its virtual work.
+     */
+    fun acquireVirtualFlags(onVoided:()->Unit):RuntimeFlagLeases.Lease {
+        if(flagLeases.held==0)displayEvents.clear()
+        return flagLeases.acquire(onVoided)
+    }
+
+    /** Leases held by virtual runs and the self-check; a new run is not admitted while any is held. */
+    val virtualFlagLeases:Int get()=flagLeases.held
+
+    /**
+     * Retries a failed restoration of the runtime flags. False while it still fails: the main-tier tree may then include
+     * not-important views, so no run of either tier is admitted (`accessibility_flags_failed`).
+     */
+    fun restoreVirtualFlags():Boolean = flagLeases.restore()
+
+    /** Windows on [displayId] (empty when the display has none or does not exist). Never the active main window. */
+    @RequiresApi(30)
+    fun windowsOn(displayId:Int):List<AccessibilityWindowInfo> = windowsOnAllDisplays.get(displayId).orEmpty()
+
+    /** Uptime of the last accessibility event on [displayId] during a virtual run, or 0. */
+    fun lastEventAt(displayId:Int):Long = displayEvents[displayId]?:0L
+
+    /**
+     * One gesture on [displayId]; blocks until it is done. REFUSED only when the system rejected it before dispatch;
+     * a cancelled, timed-out or interrupted gesture is UNCERTAIN (it may have acted) and must not be injected again.
+     */
+    @RequiresApi(30)
+    fun gesture(displayId:Int,strokes:List<GestureDescription.StrokeDescription>):GestureOutcome {
+        check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
+        val gesture=GestureDescription.Builder().setDisplayId(displayId).apply { strokes.forEach(::addStroke) }.build()
+        val done=CompletableFuture<Boolean>()
+        val accepted=dispatchGesture(gesture,object:GestureResultCallback(){
+            override fun onCompleted(gestureDescription:GestureDescription?){done.complete(true)}
+            override fun onCancelled(gestureDescription:GestureDescription?){done.complete(false)}
+        },gestureHandler)
+        if(!accepted)return GestureOutcome.REFUSED
+        return try { if(done.get(15,TimeUnit.SECONDS)) GestureOutcome.COMPLETED else GestureOutcome.UNCERTAIN } catch(_:Exception) { GestureOutcome.UNCERTAIN }
+    }
+
+    /**
+     * Pairing-code reader for the wireless-debugging pairing dialog (M2 `PairingWindowReader.settingsWindowTexts`):
+     * the non-blank, non-password text of each system Settings window on the main display, one list per window, at most
+     * [PAIRING_MAX_NODES] nodes each. Other apps' windows are never read. Derived from Mika cap/phone/setup/PairingCodeReader.
+     */
+    fun settingsWindowTexts():List<List<String>> = onMain {
+        val settings=runCatching { packageManager.resolveActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS),0)?.activityInfo?.packageName }.getOrNull()?:"com.android.settings"
+        val mainWindows=if(Build.VERSION.SDK_INT>=30)windowsOnAllDisplays.get(Display.DEFAULT_DISPLAY).orEmpty() else windows
+        mainWindows.mapNotNull { window ->
+            val root=runCatching { window.root }.getOrNull()?:return@mapNotNull null
+            if(root.packageName?.toString()!=settings)return@mapNotNull null
+            val texts=mutableListOf<String>()
+            val queue=ArrayDeque(listOf(root))
+            var seen=0
+            while(queue.isNotEmpty()&&seen++<PAIRING_MAX_NODES) {
+                val node=queue.removeFirst()
+                if(node.isVisibleToUser&&!node.isPassword)node.text?.toString()?.takeIf { it.isNotBlank() }?.let(texts::add)
+                for(i in 0 until node.childCount)node.getChild(i)?.let(queue::add)
+            }
+            texts
+        }
+    }
+
+    /** Display of an event: from API 33 the event carries it; earlier, look its window up on every display. */
+    private fun displayOf(event:AccessibilityEvent):Int {
+        if(Build.VERSION.SDK_INT>=33)return event.displayId
+        if(Build.VERSION.SDK_INT<30)return Display.INVALID_DISPLAY
+        val windowId=event.windowId
+        if(windowId==-1)return Display.INVALID_DISPLAY
+        val all=windowsOnAllDisplays
+        for(i in 0 until all.size()) if(all.valueAt(i).any { it.id==windowId }) return all.keyAt(i)
+        return Display.INVALID_DISPLAY
+    }
 }

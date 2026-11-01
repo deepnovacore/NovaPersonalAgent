@@ -320,5 +320,52 @@ class LocalToolLoopTest {
         assertEquals("tool_failed", host.interruption)
         assertEquals(0, host.writes)
     }
-
+    private fun tapRef(ref: String) = ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Tap result","action":{"type":"tap","ref":"$ref","snapshot_id":"ph-1"}}"""), com.nova.nova_mobile.phone.PhoneTier.VIRTUAL)
+    @Test fun expiredRefReobservesAndAsksTheModelWithoutRetryingTheAction() {
+        val host = Host()
+        val frames = mutableListOf<String>()
+        LocalToolLoop(host, { observation, turn ->
+            frames.add(observation.getString("fingerprint"))
+            host.executeError = if(turn == 0) IllegalStateException("ref_expired") else null
+            when(turn) {
+                0 -> tapRef("@e3")
+                1 -> tapRef("@e4")
+                else -> ToolDecision.parse(JSONObject("""{"kind":"complete","summary":"Visible result"}"""))
+            }
+        }).run()
+        assertEquals(listOf("frame-1", "frame-2", "frame-3"), frames)
+        assertEquals(1, host.writes)
+        assertEquals(2, host.attemptedActions.size)
+        assertTrue(host.attemptedActions[0].contains("@e3") && host.attemptedActions[1].contains("@e4"))
+        assertTrue(host.verified)
+    }
+    @Test fun expiredRefsShareTheStalePlanBudget() {
+        val host = Host()
+        LocalToolLoop(host, { _, turn ->
+            host.executeError = IllegalStateException(if(turn == 1) "screen_changed" else "ref_expired")
+            tapRef("@e1")
+        }).run()
+        assertEquals("tool_ref_expired", host.interruption)
+        assertEquals(0, host.writes)
+        assertEquals(4, host.observed)
+    }
+    @Test fun virtualExecutionCodesAreReportedWithTheirStage() {
+        for (code in listOf("ref_not_editable", "ref_not_scrollable", "app_not_allowed", "app_in_use_on_main", "display_unavailable",
+            "helper_unavailable", "takeover_unavailable", "takeover_timeout", "private_input_requires_user", "no_focused_input")) {
+            val host = Host().apply { executeError = IllegalStateException(code) }
+            LocalToolLoop(host, { _, _ -> tapRef("@e1") }).run()
+            assertEquals("tool_$code", host.interruption)
+            assertEquals(0, host.writes)
+        }
+        val host = Host().apply { observeError = IllegalStateException("helper_unavailable") }
+        LocalToolLoop(host, { _, _ -> tapRef("@e1") }).run()
+        assertEquals("observation_helper_unavailable", host.interruption)
+    }
+    @Test fun virtualParseCodesAreReportedAsModelCodes() {
+        for (code in listOf("invalid_ref", "invalid_snapshot_id", "invalid_direction", "invalid_package", "invalid_reason")) {
+            val host = Host()
+            LocalToolLoop(host, { _, _ -> throw IllegalArgumentException(code) }).run()
+            assertEquals("model_$code", host.interruption)
+        }
+    }
 }

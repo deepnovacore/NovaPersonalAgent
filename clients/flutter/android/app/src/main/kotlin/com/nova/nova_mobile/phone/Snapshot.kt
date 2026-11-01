@@ -14,8 +14,8 @@ val SNAPSHOT_REF = Regex("^@e[1-9][0-9]{0,3}$")
 /**
  * The only element DTO for phone control (phone-core copies ElementLocator/relocate, not Mika's UiElement).
  * Wire: {ref, role, name, bounds:[l,t,r,b], resource_id?, clickable, editable, scrollable, focused, secret}.
- * [role] is the short class name (e.g. "Button", "EditText", "View"). [secret] marks password fields;
- * their [name] is the hint/label only, never the content.
+ * [role] is the short class name (e.g. "Button", "EditText", "View"). [secret] marks password fields.
+ * Editable and secret fields are named by their hint/label only, never by their content.
  */
 data class UiElement(
     val ref: String,
@@ -35,7 +35,8 @@ data class UiElement(
  * elements:[UiElement], image, changed_during_read, secure_frame}.
  * [width]/[height] are virtual display pixels; [image] is base64 JPEG of the full frame (longest side <= 1280).
  * [changedDuringRead]: the UI moved while reading; refs may be unreliable.
- * [secureFrame]: the frame is black (FLAG_SECURE); the model should hand_to_user rather than guess.
+ * [secureFrame]: the frame is black while the tree still shows elements (FLAG_SECURE); only back and hand_to_user run,
+ * any other action starts a `secure_page` takeover.
  */
 data class PhoneSnapshot(
     val snapshotId: String,
