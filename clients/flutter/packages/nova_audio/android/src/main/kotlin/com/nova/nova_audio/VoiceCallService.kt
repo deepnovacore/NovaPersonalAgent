@@ -27,7 +27,6 @@ class VoiceCallService : Service() {
     private var callId: String? = null
     private val stopped = mutableListOf<() -> Unit>()
     private var foreground = false
-    private var overlay: VoiceCallOverlay? = null
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate()
@@ -36,7 +35,8 @@ class VoiceCallService : Service() {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL, "Nova calls", NotificationManager.IMPORTANCE_LOW))
         }
-        overlay = VoiceCallOverlay(this, ::action, ::openApp)
+        VoicePetHost.initialize(this)
+        VoicePetHost.callAction = ::action
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val requestedId = intent?.getStringExtra("call_id")
@@ -56,6 +56,7 @@ class VoiceCallService : Service() {
                         startForeground(NOTIFICATION, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
                     } else startForeground(NOTIFICATION, notification())
                     foreground = true
+                    VoicePetHost.call(true, muted)
                     wakeLock = getSystemService(android.os.PowerManager::class.java)
                         .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "nova:voice-call").apply {
                             setReferenceCounted(false); acquire()
@@ -76,14 +77,13 @@ class VoiceCallService : Service() {
     fun update(value: Boolean) {
         muted = value
         if (foreground && !finished) getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification())
-        overlay?.update(value)
+        VoicePetHost.call(foreground && !finished, value)
     }
-    fun showOrb() = overlay?.show() ?: false
-    fun hideOrb() { overlay?.hide() }
+    /** The host shows the window only after the activity actually pauses. */
+    fun canMinimize() = android.provider.Settings.canDrawOverlays(this)
     private fun openIntent(): Intent? = packageManager.getLaunchIntentForPackage(packageName)?.apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
-    private fun openApp() { openIntent()?.let { startActivity(it) }; hideOrb() }
     private fun notification(): Notification {
         val open = openIntent()?.let { PendingIntent.getActivity(this, 1, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) }
         fun command(action: String, id: Int) = PendingIntent.getService(this, (callId?.hashCode() ?: 0) + id,
@@ -104,22 +104,22 @@ class VoiceCallService : Service() {
         onStopped?.let { stopped.add(it) }
         if (finished) return
         finished = true
-        hideOrb()
+        VoicePetHost.call(false)
         wakeLock?.let { if (it.isHeld) it.release() }; wakeLock = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        overlay?.relayout()
+        VoicePetHost.relayout()
     }
     override fun onTaskRemoved(rootIntent: Intent?) { action("end") }
     override fun onDestroy() {
-        hideOrb()
+        VoicePetHost.call(false)
         wakeLock?.let { if (it.isHeld) it.release() }; wakeLock = null
         destroyed = true
         if (!finished && ownership.owns(callId)) onAction?.invoke("end")
-        if (current === this) current = null
+        if (current === this) { current = null; VoicePetHost.callAction = null }
         stopped.toList().forEach { it() }; stopped.clear()
         super.onDestroy()
     }

@@ -3,6 +3,8 @@ package com.nova.nova_audio
 import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -17,6 +19,9 @@ import android.os.Build
 import android.provider.Settings
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.widget.Button
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -39,6 +44,14 @@ internal class VoiceCallOverlay(
     private var mutedBadge: View? = null
     private var pulse: ValueAnimator? = null
     private var muted = false
+    private var callActive = false
+    private var task: VoicePetTask? = null
+    private var portrait: Bitmap? = null
+    private var portraitView: ImageView? = null
+    private var preview: ImageView? = null
+    private var latestFrame: Bitmap? = null
+    private var progress: View? = null
+    val isExpanded get() = view != null && expanded
     private var expanded = false
     private var dockedRight = false
     private val zh get() = context.resources.configuration.locales[0].language == "zh"
@@ -46,12 +59,12 @@ internal class VoiceCallOverlay(
     private val params = WindowManager.LayoutParams(
         WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
         if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT,
     ).apply { gravity = Gravity.TOP or Gravity.LEFT; y = dp(180) }
 
     fun show(): Boolean {
+        if (!Settings.canDrawOverlays(context)) { hide(); return false }
         if (view != null) return true
-        if (!Settings.canDrawOverlays(context)) return false
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -66,6 +79,18 @@ internal class VoiceCallOverlay(
             setOnClickListener { expanded = !expanded; rebuildControls() }
         }
         bubble.addView(avatarView(), FrameLayout.LayoutParams(dp(ORB - 8), dp(ORB - 8), Gravity.CENTER))
+        val progressRing = object : View(context) {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp(3).toFloat(); color = LIVE_RING; strokeCap = Paint.Cap.ROUND }
+            override fun onDraw(canvas: Canvas) {
+                if (task?.status == "running") {
+                    val inset = dp(2).toFloat()
+                    val angle = (android.os.SystemClock.uptimeMillis() % 1800) * 360f / 1800
+                    canvas.drawArc(inset, inset, width - inset, height - inset, angle, 110f, false, paint)
+                    postInvalidateDelayed(32)
+                }
+            }
+        }
+        bubble.addView(progressRing, FrameLayout.LayoutParams(-1, -1)); progress = progressRing
         val badge = View(context).apply {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(MUTED_RED); setStroke(dp(2), Color.WHITE) }
             foreground = IconDrawable(Icon.MIC_OFF, Color.WHITE, dp(2).toFloat() * 0.8f, inset = dp(3))
@@ -99,7 +124,7 @@ internal class VoiceCallOverlay(
         }
         return try {
             params.width = boxWidth
-            alignDock(); windows.addView(box, params); update(muted); true
+            alignDock(); windows.addView(box, params); rebuildControls(); true
         } catch (_: RuntimeException) { stopPulse(); view = null; orb = null; orbRing = null; mutedBadge = null; false }
     }
 
@@ -109,19 +134,21 @@ internal class VoiceCallOverlay(
         clipToOutline = true
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         scaleType = ImageView.ScaleType.CENTER_CROP
-        setImageResource(R.drawable.nova_orb_avatar)
+        if (portrait != null) setImageBitmap(portrait) else setImageResource(R.drawable.nova_orb_avatar)
+        portraitView = this
     }
 
     private fun maxX() = (context.resources.displayMetrics.widthPixels - (params.width.takeIf { it > 0 } ?: boxWidth)).coerceAtLeast(0)
     private fun maxY() = (context.resources.displayMetrics.heightPixels - (view?.measuredHeight?.takeIf { it > 0 } ?: dp(ORB)) - dp(32)).coerceAtLeast(0)
-    private fun dock() { dockedRight = params.x > maxX() / 2; alignDock() }
-    private fun alignDock() { params.x = if (dockedRight) maxX() else 0; params.y = params.y.coerceIn(0, maxY()) }
+    private fun dock() { dockedRight = VoicePetDock.edge(params.x, maxX()) > 0; alignDock() }
+    private fun alignDock() { params.x = if (dockedRight) maxX() else 0; params.y = VoicePetDock.clamp(params.y, maxY()) }
     private fun reposition() { view?.let { try { windows.updateViewLayout(it, params) } catch (_: RuntimeException) { hide() } } }
 
     private fun rebuildControls() {
         val box = view ?: return
         while (box.childCount > 1) box.removeViewAt(1)
         muteButton = null
+        preview = null
         // Collapsed it is only the floating portrait; the capsule appears with the controls.
         box.background = if (expanded) GradientDrawable().apply { setColor(Color.WHITE); setStroke(dp(1), Color.rgb(226, 233, 229)); cornerRadius = dp((ORB + 2 * PAD) / 2).toFloat() } else null
         box.elevation = if (expanded) dp(6).toFloat() else 0f
@@ -137,9 +164,52 @@ internal class VoiceCallOverlay(
                 setOnClickListener { clicked() }
                 box.addView(this, LinearLayout.LayoutParams(dp(CONTROL), dp(CONTROL)).apply { topMargin = dp(4) })
             }
-            control(Icon.BACK, INK, null, if (zh) "返回 Nova" else "Return to Nova", open)
-            muteButton = control(Icon.MIC, INK, null, "") { action("mute") }
-            control(Icon.END, Color.WHITE, END_RED, if (zh) "结束通话" else "End call") { action("end") }
+            task?.let { current ->
+                preview = ImageView(context).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = if (zh) "虚拟屏预览" else "Virtual screen preview"
+                    setImageBitmap(latestFrame)
+                    setBackgroundColor(Color.rgb(240, 244, 242))
+                    box.addView(this, LinearLayout.LayoutParams(-1, dp(160)))
+                }
+                box.addView(TextView(context).apply {
+                    text = listOfNotNull(current.step?.let { if (zh) "第 $it 步" else "Step $it" }, current.label).joinToString(" · ")
+                    setTextColor(INK); textSize = 14f; maxLines = 3
+                    setPadding(dp(8), dp(8), dp(8), dp(8))
+                }, LinearLayout.LayoutParams(-1, -2))
+                fun taskButton(label: String, value: String) {
+                    box.addView(Button(context).apply {
+                        text = label; contentDescription = label; minHeight = dp(48)
+                        isEnabled = !current.terminal
+                        setOnClickListener { action(value) }
+                    }, LinearLayout.LayoutParams(-1, dp(48)))
+                }
+                taskButton(if (zh) "停止" else "Stop", "task_stop")
+                taskButton(if (zh) "我来" else "Take over", "task_takeover")
+                box.addView(Button(context).apply {
+                    text = if (zh) "打开 Nova" else "Open Nova"; contentDescription = text; minHeight = dp(48)
+                    setOnClickListener { open() }
+                }, LinearLayout.LayoutParams(-1, dp(48)))
+            } ?: control(Icon.BACK, INK, null, if (zh) "返回 Nova" else "Return to Nova", open)
+            if (callActive) {
+                val row = LinearLayout(context).apply { gravity = Gravity.CENTER }
+                muteButton = control(Icon.MIC, INK, null, "") { action("mute") }
+                val end = control(Icon.END, Color.WHITE, END_RED, if (zh) "结束通话" else "End call") { action("end") }
+                if (task != null) {
+                    box.removeView(muteButton); box.removeView(end)
+                    row.addView(muteButton, LinearLayout.LayoutParams(dp(CONTROL), dp(CONTROL)))
+                    row.addView(end, LinearLayout.LayoutParams(dp(CONTROL), dp(CONTROL)))
+                    box.addView(row)
+                }
+            }
+        }
+        if (expanded && task != null) {
+            val controls = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+            while (box.childCount > 1) {
+                val child = box.getChildAt(1)
+                box.removeViewAt(1); controls.addView(child)
+            }
+            box.addView(ScrollView(context).apply { addView(controls) }, LinearLayout.LayoutParams(-1, -2))
         }
         update(muted)
     }
@@ -148,18 +218,36 @@ internal class VoiceCallOverlay(
         val box = view ?: return
         box.post {
             if (view !== box) return@post
-            // Fixed-size icon controls: the window width no longer depends on label text or font scale.
-            params.width = boxWidth.coerceAtMost(context.resources.displayMetrics.widthPixels)
+            // Keep all controls reachable on short/landscape screens without growing the touch window.
+            val scroll = box.getChildAt(1) as? ScrollView
+            scroll?.layoutParams?.height = -2
+            params.width = (if (expanded && task != null) dp(240) else boxWidth).coerceAtMost(context.resources.displayMetrics.widthPixels)
             box.measure(View.MeasureSpec.makeMeasureSpec(params.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            if (scroll != null) {
+                val available = (context.resources.displayMetrics.heightPixels - dp(ORB + 2 * PAD + 64)).coerceAtLeast(dp(48))
+                scroll.layoutParams.height = minOf(scroll.measuredHeight, available)
+                box.measure(View.MeasureSpec.makeMeasureSpec(params.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            }
             alignDock(); reposition()
         }
     }
 
     fun update(value: Boolean) {
         muted = value
-        if (muted) { stopPulse(); orbRing?.setStroke(dp(3), MUTED_RING) } else startPulse()
-        mutedBadge?.visibility = if (muted) View.VISIBLE else View.GONE
+        stopPulse()
+        when (task?.status) {
+            "running" -> { orbRing?.setStroke(0, Color.TRANSPARENT); progress?.invalidate() }
+            "needs_user" -> startPulse(Color.rgb(235, 145, 45))
+            "done" -> orbRing?.setStroke(dp(3), LIVE_RING)
+            "failed" -> orbRing?.setStroke(dp(3), END_RED)
+            else -> if (muted) orbRing?.setStroke(dp(3), MUTED_RING) else startPulse()
+        }
+        mutedBadge?.visibility = if (callActive && muted) View.VISIBLE else View.GONE
         orb?.contentDescription = if (zh) "Nova 通话，${if (muted) "已静音" else "麦克风开启"}，${if (expanded) "点按收起" else "点按展开"}" else "Nova call, ${if (muted) "muted" else "microphone active"}, ${if (expanded) "tap to collapse controls" else "tap for controls"}"
+        task?.let {
+            val status = if (zh) when (it.status) { "running" -> "运行中"; "needs_user" -> "需要你接管"; "done" -> "已完成"; else -> "失败" } else it.status.replace('_', ' ')
+            orb?.contentDescription = "Nova, $status, ${it.label}, " + if (zh) "点按展开或收起" else "tap to expand or collapse"
+        }
         muteButton?.apply {
             val label = if (muted) { if (zh) "取消静音" else "Unmute" } else { if (zh) "静音" else "Mute" }
             contentDescription = label
@@ -169,7 +257,7 @@ internal class VoiceCallOverlay(
     }
 
     /** Live ring breathes while the microphone is open; it holds still when muted. */
-    private fun startPulse() {
+    private fun startPulse(color: Int = LIVE_RING) {
         val ring = orbRing ?: return
         if (pulse?.isRunning == true) return
         pulse = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -178,7 +266,7 @@ internal class VoiceCallOverlay(
             addUpdateListener {
                 val t = it.animatedValue as Float
                 val alpha = (255 * (1f - 0.55f * t)).toInt()
-                ring.setStroke(dp(3) + (dp(1) * t).toInt(), Color.argb(alpha, Color.red(LIVE_RING), Color.green(LIVE_RING), Color.blue(LIVE_RING)))
+                ring.setStroke(dp(3) + (dp(1) * t).toInt(), Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color)))
             }
             start()
         }
@@ -189,8 +277,39 @@ internal class VoiceCallOverlay(
     fun hide() {
         stopPulse()
         view?.let { try { windows.removeView(it) } catch (_: RuntimeException) {} }
-        view = null; orb = null; orbRing = null; mutedBadge = null; muteButton = null; expanded = false
+        view = null; orb = null; orbRing = null; mutedBadge = null; muteButton = null; portraitView = null; preview = null; progress = null; expanded = false
+        clearFrame()
     }
+
+    fun setMode(active: Boolean, value: VoicePetTask?, mute: Boolean) {
+        val changed = callActive != active || task != value
+        callActive = active; task = value; muted = mute
+        if (changed) rebuildControls() else update(mute)
+    }
+
+    /** Bound allocations even if a caller supplies a full-size portrait or screenshot. */
+    private fun decode(bytes: ByteArray): Bitmap? {
+        if (bytes.size > 4 * 1024 * 1024) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val options = BitmapFactory.Options()
+        while (maxOf(bounds.outWidth, bounds.outHeight) / options.inSampleSize > 512) options.inSampleSize *= 2
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    }
+    fun setAvatar(bytes: ByteArray?, path: String?) {
+        portrait = try {
+            val data = bytes ?: path?.let { java.io.File(it).takeIf { file -> file.length() in 1..4 * 1024 * 1024 }?.readBytes() }
+            data?.let(::decode)
+        } catch (_: Exception) { null }
+        if (portrait != null) portraitView?.setImageBitmap(portrait) else portraitView?.setImageResource(R.drawable.nova_orb_avatar)
+    }
+    fun frame(bytes: ByteArray) {
+        if (!isExpanded || task == null) return
+        val bitmap = decode(bytes) ?: return
+        latestFrame = bitmap; preview?.setImageBitmap(bitmap)
+    }
+    fun clearFrame() { latestFrame = null; preview?.setImageDrawable(null) }
 
     private enum class Icon { BACK, MIC, MIC_OFF, END }
 
