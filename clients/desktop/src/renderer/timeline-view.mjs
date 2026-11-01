@@ -23,8 +23,8 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
  const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}${snapshot?.timeline?' timeline-briefing':''}`);parent.append(root)
  if(!snapshot?.timeline)renderSourceStatus(root,{sources:snapshot?.sources??[],status:snapshot?.profile_preparation?.status,processing:snapshot?.profile_preparation?.processing,el,button,openSettings})
  const allGroups=timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),groups=snapshot?.timeline?[]:allGroups
- // In briefing mode suggestions already appear above as pending cards, so only the user's own todos are listed under the briefing.
- const todoGroups=snapshot?.timeline?allGroups.map(group=>({...group,items:group.items.filter(item=>!item.suggested)})).filter(group=>group.items.length):[],currentDate=timelineDate(snapshot,now)
+ // Todos belong to the timeline itself, so the briefing no longer lists them in a separate section.
+ const currentDate=timelineDate(snapshot,now)
  const formatDate=date=>new Date(date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{...(date.slice(0,4)!==currentDate.slice(0,4)?{year:'numeric'}:{}),month:'short',day:'numeric',timeZone:'UTC'})
  if(!snapshot?.life){const status=el('p',t(connected?'正在读取事项…':'连接后可查看安排。'),'hint');status.setAttribute('role','status');root.append(status);return}
  if(!compact){
@@ -198,10 +198,6 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
    const replacement=holder.children[0];root.replaceWith(replacement)
    replacement.querySelectorAll('.timeline-attention-card')[visibleCount]?.focus?.({preventScroll:true})
   },root,'timeline:more');more.className='soft timeline-load-more'
- }
- if(todoGroups.length){
-  root.append(el('h2',t('我的待办'),'timeline-todos-title'))
-  todoGroups.forEach(renderGroup)
  }
  root.append(el('p',t('这里展示已记录的事项和待确认建议，不代表完整日程。'),'timeline-source-note'))
  for(const node of root.querySelectorAll('button'))if(!connected&&node.className!=='source-info')node.disabled=true

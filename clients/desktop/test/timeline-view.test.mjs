@@ -149,16 +149,14 @@ test('briefing retains Today and the date axis while loading without pending sug
  assert.equal(commands.length,0)
 })
 
-test('briefing keeps the date axis for briefs and lists the user todos below it under their own heading',()=>{
+test('briefing keeps the date axis for briefs and no longer lists a separate todo section',()=>{
  const state={...snapshot,timeline:{status:'ready',cards:[]}}
  const {parent}=render(state,{now:new Date('2026-10-11T08:00:00Z'),command:()=>{}})
  assert.equal(parent.querySelectorAll('.timeline-current').length,1)
  assert.deepEqual(parent.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),['2026-10-11'],'the axis only carries briefs and today')
- assert.equal(parent.querySelectorAll('.timeline-todos-title')[0].textContent,'我的待办')
- const children=parent.querySelectorAll('.timeline-content')[0].children,heading=children.findIndex(n=>n.className==='timeline-todos-title')
- assert.ok(heading>children.findIndex(n=>n.className==='timeline-attention'),'todos sit below the briefing')
- assert.deepEqual(parent.querySelectorAll('.timeline-undated').map(n=>n.dataset.group),['overdue','soon','waiting'])
- assert.deepEqual(parent.querySelectorAll('article').filter(n=>!n.className.includes('attention')).map(n=>n.dataset.objectId).sort(),['date','past','wait'])
+ assert.equal(parent.querySelectorAll('.timeline-todos-title').length,0)
+ assert.equal(parent.querySelectorAll('.timeline-undated').length,0)
+ assert.deepEqual(parent.querySelectorAll('article').filter(n=>!n.className.includes('attention')).map(n=>n.dataset.objectId),[])
 })
 test('briefing todo list does not repeat suggestions already shown as pending cards',()=>{
  const state={...snapshot,timeline:{status:'ready',cards:[]},derived_understanding:{sources:[],suggestions:[{id:'s1',kind:'action',title:'Proposed',body:'b',refs:[]}]}}
@@ -166,7 +164,7 @@ test('briefing todo list does not repeat suggestions already shown as pending ca
  assert.equal(parent.querySelectorAll('article').filter(n=>n.dataset.objectId==='s1').length,1)
 })
 test('a todo is completed, reopened and rescheduled with versioned life.mutate updates',()=>{
- const commands=[],state={...snapshot,timeline:{status:'ready',cards:[]}}
+ const commands=[],state={...snapshot}
  const {parent}=render(state,{now:new Date('2026-10-11T08:00:00Z'),command:(...args)=>{commands.push(args);return Promise.resolve()}})
  const card=parent.querySelectorAll('article').find(n=>n.dataset.objectId==='date')
  card.querySelectorAll('button').find(n=>n.textContent==='标记完成').listeners.click()
@@ -179,8 +177,8 @@ test('a todo is completed, reopened and rescheduled with versioned life.mutate u
   ['life.mutate',{op:'update',kind:'todo',id:'date',expected_version:1,due:'2026-10-30'}],
   ['life.mutate',{op:'update',kind:'todo',id:'date',expected_version:1,due:null}]])
 })
-test('a done todo lands in the completed group in briefing mode and offers no done button',()=>{
- const state=structuredClone(snapshot);state.timeline={status:'ready',cards:[]};state.life.todos.push({id:'fin',title:'Finished',status:'done',due:'2026-10-09',version:2})
+test('a done todo lands in the completed group and offers no done button',()=>{
+ const state=structuredClone(snapshot);state.life.todos.push({id:'fin',title:'Finished',status:'done',due:'2026-10-09',version:2})
  const {parent}=render(state,{now:new Date('2026-10-11T08:00:00Z'),command:()=>{}})
  const group=parent.querySelectorAll('section').find(n=>n.dataset.group==='completed')
  assert.deepEqual(group.querySelectorAll('article').map(n=>n.dataset.objectId),['fin'])
