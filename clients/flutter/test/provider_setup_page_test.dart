@@ -719,6 +719,31 @@ void main() {
       expect(find.textContaining('m-2 没有调用工具'), findsOneWidget);
     });
 
+    testWidgets('a custom Responses provider keeps its protocol', (
+      tester,
+    ) async {
+      final backend = withProviders();
+      backend.saved.add(
+        const SavedProvider(
+          id: 'c',
+          endpoint: 'https://relay.example/v1',
+          label: 'relay.example',
+          protocol: ModelProtocol.responses,
+        ),
+      );
+      await _open(tester, backend);
+      await tester.tap(find.byKey(const ValueKey('provider.saved.c')));
+      await tester.pumpAndSettle();
+      expect(find.text('OpenAI Responses'), findsOneWidget);
+      expect(backend.listCalls.last.protocol, ModelProtocol.responses);
+      await tester.tap(find.byKey(const ValueKey('provider.model.m-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('provider.model.use'));
+      await tester.pumpAndSettle();
+      expect(backend.probeCalls.single.protocol, ModelProtocol.responses);
+      expect(backend.saves.single.protocol, ModelProtocol.responses);
+    });
+
     testWidgets('changing the key stores it without choosing a model', (
       tester,
     ) async {

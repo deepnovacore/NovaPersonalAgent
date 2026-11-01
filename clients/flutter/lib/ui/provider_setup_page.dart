@@ -781,9 +781,8 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
 
   ProviderSetupCopy get _copy => ProviderSetupCopy(widget.language);
   ModelPreset? get _preset => ModelPreset.forEndpoint(widget.provider.endpoint);
-  ModelProtocol get _protocol => _isCurrent
-      ? _view.protocol
-      : _preset?.protocol ?? ModelProtocol.chatCompletions;
+  ModelProtocol get _protocol =>
+      _isCurrent ? _view.protocol : widget.provider.protocol;
   bool get _isCurrent {
     try {
       return ProviderCredentials.scopeForEndpoint(widget.provider.endpoint) ==

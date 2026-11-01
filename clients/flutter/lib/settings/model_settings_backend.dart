@@ -6,6 +6,7 @@ import '../agent_core/model_client.dart'
 import '../agent_core/model_presets.dart';
 import '../agent_core/model_probe.dart';
 import '../agent_core/model_settings.dart';
+import '../agent_core/provider_credentials.dart';
 
 /// Editable selection and capabilities only. Credentials never enter this view.
 class ModelSettingsView {
@@ -50,8 +51,18 @@ class SavedProvider {
     required this.id,
     required this.endpoint,
     required this.label,
+    this.presetId,
+    this.protocol = ModelProtocol.chatCompletions,
   });
   final String id, endpoint, label;
+
+  /// The preset this endpoint belongs to, if any: its name can be shown in the
+  /// reader's language, unlike [label].
+  final String? presetId;
+
+  /// The API the endpoint was saved with. Records without one read as the
+  /// preset's protocol, or Chat Completions.
+  final ModelProtocol protocol;
 }
 
 /// A newly typed key is write-only and must never be copied into a view.
@@ -203,12 +214,18 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
   Future<List<SavedProvider>> savedProviders() async => [
     for (final entry in await settings.credentials.list())
       if (entry.endpoint.startsWith('http'))
-        SavedProvider(
-          id: entry.id,
-          endpoint: entry.endpoint,
-          label: ModelPreset.forEndpoint(entry.endpoint)?.name ?? entry.label,
-        ),
+        _saved(entry, ModelPreset.forEndpoint(entry.endpoint)),
   ];
+
+  SavedProvider _saved(ProviderCredential entry, ModelPreset? preset) =>
+      SavedProvider(
+        id: entry.id,
+        endpoint: entry.endpoint,
+        label: preset?.name ?? entry.label,
+        presetId: preset?.id,
+        protocol:
+            entry.protocol ?? preset?.protocol ?? ModelProtocol.chatCompletions,
+      );
 
   @override
   Future<void> saveCredential(ModelSettingsInput input) async {
@@ -217,6 +234,7 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
       id: existing?.id,
       endpoint: input.endpoint.trim(),
       key: input.newKey,
+      protocol: input.protocol,
     );
     await settings.refreshApiKeyProjection(saved.id);
   }

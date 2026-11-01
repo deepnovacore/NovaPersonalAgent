@@ -14,13 +14,20 @@ class ProviderCredential {
     required this.endpoint,
     required this.label,
     required this.key,
+    this.protocol,
   });
   final String id, endpoint, label, key;
+
+  /// The API this endpoint was saved with (a custom endpoint may speak
+  /// Responses). Absent in older records, which read as the preset's protocol
+  /// or Chat Completions.
+  final ModelProtocol? protocol;
   Map<String, dynamic> toJson() => {
     'id': id,
     'endpoint': endpoint,
     'label': label,
     'key': key,
+    if (protocol != null) 'protocol': protocol!.name,
   };
 }
 
@@ -116,6 +123,7 @@ class ProviderCredentials {
     required String endpoint,
     required String key,
     String? label,
+    ModelProtocol? protocol,
   }) => _run((entries) async {
     final scope = scopeForEndpoint(endpoint);
     final old = entries.where((e) => e.id == id).firstOrNull;
@@ -129,17 +137,23 @@ class ProviderCredentials {
               .where((e) => e.endpoint == scope && e.key == secret)
               .firstOrNull
         : null;
-    if (duplicate != null) return duplicate;
+    final chosen = protocol == ModelProtocol.chatgptResponses ? null : protocol;
+    if (duplicate != null && (chosen == null || duplicate.protocol == chosen)) {
+      return duplicate;
+    }
+    final existing = old ?? duplicate;
     final value = ProviderCredential(
-      id: id ?? newSpaceId(),
+      id: existing?.id ?? newSpaceId(),
       endpoint: scope,
       label: label?.trim().isNotEmpty == true
           ? label!.trim()
-          : old?.label ?? ModelPreset.forEndpoint(scope)?.name ?? scope,
+          : existing?.label ?? ModelPreset.forEndpoint(scope)?.name ?? scope,
       key: secret,
+      protocol:
+          chosen ?? (existing?.endpoint == scope ? existing?.protocol : null),
     );
-    if (old != null) {
-      entries[entries.indexOf(old)] = value;
+    if (existing != null) {
+      entries[entries.indexOf(existing)] = value;
     } else {
       entries.add(value);
     }
@@ -172,6 +186,7 @@ class ProviderCredentials {
         endpoint: v['endpoint'] as String,
         label: v['label'] as String,
         key: v['key'] as String,
+        protocol: _storedProtocol(v['protocol']),
       );
       if (entry.id.isEmpty ||
           !ids.add(entry.id) ||
@@ -182,6 +197,14 @@ class ProviderCredentials {
       return entry;
     }).toList();
   }
+
+  /// Unknown or missing values read as "not recorded", never as an error.
+  static ModelProtocol? _storedProtocol(Object? name) =>
+      name == ModelProtocol.chatCompletions.name
+      ? ModelProtocol.chatCompletions
+      : name == ModelProtocol.responses.name
+      ? ModelProtocol.responses
+      : null;
 
   Future<void> _write(List<ProviderCredential> entries) => storage.write(
     key: _scopedKey,

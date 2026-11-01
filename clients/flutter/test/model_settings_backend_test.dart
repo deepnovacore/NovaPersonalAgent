@@ -82,6 +82,89 @@ void main() {
     expect(native.calls.last.$2['key'], 'private-key');
   });
 
+  test('a saved provider keeps the protocol it was saved with', () async {
+    final settings = ModelSettings(native: _Native());
+    final backend = LocalModelSettingsBackend(settings);
+    const custom = 'https://relay.example/v1';
+    await backend.save(
+      const ModelSettingsInput(
+        providerId: null,
+        endpoint: custom,
+        model: 'm1',
+        protocol: ModelProtocol.responses,
+        newKey: 'custom-key',
+      ),
+    );
+    // Another provider becomes the one in use.
+    await backend.save(
+      const ModelSettingsInput(
+        providerId: 'deepseek',
+        endpoint: 'https://api.deepseek.com',
+        model: 'deepseek-flash',
+        protocol: ModelProtocol.chatCompletions,
+        newKey: 'ds-key',
+      ),
+    );
+    var saved = {for (final p in await backend.savedProviders()) p.endpoint: p};
+    expect(saved[custom]!.protocol, ModelProtocol.responses);
+    expect(saved[custom]!.presetId, isNull);
+    expect(
+      saved['https://api.deepseek.com']!.protocol,
+      ModelProtocol.chatCompletions,
+    );
+    expect(saved['https://api.deepseek.com']!.presetId, 'deepseek');
+
+    // Replacing only the key keeps the protocol.
+    await backend.saveCredential(
+      const ModelSettingsInput(
+        providerId: null,
+        endpoint: custom,
+        model: '',
+        protocol: ModelProtocol.responses,
+        newKey: 'custom-key-2',
+      ),
+    );
+    // Saving the same key again with another protocol updates the record.
+    await backend.save(
+      const ModelSettingsInput(
+        providerId: 'deepseek',
+        endpoint: 'https://api.deepseek.com',
+        model: 'deepseek-flash',
+        protocol: ModelProtocol.responses,
+      ),
+    );
+    saved = {for (final p in await backend.savedProviders()) p.endpoint: p};
+    expect(saved[custom]!.protocol, ModelProtocol.responses);
+    expect(
+      saved['https://api.deepseek.com']!.protocol,
+      ModelProtocol.responses,
+    );
+    expect((await settings.credentials.resolve(custom))!.key, 'custom-key-2');
+  });
+
+  test(
+    'records saved before protocols were stored read as the preset\'s',
+    () async {
+      final settings = ModelSettings(native: _Native());
+      await settings.credentials.save(
+        endpoint: 'https://api.deepseek.com',
+        key: 'old-key',
+      );
+      await settings.credentials.save(
+        endpoint: 'https://relay.example/v1',
+        key: 'old-custom',
+      );
+      final saved = {
+        for (final p in await LocalModelSettingsBackend(
+          settings,
+        ).savedProviders())
+          p.endpoint: p.protocol,
+      };
+      expect(saved['https://api.deepseek.com'], ModelProtocol.chatCompletions);
+      expect(saved['https://relay.example/v1'], ModelProtocol.chatCompletions);
+    },
+  );
+
   test(
     'support preserves credential references and resets to follow',
     () async {
