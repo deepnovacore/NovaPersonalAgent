@@ -18,7 +18,63 @@ import java.nio.ByteOrder
 
 class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAware,PluginRegistry.RequestPermissionsResultListener,Application.ActivityLifecycleCallbacks {
  private lateinit var companion:MethodChannel
+ private val petOwner=java.util.UUID.randomUUID().toString()
+ private val petRequests=VoicePetRequests()
+ private fun hideTask(taskId:String?=null,reason:String="hidden",error:String="overlay_blocked"){
+  if(!VoicePetService.ownership.owns(petOwner))return
+  val id=petRequests.task?.id
+  if(!petRequests.hide(taskId,error))return
+  VoicePetService.onReady=null;VoicePetHost.taskAction=null
+  VoicePetHost.taskGone=null;VoicePetHost.previewWanted=null
+  VoicePetHost.task(null)
+  VoicePetService.current?.finish()
+  VoicePetService.ownership.release(petOwner)
+  if(id!=null)companion.invokeMethod("taskGone",mapOf("taskId" to id,"reason" to reason))
+ }
+ private fun showTask(call:MethodCall,result:MethodChannel.Result){
+  if(!android.provider.Settings.canDrawOverlays(context)){
+   hideTask(reason="overlay_permission",error="overlay_permission")
+   result.error("overlay_permission","Allow display over other apps",null);return
+  }
+  val task=VoicePetTask(call.argument<String>("taskId") ?: error("Missing taskId"),
+   call.argument<String>("status") ?: error("Missing status"),call.argument<String>("label") ?: "",call.argument<Number>("step")?.toInt())
+  check(VoicePetService.ownership.owns(petOwner) || VoicePetService.ownership.claim(petOwner)){"Another engine owns the task"}
+  val starting=petRequests.starting
+  petRequests.show(task){error->
+   if(error==null)result.success(true) else result.error(error,"Task overlay unavailable: $error",null)
+  }
+  VoicePetHost.taskAction={action->petRequests.task?.let { companion.invokeMethod("action",mapOf("taskId" to it.id,"action" to action)) }}
+  VoicePetHost.taskGone={id,reason->hideTask(id,reason,if(reason=="overlay_permission") reason else "overlay_blocked")}
+  VoicePetHost.previewWanted={id,wanted->companion.invokeMethod("previewWanted",mapOf("taskId" to id,"wanted" to wanted))}
+  fun ready(){
+   // Probe the window only once per task: step updates must not add/remove a window each time.
+   val id=petRequests.task?.id
+   val needsProbe=id!=null && id!=probedTask
+   val shown=VoicePetHost.task(petRequests.task) && (!needsProbe || VoicePetHost.probe())
+   if(shown&&needsProbe)probedTask=id
+   if(shown){VoicePetService.current?.refreshNotification();petRequests.complete()}
+   else {
+    val error=if(android.provider.Settings.canDrawOverlays(context)) "overlay_blocked" else "overlay_permission"
+    hideTask(reason=error,error=error)
+   }
+  }
+  if(VoicePetService.current!=null && !starting){ready();return}
+  if(starting)return
+  val generation=petRequests.generation
+  VoicePetService.onReady={success->
+   if(VoicePetService.ownership.owns(petOwner) && petRequests.generation==generation){
+    VoicePetService.onReady=null
+    if(success)ready() else hideTask(reason="foreground_blocked",error="foreground_blocked")
+   }
+  }
+  try{
+   val intent=android.content.Intent(context,VoicePetService::class.java).putExtra("owner",petOwner)
+   if(android.os.Build.VERSION.SDK_INT>=26)context.startForegroundService(intent) else context.startService(intent)
+   main.postDelayed({if(petRequests.starting && petRequests.generation==generation)hideTask(reason="timeout",error="timeout")},4500)
+  }catch(_:RuntimeException){hideTask(reason="foreground_blocked",error="foreground_blocked")}
+ }
  private var backgroundCall=false
+ private var probedTask:String?=null
  private var companionStart:MethodChannel.Result?=null
  private var companionId:String?=null
  private fun stopCompanion(onStopped:(()->Unit)?=null){
@@ -42,21 +98,36 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
  private fun companionCall(call:MethodCall,result:MethodChannel.Result){
   try {
    when(call.method){
+    "showTask"->{showTask(call,result)}
+    "hideTask"->{hideTask(call.argument<String>("taskId"));result.success(null)}
+    "requestOverlayPermission"->{
+     val host=activity ?: error("Application is not active")
+     host.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,android.net.Uri.parse("package:${context.packageName}")))
+     result.success(null)
+    }
+    "taskFrame"->{
+     if(VoicePetService.ownership.owns(petOwner) && call.argument<String>("taskId")==petRequests.task?.id)
+      call.argument<ByteArray>("jpeg")?.let(VoicePetHost::frame)
+     result.success(null)
+    }
+    "setAvatar"->{
+     VoicePetHost.avatar(call.argument<ByteArray>("pngBytes"),call.argument<String>("filePath"));result.success(null)
+    }
     "start"->{
      val host=activity ?: error("Application is not active")
      check(host.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
      check(!backgroundCall && companionStart==null){"Call already started"}
-     val callId=java.util.UUID.randomUUID().toString()
+     val callId=call.argument<String>("callId") ?: java.util.UUID.randomUUID().toString()
      check(VoiceCallService.ownership.claim(callId)){"Another engine owns the call"}
      companionId=callId;companionStart=result;backgroundCall=true
      VoiceCallService.onReady={companionStart?.success(null);companionStart=null}
      VoiceCallService.onAction={action->
       if(action=="end")fail("Call ended")
-      companion.invokeMethod("action",action)
+      companion.invokeMethod("action",mapOf("callId" to callId,"action" to action))
      }
      val intent=android.content.Intent(context,VoiceCallService::class.java).setAction(VoiceCallService.START).putExtra("call_id",callId)
      if(android.os.Build.VERSION.SDK_INT>=26)context.startForegroundService(intent) else context.startService(intent)
-     main.postDelayed({if(companionStart===result){stopCompanion();companion.invokeMethod("action","end")}},4500)
+     main.postDelayed({if(companionStart===result){stopCompanion();companion.invokeMethod("action",mapOf("callId" to callId,"action" to "end"))}},4500)
     }
     "update"->{check(VoiceCallService.ownership.owns(companionId));VoiceCallService.current?.update(call.argument<Boolean>("muted")==true);result.success(null)}
     "minimize"->{
@@ -66,7 +137,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
       host.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,android.net.Uri.parse("package:${context.packageName}")))
       result.success(false)
      }else{
-      val shown=VoiceCallService.current?.showOrb()==true
+      val shown=VoiceCallService.current?.canMinimize()==true
       if(shown)host.moveTaskToBack(true)
       result.success(shown)
      }
@@ -78,7 +149,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
    if(call.method=="start"){
     companionStart=null;stopCompanion()
    }
-   result.error("call_controls_failed",e.message,null)
+   result.error(if(call.method in setOf("showTask","hideTask","taskFrame","setAvatar","requestOverlayPermission")) "overlay_blocked" else "call_controls_failed",e.message,null)
   }
  }
  private lateinit var channel:MethodChannel
@@ -100,6 +171,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
   companion=MethodChannel(engine.binaryMessenger,"nova/voice_companion");companion.setMethodCallHandler(::companionCall)
   pcm=BasicMessageChannel(engine.binaryMessenger,"nova/audio/pcm",BinaryCodec.INSTANCE)
   context=engine.applicationContext
+  VoicePetHost.initialize(context)
   audio=RelayAudio(context,::event,::deliver)
  }
  private fun event(kind:String,fields:Map<String,Any>){
@@ -173,20 +245,19 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
   if(code!=requestCode)return false
   permission?.success(results.isNotEmpty() && results[0]==PackageManager.PERMISSION_GRANTED);permission=null;return true
  }
- override fun onAttachedToActivity(value:ActivityPluginBinding){binding=value;activity=value.activity;value.addRequestPermissionsResultListener(this);value.activity.application.registerActivityLifecycleCallbacks(this)}
+ override fun onAttachedToActivity(value:ActivityPluginBinding){binding=value;activity=value.activity;VoicePetHost.attach(value.activity);value.addRequestPermissionsResultListener(this);value.activity.application.registerActivityLifecycleCallbacks(this)}
  override fun onDetachedFromActivityForConfigChanges(){detachActivity()}
  override fun onReattachedToActivityForConfigChanges(value:ActivityPluginBinding){onAttachedToActivity(value)}
  override fun onDetachedFromActivity(){detachActivity()}
  private fun detachActivity(){if(backgroundCall)fail("Activity detached");binding?.removeRequestPermissionsResultListener(this);activity?.application?.unregisterActivityLifecycleCallbacks(this);binding=null;activity=null;permission?.success(false);permission=null;if(audio.running || aoq?.running==true)fail("Activity detached")}
- override fun onDetachedFromEngine(engine:FlutterPlugin.FlutterPluginBinding){stopCompanion();companion.setMethodCallHandler(null);detachActivity();audio.dispose();channel.setMethodCallHandler(null);generation=null;resetHandoff()}
+ override fun onDetachedFromEngine(engine:FlutterPlugin.FlutterPluginBinding){hideTask();stopCompanion();companion.setMethodCallHandler(null);detachActivity();audio.dispose();channel.setMethodCallHandler(null);generation=null;resetHandoff()}
  override fun onActivityStopped(value:Activity){
   if(value!=activity)return
-  if(backgroundCall && audio.running)VoiceCallService.current?.showOrb()
-  else if(!backgroundCall && (audio.running || aoq?.running==true))fail("Application backgrounded")
+  if(!backgroundCall && (audio.running || aoq?.running==true))fail("Application backgrounded")
  }
  override fun onActivityCreated(a:Activity,state:Bundle?){}
  override fun onActivityStarted(a:Activity){}
- override fun onActivityResumed(a:Activity){if(a==activity && VoiceCallService.ownership.owns(companionId))VoiceCallService.current?.hideOrb()}
+ override fun onActivityResumed(a:Activity){}
  override fun onActivityPaused(a:Activity){}
  override fun onActivitySaveInstanceState(a:Activity,state:Bundle){}
  override fun onActivityDestroyed(a:Activity){}
