@@ -23,6 +23,46 @@ class SpaceClientState extends ChangeNotifier {
   bool hostOnline = false;
   bool waitingForApproval = false;
   String? error;
+
+  /// Last time any channel (HTTP sync, live stream or a sent message) worked.
+  DateTime? lastOkAt;
+  int consecutiveFailures = 0;
+
+  /// True while a manual reconnect is in flight, so the reconnect page can show progress.
+  bool reconnecting = false;
+
+  /// A working channel clears transient errors; fatal ones (version, pairing, keys, revoked) stay.
+  void markOk([DateTime? now]) {
+    lastOkAt = now ?? DateTime.now();
+    consecutiveFailures = 0;
+    if (error != null && !isFatalConnectionError(error!)) error = null;
+  }
+
+  void markFailure(String message) {
+    error = message;
+    consecutiveFailures++;
+  }
+
+  SpaceLinkStatus linkStatus([DateTime? now]) {
+    final e = error;
+    if (e == null) {
+      return hostOnline ? SpaceLinkStatus.online : SpaceLinkStatus.hostOffline;
+    }
+    if (isFatalConnectionError(e)) return SpaceLinkStatus.blocked;
+    final recent =
+        lastOkAt != null &&
+        (now ?? DateTime.now()).difference(lastOkAt!) <
+            const Duration(seconds: 20);
+    // One failing channel while another works is degraded, not disconnected.
+    if (recent) {
+      return hostOnline
+          ? SpaceLinkStatus.degraded
+          : SpaceLinkStatus.hostOffline;
+    }
+    if (consecutiveFailures >= 3) return SpaceLinkStatus.disconnected;
+    return SpaceLinkStatus.connecting;
+  }
+
   Future<void> _tail = Future.value();
   bool _disposed = false;
   void changed() {
@@ -583,3 +623,22 @@ class SpaceClientState extends ChangeNotifier {
     super.dispose();
   }
 }
+
+enum SpaceLinkStatus {
+  connecting,
+  online,
+  degraded,
+  hostOffline,
+  disconnected,
+  blocked,
+}
+
+/// Errors that need the user or an update; they are never cleared by an unrelated successful channel.
+bool isFatalConnectionError(String error) =>
+    error.contains('incompatible_business_version') ||
+    error.contains('unsupported_display_version') ||
+    error.contains('unknown_device') ||
+    error.contains('inactive') ||
+    error.contains('waiting_for_host_key') ||
+    error.contains('missing_content_key') ||
+    error.contains('revoked');

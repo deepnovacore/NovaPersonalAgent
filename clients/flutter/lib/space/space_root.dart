@@ -24,6 +24,7 @@ import 'host_panel.dart';
 import 'source_panel.dart';
 import 'space_dialog.dart';
 import 'chat_message.dart';
+import 'reconnect_page.dart';
 import 'binding_cleanup.dart';
 import 'personal_adapter.dart';
 import '../ui/workbench_page.dart';
@@ -946,9 +947,13 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         ),
       );
     }
+    final status = state.linkStatus();
+    // Only a fatal condition or a real Host absence deserves a banner; a degraded or
+    // still-connecting link says nothing rather than contradicting what works.
     final lines = [
-      if (!state.hostOnline) 'Host 不在线 · 展示上次缓存',
-      if (state.error != null) _connectionText(state.error!),
+      if (!state.hostOnline && status != SpaceLinkStatus.disconnected)
+        'Host 不在线 · 展示上次缓存',
+      if (status == SpaceLinkStatus.blocked) _connectionText(state.error!),
     ];
     return lines.isEmpty
         ? null
@@ -1512,7 +1517,8 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
       );
     }
     final state = c.state;
-    final notice = tab < 2 ? _notice(state) : null;
+    final disconnected = state.linkStatus() == SpaceLinkStatus.disconnected;
+    final notice = tab < 2 && !disconnected ? _notice(state) : null;
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 64,
@@ -1556,12 +1562,18 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         children: [
           ?notice,
           Expanded(
-            child: switch (tab) {
-              0 => _chat(c),
-              1 => taskOpen ? _chat(c) : _tasks(state),
-              2 => _timeline(state),
-              _ => _me(c),
-            },
+            child: disconnected
+                ? SpaceReconnectPage(
+                    reconnecting: state.reconnecting,
+                    lastOkAt: state.lastOkAt,
+                    onRetry: () => unawaited(c.reconnectNow()),
+                  )
+                : switch (tab) {
+                    0 => _chat(c),
+                    1 => taskOpen ? _chat(c) : _tasks(state),
+                    2 => _timeline(state),
+                    _ => _me(c),
+                  },
           ),
         ],
       ),
@@ -1606,7 +1618,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
       return '等待 Host 发送空间密钥。';
     }
     if (error.contains('revoked')) return '此设备已被撤销。请创建新 Space 后重新配对。';
-    return '连接暂不可用，将在恢复后补拉。';
+    return '网络不稳定，正在重试。';
   }
 }
 

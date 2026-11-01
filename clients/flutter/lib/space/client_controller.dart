@@ -89,7 +89,7 @@ class SpaceClientController with WidgetsBindingObserver {
         unawaited(_stream(event));
       },
       onError: (Object error) {
-        state.error = '$error';
+        state.markFailure('$error');
         state.changed();
       },
     );
@@ -114,6 +114,7 @@ class SpaceClientController with WidgetsBindingObserver {
     try {
       final payload = await transport.crypto.openEnvelope(envelope);
       if (payload != null && !_disposed) {
+        state.markOk();
         if (payload['type'] == 'push.key') {
           await push?.acceptKey(payload);
         } else if (payload['type'] == 'mobile.action') {
@@ -123,8 +124,9 @@ class SpaceClientController with WidgetsBindingObserver {
         }
       }
     } catch (error) {
+      // One undecryptable envelope is not a link failure; only fatal conditions surface.
       if (!_disposed) {
-        state.error = '$error';
+        if (isFatalConnectionError('$error')) state.error = '$error';
         state.changed();
       }
     }
@@ -287,11 +289,24 @@ class SpaceClientController with WidgetsBindingObserver {
         }
       }
       state.error = null;
+      state.markOk();
     } catch (error) {
-      state.error = '$error';
+      state.markFailure('$error');
       if (!presenceConfirmed) state.hostOnline = false;
     }
     if (!_disposed) state.changed();
+  }
+
+  /// Manual retry from the reconnect page.
+  Future<void> reconnectNow() async {
+    state.reconnecting = true;
+    state.changed();
+    try {
+      await sync();
+    } finally {
+      state.reconnecting = false;
+      state.changed();
+    }
   }
 
   Future<String> sendChat(
@@ -326,6 +341,7 @@ class SpaceClientController with WidgetsBindingObserver {
     await state.beginChat(id, text, now, conversationId: conversationId);
     try {
       await transport.send(envelope); // No durable offline queue or retry.
+      state.markOk();
       await state.markChat(id, 'sent');
     } catch (_) {
       await state.markChat(id, 'unknown', error: 'send_outcome_unknown');
