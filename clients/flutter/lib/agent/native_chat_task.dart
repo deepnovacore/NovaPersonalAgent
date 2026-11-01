@@ -9,9 +9,15 @@ class NativeChatTaskRunner {
     this.agent = const NativeLocalAgent(),
     this.pollInterval = const Duration(milliseconds: 350),
     this.timeout = const Duration(minutes: 5),
+    this.virtualTimeout = const Duration(minutes: 16),
   });
   final LocalAgent agent;
-  final Duration pollInterval, timeout;
+  final Duration pollInterval;
+
+  /// Budget of a main-screen run; a virtual run gets [virtualTimeout], the
+  /// native 15 minutes (5 of agent time, up to 10 of takeover) plus a minute
+  /// of margin so the native end arrives before this stop does.
+  final Duration timeout, virtualTimeout;
   String? _active;
   bool _cancelled = false;
 
@@ -33,7 +39,8 @@ class NativeChatTaskRunner {
     if (_active != null) return {'status': 'failed', 'reason': 'task_busy'};
     _active = id;
     _cancelled = false;
-    final deadline = DateTime.now().add(timeout);
+    final started = DateTime.now();
+    var deadline = started.add(timeout);
     try {
       if (request.containsKey('target_package')) {
         try {
@@ -63,6 +70,7 @@ class NativeChatTaskRunner {
                 .timeout(const Duration(seconds: 15))
             as Map,
       );
+      if (task['tier'] == 'virtual') deadline = started.add(virtualTimeout);
       while (true) {
         switch (task['phase']) {
           case 'completed':

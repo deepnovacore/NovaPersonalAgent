@@ -345,6 +345,9 @@ abstract interface class PhoneChannel {
   /// Stops the native run [taskId] (the `id` the run was started with).
   Future<void> stopTask(String taskId);
 
+  /// Ids of the runs native still considers in progress; null when unknown.
+  Future<Set<String>?> activeTaskIds();
+
   /// Status, step, takeover and done events. Empty when the host has no
   /// phone bridge.
   Stream<PhoneEvent> get events;
@@ -441,6 +444,23 @@ class NativePhoneChannel implements PhoneChannel {
   @override
   Future<void> stopTask(String taskId) async {
     await const NativeLocalAgent().call('stop', {'id': taskId});
+  }
+
+  @override
+  Future<Set<String>?> activeTaskIds() async {
+    try {
+      final tasks = await const NativeLocalAgent().call('tasks');
+      if (tasks is! List) return null;
+      return {
+        for (final task in tasks.whereType<Map>())
+          if (task['id'] is String &&
+              (task['phase'] == 'running' ||
+                  task['phase'] == 'waiting_approval'))
+            task['id'] as String,
+      };
+    } catch (_) {
+      return null;
+    }
   }
 
   // One native subscription per EventChannel: a second receiveBroadcastStream

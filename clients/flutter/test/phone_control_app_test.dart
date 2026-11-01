@@ -92,4 +92,58 @@ void main() {
       expect(channel.previews, [true, false]);
     },
   );
+
+  testWidgets('Stop asks native to stop that run by its id', (tester) async {
+    final channel = FakePhoneChannel(const PhoneStatus(apiLevel: 34));
+    addTearDown(channel.close);
+    await _pumpApp(tester, phone: channel);
+    channel.emit(stepEvent(taskId: 'run-42'));
+    await tester.runAsync(pumpEventQueue);
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('pip-working')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pip-stop')));
+    await tester.pump();
+    expect(channel.stopped, ['run-42']);
+  });
+
+  testWidgets('at 2x text the picture stays above the composer', (
+    tester,
+  ) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearAllTestValues);
+    final channel = FakePhoneChannel(const PhoneStatus(apiLevel: 34));
+    addTearDown(channel.close);
+    await _pumpApp(tester, phone: channel);
+    channel.emit(stepEvent());
+    await tester.runAsync(pumpEventQueue);
+    await tester.pump();
+    final pip = tester.getRect(find.byKey(const ValueKey('pip-working')));
+    final composer = tester.getRect(find.byType(TextField).first);
+    expect(pip.bottom, lessThanOrEqualTo(composer.top));
+    // Expanded it is bigger and still clear of the composer.
+    await tester.tap(find.byKey(const ValueKey('pip-working')));
+    await tester.pumpAndSettle();
+    final open = tester.getRect(find.byKey(const ValueKey('pip-working')));
+    expect(open.bottom, lessThanOrEqualTo(composer.top));
+  });
+
+  testWidgets('a page above the app releases the preview', (tester) async {
+    final channel = FakePhoneChannel(const PhoneStatus(apiLevel: 34));
+    addTearDown(channel.close);
+    await _pumpApp(tester, phone: channel);
+    channel.emit(stepEvent());
+    await tester.runAsync(pumpEventQueue);
+    await tester.pump();
+    expect(channel.previews, [true]);
+    await tester.tap(find.text('Me'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Phone control'));
+    await tester.pumpAndSettle();
+    expect(channel.previews, [true, false]);
+    Navigator.of(tester.element(find.text('Accessibility'))).pop();
+    await tester.pumpAndSettle();
+  });
 }

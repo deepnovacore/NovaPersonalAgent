@@ -354,7 +354,15 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   ? null
                   : () async =>
                         await const NativeLocalAgent().call('tasks') as List,
-              requestDeviceTask: iosTasks != null ? null : nativeTasks.run,
+              requestDeviceTask: iosTasks != null
+                  ? null
+                  : (input, id) async {
+                      try {
+                        return await nativeTasks.run(input, id);
+                      } finally {
+                        phoneRun?.markEnded(id);
+                      }
+                    },
             ),
           );
       await host.store.ensureMain();
@@ -1349,14 +1357,22 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     super.dispose();
   }
 
-  /// Stops the task shown in the virtual-screen picture: the voice call's
-  /// delegate when one runs, else the chat turn that owns it.
+  /// Stops the task shown in the virtual-screen picture: native stops the run
+  /// by its id, then the turn or voice delegate that owns it is cancelled.
   void _stopPhoneTask() {
+    final run = phoneRun?.activeVirtual;
+    if (run != null) {
+      unawaited(
+        phoneChannel?.stopTask(run.taskId).catchError((Object _) {}) ??
+            Future<void>.value(),
+      );
+    }
+    final core = agentCore;
     final voice = phoneVoice;
-    if (voice != null && voice.active && voiceDelegates?.busy == true) {
+    if (core != null && core.busy && core.activeTool == 'device_run_task') {
+      core.cancel();
+    } else if (voice != null && voice.active && voiceDelegates?.busy == true) {
       voice.cancelDelegate();
-    } else {
-      agentCore?.cancel();
     }
   }
 
@@ -1412,6 +1428,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   Widget build(BuildContext context) {
     final host = agentCore;
     final hasChat = host != null && chatId != null;
+    final chatShown = hasChat && (_tab == 0 || (_tab == 1 && _taskOpen));
     final fullCall = _phoneVoiceExpanded && phoneVoice != null;
     final connector = feishu;
     final profileHint = _profileHint();
@@ -1576,6 +1593,15 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                         !fullCall,
                                     header: _taskContext(host),
                                     phoneRun: phoneRun,
+                                    floating: phoneRun == null
+                                        ? null
+                                        : VirtualScreenPip(
+                                            key: const ValueKey('chat-pip'),
+                                            tracker: phoneRun!,
+                                            language: language,
+                                            visible: !fullCall,
+                                            onStop: _stopPhoneTask,
+                                          ),
                                     host: host,
                                     conversationId: chatId!,
                                     language: language,
@@ -1615,21 +1641,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           ),
                         ],
                       ),
-                      if (phoneRun != null)
+                      if (phoneRun != null && !chatShown)
                         Positioned.fill(
                           child: VirtualScreenPip(
+                            key: const ValueKey('app-pip'),
                             tracker: phoneRun!,
                             language: language,
                             visible: !fullCall,
-                            // Off the model row and the composer in chat.
-                            topInset: hasChat && (_tab == 0 || _tab == 1)
-                                ? 52
-                                : 8,
-                            bottomInset:
-                                hasChat &&
-                                    (_tab == 0 || (_tab == 1 && _taskOpen))
-                                ? 96
-                                : 12,
                             onStop: _stopPhoneTask,
                           ),
                         ),

@@ -9,6 +9,7 @@ import 'package:nova_mobile/agent_core/agent_core_host.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/conversation/local_chat_panel.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
+import 'package:nova_mobile/ui/phone_tool_steps.dart';
 import 'package:nova_mobile/ui/tool_step.dart';
 import 'package:nova_mobile/ui/tool_timeline.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
@@ -174,7 +175,7 @@ void main() {
       final run = tracker.run('t1')!;
       expect(run.stepEvents.map((e) => e.step), [1, 2]);
       expect(run.stepEvents.last.status, StepStatus.completed);
-      expect(run.toolSteps('zh'), hasLength(2));
+      expect(phoneRunToolSteps(run, 'zh'), hasLength(2));
       expect(tracker.activeVirtual, same(run));
     });
 
@@ -231,6 +232,41 @@ void main() {
         expect(tracker.actionFailed, isTrue);
       },
     );
+
+    test('markEnded closes a run whose done event never came', () async {
+      final channel = FakePhoneChannel();
+      final tracker = PhoneRunTracker(channel)..start();
+      addTearDown(tracker.dispose);
+      channel.emit(stepEvent());
+      await pumpEventQueue();
+      expect(tracker.activeVirtual, isNotNull);
+      var notified = 0;
+      tracker.addListener(() => notified++);
+      tracker.markEnded('unknown');
+      expect(notified, 0);
+      tracker.markEnded('t1');
+      expect(tracker.activeVirtual, isNull);
+      expect(tracker.run('t1')!.active, isFalse);
+      expect(notified, 1);
+    });
+
+    test('on resume a run native no longer lists is over', () async {
+      final channel = FakePhoneChannel();
+      final tracker = PhoneRunTracker(channel)..start();
+      addTearDown(tracker.dispose);
+      channel.emit(stepEvent(taskId: 'gone'));
+      channel.emit(stepEvent(taskId: 'alive'));
+      await pumpEventQueue();
+      channel.activeIds = null;
+      tracker.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await pumpEventQueue();
+      expect(tracker.run('gone')!.active, isTrue, reason: 'unknown keeps runs');
+      channel.activeIds = {'alive'};
+      tracker.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await pumpEventQueue();
+      expect(tracker.run('gone')!.active, isFalse);
+      expect(tracker.run('alive')!.active, isTrue);
+    });
 
     test('keeps only the most recent runs', () async {
       final channel = FakePhoneChannel();
@@ -309,6 +345,7 @@ void main() {
       String id,
       PhoneRunTracker tracker, {
       bool running = false,
+      String? activeTool = 'device_run_task',
     }) async {
       tester.view.physicalSize = const Size(800, 2400);
       tester.view.devicePixelRatio = 1;
@@ -317,6 +354,7 @@ void main() {
       if (running) {
         host
           ..busy = true
+          ..activeTool = activeTool
           ..activeConversationId = id;
       }
       addTearDown(host.dispose);
@@ -400,6 +438,75 @@ void main() {
       expect(group.steps.map((s) => s.status), ['completed', 'running']);
       expect(find.text('打开小红书'), findsOneWidget);
       expect(find.text('点搜索'), findsOneWidget);
+    });
+
+    testWidgets('the live group stays after done until the result is stored', (
+      tester,
+    ) async {
+      final (store, id) = await openStore();
+      final channel = FakePhoneChannel();
+      final tracker = PhoneRunTracker(channel)..start();
+      addTearDown(tracker.dispose);
+      await store.append(id, {'role': 'user', 'content': '搜一下'});
+      channel
+        ..emit(stepEvent(step: 1, label: '打开小红书', tool: 'open_app'))
+        ..emit(doneEvent());
+      await tester.runAsync(pumpEventQueue);
+      await pump(tester, store, id, tracker, running: true);
+      final group = tester.widget<ToolStepGroup>(find.byType(ToolStepGroup));
+      expect(group.steps.single.name, 'open_app');
+      expect(group.running, isFalse);
+    });
+
+    testWidgets('another tool running here gets no phone group', (
+      tester,
+    ) async {
+      final (store, id) = await openStore();
+      final channel = FakePhoneChannel();
+      final tracker = PhoneRunTracker(channel)..start();
+      addTearDown(tracker.dispose);
+      await store.append(id, {'role': 'user', 'content': '搜一下'});
+      channel.emit(stepEvent(step: 1, label: '打开小红书', tool: 'open_app'));
+      await tester.runAsync(pumpEventQueue);
+      await pump(
+        tester,
+        store,
+        id,
+        tracker,
+        running: true,
+        activeTool: 'web_fetch',
+      );
+      expect(find.byType(ToolStepGroup), findsNothing);
+    });
+
+    testWidgets('a task that did not complete keeps its own row after steps', (
+      tester,
+    ) async {
+      final (store, id) = await openStore();
+      final channel = FakePhoneChannel();
+      final tracker = PhoneRunTracker(channel)..start();
+      addTearDown(tracker.dispose);
+      await store.append(id, {'role': 'user', 'content': 'x'});
+      await store.append(id, {
+        'role': 'tool',
+        'tool_name': 'device_run_task',
+        'tool_call_id': 'c1',
+        'content': jsonEncode({
+          'status': 'outcome_unknown',
+          'data': {'status': 'outcome_unknown', 'task_id': 't1'},
+        }),
+      });
+      channel
+        ..emit(stepEvent(step: 1, tool: 'open_app', label: '打开'))
+        ..emit(stepEvent(step: 2, tool: 'tap', label: '点'));
+      await tester.runAsync(pumpEventQueue);
+      await pump(tester, store, id, tracker);
+      final group = tester.widget<ToolStepGroup>(find.byType(ToolStepGroup));
+      expect(group.steps.map((s) => s.name), [
+        'open_app',
+        'tap',
+        'device_run_task',
+      ]);
     });
 
     testWidgets('a task without recorded steps keeps its single line', (

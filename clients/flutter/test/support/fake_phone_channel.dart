@@ -23,6 +23,9 @@ class FakePhoneChannel implements PhoneChannel {
   Object? commandError;
   Object? ackError;
   final stopped = <String>[];
+
+  /// What `tasks` reports as still running; null = unknown.
+  Set<String>? activeIds;
   TakeoverState takeoverResult = TakeoverState.active;
   TakeoverState handBackResult = TakeoverState.returned;
   final eventController = StreamController<PhoneEvent>.broadcast();
@@ -112,6 +115,12 @@ class FakePhoneChannel implements PhoneChannel {
       helperFix: s.helperFix,
     );
     return current;
+  }
+
+  @override
+  Future<Set<String>?> activeTaskIds() async {
+    calls.add('activeTaskIds');
+    return activeIds;
   }
 
   @override

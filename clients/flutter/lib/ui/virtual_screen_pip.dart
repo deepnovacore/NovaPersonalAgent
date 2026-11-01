@@ -101,6 +101,9 @@ class _VirtualScreenPipState extends State<VirtualScreenPip>
   bool expanded = false, dragging = false;
   late PreviewLease _lease = PreviewLease(tracker.preview);
   bool _needsUser = false, _reduced = false, _started = false;
+  // Set from TickerMode before the first build; false while a route above
+  // hides this page.
+  bool _onScreen = false;
   String? _taskId;
 
   String t(String zh, String en) => widget.language == 'zh' ? zh : en;
@@ -118,8 +121,13 @@ class _VirtualScreenPipState extends State<VirtualScreenPip>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduced = MediaQuery.disableAnimationsOf(context);
+    _onScreen = TickerMode.valuesOf(context).enabled;
+    _lease.wanted = _leaseWanted(tracker.activeVirtual);
     _syncBreath();
   }
+
+  bool _leaseWanted(PhoneRun? run) =>
+      run != null && widget.visible && _onScreen;
 
   @override
   void didUpdateWidget(covariant VirtualScreenPip old) {
@@ -137,7 +145,7 @@ class _VirtualScreenPipState extends State<VirtualScreenPip>
   /// run. Called outside of build.
   void _sync() {
     final run = tracker.activeVirtual;
-    _lease.wanted = run != null && widget.visible;
+    _lease.wanted = _leaseWanted(run);
     final needs = run?.needsUser ?? false;
     if (run?.taskId != _taskId) {
       _taskId = run?.taskId;
@@ -513,9 +521,10 @@ class _VirtualScreenViewState extends State<VirtualScreenView>
   String t(String zh, String en) => widget.language == 'zh' ? zh : en;
 
   @override
-  void initState() {
-    super.initState();
-    _lease.wanted = true;
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // A route above this page hides it: no frames for nobody.
+    _lease.wanted = TickerMode.valuesOf(context).enabled;
   }
 
   @override

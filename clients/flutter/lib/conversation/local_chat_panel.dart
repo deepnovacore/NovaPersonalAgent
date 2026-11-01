@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import '../ui/theme.dart';
 import '../ui/chat_activity.dart';
 import '../ui/thinking_block.dart';
+import '../ui/phone_tool_steps.dart';
 import '../ui/tool_step.dart';
 import '../ui/tool_timeline.dart';
 import '../agent/phone_run.dart';
@@ -77,11 +78,16 @@ class LocalChatPanel extends StatefulWidget {
     this.onCancelExternalTask,
     this.header,
     this.phoneRun,
+    this.floating,
   });
 
   /// Steps of phone tasks (`nova/phone/events`). A task's steps replace its
   /// single `device_run_task` result and join the group it sits in.
   final PhoneRunTracker? phoneRun;
+
+  /// Floats over the message list only, never over the header, the model row
+  /// or the composer, whatever the text size.
+  final Widget? floating;
   final Widget? header;
   final AgentCoreHost host;
   final AudioOwner? audioOwner;
@@ -603,6 +609,16 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     );
   }
 
+  static Widget _floatOver(Widget? floating, Widget child) => floating == null
+      ? child
+      : Stack(
+          fit: StackFit.expand,
+          children: [
+            child,
+            Positioned.fill(child: floating),
+          ],
+        );
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: Listenable.merge([widget.host, ?widget.phoneRun]),
@@ -640,10 +656,15 @@ class LocalChatPanelState extends State<LocalChatPanel> {
               final run = taskIds[i] == null
                   ? null
                   : widget.phoneRun?.run(taskIds[i]!);
-              final phoneSteps = run?.toolSteps(widget.language);
-              return phoneSteps == null || phoneSteps.isEmpty
-                  ? [ordered[i]]
-                  : phoneSteps;
+              final phoneSteps = run == null
+                  ? null
+                  : phoneRunToolSteps(run, widget.language);
+              if (phoneSteps == null || phoneSteps.isEmpty) return [ordered[i]];
+              // A task that did not complete keeps its own row after its
+              // steps, so green steps never hide how it ended.
+              return ordered[i].status == 'completed'
+                  ? phoneSteps
+                  : [...phoneSteps, ordered[i]];
             })(),
         ];
         messageWidgets.add(
@@ -661,12 +682,13 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       }
 
       // The task still running has no stored result yet: its live steps close
-      // the turn as one group.
+      // the turn as one group. It stays until that result is stored, even after
+      // the run's own `done` event, so the group does not blink out.
       final phone = widget.phoneRun;
       final liveRun = phone?.latest;
       if (runningHere &&
+          host.activeTool == 'device_run_task' &&
           liveRun != null &&
-          liveRun.active &&
           widget.showProcess &&
           liveRun.stepEvents.isNotEmpty &&
           !messages.any(
@@ -679,8 +701,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
         messageWidgets.add(
           ToolStepGroup(
             key: ValueKey('phone-run:${liveRun.taskId}'),
-            steps: liveRun.toolSteps(widget.language),
-            running: true,
+            steps: phoneRunToolSteps(liveRun, widget.language),
+            running: liveRun.active,
           ),
         );
         runInternalWidgets++;
@@ -839,160 +861,168 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                 ),
               ...[
                 Expanded(
-                  child: messages.isEmpty && !host.busy
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(30),
-                            child: Text(
-                              t('从这里开始。', 'Start here.'),
-                              style: const TextStyle(
-                                fontSize: 22,
-                                color: Nova.tertiary,
-                                fontWeight: FontWeight.w400,
+                  child: _floatOver(
+                    widget.floating,
+                    messages.isEmpty && !host.busy
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(30),
+                              child: Text(
+                                t('从这里开始。', 'Start here.'),
+                                style: const TextStyle(
+                                  fontSize: 22,
+                                  color: Nova.tertiary,
+                                  fontWeight: FontWeight.w400,
+                                ),
                               ),
                             ),
-                          ),
-                        )
-                      : ListView(
-                          controller: scroll,
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
-                          children: [
-                            ...messageWidgets.reversed,
-                            if (host.pendingUserText.isNotEmpty &&
-                                host.activeConversationId ==
-                                    widget.conversationId)
-                              _message({
-                                'role': 'user',
-                                'content': host.pendingUserText,
-                              }),
-                            if (widget.showProcess &&
-                                host.draft.isNotEmpty &&
-                                host.activeConversationId ==
-                                    widget.conversationId)
-                              _message({
-                                'role': 'assistant',
-                                'content': host.draft,
-                              }),
-                            if (host.busy &&
-                                host.activeConversationId ==
-                                    widget.conversationId)
-                              ChatActivity(
-                                label: !widget.showProcess
-                                    ? t('正在回复', 'Waiting for reply')
-                                    : switch (host.activeTool) {
-                                        'file_write' || 'file_edit' => t(
-                                          '正在编写文件',
-                                          'Writing files',
-                                        ),
-                                        'shell_execute' => t(
-                                          '正在执行命令',
-                                          'Running a command',
-                                        ),
-                                        'file_read' => t(
-                                          '正在读取文件',
-                                          'Reading files',
-                                        ),
-                                        'calendar_list' => t(
-                                          '正在读取系统日历',
-                                          'Reading Calendar',
-                                        ),
-                                        'reminders_list' => t(
-                                          '正在读取提醒事项',
-                                          'Reading Reminders',
-                                        ),
-                                        'device_run_task' => t(
-                                          '正在执行手机任务',
-                                          'Working on your phone',
-                                        ),
-                                        null =>
-                                          host.draft.isEmpty
-                                              ? t('正在思考', 'Thinking')
-                                              : t('正在回复', 'Writing the reply'),
-                                        _ => t('正在处理', 'Working'),
-                                      },
-                                summary:
-                                    widget.showProcess && host.draft.isEmpty
-                                    ? thinkingSummary(liveReasoning)
-                                    : null,
-                                startedAt: host.turnStartedAt ?? DateTime.now(),
-                                language: widget.language,
-                                details: !widget.showProcess
-                                    ? null
-                                    : Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          if (liveReasoning.isNotEmpty)
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                bottom: 10,
+                          )
+                        : ListView(
+                            controller: scroll,
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
+                            children: [
+                              ...messageWidgets.reversed,
+                              if (host.pendingUserText.isNotEmpty &&
+                                  host.activeConversationId ==
+                                      widget.conversationId)
+                                _message({
+                                  'role': 'user',
+                                  'content': host.pendingUserText,
+                                }),
+                              if (widget.showProcess &&
+                                  host.draft.isNotEmpty &&
+                                  host.activeConversationId ==
+                                      widget.conversationId)
+                                _message({
+                                  'role': 'assistant',
+                                  'content': host.draft,
+                                }),
+                              if (host.busy &&
+                                  host.activeConversationId ==
+                                      widget.conversationId)
+                                ChatActivity(
+                                  label: !widget.showProcess
+                                      ? t('正在回复', 'Waiting for reply')
+                                      : switch (host.activeTool) {
+                                          'file_write' || 'file_edit' => t(
+                                            '正在编写文件',
+                                            'Writing files',
+                                          ),
+                                          'shell_execute' => t(
+                                            '正在执行命令',
+                                            'Running a command',
+                                          ),
+                                          'file_read' => t(
+                                            '正在读取文件',
+                                            'Reading files',
+                                          ),
+                                          'calendar_list' => t(
+                                            '正在读取系统日历',
+                                            'Reading Calendar',
+                                          ),
+                                          'reminders_list' => t(
+                                            '正在读取提醒事项',
+                                            'Reading Reminders',
+                                          ),
+                                          'device_run_task' => t(
+                                            '正在执行手机任务',
+                                            'Working on your phone',
+                                          ),
+                                          null =>
+                                            host.draft.isEmpty
+                                                ? t('正在思考', 'Thinking')
+                                                : t(
+                                                    '正在回复',
+                                                    'Writing the reply',
+                                                  ),
+                                          _ => t('正在处理', 'Working'),
+                                        },
+                                  summary:
+                                      widget.showProcess && host.draft.isEmpty
+                                      ? thinkingSummary(liveReasoning)
+                                      : null,
+                                  startedAt:
+                                      host.turnStartedAt ?? DateTime.now(),
+                                  language: widget.language,
+                                  details: !widget.showProcess
+                                      ? null
+                                      : Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            if (liveReasoning.isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 10,
+                                                ),
+                                                child: ConstrainedBox(
+                                                  constraints:
+                                                      const BoxConstraints(
+                                                        maxHeight: 320,
+                                                      ),
+                                                  child: SingleChildScrollView(
+                                                    child: SelectableText(
+                                                      liveReasoning,
+                                                      style: const TextStyle(
+                                                        color: Nova.secondary,
+                                                        fontSize: 13,
+                                                        height: 1.5,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
                                               ),
-                                              child: ConstrainedBox(
+                                            if (host.activeTool != null)
+                                              Text(
+                                                host.activeTool!,
+                                                style: const TextStyle(
+                                                  color: Nova.secondary,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            if (host
+                                                .activeToolArguments
+                                                .isNotEmpty)
+                                              ConstrainedBox(
                                                 constraints:
                                                     const BoxConstraints(
-                                                      maxHeight: 320,
+                                                      maxHeight: 220,
                                                     ),
                                                 child: SingleChildScrollView(
                                                   child: SelectableText(
-                                                    liveReasoning,
+                                                    host.activeToolArguments,
                                                     style: const TextStyle(
-                                                      color: Nova.secondary,
-                                                      fontSize: 13,
-                                                      height: 1.5,
+                                                      fontFamily: 'Menlo',
+                                                      fontSize: 12,
+                                                      height: 1.4,
                                                     ),
                                                   ),
                                                 ),
-                                              ),
-                                            ),
-                                          if (host.activeTool != null)
-                                            Text(
-                                              host.activeTool!,
-                                              style: const TextStyle(
-                                                color: Nova.secondary,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          if (host
-                                              .activeToolArguments
-                                              .isNotEmpty)
-                                            ConstrainedBox(
-                                              constraints: const BoxConstraints(
-                                                maxHeight: 220,
-                                              ),
-                                              child: SingleChildScrollView(
-                                                child: SelectableText(
-                                                  host.activeToolArguments,
-                                                  style: const TextStyle(
-                                                    fontFamily: 'Menlo',
-                                                    fontSize: 12,
-                                                    height: 1.4,
-                                                  ),
+                                              )
+                                            else if (liveReasoning.isEmpty)
+                                              Text(
+                                                host.draft.isEmpty
+                                                    ? t(
+                                                        '正在等待模型输出；收到内容后会显示在这里。',
+                                                        'Waiting for model output; received content will appear here.',
+                                                      )
+                                                    : t(
+                                                        '正在接收回复…',
+                                                        'Receiving the reply…',
+                                                      ),
+                                                style: const TextStyle(
+                                                  color: Nova.secondary,
+                                                  fontSize: 13,
                                                 ),
                                               ),
-                                            )
-                                          else if (liveReasoning.isEmpty)
-                                            Text(
-                                              host.draft.isEmpty
-                                                  ? t(
-                                                      '正在等待模型输出；收到内容后会显示在这里。',
-                                                      'Waiting for model output; received content will appear here.',
-                                                    )
-                                                  : t(
-                                                      '正在接收回复…',
-                                                      'Receiving the reply…',
-                                                    ),
-                                              style: const TextStyle(
-                                                color: Nova.secondary,
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                              ),
-                          ],
-                        ),
+                                          ],
+                                        ),
+                                ),
+                            ],
+                          ),
+                  ),
                 ),
                 if (host.error != null)
                   Padding(

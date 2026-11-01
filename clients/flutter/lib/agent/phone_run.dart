@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:collection' show SplayTreeMap;
 import 'package:flutter/foundation.dart';
-import '../ui/tool_step.dart';
+import 'package:flutter/widgets.dart'
+    show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
 import 'phone_channel.dart';
 
 /// One phone task as the UI sees it, folded from `step`, `takeover` and
@@ -16,7 +17,10 @@ class PhoneRun {
   String? takeoverReason;
   PhoneDoneEvent? done;
 
-  bool get active => done == null;
+  /// The run's result reached the app before (or without) its `done` event.
+  bool endedByResult = false;
+
+  bool get active => done == null && !endedByResult;
   bool get isVirtual => tier == PhoneTier.virtual;
 
   /// The user has to act: the model asked for help or the user took over.
@@ -25,12 +29,6 @@ class PhoneRun {
       (takeover == TakeoverState.requested || takeover == TakeoverState.active);
   bool get takeoverActive => active && takeover == TakeoverState.active;
   List<PhoneStepEvent> get stepEvents => _steps.values.toList();
-
-  /// The run's steps in the vocabulary of the chat timeline: `tool` -> name,
-  /// `label` -> narration, `ref` -> refLabel, `step` -> stepIndex.
-  List<ToolStep> toolSteps(String language) => [
-    for (final event in _steps.values) phoneStepToToolStep(event, language),
-  ];
 
   void apply(PhoneEvent event) {
     switch (event) {
@@ -48,21 +46,6 @@ class PhoneRun {
     }
   }
 }
-
-/// A step event as a chat timeline row.
-ToolStep phoneStepToToolStep(PhoneStepEvent event, String language) => ToolStep(
-  name: event.tool,
-  status: switch (event.status) {
-    StepStatus.running => 'running',
-    StepStatus.completed => 'completed',
-    StepStatus.failed => 'failed',
-    StepStatus.unknown => 'outcome_unknown',
-  },
-  language: language,
-  narration: event.label.trim().isEmpty ? null : event.label,
-  refLabel: event.ref,
-  stepIndex: event.step,
-);
 
 /// Counts the widgets that show the live screen. Frames and `setPreview`
 /// follow it: the first holder turns the preview on, the last one off.
@@ -151,7 +134,7 @@ class PhonePreview {
 }
 
 /// The phone tasks of this app session, driven by `nova/phone/events`.
-class PhoneRunTracker extends ChangeNotifier {
+class PhoneRunTracker extends ChangeNotifier with WidgetsBindingObserver {
   PhoneRunTracker(this.channel) : preview = PhonePreview(channel);
   final PhoneChannel channel;
   final PhonePreview preview;
@@ -167,6 +150,37 @@ class PhoneRunTracker extends ChangeNotifier {
   void start() {
     if (_events != null) return;
     _events = channel.events.listen(_onEvent, onError: (Object _) {});
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// The run's result is in, so it is over even if its `done` event never
+  /// arrived (the event stream is dropped whenever the activity detaches).
+  void markEnded(String taskId) {
+    final run = _runs[taskId];
+    if (_disposed || run == null || !run.active) return;
+    run.endedByResult = true;
+    notifyListeners();
+  }
+
+  /// Native events are not queued while the app is away: on return, a run that
+  /// native no longer lists as in progress is over.
+  Future<void> reconcile() async {
+    if (_runs.values.every((run) => !run.active)) return;
+    final running = await channel.activeTaskIds();
+    if (_disposed || running == null) return;
+    var changed = false;
+    for (final run in _runs.values) {
+      if (run.active && !running.contains(run.taskId)) {
+        run.endedByResult = true;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(reconcile());
   }
 
   PhoneRun? run(String taskId) => _runs[taskId];
@@ -230,6 +244,7 @@ class PhoneRunTracker extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    if (_events != null) WidgetsBinding.instance.removeObserver(this);
     unawaited(_events?.cancel());
     preview.dispose();
     super.dispose();
