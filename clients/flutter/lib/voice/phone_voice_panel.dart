@@ -262,7 +262,7 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                       height: short
                           ? 112
                           : screen != null && !wide
-                          ? 132
+                          ? 88
                           : (constraints.maxHeight * .43).clamp(190.0, 270.0),
                       width: double.infinity,
                       child: ValueListenableBuilder<double>(
@@ -297,57 +297,58 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                     ),
                   ],
                 );
-                Widget visual() {
+                Widget visual(PhoneRun? run) {
                   final tracker = widget.phoneRun;
-                  if (tracker == null) return stage(null);
-                  return ListenableBuilder(
-                    listenable: tracker,
-                    builder: (context, _) {
-                      final run = tracker.activeVirtual;
-                      if (run == null) return stage(null);
-                      final screen = VirtualScreenView(
-                        key: const ValueKey('voice-virtual-screen'),
-                        tracker: tracker,
-                        run: run,
-                        language: widget.language,
-                        maxWidth: wide ? 180 : 140,
-                        maxHeight: wide ? 300 : 200,
-                      );
-                      return wide
-                          ? Row(
-                              key: const ValueKey('voice-pet-and-screen-row'),
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Expanded(child: stage(run)),
-                                const SizedBox(width: 24),
-                                screen,
-                              ],
-                            )
-                          : Column(
-                              key: const ValueKey(
-                                'voice-pet-and-screen-column',
-                              ),
-                              children: [
-                                stage(run),
-                                const SizedBox(height: 12),
-                                screen,
-                              ],
-                            );
-                    },
+                  if (tracker == null || run == null) return stage(null);
+                  final screen = VirtualScreenView(
+                    key: const ValueKey('voice-virtual-screen'),
+                    tracker: tracker,
+                    run: run,
+                    language: widget.language,
+                    maxWidth: wide ? 180 : 110,
+                    maxHeight: wide ? 300 : 120,
                   );
+                  return wide
+                      ? Row(
+                          key: const ValueKey('voice-pet-and-screen-row'),
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(child: stage(run)),
+                            const SizedBox(width: 24),
+                            screen,
+                          ],
+                        )
+                      : Column(
+                          key: const ValueKey('voice-pet-and-screen-column'),
+                          children: [
+                            stage(run),
+                            const SizedBox(height: 8),
+                            screen,
+                          ],
+                        );
                 }
 
-                return SingleChildScrollView(
+                Widget content(PhoneRun? run) => SingleChildScrollView(
                   key: const ValueKey('voice-call-content'),
                   padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Column(
                     children: [
-                      SizedBox(height: short ? 0 : constraints.maxHeight * .10),
-                      visual(),
+                      SizedBox(
+                        height: short || (run != null && !wide)
+                            ? 0
+                            : constraints.maxHeight * .10,
+                      ),
+                      visual(run),
                       const SizedBox(height: 28),
                       SizedBox(
                         key: const ValueKey('voice-captions'),
-                        height: short ? 116 : 164,
+                        // Beside a narrow phone's virtual screen the captions
+                        // give up height so the end of the content stays near.
+                        height: short
+                            ? 116
+                            : (run != null && !wide)
+                            ? 96
+                            : 164,
                         width: double.infinity,
                         child: SingleChildScrollView(
                           child: Column(
@@ -432,6 +433,14 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                     ],
                   ),
                 );
+
+                final tracker = widget.phoneRun;
+                return tracker == null
+                    ? content(null)
+                    : ListenableBuilder(
+                        listenable: tracker,
+                        builder: (context, _) => content(tracker.activeVirtual),
+                      );
               },
             ),
           ),

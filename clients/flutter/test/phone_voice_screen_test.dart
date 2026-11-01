@@ -110,6 +110,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final size in [const Size(360, 640), const Size(320, 568)]) {
+    testWidgets(
+      'narrow ${size.width.toInt()}x${size.height.toInt()}: end call and the '
+      'captions stay on screen beside the virtual screen',
+      (tester) async {
+        final s = await _pump(tester, size, reduced: true);
+        await _emit(tester, s, stepEvent());
+        expect(_screen, findsOneWidget);
+        final viewport = Offset.zero & size;
+        final end = tester.getRect(find.text('结束通话'));
+        expect(viewport.contains(end.center), isTrue);
+        expect(end.bottom, lessThanOrEqualTo(size.height));
+        // The call controls live outside the scrolling content.
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('voice-call-content')),
+            matching: find.text('结束通话'),
+          ),
+          findsNothing,
+        );
+        // The captions are inside the viewport without scrolling.
+        final captions = tester.getRect(
+          find.byKey(const ValueKey('voice-captions')),
+        );
+        expect(captions.bottom, lessThanOrEqualTo(end.top));
+        expect(captions.top, greaterThanOrEqualTo(0));
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('frames reach the screen and the call keeps its controls', (
     tester,
   ) async {
