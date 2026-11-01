@@ -205,11 +205,10 @@ class VirtualScreen(
         val text = action.text
         // No label: the host labels typing with a fixed text.
         return Prepared("type", action.ref, null, CHANGE_WAIT_MS, { _, effects ->
-            effects.admit {
-                if (!field.isFocused) field.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
-                field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-            }
+            val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+            focusThenSetText(effects, needsFocus = !field.isFocused,
+                { field.performAction(AccessibilityNodeInfo.ACTION_FOCUS) },
+                { field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) })
         })
     }
 

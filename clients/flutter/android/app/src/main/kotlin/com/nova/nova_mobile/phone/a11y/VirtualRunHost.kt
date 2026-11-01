@@ -50,6 +50,19 @@ fun gestureOrInjection(effects: EffectAdmission, gesture: () -> GestureOutcome, 
         GestureOutcome.REFUSED -> effects.admit(inject)
     }
 
+/**
+ * Typing as two effects, each admitted on its own: [focus] (only when [needsFocus]), then [setText]. A stop or takeover
+ * between them refuses [setText]. A focus call that ran may have acted (a false result can also be an IPC timeout), so
+ * that refusal throws [EFFECT_UNKNOWN]; without a focus call it stays an [EffectRefused] (nothing was dispatched).
+ */
+fun focusThenSetText(effects: EffectAdmission, needsFocus: Boolean, focus: () -> Unit, setText: () -> Boolean): Boolean {
+    if (needsFocus) effects.admit(focus)
+    return try { effects.admit(setText) } catch (e: EffectRefused) {
+        if (needsFocus) throw IllegalStateException(EFFECT_UNKNOWN)
+        throw e
+    }
+}
+
 /** An action resolved against the current display. [ref] is the model's ref; [label] an element name or package, never typed text. */
 open class PreparedAction(val tool: String, val ref: String?, val label: String?)
 
