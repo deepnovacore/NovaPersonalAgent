@@ -47,7 +47,11 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
   VoicePetHost.taskGone={id,reason->hideTask(id,reason,if(reason=="overlay_permission") reason else "overlay_blocked")}
   VoicePetHost.previewWanted={id,wanted->companion.invokeMethod("previewWanted",mapOf("taskId" to id,"wanted" to wanted))}
   fun ready(){
-   val shown=VoicePetHost.task(petRequests.task) && VoicePetHost.probe()
+   // Probe the window only once per task: step updates must not add/remove a window each time.
+   val id=petRequests.task?.id
+   val needsProbe=id!=null && id!=probedTask
+   val shown=VoicePetHost.task(petRequests.task) && (!needsProbe || VoicePetHost.probe())
+   if(shown&&needsProbe)probedTask=id
    if(shown){VoicePetService.current?.refreshNotification();petRequests.complete()}
    else {
     val error=if(android.provider.Settings.canDrawOverlays(context)) "overlay_blocked" else "overlay_permission"
@@ -70,6 +74,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
   }catch(_:RuntimeException){hideTask(reason="foreground_blocked",error="foreground_blocked")}
  }
  private var backgroundCall=false
+ private var probedTask:String?=null
  private var companionStart:MethodChannel.Result?=null
  private var companionId:String?=null
  private fun stopCompanion(onStopped:(()->Unit)?=null){

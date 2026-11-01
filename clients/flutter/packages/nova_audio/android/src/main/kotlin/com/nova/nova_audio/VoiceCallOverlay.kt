@@ -326,10 +326,12 @@ internal class VoiceCallOverlay(
         progressAnimator?.cancel(); progressAnimator = null
         val removed = view
         view = null // Detach callbacks must distinguish our hide from permission/OEM removal.
+        // Detach bitmaps from the dying window before they can be recycled.
+        clearFrame()
+        portraitView?.setImageDrawable(null)
         removed?.let { try { windows.removeView(it) } catch (_: RuntimeException) {} }
         view = null; orb = null; orbRing = null; mutedBadge = null; muteButton = null; portraitView = null; preview = null; progress = null; expanded = false
         stepText = null
-        clearFrame()
         visibilityChanged()
     }
 
@@ -364,7 +366,7 @@ internal class VoiceCallOverlay(
             val bitmap = try {
                 val data = bytes ?: path?.let { java.io.File(it).takeIf { file -> file.length() in 1..4 * 1024 * 1024 }?.readBytes() }
                 data?.let(::decode)
-            } catch (_: Exception) { null }
+            } catch (_: Exception) { null } catch (_: OutOfMemoryError) { null }
             main.post {
                 if (avatarRevision != revision) { bitmap?.recycle(); return@post }
                 val previous = portrait
@@ -379,7 +381,8 @@ internal class VoiceCallOverlay(
         frameDecoding = true
         val revision = ++frameRevision
         decoder.execute {
-            val bitmap = try { decode(bytes) } catch (_: Exception) { null }
+            // OutOfMemoryError must not leave frameDecoding stuck, or the preview freezes.
+            val bitmap = try { decode(bytes) } catch (_: Exception) { null } catch (_: OutOfMemoryError) { null }
             main.post {
                 frameDecoding = false
                 if (frameRevision != revision || !isExpanded) { bitmap?.recycle(); return@post }
