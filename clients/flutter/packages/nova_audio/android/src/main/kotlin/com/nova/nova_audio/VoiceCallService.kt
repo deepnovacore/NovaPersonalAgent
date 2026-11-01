@@ -79,8 +79,8 @@ class VoiceCallService : Service() {
         if (foreground && !finished) getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification())
         VoicePetHost.call(foreground && !finished, value)
     }
-    /** The host shows the window only after the activity actually pauses. */
-    fun canMinimize() = android.provider.Settings.canDrawOverlays(this)
+    /** The host shows the window only after the activity actually stops. */
+    fun canMinimize() = android.provider.Settings.canDrawOverlays(this) && VoicePetHost.probe()
     private fun openIntent(): Intent? = packageManager.getLaunchIntentForPackage(packageName)?.apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }

@@ -11,9 +11,9 @@ class VoicePetStateTest {
         assertFalse(state.visible)
         state.task = task()
         assertTrue(state.visible)
-        state.resumed = true
+        state.appVisible = true
         assertFalse(state.visible)
-        state.resumed = false
+        state.appVisible = false
         assertTrue(state.visible)
     }
 
@@ -24,7 +24,7 @@ class VoicePetStateTest {
         assertTrue(state.visible)
         state.callActive = true; state.task = null
         assertTrue(state.visible)
-        state.resumed = true
+        state.appVisible = true
         assertFalse(state.visible)
     }
 
@@ -35,9 +35,9 @@ class VoicePetStateTest {
         state.task = task()
         assertTrue(state.acceptsFrame(true))
         assertFalse(state.acceptsFrame(false))
-        state.resumed = true
+        state.appVisible = true
         assertFalse(state.acceptsFrame(true))
-        state.resumed = false
+        state.appVisible = false
         for (status in listOf("needs_user", "done", "failed")) {
             state.task = task(status)
             assertFalse(state.acceptsFrame(true))

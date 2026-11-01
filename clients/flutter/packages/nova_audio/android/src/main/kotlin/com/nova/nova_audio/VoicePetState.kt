@@ -9,12 +9,12 @@ internal data class VoicePetTask(val id: String, val status: String, val label: 
     val terminal get() = status == "done" || status == "failed"
 }
 
-/** Call and task lifetimes are independent; a resumed Nova activity always wins. */
+/** Call and task lifetimes are independent; a visible Nova activity always wins. */
 internal class VoicePetState {
     var callActive = false
     var task: VoicePetTask? = null
-    var resumed = false
-    val visible get() = !resumed && (callActive || task != null)
+    var appVisible = false
+    val visible get() = !appVisible && (callActive || task != null)
     fun acceptsFrame(expanded: Boolean) = visible && expanded && task?.status == "running"
     fun expire(expected: VoicePetTask): Boolean {
         if (task !== expected || !expected.terminal) return false
