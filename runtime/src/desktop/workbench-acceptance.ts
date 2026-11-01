@@ -13,7 +13,7 @@ import type {CapabilityRegistry} from '../config/capability-registry.js'
 import {Dispatcher,getGlobalDispatcher,setGlobalDispatcher} from 'undici'
 import {FEED_HEADERS,NEWS_SOURCES} from '../news/feeds.js'
 
-const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false),news:z.boolean().default(false),readExistingOnly:z.boolean().default(false),chatCallLimit:z.number().int().min(0).max(3).default(0),relayOrigins:z.array(z.string().url()).default([])}).strict()
+const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false),news:z.boolean().default(false),readExistingOnly:z.boolean().default(false),keepOpen:z.boolean().default(false),chatCallLimit:z.number().int().min(0).max(3).default(0),relayOrigins:z.array(z.string().url()).default([])}).strict()
 export type AcceptanceManifest=z.infer<typeof manifestSchema>
 let active:AcceptanceManifest|undefined
 let calls=0,blocked=0,probeVerified=false
@@ -38,6 +38,7 @@ export function loadAcceptanceManifest(environment:NodeJS.ProcessEnv=process.env
  if(!environment.NOVA_WORKBENCH_ACCEPTANCE_REPORT)return undefined
  if(!environment.NOVA_WORKBENCH_ACCEPTANCE_MANIFEST)throw Error('acceptance_manifest_required')
  const value=manifestSchema.parse(JSON.parse(readFileSync(environment.NOVA_WORKBENCH_ACCEPTANCE_MANIFEST,'utf8')))
+ if(value.keepOpen&&!value.readExistingOnly)throw Error('acceptance_keep_open_requires_cached_results')
  const output=canonical(value.outputDirectory),report=resolve(environment.NOVA_WORKBENCH_ACCEPTANCE_REPORT)
  for(const root of [value.originalUserData,dirname(value.originalBlackboardPath),value.repository])if(inside(canonical(root),output))throw Error('acceptance_output_inside_profile_or_repository')
  if(canonical(dirname(report))!==output)throw Error('acceptance_report_outside_output')

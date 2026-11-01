@@ -285,3 +285,14 @@ test('existing-data chat grant bounds streaming calls and leaves background gene
  assert.equal(child.status,0,child.stderr);
  }finally{f.close()}
 });
+
+
+test('keeping the acceptance Host open requires cached-data mode and retains bounded chat permission',()=>{
+ const f=fixture();try{
+  assert.equal(loadAcceptanceManifest(f.env)?.keepOpen,false);
+  writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,keepOpen:true}));
+  assert.throws(()=>loadAcceptanceManifest(f.env),/keep_open_requires_cached_results/);
+  writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,readExistingOnly:true,keepOpen:true,chatCallLimit:1}));
+  const loaded=loadAcceptanceManifest(f.env)!;assert.equal(loaded.keepOpen,true);assert.equal(loaded.readExistingOnly,true);assert.equal(loaded.chatCallLimit,1);
+ }finally{f.close()}
+});

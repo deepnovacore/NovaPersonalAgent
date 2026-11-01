@@ -2656,7 +2656,7 @@ if (packagedSourceRollbackUnavailable) {
       iconFile: resolve(packageRoot, 'resources/icon-source/1024x1024.png'),
     })
     const started=start()
-    if(acceptance)void started.then(async()=>{
+    if(acceptance&&!acceptance.keepOpen)void started.then(async()=>{
       await waitForNativeWorkbench(mainWindow)
       const initial=await captureNativeWorkbench(mainWindow,acceptance.outputDirectory,'initial')
       await new Promise(resolve=>setTimeout(resolve,acceptance.runCapSeconds*1000))
