@@ -34,7 +34,7 @@ void main() {
       ),
     );
     // No target metadata, so nothing merges and nothing is invented.
-    expect(find.text('做了 4 步 · 有未完成或待核实'), findsOneWidget);
+    expect(find.text('查看了 1 个文件 · 4 次工具调用 · 有未完成或待核实'), findsOneWidget);
     expect(
       tester.getSize(find.byType(ToolTimeline)).height,
       lessThanOrEqualTo(40),
@@ -61,7 +61,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('做了 2 步 · 有未完成或待核实'), findsOneWidget);
+    expect(find.text('2 次工具调用 · 有未完成或待核实'), findsOneWidget);
     await tester.tap(find.byType(ToolTimeline));
     await tester.pumpAndSettle();
     expect(find.text('读取文件'), findsNWidgets(2));

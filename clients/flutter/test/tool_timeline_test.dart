@@ -191,32 +191,36 @@ void main() {
   });
 
   group('copy and thresholds', () {
-    test('finished summary', () {
+    test('finished summary keeps the established wording', () {
       expect(
         toolTimelineSummary(
           language: 'zh',
-          steps: 12,
-          elapsed: const Duration(minutes: 1, seconds: 20),
+          steps: const [
+            ToolStep(
+              name: 'file_read',
+              status: 'completed',
+              completedReadPath: '/workspace/a.txt',
+            ),
+            ToolStep(
+              name: 'file_read',
+              status: 'completed',
+              completedReadPath: '/workspace/a.txt',
+            ),
+            ToolStep(name: 'web_fetch', status: 'completed'),
+          ],
         ),
-        '做了 12 步 · 1 分 20 秒',
+        '查看了 1 个文件 · 3 次工具调用',
       );
-      expect(toolTimelineSummary(language: 'zh', steps: 3), '做了 3 步');
       expect(
         toolTimelineSummary(
           language: 'en',
-          steps: 1,
-          elapsed: const Duration(seconds: 5),
+          steps: const [
+            ToolStep(name: 'shell_execute', status: 'failed'),
+            ToolStep(name: 'web_fetch', status: 'completed'),
+          ],
           incomplete: true,
         ),
-        'Did 1 step · 5s · Some incomplete or unverified',
-      );
-      expect(
-        toolTimelineSummary(
-          language: 'en',
-          steps: 2,
-          elapsed: const Duration(minutes: 2),
-        ),
-        'Did 2 steps · 2m',
+        '2 tool calls · Some incomplete or unverified',
       );
     });
 
@@ -243,7 +247,7 @@ void main() {
     ) async {
       await _pumpGroup(tester, _shells(8), running: true);
       expect(find.text('更早的 3 步'), findsOneWidget);
-      expect(find.textContaining('做了'), findsNothing);
+      expect(find.textContaining('次工具调用'), findsNothing);
       expect(find.text('执行命令 · step2'), findsNothing);
       for (var i = 3; i < 8; i++) {
         expect(find.text('执行命令 · step$i'), findsOneWidget);
@@ -262,22 +266,22 @@ void main() {
       expect(find.text('执行命令 · step0'), findsOneWidget);
     });
 
-    testWidgets('finished: one summary line that expands', (tester) async {
+    testWidgets('finished: the established summary line expands', (tester) async {
       await _pumpGroup(
         tester,
         _shells(8),
         elapsed: const Duration(minutes: 1, seconds: 20),
       );
-      expect(find.text('做了 8 步 · 1 分 20 秒'), findsOneWidget);
+      expect(find.text('8 次工具调用'), findsOneWidget);
       expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
       expect(find.text('执行命令 · step0'), findsNothing);
-      await tester.tap(find.text('做了 8 步 · 1 分 20 秒'));
+      await tester.tap(find.text('8 次工具调用'));
       await tester.pumpAndSettle();
       for (var i = 0; i < 8; i++) {
         expect(find.text('执行命令 · step$i'), findsOneWidget);
       }
       expect(find.textContaining('更早'), findsNothing);
-      await tester.tap(find.text('做了 8 步 · 1 分 20 秒'));
+      await tester.tap(find.text('8 次工具调用'));
       await tester.pumpAndSettle();
       expect(find.text('执行命令 · step0'), findsNothing);
     });
@@ -287,7 +291,7 @@ void main() {
         ..._shells(2),
         const ToolStep(name: 'shell_execute', status: 'outcome_unknown'),
       ]);
-      expect(find.text('做了 3 步 · 有未完成或待核实'), findsOneWidget);
+      expect(find.text('3 次工具调用 · 有未完成或待核实'), findsOneWidget);
       expect(find.byIcon(Icons.info_outline), findsOneWidget);
     });
 
@@ -301,7 +305,7 @@ void main() {
         tester.widget<AnimatedSize>(size).duration,
         const Duration(milliseconds: 200),
       );
-      await tester.tap(find.textContaining('做了 3 步'));
+      await tester.tap(find.textContaining('3 次工具调用'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       // Mid-animation the body is still growing.
@@ -311,11 +315,11 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await _pumpGroup(tester, _shells(3), reduceMotion: true);
       expect(size, findsNothing);
-      await tester.tap(find.textContaining('做了 3 步'));
+      await tester.tap(find.textContaining('3 次工具调用'));
       await tester.pump();
       expect(find.text('执行命令 · step0'), findsOneWidget);
       expect(tester.hasRunningAnimations, isFalse);
-      await tester.tap(find.textContaining('做了 3 步'));
+      await tester.tap(find.textContaining('3 次工具调用'));
       await tester.pump();
       expect(find.text('执行命令 · step0'), findsNothing);
     });

@@ -101,7 +101,7 @@ class ToolStep extends StatelessWidget {
 /// One run's tool steps. A lone plain step keeps the compact legacy line;
 /// anything longer renders as a [ToolTimeline]: while [running] the last
 /// [toolTimelineVisibleSteps] rows, once finished one expandable summary line
-/// (with [elapsed] when known).
+/// in the established "查看了 N 个文件 · N 次工具调用" wording.
 class ToolStepGroup extends StatelessWidget {
   const ToolStepGroup({
     super.key,

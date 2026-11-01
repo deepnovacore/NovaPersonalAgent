@@ -108,17 +108,25 @@ String formatToolElapsed(Duration elapsed, String language) {
   return seconds == 0 ? '${minutes}m' : '${minutes}m ${seconds}s';
 }
 
-/// The single line a finished run collapses to: "做了 N 步 · 1 分 20 秒".
+/// The single line a finished run collapses to. Keeps Nova's established
+/// wording: "查看了 N 个文件 · N 次工具调用 · 有未完成或待核实".
 String toolTimelineSummary({
   required String language,
-  required int steps,
-  Duration? elapsed,
+  required List<ToolStep> steps,
   bool incomplete = false,
 }) {
   String t(String zh, String en) => language == 'zh' ? zh : en;
+  final files = {
+    for (final step in steps)
+      if (step.name == 'file_read' &&
+          step.completed &&
+          step.completedReadPath != null)
+        step.completedReadPath!,
+  };
   return [
-    t('做了 $steps 步', steps == 1 ? 'Did 1 step' : 'Did $steps steps'),
-    if (elapsed != null) formatToolElapsed(elapsed, language),
+    if (files.isNotEmpty)
+      t('查看了 ${files.length} 个文件', 'Read ${files.length} files'),
+    t('${steps.length} 次工具调用', '${steps.length} tool calls'),
     if (incomplete) t('有未完成或待核实', 'Some incomplete or unverified'),
   ].join(' · ');
 }
@@ -336,8 +344,7 @@ class _ToolTimelineState extends State<ToolTimeline> {
                       child: Text(
                         toolTimelineSummary(
                           language: language,
-                          steps: rows.length,
-                          elapsed: widget.elapsed,
+                          steps: widget.steps,
                           incomplete: incomplete,
                         ),
                         style: bodySmall,

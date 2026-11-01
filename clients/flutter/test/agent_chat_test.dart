@@ -369,9 +369,9 @@ void main() {
       // Reasoning that only precedes tools does not split the run; it becomes
       // the narration of the step it introduced.
       expect(find.byType(ThinkingBlock), findsNothing);
-      expect(find.textContaining('做了 4 步'), findsOneWidget);
+      expect(find.textContaining('4 次工具调用'), findsOneWidget);
       expect(find.textContaining('有未完成或待核实'), findsOneWidget);
-      await tester.tap(find.textContaining('做了 4 步'));
+      await tester.tap(find.textContaining('4 次工具调用'));
       await tester.pumpAndSettle();
       expect(find.text('Check next step'), findsOneWidget);
       expect(

@@ -103,9 +103,9 @@ void main() {
       'second idea',
     ]);
     expect(find.byType(ThinkingBlock), findsNothing);
-    expect(find.textContaining('做了 2 步'), findsOneWidget);
+    expect(find.textContaining('2 次工具调用'), findsOneWidget);
     // The model's sentence is the row title; tapping a row reveals its text.
-    await tester.tap(find.textContaining('做了 2 步'));
+    await tester.tap(find.textContaining('2 次工具调用'));
     await tester.pumpAndSettle();
     expect(find.text('first idea'), findsOneWidget);
     expect(find.text('second idea'), findsOneWidget);
@@ -165,7 +165,7 @@ void main() {
     });
     await _result(store, id, 'c', 'web_fetch');
     await _pump(tester, store, id);
-    await tester.tap(find.textContaining('做了 2 步'));
+    await tester.tap(find.textContaining('3 次工具调用'));
     await tester.pumpAndSettle();
     expect(find.text('读取文件 · notes.txt · 2 次'), findsOneWidget);
     expect(find.text('读取网页 · example.com'), findsOneWidget);
@@ -188,7 +188,7 @@ void main() {
     final group = tester.widget<ToolStepGroup>(find.byType(ToolStepGroup));
     expect(group.running, isTrue);
     expect(find.text('更早的 2 步'), findsOneWidget);
-    expect(find.textContaining('做了'), findsNothing);
+    expect(find.textContaining('次工具调用'), findsNothing);
     await tester.tap(find.text('更早的 2 步'));
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('更早的 2 步'), findsNothing);
@@ -208,7 +208,7 @@ void main() {
       tester.widget<ToolStepGroup>(find.byType(ToolStepGroup)).running,
       isFalse,
     );
-    expect(find.textContaining('做了 3 步'), findsOneWidget);
+    expect(find.textContaining('3 次工具调用'), findsOneWidget);
     expect(find.text('idea 0'), findsNothing);
   });
 }
