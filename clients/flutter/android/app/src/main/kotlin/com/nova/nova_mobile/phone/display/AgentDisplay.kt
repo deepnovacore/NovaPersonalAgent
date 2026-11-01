@@ -165,10 +165,10 @@ class AgentDisplay(
         }
     }
 
-    /** Latest frame as a luma grid (see [FrameMath.lumaGrid]); null before the first frame. */
-    fun frameGrid(): IntArray? {
-        val frame = latestFrameBitmap() ?: return null
-        return try { FrameMath.lumaGrid(frame.width, frame.height, frame::getPixel) } finally { frame.recycle() }
+    /** Latest frame as a luma grid (see [FrameMath.lumaGrid]); null before the first frame. Samples in place, no copy. */
+    fun frameGrid(): IntArray? = synchronized(frameLock) {
+        val bmp = fullFrame
+        if (!hasFrame || bmp == null) null else FrameMath.lumaGrid(width, height, bmp::getPixel)
     }
 
     fun release() {

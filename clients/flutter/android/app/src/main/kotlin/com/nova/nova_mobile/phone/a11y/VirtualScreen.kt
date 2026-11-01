@@ -21,6 +21,7 @@ import com.nova.nova_mobile.phone.ScrollDirection
 import com.nova.nova_mobile.phone.ShellProvider
 import com.nova.nova_mobile.phone.TakeoverPort
 import com.nova.nova_mobile.phone.display.AgentDisplay
+import com.nova.nova_mobile.phone.display.FrameMath
 import com.nova.nova_mobile.phone.display.LazyAgentDisplay
 import com.nova.nova_mobile.phone.shell.INovaShell
 import kotlin.math.min
@@ -132,6 +133,7 @@ class VirtualScreen(
         shell()
         val d = requireDisplay()
         val before = SnapshotReader.hash(windows(d))
+        val frameBefore = d.frameGrid()
         val done = try { action.run(d, effects) } catch (e: EffectRefused) {
             // Admission refused before any effect of this action (every earlier try was refused too).
             throw e
@@ -141,7 +143,7 @@ class VirtualScreen(
             throw IllegalStateException(EFFECT_UNKNOWN)
         }
         if (!done) return DispatchResult("rejected", null)
-        return DispatchResult("dispatched", settle(d, before, action))
+        return DispatchResult("dispatched", settle(d, before, frameBefore, action))
     }
 
     /** Ends the run's display: later calls fail with `display_unavailable`. */
@@ -243,13 +245,16 @@ class VirtualScreen(
         return null
     }
 
-    /** Waits for the tree to change after an action, then for the display's events to go quiet (both capped). */
-    private fun settle(d: AgentDisplay, before: Long, prepared: Prepared): Boolean {
+    /**
+     * Waits for the tree or the frame to change after an action (canvas, WebView and game screens change only in the
+     * frame), then for the display's events to go quiet (both capped).
+     */
+    private fun settle(d: AgentDisplay, before: Long, frameBefore: IntArray?, prepared: Prepared): Boolean {
         val start = SystemClock.uptimeMillis()
         var changed = false
         while (SystemClock.uptimeMillis() - start < prepared.changeWaitMs) {
             val done = prepared.settled?.invoke(d) ?: true
-            if (done && SnapshotReader.hash(windows(d)) != before) { changed = true; break }
+            if (done && (SnapshotReader.hash(windows(d)) != before || FrameMath.differs(frameBefore, d.frameGrid()))) { changed = true; break }
             Thread.sleep(POLL_MS)
         }
         if (changed) {
