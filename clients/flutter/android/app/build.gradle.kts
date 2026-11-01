@@ -20,7 +20,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { buildConfig = true }
+    buildFeatures {
+        buildConfig = true
+        // INovaShell: Binder contract with the shell-uid phone helper.
+        aidl = true
+    }
     // A missing vendor AAR is an explicit configuration failure for a selected MiPush build.
     if (pushSetting("novaPushProvider") == "mipush") require(miPushSdk != null && file(miPushSdk).isFile) { "novaMiPushSdk must point to the official vendor AAR" }
     defaultConfig {
