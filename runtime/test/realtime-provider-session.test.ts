@@ -665,3 +665,22 @@ test('requested-response audio does not read memory per frame but response admis
  assert.deepEqual(provider.responseAdaptations.at(-1),{revision:1,content:null});assert.equal(provider.ensured,1)
  await session.close()
 })
+
+test('memory is read once per session and later audio frames never wait for it', async () => {
+  const provider = new FakeProvider()
+  let reads = 0
+  const session = new RealtimeProviderSession(provider, {
+    responseAdaptation: () => { reads += 1; return new Promise(resolve => setTimeout(() => resolve({revision: 1, content: 'ctx'}), 300)) },
+    responseAdaptationRequired: () => true,
+  })
+  await session.connect()
+  // The first frame has no verification yet, so it waits for one read.
+  await session.sendAudio(new Uint8Array([0, 0]))
+  const readsAfterFirst = reads
+  const started = Date.now()
+  for (let i = 1; i <= 200; i++) await session.sendAudio(new Uint8Array([i & 255, 0]))
+  assert.ok(Date.now() - started < 250, 'frames after a verification are not blocked by a read')
+  assert.equal(provider.sentAudio.length, 201)
+  assert.equal(reads - readsAfterFirst, 0, 'no further reads after the first verification')
+  await session.close()
+})

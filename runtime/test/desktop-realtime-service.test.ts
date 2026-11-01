@@ -1827,7 +1827,7 @@ test('shared phone endpoint publishes one host revision and cannot interrupt des
     Object.defineProperties(realtime.personalAgent,{
       subscribe:{value:(listener:()=>void)=>{listeners.add(listener);return()=>listeners.delete(listener)}},
       snapshot:{value:()=>({type:'personal.state',revision})},
-      conversationSnapshot:{value:()=>({voice_id:voice,selected_id:'chat',items:[{id:'chat'}]})},
+      conversationSnapshot:{value:()=>({voice_id:voice,selected_id:'chat',items:[{id:'chat'}]})},voiceConversationId:{value:()=>voice},
       command:{value:async(command:{method:string;request_id:string;params?:{enabled?:boolean;mode?:string}},context?:{presentation_mode?:string})=>{if(command.method==='presentation.set')presentations.push({mode:command.params?.mode,aggregate:context?.presentation_mode});if(command.method==='conversations.voice'){if(voiceFailure)throw Error('voice_start_failed');if(command.params?.enabled)await voiceStart;voice=command.params?.enabled?'chat':null;}revision++;for(const listener of listeners)listener();return {type:'personal.result',request_id:command.request_id,ok:true}}},
       voiceService:{value:()=>realtime.service},
       sendConversationAudio:{value:(id:string)=>{assert.equal(id,'chat');conversationAudio++;return Promise.resolve()}},

@@ -2664,7 +2664,7 @@ test('personal learning uses host session identity and only the accepted user ev
   }
 })
 
-test('personal reply preferences refresh response style without invoking recall', async () => {
+test('personal reply preferences are read once per voice session and not refreshed per audio frame', async () => {
   const provider = new ResponseAdaptationProvider()
   let recallCalls = 0
   let adaptation = {
@@ -2697,16 +2697,11 @@ test('personal reply preferences refresh response style without invoking recall'
     assert.equal(provider.adaptations[0]!.content?.includes('source:'), false)
     assert.equal(recallCalls, 0)
 
-    await new Promise<void>(resolve => setImmediate(resolve))
+    // The context is read once per session: later audio never waits for, or triggers, another memory read.
     adaptation = {revision: 8, replyPreferences: []}
     await realtime.service.sendAudio(new Uint8Array([2, 3]))
     await new Promise<void>(resolve => setImmediate(resolve))
-    assert.deepEqual(provider.adaptations.at(-1), {revision: 2, content: null})
-    adaptation = {revision: 0, replyPreferences: [{id: 'reset', text: 'New preference after reopening.', evidenceIds: []}]}
-    await realtime.service.sendAudio(new Uint8Array([2, 3]))
-    await new Promise<void>(resolve => setImmediate(resolve))
-    assert.equal(provider.adaptations.at(-1)?.revision, 3)
-    assert.ok(provider.adaptations.at(-1)?.content?.includes('New preference'))
+    assert.equal(provider.adaptations.length, 1)
   } finally { await realtime.stop() }
 })
 
@@ -2744,12 +2739,10 @@ test('memory reading modes select bounded low-trust snapshots without invoking r
    assert.ok(content.includes(context[mode]));assert.ok(!content.includes(context[mode==='text'?'voice':'text']))
    assert.match(content,/untrusted|low.trust/i);assert.match(content,/cannot authorize/)
    assert.equal(recalled,0)
+   assert.ok(content.length<(mode==='text'?6500:4500),'the snapshot is bounded');assert.ok(!content.includes('OMITTED_TAIL'))
    context={text:'x'.repeat(10000)+'OMITTED_TAIL',voice:'y'.repeat(10000)+'OMITTED_TAIL'}
    await realtime.service.sendAudio(new Uint8Array([2,3]));await new Promise<void>(resolve=>setImmediate(resolve))
-   const bounded=provider.adaptations.at(-1)?.content??''
-   assert.ok(bounded.length<(mode==='text'?6500:4500));assert.ok(!bounded.includes('OMITTED_TAIL'))
-   context={text:'',voice:''};await realtime.service.sendAudio(new Uint8Array([2,3]));await new Promise<void>(resolve=>setImmediate(resolve))
-   assert.equal(provider.adaptations.at(-1)?.content,null)
+   assert.equal(provider.adaptations.length,1,'later audio does not re-read memory')
   }finally{await realtime.stop()}
  }
 })

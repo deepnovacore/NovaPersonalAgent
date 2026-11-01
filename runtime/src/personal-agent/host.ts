@@ -803,6 +803,8 @@ export class PersonalAgentHost {
             item.messages=item.messages.slice(-512);await this.#commit(next);
         });
     }
+    /** The conversation that owns the microphone. Cheap on purpose: it runs for every audio frame, unlike conversationSnapshot(), which assembles messages. */
+    voiceConversationId():string|null{return this.#state.conversations.voice_id??null}
     conversationSnapshot(maxHomeBytes=256*1024){
         const c=this.#state.conversations,selected=c.items.find(item=>item.id===c.selected_id),home=c.items.find(item=>item.id==='chat:main')?.messages??[];
         const receipts=this.#state.feed.filter(feed=>feed.task_ref&&!home.some(message=>message.id==='feed:'+feed.id||message.turn_id==='task:'+feed.task_ref!.work_id)).map(feed=>({id:'feed:'+feed.id,conversation_id:c.work_owners[feed.task_ref!.work_id]??'chat:main',role:'assistant' as const,text:feed.title,created_at:feed.updated_at}));

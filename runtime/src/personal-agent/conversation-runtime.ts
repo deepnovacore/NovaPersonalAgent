@@ -94,6 +94,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   if(conversation.kind==='schedule'&&!execution)throw Error('scheduled_execution_required')
   const processing=execution&&options.host.schedules.getRun(execution.run_id).processing
   const audioDrops:Record<string,number>={};let audioDropReportedAt=0
+  let audioIdentityEpoch=-1;let audioIdentitySync:Promise<void>|undefined
   const telemetry:RealtimeTelemetry|undefined=options.telemetry?{
    record:(kind,payload)=>options.telemetry!.record(kind,{...payload,conversation_id:conversation.id,conversation_generation:conversation.generation}),
    close:()=>{/* the deployment owns the shared telemetry sink */},
@@ -219,7 +220,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ...(workbenchVoice?{providerToolView:tools=>({...tools,schemas:[]}),scopedTool:event=>Promise.resolve(scheduledToolResult(event,{state:'refused',code:'workbench_voice_readonly',message:'Return to text mode to confirm execution.'},'workbench_voice_readonly',false))}:{}),
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
-   ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(conversation.id!=='chat:main'||options.host.conversationSnapshot().voice_id===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
+   ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(conversation.id!=='chat:main'||options.host.voiceConversationId()===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
    ...(projectConfirmation?{projectConfirmation}:{}),...(codingTarget?{codingTarget}:{}),
    ...(options.codexResource?{codexResource:options.codexResource,codingAgentControllerFactory:options.codexResource.agentControllerFactory}:{}),
    ...(approval?{executorApproval:approval}:{}),
@@ -315,7 +316,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(mode==='background')projectConfirmation?.setBackground(true)
    else if(!seen)projectConfirmation?.setBackground(false,{awaitPresentation:true})
    else if(seen?.proposal_id&&seen.conversation_id===conversation.id&&projectConfirmation?.view.pending_confirmation_id===seen.proposal_id)projectConfirmation.setBackground(false)
-   if(!seen){audioGeneration++;const paused=!execution&&(!textOnly&&!voiceEnabled||mode==='background'||!textOnly&&mode==='workbench'&&conversation.id==='chat:main'&&options.host.conversationSnapshot().voice_id!==conversation.id);if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
+   if(!seen){audioGeneration++;const paused=!execution&&(!textOnly&&!voiceEnabled||mode==='background'||!textOnly&&mode==='workbench'&&conversation.id==='chat:main'&&options.host.voiceConversationId()!==conversation.id);if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   })
   const syncIdentityContext=createIdentityContextSync({identity:()=>options.host.identity(),epoch:()=>graph.service.session.sessionEpoch,
    inject:(content,signal)=>provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content},{confirmationTimeout:null,asUserActivation:false,signal})})
@@ -404,12 +405,17 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    deliverSuggestion:(suggestion,reason)=>graph.service.onSuggestionSelected(suggestion,reason),
    ownsWork:id=>core.runtime.inFlightDelegate(id)!==undefined,bridgeService:graph.service,sendAudio:async(pcm)=>{
     const generation=audioGeneration,epoch=graph.service.session.sessionEpoch
-    const reason=()=>closed||lifetime.aborted?'closed':!voiceEnabled?'voice_off':generation!==audioGeneration?'generation':epoch!==graph.service.session.sessionEpoch?'epoch':options.host.presentationMode==='background'?'background':options.host.conversationSnapshot().voice_id!==conversation.id?'other_voice_owner':undefined
+    const reason=()=>closed||lifetime.aborted?'closed':!voiceEnabled?'voice_off':generation!==audioGeneration?'generation':epoch!==graph.service.session.sessionEpoch?'epoch':options.host.presentationMode==='background'?'background':options.host.voiceConversationId()!==conversation.id?'other_voice_owner':undefined
     const current=()=>reason()===undefined
     // Frames dropped here are otherwise invisible; count them by reason and report at most every five seconds.
     const dropped=(why:string)=>{audioDrops[why]=(audioDrops[why]??0)+1;const now=Date.now();if(now-audioDropReportedAt>=5000){audioDropReportedAt=now;telemetry?.record('voice.audio_dropped',{...audioDrops});for(const key of Object.keys(audioDrops))delete audioDrops[key]}}
     if(!current()){dropped(reason()??'unknown');return}
-    await syncIdentity(AbortSignal.any([lifetime,AbortSignal.timeout(10000)]))
+    // The names are read from memory, which takes over a second; doing that for every 10 ms frame stalls the serial audio path.
+    // Once per provider session is enough, because identity edits are injected by their own command path.
+    if(audioIdentityEpoch!==epoch){
+      audioIdentitySync??=syncIdentity(AbortSignal.any([lifetime,AbortSignal.timeout(10000)])).then(()=>{audioIdentityEpoch=epoch}).finally(()=>{audioIdentitySync=undefined})
+      await audioIdentitySync
+    }
     if(current())await graph.service.sendAudio(pcm);else dropped(reason()??'unknown')
    },
    runTurn:async(text,callerSignal,context)=>{

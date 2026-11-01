@@ -1634,7 +1634,7 @@ export function buildDesktopRealtimeComposition(
       // implicit owner and drains its audio independently of phone visibility.
       if (input.method === 'presentation.set' && (result as {ok?:boolean}).ok &&
           side === 'desktop' && params.mode !== 'orb' && audioOwner === side &&
-          requireRealtime().personalAgent.conversationSnapshot().voice_id === null) {
+          requireRealtime().personalAgent.voiceConversationId() === null) {
         audioClosing++
         try {
           await requireRealtime().service.discardInputAudio?.()
@@ -1744,12 +1744,12 @@ export function buildDesktopRealtimeComposition(
     personalSnapshot: () => realtime.personalAgent.snapshot(),
     onConnectionReleased:()=>{
       const hadPresentation = presentation.delete(side)
-      if(audioOwner===side && (realtime.personalAgent.conversationSnapshot().voice_id!==null || voiceOperations.has(side))){
+      if(audioOwner===side && (realtime.personalAgent.voiceConversationId()!==null || voiceOperations.has(side))){
         audioClosing++
         let released=false
         void (async()=>{
           await voiceOperations.get(side)?.catch(()=>{ /* the failed operation already reported its error */ })
-          const id=realtime.personalAgent.conversationSnapshot().voice_id
+          const id=realtime.personalAgent.voiceConversationId()
           if(id){const result=await realtime.personalAgent.command({type:'personal.command',request_id:randomUUID(),method:'conversations.voice',params:{id,enabled:false}}) as {ok?:boolean};if(!result.ok)throw Error('voice_release_failed')}
           released=true
         })().catch(()=>{/* Keep owner if draining failed; that endpoint can reconnect and retry stop. */}).finally(()=>{if(released&&audioOwner===side)audioOwner=null;audioClosing--})
