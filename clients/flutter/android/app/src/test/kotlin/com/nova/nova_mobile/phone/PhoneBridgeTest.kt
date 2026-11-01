@@ -108,4 +108,12 @@ class PhoneBridgeTest {
         assertTrue(json.getBoolean("experimental"))
         assertEquals(37123, json.getInt("pairing_port"))
     }
+    @Test fun experimentalAckArgumentIsABooleanOrInvalid() {
+        assertTrue(PhoneBridge.acknowledgedArgument(org.json.JSONObject("{\"acknowledged\":true}")))
+        assertFalse(PhoneBridge.acknowledgedArgument(org.json.JSONObject("{\"acknowledged\":false}")))
+        for (raw in listOf("{}", "{\"acknowledged\":\"yes\"}", "{\"acknowledged\":null}")) {
+            val error = assertThrows(IllegalArgumentException::class.java) { PhoneBridge.acknowledgedArgument(org.json.JSONObject(raw)) }
+            assertEquals("invalid_acknowledged", PhoneBridge.safeError(error))
+        }
+    }
 }

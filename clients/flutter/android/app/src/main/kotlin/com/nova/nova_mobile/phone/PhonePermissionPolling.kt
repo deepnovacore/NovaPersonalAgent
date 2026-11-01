@@ -7,6 +7,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 
 /** Identity-based tracking handles overlapping activities and duplicate pause/destroy callbacks. Main-thread only. */
@@ -25,4 +28,16 @@ internal suspend fun pollPhonePermissions(resumed: Flow<Boolean>, refresh: suspe
             delay(2_000)
         }
     }
+}
+
+/**
+ * Permission flags as status input: never the unread placeholder. A subscriber that arrives before the first poll
+ * (background, or right after an engine restart) reads the flags once instead of reporting every permission as off.
+ */
+internal fun <T : Any> readPermissionFlags(flags: MutableStateFlow<T?>, read: suspend () -> T): Flow<T> = flow {
+    if (flags.value == null) {
+        val first = read()
+        flags.compareAndSet(null, first)
+    }
+    emitAll(flags.filterNotNull())
 }

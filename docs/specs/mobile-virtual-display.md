@@ -185,7 +185,9 @@ for Nova's package so the user can allow restricted settings.
 
 Native permission polling runs only while at least one app activity is resumed. Pausing the last activity stops
 polling, not the event subscription; helper state events continue using the last permission flags, and resume
-refreshes them immediately. Explicit `status` calls still read current flags.
+refreshes them immediately. Explicit `status` calls still read current flags. `accessibility` is a field read of the
+running service, so every status (polled or not) reads it live. A subscriber that arrives before the first poll (in the
+background, or after an engine restart) gets one fresh read of the flags; no status is ever built from unread flags.
 
 `notifications_allowed` requires app notifications and the selected pairing channel to be enabled.
 `pairing_stage` describes the current pairing attempt independently of helper availability: discovery/repair waits for code, code exchange is `pairing`, helper startup is `connecting`.
@@ -287,7 +289,14 @@ Lanes do not edit files they don't own. If a lane needs a seam that isn't here, 
   `PhoneBridge` for both (null keeps every run on `main`). The controller implements `PhoneTakeover`; the bridge routes
   `takeover`/`handBack` to the current controller. On Space switch/close or activity destruction, detach both hooks
   before closing the old controller; install both hooks for the new Space only. An old activity's cleanup must not
-  clear a newer controller's hooks. A closed controller also refuses self-check admission.
+  clear a newer controller's hooks. A closed controller also refuses self-check admission (`accessibility_unavailable`,
+  which ends the whole self-check rather than being reported as a `create_display` flag failure).
+- **Single-activity assumption.** The bridge holds one pair of hooks, owned by the last `MainActivity` that installed
+  them. `MainActivity` is `singleTop` and the app opens it with `FLAG_ACTIVITY_NEW_TASK|SINGLE_TOP|CLEAR_TOP`, so one
+  instance is expected. If two instances ever coexist and the newer one is destroyed first, its cleanup clears the
+  hooks while the older controller still runs: `takeover`/`handBack` then fail with `task_not_running` and `selfCheck`
+  with `accessibility_unavailable` until the next Space switch reinstalls them. The run itself is unaffected and can
+  still be stopped through `nova/local_agent/v1 stop`.
 - `pairingWindowReader` dynamically wraps `LocalGuiService.current?.settingsWindowTexts()` (empty while unavailable),
   so service reconnection never leaves a stale accessibility instance attached.
 - `VirtualSelfCheck(context, shells, runs)` implements `PhoneSelfCheck`; `runs` is the current `LocalAgentController`

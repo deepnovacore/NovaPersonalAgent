@@ -95,7 +95,7 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider, priv
             // Taken while no run is active; a run cannot start until the lease is released below.
             if (service != null) {
                 flags = try { runs.whileIdle { service.acquireVirtualFlags(cancellation::cancel) } } catch (e: IllegalStateException) {
-                    if (e.message == RUN_ACTIVE) throw e
+                    if (isAdmissionRefusal(e)) throw e
                     put(ID_CREATE_DISPLAY, false, "accessibility_flags_failed")
                     return
                 } catch (_: Exception) {
@@ -207,6 +207,11 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider, priv
         const val ID_MAIN_FOCUS = "main_focus"
         /** Refusal while an agent run is active. */
         const val RUN_ACTIVE = "run_active"
+        /** Refusal by a closed controller (Space switched or closed during the self-check). */
+        const val CONTROLLER_CLOSED = "accessibility_unavailable"
+
+        /** Admission refusals end the whole self-check; they are not a failure of the runtime a11y flag. */
+        internal fun isAdmissionRefusal(error: IllegalStateException) = error.message == RUN_ACTIVE || error.message == CONTROLLER_CLOSED
         /** Contract order of the rows. */
         val IDS = listOf(ID_HELPER, ID_CREATE_DISPLAY, ID_START_APP, ID_READ_TREE, ID_TAP, ID_TYPE, ID_BACK, ID_MAIN_FOCUS)
         private const val TYPE_PROBE = "nova"

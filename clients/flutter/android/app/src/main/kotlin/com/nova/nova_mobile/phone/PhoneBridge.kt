@@ -92,7 +92,8 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
 
     private data class Permissions(val accessibility: Boolean, val overlay: Boolean, val battery: Boolean, val notifications: Boolean)
 
-    private val permissionFlags = MutableStateFlow(Permissions(false, false, false, false))
+    /** Null until the first read, so no status is ever projected from unread (all-false) flags. */
+    private val permissionFlags = MutableStateFlow<Permissions?>(null)
     private val activities = ResumedPhoneActivities()
 
     init {
@@ -118,7 +119,8 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
     suspend fun status(): PhoneStatus = status(permissions().also { permissionFlags.value = it })
 
     private suspend fun status(permissions: Permissions): PhoneStatus = withContext(Dispatchers.IO) {
-        val accessibility = permissions.accessibility
+        // A static field read, so it stays live in the background where the other flags are only polled on resume.
+        val accessibility = LocalGuiService.current != null
         val state = if (supported) manager.engine.status.value else null
         val discovery = if (supported) manager.engine.pairingDiscovery.value else PairingDiscovery.Idle
         projectStatus(Build.VERSION.SDK_INT, accessibility, shell != null, state, discovery,
@@ -133,7 +135,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
             val e = withContext(Dispatchers.IO) { manager.engine }
             combine(e.status, hub.shell, e.pairingDiscovery, e.exchangingCode, pairing.repairing) { _, _, _, _, _ -> Unit }
         } else flowOf(Unit)
-        emitAll(combine(changes, permissionFlags, preferenceChanges) { _, flags, _ -> status(flags) })
+        emitAll(combine(changes, readPermissionFlags(permissionFlags, ::permissions), preferenceChanges) { _, flags, _ -> status(flags) })
     }.distinctUntilChanged()
 
     private fun attach(activity: Activity, engine: FlutterEngine) {
@@ -154,8 +156,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                         "status" -> encodeStatus(status())
                         "openSettings" -> JSONObject().put("opened", openSettings(owner.get(), args.getString("kind")))
                         "setExperimentalAck" -> {
-                            val acknowledged = args.get("acknowledged") as? Boolean
-                                ?: throw IllegalArgumentException("invalid_acknowledged")
+                            val acknowledged = acknowledgedArgument(args)
                             withContext(Dispatchers.IO) { setExperimentalAck(preferences, acknowledged) }
                             preferenceChanges.value++
                             encodeStatus(status())
@@ -186,7 +187,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                                 put(JSONObject().put("id", c.id).put("ok", c.ok).apply { c.detail?.let { put("detail", it) } })
                             } })
                         }
-                        "setPreview" -> { registration.visible = args.get("visible") as? Boolean ?: throw IllegalArgumentException("invalid_preview"); JSONObject() }
+                        "setPreview" -> { registration.visible = args.opt("visible") as? Boolean ?: throw IllegalArgumentException("invalid_preview"); JSONObject() }
                         "takeover", "handBack" -> {
                             val taskId = args.getString("task_id").takeIf { it.isNotBlank() } ?: throw IllegalArgumentException("invalid_task")
                             val state = withContext(Dispatchers.IO) {
@@ -274,6 +275,9 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
             "invalid_acknowledged", "run_active", "task_not_running", "no_takeover", "takeover_on_main_thread",
             "takeover_unavailable", "accessibility_flags_failed", "accessibility_unavailable", "helper_unavailable", "display_unavailable")
         internal fun safeError(error: Exception): String = error.message?.takeIf { it in SAFE_ERRORS } ?: "unknown"
+        /** `setExperimentalAck` argument; a missing or non-boolean value is `invalid_acknowledged`, never `unknown`. */
+        internal fun acknowledgedArgument(args: JSONObject): Boolean =
+            args.opt("acknowledged") as? Boolean ?: throw IllegalArgumentException("invalid_acknowledged")
         internal fun setExperimentalAck(preferences: SharedPreferences, acknowledged: Boolean) {
             preferences.edit().putBoolean(PHONE_EXPERIMENTAL_ACK, acknowledged).apply()
         }

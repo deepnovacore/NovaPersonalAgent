@@ -1,6 +1,11 @@
 package com.nova.nova_mobile.phone
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
@@ -60,5 +65,23 @@ class PhonePermissionPollingTest {
         testScheduler.runCurrent()
         assertTrue(cancelled)
         job.cancel()
+    }
+
+    @Test fun statusFlagsReadOnceBeforeTheFirstPollInsteadOfReportingAllOff() = runTest {
+        val flags = MutableStateFlow<Boolean?>(null)
+        var reads = 0
+        assertEquals(true, readPermissionFlags(flags) { reads++; true }.first())
+        assertEquals(1, reads)
+        assertEquals(true, flags.value)
+    }
+
+    @Test fun statusFlagsFollowPollsWithoutRereading() = runTest {
+        val flags = MutableStateFlow<Boolean?>(false)
+        var reads = 0
+        val seen = async { readPermissionFlags(flags) { reads++; true }.take(2).toList() }
+        testScheduler.runCurrent()
+        flags.value = true
+        assertEquals(listOf(false, true), seen.await())
+        assertEquals(0, reads)
     }
 }

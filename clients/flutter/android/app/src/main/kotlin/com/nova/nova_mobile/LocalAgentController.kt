@@ -202,7 +202,7 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
     private fun experimentalAcknowledged()=app.getSharedPreferences(PHONE_PREFERENCES,Context.MODE_PRIVATE).getBoolean(PHONE_EXPERIMENTAL_ACK,false)
     /** Self-check admission: [block] runs only while no run is active, atomically with run admission; else `run_active`. */
     @Synchronized override fun <T> whileIdle(block:()->T):T {
-        check(!closed){"accessibility_unavailable"}
+        check(!closed){VirtualSelfCheck.CONTROLLER_CLOSED}
         check(active==null){VirtualSelfCheck.RUN_ACTIVE}
         return block()
     }

@@ -2,6 +2,7 @@ package com.nova.nova_mobile.phone
 
 import com.nova.nova_mobile.phone.a11y.RuntimeFlagLeases
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -47,5 +48,12 @@ class VirtualSelfCheckTest {
         assertEquals(1, store.flags)
         lease.release()
         assertEquals(1, store.flags)
+    }
+
+    @Test fun closedControllerAndActiveRunEndTheSelfCheckInsteadOfAFlagRow() {
+        assertTrue(VirtualSelfCheck.isAdmissionRefusal(IllegalStateException("run_active")))
+        assertTrue(VirtualSelfCheck.isAdmissionRefusal(IllegalStateException("accessibility_unavailable")))
+        assertFalse(VirtualSelfCheck.isAdmissionRefusal(IllegalStateException("accessibility_flags_failed")))
+        assertEquals("accessibility_unavailable", PhoneBridge.safeError(IllegalStateException(VirtualSelfCheck.CONTROLLER_CLOSED)))
     }
 }
