@@ -1,0 +1,272 @@
+package com.nova.nova_mobile.phone
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
+import com.nova.nova_mobile.LocalGuiService
+import com.nova.nova_mobile.phone.setup.*
+import com.nova.nova_mobile.phone.shell.HelperHub
+import com.nova.nova_mobile.phone.shell.INovaShell
+import com.nova.phone.core.shell.*
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodChannel
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.json.JSONArray
+import org.json.JSONObject
+import java.lang.ref.WeakReference
+
+/** Process-owned channels and helper seam. Provider handoff does not depend on a Flutter engine. */
+class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEventSink {
+    private val app = context.applicationContext
+    private val main = Handler(Looper.getMainLooper())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val operations = Mutex()
+    private val hub = HelperHub.of(app)
+    private val manager by lazy { BuiltinShellManager(app, hub) }
+    val pairing by lazy { PairingCoordinator(app, manager.engine) { pairingWindowReader } }
+    /** M3 (LocalGuiService) installs its reader via PhoneBridge.of(context).pairingWindowReader. */
+    @Volatile var pairingWindowReader: PairingWindowReader? = null
+    @Volatile var takeover: PhoneTakeover? = null
+    @Volatile var selfCheck: PhoneSelfCheck? = null
+    private class Registration {
+        @Volatile var events: EventChannel.EventSink? = null
+        @Volatile var frames: EventChannel.EventSink? = null
+        @Volatile var visible = false
+        var statusWatch: Job? = null
+        lateinit var detach: () -> Unit
+        fun clearStreams() {
+            statusWatch?.cancel()
+            events = null; frames = null; visible = false
+        }
+    }
+    private val registrations = ConcurrentHashMap<FlutterEngine, Registration>()
+    override val shell: INovaShell? get() = hub.shell.value
+    override val previewVisible: Boolean get() = registrations.values.any { it.visible && it.frames != null }
+    override fun need() {
+        scope.launch(Dispatchers.IO) { runCatching { if (supported) { manager.start(); manager.need() } } }
+    }
+    private val supported get() = Build.VERSION.SDK_INT >= PHONE_VIRTUAL_MIN_API
+
+    override fun emit(event: JSONObject) {
+        val encoded = event.toString()
+        registrations.values.forEach { registration ->
+            val sink = registration.events ?: return@forEach
+            main.post { if (registration.events === sink) sink.success(encoded) }
+        }
+    }
+    override fun frame(jpeg: ByteArray) {
+        if (!previewVisible) return
+        val bytes = jpeg.copyOf()
+        registrations.values.forEach { registration ->
+            val sink = registration.frames?.takeIf { registration.visible } ?: return@forEach
+            main.post { if (registration.visible && registration.frames === sink) sink.success(bytes) }
+        }
+    }
+
+    private data class Permissions(val overlay: Boolean, val battery: Boolean, val notifications: Boolean)
+
+    private suspend fun permissions(): Permissions = withContext(Dispatchers.IO) {
+        Permissions(Settings.canDrawOverlays(app),
+            app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName),
+            PairingNotifier.notificationsAllowed(app))
+    }
+
+    /** All system queries and the first preferences/engine load stay off Flutter's main thread. */
+    suspend fun status(): PhoneStatus = status(permissions())
+
+    private suspend fun status(permissions: Permissions): PhoneStatus = withContext(Dispatchers.IO) {
+        val accessibility = LocalGuiService.current != null
+        val state = if (supported) manager.engine.status.value else null
+        val discovery = if (supported) manager.engine.pairingDiscovery.value else PairingDiscovery.Idle
+        projectStatus(Build.VERSION.SDK_INT, accessibility, shell != null, state, discovery,
+            supported && manager.engine.paired, permissions.overlay, permissions.battery, permissions.notifications,
+            if (supported) PhoneSetupFlow.stage(state!!, discovery, pairing.repairing.value, manager.engine.exchangingCode.value) else PairingStage.IDLE)
+    }
+
+    /** Reactive helper state; only system permission flags need a slow refresh while Dart listens. */
+    private fun statuses(): Flow<PhoneStatus> = flow {
+        val permissionChanges = flow {
+            while (currentCoroutineContext().isActive) { emit(permissions()); delay(2_000) }
+        }
+        val changes = if (supported) {
+            val e = withContext(Dispatchers.IO) { manager.engine }
+            combine(e.status, hub.shell, e.pairingDiscovery, e.exchangingCode, pairing.repairing) { _, _, _, _, _ -> Unit }
+        } else flowOf(Unit)
+        emitAll(combine(changes, permissionChanges) { _, flags -> status(flags) })
+    }.distinctUntilChanged()
+
+    private fun attach(activity: Activity, engine: FlutterEngine) {
+        registrations.remove(engine)?.detach?.invoke()
+        scope.launch(Dispatchers.IO) { if (supported) manager.start() }
+        val owner = WeakReference(activity)
+        val methods = MethodChannel(engine.dartExecutor.binaryMessenger, PHONE_METHOD_CHANNEL)
+        val eventChannel = EventChannel(engine.dartExecutor.binaryMessenger, PHONE_EVENT_CHANNEL)
+        val frameChannel = EventChannel(engine.dartExecutor.binaryMessenger, PHONE_FRAME_CHANNEL)
+        val calls = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val registration = Registration()
+        registrations[engine] = registration
+        methods.setMethodCallHandler { call, result ->
+            calls.launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    val args = JSONObject(call.arguments as? String ?: "{}")
+                    val answer = when (call.method) {
+                        "status" -> encodeStatus(status())
+                        "openSettings" -> JSONObject().put("opened", openSettings(owner.get(), args.getString("kind")))
+                        "startPairing" -> {
+                            requireSupported()
+                            PairingService.start(app)
+                            withContext(Dispatchers.IO) { manager.start(); pairing.startRepair(); pairing.begin() }
+                            encodeStatus(status())
+                        }
+                        "submitCode" -> {
+                            requireSupported()
+                            val code = PairingCode.normalize(args.getString("code")) ?: throw IllegalArgumentException("invalid_code")
+                            val port = if (args.has("port")) (args.get("port") as? Number)?.let {
+                                it.toInt().takeIf { p -> p in 1..65535 && it.toDouble() == p.toDouble() }
+                            } ?: throw IllegalArgumentException("invalid_port") else null
+                            operations.withLock { withContext(Dispatchers.IO) { pairing.pair(code, port) } }
+                            encodeStatus(status())
+                        }
+                        "ensureHelper" -> { need(); encodeStatus(status()) }
+                        "unpair" -> {
+                            if (supported) operations.withLock { withContext(Dispatchers.IO) { pairing.end(); manager.engine.unpair() } }
+                            encodeStatus(status())
+                        }
+                        "selfCheck" -> {
+                            val checks = withContext(Dispatchers.IO) { selfCheck?.run() ?: listOf(SelfCheckItem("helper", shell != null, null)) }
+                            JSONObject().put("checks", JSONArray().apply { checks.forEach { c ->
+                                put(JSONObject().put("id", c.id).put("ok", c.ok).apply { c.detail?.let { put("detail", it) } })
+                            } })
+                        }
+                        "setPreview" -> { registration.visible = args.get("visible") as? Boolean ?: throw IllegalArgumentException("invalid_preview"); JSONObject() }
+                        "takeover", "handBack" -> {
+                            val taskId = args.getString("task_id").takeIf { it.isNotBlank() } ?: throw IllegalArgumentException("invalid_task")
+                            val state = withContext(Dispatchers.IO) {
+                                if (call.method == "takeover") takeover?.takeover(taskId) else takeover?.handBack(taskId)
+                            } ?: TakeoverState.FAILED
+                            JSONObject().put("state", state.wire)
+                        }
+                        else -> { result.notImplemented(); return@launch }
+                    }
+                    result.success(answer.toString())
+                } catch (e: CancellationException) { result.error("phone_error", "unknown", null); throw e }
+                catch (e: Exception) {
+                    val code = e.message?.takeIf { it in SAFE_ERRORS } ?: "unknown"
+                    result.error("phone_error", code, null)
+                }
+            }
+        }
+        eventChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, sink: EventChannel.EventSink) {
+                registration.events = sink
+                registration.statusWatch?.cancel()
+                registration.statusWatch = calls.launch {
+                    statuses().collect { status ->
+                        if (registration.events === sink) sink.success(JSONObject().put("type", "status")
+                            .put("status", encodeStatus(status)).toString())
+                    }
+                }
+            }
+            override fun onCancel(arguments: Any?) {
+                registration.events = null; registration.statusWatch?.cancel()
+            }
+        })
+        frameChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, sink: EventChannel.EventSink) { registration.frames = sink }
+            override fun onCancel(arguments: Any?) { registration.frames = null }
+        })
+        val listener = object : FlutterEngine.EngineLifecycleListener {
+            override fun onPreEngineRestart() { calls.coroutineContext.cancelChildren(); registration.clearStreams() }
+            override fun onEngineWillDestroy() { registration.detach() }
+        }
+        engine.addEngineLifecycleListener(listener)
+        registration.detach = {
+            calls.cancel(); registration.clearStreams()
+            methods.setMethodCallHandler(null); eventChannel.setStreamHandler(null); frameChannel.setStreamHandler(null)
+            engine.removeEngineLifecycleListener(listener)
+            registrations.remove(engine, registration)
+        }
+    }
+
+    private fun requireSupported() { check(supported) { "unsupported" } }
+    private fun openSettings(activity: Activity?, kind: String): Boolean {
+        val packageUri = Uri.parse("package:${app.packageName}")
+        val intents = when (kind) {
+            "accessibility" -> listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            "overlay" -> listOf(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, packageUri))
+            "battery" -> listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            "developer" -> DeveloperSettings.developerOptionsPage()
+            "wireless_debugging" -> DeveloperSettings.wirelessDebuggingPage()
+            "wifi" -> DeveloperSettings.wifiPage()
+            else -> throw IllegalArgumentException("invalid_settings")
+        }
+        return intents.any { runCatching {
+            if (activity != null) activity.startActivity(it) else app.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        }.getOrDefault(false) }
+    }
+
+    companion object {
+        @Volatile private var instance: PhoneBridge? = null
+        fun of(context: Context): PhoneBridge = instance ?: synchronized(this) {
+            instance ?: PhoneBridge(context.applicationContext).also { instance = it }
+        }
+        fun register(activity: Activity, engine: FlutterEngine) = of(activity).attach(activity, engine)
+        private val SAFE_ERRORS = setOf("unsupported", "invalid_code", "invalid_port", "invalid_preview", "invalid_task", "invalid_settings")
+        internal fun projectStatus(
+            apiLevel: Int, accessibility: Boolean, helperAlive: Boolean, state: BuiltinShellStatus?,
+            discovery: PairingDiscovery, paired: Boolean, overlay: Boolean, battery: Boolean,
+            notifications: Boolean, stage: PairingStage,
+        ): PhoneStatus {
+            val helper = when {
+                apiLevel < PHONE_VIRTUAL_MIN_API -> HelperState.UNSUPPORTED
+                helperAlive -> HelperState.RUNNING
+                state is BuiltinShellStatus.Failed -> HelperState.FAILED
+                state == BuiltinShellStatus.Connecting -> HelperState.CONNECTING
+                state == BuiltinShellStatus.WirelessDebuggingOff -> HelperState.WIRELESS_DEBUGGING_OFF
+                else -> HelperState.NOT_PAIRED
+            }
+            val tier = if (accessibility && helper == HelperState.RUNNING) PhoneTier.VIRTUAL else PhoneTier.MAIN
+            val failure = (state as? BuiltinShellStatus.Failed)?.reason?.let { reason ->
+                when (reason) {
+                    BuiltinShellFailure.WrongCode -> HelperFailure.WRONG_CODE
+                    BuiltinShellFailure.PairingWindowClosed -> HelperFailure.PAIRING_WINDOW_CLOSED
+                    BuiltinShellFailure.NoWifi -> HelperFailure.NO_WIFI
+                    BuiltinShellFailure.WifiNotAllowed -> HelperFailure.WIFI_NOT_ALLOWED
+                    BuiltinShellFailure.ConnectFailed -> HelperFailure.CONNECT_FAILED
+                    BuiltinShellFailure.AuthorizationRevoked -> HelperFailure.AUTHORIZATION_REVOKED
+                    BuiltinShellFailure.KeyUnreadable -> HelperFailure.KEY_UNREADABLE
+                    BuiltinShellFailure.HelperStartFailed -> HelperFailure.HELPER_START_FAILED
+                    else -> HelperFailure.UNKNOWN
+                }
+            }
+            return PhoneStatus(apiLevel, tier, tier == PhoneTier.VIRTUAL && apiLevel < PHONE_VIRTUAL_STABLE_API,
+                accessibility, overlay, battery,
+                when { discovery != PairingDiscovery.Idle -> PairingState.SEARCHING
+                    paired -> PairingState.PAIRED
+                    else -> PairingState.UNPAIRED },
+                (discovery as? PairingDiscovery.Found)?.port, helper, failure, notifications, stage)
+        }
+
+        fun encodeStatus(s: PhoneStatus): JSONObject = JSONObject()
+            .put("schema_version", PHONE_SCHEMA_VERSION).put("api_level", s.apiLevel).put("tier", s.tier.wire)
+            .put("experimental", s.experimental).put("accessibility", s.accessibility).put("overlay", s.overlay)
+            .put("notifications_allowed", s.notificationsAllowed).put("pairing_stage", s.pairingStage.wire)
+            .put("battery_whitelisted", s.batteryWhitelisted).put("pairing", s.pairing.wire).put("helper", s.helper.wire)
+            .apply {
+                s.pairingPort?.let { put("pairing_port", it) }
+                s.helperFailure?.let { put("helper_failure", it.wire); put("helper_fix", it.fix.wire) }
+            }
+    }
+}

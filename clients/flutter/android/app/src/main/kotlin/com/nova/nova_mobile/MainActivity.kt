@@ -59,6 +59,7 @@ class MainActivity : FlutterActivity() {
     }
     override fun configureFlutterEngine(flutterEngine:FlutterEngine){
         super.configureFlutterEngine(flutterEngine)
+        com.nova.nova_mobile.phone.PhoneBridge.register(this, flutterEngine)
         NovaScheduleBridge.install(this, flutterEngine)
         spacePush = NovaSpacePush(this, flutterEngine.dartExecutor.binaryMessenger)
         spaceTools = NovaSpaceTools(this, flutterEngine.dartExecutor.binaryMessenger)
