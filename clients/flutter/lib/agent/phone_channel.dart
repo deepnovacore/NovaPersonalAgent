@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../agent_core/schedule_wake.dart';
+import 'local_agent.dart';
 
 /// Phone control exists on Android only; iOS has no counterpart and must not
 /// grow one.
@@ -55,6 +55,8 @@ enum PhoneSettingsKind {
   developer,
   wirelessDebugging,
   wifi,
+  notifications,
+  appInfo,
 }
 
 enum TakeoverState { requested, active, returned, timedOut, failed }
@@ -92,6 +94,7 @@ class PhoneStatus {
     this.apiLevel = 0,
     this.tier = PhoneTier.main,
     this.experimental = false,
+    this.experimentalAck = false,
     this.accessibility = false,
     this.overlay = false,
     this.batteryWhitelisted = false,
@@ -108,6 +111,7 @@ class PhoneStatus {
     apiLevel: (json['api_level'] as num?)?.toInt() ?? 0,
     tier: _wire(PhoneTier.values, json['tier'], PhoneTier.main),
     experimental: json['experimental'] == true,
+    experimentalAck: json['experimental_ack'] == true,
     accessibility: json['accessibility'] == true,
     overlay: json['overlay'] == true,
     batteryWhitelisted: json['battery_whitelisted'] == true,
@@ -137,6 +141,9 @@ class PhoneStatus {
 
   /// Android 12/13: apps on the virtual screen may briefly take main-screen focus.
   final bool experimental;
+
+  /// The user accepted the Android 12/13 warning. Native is the only owner.
+  final bool experimentalAck;
   final bool accessibility, overlay, batteryWhitelisted, notificationsAllowed;
   final PairingState pairing;
   final PairingStage pairingStage;
@@ -156,6 +163,7 @@ class PhoneStatus {
       other.apiLevel == apiLevel &&
       other.tier == tier &&
       other.experimental == experimental &&
+      other.experimentalAck == experimentalAck &&
       other.accessibility == accessibility &&
       other.overlay == overlay &&
       other.batteryWhitelisted == batteryWhitelisted &&
@@ -172,6 +180,7 @@ class PhoneStatus {
     apiLevel,
     tier,
     experimental,
+    experimentalAck,
     accessibility,
     overlay,
     batteryWhitelisted,
@@ -329,12 +338,12 @@ abstract interface class PhoneChannel {
   /// Asks the system for notification access (runtime permission prompt).
   Future<void> requestNotifications();
 
-  /// Whether the user accepted the Android 12/13 focus warning.
-  Future<bool> experimentalAcknowledged();
+  /// Records (or withdraws) the Android 12/13 focus-warning acceptance in
+  /// native, which owns it. Throws when native did not take it.
+  Future<PhoneStatus> setExperimentalAck(bool acknowledged);
 
-  /// Records the acceptance for native gating; tolerates a native side that
-  /// has no handler yet.
-  Future<void> setExperimentalAck(bool acknowledged);
+  /// Stops the native run [taskId] (the `id` the run was started with).
+  Future<void> stopTask(String taskId);
 
   /// Status, step, takeover and done events. Empty when the host has no
   /// phone bridge.
@@ -349,7 +358,6 @@ class NativePhoneChannel implements PhoneChannel {
   static const _method = MethodChannel('nova/phone/v1');
   static const _events = EventChannel('nova/phone/events');
   static const _frames = EventChannel('nova/phone/frames');
-  static const ackKey = 'phone.experimental_ack';
 
   Future<Map<dynamic, dynamic>> _call(
     String method, [
@@ -420,56 +428,83 @@ class NativePhoneChannel implements PhoneChannel {
   Future<void> requestNotifications() => ScheduleWake.requestNotifications();
 
   @override
-  Future<bool> experimentalAcknowledged() async {
+  Future<PhoneStatus> setExperimentalAck(bool acknowledged) async {
     try {
-      return (await SharedPreferences.getInstance()).getBool(ackKey) ?? false;
-    } catch (_) {
-      return false;
+      return await _status('setExperimentalAck', {
+        'acknowledged': acknowledged,
+      });
+    } on MissingPluginException {
+      throw const PhoneChannelException('unavailable');
     }
   }
 
   @override
-  Future<void> setExperimentalAck(bool acknowledged) async {
-    try {
-      await (await SharedPreferences.getInstance()).setBool(
-        ackKey,
-        acknowledged,
-      );
-    } catch (_) {}
-    try {
-      await _call('setExperimentalAck', {'acknowledged': acknowledged});
-    } on MissingPluginException {
-      /* The native handler lands with the display lane. */
-    } on PhoneChannelException {
-      /* Native gating can catch up on the next ack; the UI state is kept. */
-    }
+  Future<void> stopTask(String taskId) async {
+    await const NativeLocalAgent().call('stop', {'id': taskId});
+  }
+
+  // One native subscription per EventChannel: a second receiveBroadcastStream
+  // would replace the first handler on the platform side, and the last cancel
+  // would end delivery for everybody. Every Dart listener shares these.
+  static final _sharedEvents = _SharedStream<PhoneEvent>(
+    _events,
+    (raw) => PhoneEvent.parse(raw),
+  );
+  static final _sharedFrames = _SharedStream<Uint8List>(
+    _frames,
+    (raw) => raw is Uint8List && raw.isNotEmpty ? raw : null,
+  );
+
+  @override
+  Stream<PhoneEvent> get events => _sharedEvents.stream;
+
+  @override
+  Stream<Uint8List> get frames => _sharedFrames.stream;
+}
+
+/// A single platform subscription fanned out to any number of Dart listeners.
+/// It opens with the first listener and closes with the last, and can reopen.
+class _SharedStream<T extends Object> {
+  _SharedStream(this._channel, this._convert) {
+    _controller = StreamController<T>.broadcast(
+      onListen: _open,
+      onCancel: _close,
+    );
+  }
+  final EventChannel _channel;
+  final T? Function(Object?) _convert;
+  late final StreamController<T> _controller;
+  StreamSubscription<Object?>? _subscription;
+
+  Stream<T> get stream => _controller.stream;
+
+  void _open() {
+    _subscription = _source().listen(
+      (raw) {
+        final value = _convert(raw);
+        if (value != null) _controller.add(value);
+      },
+      onError: _controller.addError,
+      onDone: () => _subscription = null,
+    );
+  }
+
+  Future<void> _close() async {
+    final subscription = _subscription;
+    _subscription = null;
+    await subscription?.cancel();
   }
 
   /// A host without the bridge (tests, desktop) answers the probe with
   /// MissingPluginException; subscribing then would report a platform error.
-  Stream<T> _stream<T>(
-    EventChannel channel,
-    T Function(Object?) convert,
-  ) async* {
+  Stream<Object?> _source() async* {
     try {
-      await _method.invokeMethod<String>('status', '{}');
+      await NativePhoneChannel._method.invokeMethod<String>('status', '{}');
     } on MissingPluginException {
       return;
     } on PlatformException {
       // A bridge that answers with an error still owns the channel.
     }
-    yield* channel.receiveBroadcastStream().map(convert);
+    yield* _channel.receiveBroadcastStream();
   }
-
-  @override
-  Stream<PhoneEvent> get events => _stream<PhoneEvent?>(
-    _events,
-    PhoneEvent.parse,
-  ).where((event) => event != null).cast<PhoneEvent>();
-
-  @override
-  Stream<Uint8List> get frames => _stream<Uint8List?>(
-    _frames,
-    (frame) => frame is Uint8List ? frame : null,
-  ).where((frame) => frame != null && frame.isNotEmpty).cast<Uint8List>();
 }

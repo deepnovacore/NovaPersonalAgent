@@ -36,7 +36,6 @@ enum _Tone { ok, bad, warn, plain }
 class _PhoneControlPageState extends State<PhoneControlPage> {
   late final PhoneStatusWatcher watcher = PhoneStatusWatcher(widget.channel);
   PhoneCopy get c => PhoneCopy(widget.language);
-  bool? acknowledged;
   bool selfChecking = false, failedAction = false;
   List<SelfCheckResult>? results;
   String? selfCheckError;
@@ -49,9 +48,6 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
     if (!supported) return;
     watcher.addListener(_changed);
     watcher.start();
-    widget.channel.experimentalAcknowledged().then((value) {
-      if (mounted) setState(() => acknowledged = value);
-    });
   }
 
   void _changed() {
@@ -161,10 +157,8 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
     }
   }
 
-  Future<void> _acknowledge() => _guard(() async {
-    await widget.channel.setExperimentalAck(true);
-    if (mounted) setState(() => acknowledged = true);
-  });
+  Future<void> _acknowledge() =>
+      _guard(() => watcher.run(() => widget.channel.setExperimentalAck(true)));
 
   Future<void> _selfCheck() async {
     setState(() {
@@ -244,7 +238,7 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
 
   List<Widget> _content(PhoneStatus s) {
     final tooOld = !s.supported;
-    final focusWarning = !tooOld && s.apiLevel < 34;
+    final focusWarning = !tooOld && s.experimental;
     final pairingValue = switch (s.pairing) {
       PairingState.paired => (c.paired, _Tone.ok),
       PairingState.searching => (c.searching, _Tone.plain),
@@ -342,7 +336,7 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
           ),
         ],
       ),
-      if (focusWarning) _experimentalCard(),
+      if (focusWarning) _experimentalCard(s),
       if (!tooOld) ..._helperProblem(s),
       if (failedAction)
         Padding(
@@ -385,7 +379,7 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
 
   /// Android 12 and 13 can lose main-screen focus while Nova works: an
   /// explicit "use it anyway" keeps the warning from being scrolled past.
-  Widget _experimentalCard() => Container(
+  Widget _experimentalCard(PhoneStatus s) => Container(
     key: const ValueKey('phone-experimental'),
     margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
     padding: const EdgeInsets.all(14),
@@ -411,7 +405,7 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
           ),
         ),
         const SizedBox(height: 8),
-        if (acknowledged == true)
+        if (s.experimentalAck)
           Row(
             children: [
               const Icon(
@@ -432,7 +426,7 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
           Align(
             alignment: Alignment.centerLeft,
             child: FilledButton.tonal(
-              onPressed: acknowledged == null ? null : _acknowledge,
+              onPressed: _acknowledge,
               child: Text(c.experimentalAck),
             ),
           ),

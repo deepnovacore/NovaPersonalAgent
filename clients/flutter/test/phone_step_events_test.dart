@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_mobile/agent/phone_channel.dart';
 import 'package:nova_mobile/agent/phone_run.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
@@ -433,12 +432,18 @@ void main() {
 
     test('stays silent without a bridge', () async {
       const channel = NativePhoneChannel();
-      await expectLater(channel.events, emitsDone);
-      await expectLater(channel.frames, emitsDone);
-      // The native ack handler may not exist yet: that must not throw.
-      SharedPreferences.setMockInitialValues({});
-      await channel.setExperimentalAck(true);
-      expect(await channel.experimentalAcknowledged(), isTrue);
+      final seen = <Object>[];
+      final events = channel.events.listen(seen.add, onError: seen.add);
+      final frames = channel.frames.listen(seen.add, onError: seen.add);
+      await pumpEventQueue();
+      await events.cancel();
+      await frames.cancel();
+      expect(seen, isEmpty);
+      // A host without the ack handler did not record it.
+      await expectLater(
+        channel.setExperimentalAck(true),
+        throwsA(isA<PhoneChannelException>()),
+      );
     });
 
     test('encodes arguments as JSON strings and decodes replies', () async {
@@ -454,7 +459,8 @@ void main() {
             ],
           }),
           'takeover' => jsonEncode({'state': 'active'}),
-          'setPreview' || 'setExperimentalAck' => jsonEncode({}),
+          'setPreview' => jsonEncode({}),
+          'setExperimentalAck' => jsonEncode({'experimental_ack': true}),
           _ => jsonEncode({'api_level': 34, 'helper': 'running'}),
         };
       });
@@ -483,7 +489,7 @@ void main() {
       expect(jsonDecode(seen['takeover']! as String), {'task_id': 't1'});
       await channel.setPreview(true);
       expect(jsonDecode(seen['setPreview']! as String), {'visible': true});
-      await channel.setExperimentalAck(true);
+      expect((await channel.setExperimentalAck(true)).experimentalAck, isTrue);
       expect(jsonDecode(seen['setExperimentalAck']! as String), {
         'acknowledged': true,
       });
@@ -504,9 +510,11 @@ void main() {
           ),
         ),
       );
-      // A native handler that errors on the ack must not break the UI state.
-      SharedPreferences.setMockInitialValues({});
-      await channel.setExperimentalAck(true);
+      // A native handler that errors on the ack is a failure the UI shows.
+      await expectLater(
+        channel.setExperimentalAck(true),
+        throwsA(isA<PhoneChannelException>()),
+      );
     });
   });
 }

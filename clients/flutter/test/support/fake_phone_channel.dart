@@ -21,7 +21,8 @@ class FakePhoneChannel implements PhoneChannel {
   List<SelfCheckResult> checks = const [];
   Object? selfCheckError;
   Object? commandError;
-  bool acknowledged = false;
+  Object? ackError;
+  final stopped = <String>[];
   TakeoverState takeoverResult = TakeoverState.active;
   TakeoverState handBackResult = TakeoverState.returned;
   final eventController = StreamController<PhoneEvent>.broadcast();
@@ -90,11 +91,33 @@ class FakePhoneChannel implements PhoneChannel {
   Future<void> requestNotifications() async =>
       calls.add('requestNotifications');
   @override
-  Future<bool> experimentalAcknowledged() async => acknowledged;
-  @override
-  Future<void> setExperimentalAck(bool value) async {
+  Future<PhoneStatus> setExperimentalAck(bool value) async {
     calls.add('setExperimentalAck:$value');
-    acknowledged = value;
+    if (ackError != null) throw ackError!;
+    final s = current;
+    current = PhoneStatus(
+      apiLevel: s.apiLevel,
+      tier: s.tier,
+      experimental: s.experimental,
+      experimentalAck: value,
+      accessibility: s.accessibility,
+      overlay: s.overlay,
+      batteryWhitelisted: s.batteryWhitelisted,
+      notificationsAllowed: s.notificationsAllowed,
+      pairing: s.pairing,
+      pairingStage: s.pairingStage,
+      pairingPort: s.pairingPort,
+      helper: s.helper,
+      helperFailure: s.helperFailure,
+      helperFix: s.helperFix,
+    );
+    return current;
+  }
+
+  @override
+  Future<void> stopTask(String taskId) async {
+    calls.add('stopTask:$taskId');
+    stopped.add(taskId);
   }
 
   @override

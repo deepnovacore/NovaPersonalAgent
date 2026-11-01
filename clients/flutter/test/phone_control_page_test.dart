@@ -244,19 +244,50 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(channel.calls, contains('setExperimentalAck:true'));
-      expect(channel.acknowledged, isTrue);
+      expect(channel.current.experimentalAck, isTrue);
       expect(find.text('我知道了，仍要使用'), findsNothing);
       expect(find.text('已确认，仍要使用'), findsOneWidget);
     });
 
     testWidgets('an earlier acknowledgement is remembered', (tester) async {
       final channel = FakePhoneChannel(
-        const PhoneStatus(apiLevel: 32, experimental: true),
-      )..acknowledged = true;
+        const PhoneStatus(
+          apiLevel: 32,
+          experimental: true,
+          experimentalAck: true,
+        ),
+      );
       addTearDown(channel.close);
       await _pump(tester, channel);
       expect(find.text('已确认，仍要使用'), findsOneWidget);
       expect(find.text('我知道了，仍要使用'), findsNothing);
+    });
+
+    testWidgets('a failed acknowledgement is shown, not swallowed', (
+      tester,
+    ) async {
+      final channel = FakePhoneChannel(
+        const PhoneStatus(apiLevel: 33, experimental: true),
+      )..ackError = const PhoneChannelException('unavailable');
+      addTearDown(channel.close);
+      await _pump(tester, channel);
+      await tester.tap(find.widgetWithText(FilledButton, '我知道了，仍要使用'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('操作没有成功，请重试。'), findsOneWidget);
+      expect(find.text('已确认，仍要使用'), findsNothing);
+      expect(find.text('我知道了，仍要使用'), findsOneWidget);
+    });
+
+    testWidgets('the warning follows the native experimental flag', (
+      tester,
+    ) async {
+      final channel = FakePhoneChannel(
+        const PhoneStatus(apiLevel: 33, experimental: false),
+      );
+      addTearDown(channel.close);
+      await _pump(tester, channel);
+      expect(find.byKey(const ValueKey('phone-experimental')), findsNothing);
     });
 
     testWidgets('English copy', (tester) async {
