@@ -1,0 +1,62 @@
+{
+  "_comment": "Wire shapes shared by nova/phone/v1, nova/phone/events and nova/local_agent/v1 (docs/specs/mobile-virtual-display.md). Pinned by test/phone_wire_contract_test.dart and android/app/src/test/.../phone/PhoneWireContractTest.kt; change both sides together.",
+  "status": {
+    "schema_version": 1,
+    "api_level": 33,
+    "tier": "virtual",
+    "experimental": true,
+    "experimental_ack": true,
+    "accessibility": true,
+    "overlay": false,
+    "battery_whitelisted": true,
+    "notifications_allowed": true,
+    "pairing": "paired",
+    "pairing_stage": "done",
+    "pairing_port": 37123,
+    "helper": "running",
+    "helper_failure": "wrong_code",
+    "helper_fix": "re_pair"
+  },
+  "events": {
+    "status": {"type": "status"},
+    "step": {"type": "step", "task_id": "task-1", "step": 2, "tool": "tap", "label": "Open search", "status": "completed", "changed": true, "ref": "@e4", "tier": "virtual"},
+    "takeover": {"type": "takeover", "task_id": "task-1", "state": "timed_out", "by": "user", "reason": "secure_page"},
+    "done": {"type": "done", "task_id": "task-1", "outcome": "interrupted", "reason": "tool_ref_expired", "summary": "Stopped", "steps": 5, "duration_ms": 1234}
+  },
+  "self_check": {"checks": [
+    {"id": "helper", "ok": true},
+    {"id": "main_focus", "ok": false, "detail": "shared_focus"}
+  ]},
+  "methods": {
+    "openSettings": {"kind": "wireless_debugging"},
+    "setExperimentalAck": {"acknowledged": true},
+    "setPreview": {"visible": true},
+    "submitCode": {"code": "123456", "port": 37123},
+    "takeover": {"task_id": "task-1"},
+    "handBack": {"task_id": "task-1"},
+    "stop": {"id": "task-1"}
+  },
+  "tasks": [
+    {"id": "task-1", "phase": "running", "tier": "virtual"},
+    {"id": "task-2", "phase": "waiting_approval", "tier": "main"},
+    {"id": "task-3", "phase": "verifying", "tier": "virtual"},
+    {"id": "task-4", "phase": "interrupted", "tier": "main"},
+    {"id": "task-5", "phase": "cancelled", "tier": "main"},
+    {"id": "task-6", "phase": "completed", "tier": "main"}
+  ],
+  "active_phases": ["running", "waiting_approval"],
+  "enums": {
+    "tier": ["virtual", "main"],
+    "pairing": ["unpaired", "searching", "paired"],
+    "pairing_stage": ["idle", "waiting_code", "pairing", "connecting", "done", "failed"],
+    "helper": ["unsupported", "not_paired", "wireless_debugging_off", "connecting", "running", "failed"],
+    "helper_failure": ["wrong_code", "pairing_window_closed", "no_wifi", "wifi_not_allowed", "connect_failed", "authorization_revoked", "key_unreadable", "helper_start_failed", "unknown"],
+    "helper_fix": ["retry", "re_pair", "open_wifi", "open_wireless_debugging"],
+    "settings_kind": ["accessibility", "overlay", "battery", "developer", "wireless_debugging", "wifi", "notifications", "app_info"],
+    "takeover_state": ["requested", "active", "returned", "timed_out", "failed"],
+    "step_status": ["running", "completed", "failed", "unknown"],
+    "done_outcome": ["completed", "failed", "cancelled", "interrupted"]
+  },
+  "self_check_ids": ["helper", "create_display", "start_app", "read_tree", "tap", "type", "back", "main_focus"],
+  "safe_errors": ["unsupported", "invalid_code", "invalid_port", "invalid_preview", "invalid_task", "invalid_settings", "invalid_acknowledged", "run_active", "task_not_running", "no_takeover", "takeover_on_main_thread", "takeover_unavailable", "accessibility_flags_failed", "accessibility_unavailable", "helper_unavailable", "display_unavailable"]
+}

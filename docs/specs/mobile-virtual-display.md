@@ -153,7 +153,10 @@ actions are journaled with the observation's `snapshot_id` as evidence (main tie
 ### MethodChannel `nova/phone/v1`
 
 Arguments and results are JSON strings, as in `nova/local_agent/v1`. Errors use `result.error("phone_error", <safe code>, null)`.
-Android-only; Dart guards with `Platform.isAndroid`.
+Android-only; Dart guards with `Platform.isAndroid`. The shared wire shapes (status, events, self-check, method
+arguments, `tasks` entries, enum wires, safe errors) are pinned by one fixture,
+`clients/flutter/test/fixtures/phone_wire_contract.json`, checked by both `test/phone_wire_contract_test.dart` and
+`android/app/src/test/.../phone/PhoneWireContractTest.kt`. Missing or mistyped arguments are `invalid_*`, never `unknown`.
 
 | Method | Args | Result |
 |---|---|---|

@@ -375,6 +375,10 @@ class PhoneCopy {
     '有任务正在进行，等它结束后再自检。',
     'A task is running. Run the self-check after it finishes.',
   );
+  String get selfCheckInterrupted => t(
+    '无障碍断开了或刚切换了空间，自检没做完：确认 Nova 的无障碍已打开，再查一次。',
+    'Accessibility disconnected or the Space changed, so the self-check stopped. Make sure Nova’s accessibility is on, then check again.',
+  );
   String get selfCheckFailedToRun =>
       t('自检没能完成，请重试。', 'The self-check didn’t finish. Try again.');
   String selfCheckName(String id) => switch (id) {

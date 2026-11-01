@@ -124,17 +124,20 @@ void main() {
     expect(companion.hides, isEmpty, reason: 'native expires done itself');
   });
 
-  test('failed and interrupted runs are failed; a cancelled run hides', () async {
-    channel.emit(stepEvent());
-    channel.emit(doneEvent(outcome: 'interrupted'));
-    await settle();
-    expect(companion.shows.last, 't1|failed|点击搜索|1');
-    channel.emit(stepEvent(taskId: 't2'));
-    channel.emit(doneEvent(taskId: 't2', outcome: 'cancelled'));
-    await settle();
-    expect(companion.shows.last, 't2|running|点击搜索|1');
-    expect(companion.hides, ['t2']);
-  });
+  test(
+    'failed and interrupted runs are failed; a cancelled run hides',
+    () async {
+      channel.emit(stepEvent());
+      channel.emit(doneEvent(outcome: 'interrupted'));
+      await settle();
+      expect(companion.shows.last, 't1|failed|点击搜索|1');
+      channel.emit(stepEvent(taskId: 't2'));
+      channel.emit(doneEvent(taskId: 't2', outcome: 'cancelled'));
+      await settle();
+      expect(companion.shows.last, 't2|running|点击搜索|1');
+      expect(companion.hides, ['t2']);
+    },
+  );
 
   test('a run whose result arrives without done releases the pet', () async {
     channel.emit(stepEvent());
@@ -179,28 +182,31 @@ void main() {
     expect(stopped, ['t1']);
   });
 
-  test('missing permission hints once and never retries until resume', () async {
-    companion.errors.add(
-      PlatformException(code: 'overlay_permission', message: 'x'),
-    );
-    channel.emit(stepEvent());
-    await settle();
-    channel.emit(stepEvent(step: 2));
-    channel.emit(stepEvent(step: 3));
-    await settle();
-    expect(companion.shows, hasLength(1));
-    expect(hints, 1);
-    // Another task without the permission does not hint again.
-    companion.errors.add(
-      PlatformException(code: 'overlay_permission', message: 'x'),
-    );
-    channel.emit(stepEvent(taskId: 't2'));
-    await settle();
-    expect(hints, 1);
-    await resume();
-    expect(companion.shows.last, 't2|running|点击搜索|1');
-    expect(companion.shows, hasLength(3));
-  });
+  test(
+    'missing permission hints once and never retries until resume',
+    () async {
+      companion.errors.add(
+        PlatformException(code: 'overlay_permission', message: 'x'),
+      );
+      channel.emit(stepEvent());
+      await settle();
+      channel.emit(stepEvent(step: 2));
+      channel.emit(stepEvent(step: 3));
+      await settle();
+      expect(companion.shows, hasLength(1));
+      expect(hints, 1);
+      // Another task without the permission does not hint again.
+      companion.errors.add(
+        PlatformException(code: 'overlay_permission', message: 'x'),
+      );
+      channel.emit(stepEvent(taskId: 't2'));
+      await settle();
+      expect(hints, 1);
+      await resume();
+      expect(companion.shows.last, 't2|running|点击搜索|1');
+      expect(companion.shows, hasLength(3));
+    },
+  );
 
   test('blocked startup is silent and not retried per step', () async {
     for (final code in ['foreground_blocked', 'overlay_blocked', 'timeout']) {
@@ -241,25 +247,28 @@ void main() {
     expect(companion.shows.last, 't2|running|点击搜索|2');
   });
 
-  test('frames flow only while the pet preview is wanted and running', () async {
-    channel.emit(stepEvent());
-    await settle();
-    expect(channel.previews, isEmpty);
-    companion.wantPreview(true);
-    await settle();
-    expect(channel.previews, [true]);
-    channel.frameController.add(tinyFrame);
-    await settle();
-    expect(companion.frames, hasLength(1));
-    // A takeover hides the preview: native stops wanting it and no frame is
-    // forwarded.
-    channel.emit(takeoverEvent(TakeoverState.requested));
-    await settle();
-    expect(channel.previews, [true, false]);
-    channel.frameController.add(tinyFrame);
-    await settle();
-    expect(companion.frames, hasLength(1));
-  });
+  test(
+    'frames flow only while the pet preview is wanted and running',
+    () async {
+      channel.emit(stepEvent());
+      await settle();
+      expect(channel.previews, isEmpty);
+      companion.wantPreview(true);
+      await settle();
+      expect(channel.previews, [true]);
+      channel.frameController.add(tinyFrame);
+      await settle();
+      expect(companion.frames, hasLength(1));
+      // A takeover hides the preview: native stops wanting it and no frame is
+      // forwarded.
+      channel.emit(takeoverEvent(TakeoverState.requested));
+      await settle();
+      expect(channel.previews, [true, false]);
+      channel.frameController.add(tinyFrame);
+      await settle();
+      expect(companion.frames, hasLength(1));
+    },
+  );
 
   test('the shared preview stays on for the in-app picture', () async {
     channel.emit(stepEvent());

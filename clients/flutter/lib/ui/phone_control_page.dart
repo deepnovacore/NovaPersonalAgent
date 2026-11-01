@@ -180,9 +180,12 @@ class _PhoneControlPageState extends State<PhoneControlPage> {
     } on PhoneChannelException catch (error) {
       if (mounted) {
         setState(
-          () => selfCheckError = error.code == 'run_active'
-              ? c.selfCheckRunActive
-              : c.selfCheckFailedToRun,
+          () => selfCheckError = switch (error.code) {
+            'run_active' => c.selfCheckRunActive,
+            // A closed controller or a service reconnect ended the check.
+            'accessibility_unavailable' => c.selfCheckInterrupted,
+            _ => c.selfCheckFailedToRun,
+          },
         );
       }
     } catch (_) {

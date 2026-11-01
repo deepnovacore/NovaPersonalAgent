@@ -511,6 +511,23 @@ void main() {
       expect(find.text('有任务正在进行，等它结束后再自检。'), findsOneWidget);
     });
 
+    testWidgets('a closed controller says the check was interrupted', (
+      tester,
+    ) async {
+      final channel = FakePhoneChannel(_ready)
+        ..selfCheckError = const PhoneChannelException(
+          'accessibility_unavailable',
+        );
+      addTearDown(channel.close);
+      await _pump(tester, channel);
+      await tester.tap(_row('开始自检'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('无障碍断开了或刚切换了空间，自检没做完：确认 Nova 的无障碍已打开，再查一次。'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('other errors say the check did not finish', (tester) async {
       final channel = FakePhoneChannel(_ready)
         ..selfCheckError = const PhoneChannelException('unknown');

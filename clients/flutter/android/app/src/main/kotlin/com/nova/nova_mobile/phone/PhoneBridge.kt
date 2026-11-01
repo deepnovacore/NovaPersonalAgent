@@ -154,7 +154,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                     val args = JSONObject(call.arguments as? String ?: "{}")
                     val answer = when (call.method) {
                         "status" -> encodeStatus(status())
-                        "openSettings" -> JSONObject().put("opened", openSettings(owner.get(), args.getString("kind")))
+                        "openSettings" -> JSONObject().put("opened", openSettings(owner.get(), args.optString("kind")))
                         "setExperimentalAck" -> {
                             val acknowledged = acknowledgedArgument(args)
                             withContext(Dispatchers.IO) { setExperimentalAck(preferences, acknowledged) }
@@ -183,13 +183,11 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                         }
                         "selfCheck" -> {
                             val checks = withContext(Dispatchers.IO) { selfCheck?.run() ?: throw IllegalStateException("accessibility_unavailable") }
-                            JSONObject().put("checks", JSONArray().apply { checks.forEach { c ->
-                                put(JSONObject().put("id", c.id).put("ok", c.ok).apply { c.detail?.let { put("detail", it) } })
-                            } })
+                            encodeSelfCheck(checks)
                         }
                         "setPreview" -> { registration.visible = args.opt("visible") as? Boolean ?: throw IllegalArgumentException("invalid_preview"); JSONObject() }
                         "takeover", "handBack" -> {
-                            val taskId = args.getString("task_id").takeIf { it.isNotBlank() } ?: throw IllegalArgumentException("invalid_task")
+                            val taskId = args.optString("task_id").takeIf { it.isNotBlank() } ?: throw IllegalArgumentException("invalid_task")
                             val state = withContext(Dispatchers.IO) {
                                 if (call.method == "takeover") takeover?.takeover(taskId) else takeover?.handBack(taskId)
                             } ?: throw IllegalStateException("task_not_running")
@@ -240,15 +238,16 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
     private fun requireSupported() { check(supported) { "unsupported" } }
     private suspend fun openSettings(activity: Activity?, kind: String): Boolean {
         val packageUri = Uri.parse("package:${app.packageName}")
-        val intents = when (kind) {
-            "accessibility" -> listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            "overlay" -> listOf(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, packageUri))
-            "battery" -> listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-            "developer" -> DeveloperSettings.developerOptionsPage()
-            "wireless_debugging" -> DeveloperSettings.wirelessDebuggingPage()
-            "wifi" -> DeveloperSettings.wifiPage()
-            "notifications", "app_info" -> {
-                val blockedChannel = if (kind == "notifications" && Build.VERSION.SDK_INT >= 26) withContext(Dispatchers.IO) {
+        // Exhaustive over the contract kinds, so a kind added to SettingsKind cannot go unhandled.
+        val intents = when (settingsKind(kind)) {
+            SettingsKind.ACCESSIBILITY -> listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            SettingsKind.OVERLAY -> listOf(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, packageUri))
+            SettingsKind.BATTERY -> listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            SettingsKind.DEVELOPER -> DeveloperSettings.developerOptionsPage()
+            SettingsKind.WIRELESS_DEBUGGING -> DeveloperSettings.wirelessDebuggingPage()
+            SettingsKind.WIFI -> DeveloperSettings.wifiPage()
+            SettingsKind.NOTIFICATIONS, SettingsKind.APP_INFO -> {
+                val blockedChannel = if (kind == SettingsKind.NOTIFICATIONS.wire && Build.VERSION.SDK_INT >= 26) withContext(Dispatchers.IO) {
                     if (!NotificationManagerCompat.from(app).areNotificationsEnabled()) null else {
                         val nm = app.getSystemService(NotificationManager::class.java)
                         PairingChannel.IDS.mapNotNull { nm.getNotificationChannel(it) }.lastOrNull()
@@ -257,7 +256,6 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                 } else null
                 phoneAppSettingsIntents(kind, app.packageName, Build.VERSION.SDK_INT, blockedChannel).map { it.toIntent() }
             }
-            else -> throw IllegalArgumentException("invalid_settings")
         }
         return intents.any { runCatching {
             if (activity != null) activity.startActivity(it) else app.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -271,9 +269,11 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
             instance ?: PhoneBridge(context.applicationContext).also { instance = it }
         }
         fun register(activity: Activity, engine: FlutterEngine) = of(activity).attach(activity, engine)
-        private val SAFE_ERRORS = setOf("unsupported", "invalid_code", "invalid_port", "invalid_preview", "invalid_task", "invalid_settings",
+        internal val SAFE_ERRORS = setOf("unsupported", "invalid_code", "invalid_port", "invalid_preview", "invalid_task", "invalid_settings",
             "invalid_acknowledged", "run_active", "task_not_running", "no_takeover", "takeover_on_main_thread",
             "takeover_unavailable", "accessibility_flags_failed", "accessibility_unavailable", "helper_unavailable", "display_unavailable")
+        internal fun settingsKind(wire: String): SettingsKind =
+            SettingsKind.entries.firstOrNull { it.wire == wire } ?: throw IllegalArgumentException("invalid_settings")
         internal fun safeError(error: Exception): String = error.message?.takeIf { it in SAFE_ERRORS } ?: "unknown"
         /** `setExperimentalAck` argument; a missing or non-boolean value is `invalid_acknowledged`, never `unknown`. */
         internal fun acknowledgedArgument(args: JSONObject): Boolean =
@@ -315,6 +315,10 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                     else -> PairingState.UNPAIRED },
                 (discovery as? PairingDiscovery.Found)?.port, helper, failure, notifications, stage, experimentalAcknowledged)
         }
+
+        internal fun encodeSelfCheck(checks: List<SelfCheckItem>): JSONObject = JSONObject().put("checks", JSONArray().apply {
+            checks.forEach { c -> put(JSONObject().put("id", c.id).put("ok", c.ok).apply { c.detail?.let { put("detail", it) } }) }
+        })
 
         fun encodeStatus(s: PhoneStatus): JSONObject = JSONObject()
             .put("schema_version", PHONE_SCHEMA_VERSION).put("api_level", s.apiLevel).put("tier", s.tier.wire)

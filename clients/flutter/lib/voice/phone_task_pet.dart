@@ -128,12 +128,7 @@ class PhoneTaskPet with WidgetsBindingObserver {
     _overlayId = id;
     unawaited(
       companion
-          .showTask(
-            taskId: id,
-            status: status,
-            label: state.$3,
-            step: state.$4,
-          )
+          .showTask(taskId: id, status: status, label: state.$3, step: state.$4)
           .then<void>((_) {}, onError: (Object error) => _failed(id, error)),
     );
   }
