@@ -185,7 +185,7 @@ Future<String?> _editCredential(
   String t(String zh, String en) => language == 'zh' ? zh : en;
   final fixed = endpoint != null || existing != null;
   final presets = [
-    for (final p in modelPresets) (p.name, p.endpoint),
+    for (final p in modelPresets) (p.label(language), p.endpoint),
     ..._speechServices,
   ];
   final url = TextEditingController(
@@ -221,7 +221,7 @@ Future<String?> _editCredential(
                 if (fixed)
                   Text(
                     existing?.label ??
-                        ModelPreset.forEndpoint(url.text)?.name ??
+                        ModelPreset.forEndpoint(url.text)?.label(language) ??
                         Uri.parse(url.text).host,
                   )
                 else

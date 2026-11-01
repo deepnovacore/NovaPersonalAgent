@@ -63,6 +63,10 @@ class SavedProvider {
   /// The API the endpoint was saved with. Records without one read as the
   /// preset's protocol, or Chat Completions.
   final ModelProtocol protocol;
+
+  /// [label], or the preset's name in [language] when there is a preset.
+  String labelFor(String language) =>
+      ModelPreset.byId(presetId ?? '')?.label(language) ?? label;
 }
 
 /// A newly typed key is write-only and must never be copied into a view.

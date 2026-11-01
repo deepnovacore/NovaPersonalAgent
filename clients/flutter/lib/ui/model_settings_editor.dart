@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../agent_core/model_client.dart';
@@ -330,10 +331,17 @@ Future<void> showModelSettingsEditor(
                     ),
                     items: [
                       for (final p in view.providers)
-                        DropdownMenuItem(
-                          value: p.id,
-                          child: Text(p.name, overflow: TextOverflow.ellipsis),
-                        ),
+                        // Providers iOS cannot chat with stay hidden, unless
+                        // it is the one already chosen.
+                        if (p.availableOn(defaultTargetPlatform) ||
+                            p.id == providerId)
+                          DropdownMenuItem(
+                            value: p.id,
+                            child: Text(
+                              p.label(language),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                       if (view.providerId != null &&
                           findProvider(view.providerId) == null)
                         DropdownMenuItem(

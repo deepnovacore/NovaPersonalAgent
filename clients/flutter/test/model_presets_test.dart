@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/model_catalog.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
@@ -32,6 +33,37 @@ void main() {
           protocol: p.protocol,
         );
       }
+    });
+
+    test('every name that contains Chinese has an English form', () {
+      final cjk = RegExp(r'[\u3400-\u9fff]');
+      var translated = 0;
+      for (final p in modelPresets) {
+        expect(p.label('zh'), p.name, reason: p.id);
+        if (cjk.hasMatch(p.name)) {
+          translated++;
+          expect(p.nameEn, isNotNull, reason: p.id);
+        }
+        expect(cjk.hasMatch(p.label('en')), isFalse, reason: p.id);
+      }
+      expect(translated, 7);
+      expect(ModelPreset.byId('deepseek')!.label('en'), 'DeepSeek');
+      expect(ModelPreset.byId('zhipu')!.label('en'), 'Zhipu GLM');
+    });
+
+    test('a provider that needs the session header is not offered on iOS', () {
+      for (final p in modelPresets) {
+        expect(p.availableOn(TargetPlatform.android), isTrue, reason: p.id);
+        expect(
+          p.availableOn(TargetPlatform.iOS),
+          p.sessionHeader == null,
+          reason: p.id,
+        );
+      }
+      expect(
+        ModelPreset.byId('opencode-go')!.availableOn(TargetPlatform.iOS),
+        isFalse,
+      );
     });
 
     test(

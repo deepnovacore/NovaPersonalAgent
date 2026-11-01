@@ -2,6 +2,8 @@
 // Copyright 2026 wangzan101. Modified by Nova: preset catalogue and capability
 // defaults ported from ProviderPresets.kt; Nova keeps its own ids, endpoints and
 // OpenAI-compatible routes for Anthropic and Gemini.
+import 'package:flutter/foundation.dart' show TargetPlatform;
+
 import 'model_catalog.dart';
 import 'model_client.dart';
 
@@ -36,6 +38,7 @@ class ModelPreset {
     required this.endpoint,
     required this.recommendedModels,
     required this.keyUrl,
+    this.nameEn,
     this.protocol = ModelProtocol.chatCompletions,
     this.noteZh,
     this.noteEn,
@@ -46,6 +49,9 @@ class ModelPreset {
     this.familyTokens = const [],
   });
   final String id, name, endpoint, keyUrl;
+
+  /// [name] for English readers, when [name] is written in Chinese.
+  final String? nameEn;
   final List<String> recommendedModels;
   final ModelProtocol protocol;
   final String? noteZh, noteEn;
@@ -62,6 +68,16 @@ class ModelPreset {
   /// Lower-case words found in this provider's own model names; its own models
   /// are tried first when a key lists other vendors' models too.
   final List<String> familyTokens;
+
+  /// The name in the reader's language (`zh` or `en`).
+  String label(String language) => language == 'zh' ? name : nameEn ?? name;
+
+  /// Whether Nova's chat on [platform] can use this provider. The session id
+  /// header is sent only by the Dart model client; iOS chats through the native
+  /// transfer (`IosModelClient`), which does not send it, so every request to a
+  /// provider that requires one would be refused there.
+  bool availableOn(TargetPlatform platform) =>
+      sessionHeader == null || platform != TargetPlatform.iOS;
 
   /// Matches a saved endpoint whether it is a Base URL or a complete route.
   static ModelPreset? forEndpoint(String endpoint) {
@@ -159,6 +175,7 @@ const modelPresets = <ModelPreset>[
   ModelPreset(
     id: 'qwen',
     name: '阿里云百炼 (Qwen)',
+    nameEn: 'Alibaba Bailian (Qwen)',
     endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     recommendedModels: ['qwen-plus', 'qwen-flash'],
     keyUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
@@ -167,6 +184,7 @@ const modelPresets = <ModelPreset>[
   ModelPreset(
     id: 'moonshot-cn',
     name: 'Moonshot Kimi (国内站)',
+    nameEn: 'Moonshot Kimi (China)',
     endpoint: 'https://api.moonshot.cn/v1',
     recommendedModels: ['kimi-k2-turbo-preview'],
     keyUrl: 'https://platform.moonshot.cn/console/api-keys',
@@ -189,6 +207,7 @@ const modelPresets = <ModelPreset>[
   ModelPreset(
     id: 'zhipu',
     name: '智谱 GLM',
+    nameEn: 'Zhipu GLM',
     endpoint: 'https://open.bigmodel.cn/api/paas/v4',
     recommendedModels: ['glm-4.5-air', 'glm-4.5'],
     keyUrl: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys',
@@ -197,6 +216,7 @@ const modelPresets = <ModelPreset>[
   ModelPreset(
     id: 'ark',
     name: '火山方舟 (豆包)',
+    nameEn: 'Volcano Ark (Doubao)',
     endpoint: 'https://ark.cn-beijing.volces.com/api/v3',
     recommendedModels: [],
     keyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey',
@@ -216,6 +236,7 @@ const modelPresets = <ModelPreset>[
   ModelPreset(
     id: 'stepfun',
     name: 'StepFun 阶跃星辰',
+    nameEn: 'StepFun',
     endpoint: 'https://api.stepfun.com/v1',
     recommendedModels: ['step-2-mini'],
     keyUrl: 'https://platform.stepfun.com/interface-key',
@@ -226,6 +247,8 @@ const modelPresets = <ModelPreset>[
     name: 'MiniMax',
     endpoint: 'https://api.minimax.cn/v1',
     recommendedModels: [],
+    // TODO: link the API-key page once its address is confirmed; the console
+    // home stays until then rather than a guessed path.
     keyUrl: 'https://platform.minimaxi.com/',
     noteZh: '国内站；思考内容默认写在回复正文的 <think> 里。',
     noteEn:
@@ -236,8 +259,11 @@ const modelPresets = <ModelPreset>[
   ModelPreset(
     id: 'hunyuan',
     name: '腾讯混元',
+    nameEn: 'Tencent Hunyuan',
     endpoint: 'https://tokenhub.tencentmaas.com/v1',
     recommendedModels: [],
+    // TODO: link the TokenHub API-key page once its address is confirmed; the
+    // console home stays until then rather than a guessed path.
     keyUrl: 'https://console.cloud.tencent.com/',
     noteZh: '混元的新模型在 TokenHub 上，旧的 api.hunyuan.cloud.tencent.com 不再上新模型。',
     noteEn:
@@ -248,6 +274,7 @@ const modelPresets = <ModelPreset>[
   ModelPreset(
     id: 'qianfan',
     name: '百度千帆',
+    nameEn: 'Baidu Qianfan',
     endpoint: 'https://qianfan.baidubce.com/v2',
     recommendedModels: [],
     keyUrl: 'https://console.bce.baidu.com/qianfan/ais/console/apiKey',
