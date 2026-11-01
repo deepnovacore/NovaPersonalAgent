@@ -469,14 +469,9 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
             ),
           ],
           const SizedBox(height: 12),
-          if (onOpenSources == null || !_sourceAvailable(entry))
+          if (onOpenSources == null)
             Text(
-              onOpenSources == null
-                  ? t('原文请在电脑上查看', 'View source messages on your computer')
-                  : t(
-                      '原始来源已不可用 · 保留此前整理内容',
-                      'Original source unavailable · saved result retained',
-                    ),
+              t('原文请在电脑上查看', 'View source messages on your computer'),
               style: const TextStyle(
                 color: Nova.secondary,
                 fontSize: 11,
@@ -550,15 +545,11 @@ class TimelineSourceEntry extends StatelessWidget {
     title: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (onOpenSources == null || !sourceAvailable)
+        if (onOpenSources == null)
           Text(
-            onOpenSources == null
-                ? (language == 'zh'
-                      ? '原文请在电脑上查看'
-                      : 'View source messages on your computer')
-                : (language == 'zh'
-                      ? '原始来源已不可用 · 保留此前整理内容'
-                      : 'Original source unavailable · saved result retained'),
+            language == 'zh'
+                ? '原文请在电脑上查看'
+                : 'View source messages on your computer',
             style: const TextStyle(color: Nova.secondary, fontSize: 12),
           ),
         Text(

@@ -518,16 +518,6 @@ class LocalProfileResults extends StatelessWidget
           ),
           const SizedBox(height: 8),
         ],
-        if (!(entry['evidence_ids'] as List).every(
-          ((value['available_evidence_ids'] as List?) ?? []).contains,
-        ))
-          Text(
-            t(
-              '原始来源已不可用 · 保留此前整理内容',
-              'Original source unavailable · saved result retained',
-            ),
-            style: const TextStyle(color: Nova.secondary, fontSize: 12),
-          ),
         Text(
           entry['text'] as String,
           style: section == 'timeline'
@@ -691,14 +681,7 @@ class LocalProfileResults extends StatelessWidget
                       ),
                     ),
                     TextButton(onPressed: retry, child: Text(t('重试', 'Retry'))),
-                  ] else if (!available ||
-                      refs.length != (entry['evidence_ids'] as List).length)
-                    Text(
-                      t(
-                        '原始来源已不可用，仍保留此前整理的内容。',
-                        'The original source is unavailable. The saved result is retained.',
-                      ),
-                    ),
+                  ],
                   for (final m in messages) ...[
                     Text(
                       '${sourceTime(DateTime.fromMillisecondsSinceEpoch(m['created_at']).toIso8601String())} · ${switch (m['relation']) {

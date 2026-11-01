@@ -536,7 +536,7 @@ void main() {
         }
         await tester.pumpAndSettle();
         expect(find.text('synthetic original plan'), findsNothing);
-        expect(find.text('原始来源已不可用，仍保留此前整理的内容。'), findsOneWidget);
+        expect(find.text('原始来源已不可用，仍保留此前整理的内容。'), findsNothing);
         await tester.tap(find.text('关闭'));
         await tester.pumpAndSettle();
         expect(find.text('Grounded profile'), findsOneWidget);

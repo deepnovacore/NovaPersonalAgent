@@ -104,7 +104,7 @@ void main() {
       const Duration(seconds: 1),
     );
     expect(find.text('项目验收还差环境复核'), findsOneWidget);
-    expect(find.text('原始来源已不可用 · 保留此前整理内容'), findsOneWidget);
+    expect(find.text('原始来源已不可用 · 保留此前整理内容'), findsNothing);
     final settledReads = profile.reads;
     await tester.pump(const Duration(minutes: 1));
     await tester.pumpAndSettle(
@@ -275,11 +275,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('下一步'), findsNothing);
-      expect(find.text('原始来源已不可用 · 保留此前整理内容'), findsOneWidget);
+      expect(find.text('原始来源已不可用 · 保留此前整理内容'), findsNothing);
       await tester.ensureVisible(find.text('查看 1 条原文 ›'));
       await tester.tap(find.text('查看 1 条原文 ›'));
       await tester.pumpAndSettle();
-      expect(find.text('原始来源已不可用，仍保留此前整理的内容。'), findsOneWidget);
+      expect(find.text('原始来源已不可用，仍保留此前整理的内容。'), findsNothing);
       expect(find.byType(SelectableText), findsNothing);
       await tester.tap(find.text('关闭'));
       await tester.pumpAndSettle();
