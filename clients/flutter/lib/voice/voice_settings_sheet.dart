@@ -693,11 +693,17 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
       isExpanded: true,
       decoration: InputDecoration(labelText: t('模型厂商', 'Provider')),
       items: [
+        // 127.0.0.1 is this phone, so a self-hosted service cannot be the
+        // forebrain; keep it only when it is already the saved choice.
         for (final preset in modelPresets)
-          DropdownMenuItem(
-            value: preset.id,
-            child: Text(preset.name, overflow: TextOverflow.ellipsis),
-          ),
+          if (!preset.selfHosted || preset.id == _forebrainPreset?.id)
+            DropdownMenuItem(
+              value: preset.id,
+              child: Text(
+                preset.label(widget.language),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
         DropdownMenuItem(
           value: 'custom',
           child: Text(t('自定义（OpenAI 兼容）', 'Custom (OpenAI-compatible)')),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent/local_agent.dart';
 import 'package:nova_mobile/ui/local_tasks.dart';
+import 'support/fake_model_http.dart';
 
 class TestAgent implements LocalAgent {
   String phase = 'verifying';
@@ -103,14 +104,21 @@ void main() {
   testWidgets('dismissing focused model settings keeps tasks usable', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(800, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       MaterialApp(home: LocalTasksPage(agent: TestAgent())),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('模型设置'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'test-only-key');
-    await tester.tap(find.text('取消'));
+    await tester.enterText(
+      find.byKey(const ValueKey('provider.key')),
+      'test-only-key',
+    );
+    await tester.pageBack();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(tester.takeException(), isNull);
@@ -122,25 +130,36 @@ void main() {
     tester,
   ) async {
     final agent = TestAgent();
+    final http = installModelHttp();
+    tester.view.physicalSize = const Size(800, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(MaterialApp(home: LocalTasksPage(agent: agent)));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('模型设置'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('OpenRouter'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('DeepSeek').last);
+    await tester.tap(find.byKey(const ValueKey('provider.chip.deepseek')));
     await tester.pumpAndSettle();
     expect(find.text('接口地址'), findsNothing);
     await tester.enterText(
-      find.widgetWithText(TextField, '模型名称'),
-      'test-model',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'API 密钥'),
+      find.byKey(const ValueKey('provider.key')),
       'test-only-key',
     );
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('provider.test')));
+    await tester.pump();
+    // DeepSeek lists no models here, so the page asks for a model name.
+    await http.lists.single.complete(tester, []);
+    await tester.enterText(
+      find.byKey(const ValueKey('provider.model')),
+      'test-model',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('provider.test')));
+    await tester.pump();
+    await http.lists.last.complete(tester, []);
+    await http.probes.single.callTool(tester);
     final shared = await ModelSettings(native: agent).read();
     expect(shared!.endpoint, 'https://api.deepseek.com');
     expect(shared.model, 'test-model');

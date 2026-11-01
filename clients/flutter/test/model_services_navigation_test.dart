@@ -68,9 +68,14 @@ void main() {
       ]) {
         await tester.tap(find.text(entry));
         await tester.pumpAndSettle();
-        await tester.tap(
-          find.text(entry == 'Provider credentials' ? 'Done' : 'Cancel'),
-        );
+        if (entry == 'Conversation model') {
+          // The provider setup page is a full page, not a dialog.
+          await tester.pageBack();
+        } else {
+          await tester.tap(
+            find.text(entry == 'Provider credentials' ? 'Done' : 'Cancel'),
+          );
+        }
         await tester.pumpAndSettle();
         expect(find.text('Model services'), findsOneWidget);
         expect(find.text('Information processing'), findsOneWidget);

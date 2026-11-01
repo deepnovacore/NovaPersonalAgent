@@ -1,0 +1,3 @@
+<resources>
+    <string name="local_gui_description">After you explicitly delegate a task, Nova can read the screen, tap, swipe and type. Where the device supports it, the selected app runs on a private background screen, so you can keep using your phone and take over at any time. Use the floating stop button (停止 Nova) at any time while a task runs. Synced to-dos never start actions automatically.</string>
+</resources>
