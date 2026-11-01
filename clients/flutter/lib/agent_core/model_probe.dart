@@ -26,8 +26,12 @@ const _probeTool = {
   },
 };
 
-/// Text a model may produce without calling the tool before the probe gives up.
+/// Text a model may produce without calling the tool before the probe gives
+/// up; reasoning text counts too.
 const _probeTextLimit = 2000;
+
+/// Output tokens (reasoning included) one probe may bill.
+const probeOutputTokens = 256;
 
 sealed class ProbeResult {
   const ProbeResult();
@@ -49,8 +53,10 @@ class ProbeFailed extends ProbeResult {
 }
 
 /// Asks [config]'s model to call one tool, through the same client that real
-/// turns use. The stream is abandoned at the first tool call. Thinking is off
-/// and the wait is bounded by [timeout].
+/// turns use. The stream is abandoned at the first tool call. Thinking is off,
+/// the reply is capped at [probeOutputTokens] and the wait is bounded by
+/// [timeout]. A model that spends the whole cap without calling the tool
+/// counts as not calling it.
 Future<ProbeResult> probeModelTool(
   ModelConfiguration config, {
   Duration timeout = probeTimeout,
@@ -62,6 +68,7 @@ Future<ProbeResult> probeModelTool(
         timeout: timeout,
         maxDuration: timeout,
         disableThinking: true,
+        maxOutputTokens: probeOutputTokens,
       );
   Future<ProbeResult> run() async {
     var text = 0;
@@ -77,11 +84,14 @@ Future<ProbeResult> probeModelTool(
         if ((delta['tool_calls'] as List?)?.isNotEmpty == true) {
           return const ProbeToolCalled();
         }
-        text += (delta['content'] as String? ?? '').length;
+        text +=
+            (delta['content'] as String? ?? '').length +
+            (delta['reasoning'] as String? ?? '').length;
         if (text > _probeTextLimit) return const ProbeNoToolCall();
       }
       return const ProbeNoToolCall();
     } on AgentFailure catch (failure) {
+      if (failure.code == 'model_output_limit') return const ProbeNoToolCall();
       return ProbeFailed(failure);
     }
   }
@@ -340,7 +350,7 @@ class ModelVersion {
 // ---------------------------------------------------------------------------
 // What went wrong with a probe, and the save-time loop over candidates.
 
-/// Why one model did not pass. The first four are about that model only, so
+/// Why one model did not pass. The first six are about that model only, so
 /// another model may work; the rest are about the provider or the network.
 enum ProbeProblem {
   noTools,
@@ -348,6 +358,7 @@ enum ProbeProblem {
   notFound,
   server,
   wrongProtocol,
+  modelRejected,
   timeout,
   auth,
   quota,
@@ -371,7 +382,8 @@ class ProbeFailure {
     ProbeProblem.notAvailable ||
     ProbeProblem.notFound ||
     ProbeProblem.server ||
-    ProbeProblem.wrongProtocol => true,
+    ProbeProblem.wrongProtocol ||
+    ProbeProblem.modelRejected => true,
     _ => false,
   };
 }
@@ -418,6 +430,17 @@ ProbeFailure classifyProbeFailure(AgentFailure failure, String model) {
   if (RegExp(r'tool|function').hasMatch(words) &&
       RegExp(r'not support|unsupported|does not support').hasMatch(words)) {
     return make(ProbeProblem.noTools);
+  }
+  // A 400 about the model or one of its parameters (OpenAI's
+  // `unsupported_parameter`, an unsupported model option) belongs to that
+  // model; another may accept the request. A bad key is never model-specific.
+  if ((status == 400 || status == 422) &&
+      !RegExp(r'api[_ ]?key').hasMatch(words) &&
+      ((failure is ModelRequestFailure && failure.parameter != null) ||
+          RegExp(
+            r'model|param|unsupported|not support',
+          ).hasMatch(failure.code.startsWith('model_') ? words : codes))) {
+    return make(ProbeProblem.modelRejected);
   }
   return make(ProbeProblem.other, detail.isEmpty ? failure.code : detail);
 }
@@ -482,7 +505,10 @@ class ProviderTestBlocked extends ProviderTestResult {
 ///
 /// A model whose listing names another endpoint or protocol than
 /// [protocol]/[baseUrl] is skipped, because the client would call it wrongly.
-/// A [preferred] model (the one already in use) is tried first when it is usable.
+/// A [preferred] model (the one already in use) is tried first when it is
+/// usable, then the provider's [recommended] models that the listing contains,
+/// then the family ordering: a model the preset names is the likeliest to
+/// accept the probe, so one odd model must not decide the whole provider.
 Future<ProviderTestResult> probeListedModels({
   required List<ListedModel> models,
   required ProviderCapabilities base,
@@ -491,6 +517,7 @@ Future<ProviderTestResult> probeListedModels({
   required String baseUrl,
   required Future<ProbeResult> Function(String model) probe,
   String? preferred,
+  List<String> recommended = const [],
   int limit = probeCandidateLimit,
 }) async {
   final options = mergeModelOptions(models, base);
@@ -521,6 +548,9 @@ Future<ProviderTestResult> probeListedModels({
           skipped: true,
         ),
     ]);
+  }
+  for (final id in recommended.reversed) {
+    if (usable.remove(id)) usable.insert(0, id);
   }
   if (preferred != null && usable.remove(preferred)) {
     usable.insert(0, preferred);

@@ -193,7 +193,80 @@ void main() {
       expect(tools, hasLength(1));
       expect((tools.single as Map)['function']['name'], 'get_time');
       expect(sentBody!['stream'], true);
+      // The reply is capped so a reasoning model cannot bill for a long time.
+      expect(sentBody!['max_tokens'], probeOutputTokens);
+      expect(sentBody!.containsKey('max_completion_tokens'), isFalse);
     });
+
+    test('the cap parameter follows the API that is called', () {
+      Map<String, dynamic> body(String endpoint, ModelProtocol protocol) =>
+          modelRequestBody(
+            ModelConfiguration(
+              endpoint: endpoint,
+              model: 'm',
+              key: 'k',
+              protocol: protocol,
+            ),
+            const [],
+            const [],
+            maxOutputTokens: probeOutputTokens,
+          );
+      final openAi = body(
+        'https://api.openai.com/v1',
+        ModelProtocol.chatCompletions,
+      );
+      expect(openAi['max_completion_tokens'], probeOutputTokens);
+      expect(openAi.containsKey('max_tokens'), isFalse);
+      final other = body(
+        'https://api.deepseek.com',
+        ModelProtocol.chatCompletions,
+      );
+      expect(other['max_tokens'], probeOutputTokens);
+      final responses = body(
+        'https://api.openai.com/v1',
+        ModelProtocol.responses,
+      );
+      expect(responses['max_output_tokens'], probeOutputTokens);
+      // Ordinary turns keep their own budget.
+      final plain = modelRequestBody(
+        ModelConfiguration(
+          endpoint: 'https://api.openai.com/v1',
+          model: 'm',
+          key: 'k',
+        ),
+        const [],
+        const [],
+      );
+      expect(plain['max_tokens'], 12000);
+    });
+
+    test('reasoning text counts towards the text limit', () async {
+      respond = (request) async {
+        request.response.headers.contentType = ContentType(
+          'text',
+          'event-stream',
+        );
+        for (var i = 0; i < 100; i++) {
+          request.response.write(
+            'data: ${jsonEncode(delta({'reasoning_content': 'x' * 100}))}\n\n',
+          );
+        }
+        await request.response.close();
+      };
+      expect(await probeModelTool(config()), isA<ProbeNoToolCall>());
+    });
+
+    test(
+      'spending the whole output cap is a model that gave no tool call',
+      () async {
+        respond = (request) => sse(request, [
+          delta({'reasoning_content': 'thinking'}),
+          delta({}, finish: 'length'),
+          '[DONE]',
+        ]);
+        expect(await probeModelTool(config()), isA<ProbeNoToolCall>());
+      },
+    );
 
     test('a text-only reply is NoToolCall', () async {
       respond = (request) => sse(request, [
@@ -243,6 +316,7 @@ void main() {
         );
         expect(result, isA<ProbeToolCalled>());
         expect(sentBody!['input'], isNotEmpty);
+        expect(sentBody!['max_output_tokens'], probeOutputTokens);
       },
     );
 
@@ -344,6 +418,30 @@ void main() {
       );
       expect(problem(429), ProbeProblem.rateLimited);
       expect(problem(500), ProbeProblem.server);
+      // OpenAI's reasoning models refuse `max_tokens`: that is about the model.
+      expect(
+        problem(
+          400,
+          code: 'unsupported_parameter',
+          body:
+              '{"error":{"code":"unsupported_parameter","param":"max_tokens",'
+              '"message":"Unsupported parameter: max_tokens is not supported with this model."}}',
+        ),
+        ProbeProblem.modelRejected,
+      );
+      expect(
+        problem(
+          400,
+          body: '{"error":{"message":"Unsupported value: temperature"}}',
+        ),
+        ProbeProblem.modelRejected,
+      );
+      // A 400 that is about the key still blocks.
+      expect(
+        problem(400, body: '{"error":{"message":"API key not valid"}}'),
+        ProbeProblem.other,
+      );
+      expect(problem(400, body: 'bad request'), ProbeProblem.other);
       expect(problem(503), ProbeProblem.server);
       expect(problem(418, body: 'teapot'), ProbeProblem.other);
     });
@@ -367,6 +465,7 @@ void main() {
             ProbeProblem.notFound,
             ProbeProblem.server,
             ProbeProblem.wrongProtocol,
+            ProbeProblem.modelRejected,
           ].contains(p),
           reason: '$p',
         );
@@ -394,6 +493,7 @@ void main() {
       List<String>? tried,
       WireProtocol protocol = WireProtocol.chatCompletions,
       String? preferred,
+      List<String> recommended = const [],
     }) => probeListedModels(
       models: models,
       base: const ProviderCapabilities(),
@@ -401,6 +501,7 @@ void main() {
       protocol: protocol,
       baseUrl: 'https://p.example/v1',
       preferred: preferred,
+      recommended: recommended,
       probe: (model) async {
         tried?.add(model);
         return outcomes[model] ?? const ProbeNoToolCall();
@@ -438,6 +539,73 @@ void main() {
         expect(tried, ['qwen-9']);
       },
     );
+
+    test('recommended models go before the family order', () async {
+      final tried = <String>[];
+      final models = [
+        listed('gpt-9-pro'),
+        listed('gpt-5'),
+        listed('gpt-4.1-mini'),
+        listed('gpt-4.1'),
+      ];
+      var result =
+          await run(
+                models,
+                {'gpt-4.1-mini': pass},
+                family: ['gpt'],
+                recommended: ['gpt-4.1-mini', 'gpt-4.1'],
+                tried: tried,
+              )
+              as ProviderTestDone;
+      expect(tried, ['gpt-4.1-mini']);
+      expect(result.main, 'gpt-4.1-mini');
+      // The model in use still comes first; unlisted recommendations are skipped.
+      tried.clear();
+      result =
+          await run(
+                models,
+                {'gpt-5': pass},
+                family: ['gpt'],
+                recommended: ['absent', 'gpt-4.1'],
+                preferred: 'gpt-5',
+                tried: tried,
+              )
+              as ProviderTestDone;
+      expect(tried, ['gpt-5']);
+      tried.clear();
+      await run(
+        models,
+        {},
+        family: ['gpt'],
+        recommended: ['absent', 'gpt-4.1'],
+        tried: tried,
+      );
+      expect(tried.first, 'gpt-4.1');
+    });
+
+    test('a model that refuses the request moves on to the next', () async {
+      final tried = <String>[];
+      final result =
+          await run(
+                [listed('o-1'), listed('gpt-4.1-mini')],
+                {
+                  'o-1': fail(
+                    400,
+                    '{"error":{"code":"unsupported_parameter",'
+                    '"message":"Unsupported parameter: max_tokens"}}',
+                  ),
+                  'gpt-4.1-mini': pass,
+                },
+                tried: tried,
+              )
+              as ProviderTestDone;
+      expect(tried, ['o-1', 'gpt-4.1-mini']);
+      expect(result.main, 'gpt-4.1-mini');
+      expect(
+        result.rejected.single.failure.problem,
+        ProbeProblem.modelRejected,
+      );
+    });
 
     test('the first passing model is chosen, own family first', () async {
       final tried = <String>[];

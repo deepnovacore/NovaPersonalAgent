@@ -112,9 +112,14 @@ class ModelClient {
     this.collectUsage = false,
     this.disableThinking = false,
     this.jsonObject = false,
+    this.maxOutputTokens,
   });
   final bool collectUsage;
   final bool jsonObject;
+
+  /// Caps the reply (reasoning included) for short calls such as the
+  /// connection test; unset keeps each protocol's own default budget.
+  final int? maxOutputTokens;
 
   /// Background profile/voice turns skip thinking; chat explicitly enables it
   /// on supported providers so visible reasoning can stream to the UI.
@@ -182,6 +187,7 @@ class ModelClient {
             disableThinking: disableThinking,
             jsonObject: jsonObject,
             includeUsage: usage != null,
+            maxOutputTokens: maxOutputTokens,
           ),
         }),
       );
@@ -436,9 +442,16 @@ Map<String, dynamic> modelRequestBody(
   bool disableThinking = false,
   bool jsonObject = false,
   bool includeUsage = false,
+  int? maxOutputTokens,
 }) {
   if (config.protocol == ModelProtocol.chatCompletions) {
     final deepseek = config.requestUri.host == 'api.deepseek.com';
+    // OpenAI's reasoning models reject `max_tokens`; a caller that sets its own
+    // cap (the connection test) uses the parameter they accept.
+    final capName =
+        maxOutputTokens != null && config.requestUri.host == 'api.openai.com'
+        ? 'max_completion_tokens'
+        : 'max_tokens';
     return {
       'model': config.model,
       'stream': true,
@@ -449,7 +462,8 @@ Map<String, dynamic> modelRequestBody(
           config.supportsJsonObject)
         'response_format': {'type': 'json_object'},
       // DeepSeek shares this budget between thinking and generated tool source.
-      'max_tokens': deepseek && !disableThinking ? 65536 : 12000,
+      capName:
+          maxOutputTokens ?? (deepseek && !disableThinking ? 65536 : 12000),
       if (deepseek)
         'thinking': {'type': disableThinking ? 'disabled' : 'enabled'},
       if (['qwen-flash', 'qwen3-vl-plus'].contains(config.model) &&
@@ -501,6 +515,8 @@ Map<String, dynamic> modelRequestBody(
     'stream': true,
     'store': false,
     'include': ['reasoning.encrypted_content'],
+    if (maxOutputTokens != null && config.protocol == ModelProtocol.responses)
+      'max_output_tokens': maxOutputTokens,
     'input': input,
     if (tools.isNotEmpty)
       'tools': config.protocol == ModelProtocol.chatgptResponses

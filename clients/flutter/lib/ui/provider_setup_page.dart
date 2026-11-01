@@ -315,6 +315,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
           models: models,
           base: preset?.capabilities ?? const ProviderCapabilities(),
           familyTokens: preset?.familyTokens ?? const [],
+          recommended: preset?.recommendedModels ?? const [],
           protocol: _protocol == ModelProtocol.responses
               ? WireProtocol.responses
               : WireProtocol.chatCompletions,

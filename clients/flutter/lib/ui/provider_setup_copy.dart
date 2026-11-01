@@ -112,6 +112,10 @@ class ProviderSetupCopy {
     _ => f.detail,
   };
 
+  String _providerSaid(ProbeFailure f) => f.detail.isNotEmpty
+      ? t('服务商说：${f.detail}', 'provider said: ${f.detail}')
+      : 'HTTP ${f.status ?? ''}';
+
   /// A probe failure as one sentence for the user. [example] names a typical
   /// model id; [listMissing] means the list was empty too.
   String probeFailed(
@@ -145,6 +149,10 @@ class ProviderSetupCopy {
       '${f.model} 不走你选的接口类型，请求到不了它',
       '${f.model} does not use the selected API type',
     ),
+    ProbeProblem.modelRejected => t(
+      '「${f.model}」不接受这次测试请求（${_providerSaid(f)}）。换一个模型试试。',
+      '“${f.model}” did not accept the test request (${_providerSaid(f)}). Try another model.',
+    ),
     _ => t(
       '试着让 ${f.model} 调用一个工具没成功：${_providerReason(f)}',
       'Asking ${f.model} to call a tool failed: ${_providerReason(f)}',
@@ -169,6 +177,10 @@ class ProviderSetupCopy {
     ProbeProblem.wrongProtocol => t(
       '它不走你选的接口类型，请求到不了它',
       'it does not use the selected API type',
+    ),
+    ProbeProblem.modelRejected => t(
+      '它不接受这次测试请求（${_providerSaid(r.failure)}）',
+      'it did not accept the test request (${_providerSaid(r.failure)})',
     ),
     _ => _providerReason(r.failure),
   };
