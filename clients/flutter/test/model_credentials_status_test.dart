@@ -14,6 +14,10 @@ void main() {
         endpoint: 'https://openrouter.ai/api/v1',
         key: 'saved-secret',
       );
+      tester.view.physicalSize = const Size(800, 2600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -28,41 +32,31 @@ void main() {
       );
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
-      expect(find.text('API 密钥：已配置'), findsOneWidget);
-      final secret = find.byWidgetPredicate(
-        (widget) => widget is TextField && widget.obscureText,
-      );
+      // The provider already has a key, so its list comes first.
+      await tester.tap(find.byKey(const ValueKey('provider.add')));
+      await tester.pumpAndSettle();
+      const saved = '已保存的密钥不会回显；留空时使用此服务已保存的密钥';
+      final secret = find.byKey(const ValueKey('provider.key'));
+      expect(find.text(saved), findsOneWidget);
       expect(tester.widget<TextField>(secret).controller!.text, isEmpty);
-      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+      await tester.tap(find.byKey(const ValueKey('provider.chip.openai')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('OpenAI').last);
+      expect(find.text(saved), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('provider.chip.custom')));
       await tester.pumpAndSettle();
-      expect(find.text('API 密钥：未配置'), findsOneWidget);
-      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text('自定义（OpenAI 兼容）'),
-        200,
-        scrollable: find.byType(Scrollable).last,
-      );
-      await tester.tap(find.text('自定义（OpenAI 兼容）'));
-      await tester.pumpAndSettle();
-      final url = find.byWidgetPredicate(
-        (widget) =>
-            widget is TextField && widget.keyboardType == TextInputType.url,
-      );
+      final url = find.byKey(const ValueKey('provider.baseUrl'));
       await tester.enterText(
         url,
         'https://openrouter.ai/api/v1/chat/completions',
       );
       await tester.pumpAndSettle();
-      expect(find.text('API 密钥：已配置'), findsOneWidget);
+      expect(find.text(saved), findsOneWidget);
       await tester.enterText(url, 'https://another.example/v1');
       await tester.pumpAndSettle();
-      expect(find.text('API 密钥：未配置'), findsOneWidget);
+      expect(find.text(saved), findsNothing);
       expect(tester.widget<TextField>(secret).controller!.text, isEmpty);
       expect(find.text('saved-secret'), findsNothing);
-      await tester.tap(find.text('取消'));
+      await tester.pageBack();
       await tester.pumpAndSettle();
     },
   );

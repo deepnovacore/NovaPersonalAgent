@@ -103,6 +103,14 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
   bool get _urlEditable => _isCustom || _selfHosted;
   bool get _showModel => _noList || _manual;
 
+  /// A provider that lists no models still has a recommended one to try.
+  void _seedRecommendedModel() {
+    final recommended = _preset?.recommendedModels;
+    if (_model.text.isEmpty && recommended != null && recommended.isNotEmpty) {
+      _model.text = recommended.first;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -275,6 +283,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
         setState(() {
           _test = _Test.idle;
           _noList = true;
+          _seedRecommendedModel();
         });
         return;
       }
@@ -310,6 +319,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
               ? WireProtocol.responses
               : WireProtocol.chatCompletions,
           baseUrl: _endpoint.text.trim(),
+          preferred: _isCurrent(_endpoint.text.trim()) ? _view.model : null,
           probe: (model) async {
             checkFresh();
             final result = await backend.probe(_input(model, key));
@@ -334,6 +344,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
             setState(() {
               _test = _Test.idle;
               _noList = true;
+              _seedRecommendedModel();
             });
             return;
           case final ProviderTestDone result:
@@ -649,27 +660,24 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
 
   Widget _protocolRow(ProviderSetupCopy copy) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-    child: Row(
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Text(copy.protocol, style: const TextStyle(fontSize: 15)),
-        const SizedBox(width: 12),
-        Wrap(
-          spacing: 6,
-          children: [
-            for (final (protocol, label) in const [
-              (ModelProtocol.chatCompletions, 'Chat Completions'),
-              (ModelProtocol.responses, 'Responses'),
-            ])
-              ChoiceChip(
-                label: Text(label),
-                selected: _protocol == protocol,
-                onSelected: (_) => setState(() {
-                  _protocol = protocol;
-                  _invalidate();
-                }),
-              ),
-          ],
-        ),
+        for (final (protocol, label) in const [
+          (ModelProtocol.chatCompletions, 'Chat Completions'),
+          (ModelProtocol.responses, 'Responses'),
+        ])
+          ChoiceChip(
+            label: Text(label),
+            selected: _protocol == protocol,
+            onSelected: (_) => setState(() {
+              _protocol = protocol;
+              _invalidate();
+            }),
+          ),
       ],
     ),
   );

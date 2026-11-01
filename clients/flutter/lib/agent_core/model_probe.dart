@@ -482,6 +482,7 @@ class ProviderTestBlocked extends ProviderTestResult {
 ///
 /// A model whose listing names another endpoint or protocol than
 /// [protocol]/[baseUrl] is skipped, because the client would call it wrongly.
+/// A [preferred] model (the one already in use) is tried first when it is usable.
 Future<ProviderTestResult> probeListedModels({
   required List<ListedModel> models,
   required ProviderCapabilities base,
@@ -489,6 +490,7 @@ Future<ProviderTestResult> probeListedModels({
   required WireProtocol protocol,
   required String baseUrl,
   required Future<ProbeResult> Function(String model) probe,
+  String? preferred,
   int limit = probeCandidateLimit,
 }) async {
   final options = mergeModelOptions(models, base);
@@ -519,6 +521,9 @@ Future<ProviderTestResult> probeListedModels({
           skipped: true,
         ),
     ]);
+  }
+  if (preferred != null && usable.remove(preferred)) {
+    usable.insert(0, preferred);
   }
   final order = usable.isNotEmpty
       ? usable

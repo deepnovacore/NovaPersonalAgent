@@ -790,6 +790,56 @@ void main() {
     });
   });
 
+  testWidgets('every part of the setup form fits a 360x780 phone', (
+    tester,
+  ) async {
+    final backend = _Backend(
+      endpoint: 'http://192.168.1.5:8080/v1',
+      model: 'm',
+      keyed: {'http://192.168.1.5:8080/v1'},
+    )..lister = ((_) => const ModelListFailed(ListFailure.network));
+    await _open(
+      tester,
+      backend,
+      size: const Size(360, 780),
+      onChatGpt: (_) async => false,
+      onManageCredentials: (_) async {},
+    );
+    final list = find.byType(Scrollable).first;
+    Future<void> reveal(String name, {double delta = 200}) async {
+      await tester.scrollUntilVisible(_key(name), delta, scrollable: list);
+      await tester.ensureVisible(_key(name));
+      await tester.pumpAndSettle();
+      final box = tester.getRect(_key(name));
+      expect(box.left, greaterThanOrEqualTo(0), reason: name);
+      expect(box.right, lessThanOrEqualTo(360), reason: name);
+    }
+
+    // A custom address: URL, protocol chips, key, manual model, warnings.
+    await reveal('provider.chatgpt');
+    await reveal('provider.baseUrl');
+    await reveal('provider.key');
+    await reveal('provider.unencrypted');
+    await tester.tap(_key('provider.manual'));
+    await tester.pumpAndSettle();
+    await reveal('provider.manualNote');
+    await reveal('provider.model');
+    await reveal('provider.chip.custom', delta: -200);
+    await reveal('provider.chip.lmstudio', delta: -200);
+    await reveal('provider.manual');
+    await reveal('provider.baseUrl', delta: -200);
+    await _type(tester, 'provider.baseUrl', 'https://api.deepseek.com/v1');
+    await _type(tester, 'provider.key', 'sk');
+    await reveal('provider.suggestion');
+    await reveal('provider.usePreset');
+    await reveal('provider.test');
+    await tester.tap(_key('provider.test'));
+    await tester.pumpAndSettle();
+    await reveal('provider.failed');
+    await reveal('model.credentials');
+    expect(tester.takeException(), isNull);
+  });
+
   for (final language in ['zh', 'en']) {
     for (final width in [320.0, 360.0]) {
       testWidgets('setup and detail fit $width / $language / 2x text', (

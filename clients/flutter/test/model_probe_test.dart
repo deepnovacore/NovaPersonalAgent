@@ -393,12 +393,14 @@ void main() {
       List<String> family = const [],
       List<String>? tried,
       WireProtocol protocol = WireProtocol.chatCompletions,
+      String? preferred,
     }) => probeListedModels(
       models: models,
       base: const ProviderCapabilities(),
       familyTokens: family,
       protocol: protocol,
       baseUrl: 'https://p.example/v1',
+      preferred: preferred,
       probe: (model) async {
         tried?.add(model);
         return outcomes[model] ?? const ProbeNoToolCall();
@@ -408,6 +410,33 @@ void main() {
     const pass = ProbeToolCalled();
     ProbeFailed fail(int status, [String body = '']) => ProbeFailed(
       ModelRequestFailure('model_http_$status', status: status, body: body),
+    );
+
+    test(
+      'the model already in use is tried first, if the list has it',
+      () async {
+        final tried = <String>[];
+        final models = [listed('qwen-9'), listed('qwen-3')];
+        final result = await run(
+          models,
+          {'qwen-3': pass, 'qwen-9': pass},
+          family: ['qwen'],
+          preferred: 'qwen-3',
+          tried: tried,
+        );
+        expect((result as ProviderTestDone).main, 'qwen-3');
+        expect(tried, ['qwen-3']);
+        tried.clear();
+        final unlisted = await run(
+          models,
+          {'qwen-9': pass},
+          family: ['qwen'],
+          preferred: 'gone',
+          tried: tried,
+        );
+        expect((unlisted as ProviderTestDone).main, 'qwen-9');
+        expect(tried, ['qwen-9']);
+      },
     );
 
     test('the first passing model is chosen, own family first', () async {
