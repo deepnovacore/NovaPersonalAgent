@@ -44,6 +44,7 @@ enum class HelperFailure(val wire: String, val fix: HelperFix) {
     WRONG_CODE("wrong_code", HelperFix.RE_PAIR),
     PAIRING_WINDOW_CLOSED("pairing_window_closed", HelperFix.RE_PAIR),
     NO_WIFI("no_wifi", HelperFix.OPEN_WIFI),
+    /** Reserved: no secure-settings auto-enable permission or network-refusal detection. */
     WIFI_NOT_ALLOWED("wifi_not_allowed", HelperFix.OPEN_WIRELESS_DEBUGGING),
     CONNECT_FAILED("connect_failed", HelperFix.RETRY),
     AUTHORIZATION_REVOKED("authorization_revoked", HelperFix.RE_PAIR),
@@ -72,7 +73,7 @@ enum class SettingsKind(val wire: String) {
 /**
  * Result of `status`, also pushed as the `status` event. Wire keys: schema_version, api_level, tier,
  * experimental, accessibility, overlay, battery_whitelisted, pairing, pairing_port?, helper,
- * helper_failure?, helper_fix?.
+ * helper_failure?, helper_fix?, notifications_allowed, pairing_stage.
  */
 data class PhoneStatus(
     val apiLevel: Int,
@@ -86,6 +87,8 @@ data class PhoneStatus(
     val pairingPort: Int?,
     val helper: HelperState,
     val helperFailure: HelperFailure?,
+    val notificationsAllowed: Boolean = false,
+    val pairingStage: String = "idle",
 )
 
 /**

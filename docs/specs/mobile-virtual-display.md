@@ -118,10 +118,16 @@ Android-only; Dart guards with `Platform.isAndroid`.
 | `takeover` | `{task_id}` | `{state: TakeoverState}` |
 | `handBack` | `{task_id}` | `{state: TakeoverState}` |
 
-`PhoneStatus` = `{schema_version:1, api_level, tier:"virtual"|"main", experimental, accessibility, overlay, battery_whitelisted,
+`PhoneStatus` = `{schema_version:1, api_level, tier:"virtual"|"main", experimental, accessibility, overlay, battery_whitelisted, notifications_allowed:bool,
+pairing_stage:"idle"|"waiting_code"|"pairing"|"connecting"|"done"|"failed",
 pairing:"unpaired"|"searching"|"paired", pairing_port?, helper:"unsupported"|"not_paired"|"wireless_debugging_off"|"connecting"|"running"|"failed",
 helper_failure?:"wrong_code"|"pairing_window_closed"|"no_wifi"|"wifi_not_allowed"|"connect_failed"|"authorization_revoked"|"key_unreadable"|"helper_start_failed"|"unknown",
 helper_fix?:"retry"|"re_pair"|"open_wifi"|"open_wireless_debugging"}`.
+
+`notifications_allowed` requires app notifications and the selected pairing channel to be enabled.
+`pairing_stage` describes the current pairing attempt independently of helper availability: discovery/repair waits for code, code exchange is `pairing`, helper startup is `connecting`.
+A live helper remains `running` (and eligible for `virtual`) even if re-pairing fails; `helper_failure`/`helper_fix` still describe that failure.
+`wifi_not_allowed` is reserved: this client does not request WRITE_SECURE_SETTINGS or auto-enable wireless debugging, so it cannot detect a network-specific refusal.
 
 ### EventChannel `nova/phone/events`
 
@@ -192,6 +198,6 @@ None of these may be weakened. Each must have a JVM or device test where practic
 | M2 native helper/pairing | new `phone-core/**` (adb, shell, `uistate/Accuracy.kt` only; no second `UiElement`), `settings.gradle.kts`, `app/build.gradle.kts` dependencies, `app/proguard-rules.pro`, `phone/shell/**` (HelperMain, HelperProcess, HelperHub, HandoffProvider, ShellContext, NovaShellService, adb/*), `phone/setup/**`, `phone/PhoneBridge.kt` (registers all three channels and implements `ShellProvider` and `PhoneEventSink`), the one-line hook in `MainActivity.kt`, `AndroidManifest.xml` provider/receiver/service entries |
 | M3 display/agent | `phone/display/**` (AgentDisplay, LazyDisplay, FrameMath), `phone/a11y/**` (NodeIds, snapshot reader, VirtualScreen), `phone/Takeover.kt` (`PhoneTakeover`), `phone/PhoneSelfCheck` implementation, `LocalGuiService.kt`, `res/xml/local_gui_service.xml`, `LocalToolLoop.kt`, `LocalGuiModel.kt`, `LocalAgentController.kt` |
 | UI lanes (Flutter) | `lib/agent/phone_channel.dart` (Dart client of the three channels), `lib/ui/{phone_control_page,phone_setup_wizard,virtual_screen_pip,tool_timeline}.dart`, the settings/chat/voice integration points |
-| Integration | `LICENSES/README.md`, NOTICE, `clients/flutter/android/THIRD_PARTY.md`, `docs/guides/mobile.md` |
+| Integration | `LICENSES/README.md`, NOTICE, `LICENSES/third-party/Mika-NOTICE.md`, `docs/guides/mobile.md` |
 
 Lanes do not edit files they don't own. If a lane needs a seam that isn't here, it asks for a contract change.
