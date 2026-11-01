@@ -1,5 +1,7 @@
 package com.nova.nova_mobile.phone.a11y
 
+import com.nova.phone.core.uistate.ElementLocator
+
 import com.nova.nova_mobile.phone.SNAPSHOT_ID_PREFIX
 import com.nova.nova_mobile.phone.SNAPSHOT_KEEP
 import com.nova.nova_mobile.phone.UiElement

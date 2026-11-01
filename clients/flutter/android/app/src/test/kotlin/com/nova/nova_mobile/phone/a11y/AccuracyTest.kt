@@ -1,7 +1,11 @@
 // Derived from Mika (https://github.com/wangzan101/Mika, Apache-2.0, commit 5f630d9),
-// Copyright 2026 wangzan101. Modified by Nova: relocate tests of core/uistate/AccuracyTest.kt for the local Accuracy.kt
-// copy; typeAndVerify tests are not copied (Nova does not port typeAndVerify).
+// Copyright 2026 wangzan101. Modified by Nova: relocation tests using the shared phone-core implementation.
+// typeAndVerify tests are not copied (Nova does not port typeAndVerify).
 package com.nova.nova_mobile.phone.a11y
+
+import com.nova.phone.core.uistate.ElementLocator
+import com.nova.phone.core.uistate.Relocation
+import com.nova.phone.core.uistate.relocate
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

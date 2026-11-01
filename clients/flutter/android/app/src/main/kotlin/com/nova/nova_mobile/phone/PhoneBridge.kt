@@ -1,15 +1,23 @@
 package com.nova.nova_mobile.phone
 
 import android.app.Activity
+import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
 import com.nova.nova_mobile.LocalGuiService
+import com.nova.nova_mobile.phone.a11y.PHONE_PREFERENCES
+import com.nova.nova_mobile.phone.a11y.PHONE_EXPERIMENTAL_ACK
+import com.nova.nova_mobile.phone.a11y.phoneTierFor
 import com.nova.nova_mobile.phone.setup.*
 import com.nova.nova_mobile.phone.shell.HelperHub
 import com.nova.nova_mobile.phone.shell.INovaShell
@@ -35,10 +43,18 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
     private val hub = HelperHub.of(app)
     private val manager by lazy { BuiltinShellManager(app, hub) }
     val pairing by lazy { PairingCoordinator(app, manager.engine) { pairingWindowReader } }
-    /** M3 (LocalGuiService) installs its reader via PhoneBridge.of(context).pairingWindowReader. */
+    /** MainActivity installs a dynamic reader of LocalGuiService.current (never a captured service). */
     @Volatile var pairingWindowReader: PairingWindowReader? = null
-    @Volatile var takeover: PhoneTakeover? = null
-    @Volatile var selfCheck: PhoneSelfCheck? = null
+    private val runHooks = PhoneRunHooks()
+    var takeover: PhoneTakeover?
+        get() = runHooks.takeover
+        set(value) { runHooks.takeover = value }
+    var selfCheck: PhoneSelfCheck?
+        get() = runHooks.selfCheck
+        set(value) { runHooks.selfCheck = value }
+    fun clearRunHooks(owner: PhoneTakeover) = runHooks.clear(owner)
+    private val preferences by lazy { app.getSharedPreferences(PHONE_PREFERENCES, Context.MODE_PRIVATE) }
+    private val preferenceChanges = MutableStateFlow(0L)
     private class Registration {
         @Volatile var events: EventChannel.EventSink? = null
         @Volatile var frames: EventChannel.EventSink? = null
@@ -74,36 +90,50 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
         }
     }
 
-    private data class Permissions(val overlay: Boolean, val battery: Boolean, val notifications: Boolean)
+    private data class Permissions(val accessibility: Boolean, val overlay: Boolean, val battery: Boolean, val notifications: Boolean)
+
+    private val permissionFlags = MutableStateFlow(Permissions(false, false, false, false))
+    private val activities = ResumedPhoneActivities()
+
+    init {
+        (app as Application).registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) { activities.resume(activity) }
+            override fun onActivityPaused(activity: Activity) { activities.pause(activity) }
+            override fun onActivityDestroyed(activity: Activity) { activities.pause(activity) }
+            override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit
+            override fun onActivityStarted(activity: Activity) = Unit
+            override fun onActivityStopped(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
+        })
+        scope.launch { pollPhonePermissions(activities.resumed) { permissionFlags.value = permissions() } }
+    }
 
     private suspend fun permissions(): Permissions = withContext(Dispatchers.IO) {
-        Permissions(Settings.canDrawOverlays(app),
+        Permissions(LocalGuiService.current != null, Settings.canDrawOverlays(app),
             app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName),
             PairingNotifier.notificationsAllowed(app))
     }
 
     /** All system queries and the first preferences/engine load stay off Flutter's main thread. */
-    suspend fun status(): PhoneStatus = status(permissions())
+    suspend fun status(): PhoneStatus = status(permissions().also { permissionFlags.value = it })
 
     private suspend fun status(permissions: Permissions): PhoneStatus = withContext(Dispatchers.IO) {
-        val accessibility = LocalGuiService.current != null
+        val accessibility = permissions.accessibility
         val state = if (supported) manager.engine.status.value else null
         val discovery = if (supported) manager.engine.pairingDiscovery.value else PairingDiscovery.Idle
         projectStatus(Build.VERSION.SDK_INT, accessibility, shell != null, state, discovery,
             supported && manager.engine.paired, permissions.overlay, permissions.battery, permissions.notifications,
-            if (supported) PhoneSetupFlow.stage(state!!, discovery, pairing.repairing.value, manager.engine.exchangingCode.value) else PairingStage.IDLE)
+            if (supported) PhoneSetupFlow.stage(state!!, discovery, pairing.repairing.value, manager.engine.exchangingCode.value) else PairingStage.IDLE,
+            preferences.getBoolean(PHONE_EXPERIMENTAL_ACK, false))
     }
 
-    /** Reactive helper state; only system permission flags need a slow refresh while Dart listens. */
+    /** Helper events remain live in the background, combined with the last foreground permission refresh. */
     private fun statuses(): Flow<PhoneStatus> = flow {
-        val permissionChanges = flow {
-            while (currentCoroutineContext().isActive) { emit(permissions()); delay(2_000) }
-        }
         val changes = if (supported) {
             val e = withContext(Dispatchers.IO) { manager.engine }
             combine(e.status, hub.shell, e.pairingDiscovery, e.exchangingCode, pairing.repairing) { _, _, _, _, _ -> Unit }
         } else flowOf(Unit)
-        emitAll(combine(changes, permissionChanges) { _, flags -> status(flags) })
+        emitAll(combine(changes, permissionFlags, preferenceChanges) { _, flags, _ -> status(flags) })
     }.distinctUntilChanged()
 
     private fun attach(activity: Activity, engine: FlutterEngine) {
@@ -123,6 +153,13 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                     val answer = when (call.method) {
                         "status" -> encodeStatus(status())
                         "openSettings" -> JSONObject().put("opened", openSettings(owner.get(), args.getString("kind")))
+                        "setExperimentalAck" -> {
+                            val acknowledged = args.get("acknowledged") as? Boolean
+                                ?: throw IllegalArgumentException("invalid_acknowledged")
+                            withContext(Dispatchers.IO) { setExperimentalAck(preferences, acknowledged) }
+                            preferenceChanges.value++
+                            encodeStatus(status())
+                        }
                         "startPairing" -> {
                             requireSupported()
                             PairingService.start(app)
@@ -144,7 +181,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                             encodeStatus(status())
                         }
                         "selfCheck" -> {
-                            val checks = withContext(Dispatchers.IO) { selfCheck?.run() ?: listOf(SelfCheckItem("helper", shell != null, null)) }
+                            val checks = withContext(Dispatchers.IO) { selfCheck?.run() ?: throw IllegalStateException("accessibility_unavailable") }
                             JSONObject().put("checks", JSONArray().apply { checks.forEach { c ->
                                 put(JSONObject().put("id", c.id).put("ok", c.ok).apply { c.detail?.let { put("detail", it) } })
                             } })
@@ -154,7 +191,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                             val taskId = args.getString("task_id").takeIf { it.isNotBlank() } ?: throw IllegalArgumentException("invalid_task")
                             val state = withContext(Dispatchers.IO) {
                                 if (call.method == "takeover") takeover?.takeover(taskId) else takeover?.handBack(taskId)
-                            } ?: TakeoverState.FAILED
+                            } ?: throw IllegalStateException("task_not_running")
                             JSONObject().put("state", state.wire)
                         }
                         else -> { result.notImplemented(); return@launch }
@@ -162,7 +199,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                     result.success(answer.toString())
                 } catch (e: CancellationException) { result.error("phone_error", "unknown", null); throw e }
                 catch (e: Exception) {
-                    val code = e.message?.takeIf { it in SAFE_ERRORS } ?: "unknown"
+                    val code = safeError(e)
                     result.error("phone_error", code, null)
                 }
             }
@@ -200,7 +237,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
     }
 
     private fun requireSupported() { check(supported) { "unsupported" } }
-    private fun openSettings(activity: Activity?, kind: String): Boolean {
+    private suspend fun openSettings(activity: Activity?, kind: String): Boolean {
         val packageUri = Uri.parse("package:${app.packageName}")
         val intents = when (kind) {
             "accessibility" -> listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -209,6 +246,16 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
             "developer" -> DeveloperSettings.developerOptionsPage()
             "wireless_debugging" -> DeveloperSettings.wirelessDebuggingPage()
             "wifi" -> DeveloperSettings.wifiPage()
+            "notifications", "app_info" -> {
+                val blockedChannel = if (kind == "notifications" && Build.VERSION.SDK_INT >= 26) withContext(Dispatchers.IO) {
+                    if (!NotificationManagerCompat.from(app).areNotificationsEnabled()) null else {
+                        val nm = app.getSystemService(NotificationManager::class.java)
+                        PairingChannel.IDS.mapNotNull { nm.getNotificationChannel(it) }.lastOrNull()
+                            ?.takeIf { it.importance == NotificationManager.IMPORTANCE_NONE }?.id
+                    }
+                } else null
+                phoneAppSettingsIntents(kind, app.packageName, Build.VERSION.SDK_INT, blockedChannel).map { it.toIntent() }
+            }
             else -> throw IllegalArgumentException("invalid_settings")
         }
         return intents.any { runCatching {
@@ -223,11 +270,17 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
             instance ?: PhoneBridge(context.applicationContext).also { instance = it }
         }
         fun register(activity: Activity, engine: FlutterEngine) = of(activity).attach(activity, engine)
-        private val SAFE_ERRORS = setOf("unsupported", "invalid_code", "invalid_port", "invalid_preview", "invalid_task", "invalid_settings")
+        private val SAFE_ERRORS = setOf("unsupported", "invalid_code", "invalid_port", "invalid_preview", "invalid_task", "invalid_settings",
+            "invalid_acknowledged", "run_active", "task_not_running", "no_takeover", "takeover_on_main_thread",
+            "takeover_unavailable", "accessibility_flags_failed", "accessibility_unavailable", "helper_unavailable", "display_unavailable")
+        internal fun safeError(error: Exception): String = error.message?.takeIf { it in SAFE_ERRORS } ?: "unknown"
+        internal fun setExperimentalAck(preferences: SharedPreferences, acknowledged: Boolean) {
+            preferences.edit().putBoolean(PHONE_EXPERIMENTAL_ACK, acknowledged).apply()
+        }
         internal fun projectStatus(
             apiLevel: Int, accessibility: Boolean, helperAlive: Boolean, state: BuiltinShellStatus?,
             discovery: PairingDiscovery, paired: Boolean, overlay: Boolean, battery: Boolean,
-            notifications: Boolean, stage: PairingStage,
+            notifications: Boolean, stage: PairingStage, experimentalAcknowledged: Boolean = false,
         ): PhoneStatus {
             val helper = when {
                 apiLevel < PHONE_VIRTUAL_MIN_API -> HelperState.UNSUPPORTED
@@ -237,7 +290,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                 state == BuiltinShellStatus.WirelessDebuggingOff -> HelperState.WIRELESS_DEBUGGING_OFF
                 else -> HelperState.NOT_PAIRED
             }
-            val tier = if (accessibility && helper == HelperState.RUNNING) PhoneTier.VIRTUAL else PhoneTier.MAIN
+            val tier = phoneTierFor(apiLevel, accessibility, helper == HelperState.RUNNING, experimentalAcknowledged)
             val failure = (state as? BuiltinShellStatus.Failed)?.reason?.let { reason ->
                 when (reason) {
                     BuiltinShellFailure.WrongCode -> HelperFailure.WRONG_CODE
@@ -251,17 +304,17 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                     else -> HelperFailure.UNKNOWN
                 }
             }
-            return PhoneStatus(apiLevel, tier, tier == PhoneTier.VIRTUAL && apiLevel < PHONE_VIRTUAL_STABLE_API,
+            return PhoneStatus(apiLevel, tier, apiLevel in PHONE_VIRTUAL_MIN_API until PHONE_VIRTUAL_STABLE_API,
                 accessibility, overlay, battery,
                 when { discovery != PairingDiscovery.Idle -> PairingState.SEARCHING
                     paired -> PairingState.PAIRED
                     else -> PairingState.UNPAIRED },
-                (discovery as? PairingDiscovery.Found)?.port, helper, failure, notifications, stage)
+                (discovery as? PairingDiscovery.Found)?.port, helper, failure, notifications, stage, experimentalAcknowledged)
         }
 
         fun encodeStatus(s: PhoneStatus): JSONObject = JSONObject()
             .put("schema_version", PHONE_SCHEMA_VERSION).put("api_level", s.apiLevel).put("tier", s.tier.wire)
-            .put("experimental", s.experimental).put("accessibility", s.accessibility).put("overlay", s.overlay)
+            .put("experimental_ack", s.experimentalAck).put("experimental", s.experimental).put("accessibility", s.accessibility).put("overlay", s.overlay)
             .put("notifications_allowed", s.notificationsAllowed).put("pairing_stage", s.pairingStage.wire)
             .put("battery_whitelisted", s.batteryWhitelisted).put("pairing", s.pairing.wire).put("helper", s.helper.wire)
             .apply {

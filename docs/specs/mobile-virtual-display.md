@@ -1,6 +1,6 @@
 # Android native phone control: virtual display contract
 
-Status: contract (phase 0). Code that implements it lives on the M2/M3 branches. Changing anything in
+Status: contract (integration, round 4). Implemented by the native helper, display and wiring lanes. Changing anything in
 this file, `INovaShell.aidl` or `clients/flutter/android/app/src/main/kotlin/com/nova/nova_mobile/phone/{PhoneControl,PhoneEvents,Snapshot,PhoneAction}.kt`
 is a contract change and needs supervisor approval. Pairing, helper and virtual-display code is derived
 from Mika (Apache-2.0, commit `5f630d9`); the scrcpy attribution in `ShellContext.kt` is kept.
@@ -158,21 +158,34 @@ Android-only; Dart guards with `Platform.isAndroid`.
 | Method | Args | Result |
 |---|---|---|
 | `status` | `{}` | `PhoneStatus` |
-| `openSettings` | `{kind: accessibility\|overlay\|battery\|developer\|wireless_debugging\|wifi}` | `{opened: bool}` |
+| `openSettings` | `{kind: accessibility\|overlay\|battery\|developer\|wireless_debugging\|wifi\|notifications\|app_info}` | `{opened: bool}` |
 | `startPairing` | `{}` | `PhoneStatus` (pairing `searching`; idempotent, restarts the 10 min sliding window) |
 | `submitCode` | `{code: "123456", port?: int}` | `PhoneStatus` after the pairing attempt (failure in `helper_failure`) |
 | `ensureHelper` | `{}` | `PhoneStatus` immediately; progress arrives as `status` events |
 | `unpair` | `{}` | `PhoneStatus` (nonces cleared, shell dropped, key forgotten) |
 | `selfCheck` | `{}` | `{checks:[{id, ok, detail?}]}`; ids `helper`, `create_display`, `start_app`, `read_tree`, `tap`, `type`, `back`, `main_focus`. Fails with `run_active` while an agent run is active. |
+| `setExperimentalAck` | `{acknowledged: bool}` | `PhoneStatus` (native preference is the only source of truth) |
 | `setPreview` | `{visible: bool}` | `{}` |
 | `takeover` | `{task_id}` | `{state: TakeoverState}` |
 | `handBack` | `{task_id}` | `{state: TakeoverState}` |
 
-`PhoneStatus` = `{schema_version:1, api_level, tier:"virtual"|"main", experimental, accessibility, overlay, battery_whitelisted, notifications_allowed:bool,
+`PhoneStatus` = `{schema_version:1, api_level, tier:"virtual"|"main", experimental:bool, experimental_ack:bool, accessibility, overlay, battery_whitelisted, notifications_allowed:bool,
 pairing_stage:"idle"|"waiting_code"|"pairing"|"connecting"|"done"|"failed",
 pairing:"unpaired"|"searching"|"paired", pairing_port?, helper:"unsupported"|"not_paired"|"wireless_debugging_off"|"connecting"|"running"|"failed",
 helper_failure?:"wrong_code"|"pairing_window_closed"|"no_wifi"|"wifi_not_allowed"|"connect_failed"|"authorization_revoked"|"key_unreadable"|"helper_start_failed"|"unknown",
 helper_fix?:"retry"|"re_pair"|"open_wifi"|"open_wireless_debugging"}`.
+
+`experimental` is true exactly on API 31..33, even when the helper is unavailable or the tier is `main`.
+`experimental_ack` reads the native `nova_phone` / `phone.experimental_ack` boolean (default false).
+`setExperimentalAck` writes that same key; Dart keeps no copy. Status tier follows the same acknowledgement
+rule as run admission; changing the acknowledgement does not change an already running task's fixed tier.
+`notifications` opens app notification settings (or the selected pairing channel when only that channel is blocked),
+with app details as a fallback on older Android versions. `app_info` opens `ACTION_APPLICATION_DETAILS_SETTINGS`
+for Nova's package so the user can allow restricted settings.
+
+Native permission polling runs only while at least one app activity is resumed. Pausing the last activity stops
+polling, not the event subscription; helper state events continue using the last permission flags, and resume
+refreshes them immediately. Explicit `status` calls still read current flags.
 
 `notifications_allowed` requires app notifications and the selected pairing channel to be enabled.
 `pairing_stage` describes the current pairing attempt independently of helper availability: discovery/repair waits for code, code exchange is `pairing`, helper startup is `connecting`.
@@ -181,7 +194,8 @@ A live helper remains `running` (and eligible for `virtual`) even if re-pairing 
 
 ### EventChannel `nova/phone/events`
 
-Each event is a JSON string object:
+Dart shares one native subscription per EventChannel (`events` and `frames`); multiple Dart listeners must not
+cancel each other's native subscription. Each event is a JSON string object:
 
 - `{type:"status", status: PhoneStatus}`
 - `{type:"step", task_id, step, tool, label, status:"running"|"completed"|"failed"|"unknown", changed?, ref?, tier}`. Each
@@ -190,6 +204,11 @@ Each event is a JSON string object:
   then `completed`.
 - `{type:"takeover", task_id, state:"requested"|"active"|"returned"|"timed_out"|"failed", by:"model"|"user", reason?}`
 - `{type:"done", task_id, outcome:"completed"|"failed"|"cancelled"|"interrupted", reason?, summary?, steps, duration_ms}`
+
+The `task_id` on `step`, `takeover` and `done` is exactly the `id` supplied to `nova/local_agent/v1 run`:
+`LocalAgentController.Active.id` comes from the request and is passed unchanged to the virtual host and takeover.
+`run` replies and every `tasks` entry include `tier: "virtual"|"main"`, including replayed journal records
+(legacy records without a tier are `main`). Phone task events are currently emitted only for virtual runs.
 
 ### EventChannel `nova/phone/frames`
 
@@ -266,7 +285,11 @@ Lanes do not edit files they don't own. If a lane needs a seam that isn't here, 
 
 - `LocalAgentController(context, spaceId, shells: ShellProvider?, events: PhoneEventSink?)`: `MainActivity` passes the
   `PhoneBridge` for both (null keeps every run on `main`). The controller implements `PhoneTakeover`; the bridge routes
-  `takeover`/`handBack` to the current controller.
+  `takeover`/`handBack` to the current controller. On Space switch/close or activity destruction, detach both hooks
+  before closing the old controller; install both hooks for the new Space only. An old activity's cleanup must not
+  clear a newer controller's hooks. A closed controller also refuses self-check admission.
+- `pairingWindowReader` dynamically wraps `LocalGuiService.current?.settingsWindowTexts()` (empty while unavailable),
+  so service reconnection never leaves a stale accessibility instance attached.
 - `VirtualSelfCheck(context, shells, runs)` implements `PhoneSelfCheck`; `runs` is the current `LocalAgentController`
   (`RunIdleGate`). Call `run()` off the main thread. It drives system
   Settings on a temporary display: `tap` goes to a point outside every clickable node, `back` uses `injectKey`, and `type`
@@ -334,3 +357,12 @@ Method error codes of `nova/phone/v1` that are not run reasons: `task_not_runnin
 `handBack`), `takeover_on_main_thread` (`takeover` called on the main thread, a bridge bug), `run_active` (`selfCheck`).
 Method error code of `nova/local_agent/v1` `start`/`run`: `accessibility_flags_failed` (a failed restoration of the runtime
 a11y flag is still owed; no run starts until a retry succeeds).
+
+## Round-4 bridge error boundary
+
+The `phone_error` message preserves these safe codes (unknown or content-bearing exceptions become `unknown`):
+`unsupported`, `invalid_code`, `invalid_port`, `invalid_preview`, `invalid_task`, `invalid_settings`,
+`invalid_acknowledged`, `run_active`, `task_not_running`, `no_takeover`, `takeover_on_main_thread`,
+`takeover_unavailable`, `accessibility_flags_failed`, `accessibility_unavailable`, `helper_unavailable`,
+`display_unavailable`. A missing controller refuses takeover/handBack with `task_not_running`; a missing
+self-check hook reports `accessibility_unavailable` rather than a misleading helper-only check.
