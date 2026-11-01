@@ -19,6 +19,7 @@ import com.nova.nova_mobile.phone.PhoneActionErrors
 import com.nova.nova_mobile.phone.PhoneSnapshot
 import com.nova.nova_mobile.phone.ScrollDirection
 import com.nova.nova_mobile.phone.ShellProvider
+import com.nova.nova_mobile.phone.TakeoverPort
 import com.nova.nova_mobile.phone.display.AgentDisplay
 import com.nova.nova_mobile.phone.display.LazyAgentDisplay
 import com.nova.nova_mobile.phone.shell.INovaShell
@@ -35,21 +36,20 @@ class VirtualScreen(
     private val shells: ShellProvider,
     val display: LazyAgentDisplay,
     val scope: VirtualScope,
-) {
+) : VirtualDevice {
     private val ids = NodeIds<AccessibilityNodeInfo>()
 
-    /** A resolved action ready to dispatch. [ref] is the model's ref, [label] an element name or package (never typed text). */
+    /** A resolved action ready to dispatch on this screen. */
     class Prepared internal constructor(
-        val tool: String,
-        val ref: String?,
-        val label: String?,
+        tool: String,
+        ref: String?,
+        label: String?,
         internal val changeWaitMs: Long,
         internal val run: (AgentDisplay) -> Boolean,
         internal val settled: ((AgentDisplay) -> Boolean)? = null,
-    )
-
-    /** [outcome] is a journal outcome (`dispatched`/`rejected`); [changed] whether the display's tree changed afterwards. */
-    class Dispatched(val outcome: String, val changed: Boolean?)
+        /** [run] throws contract codes only for refusals that started nothing (`startApp` results). */
+        internal val refusalsAreDefinite: Boolean = false,
+    ) : PreparedAction(tool, ref, label)
 
     /** The helper binder the display was created with; a missing or different binder means the helper died or restarted. */
     private fun shell(): INovaShell {
@@ -65,11 +65,9 @@ class VirtualScreen(
 
     private fun read(d: AgentDisplay) = SnapshotReader.read(windows(d), d.width, d.height)
 
-    /** Foreground package of the display, or null when nothing readable is shown. */
-    fun topPackage(): String? = display.current?.let { SnapshotReader.topPackage(windows(it)) }
+    override fun topPackage(): String? = display.current?.let { SnapshotReader.topPackage(windows(it)) }
 
-    /** Reads and registers a numbered snapshot with the latest frame. */
-    fun snapshot(): PhoneSnapshot = helperCall {
+    override fun snapshot(): PhoneSnapshot = helperCall {
         shell()
         val d = requireDisplay()
         if (!d.awaitFrame(FIRST_FRAME_MS)) throw IllegalStateException(SCREEN_UNAVAILABLE)
@@ -90,15 +88,9 @@ class VirtualScreen(
         )
     }
 
-    /** After a takeover every ref is stale. */
-    fun forgetRefs() = ids.clear()
+    override fun forgetRefs() = ids.clear()
 
-    /**
-     * Resolves [action] against the current display without any effect on it (except creating the display for
-     * `open_app`). Throws `ref_expired`, `ref_not_editable`, `ref_not_scrollable`, `no_focused_input`,
-     * `private_input_requires_user`, `app_not_allowed`, `display_unavailable` or `helper_unavailable`.
-     */
-    fun prepare(action: PhoneAction): Prepared = helperCall {
+    override fun prepare(action: PhoneAction): Prepared = helperCall {
         shell()
         when (action) {
             is PhoneAction.OpenApp -> prepareOpenApp(action.packageName)
@@ -129,24 +121,39 @@ class VirtualScreen(
         }
     }
 
-    /**
-     * Dispatches [prepared] once if [allowed] still holds, then waits briefly for the display to change and settle.
-     * A definite pre-effect failure (for example `app_in_use_on_main`) throws its contract code; any other exception
-     * means the effect is unknown.
-     */
-    fun dispatch(prepared: Prepared, allowed: () -> Boolean): Dispatched {
+    override fun dispatch(prepared: PreparedAction, allowed: () -> Boolean): DispatchResult {
+        val action = prepared as Prepared
         shell()
         val d = requireDisplay()
-        check(allowed()) { "execution_stopped" }
+        check(allowed()) { EXECUTION_STOPPED }
         val before = SnapshotReader.hash(windows(d))
-        if (!prepared.run(d)) return Dispatched("rejected", null)
-        return Dispatched("dispatched", settle(d, before, prepared))
+        val done = try { action.run(d) } catch (e: IllegalStateException) {
+            // A failure in the middle of a gesture or injection may already have had an effect.
+            if (action.refusalsAreDefinite) throw e
+            throw IllegalStateException(EFFECT_UNKNOWN)
+        }
+        if (!done) return DispatchResult("rejected", null)
+        return DispatchResult("dispatched", settle(d, before, action))
     }
 
     /** Ends the run's display: later calls fail with `display_unavailable`. */
     fun close() {
         ids.clear()
         display.close()?.release()
+    }
+
+    /** Takeover moves on this run's display: its top task to the main display (0) and back. */
+    fun takeoverPort(): TakeoverPort = object : TakeoverPort {
+        override fun topTask(): Int {
+            val d = display.current ?: return -1
+            return shell().topTaskId(d.displayId)
+        }
+        override fun moveToMain(taskId: Int): Boolean = shell().moveTask(taskId, android.view.Display.DEFAULT_DISPLAY)
+        override fun moveBack(taskId: Int): Boolean {
+            val d = display.current ?: return false
+            return shell().moveTask(taskId, d.displayId)
+        }
+        override fun paused(paused: Boolean) { display.current?.previewPaused = paused }
     }
 
     private fun prepareOpenApp(packageName: String): Prepared {
@@ -164,7 +171,7 @@ class VirtualScreen(
         return Prepared("open_app", null, packageName, LAUNCH_WAIT_MS, run = {
             startAppError(shell().startApp(d.displayId, packageName))?.let { code -> throw IllegalStateException(code) }
             true
-        }, settled = { SnapshotReader.topPackage(windows(it)) == packageName })
+        }, settled = { SnapshotReader.topPackage(windows(it)) == packageName }, refusalsAreDefinite = true)
     }
 
     private fun prepareType(d: AgentDisplay, action: PhoneAction.Type): Prepared {
@@ -315,6 +322,8 @@ class VirtualScreen(
     companion object {
         /** Existing safe observation code, reused when the display has no frame yet. */
         const val SCREEN_UNAVAILABLE = "screen_unavailable"
+        /** Not a contract code: the host journals the attempt as `unknown`. */
+        private const val EFFECT_UNKNOWN = "effect_unknown"
         private const val FIRST_FRAME_MS = 2_000L
         private const val CHANGE_WAIT_MS = 1_500L
         private const val LAUNCH_WAIT_MS = 5_000L
