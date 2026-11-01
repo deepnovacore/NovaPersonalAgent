@@ -1,13 +1,12 @@
 // Derived from Mika (https://github.com/wangzan101/Mika, Apache-2.0, commit 5f630d9),
-// Copyright 2026 wangzan101. Modified by Nova: relocate tests of core/uistate/AccuracyTest.kt for the internal copy;
-// typeAndVerify tests are not copied (Nova does not port typeAndVerify).
-// TODO(integration): drop with the internal ElementLocator copy once phone-core (M2 lane) is merged.
+// Copyright 2026 wangzan101. Modified by Nova: relocate tests of core/uistate/AccuracyTest.kt for the local Accuracy.kt
+// copy; typeAndVerify tests are not copied (Nova does not port typeAndVerify).
 package com.nova.nova_mobile.phone.a11y
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class ElementLocatorTest {
+class AccuracyTest {
     private fun loc(
         name: String, x: Int = 100, y: Int = 100, ctx: String? = "上一项", role: String = "TextView", rid: String? = null,
         hint: Boolean = false, inList: Boolean = false,
@@ -102,13 +101,5 @@ class ElementLocatorTest {
         // 换了一页:同位置的按钮名字也变了
         val otherPage = listOf(loc("设置", 100, 300, null), loc("关于", 100, 500, "设置"), prev.copy(name = "退出登录"))
         assertEquals(Relocation.Gone, relocate(prev, rows + prev, otherPage, 720))
-    }
-
-    @Test fun normalizeMapsPixelsToTheSnapshotRange() {
-        assertEquals(0, normalize(0, 1080))
-        assertEquals(999, normalize(1079, 1080))
-        assertEquals(999, normalize(5000, 1080))
-        assertEquals(0, normalize(-3, 1080))
-        assertEquals(0, normalize(10, 1))
     }
 }

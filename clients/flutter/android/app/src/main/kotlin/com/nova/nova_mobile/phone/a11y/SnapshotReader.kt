@@ -1,12 +1,16 @@
 // Derived from Mika (https://github.com/wangzan101/Mika, Apache-2.0, commit 5f630d9),
 // Copyright 2026 wangzan101. Modified by Nova: subset of cap/phone/a11y/ScreenReader.kt (numbering, locators,
-// change hash) emitting the contract UiElement; no UiTreeNode/wheel/aggregate trees; element and name caps.
+// change hash) and ScreenPort.normalize emitting the contract UiElement; no UiTreeNode/wheel/aggregate trees; element and name caps.
 package com.nova.nova_mobile.phone.a11y
 
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import com.nova.nova_mobile.phone.SNAPSHOT_BOUNDS_MAX
 import com.nova.nova_mobile.phone.UiElement
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * One read of a display. [hash] covers every visible node's class, text, description, bounds and state (checked,
@@ -214,4 +218,10 @@ internal object SnapshotReader {
         }
         return h
     }
+}
+
+/** Pixel [p] on an axis of [size] pixels to the snapshot's 0..[SNAPSHOT_BOUNDS_MAX] space. */
+internal fun normalize(p: Int, size: Int): Int {
+    if (size <= 1) return 0
+    return min(SNAPSHOT_BOUNDS_MAX, max(0, (p * SNAPSHOT_BOUNDS_MAX.toDouble() / (size - 1)).roundToInt()))
 }

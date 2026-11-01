@@ -1,21 +1,17 @@
 // Derived from Mika (https://github.com/wangzan101/Mika, Apache-2.0, commit 5f630d9),
-// Copyright 2026 wangzan101. Modified by Nova: minimal internal copy of core/uistate/Accuracy.kt (ElementLocator,
-// relocate, stationary) and ScreenPort.normalize, English comments.
-// TODO(integration): replace with phone-core `com.nova.phone.core.uistate` (M2 lane) once both branches are merged.
+// Copyright 2026 wangzan101. Modified by Nova: package name and English comments.
+// Local copy of core/uistate/Accuracy.kt with the same declarations, visibility and semantics as the M2 lane's
+// phone-core `com.nova.phone.core.uistate` copy, so integration replaces this file with that import unchanged.
 package com.nova.nova_mobile.phone.a11y
 
-import com.nova.nova_mobile.phone.SNAPSHOT_BOUNDS_MAX
 import kotlin.math.hypot
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
 
 /**
  * Features used to recognise "the same element" on a new screen. [context] is the nearest named element before it in
  * traversal order, so a same-named button elsewhere cannot take its place after scrolling. [hint]: the name is an
  * input hint/placeholder (these rotate). [inList]: the element is inside a list container (items are recycled).
  */
-internal data class ElementLocator(
+data class ElementLocator(
     val role: String,
     val name: String,
     val resourceId: String?,
@@ -26,7 +22,7 @@ internal data class ElementLocator(
     val inList: Boolean = false,
 )
 
-internal sealed interface Relocation {
+sealed interface Relocation {
     /** [index] is the index in the new list. */
     data class Found(val index: Int) : Relocation
     /** Still there, but the context changed or it moved too far. */
@@ -38,10 +34,10 @@ internal sealed interface Relocation {
 }
 
 /** Largest centre shift accepted when relocating: this share of the screen's short side. */
-internal const val RELOCATE_MAX_SHIFT = 0.15
+const val RELOCATE_MAX_SHIFT = 0.15
 
 /** "Still in place" shift limit: this share of the screen's short side. */
-internal const val SAME_SPOT_SHIFT = 0.02
+const val SAME_SPOT_SHIFT = 0.02
 
 /**
  * Finds the unique counterpart of [previous] in [after] once its ref is stale. Found only when role, name and resource id
@@ -54,7 +50,7 @@ internal const val SAME_SPOT_SHIFT = 0.02
  *   names differ only in digits and whitespace ("Skip 3" -> "Skip 2") or the old name was a rotating hint.
  *   Semantic changes ("Follow" -> "Following", "Next" -> "Confirm payment") never match.
  */
-internal fun relocate(previous: ElementLocator, before: List<ElementLocator>, after: List<ElementLocator>, shortSide: Int): Relocation {
+fun relocate(previous: ElementLocator, before: List<ElementLocator>, after: List<ElementLocator>, shortSide: Int): Relocation {
     if (previous.name.isBlank() && previous.resourceId.isNullOrBlank()) return Relocation.Ambiguous
     val spot = shortSide * SAME_SPOT_SHIFT
     val still by lazy { stationary(before, after, spot) }
@@ -98,10 +94,4 @@ internal fun stationary(before: List<ElementLocator>, after: List<ElementLocator
         if (shift(list[0], a) <= spot) inPlace++
     }
     return shared >= 2 && inPlace >= shared * 0.8
-}
-
-/** Pixel [p] on an axis of [size] pixels to the snapshot's 0..[SNAPSHOT_BOUNDS_MAX] space. */
-internal fun normalize(p: Int, size: Int): Int {
-    if (size <= 1) return 0
-    return min(SNAPSHOT_BOUNDS_MAX, max(0, (p * SNAPSHOT_BOUNDS_MAX.toDouble() / (size - 1)).roundToInt()))
 }

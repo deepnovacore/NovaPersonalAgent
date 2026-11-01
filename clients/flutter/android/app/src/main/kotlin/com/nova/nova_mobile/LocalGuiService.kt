@@ -29,7 +29,10 @@ import java.util.concurrent.Executors
 
 /** Android owns observation and input; no ADB, host process or Hub is used. */
 class LocalGuiService : AccessibilityService() {
-    companion object { @Volatile var current: LocalGuiService?=null }
+    companion object {
+        @Volatile var current: LocalGuiService?=null
+        private const val PAIRING_MAX_NODES=400
+    }
     private val main=Handler(Looper.getMainLooper())
     private val observations=Executors.newSingleThreadExecutor()
     private var stopButton: Button?=null
@@ -213,6 +216,29 @@ class LocalGuiService : AccessibilityService() {
         },main)
         if(!accepted)return false
         return try { done.get(15,TimeUnit.SECONDS) } catch(_:Exception) { false }
+    }
+
+    /**
+     * Pairing-code reader for the wireless-debugging pairing dialog (M2 `PairingWindowReader.settingsWindowTexts`):
+     * the non-blank, non-password text of each system Settings window on the main display, one list per window, at most
+     * [PAIRING_MAX_NODES] nodes each. Other apps' windows are never read. Derived from Mika cap/phone/setup/PairingCodeReader.
+     */
+    fun settingsWindowTexts():List<List<String>> = onMain {
+        val settings=runCatching { packageManager.resolveActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS),0)?.activityInfo?.packageName }.getOrNull()?:"com.android.settings"
+        val mainWindows=if(Build.VERSION.SDK_INT>=30)windowsOnAllDisplays.get(Display.DEFAULT_DISPLAY).orEmpty() else windows
+        mainWindows.mapNotNull { window ->
+            val root=runCatching { window.root }.getOrNull()?:return@mapNotNull null
+            if(root.packageName?.toString()!=settings)return@mapNotNull null
+            val texts=mutableListOf<String>()
+            val queue=ArrayDeque(listOf(root))
+            var seen=0
+            while(queue.isNotEmpty()&&seen++<PAIRING_MAX_NODES) {
+                val node=queue.removeFirst()
+                if(node.isVisibleToUser&&!node.isPassword)node.text?.toString()?.takeIf { it.isNotBlank() }?.let(texts::add)
+                for(i in 0 until node.childCount)node.getChild(i)?.let(queue::add)
+            }
+            texts
+        }
     }
 
     /** Display of an event: from API 33 the event carries it; earlier, look its window up on every display. */
