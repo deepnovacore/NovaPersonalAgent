@@ -938,3 +938,11 @@ test('timeline diagnostics default the incremental cache counters when no run is
  assert.equal(result.diagnostics?.cache_stage_hits,0)
  assert.equal(result.diagnostics?.cache_stage_misses,0)
 })
+
+test('uncertainty that only describes what the source did not say is dropped', async () => {
+  const {coverageGapFree} = await import('../src/model/personal-writer.js')
+  assert.equal(coverageGapFree('原文未说明当前实际在用哪些模型版本。'), '')
+  assert.equal(coverageGapFree('消息中没有提及负责人。'), '')
+  assert.equal(coverageGapFree('是否已完成迁移仍待确认。'), '是否已完成迁移仍待确认。')
+  assert.equal(coverageGapFree(''), '')
+})

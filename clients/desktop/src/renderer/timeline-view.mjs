@@ -72,7 +72,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
    const card=el('article',undefined,'timeline-attention-card');card.tabIndex=-1;card.dataset.kind=kind;card.dataset.historical=String(historical);card.dataset.objectId=item.id;briefCards.push({item,card});if(compact)section.append(card)
    const meta=el('div',undefined,'timeline-brief-meta'),topic=el('span',undefined,'timeline-topic')
    const glyph=el('span',{attention:'!',deadline:'◷',progress:'✓',insight:'◇'}[kind],'timeline-topic-icon');glyph.setAttribute('aria-hidden','true');topic.append(glyph,el('span',item.category));meta.append(topic)
-   if(item.status_label)meta.append(el('span',historical?t('当时状态：{0}',item.status_label):item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
+   if(item.status_label)meta.append(el('span',item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
    if(historical&&item.time?.as_of)card.append(el('p',t('整理于 {0}',formatDate(item.time.as_of)),'hint timeline-history-note'))
    if(item.people?.length){const people=renderCardTags(card,item.people.map(person=>({label:person.name,tone:'person'})),{el});people.className+=' timeline-people';people.setAttribute('aria-label',t('相关同事'))}
    const timeMeta=el('div',undefined,'timeline-card-time'),time=item.time,label=text=>timeMeta.append(el('span',text,'timeline-time-label'))
@@ -87,14 +87,13 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
    }else label(t('时间待明确'))
    card.append(timeMeta)
    const facts=el('div',undefined,'timeline-attention-facts');facts.dataset.count=String(item.facts?.length??0);for(const fact of item.facts??[]){const panel=el('div',undefined,'timeline-fact');panel.dataset.tone=['risk','warning','positive'].includes(fact.tone)?fact.tone:'neutral';if(fact.label)panel.append(el('h4',fact.label));panel.append(el('p',fact.text));facts.append(panel)}card.append(facts)
-   const reason=el('div',undefined,'timeline-attention-reason');reason.append(el('span',t(historical?'当时判断':{attention:'影响',deadline:'时间窗口',progress:'进展',insight:'判断'}[kind])),el('p',item.why_now));card.append(reason)
+   const reason=el('div',undefined,'timeline-attention-reason');reason.append(el('span',t({attention:'影响',deadline:'时间窗口',progress:'进展',insight:'判断'}[kind])),el('p',item.why_now));card.append(reason)
    if(item.next_steps?.length){
-    const followups=el('section',undefined,'timeline-followups');followups.append(el('h4',t(historical?'当时建议':'后续建议')))
+    const followups=el('section',undefined,'timeline-followups');followups.append(el('h4',t('后续建议')))
     const steps=el('ol',undefined,'timeline-next-steps');for(const [index,step] of item.next_steps.entries()){const tile=el('li');tile.append(el('span',String(index+1).padStart(2,'0'),'timeline-step-number'),el('h5',step.title),el('p',step.detail));steps.append(tile)}followups.append(steps);card.append(followups)
    }
    if(item.uncertainty){const caution=el('p',undefined,'timeline-caution');caution.append(el('span',t('尚不确定：')),el('span',item.uncertainty));card.append(caution)}
-   if(item.sources_available===false&&!item.sources_checking)card.append(el('p',t('原始来源已不可用'),'hint timeline-source-unavailable'))
-   else if(item.sources_available!==false)attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
+   if(item.sources_available!==false)attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
    const actions=el('div',undefined,'timeline-actions');card.append(actions)
    for(const action of item.sources_available===false||item.historical===true?[]:item.actions??[]){
     const reference=[{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],draft=action.kind==='draft'
