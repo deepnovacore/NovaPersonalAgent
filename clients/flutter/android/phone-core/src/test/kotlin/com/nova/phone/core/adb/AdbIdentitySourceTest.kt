@@ -42,8 +42,8 @@ class AdbIdentitySourceTest {
     fun generatedKeyRoundTripsToTheIdenticalPublicKey() {
         // 升级前存下的就是 generate() 出来的私钥编码:读回来要是同一把公钥,已配对的不用重配
         repeat(3) {
-            val id = AdbIdentity.generate("mika@x")
-            val back = AdbIdentity.fromPkcs8(id.keyPair.private.encoded, "mika@x")
+            val id = AdbIdentity.generate("nova@x")
+            val back = AdbIdentity.fromPkcs8(id.keyPair.private.encoded, "nova@x")
             assertArrayEquals(id.publicKey.encoded, back.publicKey.encoded)
             assertEquals(id.adbPublicKey, back.adbPublicKey)
             assertArrayEquals(id.certificate.publicKey.encoded, back.certificate.publicKey.encoded)
@@ -54,7 +54,7 @@ class AdbIdentitySourceTest {
     fun nonCrtPrivateKeyStillParsesToTheSamePublicKey() {
         val key = nonCrt()
         assertFalse(key is RSAPrivateCrtKey)
-        val id = AdbIdentity.fromPkcs8(key.encoded, "mika@x")
+        val id = AdbIdentity.fromPkcs8(key.encoded, "nova@x")
         assertEquals(TestTls.client.publicKey, id.publicKey)
         assertEquals(BigInteger.valueOf(65537), id.publicKey.publicExponent)
         id.certificate.verify(TestTls.client.publicKey)
@@ -75,26 +75,26 @@ class AdbIdentitySourceTest {
         val g = KeyPairGenerator.getInstance("RSA").apply { initialize(RSAKeyGenParameterSpec(2048, BigInteger.valueOf(65539))) }
         val odd = g.generateKeyPair().private as RSAPrivateCrtKey
         val stripped = nonCrt(odd)
-        assertThrows(AdbKeyUnreadableException::class.java) { AdbIdentity.fromPkcs8(stripped.encoded, "mika@x") }
+        assertThrows(AdbKeyUnreadableException::class.java) { AdbIdentity.fromPkcs8(stripped.encoded, "nova@x") }
         // 编码里带着指数的照常读
-        assertEquals(BigInteger.valueOf(65539), AdbIdentity.fromPkcs8(odd.encoded, "mika@x").publicKey.publicExponent)
+        assertEquals(BigInteger.valueOf(65539), AdbIdentity.fromPkcs8(odd.encoded, "nova@x").publicKey.publicExponent)
     }
 
     @Test
     fun garbageIsUnreadable() {
-        assertThrows(AdbKeyUnreadableException::class.java) { AdbIdentity.fromPkcs8(byteArrayOf(1, 2, 3), "mika@x") }
+        assertThrows(AdbKeyUnreadableException::class.java) { AdbIdentity.fromPkcs8(byteArrayOf(1, 2, 3), "nova@x") }
     }
 
     @Test
     fun noKeyStoredCreatesAndStoresOne() {
         val store = MemKeyStore()
-        val src = AdbIdentitySource(store, { "mika@x" })
+        val src = AdbIdentitySource(store, { "nova@x" })
         assertEquals(AdbKeyState.NotLoaded, src.state)
         val id = src.forConnect()
         assertEquals(AdbKeyState.Created, src.state)
         assertEquals(1, store.writes)
         assertArrayEquals(id.keyPair.private.encoded, store.bytes)
-        val again = AdbIdentitySource(store, { "mika@x" })
+        val again = AdbIdentitySource(store, { "nova@x" })
         assertEquals(id.publicKey, again.forConnect().publicKey)
         assertEquals(AdbKeyState.Loaded, again.state)
         assertEquals(1, store.writes)
@@ -105,7 +105,7 @@ class AdbIdentitySourceTest {
         val garbage = byteArrayOf(0x30, 0x03, 2, 1, 0)
         val store = MemKeyStore(garbage)
         val logged = mutableListOf<String>()
-        val src = AdbIdentitySource(store, { "mika@x" }) { msg, _ -> logged += msg }
+        val src = AdbIdentitySource(store, { "nova@x" }) { msg, _ -> logged += msg }
         assertThrows(AdbKeyUnreadableException::class.java) { src.forConnect() }
         assertThrows(AdbKeyUnreadableException::class.java) { src.forConnect() }
         assertEquals(AdbKeyState.Unreadable, src.state)
@@ -116,14 +116,14 @@ class AdbIdentitySourceTest {
 
         // 解不开(包装密钥没了)也一样
         val locked = MemKeyStore(TestTls.client.keyPair.private.encoded).apply { unreadable = true }
-        assertThrows(AdbKeyUnreadableException::class.java) { AdbIdentitySource(locked, { "mika@x" }).forConnect() }
+        assertThrows(AdbKeyUnreadableException::class.java) { AdbIdentitySource(locked, { "nova@x" }).forConnect() }
         assertEquals(0, locked.writes)
     }
 
     @Test
     fun pairingReplacesAnUnreadableKeyAndConnectThenUsesTheNewOne() {
         val store = MemKeyStore(byteArrayOf(9, 9, 9))
-        val src = AdbIdentitySource(store, { "mika@x" })
+        val src = AdbIdentitySource(store, { "nova@x" })
         val paired = src.forPairing()
         assertEquals(AdbKeyState.Created, src.state)
         assertNull(src.problem)
@@ -135,7 +135,7 @@ class AdbIdentitySourceTest {
     fun pairingReusesAReadableKey() {
         val stored = TestTls.client.keyPair.private.encoded
         val store = MemKeyStore(stored)
-        val src = AdbIdentitySource(store, { "mika@x" })
+        val src = AdbIdentitySource(store, { "nova@x" })
         assertEquals(TestTls.client.publicKey, src.forPairing().publicKey)
         assertEquals(0, store.writes)
     }
@@ -143,7 +143,7 @@ class AdbIdentitySourceTest {
     @Test
     fun pairAndConnectInOneProcessShareOneIdentityEvenIfTheStoreFailsLater() {
         val store = MemKeyStore()
-        val src = AdbIdentitySource(store, { "mika@x" })
+        val src = AdbIdentitySource(store, { "nova@x" })
         val forPair = src.forPairing()
         // 存下的东西之后坏了:这个进程里仍用配对时那一把
         store.unreadable = true
@@ -154,7 +154,7 @@ class AdbIdentitySourceTest {
     @Test
     fun forgetClearsTheCacheAndTheStore() {
         val store = MemKeyStore()
-        val src = AdbIdentitySource(store, { "mika@x" })
+        val src = AdbIdentitySource(store, { "nova@x" })
         val first = src.forConnect()
         src.forget()
         assertNull(store.bytes)

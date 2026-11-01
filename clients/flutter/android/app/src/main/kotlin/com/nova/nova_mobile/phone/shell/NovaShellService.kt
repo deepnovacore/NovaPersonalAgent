@@ -1,4 +1,4 @@
-// Derived from Nova (https://github.com/wangzan101/Nova, Apache-2.0, commit 5f630d9),
+// Derived from Mika (https://github.com/wangzan101/Mika, Apache-2.0, commit 5f630d9),
 // Copyright 2026 wangzan101. Modified by Nova: restricted Binder subset and own-display enforcement.
 package com.nova.nova_mobile.phone.shell
 
@@ -16,12 +16,13 @@ import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
 /** Shell-only process; the Binder authorizes Nova's runtime uid on every transaction. */
-class NovaShellService(private val allowedUid: Int) : INovaShell.Stub() {
+class NovaShellService(private val allowedUid: Int, private val appPackage: String) : INovaShell.Stub() {
     private val context: Context = ShellContext.create()
     private val displays = HashMap<Int, VirtualDisplay>()
     private val flagsUsed = HashMap<Int, Int>()
     private val movedOut = HashSet<Int>()
     private val launchLock = Any()
+    private val strokeLock = Any()
     private val myUser = allowedUid / 100_000
     @SuppressLint("PrivateApi")
     private val displayManager = DisplayManager::class.java.getDeclaredConstructor(Context::class.java)
@@ -30,7 +31,7 @@ class NovaShellService(private val allowedUid: Int) : INovaShell.Stub() {
         Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
     }
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-        if (code in FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION && Binder.getCallingUid() != allowedUid) {
+        if (!allowsTransaction(code, Binder.getCallingUid(), allowedUid)) {
             throw SecurityException("caller_not_allowed")
         }
         return super.onTransact(code, data, reply, flags)
@@ -82,7 +83,7 @@ class NovaShellService(private val allowedUid: Int) : INovaShell.Stub() {
 
     @Synchronized
     override fun startApp(displayId: Int, packageName: String): Int = synchronized(launchLock) {
-        if (!ownDisplay(displayId) || !PACKAGE.matches(packageName)) return START_ERROR
+        if (!ownDisplay(displayId) || !allowsApp(packageName, appPackage)) return START_ERROR
         try {
             // Missing visibility metadata fails closed: never move a possibly visible main task away.
             val visible = TASK_INFO.getField("isVisible")
@@ -211,28 +212,34 @@ class NovaShellService(private val allowedUid: Int) : INovaShell.Stub() {
      * App 看到的速度就是 Nova 排好的快慢。只发到 Nova 自己的屏。按下没注入成功返回 false(调用方改走别的路);
      * 按下之后中途哪个点没注入成功也照样往下走,最后一定补发抬起,不让手指一直按着。
      */
-    @Synchronized
     override fun injectStroke(displayId: Int, xs: IntArray, ys: IntArray, times: LongArray): Boolean {
-        if (!ownDisplay(displayId)) return false
-        val n = times.size
-        if (n < 2 || n > STROKE_MAX_POINTS || xs.size != n || ys.size != n || times[0] != 0L ||
-            times.last() > STROKE_MAX_MS || (1 until n).any { times[it] < times[it - 1] }
-        ) return false
-        val down = SystemClock.uptimeMillis()
-        fun event(i: Int, action: Int): MotionEvent {
-            val props = MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER }
-            val coords = MotionEvent.PointerCoords().apply { x = xs[i].toFloat(); y = ys[i].toFloat(); pressure = 1f; size = 1f }
-            return MotionEvent.obtain(down, down + times[i], action, 1, arrayOf(props), arrayOf(coords), 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+        synchronized(strokeLock) {
+            val n = times.size
+            synchronized(this) {
+                if (!ownDisplay(displayId)) return false
+                if (n < 2 || n > STROKE_MAX_POINTS || xs.size != n || ys.size != n || times[0] != 0L ||
+                    times.last() > STROKE_MAX_MS || (1 until n).any { times[it] < times[it - 1] }
+                ) return false
+            }
+            val down = SystemClock.uptimeMillis()
+            fun event(i: Int, action: Int): MotionEvent {
+                val props = MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER }
+                val coords = MotionEvent.PointerCoords().apply { x = xs[i].toFloat(); y = ys[i].toFloat(); pressure = 1f; size = 1f }
+                return MotionEvent.obtain(down, down + times[i], action, 1, arrayOf(props), arrayOf(coords), 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+            }
+            fun send(i: Int, action: Int): Boolean {
+                val wait = down + times[i] - SystemClock.uptimeMillis()
+                if (wait > 0) SystemClock.sleep(wait)
+                return synchronized(this) {
+                    if (!ownDisplay(displayId)) return false
+                    val e = event(i, action)
+                    try { inject(e, displayId) } finally { e.recycle() }
+                }
+            }
+            if (!send(0, MotionEvent.ACTION_DOWN)) return false
+            for (i in 1 until n) send(i, MotionEvent.ACTION_MOVE)
+            return send(n - 1, MotionEvent.ACTION_UP) || send(n - 1, MotionEvent.ACTION_UP)
         }
-        fun send(i: Int, action: Int): Boolean {
-            val wait = down + times[i] - SystemClock.uptimeMillis()
-            if (wait > 0) SystemClock.sleep(wait)
-            val e = event(i, action)
-            return try { inject(e, displayId) } finally { e.recycle() }
-        }
-        if (!send(0, MotionEvent.ACTION_DOWN)) return false
-        for (i in 1 until n) send(i, MotionEvent.ACTION_MOVE)
-        return send(n - 1, MotionEvent.ACTION_UP) || send(n - 1, MotionEvent.ACTION_UP)
     }
 
     /**
@@ -286,6 +293,12 @@ class NovaShellService(private val allowedUid: Int) : INovaShell.Stub() {
     } catch (_: Exception) { -1 }
 
     companion object {
+        internal fun allowsTransaction(code: Int, caller: Int, owner: Int): Boolean =
+            code !in FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION || caller == owner
+
+        internal fun allowsApp(packageName: String, appPackage: String): Boolean =
+            PACKAGE.matches(packageName) && packageName != appPackage
+
         internal fun allowsTaskMove(taskId: Int, from: Int, to: Int, own: Set<Int>, moved: Set<Int>): Boolean =
             (from in own && to == Display.DEFAULT_DISPLAY) ||
                 (from == Display.DEFAULT_DISPLAY && taskId in moved && to in own)

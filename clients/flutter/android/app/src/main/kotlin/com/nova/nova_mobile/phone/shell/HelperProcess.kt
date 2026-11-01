@@ -46,7 +46,7 @@ object HelperProcess {
         }
         // ShellContext 自建 ActivityThread 时要有主线程 Looper
         Looper.prepareMainLooper()
-        val service = NovaShellService(allowedUid = appUid)
+        val service = NovaShellService(allowedUid = appUid, appPackage = packageName)
         val helper = Helper(service, packageName, appUid, certPin)
         helper.start(launchNonce)
         Looper.loop()

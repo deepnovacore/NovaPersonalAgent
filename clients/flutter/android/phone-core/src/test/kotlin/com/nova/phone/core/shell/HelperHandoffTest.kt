@@ -9,11 +9,6 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
 class HelperHandoffTest {
@@ -24,35 +19,10 @@ class HelperHandoffTest {
     }
 
     private var now = 1_000L
-    private var wall = 1_700_000_000_000L
 
     private fun nonces(store: NonceStore = MemStore()): HandoffNonces {
         var n = 0
-        return HandoffNonces(store, clock = { now }, wallClock = { wall }) { "n${++n}" }
-    }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    @Test
-    fun usbScriptIsRewrittenWithAFreshNonceWhenNoncesAreClearedWhileNoHelperIsConnected() = runTest {
-        var n = 0
-        val gate = HandoffNonces(MemStore(), clock = { now }, wallClock = { wall }) { "f00d%04d".format(++n) }
-        val helper = MutableStateFlow<Any?>(null)
-        val written = mutableListOf<String>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            HelperHandoff.usbScriptWrites(helper, gate.resets).collect { connected ->
-                written += HelperHandoff.usbFile(connected, "/a.apk", "p", 1, { "pin" }, gate::usbNonce, "/s.sh")
-            }
-        }
-        assertEquals(1, written.size)
-        val stale = gate.usbNonce()
-        assertTrue(written[0].contains(stale))
-        // 解除配对:助手一直不在,也要重写,新脚本里是新口令,旧的不再认
-        gate.clear()
-        assertEquals(2, written.size)
-        assertFalse(written[1].contains(stale))
-        assertFalse(gate.matches(stale))
-        assertTrue(gate.matches(gate.usbNonce()))
-        assertTrue(written[1].contains(gate.usbNonce()))
+        return HandoffNonces(store, clock = { now }) { "n${++n}" }
     }
 
     @Test
@@ -181,125 +151,4 @@ class HelperHandoffTest {
         assertNull(HelperHandoff.certPin(null))
     }
 
-    // ---------- 用电脑经 USB 启动 ----------
-
-    private val apk = "/data/app/~~x/com.nova.nova_mobile.autonomy-y/base.apk"
-    private val scriptPath = "/storage/emulated/0/Android/data/com.nova.nova_mobile.autonomy/files/usb-start.sh"
-
-    @Test
-    fun usbCommandUsesTheShortSdcardPathForTheMainUser() {
-        assertEquals("adb shell sh /sdcard/Android/data/com.nova.nova_mobile.autonomy/files/usb-start.sh", HelperHandoff.usbCommand(scriptPath))
-        // 别的用户的存储照实际路径写
-        assertEquals(
-            "adb shell sh /storage/emulated/10/Android/data/com.nova.nova_mobile.autonomy/files/usb-start.sh",
-            HelperHandoff.usbCommand("/storage/emulated/10/Android/data/com.nova.nova_mobile.autonomy/files/usb-start.sh"),
-        )
-    }
-
-    @Test
-    fun usbScriptStartsTheSameHelperDetachedWithTheNonceOnStdin() {
-        val script = HelperHandoff.usbScript(apk, "com.nova.nova_mobile.autonomy", 10234, "ab'cd", "f00d", scriptPath)
-        assertTrue(script.startsWith("#!/system/bin/sh\n"))
-        // 和无线调试同一个入口、同样的参数;指纹里的单引号转义好;忽略挂断信号、另起会话、放到后台、输出丢掉
-        assertTrue(
-            script,
-            script.contains(
-                "(echo \"\$n\" | CLASSPATH='$apk' nohup setsid app_process /system/bin --nice-name='com.nova.nova_mobile.autonomy:helper' " +
-                    "com.nova.nova_mobile.phone.shell.HelperMain 'com.nova.nova_mobile.autonomy' 10234 'ab'\\''cd' >/dev/null 2>&1 &)",
-            ),
-        )
-        // 口令只在变量里,经内建 echo 走管道,不进命令行参数
-        assertTrue(script.contains("\nn='f00d'\n"))
-        assertEquals(1, script.split("f00d").size - 1)
-        // 只有 shell 身份才起;APK 不在(更新过)就请用户先打开 Nova
-        assertTrue(script.contains("if [ \"\$(id -u)\" != \"2000\" ]; then"))
-        assertTrue(script.contains("if [ ! -f '$apk' ]; then"))
-        // 等 setsid 生效再返回,并说清结果和怎么确认
-        assertTrue(script.contains("\nsleep 2\n"))
-        assertTrue(script.contains("if pidof 'com.nova.nova_mobile.autonomy:helper' >/dev/null 2>&1; then"))
-        assertTrue(script.contains("Nova helper starting... Open Nova to confirm"))
-        assertTrue(script.contains("adb shell sh /sdcard/Android/data/com.nova.nova_mobile.autonomy/files/usb-start.sh"))
-        assertTrue(script.endsWith("fi\n"))
-    }
-
-    @Test
-    fun usbScriptQuotesEverythingItInterpolates() {
-        val script = HelperHandoff.usbScript("/a b/it's.apk", "p", 1, "pin", "n'; rm -rf /; '", scriptPath)
-        assertTrue(script.contains("CLASSPATH='/a b/it'\\''s.apk'"))
-        assertTrue(script.contains("n='n'\\''; rm -rf /; '\\'''"))
-        assertFalse(script.contains("n='n'; rm"))
-    }
-
-    @Test
-    fun connectedGetsAStubWithoutANonce() {
-        var asked = 0
-        val stub = HelperHandoff.usbFile(true, apk, "com.nova.nova_mobile.autonomy", 10234, { asked++; "pin" }, { asked++; "secret" }, scriptPath)
-        assertEquals(0, asked)
-        assertFalse(stub.contains("secret"))
-        assertFalse(stub.contains("app_process"))
-        assertTrue(stub.contains("already running"))
-        assertTrue(stub.contains("pidof 'com.nova.nova_mobile.autonomy:helper'"))
-        val live = HelperHandoff.usbFile(false, apk, "com.nova.nova_mobile.autonomy", 10234, { "pin" }, { "secret" }, scriptPath)
-        assertTrue(live.contains("n='secret'"))
-        assertTrue(live.contains("app_process"))
-    }
-
-    @Test
-    fun usbNonceIsReusedWhileFreshAndHandsOffOnce() {
-        val g = nonces()
-        val usb = g.usbNonce()
-        // 重写脚本时还新:沿用,电脑正在跑的那份不作废
-        wall += HandoffNonces.USB_TTL_MS / 2
-        assertEquals(usb, g.usbNonce())
-        assertTrue(g.matches(usb))
-        assertNotNull(g.accept(usb))
-        // 用过就作废;下一份脚本是新口令
-        assertNull(g.accept(usb))
-        assertNotEquals(usb, g.usbNonce())
-    }
-
-    @Test
-    fun usbNonceRotatesWhenHalfUsedAndExpires() {
-        val g = nonces()
-        val usb = g.usbNonce()
-        wall += HandoffNonces.USB_TTL_MS / 2 + 1
-        val fresh = g.usbNonce()
-        assertNotEquals(usb, fresh)
-        assertFalse(g.matches(usb))
-        wall += HandoffNonces.USB_TTL_MS
-        assertTrue(g.matches(fresh))
-        wall += 1
-        assertFalse(g.matches(fresh))
-        assertNull(g.accept(fresh))
-    }
-
-    @Test
-    fun usbNonceFromTheFutureIsNotTrusted() {
-        val g = nonces()
-        val usb = g.usbNonce()
-        wall -= 1
-        assertFalse(g.matches(usb))
-    }
-
-    @Test
-    fun usbNonceSurvivesARebootButNotAnotherHandoff() {
-        val store = MemStore()
-        val usb = nonces(store).usbNonce()
-        // 重启后开机计时归零,墙上时钟照走:脚本照样能用
-        now = 0
-        val g = nonces(store)
-        assertTrue(g.matches(usb))
-        // 无线调试那边起的助手先被收下:脚本里的口令作废
-        assertNotNull(g.accept(g.issueLaunch()))
-        assertFalse(g.matches(usb))
-        assertNull(store.slots.usb)
-    }
-
-    @Test
-    fun clearVoidsTheUsbNonce() {
-        val g = nonces()
-        val usb = g.usbNonce()
-        g.clear()
-        assertFalse(g.matches(usb))
-    }
 }

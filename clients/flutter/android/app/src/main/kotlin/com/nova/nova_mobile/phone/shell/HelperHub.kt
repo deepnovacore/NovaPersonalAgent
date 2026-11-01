@@ -11,6 +11,7 @@ import android.os.Binder
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
+import com.nova.phone.core.shell.HandoffGate
 import com.nova.phone.core.shell.HandoffNonces
 import com.nova.phone.core.shell.HelperHandoff
 import com.nova.phone.core.shell.NonceSlots
@@ -30,16 +31,10 @@ class HelperHub private constructor(context: Context) {
 
     /** 交给助手的本进程令牌:Nova 进程一死,助手就从它的死亡通知得知,撤掉 Nova 留下的改动。 */
     private val token = Binder()
-    private val nonces: HandoffNonces by lazy { HandoffNonces(PrefsNonceStore(app), SystemClock::elapsedRealtime, System::currentTimeMillis) }
+    private val nonces: HandoffNonces by lazy { HandoffNonces(PrefsNonceStore(app), SystemClock::elapsedRealtime) }
 
     /** 经 adbd 起新助手前调:这个一次性口令经 exec 流的标准输入交给助手。 */
     fun issueLaunchNonce(): String = nonces.issueLaunch()
-
-    /** 写进「用电脑启动」脚本的一次性口令(见 [HandoffNonces.usbNonce]);交接走的是同一个 [offer]。 */
-    fun usbNonce(): String = nonces.usbNonce()
-
-    /** 口令被整体作废的次数(见 [HandoffNonces.resets]):「用电脑启动」脚本跟着它重写。 */
-    val nonceResets: StateFlow<Int> get() = nonces.resets
 
     /** 解除配对:口令全部作废(还活着的助手下次交接会被拒绝并退出),手里的接口也放掉。 */
     @Synchronized
@@ -55,26 +50,30 @@ class HelperHub private constructor(context: Context) {
     @Synchronized
     fun offer(extras: Bundle?, callingUid: Int, callingPid: Int): Bundle {
         val binder = extras?.getBinder(HelperHandoff.KEY_BINDER)
-        HelperHandoff.check(
-            callingUid, callingPid,
-            reportedUid = extras?.getInt(HelperHandoff.KEY_UID, -1) ?: -1,
-            reportedPid = extras?.getInt(HelperHandoff.KEY_PID, -1) ?: -1,
-            helperApk = extras?.getString(HelperHandoff.KEY_APK),
-            appApk = app.applicationInfo.sourceDir,
-            hasBinder = binder != null,
-        )?.let { return reject(it) }
-        val gate = nonces
         val nonce = extras?.getString(HelperHandoff.KEY_NONCE)
-        // 口令不对就不碰对方给的 Binder
-        if (!gate.matches(nonce)) return reject(HelperHandoff.Reject.BadNonce)
-        val shell = INovaShell.Stub.asInterface(binder!!)
-        val ids = runCatching { shell.identity() }.getOrNull()
-        if (ids == null || ids.size < 2 || ids[0] != callingUid || ids[1] != callingPid) {
-            return reject(HelperHandoff.Reject.BinderElsewhere)
-        }
-        val next = gate.accept(nonce) ?: return reject(HelperHandoff.Reject.BadNonce)
+        var candidate: INovaShell? = null
+        val decision = HandoffGate.offer(
+            check = { HelperHandoff.check(
+                callingUid, callingPid,
+                reportedUid = extras?.getInt(HelperHandoff.KEY_UID, -1) ?: -1,
+                reportedPid = extras?.getInt(HelperHandoff.KEY_PID, -1) ?: -1,
+                helperApk = extras?.getString(HelperHandoff.KEY_APK),
+                appApk = app.applicationInfo.sourceDir,
+                hasBinder = binder != null,
+            ) },
+            matches = { nonces.matches(nonce) },
+            identity = {
+                candidate = INovaShell.Stub.asInterface(binder!!)
+                val ids = runCatching { candidate!!.identity() }.getOrNull()
+                ids != null && ids.size >= 2 && ids[0] == callingUid && ids[1] == callingPid
+            },
+            accept = { nonces.accept(nonce) },
+        )
+        if (decision is HandoffGate.Result.Rejected) return reject(decision.reason)
+        val next = (decision as HandoffGate.Result.Accepted).nextNonce
+        val shell = checkNotNull(candidate)
         try {
-            binder.linkToDeath({ synchronized(this@HelperHub) { _shell.compareAndSet(shell, null) } }, 0)
+            binder!!.linkToDeath({ synchronized(this@HelperHub) { _shell.compareAndSet(shell, null) } }, 0)
         } catch (e: Exception) {
             return reject(HelperHandoff.Reject.NoBinder)
         }
@@ -109,12 +108,11 @@ class HelperHub private constructor(context: Context) {
         private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         override fun load() = NonceSlots(
             prefs.getString("resume", null), prefs.getString("launch", null), prefs.getLong("launchAt", 0),
-            prefs.getString("usb", null), prefs.getLong("usbAt", 0),
         )
         // 同步写:助手拿到新口令后 Nova 可能马上被杀,新进程要认得它
         override fun save(slots: NonceSlots) {
             prefs.edit().putString("resume", slots.resume).putString("launch", slots.launch).putLong("launchAt", slots.launchAt)
-                .putString("usb", slots.usb).putLong("usbAt", slots.usbAt).commit().also { check(it) { "nonce_persistence_failed" } }
+                .remove("usb").remove("usbAt").commit().also { check(it) { "nonce_persistence_failed" } }
         }
     }
 }

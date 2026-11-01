@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NovaShellServiceTest {
+    @Test fun ownPackageCannotBeStartedEvenOnOwnDisplay() {
+        assertFalse(NovaShellService.allowsApp("com.nova.nova_mobile", "com.nova.nova_mobile"))
+        assertFalse(NovaShellService.allowsApp("com.nova.nova_mobile.autonomy", "com.nova.nova_mobile.autonomy"))
+        assertTrue(NovaShellService.allowsApp("com.example.app", "com.nova.nova_mobile"))
+        assertFalse(NovaShellService.allowsApp("bad;command", "com.nova.nova_mobile"))
+    }
+    @Test fun binderTransactionsRequireTheRuntimeAppUid() {
+        assertTrue(NovaShellService.allowsTransaction(1, 10234, 10234))
+        assertFalse(NovaShellService.allowsTransaction(1, 2000, 10234))
+        assertFalse(NovaShellService.allowsTransaction(14, 0, 10234))
+        assertFalse(NovaShellService.allowsTransaction(14, 110234, 10234))
+    }
+
     @Test fun takeoverCannotMoveUnrelatedTasksOrTargetForeignDisplays() {
         val own = setOf(8, 9)
         val moved = setOf(100)
