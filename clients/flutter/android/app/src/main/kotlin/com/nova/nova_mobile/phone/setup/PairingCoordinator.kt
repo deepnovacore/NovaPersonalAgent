@@ -86,6 +86,8 @@ class PairingCoordinator(context: Context, private val control: BuiltinShellCont
             if (!deadline.await(notices)) {
                 notices.cancel()
                 cancelNotice()
+                // The window expired with no live attempt: stop reporting `waiting_code`.
+                _repairing.value = false
             }
             reader.cancel()
             control.stopDiscovery()
