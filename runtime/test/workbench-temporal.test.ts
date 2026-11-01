@@ -71,3 +71,18 @@ test('splitting a possible closure cannot resurrect its earlier commitment',asyn
  const result=await writer({phase:'reconcile',matters:rows,inputs:[],date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal)
  assert.deepEqual(resolveWorkbenchGroups(rows,result).map(g=>g.state),['uncertain','completed'])
 })
+
+test('an oversized matter index is reconciled in bounded shards instead of failing the whole run',async()=>{
+ const {createWorkbenchGenerator}=await import('../src/model/workbench-writer.js')
+ const rows=Array.from({length:900},(_,i)=>({...m('x'+i),observed_at:new Date(Date.UTC(2026,9,1,0,i)).toISOString()}))
+ const sizes:number[]=[]
+ const writer=createWorkbenchGenerator({stream:()=>{throw Error('unused')},complete:r=>{
+  const body=JSON.parse(r.prompt) as {matters:{id:string}[]}
+  sizes.push(body.matters.length)
+  return Promise.resolve({text:JSON.stringify({groups:body.matters.map(x=>({members:[x.id],state:'open',current:x.id,basis:[x.id]}))})})
+ }},'test')
+ const result=await writer({phase:'reconcile',matters:rows,inputs:[],date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal)
+ assert.ok(sizes.length>=3&&sizes.every(n=>n<=400),'each model call is bounded: '+sizes.join(','))
+ const groups=resolveWorkbenchGroups(rows,result)
+ assert.equal(groups.length,900,'every matter is covered exactly once')
+})

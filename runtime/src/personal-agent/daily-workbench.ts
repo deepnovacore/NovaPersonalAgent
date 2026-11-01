@@ -1,5 +1,5 @@
 import {z} from 'zod'
-import {TEMPORAL_RECIPE,temporalReplySchema,resolveWorkbenchGroups} from './workbench-temporal.js'
+import {TEMPORAL_RECIPE,temporalResultSchema,resolveWorkbenchGroups} from './workbench-temporal.js'
 import {readFile} from 'node:fs/promises'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import type {TimelineInput} from './timeline-brief.js'
@@ -21,7 +21,7 @@ const dropTodoState=(raw:unknown):unknown=>{
  const stale=(state.cards??[]).some(card=>card.tab==='todos'||todo(card.update))||(state.cache??[]).some(entry=>(entry.matters??[]).some(todo))||(state.recorded??[]).some(row=>todo(row.matter))
  return stale?{...state,temporal:null,compositions:[],cache:[],cards:[],key:'',updated_at:null,automatic_day:'',recorded:(state.recorded??[]).filter(row=>!todo(row.matter))}:raw
 }
-const stateSchema=z.preprocess(dropTodoState,z.object({version:z.literal(1),failure:z.string().nullable().default(null),temporal:z.object({key:z.string(),source_key:z.string().default(''),result:temporalReplySchema}).nullable().default(null),legacy_imported:z.boolean().default(false),legacy_dismissed:z.array(legacyDismissedSchema).default([]),automatic_day:z.string(),key:z.string(),updated_at:z.string().nullable(),cache:z.array(cacheSchema),compositions:z.array(z.object({key:z.string(),result:workbenchCompositionSchema})).default([]),cards:z.array(cardSchema),dismissed:z.array(z.string()),recorded:z.array(recordedSchema),
+const stateSchema=z.preprocess(dropTodoState,z.object({version:z.literal(1),failure:z.string().nullable().default(null),temporal:z.object({key:z.string(),source_key:z.string().default(''),result:temporalResultSchema}).nullable().default(null),legacy_imported:z.boolean().default(false),legacy_dismissed:z.array(legacyDismissedSchema).default([]),automatic_day:z.string(),key:z.string(),updated_at:z.string().nullable(),cache:z.array(cacheSchema),compositions:z.array(z.object({key:z.string(),result:workbenchCompositionSchema})).default([]),cards:z.array(cardSchema),dismissed:z.array(z.string()),recorded:z.array(recordedSchema),
  diagnostics:z.object({inputs:z.number(),cache_hits:z.number(),extraction_calls:z.number(),composition_calls:z.number(),received:z.number(),rejected:z.number(),recorded:z.number()})}))
 type State=z.infer<typeof stateSchema>
 const diagnostics=()=>({inputs:0,cache_hits:0,extraction_calls:0,composition_calls:0,received:0,rejected:0,recorded:0})
@@ -145,7 +145,7 @@ export class DailyWorkbench {
    let temporal=this.#state.temporal?.key===temporalKey?this.#state.temporal.result:undefined
    if(!temporal){
     this.#state.diagnostics.composition_calls++
-    temporal=temporalReplySchema.parse(await this.options.generate({phase:'reconcile',matters:extracted,inputs,date:day,timezone},signal));guard()
+    temporal=temporalResultSchema.parse(await this.options.generate({phase:'reconcile',matters:extracted,inputs,date:day,timezone},signal));guard()
    }
    const resolved=resolveWorkbenchGroups(extracted,temporal)
    this.#state.temporal={key:temporalKey,source_key:workbenchHash(inputs.map(i=>[i.id,i.version])),result:temporal};await this.#save()
