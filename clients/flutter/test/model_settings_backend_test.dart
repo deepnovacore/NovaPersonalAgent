@@ -208,6 +208,46 @@ void main() {
     expect((await settings.credentials.resolve(custom))!.key, 'custom-key-2');
   });
 
+  test('the ChatGPT account route is never recorded on a key record', () async {
+    final settings = ModelSettings(native: _Native());
+    final backend = LocalModelSettingsBackend(settings);
+    const custom = 'https://relay.example/v1';
+    // A new key record starts unrecorded, so it reads as Chat Completions.
+    await backend.saveCredential(
+      const ModelSettingsInput(
+        providerId: null,
+        endpoint: custom,
+        model: '',
+        protocol: ModelProtocol.chatgptResponses,
+        newKey: 'k1',
+      ),
+    );
+    expect((await settings.credentials.resolve(custom))!.protocol, isNull);
+    var saved = {for (final p in await backend.savedProviders()) p.endpoint: p};
+    expect(saved[custom]!.protocol, ModelProtocol.chatCompletions);
+
+    // A declared API survives a later attempt to record the account route.
+    await backend.saveCredential(
+      const ModelSettingsInput(
+        providerId: null,
+        endpoint: custom,
+        model: '',
+        protocol: ModelProtocol.responses,
+      ),
+    );
+    await backend.saveCredential(
+      const ModelSettingsInput(
+        providerId: null,
+        endpoint: custom,
+        model: '',
+        protocol: ModelProtocol.chatgptResponses,
+      ),
+    );
+    saved = {for (final p in await backend.savedProviders()) p.endpoint: p};
+    expect(saved[custom]!.protocol, ModelProtocol.responses);
+    expect((await settings.credentials.resolve(custom))!.key, 'k1');
+  });
+
   test(
     'records saved before protocols were stored read as the preset\'s',
     () async {

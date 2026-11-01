@@ -30,8 +30,10 @@ const _probeTool = {
 /// up; reasoning text counts too.
 const _probeTextLimit = 2000;
 
-/// Output tokens (reasoning included) one probe may bill.
-const probeOutputTokens = 256;
+/// Output tokens (reasoning included) one probe may bill. Models that think
+/// by default (Nova can only switch that off on a few hosts) need room to
+/// finish thinking before they reach the tool call.
+const probeOutputTokens = 1024;
 
 sealed class ProbeResult {
   const ProbeResult();
@@ -358,6 +360,9 @@ enum ProbeProblem {
   server,
   wrongProtocol,
   modelRejected,
+
+  /// A 404 that does not name a model: the chat endpoint is not at this URL.
+  badAddress,
   timeout,
   auth,
   quota,
@@ -398,8 +403,39 @@ class ProbeFailure {
   };
 }
 
+/// Request options a 400 may name when the model, not the provider, is the
+/// problem: a reasoning model refusing `max_tokens` or `temperature`, a model
+/// without tool support.
+const _modelOptions = [
+  'max_tokens',
+  'max_completion_tokens',
+  'max_output_tokens',
+  'tools',
+  'tool_choice',
+  'temperature',
+  'reasoning',
+  'reasoning_effort',
+  'stream_options',
+];
+
+final _modelOptionWords = RegExp(
+  '(?<![a-z0-9_])(${_modelOptions.join('|')})(?![a-z0-9_])',
+);
+
+/// [words] (lower case) contains [model] as a whole name.
+bool _mentionsModel(String words, String model) {
+  final name = model.trim().toLowerCase();
+  if (name.isEmpty) return false;
+  return RegExp(
+    '(?<![a-z0-9_-]|[a-z0-9]\\.)${RegExp.escape(name)}(?![a-z0-9_-]|\\.[a-z0-9])',
+  ).hasMatch(words);
+}
+
 /// Reads a failed model call: HTTP status, then the provider's error code and
-/// words. Heuristics only choose which hint the user sees, never whether to save.
+/// words. A 400 or 404 counts as being about the model only when it names the
+/// probed model or one of the request options a model may refuse; anything
+/// else is the provider's (a region block, a proxy's complaint, a wrong URL)
+/// and proves nothing about the key.
 ProbeFailure classifyProbeFailure(AgentFailure failure, String model) {
   if (failure.code == 'probe_timeout' || failure.code == 'model_timeout') {
     return ProbeFailure(ProbeProblem.timeout, model);
@@ -429,27 +465,30 @@ ProbeFailure classifyProbeFailure(AgentFailure failure, String model) {
   if (status == 403) {
     return make(aboutModel ? ProbeProblem.notAvailable : ProbeProblem.auth);
   }
-  if (status == 404 ||
-      codes.contains('model_not_found') ||
+  if (codes.contains('model_not_found') ||
       (aboutModel &&
           RegExp(
             r'not found|does not exist|not exist|unknown model|invalid model',
-          ).hasMatch(words))) {
+          ).hasMatch(words)) ||
+      (status == 404 && _mentionsModel(words, model))) {
     return make(ProbeProblem.notFound);
   }
+  if (status == 404) return make(ProbeProblem.badAddress);
   if (RegExp(r'tool|function').hasMatch(words) &&
       RegExp(r'not support|unsupported|does not support').hasMatch(words)) {
     return make(ProbeProblem.noTools);
   }
-  // A 400 about the model or one of its parameters (OpenAI's
-  // `unsupported_parameter`, an unsupported model option) belongs to that
-  // model; another may accept the request. A bad key is never model-specific.
+  // A 400 that names the model or one of its request options (OpenAI's
+  // `unsupported_parameter` for `max_tokens`) belongs to that model; another
+  // may accept the request. A bad key is never model-specific.
   if ((status == 400 || status == 422) &&
       !RegExp(r'api[_ ]?key').hasMatch(words) &&
-      ((failure is ModelRequestFailure && failure.parameter != null) ||
-          RegExp(
-            r'model|param|unsupported|not support',
-          ).hasMatch(failure.code.startsWith('model_') ? words : codes))) {
+      (_mentionsModel(words, model) ||
+          _modelOptions.contains(
+            (failure is ModelRequestFailure ? failure.parameter : null)
+                ?.toLowerCase(),
+          ) ||
+          _modelOptionWords.hasMatch(words))) {
     return make(ProbeProblem.modelRejected);
   }
   return make(ProbeProblem.other, detail.isEmpty ? failure.code : detail);

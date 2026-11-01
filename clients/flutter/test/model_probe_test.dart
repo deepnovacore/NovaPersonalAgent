@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_mobile/agent_core/chatgpt_accounts.dart';
 import 'package:nova_mobile/agent_core/model_catalog.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/model_presets.dart';
@@ -198,46 +199,81 @@ void main() {
       expect(sentBody!.containsKey('max_completion_tokens'), isFalse);
     });
 
-    test('the cap parameter follows the API that is called', () {
-      Map<String, dynamic> body(String endpoint, ModelProtocol protocol) =>
-          modelRequestBody(
-            ModelConfiguration(
-              endpoint: endpoint,
-              model: 'm',
-              key: 'k',
-              protocol: protocol,
-            ),
-            const [],
-            const [],
-            maxOutputTokens: probeOutputTokens,
-          );
-      final openAi = body(
-        'https://api.openai.com/v1',
-        ModelProtocol.chatCompletions,
-      );
-      expect(openAi['max_completion_tokens'], probeOutputTokens);
-      expect(openAi.containsKey('max_tokens'), isFalse);
-      final other = body(
-        'https://api.deepseek.com',
-        ModelProtocol.chatCompletions,
-      );
-      expect(other['max_tokens'], probeOutputTokens);
-      final responses = body(
-        'https://api.openai.com/v1',
-        ModelProtocol.responses,
-      );
-      expect(responses['max_output_tokens'], probeOutputTokens);
-      // Ordinary turns keep their own budget.
-      final plain = modelRequestBody(
+    group('the output cap parameter follows the host and API', () {
+      Map<String, dynamic> body(
+        String endpoint,
+        ModelProtocol protocol, {
+        int? cap,
+      }) => modelRequestBody(
         ModelConfiguration(
-          endpoint: 'https://api.openai.com/v1',
+          endpoint: endpoint,
           model: 'm',
           key: 'k',
+          protocol: protocol,
         ),
         const [],
         const [],
+        maxOutputTokens: cap,
       );
-      expect(plain['max_tokens'], 12000);
+      const openAi = 'https://api.openai.com/v1';
+      const other = 'https://api.deepseek.com';
+
+      test('a plain turn on api.openai.com uses max_completion_tokens', () {
+        final plain = body(openAi, ModelProtocol.chatCompletions);
+        expect(plain['max_completion_tokens'], 12000);
+        expect(plain.containsKey('max_tokens'), isFalse);
+      });
+
+      test('a probe on api.openai.com uses max_completion_tokens', () {
+        final probe = body(
+          openAi,
+          ModelProtocol.chatCompletions,
+          cap: probeOutputTokens,
+        );
+        expect(probe['max_completion_tokens'], probeOutputTokens);
+        expect(probe.containsKey('max_tokens'), isFalse);
+      });
+
+      test('other hosts keep max_tokens, for turns and probes', () {
+        final plain = body(other, ModelProtocol.chatCompletions);
+        expect(plain['max_tokens'], 65536);
+        expect(plain.containsKey('max_completion_tokens'), isFalse);
+        final generic = body(
+          'https://relay.example/v1',
+          ModelProtocol.chatCompletions,
+        );
+        expect(generic['max_tokens'], 12000);
+        expect(generic.containsKey('max_completion_tokens'), isFalse);
+        final probe = body(
+          other,
+          ModelProtocol.chatCompletions,
+          cap: probeOutputTokens,
+        );
+        expect(probe['max_tokens'], probeOutputTokens);
+        expect(probe.containsKey('max_completion_tokens'), isFalse);
+      });
+
+      test(
+        'Responses and ChatGPT probes are capped with max_output_tokens',
+        () {
+          expect(
+            body(openAi, ModelProtocol.responses, cap: probeOutputTokens),
+            containsPair('max_output_tokens', probeOutputTokens),
+          );
+          expect(
+            body(chatGptResource, ModelProtocol.chatgptResponses, cap: 7),
+            containsPair('max_output_tokens', 7),
+          );
+          // Ordinary turns are not capped.
+          expect(
+            body(
+              openAi,
+              ModelProtocol.responses,
+            ).containsKey('max_output_tokens'),
+            isFalse,
+          );
+        },
+      );
     });
 
     test('reasoning text counts towards the text limit', () async {
@@ -397,7 +433,7 @@ void main() {
         ProbeProblem.notAvailable,
       );
       expect(problem(403, body: 'forbidden'), ProbeProblem.auth);
-      expect(problem(404), ProbeProblem.notFound);
+      expect(problem(404), ProbeProblem.badAddress);
       expect(
         problem(
           400,
@@ -444,6 +480,121 @@ void main() {
       expect(problem(400, body: 'bad request'), ProbeProblem.other);
       expect(problem(503), ProbeProblem.server);
       expect(problem(418, body: 'teapot'), ProbeProblem.other);
+    });
+
+    group('a 400 or 404 is about the model only when it says so', () {
+      ProbeFailure classify(
+        int status,
+        String body, {
+        String code = 'model_http_400',
+        String? parameter,
+        String model = 'probe-model',
+      }) => classifyProbeFailure(
+        ModelRequestFailure(
+          code,
+          status: status,
+          body: body,
+          parameter: parameter,
+        ),
+        model,
+      );
+
+      test('a region block is the provider\'s, not the model\'s', () {
+        const body =
+            '{"error":{"code":"unsupported_country_region_territory",'
+            '"message":"Country, region, or territory not supported"}}';
+        for (final status in [400, 403]) {
+          final f = classify(
+            status,
+            body,
+            code: 'unsupported_country_region_territory',
+          );
+          expect(f.modelSpecific, isFalse, reason: '$status');
+          expect(f.keyAccepted, isFalse, reason: '$status');
+        }
+      });
+
+      test('a proxy\'s 400 about an unrelated parameter blocks', () {
+        final f = classify(
+          400,
+          '{"error":{"param":"user_id","message":"invalid request"}}',
+          code: 'invalid_request',
+          parameter: 'user_id',
+        );
+        expect(f.problem, ProbeProblem.other);
+        expect(f.modelSpecific, isFalse);
+        expect(f.keyAccepted, isFalse);
+      });
+
+      test('a 404 that names no model is a wrong address and blocks', () {
+        final f = classify(
+          404,
+          '{"detail":"Not Found"}',
+          code: 'model_http_404',
+        );
+        expect(f.problem, ProbeProblem.badAddress);
+        expect(f.modelSpecific, isFalse);
+        expect(f.keyAccepted, isFalse);
+        expect(classify(404, '').problem, ProbeProblem.badAddress);
+      });
+
+      test('a missing model named in the answer moves on to the next', () {
+        for (final (status, body) in [
+          (404, '{"error":{"message":"model \'probe-model\' not found"}}'),
+          (404, '{"error":{"message":"No such thing: probe-model."}}'),
+          (
+            400,
+            '{"error":{"message":"The model `probe-model` does not exist"}}',
+          ),
+          (404, '{"error":{"code":"model_not_found","message":"gone"}}'),
+        ]) {
+          final f = classify(status, body);
+          expect(f.problem, ProbeProblem.notFound, reason: body);
+          expect(f.modelSpecific, isTrue);
+          expect(f.keyAccepted, isTrue);
+        }
+      });
+
+      test(
+        'a 400 that names the model or one of its options is the model\'s',
+        () {
+          for (final body in [
+            '{"error":{"message":"probe-model does not accept this request"}}',
+            '{"error":{"param":"max_tokens","message":"nope"}}',
+            '{"error":{"message":"Unsupported value: temperature"}}',
+            '{"error":{"message":"reasoning_effort is not allowed"}}',
+            '{"error":{"message":"stream_options.include_usage is invalid"}}',
+          ]) {
+            final f = classify(400, body);
+            expect(f.problem, ProbeProblem.modelRejected, reason: body);
+            expect(f.keyAccepted, isTrue);
+          }
+          // `parameter` alone, as the client reads it from the error object.
+          expect(
+            classify(
+              400,
+              '{"error":{"message":"bad"}}',
+              parameter: 'tool_choice',
+            ).problem,
+            ProbeProblem.modelRejected,
+          );
+          // A part of a longer word or another model's name is not a match.
+          expect(
+            classify(
+              400,
+              '{"error":{"message":"probe-model-2 is gone soon"}}',
+            ).modelSpecific,
+            isFalse,
+          );
+          expect(
+            classify(
+              400,
+              '{"error":{"message":"my_tools_v2 unavailable"}}',
+            ).modelSpecific,
+            isFalse,
+          );
+        },
+      );
     });
 
     test('codes without a status are read too', () {

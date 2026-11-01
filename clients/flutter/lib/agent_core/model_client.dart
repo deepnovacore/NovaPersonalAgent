@@ -448,10 +448,10 @@ Map<String, dynamic> modelRequestBody(
 }) {
   if (config.protocol == ModelProtocol.chatCompletions) {
     final deepseek = config.requestUri.host == 'api.deepseek.com';
-    // OpenAI's reasoning models reject `max_tokens`; a caller that sets its own
-    // cap (the connection test) uses the parameter they accept.
-    final capName =
-        maxOutputTokens != null && config.requestUri.host == 'api.openai.com'
+    // OpenAI's reasoning models reject `max_tokens` and every one of its chat
+    // models accepts `max_completion_tokens`, so each request to that host
+    // uses it. Other hosts keep `max_tokens`, which they all understand.
+    final capName = config.requestUri.host == 'api.openai.com'
         ? 'max_completion_tokens'
         : 'max_tokens';
     return {
@@ -517,8 +517,7 @@ Map<String, dynamic> modelRequestBody(
     'stream': true,
     'store': false,
     'include': ['reasoning.encrypted_content'],
-    if (maxOutputTokens != null && config.protocol == ModelProtocol.responses)
-      'max_output_tokens': maxOutputTokens,
+    'max_output_tokens': ?maxOutputTokens,
     'input': input,
     if (tools.isNotEmpty)
       'tools': config.protocol == ModelProtocol.chatgptResponses

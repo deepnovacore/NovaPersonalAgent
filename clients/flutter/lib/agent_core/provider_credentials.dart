@@ -137,6 +137,9 @@ class ProviderCredentials {
               .where((e) => e.endpoint == scope && e.key == secret)
               .firstOrNull
         : null;
+    // `chatgptResponses` is the ChatGPT account route (OAuth, a fixed
+    // endpoint), never an API-key endpoint, so it is not recorded; the record
+    // keeps whatever API it had before.
     final chosen = protocol == ModelProtocol.chatgptResponses ? null : protocol;
     if (duplicate != null && (chosen == null || duplicate.protocol == chosen)) {
       return duplicate;
