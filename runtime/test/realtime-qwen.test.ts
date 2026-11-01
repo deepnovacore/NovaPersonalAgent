@@ -1654,3 +1654,22 @@ test('a successful connect records integrated.connect without the credential', a
   assert.deepEqual(records.map(record => [record.kind, record.payload.provider, record.payload.outcome]), [['integrated.connect', 'qwen', 'connected']])
   assert.ok(!JSON.stringify(records).includes('secret-key-value'))
 })
+
+test('an unclassified connect failure records its stage and a bounded cause without secrets', async () => {
+  const tlsLike = Object.assign(new Error('boom secret-key-value wss://example.invalid/realtime'), {code: 'ERR_SOCKET_WEIRD'})
+  for (const [failure, detail] of [
+    [tlsLike, 'stage=socket_open;cause=ERR_SOCKET_WEIRD'],
+    [new Error('boom secret-key-value'), 'stage=socket_open;cause=Error'],
+  ] as const) {
+    const {records, telemetry} = recordingTelemetry()
+    const adapter = new QwenAudioRealtimeAdapter({
+      url: 'wss://example.invalid/realtime', apiKey: 'secret-key-value', model: 'm', voice: 'v',
+      idFactory: ids(), telemetry, connector: () => Promise.reject(failure),
+    })
+    await assert.rejects(adapter.connect({tools: [], signal: new AbortController().signal}))
+    assert.equal(records[0]!.payload.code, 'realtime_connect_failed')
+    assert.equal(records[0]!.payload.detail, detail)
+    assert.ok(!JSON.stringify(records).includes('secret-key-value'))
+    assert.ok(!JSON.stringify(records).includes('example.invalid'))
+  }
+})

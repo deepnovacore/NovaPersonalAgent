@@ -41,6 +41,7 @@ export const HOST_REFUSALS=Object.freeze({
  realtime_handshake_rejected:'实时语音服务拒绝了连接，请稍后重试；若持续失败，请检查语音服务设置。',
  realtime_unreachable:'无法连接实时语音服务，请检查网络或代理后重试。',
  realtime_timeout:'连接实时语音服务超时，请检查网络后重试。',
+ realtime_tls_failed:'与实时语音服务的加密连接失败，请检查系统时间、代理或网络证书设置后重试。',
  realtime_session_rejected:'实时语音服务拒绝了会话，可能是模型权限或账户余额问题，请检查语音服务的模型与账户状态。',
  realtime_connect_failed:'实时语音连接失败，请稍后重试；若持续失败，请检查语音服务设置。',
  realtime_protocol_error:'实时语音服务的响应不符合预期，请确认所选模型支持实时语音后重试。',

@@ -28,7 +28,7 @@ test('the review-listed codes are all curated',()=>{
 })
 
 test('realtime voice connect failures explain what to check',()=>{
- for(const code of ['realtime_auth_rejected','realtime_endpoint_not_found','realtime_rate_limited','realtime_handshake_rejected','realtime_unreachable','realtime_timeout','realtime_session_rejected','realtime_connect_failed','realtime_protocol_error'])
+ for(const code of ['realtime_auth_rejected','realtime_endpoint_not_found','realtime_rate_limited','realtime_handshake_rejected','realtime_unreachable','realtime_timeout','realtime_tls_failed','realtime_session_rejected','realtime_connect_failed','realtime_protocol_error'])
   assert.ok(Object.hasOwn(HOST_REFUSALS,code),`missing ${code}`)
  assert.match(refusalText('realtime_auth_rejected'),/API Key/)
  assert.match(refusalText('realtime_auth_rejected'),/地域/)

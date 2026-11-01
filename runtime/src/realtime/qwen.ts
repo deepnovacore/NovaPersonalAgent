@@ -233,6 +233,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
     let initialInstructions = this.#instructions()
     let providerSessionId: string
     let socket: QwenSocket
+    let stage: ConnectStage = 'socket_open'
     try {
       socket = await this.#connector({
         endpoint,
@@ -241,14 +242,18 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
         signal: options.signal,
       })
       this.#socket = socket
+      stage = 'session_created'
       const created = await this.#untilDeadline(this.#receiveJson(socket), deadline)
       if (created.type === 'error') throw new ProviderSetupRejected(created)
       providerSessionId = sessionId(created, 'session.created')
+      stage = 'instructions'
       initialInstructions = this.#instructions()
+      stage = 'session_update'
       await this.#untilDeadline(this.#sendJson({
         type: 'session.update',
         session: this.#wireProfile.session(options.tools, this.#voice, initialInstructions, this.#model),
       }), deadline)
+      stage = 'session_updated'
       const updated = await this.#untilDeadline(this.#receiveJson(socket), deadline)
       if (updated.type === 'error') throw new ProviderSetupRejected(updated)
       if (sessionId(updated, 'session.updated') !== providerSessionId) {
@@ -258,7 +263,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
       await this.#cleanupDetached()
       const failure = options.signal.aborted
         ? {code: 'realtime_connect_aborted', error: new QwenRealtimeError('realtime_connect_aborted')}
-        : connectFailureCode(error)
+        : connectFailureCode(error, stage)
       this.#recordConnect({
         outcome: 'failed',
         code: failure.code,
@@ -1355,13 +1360,25 @@ class ProviderSetupRejected extends Error {
  * Connect failures leave as a stable snake_case code the client can explain; protocol violations
  * become `realtime_protocol_error`. Nothing provider-authored is surfaced.
  */
-function connectFailureCode(error: unknown): {readonly code: string; readonly detail?: string; readonly error: QwenRealtimeError} {
-  if (error instanceof RealtimeConnectError) return {code: error.code, error: new QwenRealtimeError(error.code)}
+type ConnectStage = 'socket_open' | 'session_created' | 'instructions' | 'session_update' | 'session_updated'
+
+/** A bounded, secret-free label for an otherwise unclassified failure: the stage plus a system error code or error class name. */
+function unclassifiedDetail(error: unknown, stage: ConnectStage): string {
+  const code = error instanceof RealtimeConnectError ? error.systemCode ?? '' : error instanceof Error && 'code' in error ? String(error.code) : ''
+  const name = error instanceof Error ? error.name : ''
+  const cause = /^[A-Z][A-Z0-9_]{2,40}$/u.test(code) ? code : /^[A-Za-z]{1,40}$/u.test(name) ? name : 'unknown'
+  return `stage=${stage};cause=${cause}`
+}
+
+function connectFailureCode(error: unknown, stage: ConnectStage): {readonly code: string; readonly detail?: string; readonly error: QwenRealtimeError} {
+  if (error instanceof RealtimeConnectError) {
+    return {code: error.code, ...(error.code === 'realtime_connect_failed' ? {detail: unclassifiedDetail(error, stage)} : {}), error: new QwenRealtimeError(error.code)}
+  }
   if (error instanceof ProviderSetupRejected) return {code: error.message, error: new QwenRealtimeError(error.message)}
   // Adapter-authored protocol text is constant (never provider data) and stays as a diagnostic detail.
   if (error instanceof QwenRealtimeError) return {code: 'realtime_protocol_error', detail: error.message.slice(0, 120), error: new QwenRealtimeError('realtime_protocol_error')}
   if (isTimeout(error)) return {code: 'realtime_timeout', error: new QwenRealtimeError('realtime_timeout')}
-  return {code: 'realtime_connect_failed', error: new QwenRealtimeError('realtime_connect_failed')}
+  return {code: 'realtime_connect_failed', detail: unclassifiedDetail(error, stage), error: new QwenRealtimeError('realtime_connect_failed')}
 }
 
 function isTimeout(error: unknown): boolean {

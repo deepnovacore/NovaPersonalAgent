@@ -145,6 +145,8 @@ export const webSocketRealtimeConnector: RealtimeConnector = (
   if (options.signal.aborted) onAbort()
 })
 
+const TLS_FAILURE = /^(?:CERT_|UNABLE_TO_|DEPTH_ZERO_|SELF_SIGNED_|ERR_TLS_|ERR_SSL_|EPROTO$)/u
+
 const UNREACHABLE = new Set([
   'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE',
 ])
@@ -165,7 +167,9 @@ export function connectFailure(error: unknown): RealtimeConnectError {
     return new RealtimeConnectError('realtime_timeout')
   }
   if (UNREACHABLE.has(systemCode)) return new RealtimeConnectError('realtime_unreachable')
-  return new RealtimeConnectError('realtime_connect_failed')
+  if (TLS_FAILURE.test(systemCode) || /certificate|self[- ]signed/iu.test(message)) return new RealtimeConnectError('realtime_tls_failed')
+  // Keep only the system error code (never provider text) so an unclassified failure still names its cause.
+  return new RealtimeConnectError('realtime_connect_failed', undefined, /^[A-Z][A-Z0-9_]{2,40}$/u.test(systemCode) ? systemCode : undefined)
 }
 
 /** Compatibility name retained for existing clients. */

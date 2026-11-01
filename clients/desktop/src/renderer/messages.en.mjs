@@ -2247,6 +2247,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "实时语音服务拒绝了连接，请稍后重试；若持续失败，请检查语音服务设置。": "The realtime voice service refused the connection. Try again later; if it keeps failing, check the voice service settings.",
   "无法连接实时语音服务，请检查网络或代理后重试。": "Cannot reach the realtime voice service. Check your network or proxy and try again.",
   "连接实时语音服务超时，请检查网络后重试。": "Connecting to the realtime voice service timed out. Check your network and try again.",
+  "与实时语音服务的加密连接失败，请检查系统时间、代理或网络证书设置后重试。": "The secure connection to the realtime voice service failed. Check the system clock, proxy or network certificate settings and try again.",
   "实时语音服务拒绝了会话，可能是模型权限或账户余额问题，请检查语音服务的模型与账户状态。": "The realtime voice service rejected the session, possibly because of model access or account balance. Check the voice model and account status.",
   "实时语音连接失败，请稍后重试；若持续失败，请检查语音服务设置。": "The realtime voice connection failed. Try again later; if it keeps failing, check the voice service settings.",
   "实时语音服务的响应不符合预期，请确认所选模型支持实时语音后重试。": "The realtime voice service sent an unexpected response. Confirm the selected model supports realtime voice and try again.",

@@ -6,6 +6,7 @@ import { RealtimeConnectError } from '../src/realtime/transport.js'
 import { QwenSocketClosedError } from '../src/realtime/qwen.js'
 import {
   MAX_QWEN_INBOUND_BACKLOG,
+  connectFailure,
   webSocketQwenConnector,
 } from '../src/realtime/qwen-transport.js'
 
@@ -291,4 +292,13 @@ test('Gemini opt-in decodes binary JSON WebSocket frames',async()=>{
   assert.equal(await receiveWithin(socket,1000),'{"setupComplete":{}}')
   await socket.close()
  } finally {await server.close()}
+})
+
+test('certificate failures map to a dedicated code and unknown system codes stay bounded', () => {
+  const tls = connectFailure(Object.assign(new Error('unable to verify the first certificate'), {code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'}))
+  assert.equal(tls.code, 'realtime_tls_failed')
+  const other = connectFailure(Object.assign(new Error('secret wss://example.invalid'), {code: 'ESOMETHING'}))
+  assert.equal(other.code, 'realtime_connect_failed')
+  assert.equal(other.systemCode, 'ESOMETHING')
+  assert.ok(!other.message.includes('example.invalid'))
 })

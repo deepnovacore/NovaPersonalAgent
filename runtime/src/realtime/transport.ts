@@ -20,6 +20,7 @@ export type RealtimeConnectFailureCode =
   | 'realtime_handshake_rejected'
   | 'realtime_unreachable'
   | 'realtime_timeout'
+  | 'realtime_tls_failed'
   | 'realtime_connect_failed'
 
 /**
@@ -29,9 +30,12 @@ export type RealtimeConnectFailureCode =
 export class RealtimeConnectError extends Error {
   readonly code: RealtimeConnectFailureCode
   readonly status: number | undefined
+  /** Allowlisted-shape system error code (for example `EPROTO`); never provider text. */
+  readonly systemCode: string | undefined
 
-  constructor(code: RealtimeConnectFailureCode, status?: number) {
+  constructor(code: RealtimeConnectFailureCode, status?: number, systemCode?: string) {
     super(code)
+    this.systemCode = systemCode
     this.name = 'RealtimeConnectError'
     this.code = code
     this.status = status
