@@ -1,10 +1,13 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent/local_agent.dart';
+import 'package:nova_mobile/agent_core/model_catalog.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/settings/model_settings_backend.dart';
 import 'package:nova_mobile/space/space_storage.dart';
+
+import 'support/fake_model_http.dart';
 
 class _Native implements LocalAgent {
   final calls = <(String, Map<String, dynamic>)>[];
@@ -80,6 +83,69 @@ void main() {
     expect(native.calls.last.$1, 'saveModelSettings');
     expect(native.calls.last.$2['model'], 'second-model');
     expect(native.calls.last.$2['key'], 'private-key');
+  });
+
+  group('listing goes to each provider\'s own route', () {
+    Future<(ModelRequest, ModelListResult)> list(
+      String providerId,
+      String endpoint,
+    ) async {
+      final http = installModelHttp();
+      final backend = LocalModelSettingsBackend(
+        ModelSettings(native: _Native()),
+      );
+      final pending = backend.listModelsDetailed(
+        ModelSettingsInput(
+          providerId: providerId,
+          endpoint: endpoint,
+          model: '',
+          protocol: ModelProtocol.chatCompletions,
+          newKey: 'sk-test',
+        ),
+      );
+      while (http.lists.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      final request = http.lists.single;
+      request.response.complete(
+        ModelResponse(200, '{"data":[{"id":"listed-model"}],"has_more":false}'),
+      );
+      return (request, await pending);
+    }
+
+    test('Anthropic: its native /v1/models with x-api-key', () async {
+      final (request, result) = await list(
+        'anthropic',
+        'https://api.anthropic.com/v1',
+      );
+      expect(
+        request.url.toString(),
+        'https://api.anthropic.com/v1/models?limit=1000',
+      );
+      expect(request.headers.values['x-api-key'], 'sk-test');
+      expect(request.headers.values['anthropic-version'], '2023-06-01');
+      expect(request.headers.values.containsKey('Authorization'), isFalse);
+      expect((result as ModelListOk).models.single.id, 'listed-model');
+    });
+
+    test('Gemini: the OpenAI-compatible route with a Bearer key', () async {
+      final (request, _) = await list(
+        'gemini',
+        'https://generativelanguage.googleapis.com/v1beta/openai',
+      );
+      expect(
+        request.url.toString(),
+        'https://generativelanguage.googleapis.com/v1beta/openai/models',
+      );
+      expect(request.headers.values['Authorization'], 'Bearer sk-test');
+      expect(request.headers.values.containsKey('x-goog-api-key'), isFalse);
+    });
+
+    test('OpenAI: /models with a Bearer key', () async {
+      final (request, _) = await list('openai', 'https://api.openai.com/v1');
+      expect(request.url.toString(), 'https://api.openai.com/v1/models');
+      expect(request.headers.values['Authorization'], 'Bearer sk-test');
+    });
   });
 
   test('a saved provider keeps the protocol it was saved with', () async {

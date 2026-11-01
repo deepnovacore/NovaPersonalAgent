@@ -69,10 +69,6 @@ void main() {
       }
       // 20 Mika presets plus Nova's separate international Moonshot site.
       expect(modelPresets, hasLength(21));
-      expect(
-        ModelPreset.byId('qwen')!.capabilities.promptCaching,
-        PromptCaching.explicit,
-      );
       expect(ModelPreset.byId('hunyuan')!.capabilities.contextTokens, 256000);
       expect(ModelPreset.byId('minimax')!.capabilities.vision, isTrue);
       expect(

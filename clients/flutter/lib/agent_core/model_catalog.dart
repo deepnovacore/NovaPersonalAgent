@@ -15,9 +15,6 @@ enum ProviderKind {
 
   const ProviderKind(this.wireProtocol);
   final WireProtocol wireProtocol;
-
-  /// Kinds a custom provider can choose when it is filled in by hand.
-  static const withApiKey = [openAiCompat, anthropic, gemini, openAiResponses];
 }
 
 /// Protocol names used by aggregator `api` tables and `supported_endpoints`.
@@ -51,23 +48,11 @@ enum WireProtocol {
   }
 }
 
-/// An endpoint a listing assigns to one model: its protocol root and the
-/// field a compatible endpoint puts reasoning text in.
+/// An endpoint a listing assigns to one model: its protocol and base URL.
 class ModelEndpoint {
-  const ModelEndpoint(this.protocol, this.baseUrl, {this.reasoningField});
+  const ModelEndpoint(this.protocol, this.baseUrl);
   final WireProtocol protocol;
   final String baseUrl;
-  final String? reasoningField;
-
-  /// Base URL for an adapter that appends its own version path.
-  String get adapterBaseUrl {
-    final url = baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
-    return switch (protocol) {
-      WireProtocol.chatCompletions || WireProtocol.responses => url,
-      WireProtocol.messages => url.replaceFirst(RegExp(r'/v1$'), ''),
-      WireProtocol.generateContent => url.replaceFirst(RegExp(r'/v1beta$'), ''),
-    };
-  }
 }
 
 /// One model as a provider lists it. A null capability means "not stated" and is
@@ -83,8 +68,6 @@ class ListedModel {
     this.endpoint,
     this.unsupportedApis = const [],
     this.chat,
-    this.reasoningEfforts,
-    this.thinkingTypes,
     this.protocols,
   });
   final String id, displayName;
@@ -96,7 +79,6 @@ class ListedModel {
 
   /// Protocol names the listing states but the caller cannot speak at all.
   final List<String> unsupportedApis;
-  final List<String>? reasoningEfforts, thinkingTypes;
 
   /// Protocols the listing says this model can be called with.
   final List<WireProtocol>? protocols;
@@ -132,8 +114,11 @@ sealed class ModelListResult {
 }
 
 class ModelListOk extends ModelListResult {
-  const ModelListOk(this.models);
+  const ModelListOk(this.models, {this.truncated = false});
   final List<ListedModel> models;
+
+  /// The provider still had more pages when the page cap was reached.
+  final bool truncated;
 }
 
 class ModelListFailed extends ModelListResult {
@@ -193,8 +178,11 @@ String catalogBase(String endpoint) => endpoint
 ///   from fields a listing actually gives, in several dialects (OpenRouter-style
 ///   `architecture`, `capabilities`, `limit`, `modalities`, the `api` table, and
 ///   the ChatGPT `models` table with `slug` / `visibility`).
-/// - Anthropic: `GET {base}/v1/models`, paged by `after_id`.
-/// - Gemini: `GET {base}/v1beta/models`, paged by `pageToken`, generateContent only.
+/// - Anthropic: `GET {root}/v1/models` with `x-api-key`, paged by `after_id`.
+///   Nova's Anthropic base URL ends in `/v1` (its OpenAI-compatible route), so
+///   the root is the base without that version.
+/// - Gemini is listed through its OpenAI-compatible route like any other
+///   OpenAI-compatible provider.
 class ModelCatalog {
   ModelCatalog({
     this.timeout = const Duration(seconds: 15),
@@ -214,7 +202,6 @@ class ModelCatalog {
   final Set<WireProtocol> speaks;
 
   static const maxPages = 10;
-  static const _effortOrder = ['low', 'medium', 'high', 'xhigh', 'max'];
   static const _chatTypes = {'chat', 'llm', 'language', 'text', 'vlm', 'code'};
   static const _nonChatTypes = {
     'embedding',
@@ -240,7 +227,6 @@ class ModelCatalog {
     Map<String, String> headers = const {},
   }) => switch (kind) {
     ProviderKind.anthropic => anthropic(baseUrl, apiKey, headers: headers),
-    ProviderKind.gemini => gemini(baseUrl, apiKey, headers: headers),
     _ => openAiCompat(baseUrl, apiKey, headers: headers),
   };
 
@@ -273,9 +259,16 @@ class ModelCatalog {
     String apiKey, {
     Map<String, String> headers = const {},
   }) async {
-    final base = _url(baseUrl, '/v1/models');
+    final base = _url(
+      baseUrl
+          .trim()
+          .replaceFirst(RegExp(r'/+$'), '')
+          .replaceFirst(RegExp(r'/v1$'), ''),
+      '/v1/models',
+    );
     if (base == null) return const ModelListFailed(ListFailure.badUrl);
     final all = <ListedModel>[];
+    var truncated = false;
     String? after;
     for (var page = 0; page < maxPages; page++) {
       final url = base.replace(
@@ -296,38 +289,9 @@ class ModelCatalog {
       ]);
       after = _str(map, 'last_id');
       if (map['has_more'] != true || after == null) break;
+      truncated = page == maxPages - 1;
     }
-    return ModelListOk(_distinct(all));
-  }
-
-  Future<ModelListResult> gemini(
-    String baseUrl,
-    String apiKey, {
-    Map<String, String> headers = const {},
-  }) async {
-    final base = _url(baseUrl, '/v1beta/models');
-    if (base == null) return const ModelListFailed(ListFailure.badUrl);
-    final all = <ListedModel>[];
-    String? token;
-    for (var page = 0; page < maxPages; page++) {
-      final url = base.replace(
-        queryParameters: {'pageSize': '1000', 'pageToken': ?token},
-      );
-      final root = await _fetch(url, {...headers, 'x-goog-api-key': apiKey});
-      if (root is ModelListFailed) return root;
-      final map = root as Map<String, dynamic>;
-      final data = map['models'];
-      if (data is List) {
-        all.addAll([
-          for (final item in data)
-            if (item is Map) ?_geminiModel(item),
-        ]);
-      }
-      final next = _str(map, 'nextPageToken');
-      token = next == null || next.isEmpty ? null : next;
-      if (token == null) break;
-    }
-    return ModelListOk(_distinct(all));
+    return ModelListOk(_distinct(all), truncated: truncated);
   }
 
   List<ListedModel> _distinct(List<ListedModel> models) {
@@ -366,14 +330,6 @@ class ModelCatalog {
     final levelsRaw =
         o['supported_reasoning_levels'] ?? capsReasoning?['effort'];
     final levels = levelsRaw is List ? levelsRaw : null;
-    final efforts = levels == null
-        ? null
-        : <String>{
-            for (final level in levels)
-              if (((level is Map ? level['effort'] : level)) case final String s
-                  when s.trim().isNotEmpty)
-                s.trim(),
-          }.toList();
     final api = _obj(o, 'api');
     final supported = o['supported_endpoints'];
     final protocols = supported is List
@@ -389,14 +345,7 @@ class ModelCatalog {
         final entry = _obj(api, protocol.wire);
         final url = entry == null ? null : _str(entry, 'base_url');
         if (entry == null || url == null || url.trim().isEmpty) continue;
-        endpoint = ModelEndpoint(
-          protocol,
-          url,
-          reasoningField: _str(
-            _obj(entry, 'compatibility') ?? const {},
-            'reasoning_field',
-          ),
-        );
+        endpoint = ModelEndpoint(protocol, url);
         break;
       }
     }
@@ -436,7 +385,6 @@ class ModelCatalog {
                 _bool(o, 'supports_reasoning') ??
                 levels?.isNotEmpty,
       endpoint: endpoint,
-      reasoningEfforts: efforts,
       unsupportedApis: endpoint == null && api != null
           ? api.keys.toList()
           : const [],
@@ -451,8 +399,6 @@ class ModelCatalog {
     if (id == null || id.trim().isEmpty) return null;
     final caps = _obj(o, 'capabilities');
     final thinking = _obj(caps ?? const {}, 'thinking');
-    final typesObject = _obj(thinking ?? const {}, 'types');
-    final types = typesObject == null ? null : _supportedKeys(typesObject);
     return ListedModel(
       id: id,
       displayName: _str(o, 'display_name') ?? '',
@@ -462,49 +408,6 @@ class ModelCatalog {
       ),
       contextTokens: _int(o, 'max_input_tokens'),
       reasoning: thinking == null ? null : _bool(thinking, 'supported'),
-      reasoningEfforts: types == null
-          ? null
-          : _anthropicEfforts(_obj(caps ?? const {}, 'effort'), types),
-      thinkingTypes: types,
-    );
-  }
-
-  /// Effort levels are offered only when the model accepts adaptive thinking;
-  /// `none` is added when it also accepts thinking disabled.
-  List<String> _anthropicEfforts(
-    Map<String, dynamic>? effort,
-    List<String> types,
-  ) {
-    final supported = effort != null && effort['supported'] == true
-        ? _supportedKeys(effort)
-        : <String>[];
-    int rank(String level) {
-      final i = _effortOrder.indexOf(level);
-      return i >= 0 ? i : _effortOrder.length;
-    }
-
-    final levels = [...supported]..sort((a, b) => rank(a).compareTo(rank(b)));
-    if (!types.contains('adaptive') || levels.isEmpty) return const [];
-    return [if (types.contains('disabled')) 'none', ...levels];
-  }
-
-  List<String> _supportedKeys(Map<String, dynamic> o) => [
-    for (final entry in o.entries)
-      if (entry.value is Map && (entry.value as Map)['supported'] == true)
-        entry.key,
-  ];
-
-  ListedModel? _geminiModel(Map<dynamic, dynamic> raw) {
-    final o = Map<String, dynamic>.from(raw);
-    final id = _str(o, 'name')?.replaceFirst(RegExp(r'^models/'), '');
-    if (id == null || id.trim().isEmpty) return null;
-    final methods = _strList(o['supportedGenerationMethods']);
-    if (methods != null && !methods.contains('generateContent')) return null;
-    return ListedModel(
-      id: id,
-      displayName: _str(o, 'displayName') ?? '',
-      contextTokens: _int(o, 'inputTokenLimit'),
-      reasoning: _bool(o, 'thinking'),
     );
   }
 

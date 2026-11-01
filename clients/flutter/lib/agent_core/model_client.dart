@@ -348,12 +348,14 @@ Uri compatibleEndpoint(String endpoint, String route) {
 Future<List<String>> listModels({
   required String endpoint,
   required String key,
+  ProviderKind kind = ProviderKind.openAiCompat,
   Duration timeout = const Duration(seconds: 15),
 }) async {
   ModelConfiguration(endpoint: endpoint, model: '-', key: key);
   final result = await listModelsDetailed(
     endpoint: endpoint,
     key: key,
+    kind: kind,
     timeout: timeout,
   );
   switch (result) {

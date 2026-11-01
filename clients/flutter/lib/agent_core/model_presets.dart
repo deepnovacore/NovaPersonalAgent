@@ -5,9 +5,6 @@
 import 'model_catalog.dart';
 import 'model_client.dart';
 
-/// How a provider reuses an identical prompt prefix.
-enum PromptCaching { implicit, explicit, none }
-
 /// What a preset assumes about its models until a listing says otherwise.
 class ProviderCapabilities {
   const ProviderCapabilities({
@@ -15,11 +12,9 @@ class ProviderCapabilities {
     this.vision = false,
     this.contextTokens = 64000,
     this.reasoning = false,
-    this.promptCaching = PromptCaching.implicit,
   });
   final bool toolCalls, vision, reasoning;
   final int contextTokens;
-  final PromptCaching promptCaching;
 }
 
 /// Placeholder bearer for services that need no key (Ollama, LM Studio and
@@ -167,8 +162,6 @@ const modelPresets = <ModelPreset>[
     endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     recommendedModels: ['qwen-plus', 'qwen-flash'],
     keyUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
-    // Several models here (e.g. the qwen3.5 series) only cache explicitly.
-    capabilities: ProviderCapabilities(promptCaching: PromptCaching.explicit),
     familyTokens: ['qwen'],
   ),
   ModelPreset(

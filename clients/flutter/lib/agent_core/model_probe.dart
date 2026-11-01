@@ -148,7 +148,6 @@ List<ModelOption> mergeModelOptions(
             vision: m.vision ?? base.vision,
             contextTokens: m.contextTokens ?? base.contextTokens,
             reasoning: m.reasoning ?? base.reasoning,
-            promptCaching: base.promptCaching,
           ),
           toolCallsKnown: m.toolCalls != null,
           visionKnown: m.vision != null,

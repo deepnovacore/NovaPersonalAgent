@@ -185,6 +185,7 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
       await discovery.listModels(
         endpoint: input.endpoint,
         key: await _key(input),
+        kind: _kind(input),
       );
 
   @override
@@ -192,7 +193,14 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
       await discovery.listModelsDetailed(
         endpoint: input.endpoint,
         key: await _key(input),
+        kind: _kind(input),
       );
+
+  /// The preset's own API family decides how its models are listed.
+  ProviderKind _kind(ModelSettingsInput input) =>
+      ModelPreset.byId(input.providerId ?? '')?.providerKind ??
+      ModelPreset.forEndpoint(input.endpoint)?.providerKind ??
+      ProviderKind.openAiCompat;
 
   @override
   Future<ProbeResult> probe(ModelSettingsInput input) async {

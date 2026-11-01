@@ -167,7 +167,6 @@ void main() {
         expect(m.reasoning, isTrue);
         expect(m.contextTokens, 200000);
         expect(m.vision, isTrue);
-        expect(m.reasoningEfforts, ['low', 'high']);
         expect(m.chat, isNull);
       },
     );
@@ -201,7 +200,6 @@ void main() {
         expect(listed.map((m) => m.id), ['gpt-x', 'gpt-y']);
         expect(listed.first.displayName, 'GPT X');
         expect(listed.first.contextTokens, 272000);
-        expect(listed.first.reasoningEfforts, ['low', 'high']);
         expect(listed.first.reasoning, isTrue);
         expect(listed.first.vision, isTrue);
         expect(listed.last.vision, isNull);
@@ -240,7 +238,6 @@ void main() {
         );
         // Wire order is chat-completions, messages, generate-content, responses.
         expect(everything[0].endpoint!.protocol, WireProtocol.chatCompletions);
-        expect(everything[0].endpoint!.reasoningField, 'reasoning_content');
         expect(everything[1].endpoint!.protocol, WireProtocol.messages);
 
         final nova = models(
@@ -317,30 +314,6 @@ void main() {
       expect(WireProtocol.of('generate-content'), WireProtocol.generateContent);
       expect(WireProtocol.of('nope'), isNull);
     });
-
-    test('adapter base URLs drop the version the adapter appends itself', () {
-      expect(
-        const ModelEndpoint(
-          WireProtocol.messages,
-          'https://x/anthropic/v1/',
-        ).adapterBaseUrl,
-        'https://x/anthropic',
-      );
-      expect(
-        const ModelEndpoint(
-          WireProtocol.generateContent,
-          'https://x/v1beta',
-        ).adapterBaseUrl,
-        'https://x',
-      );
-      expect(
-        const ModelEndpoint(
-          WireProtocol.responses,
-          'https://x/v1/',
-        ).adapterBaseUrl,
-        'https://x/v1',
-      );
-    });
   });
 
   group('Anthropic listing', () {
@@ -404,11 +377,36 @@ void main() {
       expect(a.vision, isTrue);
       expect(a.contextTokens, 200000);
       expect(a.reasoning, isTrue);
-      expect(a.thinkingTypes, containsAll(['adaptive', 'enabled', 'disabled']));
-      // "none" first because thinking can be disabled, then shallow to deep.
-      expect(a.reasoningEfforts, ['none', 'low', 'high', 'max']);
       expect(a.toolCalls, isNull);
-      expect(listed.last.reasoningEfforts, isNull);
+    });
+
+    test(
+      'the root is the base without its /v1, whichever way it is given',
+      () async {
+        for (final given in [base(), base('/'), base('/v1'), base('/v1/')]) {
+          await catalog().anthropic(given, 'ak');
+        }
+        expect(seen.map((r) => r.uri.path), everyElement('/v1/models'));
+        expect(seen, hasLength(4));
+        expect(headersOf['x-api-key'], 'ak');
+        expect(headersOf['anthropic-version'], '2023-06-01');
+        expect(headersOf.containsKey('authorization'), isFalse);
+      },
+    );
+
+    test('a short listing is not marked truncated', () async {
+      handler = (_) => (
+        status: 200,
+        body: {
+          'data': [
+            {'id': 'm'},
+          ],
+          'has_more': false,
+          'last_id': 'm',
+        },
+      );
+      final result = await catalog().anthropic(base(), 'ak') as ModelListOk;
+      expect(result.truncated, isFalse);
     });
 
     test('stops after the page cap when the server never ends', () async {
@@ -422,74 +420,33 @@ void main() {
           'last_id': 'x${seen.length}',
         },
       );
-      final listed = models(await catalog().anthropic(base(), 'ak'));
+      final result = await catalog().anthropic(base(), 'ak') as ModelListOk;
       expect(seen, hasLength(ModelCatalog.maxPages));
-      expect(listed, hasLength(ModelCatalog.maxPages));
-    });
-  });
-
-  group('Gemini listing', () {
-    test('follows pageToken and keeps only generateContent models', () async {
-      handler = (request) {
-        if (request.uri.queryParameters['pageToken'] == null) {
-          return (
-            status: 200,
-            body: {
-              'models': [
-                {
-                  'name': 'models/gemini-a',
-                  'displayName': 'Gemini A',
-                  'inputTokenLimit': 1048576,
-                  'thinking': true,
-                  'supportedGenerationMethods': ['generateContent'],
-                },
-                {
-                  'name': 'models/embed-1',
-                  'supportedGenerationMethods': ['embedContent'],
-                },
-              ],
-              'nextPageToken': 'p2',
-            },
-          );
-        }
-        return (
-          status: 200,
-          body: {
-            'models': [
-              {'name': 'models/gemini-b'},
-            ],
-          },
-        );
-      };
-      final listed = models(await catalog().gemini(base(), 'gk'));
-      expect(listed.map((m) => m.id), ['gemini-a', 'gemini-b']);
-      expect(listed.first.contextTokens, 1048576);
-      expect(listed.first.reasoning, isTrue);
-      expect(listed.first.toolCalls, isNull);
-      expect(seen.first.uri.path, '/v1beta/models');
-      expect(seen.last.uri.queryParameters['pageToken'], 'p2');
-      expect(headersOf['x-goog-api-key'], 'gk');
-    });
-
-    test('a body without a models array is an empty list', () async {
-      handler = (_) => (status: 200, body: <String, Object>{});
-      expect(models(await catalog().gemini(base(), 'gk')), isEmpty);
+      expect(result.models, hasLength(ModelCatalog.maxPages));
+      expect(result.truncated, isTrue);
     });
   });
 
   group('dispatch by kind', () {
-    test('list() picks the lister for each provider kind', () async {
-      await catalog().list(ProviderKind.anthropic, base(), 'k');
-      await catalog().list(ProviderKind.gemini, base(), 'k');
-      await catalog().list(ProviderKind.openAiResponses, base(), 'k');
-      expect(seen.map((r) => r.uri.path), [
-        '/v1/models',
-        '/v1beta/models',
-        '/models',
-      ]);
-      expect(ProviderKind.anthropic.wireProtocol, WireProtocol.messages);
-      expect(ProviderKind.openAiResponses.wireProtocol, WireProtocol.responses);
-    });
+    test(
+      'Anthropic has its own lister; every other kind lists as OpenAI',
+      () async {
+        await catalog().list(ProviderKind.anthropic, base(), 'k');
+        await catalog().list(ProviderKind.gemini, base('/v1beta/openai'), 'k');
+        await catalog().list(ProviderKind.openAiResponses, base(), 'k');
+        expect(seen.map((r) => r.uri.path), [
+          '/v1/models',
+          '/v1beta/openai/models',
+          '/models',
+        ]);
+        expect(headersOf['authorization'], 'Bearer k');
+        expect(ProviderKind.anthropic.wireProtocol, WireProtocol.messages);
+        expect(
+          ProviderKind.openAiResponses.wireProtocol,
+          WireProtocol.responses,
+        );
+      },
+    );
   });
 
   group('failures', () {
