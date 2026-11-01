@@ -160,7 +160,8 @@ test('ideas tab shows Nova suggestions as plain ideas with only ignore',async()=
   assert.ok(cards[0].textContent!.includes('整理灵感'))
   assert.ok(cards[0].textContent!.includes('把零散的想法收在一起'))
   for(const card of cards){
-   assert.deepEqual([...card.querySelectorAll('button')].map(node=>node.textContent),['忽略'])
+   assert.deepEqual([...card.querySelectorAll('button')].map(node=>node.getAttribute('aria-label')),['忽略'],'one corner close control, no text button')
+   assert.equal(card.querySelector('.card-actions'),null)
    assert.equal(card.textContent!.includes('设为目标'),false)
    assert.equal(card.textContent!.includes('目标建议'),false)
    assert.equal(card.querySelector('.card-tag'),null)
@@ -174,7 +175,7 @@ test('Nova suggestions dismiss through understanding command then hide',async()=
  const suggestions=[{id:'s1',kind:'idea',title:'Idea A',body:'Body A',project_id:null,todo_id:null,due:null,refs:[]},{id:'s2',kind:'goal',title:'Goal B',body:'Body B',project_id:null,todo_id:null,due:null,refs:[]}]
  const p=await mount('ideas',{life,derived_understanding:{projects:[],suggestions,sources:[]}})
  try{
-  await p.click('忽略',p.host)
+  await act(async()=>{(p.host.querySelector('[data-suggestion-id="s1"] .card-close') as HTMLElement).click()})
   assert.deepEqual(p.calls[0],['understanding.dismiss',{id:'s1'}])
   assert.equal(p.host.querySelector('[data-suggestion-id="s1"]'),null)
   assert.ok(p.host.querySelector('[data-suggestion-id="s2"]'))

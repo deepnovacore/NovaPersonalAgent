@@ -6,7 +6,12 @@ import { t } from '../../locale.mjs';
 import { DEFAULT_SKIN, MAX_SKIN_BYTES, importSkin, removeSkin, selectedSkin } from '../../orb-skins.mjs';
 import { createSkinVisual } from '../../orb-skin-visual.mjs';
 import { readDisplayPreferences, writeDisplayPreferences, subscribeDisplayPreferences } from '../../view-preferences.mjs';
-export function DisplayPanel() { const [p, setP] = useState(readDisplayPreferences); useEffect(() => subscribeDisplayPreferences(setP), []); return <><Field label="工作步骤展示" value={p.steps} options={[{ value: 'compact', label: '简洁' }, { value: 'standard', label: '标准' }, { value: 'detailed', label: '详细' }]} onChange={(steps: string) => writeDisplayPreferences({ steps })}/><Field label="工作步骤收起时机" value={p.collapse} options={[{ value: 'after_reply', label: '回答结束后' }, { value: 'manual', label: '手动' }]} onChange={(collapse: string) => writeDisplayPreferences({ collapse })}/></>; }
+const DISPLAY_OPTIONS: any = {
+    'display-steps': { key: 'steps', label: '工作步骤展示', options: [['compact', '简洁'], ['standard', '标准'], ['detailed', '详细']] },
+    'display-collapse': { key: 'collapse', label: '工作步骤收起时机', options: [['after_reply', '回答结束后'], ['manual', '手动']] },
+};
+/** Only the select is replaced; its label and hint stay in the page's own `.field` wrapper so the row lays out like every other setting. */
+export function DisplayPanel({ id }: { id: string }) { const [p, setP] = useState(readDisplayPreferences); useEffect(() => subscribeDisplayPreferences(setP), []); const spec = DISPLAY_OPTIONS[id]; return <select id={id} aria-label={t(spec.label)} value={(p as any)[spec.key]} onChange={e => writeDisplayPreferences({ [spec.key]: e.target.value })}>{spec.options.map(([value, label]: string[]) => <option key={value} value={value}>{t(label)}</option>)}</select>; }
 export function VisorPanel({ api }: any) { const [p, setP] = useState<any>({}), [busy, setBusy] = useState(false), [status, setStatus] = useState(''); const lock = useRef(false); useEffect(() => { if (!api)
     return; let live = true; const refresh = () => { if (!lock.current)
     void api.snapshot().then((v: any) => { if (live)

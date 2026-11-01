@@ -225,3 +225,15 @@ test('setup starts with only the conversation model key; the voice key is option
  await waitFor(()=>assert.equal(calls.length,1));
  assert.deepEqual(calls[0],{pipelineMode:'integrated',cascadedLlmProvider:'deepseek',secrets:{deepseekApiKey:'only-text'}})
 })
+
+test('display settings render one label, select and hint per row without nested field wrappers',async()=>{
+ const b=bridge(base({focusCategory:'general'}));const v=render(<SettingsApp bridge={b.bridge}/>)
+ await waitFor(()=>assert.ok(v.container.querySelector('#display-section')))
+ const section=v.container.querySelector('#display-section') as HTMLElement
+ const rows=[...section.querySelectorAll(':scope > .field')]
+ assert.equal(rows.length,2)
+ assert.equal(section.querySelectorAll('.field .field').length,0,'no field nested inside a field')
+ for(const row of rows){assert.equal(row.querySelectorAll('label').length,1);assert.equal(row.querySelectorAll('select').length,1);assert.equal(row.querySelectorAll('small').length,1)}
+ assert.deepEqual(rows.map(r=>r.querySelector('label')!.textContent),['工作步骤展示','工作步骤收起时机'])
+ assert.deepEqual([...section.querySelectorAll('#display-steps option')].map(o=>(o as HTMLOptionElement).value),['compact','standard','detailed'])
+})

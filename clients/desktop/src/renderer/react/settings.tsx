@@ -196,10 +196,8 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             return category === 'secrets' ? <ChatGptPanel key={key} api={bridge?.chatgpt}/> : null;
         if (id === 'voiceprint-settings' || (tag === 'section' && props['aria-label'] === '声纹验证'))
             return category === 'models' && modelPane === 'pipeline' ? <VoiceprintPanel key={key} api={api} view={view} drafts={snapshot.drafts} stage={stage}/> : null;
-        if (id === 'display-steps')
-            return <DisplayPanel key={key}/>;
-        if (id === 'display-collapse' || (tag === 'label' && ['display-steps', 'display-collapse'].includes(props.for ?? '')))
-            return null;
+        if (id === 'display-steps' || id === 'display-collapse')
+            return <DisplayPanel key={key} id={id}/>;
         if (pickers[id])
             return picker(id);
         if (Object.values(pickers).some((p: any) => p.custom === id))
