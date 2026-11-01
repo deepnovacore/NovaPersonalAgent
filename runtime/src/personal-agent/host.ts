@@ -1697,10 +1697,16 @@ export class PersonalAgentHost {
         const context=timelineContextInputs(this.#sources?.contextEntries?.()??[],memories,history).map(input=>input.kind==='memory'&&!stated.includes(input.id.slice(7))?{...input,history_only:true}:input);
         return [...messages,...retained.filter(entry=>!messages.some(message=>message.id===entry.id)).map(entry=>({id:entry.id,version:String(entry.version),kind:entry.source?.kind??'memory',text:entry.content,observed_at:entry.observed_at??'',...(entry.source?.relation?{relation:entry.source.relation}:{})})),...context];
     }
+    /** Drops only cards whose cited message was really deleted; a paused or re-authorized source leaves cards untouched. */
+    async #retireDeletedTimelineMessages():Promise<void>{
+        const missing=this.timeline.missingMessageRefs();if(!missing.length)return
+        const gone=await this.options.memory()?.timelineRetired?.(missing).catch(()=>[] as string[])??[]
+        if(gone.length)await this.timeline.retire(new Set(gone))
+    }
     refreshTimeline():Promise<void>{
         if(!this.#opened)return Promise.resolve();
         if(this.#timelineRefresh)return this.#timelineRefresh;
-        const run=(async()=>{try{while(this.#opened){const revision=this.#timelineRevision,account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id,scope=account?'feishu:'+account:'local';if(this.#timelineCacheScope!==undefined&&this.#timelineCacheScope!==scope)void this.#timelineCache.clear();this.#timelineCacheScope=scope;this.timeline.setAccess({scope,allowed:true,legacy_refs:[]});const inputs=await this.#timelineInputs(true);if(!this.#opened)return;if(revision!==this.#timelineRevision)continue;const timezone=dailyBriefSettings(this.#state.settings).timezone;this.timeline.update(inputs,this.#now().toLocaleDateString('en-CA',{timeZone:timezone}),timezone,{scope,allowed:true,legacy_refs:inputs.filter(input=>input.kind==='file'||input.kind==='memory'||!!account&&input.account_scope===account).map(input=>input.id)});return}}catch(error){this.timeline.unavailable();throw error}})();
+        const run=(async()=>{try{while(this.#opened){const revision=this.#timelineRevision,account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id,scope=account?'feishu:'+account:'local';if(this.#timelineCacheScope!==undefined&&this.#timelineCacheScope!==scope)void this.#timelineCache.clear();this.#timelineCacheScope=scope;this.timeline.setAccess({scope,allowed:true,legacy_refs:[]});const inputs=await this.#timelineInputs(true);if(!this.#opened)return;if(revision!==this.#timelineRevision)continue;const timezone=dailyBriefSettings(this.#state.settings).timezone;this.timeline.update(inputs,this.#now().toLocaleDateString('en-CA',{timeZone:timezone}),timezone,{scope,allowed:true,legacy_refs:inputs.filter(input=>input.kind==='file'||input.kind==='memory'||!!account&&input.account_scope===account).map(input=>input.id)});await this.#retireDeletedTimelineMessages();return}}catch(error){this.timeline.unavailable();throw error}})();
         this.#timelineRefresh=run.finally(()=>{this.#timelineRefresh=undefined});return this.#timelineRefresh;
     }
     async timelineAuthorized(id:string,version:string,consumer:string|undefined):Promise<boolean>{

@@ -19,6 +19,7 @@ export function timelineRevisionId(priorId:string|undefined,refs:readonly string
  const candidates=priorCards.filter(card=>card.evidence_ids?.some(id=>refs.includes(id)))
  return candidates.length===1?candidates[0]!.id:undefined
 }
+const MESSAGE_KINDS=new Set(['im','mail','calendar'])
 export const TIMELINE_MAX_REFS=16
 const ref=z.string().min(1).max(600)
 export const timelineReplySchema=z.object({cards:z.array(z.object({
@@ -113,8 +114,24 @@ export class TimelineBrief {
  #dismissed(card:State['cards'][number],state=this.#state){return state.dismissed.includes(`${card.artifact_scope??''}:${card.id}`)||!card.artifact_scope&&state.dismissed.includes(card.id)}
  #sourcesAvailable(card:State['cards'][number],state=this.#state){
   if(this.#pendingValidation)return false
-  const versions=new Map(this.#inputs.map(input=>[input.id,input.version])),basis=new Map((card.evidence_basis??state.basis).map(input=>[input.id,input.version]))
-  return card.refs.every(ref=>versions.has(ref)&&versions.get(ref)===basis.get(ref))
+  const inputs=new Map(this.#inputs.map(input=>[input.id,input])),basis=new Map((card.evidence_basis??state.basis).map(input=>[input.id,input.version]))
+  // A message's version also covers permission bookkeeping (source fence, grant revision), which changes on pause, resume and rescan
+  // without the message changing; presence is the proof for messages. Files and memories keep the exact-version check.
+  return card.refs.every(ref=>{const input=inputs.get(ref);return !!input&&(MESSAGE_KINDS.has(input.kind)||input.version===basis.get(ref))})
+ }
+ /** Cited message ids that are absent from the current inputs; the host asks the ledger which of them were really deleted. */
+ missingMessageRefs():string[]{
+  const present=new Set(this.#inputs.map(input=>input.id))
+  return [...new Set(this.#state.cards.flatMap(card=>card.refs).filter(id=>!present.has(id)&&!id.startsWith('source:')&&!id.startsWith('memory:')))]
+ }
+ /** Removes cards that cite a message that no longer exists. Cards whose source is merely paused or unauthorized stay. */
+ async retire(ids:ReadonlySet<string>):Promise<number>{
+  if(!ids.size)return 0
+  const before=this.#state.cards.length
+  this.#state.cards=this.#state.cards.filter(card=>!card.refs.some(ref=>ids.has(ref)))
+  const removed=before-this.#state.cards.length
+  if(removed){await this.#save();this.changed()}
+  return removed
  }
  #visibleCards(state=this.#state){
   if(!this.#access?.allowed)return []

@@ -669,6 +669,10 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     for(const row of rows)row.sources=[...(row.workbench_source?(row.sources??[]).filter(source=>source.type==='file'):[]),...refs.get(row.id)!.flatMap(id=>{const tag=tags.get(id);return tag?[tag]:[]})]
     return snapshot
   }
+  async timelineRetired(ids:readonly string[]):Promise<string[]>{
+    if(!ids.length)return []
+    return z.array(z.string()).parse(await this.options.client.memory('timeline_retired',{ids:[...ids]}))
+  }
   async timelineEvidence(retainedIds:readonly string[]=[]){
     const records=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('timeline_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),limit:5000,retained_ids:[...retainedIds]}))
     const since=Date.now()-14*86400000

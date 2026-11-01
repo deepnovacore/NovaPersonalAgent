@@ -15,7 +15,7 @@ test('timeline uses ordinary evidence, caches across restart, preserves changed-
   await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');assert.equal(calls,0,'update does not wait for generation')
   await brief.refresh();assert.equal(brief.snapshot().cards.length,1);assert.equal(calls,1)
   await brief.close();brief=make();await brief.open();brief.update([input],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1);assert.equal(calls,1)
-  brief.update([{...input,version:'v2',text:'recovered'}],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1);assert.equal(brief.snapshot().cards[0]!.sources_available,false)
+  brief.update([{...input,version:'v2',text:'recovered'}],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,1);assert.equal(brief.snapshot().cards[0]!.sources_available,true,'a message whose permission bookkeeping drifted is still the same message')
   await brief.refresh();assert.equal(brief.snapshot().cards.length,1,'new unsupported output cannot erase the previous success')
   assert.equal(brief.snapshot().diagnostics?.host_dropped.unsupported_quote,1)
   assert.equal(brief.snapshot().diagnostics?.published,0)
@@ -180,7 +180,7 @@ test('new messages do not starve an authorized generation; edits and revocation 
   release(reply);await run;assert.equal(brief.snapshot().cards.length,1)
   const next=brief.refresh();while(signal?.aborted)await new Promise(resolve=>setImmediate(resolve))
   brief.update([{...input,version:'changed'}, {...input,id:'new-message'}],'2026-10-17','UTC')
-  await next;assert.equal(brief.snapshot().cards.length,1);assert.equal(brief.snapshot().cards[0]!.sources_available,false)
+  await next;assert.equal(brief.snapshot().cards.length,1);assert.equal(brief.snapshot().cards[0]!.sources_available,true)
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -210,10 +210,10 @@ test('source edits preserve all published cards while unavailable citations cann
  const brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards:[reply.cards[0]!,{...reply.cards[0]!,title:'Other issue',refs:['other'],facts:[{text:other.text,quote:other.text,ref:'other'}]}]}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  try{
   await brief.open();brief.update([input,other],'2026-10-17','Asia/Shanghai');await brief.refresh()
-  brief.update([input,{...other,version:'v2'}],'2026-10-17','Asia/Shanghai')
+  brief.update([input],'2026-10-17','Asia/Shanghai')
   assert.deepEqual(brief.snapshot().cards.map(c=>c.title),['Check the node','Other issue'])
   assert.deepEqual(brief.basis(),[{id:input.id,version:input.version}])
-  brief.update([{...other,version:'v2'}],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,2);assert.deepEqual(brief.basis(),[])
+  brief.update([],'2026-10-17','Asia/Shanghai');assert.equal(brief.snapshot().cards.length,2);assert.deepEqual(brief.basis(),[])
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -475,7 +475,7 @@ test('snapshot separates active and archived cards and keeps the page key stable
   await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
   const before=brief.snapshot()
   assert.equal(before.active_count,1);assert.equal(before.archived_count,0);assert.equal(typeof before.pagination_key,'string')
-  brief.update([{...input,version:'v2'}],'2026-10-17','UTC')
+  brief.update([],'2026-10-17','UTC')
   const after=brief.snapshot()
   assert.equal(after.active_count,0);assert.equal(after.archived_count,1,'withdrawn evidence is retained as archived history')
   assert.equal(after.pagination_key,before.pagination_key,'the page key follows the generation, not the recheck timestamp')
@@ -526,5 +526,25 @@ test('the writer receives identities for every visible card beyond thirty two',a
   await brief.open();brief.update(inputs,'2026-10-17','UTC');await brief.refresh()
   assert.equal(brief.snapshot().cards.length,33)
   await brief.refresh({force:true});assert.equal(calls,2)
+ }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('version drift on a message keeps its card; a drifted file or memory does not; only really deleted messages retire cards',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-retire-'))
+ const file:TimelineInput={id:'source:file',version:'f1',kind:'file',text:'Synthetic node is still down',observed_at:'2026-10-17T01:00:00Z'}
+ const fileCard={...reply.cards[0]!,title:'File card',refs:['source:file'],facts:[{text:file.text,quote:file.text,ref:'source:file'}]}
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve({cards:[reply.cards[0]!,fileCard]}),()=>undefined)
+ try{
+  await brief.open();brief.update([input,file],'2026-10-17','UTC');await brief.refresh()
+  assert.equal(brief.snapshot().cards.length,2)
+  brief.update([{...input,version:'fence-moved'},{...file,version:'f2'}],'2026-10-17','UTC')
+  const byTitle=Object.fromEntries(brief.snapshot().cards.map(c=>[c.title,c.sources_available]))
+  assert.equal(byTitle['Check the node'],true);assert.equal(byTitle['File card'],false)
+  // A paused or re-authorized source leaves its messages out of the inputs; that alone never removes a card.
+  brief.update([{...file,version:'f2'}],'2026-10-17','UTC')
+  assert.equal(brief.snapshot().cards.length,2);assert.deepEqual(brief.missingMessageRefs(),[input.id])
+  assert.equal(await brief.retire(new Set()),0);assert.equal(brief.snapshot().cards.length,2)
+  assert.equal(await brief.retire(new Set([input.id])),1)
+  assert.deepEqual(brief.snapshot().cards.map(c=>c.title),['File card'])
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })

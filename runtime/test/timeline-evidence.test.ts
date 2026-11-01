@@ -58,3 +58,21 @@ test('cached historical citations are revalidated beyond the recent window witho
   assert.deepEqual(memoryOperation(db,'timeline_evidence',{...query,provider:'wrong',retained_ids}),[])
  }finally{db.close()}
 })
+
+test('retired evidence means gone or expired, never merely unauthorized or paused',()=>{
+ const db=new DatabaseSync(':memory:');initializeMemory(db)
+ const prefix='personal:retired:',provider='fixture',now=new Date().toISOString()
+ const add=(key:string,extra:Record<string,unknown>={})=>{
+  const source_id=prefix+key,id=prefix+'e:'+key
+  memoryOperation(db,'append_evidence',{id,source_id,source_kind:'im',locator:key,raw_text:'Synthetic message',hash:key,observed_at:now,recorded_at:now,trust:'untrusted_external',...extra})
+  memoryOperation(db,'source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:provider,embedding_provider:null}})
+  return id
+ }
+ try{
+  const live=add('live'),paused=add('paused'),expired=add('expired',{retention_until:'2000-01-01T00:00:00Z'})
+  memoryOperation(db,'source_grant',{source_id:prefix+'paused',expected_revision:1,grant:{revision:2,scope_revision:1,extraction_provider:null,embedding_provider:null}})
+  const retired=memoryOperation(db,'timeline_retired',{ids:[live,paused,expired,prefix+'e:never-existed']}) as string[]
+  assert.deepEqual(retired.sort(),[expired,prefix+'e:never-existed'].sort())
+  assert.deepEqual(memoryOperation(db,'timeline_retired',{ids:[]}),[])
+ }finally{db.close()}
+})
