@@ -443,3 +443,4 @@ test('briefing metadata is at most two lines and picks one problem sentence by p
  assert.equal(partial.length,2);assert.equal(partial[1].textContent,'部分资料尚未整理，可刷新补充')
  assert.equal(lines({timeline:{...base,status:'working',diagnostics:{pending_batches:1}}}).length,1,'no partial warning while working')
 })
+

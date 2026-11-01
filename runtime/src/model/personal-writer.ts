@@ -18,6 +18,7 @@ import {proposalSchema,versionSchema,type Proposal,type PreparedMaterial} from '
 import type {DiscoverySnapshot} from '../personal-agent/host.js'
 import type {JsonValue} from '../core/events.js'
 import type {CompleteRequest,ModelGateway} from './model-gateway.js'
+import {clusterCards} from '../personal-agent/timeline-cluster.js'
 /** Nine cards at their field limits (360 characters of text plus a key each) come to roughly 3.6k tokens; the cap leaves headroom and the parse below survives a cut-off reply. */
 const CONTEXT_MAX_TOKENS=4000
 const CARDS_PER_TAB=3
@@ -142,7 +143,7 @@ export class GatewayPersonalWriter {
     const delta=priorCards?.length||newInputIds!==undefined?{prior_cards:priorCards??[],new_input_ids:newInputIds??[]}:undefined
     const newIds=new Set(delta?.new_input_ids??[])
     const perspective=timelinePerspective(pool,context);
-    const diagnostics:TimelineDiagnostics={input_count:pool.length,selected_inputs:0,screened_topics:0,composition_batches:0,pending_batches:0,failed_batches:[],stages:[],host_received:0,published:0,host_dropped:{},cache_reused_topics:0,cache_reused_inputs:0,cache_screened_inputs:0,cache_stage_hits:0,cache_stage_misses:0,cache_skipped_topics:0,duplicates_folded:0,stale_state_repairs:0,stale_state_dropped:0};
+    const diagnostics:TimelineDiagnostics={input_count:pool.length,selected_inputs:0,screened_topics:0,composition_batches:0,pending_batches:0,failed_batches:[],stages:[],host_received:0,published:0,host_dropped:{},cache_reused_topics:0,cache_reused_inputs:0,cache_screened_inputs:0,cache_stage_hits:0,cache_stage_misses:0,cache_skipped_topics:0,duplicates_folded:0,cards_folded:0,stale_state_repairs:0,stale_state_dropped:0};
     const stage=timelineStagePort(handle,diagnostics)
     // Reuse a topic only while every member is still present with the version the screening saw.
     // A withdrawn member is dropped from the topic; a changed version invalidates the whole topic.
@@ -201,7 +202,9 @@ export class GatewayPersonalWriter {
     diagnostics.failed_batches.sort((a,b)=>a.batch-b.batch);
     if(batches.length&&diagnostics.failed_batches.length===batches.length)throw Object.assign(Error('timeline_batches_failed'),{diagnostics});
     diagnostics.stages.sort((a,b)=>a.batch-b.batch||(a.phase==='compose'?-1:1));
-    return {cards:results.flat(),diagnostics,completed_input_ids:completedInputIds()};
+    // One generation must not publish several near-identical cards for the same matter; keep the strongest one.
+    const generated=results.flat(),distinct=clusterCards(generated).map(cluster=>cluster.leader);diagnostics.cards_folded+=generated.length-distinct.length
+    return {cards:distinct,diagnostics,completed_input_ids:completedInputIds()};
     }finally{pending.abort();await handle?.commit()}
   }
   async #composeTimelineBatch(topics:TimelineTopic[],context:Parameters<TimelineGenerator>[1],delta:{prior_cards:NonNullable<TimelineContext['prior_cards']>;new_input_ids:string[]}|undefined,signal:AbortSignal,diagnostics:TimelineDiagnostics,batch:number,stage?:TimelineStagePort,allTopics:readonly TimelineTopic[]=topics):Promise<z.infer<typeof timelineReplySchema>['cards']>{

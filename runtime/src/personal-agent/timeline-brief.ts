@@ -7,6 +7,7 @@ import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {abortable} from '../core/camera-session.js'
 import {sourceTagSchema,type SourceTag} from '../memory/provenance.js'
 import type {TimelineCachePort,TimelineRunOptions} from './timeline-cache.js'
+import {clusterCards} from './timeline-cluster.js'
 
 export interface TimelineAccess {scope:string;allowed:boolean;legacy_refs:readonly string[]}
 export interface TimelineInput {account_scope?:string;history_only?:boolean;id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
@@ -55,7 +56,7 @@ export const timelineDiagnosticsSchema=z.object({
  /** Topics whose inputs were all already published, so their existing cards stay the answer. */
  cache_skipped_topics:count.default(0),
  /** Repeated routine alerts folded into one batch entry, and revisions that ignored a new state change. */
- duplicates_folded:count.default(0),stale_state_repairs:count.default(0),stale_state_dropped:count.default(0),
+ duplicates_folded:count.default(0),cards_folded:count.default(0),stale_state_repairs:count.default(0),stale_state_dropped:count.default(0),
 })
 export type TimelineDiagnostics=z.infer<typeof timelineDiagnosticsSchema>
 export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:z.input<typeof timelineDiagnosticsSchema>;/** Inputs whose screening and composition completed, including valid empty results. */completed_input_ids?:string[]}
@@ -89,6 +90,7 @@ export class TimelineBrief {
  #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
  constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void,options?:{readonly cache?:TimelineCachePort}){this.#store=new BoundedJsonStore(path,stateSchema);this.#cache=options?.cache}
  async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}
+  if(this.#dropDuplicates())await this.#save()
   // Older progress writes claimed the whole pool even when a batch failed or never finished.
   if(this.#state.checkpoint.generation&&this.#state.checkpoint.generation===this.#state.key&&(this.#state.failure||this.#state.diagnostics?.failed_batches.length||this.#state.diagnostics?.pending_batches))this.#state.checkpoint={last_success_at:null,input_versions:[],generation:''}
   this.#persisted=structuredClone(this.#state);this.#access=undefined;this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
@@ -132,6 +134,18 @@ export class TimelineBrief {
   const removed=before-this.#state.cards.length
   if(removed){await this.#save();this.changed()}
   return removed
+ }
+ /** Deletes cards that repeat a stronger card (same cited message, same matter). Cards that revise a published card are kept. */
+ #dropDuplicates():number{
+  const byScope=new Map<string|undefined,State['cards']>()
+  for(const card of this.#state.cards)byScope.set(card.artifact_scope,[...(byScope.get(card.artifact_scope)??[]),card])
+  const drop=new Set<State['cards'][number]>()
+  for(const group of byScope.values())for(const cluster of clusterCards(group))for(const member of cluster.members)drop.add(member)
+  if(!drop.size)return 0
+  const dropped=new Set([...drop].map(card=>card.id))
+  this.#state.cards=this.#state.cards.filter(card=>!drop.has(card))
+  this.#state.dismissed=this.#state.dismissed.filter(entry=>![...dropped].some(id=>entry===id||entry.endsWith(':'+id)))
+  return drop.size
  }
  #visibleCards(state=this.#state){
   if(!this.#access?.allowed)return []
@@ -221,7 +235,7 @@ export class TimelineBrief {
    const complete=done&&!diagnostics.failed_batches.length&&!diagnostics.pending_batches&&covered.length===basis.length
    diagnostics.published=cards.length
    // updated_at only moves when a card actually changed; a no-op or empty refresh keeps the earlier briefing timestamp.
-   this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis,cards:retainedCards,updated_at:changed?now:this.#state.updated_at,checkpoint:{last_success_at:complete?now:this.#state.checkpoint.last_success_at,input_versions:covered,generation:complete?key:this.#state.checkpoint.generation}};await this.#save();this.#loadFailed=false;if(done)this.#status='ready';this.changed()
+   this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis,cards:retainedCards,updated_at:changed?now:this.#state.updated_at,checkpoint:{last_success_at:complete?now:this.#state.checkpoint.last_success_at,input_versions:covered,generation:complete?key:this.#state.checkpoint.generation}};this.#dropDuplicates();await this.#save();this.#loadFailed=false;if(done)this.#status='ready';this.changed()
   }
   const work=(async()=>{try{
    this.#state.last_attempt=Date.now();this.#state.failure=null;await this.#save();signal.throwIfAborted()

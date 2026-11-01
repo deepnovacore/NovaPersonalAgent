@@ -128,7 +128,7 @@ test('source rechecks keep published cards visible without cancelling synthesis'
 
 test('more than six independent briefings survive storage and restart',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-many-'))
- const cards=Array.from({length:13},(_,i)=>({...reply.cards[0]!,title:'Independent update '+i}))
+ const cards=Array.from({length:13},(_,i)=>({...reply.cards[0]!,title:['Billing reminder','Deploy window','Security patch','Vendor contract','Office move','Hiring plan','Budget review','Travel booking','Training course','Audit finding','Backup check','License renewal','Customer escalation'][i]!}))
  let brief=new TimelineBrief(join(dir,'timeline.json'),()=>{try{return Promise.resolve(({cards}))}catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}},()=>undefined)
  try{
   await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
