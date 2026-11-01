@@ -84,6 +84,8 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         val service=LocalGuiService.current?:throw IllegalStateException("accessibility_required")
         // The self-check holds the runtime a11y flag; no run may observe while it is set.
         check(service.virtualFlagLeases==0){"another_task_is_active"}
+        // A failed restoration may have left that flag set: retry it, and admit no run of either tier until it succeeds.
+        check(service.restoreVirtualFlags()){RuntimeFlagLeases.ACCESSIBILITY_FLAGS_FAILED}
         val goal=request.getString("goal").trim();val acceptance=request.getString("acceptance").trim()
         val todo=request.optJSONObject("todo_ref")
         if(todo!=null)require(todo.keys().asSequence().toSet()==setOf("id","version") && todo.getString("id").length in 1..200 && todo.get("version") is Int && todo.getInt("version")>0){"invalid_todo_reference"}

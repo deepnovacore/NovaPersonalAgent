@@ -203,6 +203,12 @@ class LocalGuiService : AccessibilityService() {
     /** Leases held by virtual runs and the self-check; a new run is not admitted while any is held. */
     val virtualFlagLeases:Int get()=flagLeases.held
 
+    /**
+     * Retries a failed restoration of the runtime flags. False while it still fails: the main-tier tree may then include
+     * not-important views, so no run of either tier is admitted (`accessibility_flags_failed`).
+     */
+    fun restoreVirtualFlags():Boolean = flagLeases.restore()
+
     /** Windows on [displayId] (empty when the display has none or does not exist). Never the active main window. */
     @RequiresApi(30)
     fun windowsOn(displayId:Int):List<AccessibilityWindowInfo> = windowsOnAllDisplays.get(displayId).orEmpty()

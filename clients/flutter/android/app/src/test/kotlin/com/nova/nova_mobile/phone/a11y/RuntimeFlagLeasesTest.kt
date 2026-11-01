@@ -1,6 +1,8 @@
 package com.nova.nova_mobile.phone.a11y
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -81,5 +83,53 @@ class RuntimeFlagLeasesTest {
         val leases = RuntimeFlagLeases(store, extra)
         leases.acquire {}.release()
         assertEquals(3, store.flags)
+    }
+
+    @Test fun failedRestorationIsOwedAndBlocksLeasesUntilARetrySucceeds() {
+        val store = Store()
+        val leases = RuntimeFlagLeases(store, extra)
+        val lease = leases.acquire {}
+        store.failWrites = true
+        lease.release()
+        assertEquals(0, leases.held)
+        assertTrue(leases.restorationOwed)
+        assertEquals(3, store.flags)
+        assertFalse(leases.restore())
+        try { leases.acquire {}; fail() } catch (e: IllegalStateException) { assertEquals(RuntimeFlagLeases.ACCESSIBILITY_FLAGS_FAILED, e.message) }
+        assertEquals(0, leases.held)
+        store.failWrites = false
+        assertTrue(leases.restore())
+        assertFalse(leases.restorationOwed)
+        assertEquals(1, store.flags)
+        assertTrue(leases.restore())
+        assertEquals(listOf(3, 1), store.writes)
+    }
+
+    @Test fun nextAcquisitionRetriesAnOwedRestorationFirst() {
+        val store = Store()
+        val leases = RuntimeFlagLeases(store, extra)
+        val lease = leases.acquire {}
+        store.failWrites = true
+        lease.release()
+        store.failWrites = false
+        val next = leases.acquire {}
+        // The original flags were written back, then saved again as the new baseline.
+        assertEquals(listOf(3, 1, 3), store.writes)
+        next.release()
+        assertEquals(1, store.flags)
+        assertFalse(leases.restorationOwed)
+    }
+
+    @Test fun failedRestorationAfterReconnectIsOwedToo() {
+        val store = Store()
+        val leases = RuntimeFlagLeases(store, extra)
+        leases.acquire {}
+        store.failWrites = true
+        leases.reconnect()
+        assertTrue(leases.restorationOwed)
+        store.failWrites = false
+        leases.reconnect()
+        assertFalse(leases.restorationOwed)
+        assertEquals(1, store.flags)
     }
 }

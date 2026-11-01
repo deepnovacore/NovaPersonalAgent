@@ -49,7 +49,12 @@ Flutter ── nova/phone/v1 (MethodChannel, JSON strings) ───────
    lease is released synchronously when the run ends, before another run is admitted (the display itself may be released
    later). No run starts while the self-check holds the flag. On a service reconnect every lease owner is stopped first
    (a run ends `interrupted`/`accessibility_unavailable`), then the saved flags are restored; releases from before the
-   reconnect are no-ops. Only a gesture the system *refused* before dispatch falls back to `injectTap`/`injectStroke`; a
+   reconnect are no-ops. If restoring the flags fails, the restoration stays owed: it is retried on every run admission
+   and self-check, and until it succeeds no run of either tier starts (`start`/`run` fail with
+   `accessibility_flags_failed`; the self-check reports `create_display` `accessibility_flags_failed`).
+   **Main-tier admission** changes only in these two cases: a main run is refused while the self-check holds the flag
+   (`another_task_is_active`) or while a restoration is owed (`accessibility_flags_failed`). Otherwise main-tier
+   admission, prompt, schema, `observe` and `perform` are unchanged. Only a gesture the system *refused* before dispatch falls back to `injectTap`/`injectStroke`; a
    cancelled, timed-out or interrupted gesture may have acted, is journaled `unknown` and is never injected again. Keys
    always use `injectKey`.
 7. **Effect admission**: every effect on the display (each a11y action, gesture, injection or `startApp`, and each
@@ -279,7 +284,7 @@ Lanes do not edit files they don't own. If a lane needs a seam that isn't here, 
 | Row | Details |
 |---|---|
 | `helper` | `unsupported` (api < 31), `not_running` (also asks the watchdog to start it), `helper_unavailable` |
-| `create_display` | `accessibility_flags_failed` (runtime a11y flag could not be set), `create_failed` |
+| `create_display` | `accessibility_flags_failed` (runtime a11y flag could not be set, or an owed restoration still fails), `create_failed` |
 | `start_app` | `app_in_use_on_main`, `app_not_launchable`, `display_unavailable`, `helper_unavailable`, `accessibility_required`, `not_on_display` |
 | `read_tree` | `empty_tree`, `no_frame`, `black_frame` |
 | `tap` | `no_free_point`, `gesture_uncertain` (never followed by an injection), `tap_refused`; `injection_only` with `ok:true` |
@@ -317,3 +322,5 @@ carry no reason. `<stage>` is the loop stage: `observation`, `model` or `tool`.
 
 Method error codes of `nova/phone/v1` that are not run reasons: `task_not_running` and `no_takeover` (`takeover`,
 `handBack`), `takeover_on_main_thread` (`takeover` called on the main thread, a bridge bug), `run_active` (`selfCheck`).
+Method error code of `nova/local_agent/v1` `start`/`run`: `accessibility_flags_failed` (a failed restoration of the runtime
+a11y flag is still owed; no run starts until a retry succeeds).
