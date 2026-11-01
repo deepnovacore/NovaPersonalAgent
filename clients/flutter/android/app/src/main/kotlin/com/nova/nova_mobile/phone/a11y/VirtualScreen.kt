@@ -38,6 +38,8 @@ class VirtualScreen(
     val scope: VirtualScope,
 ) : VirtualDevice {
     private val ids = NodeIds<AccessibilityNodeInfo>()
+    /** Task of the last app `open_app` brought to the front of the display, or -1. */
+    @Volatile private var launchedTask = -1
 
     /** A resolved action ready to dispatch on this screen. */
     class Prepared internal constructor(
@@ -68,8 +70,11 @@ class VirtualScreen(
     override fun topPackage(): String? = display.current?.let { SnapshotReader.topPackage(windows(it)) }
 
     override fun snapshot(): PhoneSnapshot = helperCall {
-        shell()
+        val s = shell()
         val d = requireDisplay()
+        // Some apps relaunch themselves onto the main display; the run cannot follow them there.
+        val task = launchedTask
+        if (task >= 0 && s.displayOfTask(task) == android.view.Display.DEFAULT_DISPLAY) throw IllegalStateException(PhoneActionErrors.DISPLAY_UNAVAILABLE)
         if (!d.awaitFrame(FIRST_FRAME_MS)) throw IllegalStateException(SCREEN_UNAVAILABLE)
         val r = read(d)
         val after = SnapshotReader.hash(windows(d))
@@ -171,7 +176,11 @@ class VirtualScreen(
         return Prepared("open_app", null, packageName, LAUNCH_WAIT_MS, run = {
             startAppError(shell().startApp(d.displayId, packageName))?.let { code -> throw IllegalStateException(code) }
             true
-        }, settled = { SnapshotReader.topPackage(windows(it)) == packageName }, refusalsAreDefinite = true)
+        }, settled = { shown ->
+            (SnapshotReader.topPackage(windows(shown)) == packageName).also { onTop ->
+                if (onTop) launchedTask = runCatching { shell().topTaskId(shown.displayId) }.getOrDefault(-1)
+            }
+        }, refusalsAreDefinite = true)
     }
 
     private fun prepareType(d: AgentDisplay, action: PhoneAction.Type): Prepared {

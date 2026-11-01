@@ -113,7 +113,11 @@ class VirtualRunHost(
     override fun observe(): JSONObject {
         repeat(SCOPE_TAKEOVERS + 1) {
             awaitTakeover()
-            val snapshot = device.snapshot()
+            val snapshot = try { device.snapshot() } catch (e: IllegalStateException) {
+                // A user takeover that started meanwhile moved the app to the main display on purpose.
+                if (e.message == PhoneActionErrors.DISPLAY_UNAVAILABLE && takeover.pending) return@repeat
+                throw e
+            }
             if (scope.allows(snapshot.packageName)) {
                 observedOnce = true
                 observedReturns = takeover.returns

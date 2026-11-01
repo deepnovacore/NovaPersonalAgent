@@ -28,7 +28,8 @@ class VirtualRunHostTest {
         var outcome = "dispatched"
         val dispatched = mutableListOf<String>()
         override fun topPackage() = foreground
-        override fun snapshot() = PhoneSnapshot("ph-${++snapshots}", foreground, 1080, 2400,
+        var snapshotError: (() -> Exception)? = null
+        override fun snapshot() = snapshotError?.let { error -> snapshotError = null; throw error() } ?: PhoneSnapshot("ph-${++snapshots}", foreground, 1080, 2400,
             listOf(UiElement("@e1", "EditText", "Search", listOf(0, 0, 999, 100), "search", false, true, false, false, false)),
             "YWJj", false, false)
         override fun prepare(action: PhoneAction): PreparedAction {
@@ -261,6 +262,16 @@ class VirtualRunHostTest {
         assertNull(gate.interruption)
     }
 
+    @Test fun appLeavingForTheMainDisplayStopsTheRunUnlessTheUserTookOver() {
+        val device = Device(target).apply { snapshotError = { IllegalStateException("display_unavailable") } }
+        try { host(device, Gate(), takeover()).observe(); fail() } catch (e: IllegalStateException) { assertEquals("display_unavailable", e.message) }
+        val t = takeover()
+        val raced = Device(target)
+        val h = host(raced, Gate(), t)
+        h.observe()
+        raced.snapshotError = { t.request(byModel = false, reason = null); Thread { Thread.sleep(50); t.handBack() }.start(); IllegalStateException("display_unavailable") }
+        assertEquals("ph-2", h.observe().getString("snapshot_id"))
+    }
     @Test fun observeDecisionIsReportedAsAStep() {
         val h = host(Device(target), Gate(), takeover())
         h.decided(ToolDecision.parse(JSONObject("""{"kind":"observe","summary":"Loading"}"""), PhoneTier.VIRTUAL))
