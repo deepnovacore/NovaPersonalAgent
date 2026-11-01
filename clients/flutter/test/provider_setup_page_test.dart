@@ -387,7 +387,7 @@ void main() {
     expect(backend.saves, isEmpty);
     expect(backend.credentialSaves, isEmpty);
     expect(_key('provider.failed'), findsOneWidget);
-    expect(find.textContaining('不走你选的接口类型'), findsOneWidget);
+    expect(find.textContaining('都要用 Nova 还不支持的接口'), findsOneWidget);
     expect(find.text('服务商'), findsNothing);
 
     // Only server errors: also unproven.
@@ -437,7 +437,10 @@ void main() {
     tester,
   ) async {
     await _open(tester, _Backend());
+    // The note states the same rule as the gate: saved once any model answered.
+    expect(find.textContaining('只要有模型回应过'), findsOneWidget);
     expect(find.textContaining('只保存 Key'), findsOneWidget);
+    expect(find.textContaining('一个模型都没有回应'), findsOneWidget);
     expect(find.textContaining('什么都不保存'), findsOneWidget);
     expect(find.textContaining('都成了才保存'), findsNothing);
   });
@@ -887,7 +890,10 @@ void main() {
       await _open(tester, backend);
       await tester.tap(find.byKey(const ValueKey('provider.saved.c')));
       await tester.pumpAndSettle();
-      expect(find.text('OpenAI Responses'), findsOneWidget);
+      expect(
+        tester.widget<ChoiceChip>(_key('provider.protocol.responses')).selected,
+        isTrue,
+      );
       expect(backend.listCalls.last.protocol, ModelProtocol.responses);
       await tester.tap(find.byKey(const ValueKey('provider.model.m-1')));
       await tester.pumpAndSettle();
@@ -959,6 +965,193 @@ void main() {
       await tester.pumpAndSettle();
       expect(backend.probeCalls, isEmpty);
       expect(backend.credentialSaves, isEmpty);
+    });
+
+    testWidgets('a provider whose models all use another API keeps its key', (
+      tester,
+    ) async {
+      final backend = withProviders()
+        ..lister = ((_) => const ModelListOk([
+          ListedModel(id: 'x-1', protocols: [WireProtocol.messages]),
+        ]));
+      await _open(tester, backend);
+      await tester.tap(find.byKey(const ValueKey('provider.saved.b')));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('provider.key.row'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_key('provider.newKey'), 'k-wrong-api');
+      await tester.tap(_key('provider.newKey.save'));
+      await tester.pumpAndSettle();
+      expect(backend.probeCalls, isEmpty);
+      expect(backend.credentialSaves, isEmpty);
+      expect(find.textContaining('都要用 Nova 还不支持的接口'), findsOneWidget);
+    });
+
+    group('a new key with nothing to test it on', () {
+      _Backend relay() {
+        final backend = withProviders()
+          ..saved.add(
+            const SavedProvider(
+              id: 'c',
+              endpoint: 'https://relay.example/v1',
+              label: 'relay.example',
+            ),
+          )
+          ..lister = ((_) => const ModelListOk([]));
+        return backend;
+      }
+
+      Future<void> openKeyDialog(WidgetTester tester, _Backend backend) async {
+        await _open(tester, backend);
+        await tester.tap(find.byKey(const ValueKey('provider.saved.c')));
+        await tester.pumpAndSettle();
+        await tester.tap(_key('provider.key.row'));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('is not stored until a typed model name works', (
+        tester,
+      ) async {
+        final backend = relay();
+        await openKeyDialog(tester, backend);
+        expect(_key('provider.newKey.model'), findsNothing);
+        await tester.enterText(_key('provider.newKey'), 'k-new');
+        await tester.tap(_key('provider.newKey.save'));
+        await tester.pumpAndSettle();
+        // Nothing was probed or stored; the dialog asks for a model name.
+        expect(backend.probeCalls, isEmpty);
+        expect(backend.credentialSaves, isEmpty);
+        expect(_key('provider.newKey.model'), findsOneWidget);
+        expect(find.textContaining('填一个模型名'), findsOneWidget);
+        expect(
+          tester.widget<TextField>(_key('provider.newKey')).controller!.text,
+          'k-new',
+        );
+
+        // A model the provider rejects with the key leaves the old key alone.
+        backend.prober = (_) => ProbeFailed(
+          const ModelRequestFailure('model_http_401', status: 401, body: '{}'),
+        );
+        await tester.enterText(_key('provider.newKey.model'), 'typed-model');
+        await tester.tap(_key('provider.newKey.save'));
+        await tester.pumpAndSettle();
+        expect(backend.probeCalls.single.model, 'typed-model');
+        expect(backend.probeCalls.single.newKey, 'k-new');
+        expect(backend.credentialSaves, isEmpty);
+        expect(find.textContaining('API Key 无效或没有权限'), findsOneWidget);
+
+        // A model that answers proves the key, and only then is it stored.
+        backend.probeCalls.clear();
+        backend.prober = (_) => const ProbeToolCalled();
+        await tester.tap(_key('provider.key.row'));
+        await tester.pumpAndSettle();
+        await tester.enterText(_key('provider.newKey'), 'k-new');
+        await tester.tap(_key('provider.newKey.save'));
+        await tester.pumpAndSettle();
+        await tester.enterText(_key('provider.newKey.model'), 'typed-model');
+        await tester.tap(_key('provider.newKey.save'));
+        await tester.pumpAndSettle();
+        expect(backend.probeCalls.single.model, 'typed-model');
+        expect(backend.credentialSaves.single.newKey, 'k-new');
+        expect(
+          backend.credentialSaves.single.endpoint,
+          'https://relay.example/v1',
+        );
+      });
+
+      testWidgets('cancelling the model prompt leaves the old key', (
+        tester,
+      ) async {
+        final backend = relay();
+        await openKeyDialog(tester, backend);
+        await tester.enterText(_key('provider.newKey'), 'k-new');
+        await tester.tap(_key('provider.newKey.save'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('取消'));
+        await tester.pumpAndSettle();
+        expect(backend.probeCalls, isEmpty);
+        expect(backend.credentialSaves, isEmpty);
+      });
+    });
+
+    testWidgets('a custom provider can be declared as Responses again', (
+      tester,
+    ) async {
+      final backend = withProviders();
+      backend.saved.add(
+        const SavedProvider(
+          id: 'c',
+          endpoint: 'https://relay.example/v1',
+          label: 'relay.example',
+        ),
+      );
+      await _open(tester, backend);
+      await tester.tap(find.byKey(const ValueKey('provider.saved.c')));
+      await tester.pumpAndSettle();
+      // Presets have a fixed API; a custom endpoint chooses.
+      expect(
+        tester
+            .widget<ChoiceChip>(_key('provider.protocol.chatCompletions'))
+            .selected,
+        isTrue,
+      );
+      await tester.tap(_key('provider.protocol.responses'));
+      await tester.pumpAndSettle();
+      expect(backend.credentialSaves.single.protocol, ModelProtocol.responses);
+      expect(backend.credentialSaves.single.newKey, isEmpty);
+      expect(
+        tester.widget<ChoiceChip>(_key('provider.protocol.responses')).selected,
+        isTrue,
+      );
+      // Models are listed and tried with the declared API from now on.
+      expect(backend.listCalls.last.protocol, ModelProtocol.responses);
+      await tester.tap(find.byKey(const ValueKey('provider.model.m-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('provider.model.use'));
+      await tester.pumpAndSettle();
+      expect(backend.probeCalls.single.protocol, ModelProtocol.responses);
+      expect(backend.saves.single.protocol, ModelProtocol.responses);
+    });
+
+    testWidgets('the provider in use is switched only if its model passes', (
+      tester,
+    ) async {
+      final backend = _Backend(
+        endpoint: 'https://relay.example/v1',
+        model: 'relay-model',
+        saved: [
+          const SavedProvider(
+            id: 'c',
+            endpoint: 'https://relay.example/v1',
+            label: 'relay.example',
+          ),
+        ],
+        keyed: {'https://relay.example/v1'},
+      )..lister = ((_) => ModelListOk([_m('relay-model')]));
+      await _open(tester, backend);
+      await tester.tap(find.byKey(const ValueKey('provider.saved.c')));
+      await tester.pumpAndSettle();
+      backend.prober = (_) => const ProbeNoToolCall();
+      await tester.tap(_key('provider.protocol.responses'));
+      await tester.pumpAndSettle();
+      expect(backend.probeCalls.single.model, 'relay-model');
+      expect(backend.probeCalls.single.protocol, ModelProtocol.responses);
+      expect(backend.saves, isEmpty);
+      expect(backend.credentialSaves, isEmpty);
+      expect(find.textContaining('relay-model 没有调用工具'), findsOneWidget);
+
+      backend.prober = (_) => const ProbeToolCalled();
+      await tester.tap(_key('provider.protocol.responses'));
+      await tester.pumpAndSettle();
+      expect(backend.saves.single.protocol, ModelProtocol.responses);
+      expect(backend.saves.single.model, 'relay-model');
+    });
+
+    testWidgets('a preset has no protocol choice', (tester) async {
+      await _open(tester, withProviders());
+      await tester.tap(find.byKey(const ValueKey('provider.saved.b')));
+      await tester.pumpAndSettle();
+      expect(_key('provider.protocol.responses'), findsNothing);
     });
 
     testWidgets('leaving while a new key is checked does nothing odd', (

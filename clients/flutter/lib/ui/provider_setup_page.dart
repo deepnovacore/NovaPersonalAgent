@@ -43,6 +43,13 @@ Future<void> showProviderSetupPage(
 
 const customProviderId = 'custom';
 
+/// The ChatGPT account route is not something a key provider can speak; when
+/// that account is the one in use, a key provider starts from Chat Completions.
+ModelProtocol _keyProtocol(ModelProtocol protocol) =>
+    protocol == ModelProtocol.chatgptResponses
+    ? ModelProtocol.chatCompletions
+    : protocol;
+
 /// Connect a model provider: sign in with an account, or pick a provider, paste
 /// a key and let Nova list its models and ask one to call a tool before saving.
 /// Keys go only to the backend's secure storage; nothing key-like is kept here
@@ -84,7 +91,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
       (ModelPreset.forEndpoint(widget.view.endpoint) == null
           ? customProviderId
           : ModelPreset.forEndpoint(widget.view.endpoint)!.id);
-  late ModelProtocol _protocol = widget.view.protocol;
+  late ModelProtocol _protocol = _keyProtocol(widget.view.protocol);
   late String _customEndpoint =
       ModelPreset.forEndpoint(widget.view.endpoint) == null
       ? widget.view.endpoint
@@ -175,7 +182,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
         _protocol = preset.protocol;
       } else {
         _endpoint.text = _customEndpoint;
-        _protocol = widget.view.protocol;
+        _protocol = _keyProtocol(widget.view.protocol);
       }
       if (!keepKey) _key.clear();
       _model.clear();
@@ -357,11 +364,9 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
               // key works: show why and store nothing.
               setState(() {
                 _test = _Test.failed;
-                _failure = copy.failed(
-                  copy.probeFailed(
-                    result.rejected.first.failure,
-                    example: copy.exampleModel(_exampleKind),
-                  ),
+                _failure = copy.notProven(
+                  result,
+                  example: copy.exampleModel(_exampleKind),
                 );
               });
               return;
@@ -806,8 +811,9 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
 
   ProviderSetupCopy get _copy => ProviderSetupCopy(widget.language);
   ModelPreset? get _preset => ModelPreset.forEndpoint(widget.provider.endpoint);
+  ModelProtocol? _declared;
   ModelProtocol get _protocol =>
-      _isCurrent ? _view.protocol : widget.provider.protocol;
+      _isCurrent ? _view.protocol : _declared ?? widget.provider.protocol;
   bool get _isCurrent {
     try {
       return ProviderCredentials.scopeForEndpoint(widget.provider.endpoint) ==
@@ -823,14 +829,17 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     _load();
   }
 
-  ModelSettingsInput _input(String model, {String key = ''}) =>
-      ModelSettingsInput(
-        providerId: _preset?.id,
-        endpoint: widget.provider.endpoint,
-        model: model,
-        protocol: _protocol,
-        newKey: key,
-      );
+  ModelSettingsInput _input(
+    String model, {
+    String key = '',
+    ModelProtocol? protocol,
+  }) => ModelSettingsInput(
+    providerId: _preset?.id,
+    endpoint: widget.provider.endpoint,
+    model: model,
+    protocol: protocol ?? _protocol,
+    newKey: key,
+  );
 
   Future<void> _load() async {
     if (!mounted) return;
@@ -875,22 +884,10 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     String? message;
     try {
       final result = await widget.backend.probe(_input(option.id));
-      switch (result) {
-        case ProbeToolCalled():
-          await widget.backend.save(_input(option.id));
-          _view = await widget.backend.load();
-        case ProbeNoToolCall():
-          message = copy.probeFailed(
-            ProbeFailure(ProbeProblem.noTools, option.id),
-            example: '',
-          );
-        case ProbeFailed(:final error):
-          message = copy.probeFailed(
-            classifyProbeFailure(error, option.id),
-            example: copy.exampleModel(
-              _preset?.providerKind ?? ProviderKind.openAiCompat,
-            ),
-          );
+      message = _probeProblem(result, option.id);
+      if (message == null) {
+        await widget.backend.save(_input(option.id));
+        _view = await widget.backend.load();
       }
     } catch (_) {
       message = copy.actionFailed;
@@ -900,6 +897,60 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
       _busy = false;
       _message = message;
     });
+  }
+
+  /// What to tell the user when [model] did not pass the tool-call test; null
+  /// when it did.
+  String? _probeProblem(ProbeResult result, String model) => switch (result) {
+    ProbeToolCalled() => null,
+    ProbeNoToolCall() => _copy.probeFailed(
+      ProbeFailure(ProbeProblem.noTools, model),
+      example: '',
+    ),
+    ProbeFailed(:final error) => _copy.probeFailed(
+      classifyProbeFailure(error, model),
+      example: _copy.exampleModel(
+        _preset?.providerKind ?? ProviderKind.openAiCompat,
+      ),
+    ),
+  };
+
+  /// A custom endpoint's API cannot be told from its address, so it can be
+  /// declared again here (records saved before the API was stored read as
+  /// Chat Completions). The model in use must pass the test with the new API
+  /// before it is switched; otherwise only the stored declaration changes.
+  Future<void> _setProtocol(ModelProtocol protocol) async {
+    if (_busy || protocol == _protocol) return;
+    final copy = _copy;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    String? message;
+    try {
+      if (_isCurrent) {
+        final model = _view.model;
+        final result = await widget.backend.probe(
+          _input(model, protocol: protocol),
+        );
+        message = _probeProblem(result, model);
+        if (message == null) {
+          await widget.backend.save(_input(model, protocol: protocol));
+          _view = await widget.backend.load();
+        }
+      } else {
+        await widget.backend.saveCredential(_input('', protocol: protocol));
+        _declared = protocol;
+      }
+    } catch (_) {
+      message = copy.actionFailed;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _message = message;
+    });
+    if (message == null) await _load();
   }
 
   Future<void> _chooseModel(ModelOption option) async {
@@ -932,16 +983,37 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   }
 
   /// Lists and probes with [key] before it replaces the stored one, so a
-  /// mistyped key cannot overwrite a working key. Returns what to tell the user
-  /// when the provider did not accept it, or null when it did (or when nothing
-  /// is available to ask).
-  Future<String?> _checkKey(String key) async {
+  /// mistyped key cannot overwrite a working key. `problem` is what to tell
+  /// the user when the provider did not accept it; `needsModel` means there
+  /// was no model to ask, so the user must type one ([typedModel]) before the
+  /// key can be checked. Both clear: the provider accepted the key.
+  Future<({String? problem, bool needsModel})> _checkKey(
+    String key, {
+    String typedModel = '',
+  }) async {
+    const accepted = (problem: null, needsModel: false);
+    const needsModel = (problem: null, needsModel: true);
     final copy = _copy;
     final backend = widget.backend;
     final preset = _preset;
     final example = copy.exampleModel(
       preset?.providerKind ?? ProviderKind.openAiCompat,
     );
+    Future<({String? problem, bool needsModel})> askOne(String model) async {
+      final result = await backend.probe(_input(model, key: key));
+      if (result is ProbeFailed) {
+        final failure = classifyProbeFailure(result.error, model);
+        if (!failure.keyAccepted) {
+          return (
+            problem: copy.failed(copy.probeFailed(failure, example: example)),
+            needsModel: false,
+          );
+        }
+      }
+      return accepted;
+    }
+
+    if (typedModel.isNotEmpty) return askOne(typedModel);
     ModelListResult listed;
     try {
       listed = await backend.listModelsDetailed(_input('', key: key));
@@ -950,22 +1022,17 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     }
     if (listed is ModelListFailed &&
         listed.reason != ListFailure.notSupported) {
-      return copy.failed(copy.listFailure(listed));
+      return (
+        problem: copy.failed(copy.listFailure(listed)),
+        needsModel: false,
+      );
     }
     final models = listed is ModelListOk ? listed.models : <ListedModel>[];
     final inUse = _isCurrent ? _view.model : null;
     if (models.isEmpty) {
       // No list to choose from: ask the model in use, or the preset's own.
       final model = inUse ?? preset?.recommendedModels.firstOrNull;
-      if (model == null) return null;
-      final result = await backend.probe(_input(model, key: key));
-      if (result is ProbeFailed) {
-        final failure = classifyProbeFailure(result.error, model);
-        if (!failure.keyAccepted) {
-          return copy.failed(copy.probeFailed(failure, example: example));
-        }
-      }
-      return null;
+      return model == null ? needsModel : askOne(model);
     }
     final done = await probeListedModels(
       models: models,
@@ -981,81 +1048,119 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     );
     switch (done) {
       case ProviderTestBlocked(:final failure):
-        return copy.failed(copy.probeFailed(failure, example: example));
-      case ProviderTestDone(rejected: []):
-        return null;
+        return (
+          problem: copy.failed(copy.probeFailed(failure, example: example)),
+          needsModel: false,
+        );
+      case ProviderTestDone(main: null, rejected: []):
+        // Nothing in the list could be tried.
+        return needsModel;
       case final ProviderTestDone result when !result.keyProven:
-        return copy.failed(
-          copy.probeFailed(result.rejected.first.failure, example: example),
+        return (
+          problem: copy.notProven(result, example: example),
+          needsModel: false,
         );
       case ProviderTestDone():
-        return null;
+        return accepted;
     }
   }
 
   Future<void> _changeKey() async {
     final copy = _copy;
     final key = TextEditingController();
+    final model = TextEditingController();
     var shown = false;
+    var askModel = false;
     try {
-      final value = await showLocalDialog<String>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialog) => AlertDialog(
-            title: Text(copy.changeKey),
-            content: TextField(
-              key: const ValueKey('provider.newKey'),
-              controller: key,
-              obscureText: !shown,
-              autocorrect: false,
-              enableSuggestions: false,
-              enableIMEPersonalizedLearning: false,
-              decoration: InputDecoration(
-                hintText: copy.newKeyHint,
-                suffixIcon: _KeyToggle(
-                  key: const ValueKey('provider.newKey.toggle'),
-                  shown: shown,
-                  copy: copy,
-                  onPressed: () => setDialog(() => shown = !shown),
+      while (true) {
+        if (!mounted) return;
+        final value = await showLocalDialog<String>(
+          context: context,
+          builder: (context) => StatefulBuilder(
+            builder: (context, setDialog) => AlertDialog(
+              title: Text(copy.changeKey),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    key: const ValueKey('provider.newKey'),
+                    controller: key,
+                    obscureText: !shown,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    enableIMEPersonalizedLearning: false,
+                    decoration: InputDecoration(
+                      hintText: copy.newKeyHint,
+                      suffixIcon: _KeyToggle(
+                        key: const ValueKey('provider.newKey.toggle'),
+                        shown: shown,
+                        copy: copy,
+                        onPressed: () => setDialog(() => shown = !shown),
+                      ),
+                    ),
+                  ),
+                  if (askModel)
+                    TextField(
+                      key: const ValueKey('provider.newKey.model'),
+                      controller: model,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      enableIMEPersonalizedLearning: false,
+                      keyboardType: TextInputType.url,
+                      decoration: InputDecoration(hintText: copy.testModelHint),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(copy.cancel),
                 ),
-              ),
+                TextButton(
+                  key: const ValueKey('provider.newKey.save'),
+                  onPressed: () => Navigator.pop(context, key.text.trim()),
+                  child: Text(copy.save),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(copy.cancel),
-              ),
-              TextButton(
-                key: const ValueKey('provider.newKey.save'),
-                onPressed: () => Navigator.pop(context, key.text.trim()),
-                child: Text(copy.save),
-              ),
-            ],
           ),
-        ),
-      );
-      if (value == null || value.isEmpty || !mounted) return;
-      setState(() {
-        _busy = true;
-        _message = copy.checkingKey;
-      });
-      String? problem;
-      try {
-        problem = await _checkKey(value);
-        if (problem == null) {
-          await widget.backend.saveCredential(_input('', key: value));
+        );
+        if (value == null || value.isEmpty || !mounted) return;
+        setState(() {
+          _busy = true;
+          _message = copy.checkingKey;
+        });
+        String? problem;
+        var needsModel = false;
+        try {
+          final check = await _checkKey(
+            value,
+            typedModel: askModel ? model.text.trim() : '',
+          );
+          problem = check.problem;
+          needsModel = check.needsModel;
+          if (problem == null && !needsModel) {
+            await widget.backend.saveCredential(_input('', key: value));
+          }
+        } catch (_) {
+          problem = copy.actionFailed;
         }
-      } catch (_) {
-        problem = copy.actionFailed;
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _message = needsModel ? copy.keyNeedsModel : problem;
+        });
+        if (needsModel) {
+          // The old key stays; ask again with a model name to test with.
+          askModel = true;
+          continue;
+        }
+        if (problem == null) await _load();
+        return;
       }
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _message = problem;
-      });
-      if (problem == null) await _load();
     } finally {
       key.dispose();
+      model.dispose();
     }
   }
 
@@ -1133,7 +1238,33 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
                           ),
                         ),
                 ),
-                NovaTile(title: copy.api, subtitle: Text(protocolLabel)),
+                NovaTile(
+                  title: copy.api,
+                  subtitle: _preset == null
+                      ? Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final (protocol, label) in const [
+                              (
+                                ModelProtocol.chatCompletions,
+                                'Chat Completions',
+                              ),
+                              (ModelProtocol.responses, 'Responses'),
+                            ])
+                              ChoiceChip(
+                                key: ValueKey(
+                                  'provider.protocol.${protocol.name}',
+                                ),
+                                label: Text(label),
+                                selected: _protocol == protocol,
+                                onSelected: _busy
+                                    ? null
+                                    : (_) => _setProtocol(protocol),
+                              ),
+                          ],
+                        )
+                      : Text(protocolLabel),
+                ),
                 NovaTile(
                   title: copy.address,
                   subtitle: Text(_shortUrl(widget.provider.endpoint)),

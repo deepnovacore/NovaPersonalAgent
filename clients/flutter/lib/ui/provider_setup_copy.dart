@@ -45,8 +45,8 @@ class ProviderSetupCopy {
   String get testAndSave => t('测试并保存', 'Test and save');
   String get testing => t('正在测试…', 'Testing…');
   String get testNote => t(
-    '先列出这家的模型，再让其中一个调用一次工具。通过的会被选为对话模型；服务商有回应但没有模型通过时，只保存 Key；连不上、Key 不对或你填的模型试调用失败，则什么都不保存。',
-    'Lists this provider’s models, then asks one to call a tool once. A model that does is selected for chat. If the provider answers but no model passes, only the key is saved. If it cannot be reached, rejects the key, or the model you typed fails, nothing is saved.',
+    '先列出这家的模型，再让其中一个调用一次工具。通过的会被选为对话模型。只要有模型回应过、但没有一个通过，就只保存 Key；一个模型都没有回应（连不上、Key 不对、地址不对、模型都用不了）则什么都不保存。',
+    'Lists this provider’s models, then asks one to call a tool once. A model that does is selected for chat. If at least one model answered but none passed, only the key is saved. If no model answered (cannot connect, key rejected, wrong address, no usable model), nothing is saved.',
   );
   String get manualOn => t('手动填写模型名', 'Enter a model name');
   String get manualOff => t('不填模型名', 'Don’t enter a model name');
@@ -81,6 +81,10 @@ class ProviderSetupCopy {
   );
   String usePreset(String name) => t('改用「$name」预设', 'Use the “$name” preset');
   String failed(String reason) => t('连接失败：$reason', 'Failed: $reason');
+  String get allWrongProtocol => t(
+    '这家的模型都要用 Nova 还不支持的接口，所以什么都没有保存。',
+    'All of this provider’s models use an API Nova does not support yet, so nothing was saved.',
+  );
   String get saveFailed => t(
     '未能保存，请检查模型名称和密钥后重试。',
     'Could not save. Check the model name and key, then retry.',
@@ -112,8 +116,19 @@ class ProviderSetupCopy {
       '服务暂时出错，请稍后再试（HTTP ${f.status ?? ''}）',
       'The service is having trouble. Try again later (HTTP ${f.status ?? ''}).',
     ),
+    ProbeProblem.badAddress => t(
+      '接口地址好像不对（HTTP 404）：这个地址上没有对话接口。检查地址是否写全，例如要不要带 /v1。',
+      'The API URL looks wrong (HTTP 404): there is no chat endpoint at this address. Check it is complete, for example whether it needs /v1.',
+    ),
     _ => f.detail,
   };
+
+  /// Why nothing was saved although the models were listed: none of them
+  /// answered. [done] has no model that passed and no answered rejection.
+  String notProven(ProviderTestDone done, {required String example}) =>
+      done.rejected.every((r) => r.skipped)
+      ? allWrongProtocol
+      : failed(probeFailed(done.rejected.first.failure, example: example));
 
   String _providerSaid(ProbeFailure f) => f.detail.isNotEmpty
       ? t('服务商说：${f.detail}', 'provider said: ${f.detail}')
@@ -230,6 +245,11 @@ class ProviderSetupCopy {
   String get keyNone => t('没有填', 'None');
   String get change => t('更换', 'Change');
   String get changeKey => t('更换 API Key', 'Change API key');
+  String get keyNeedsModel => t(
+    '这家没有列出可以试的模型，没法验证新 Key。填一个模型名，用它试调用一次；通了才会换掉旧 Key。',
+    'This provider lists no model to try, so the new key cannot be checked. Enter a model name to try; the old key is replaced only if it works.',
+  );
+  String get testModelHint => t('用来测试的模型名', 'Model to test with');
   String get newKeyHint => t('粘贴新的 Key', 'Paste the new key');
   String get checkingKey => t('正在验证新的 Key…', 'Checking the new key…');
   String get save => t('保存', 'Save');
