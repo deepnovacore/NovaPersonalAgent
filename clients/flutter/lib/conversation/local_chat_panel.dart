@@ -604,7 +604,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       final messageWidgets = <Widget>[];
       final seenPreviews = <String>{};
       final toolSteps = <ToolStep>[];
-      final targets = toolTargetsByCallId(messages);
+      final targets = widget.showProcess
+          ? toolTargetsByCallId(messages)
+          : const <String, ToolTarget>{};
       // Call id of each entry of [toolSteps] (null when the result has none).
       final toolStepCallIds = <String?>[];
       var firstToolIndex = 0;

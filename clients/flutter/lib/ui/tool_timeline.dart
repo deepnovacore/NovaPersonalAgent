@@ -65,11 +65,12 @@ ToolTarget? toolTarget(String name, Object? arguments) {
   if (decoded is! Map) return null;
   switch (name) {
     case 'file_read' || 'file_write' || 'file_edit':
-      final path = decoded['path'];
-      final label = path is String ? pathBaseName(path) : null;
-      return label == null
+      final raw = decoded['path'];
+      final path = raw is String ? raw.trim() : null;
+      final label = path == null || path.isEmpty ? null : pathBaseName(path);
+      return label == null || label.trim().isEmpty
           ? null
-          : ToolTarget(label: label, key: (path as String).trim());
+          : ToolTarget(label: label, key: path!);
     case 'web_fetch' || 'browser' || 'browser_open':
       final url = decoded['url'];
       final host = url is String ? Uri.tryParse(url)?.host : null;
@@ -488,7 +489,10 @@ class _StepTileState extends State<_StepTile> {
       onTap: row.detail == null
           ? null
           : () => setState(() => showDetail = !showDetail),
-      semanticsLabel: row.text,
+      semanticsLabel: [
+        row.text,
+        if (row.subtitle.isNotEmpty) row.subtitle,
+      ].join(' · '),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
