@@ -62,8 +62,8 @@ internal object SnapshotReader {
             if (n.isVisibleToUser) {
                 n.getBoundsInScreen(rect)
                 hash = mix(hash, n.className, n.text, n.contentDescription, rect.flattenToString(), states(n))
-                // Secret fields expose only their hint, never their content.
-                val own = if (n.isPassword) n.hintText?.toString()?.trim()?.ifEmpty { null } else ownLabel(n)
+                // Editable and secret fields expose only their hint or label, never their content.
+                val own = ownLabel(n)
                 clip(rect, width, height)
                 val usable = rect.width() >= MIN_SIZE && rect.height() >= MIN_SIZE
                 val interactive = n.isClickable || n.isEditable || n.isScrollable
@@ -86,7 +86,7 @@ internal object SnapshotReader {
                             focused = n.isFocused,
                             secret = n.isPassword,
                         )
-                        val hint = own != null && showingHint(n)
+                        val hint = namedByHint(n, own)
                         entries += NodeEntry(element, ElementLocator(role, label, rid, rect.centerX(), rect.centerY(), lastLabel, hint, inList), n)
                         if (label.isNotEmpty()) lastLabel = label
                     }
@@ -111,10 +111,10 @@ internal object SnapshotReader {
         val rect = Rect().also { n.getBoundsInScreen(it) }
         clip(rect, width, height)
         if (rect.width() < MIN_SIZE || rect.height() < MIN_SIZE) return null
-        val own = if (n.isPassword) n.hintText?.toString()?.trim()?.ifEmpty { null } else ownLabel(n)
+        val own = ownLabel(n)
         return ElementLocator(
             roleOf(n), labelOf(n, own), n.viewIdResourceName, rect.centerX(), rect.centerY(), null,
-            hint = own != null && showingHint(n), inList = inList(n),
+            hint = namedByHint(n, own), inList = inList(n),
         )
     }
 
@@ -164,14 +164,18 @@ internal object SnapshotReader {
     private fun states(n: AccessibilityNodeInfo) =
         "${n.isChecked}${n.isSelected}${n.isEnabled}${n.isFocused}${n.textSelectionStart}:${n.textSelectionEnd}"
 
-    /** The node's own name: its text (a hint counts, it explains a field), else its content description. */
-    fun ownLabel(n: AccessibilityNodeInfo): String? {
-        val text = n.text?.toString()?.trim()
-        if (!text.isNullOrEmpty()) return text
-        val desc = n.contentDescription?.toString()?.trim()
-        if (!desc.isNullOrEmpty()) return desc
-        return n.hintText?.toString()?.trim()?.ifEmpty { null }
-    }
+    /** Editable and secret fields hold user input; their names never come from their own text or description. */
+    private fun isField(n: AccessibilityNodeInfo) = n.isEditable || n.isPassword
+
+    /** The node's own name per [nodeName]; a field's label view counts only when it is not a field itself. */
+    fun ownLabel(n: AccessibilityNodeInfo): String? =
+        nodeName(n.text, n.contentDescription, n.hintText, isField(n)) {
+            n.labeledBy?.takeUnless { isField(it) }?.let { label -> label.text ?: label.contentDescription }
+        }
+
+    /** The name is an input hint (these rotate): a field named by its hint, or another node showing its hint. */
+    private fun namedByHint(n: AccessibilityNodeInfo, own: String?): Boolean =
+        own != null && if (isField(n)) own == n.hintText?.toString()?.trim() else showingHint(n)
 
     /** The node shows its hint: flagged by the system, no real text, or the reported text equals the hint. */
     private fun showingHint(n: AccessibilityNodeInfo): Boolean {
@@ -218,6 +222,17 @@ internal object SnapshotReader {
         }
         return h
     }
+}
+
+/**
+ * Name of a node. A [field] (editable or secret) is named by its [hint], else by the text of its label view
+ * ([labelledBy]), never by its own [text] or [description], which may be what the user typed. Any other node is named by
+ * its text, else its description, else its hint. Null when there is no name.
+ */
+internal fun nodeName(text: CharSequence?, description: CharSequence?, hint: CharSequence?, field: Boolean, labelledBy: () -> CharSequence?): String? {
+    fun clean(value: CharSequence?) = value?.toString()?.trim()?.ifEmpty { null }
+    if (field) return clean(hint) ?: clean(labelledBy())
+    return clean(text) ?: clean(description) ?: clean(hint)
 }
 
 /** Pixel [p] on an axis of [size] pixels to the snapshot's 0..[SNAPSHOT_BOUNDS_MAX] space. */
