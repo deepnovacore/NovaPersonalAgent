@@ -279,7 +279,9 @@ Lanes do not edit files they don't own. If a lane needs a seam that isn't here, 
 
 ## Self-check details
 
-`detail` codes per row (`ok:false` unless noted). A row that did not run is `{ok:false, detail:"not_run"}`.
+`detail` codes per row (`ok:false` unless noted). A row that did not run is `{ok:false, detail:"not_run"}`. A service
+reconnect during the self-check cancels it before its next effect (display creation, `startApp`, tap, each typing
+action, each back key): that row reports `accessibility_unavailable` and later rows `not_run`.
 
 | Row | Details |
 |---|---|

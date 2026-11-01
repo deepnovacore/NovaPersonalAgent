@@ -33,11 +33,32 @@ interface RunIdleGate {
     fun <T> whileIdle(block: () -> T): T
 }
 
+/** The self-check was cancelled before an effect of the row [row]; nothing of that effect ran. */
+internal class SelfCheckCancelled(val row: String) : IllegalStateException(SELF_CHECK_CANCELLED)
+
+/** Detail of the row whose effect a cancellation refused (a service reconnect voided the self-check's flag lease). */
+const val SELF_CHECK_CANCELLED = "accessibility_unavailable"
+
+/**
+ * Cancellation of one self-check: a service reconnect voids its runtime-flag lease and calls [cancel]. Every effect on
+ * the display is preceded by [before], so no effect starts after the cancellation was seen.
+ */
+internal class SelfCheckCancellation {
+    @Volatile var cancelled = false
+        private set
+
+    fun cancel() { cancelled = true }
+
+    /** Throws [SelfCheckCancelled] for [row] once cancelled. */
+    fun before(row: String) { if (cancelled) throw SelfCheckCancelled(row) }
+}
+
 /**
  * Self-check of the virtual tier (contract `selfCheck`): creates a temporary display, opens system Settings on it, reads
  * its tree and frame, taps a point outside every clickable node, types only into an editable Settings field (or reports
  * `no_text_field`), presses back with `injectKey` and reads FLAG_OWN_FOCUS. The runtime a11y flag and the display are
- * always released. It refuses with `run_active` while a run is active, and no run starts while it holds the flag.
+ * always released. It refuses with `run_active` while a run is active, and no run starts while it holds the flag. A
+ * service reconnect cancels it: the row whose effect was next reports [SELF_CHECK_CANCELLED], later rows `not_run`.
  * Details are safe codes; no screen text is reported. [run] blocks and must not run on the main thread.
  */
 class VirtualSelfCheck(context: Context, private val shells: ShellProvider, private val runs: RunIdleGate) : PhoneSelfCheck {
@@ -69,10 +90,11 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider, priv
         val height = maxOf(metrics.widthPixels, metrics.heightPixels)
         var flags: RuntimeFlagLeases.Lease? = null
         var created: AgentDisplay? = null
+        val cancellation = SelfCheckCancellation()
         try {
             // Taken while no run is active; a run cannot start until the lease is released below.
             if (service != null) {
-                flags = try { runs.whileIdle { service.acquireVirtualFlags { } } } catch (e: IllegalStateException) {
+                flags = try { runs.whileIdle { service.acquireVirtualFlags(cancellation::cancel) } } catch (e: IllegalStateException) {
                     if (e.message == RUN_ACTIVE) throw e
                     put(ID_CREATE_DISPLAY, false, "accessibility_flags_failed")
                     return
@@ -81,6 +103,7 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider, priv
                     return
                 }
             }
+            cancellation.before(ID_CREATE_DISPLAY)
             val display = try { AgentDisplay(shell, width, height, metrics.densityDpi, null) } catch (_: Exception) {
                 put(ID_CREATE_DISPLAY, false, "create_failed")
                 return
@@ -92,6 +115,7 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider, priv
 
             val settings = runCatching { app.packageManager.resolveActivity(Intent(Settings.ACTION_SETTINGS), 0)?.activityInfo?.packageName }.getOrNull()
                 ?: "com.android.settings"
+            cancellation.before(ID_START_APP)
             val started = runCatching { startAppError(shell.startApp(display.displayId, settings)) }.getOrElse { PhoneActionErrors.HELPER_UNAVAILABLE }
             if (started != null) { put(ID_START_APP, false, started); return }
             if (service == null) { put(ID_START_APP, false, "accessibility_required"); return }
@@ -115,12 +139,14 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider, priv
             val point = freePoint(width, height, clickable)
             if (point == null) put(ID_TAP, false, "no_free_point") else {
                 val path = Path().apply { moveTo(point.first.toFloat(), point.second.toFloat()) }
+                cancellation.before(ID_TAP)
                 val gesture = runCatching { service.gesture(display.displayId, listOf(GestureDescription.StrokeDescription(path, 0, TAP_MS))) }.getOrDefault(GestureOutcome.UNCERTAIN)
                 // Only a refused gesture is followed by an injection; an uncertain one may already have tapped.
                 when (gesture) {
                     GestureOutcome.COMPLETED -> put(ID_TAP, true, null)
                     GestureOutcome.UNCERTAIN -> put(ID_TAP, false, "gesture_uncertain")
                     GestureOutcome.REFUSED -> {
+                        cancellation.before(ID_TAP)
                         val injected = runCatching { shell.injectTap(display.displayId, point.first, point.second) }.getOrDefault(false)
                         put(ID_TAP, injected, if (injected) "injection_only" else "tap_refused")
                     }
@@ -130,9 +156,12 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider, priv
             val field = read.entries.firstOrNull { it.element.editable && !it.element.secret }?.node
             if (field == null) put(ID_TYPE, false, "no_text_field") else {
                 val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, TYPE_PROBE) }
+                cancellation.before(ID_TYPE)
                 field.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                cancellation.before(ID_TYPE)
                 val typed = field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) &&
                     poll(ACTION_WAIT_MS) { field.refresh() && field.text?.toString() == TYPE_PROBE }
+                cancellation.before(ID_TYPE)
                 field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "") })
                 put(ID_TYPE, typed, if (typed) null else "text_not_set")
             }
@@ -143,12 +172,15 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider, priv
             var left = false
             repeat(BACK_TRIES) {
                 if (left) return@repeat
+                cancellation.before(ID_BACK)
                 accepted = runCatching { shell.injectKey(display.displayId, KeyEvent.KEYCODE_BACK) }.getOrDefault(false) || accepted
                 left = poll(ACTION_WAIT_MS) {
                     SnapshotReader.topPackage(service.windowsOn(display.displayId)) != settings || SnapshotReader.hash(service.windowsOn(display.displayId)) != before
                 }
             }
             put(ID_BACK, accepted && left, if (!accepted) "injection_refused" else if (!left) "no_effect" else null)
+        } catch (e: SelfCheckCancelled) {
+            put(e.row, false, SELF_CHECK_CANCELLED)
         } finally {
             created?.release()
             flags?.release()

@@ -1,8 +1,10 @@
 package com.nova.nova_mobile.phone
 
+import com.nova.nova_mobile.phone.a11y.RuntimeFlagLeases
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class VirtualSelfCheckTest {
@@ -23,5 +25,27 @@ class VirtualSelfCheckTest {
 
     @Test fun rowsFollowTheContractIds() {
         assertEquals(listOf("helper", "create_display", "start_app", "read_tree", "tap", "type", "back", "main_focus"), VirtualSelfCheck.IDS)
+    }
+
+    @Test fun reconnectCancelsTheSelfCheckBeforeItsNextEffect() {
+        val store = object : RuntimeFlagLeases.Store {
+            var flags: Int? = 1
+            override fun read() = flags
+            override fun write(flags: Int) { this.flags = flags }
+        }
+        val leases = RuntimeFlagLeases(store, 2)
+        val cancellation = SelfCheckCancellation()
+        val lease = leases.acquire(cancellation::cancel)
+        cancellation.before(VirtualSelfCheck.ID_TAP)
+        leases.reconnect()
+        assertTrue(cancellation.cancelled)
+        try { cancellation.before(VirtualSelfCheck.ID_TYPE); fail() } catch (e: SelfCheckCancelled) {
+            assertEquals(VirtualSelfCheck.ID_TYPE, e.row)
+            assertEquals(SELF_CHECK_CANCELLED, e.message)
+        }
+        // The voided lease's release in the self-check's cleanup leaves the restored flags alone.
+        assertEquals(1, store.flags)
+        lease.release()
+        assertEquals(1, store.flags)
     }
 }
