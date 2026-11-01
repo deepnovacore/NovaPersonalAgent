@@ -148,3 +148,12 @@ test('first-run setup ignores missing keys left over from the previous launch', 
   t.mock.timers.tick(1200)
   assert.equal(page.closed(), 1)
 })
+
+test('the conversation model key is accepted with every voice path, and voice keys stay optional', () => {
+  assert.deepEqual(setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek', secrets: {deepseekApiKey: 'd'}}),
+    {settingsPatch: {pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek', secrets: {deepseekApiKey: 'd'}}})
+  assert.deepEqual(setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek', secrets: {deepseekApiKey: 'd', dashscopeApiKey: 'q'}}),
+    {settingsPatch: {pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek', secrets: {deepseekApiKey: 'd', dashscopeApiKey: 'q'}}})
+  assert.throws(() => setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'openai'}), /invalid setup choice/u)
+  assert.throws(() => setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'ark', secrets: {deepseekApiKey: 'd'}}), /invalid setup choice/u)
+})

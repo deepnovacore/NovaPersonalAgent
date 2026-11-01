@@ -11,7 +11,7 @@ const PATHS = [
     ['integrated', '快速开始', '通义千问实时语音，只需一个阿里云百炼 DashScope 密钥。', Zap, true],
     ['cascaded', '高级', '火山引擎语音识别与合成，搭配你选择的大模型。', SlidersHorizontal, false],
 ];
-const STEPS = ['选择语音方式', '连接模型服务', '开始对话'];
+const STEPS = ['连接模型服务', '语音（可选）', '开始使用'];
 function SetupOrb({ size = 176 }: { size?: number }) {
     const canvas = useRef<HTMLCanvasElement>(null);
     useEffect(() => { const node = canvas.current;
@@ -51,8 +51,10 @@ export default function SetupApp({ api = (window as any).novaPersonalAgentDeskto
         return; setView(next); setPipeline(next.pipelineMode === 'cascaded' && ['deepseekApiKey', 'arkApiKey', 'doubaoBigmodelApiKey'].some(key => next.secretsPresent?.[key]) ? 'cascaded' : 'integrated'); if (KEYS[next.cascadedLlmProvider])
         setProvider(next.cascadedLlmProvider); }).catch(() => { if (alive.current)
         setStatus(t('读取设置失败，请重试')); }); return () => { alive.current = false; off?.(); clearTimeout(timer.current); }; }, [api, onClose]);
-    const active = pipeline === 'integrated' ? ['dashscopeApiKey'] : [KEYS[provider], 'doubaoBigmodelApiKey'];
-    const keysReady = active.every(key => (drafts[key] ?? '').trim() !== '' || view?.secretsPresent?.[key] === true);
+    // The conversation model's key is the only requirement; the chosen voice path's key is optional.
+    const required = [KEYS[provider]];
+    const active = [...new Set([KEYS[provider], pipeline === 'integrated' ? 'dashscopeApiKey' : 'doubaoBigmodelApiKey'])];
+    const keysReady = required.every(key => (drafts[key] ?? '').trim() !== '' || view?.secretsPresent?.[key] === true);
     async function test(key: string) { const rev = (probeRevision.current[key] ?? 0) + 1; probeRevision.current[key] = rev; setTesting((s: any) => ({ ...s, [key]: true })); setResults((s: any) => ({ ...s, [key]: t('测试中…') })); setResultTones((s: any) => ({ ...s, [key]: 'testing' })); try {
         const r = await api.testKey(key, inputs.current[key]?.value ?? '');
         if (alive.current && probeRevision.current[key] === rev) {
@@ -75,14 +77,14 @@ export default function SetupApp({ api = (window as any).novaPersonalAgentDeskto
         const value = inputs.current[key]?.value.trim() ?? '';
         if (value)
             secrets[key] = value;
-        else if (!view?.secretsPresent?.[key]) {
+        else if (required.includes(key) && !view?.secretsPresent?.[key]) {
             setStatus(t('请填写 {0}', t(LABELS[key])));
             setTone('warn');
             inputs.current[key]?.focus();
             return;
         }
     } startingRef.current = true; restartSeen.current = false; setStarting(true); setStatus(t('正在保存并启动…')); setTone(''); clearTimeout(timer.current); timer.current = null; try {
-        const result = await api.save({ pipelineMode: pipeline, ...(pipeline === 'cascaded' ? { cascadedLlmProvider: provider } : {}), secrets });
+        const result = await api.save({ pipelineMode: pipeline, cascadedLlmProvider: provider, secrets });
         if (!alive.current)
             return;
         if (!result.saved || result.rejectedSecrets?.length) {
@@ -119,7 +121,7 @@ export default function SetupApp({ api = (window as any).novaPersonalAgentDeskto
             <div className="setup-rail-copy">
                 <p className="setup-rail-eyebrow">{t('首次设置')}</p>
                 <h1>{t('你好，我是 Nova')}</h1>
-                <p>{t('一个住在你电脑里的语音搭档。')}</p>
+                <p>{t('你的个人助手，语音对话是可选能力。')}</p>
             </div>
             <ol className="setup-steps" aria-label={t('开始步骤')}>{STEPS.map((step, index) => <li key={step} data-state={index < currentStep ? 'done' : index === currentStep ? 'current' : 'todo'} aria-current={index === currentStep ? 'step' : undefined}><span className="setup-step-index" aria-hidden="true">{index < currentStep ? <Check size={11}/> : index + 1}</span><span>{t(step)}</span></li>)}</ol>
             <p className="setup-rail-foot"><ShieldCheck size={14} aria-hidden="true"/>{t('本地优先 · 隐私可控')}</p>
@@ -127,21 +129,22 @@ export default function SetupApp({ api = (window as any).novaPersonalAgentDeskto
         <main className="setup-main">
             <header className="setup-head">
                 <p className="setup-eyebrow">{t('开始使用 Nova')}</p>
-                <h2>{t('选择一种语音方式')}</h2>
-                <p className="setup-lead">{t('填好对应密钥即可开始；之后可在设置中随时调整。')}</p>
+                <h2>{t('连接模型服务')}</h2>
+                <p className="setup-lead">{t('填入对话模型的密钥即可开始；语音对话可选，之后可在设置中随时调整。')}</p>
             </header>
             <div className="setup-content">
+                <label className="llm-choice setup-provider"><span className="setup-field-label">{t('对话模型')}</span><select id="llm-provider" value={provider} disabled={starting} onChange={e => setProvider(e.target.value)}><option value="deepseek">DeepSeek</option><option value="qwen">{t('通义千问（DashScope）')}</option><option value="ark">{t('豆包（火山方舟）')}</option></select></label>
+                <p className="setup-section-label">{t('语音对话（可选）')}</p>
                 <div className="paths" role="radiogroup" aria-label={t('语音方式')}>{PATHS.map(([id, title, body, Icon, recommended]: any[]) => <label className="path" id={'path-' + id} key={id} data-selected={pipeline === id ? 'true' : 'false'}>
                     <input type="radio" name="pipeline" value={id} checked={pipeline === id} disabled={starting} onChange={() => setPipeline(id)}/>
                     <span className="path-icon" aria-hidden="true"><Icon size={18}/></span>
                     <span className="path-copy"><span className="path-title">{t(title)}{recommended && <Badge className="path-badge" size="1" radius="full" variant="soft">{t('推荐')}</Badge>}</span><span className="path-body">{t(body)}</span></span>
                     <span className="path-check" aria-hidden="true"><Check size={13}/></span>
                 </label>)}</div>
-                {pipeline === 'cascaded' && <label className="llm-choice setup-provider"><span className="setup-field-label">{t('大模型')}</span><select id="llm-provider" value={provider} disabled={starting} onChange={e => setProvider(e.target.value)}><option value="deepseek">DeepSeek</option><option value="qwen">{t('通义千问（DashScope）')}</option><option value="ark">{t('豆包（火山方舟）')}</option></select></label>}
                 <Card className="fields setup-keys" id={pipeline + '-fields'} aria-labelledby="setup-keys-title" variant="surface">
                     <div className="setup-section-head"><div><h3 id="setup-keys-title">{t('连接模型服务')}</h3><p>{t('密钥只加密保存在本机。')}</p></div><Badge className="setup-secure" size="1" variant="soft" color="gray"><ShieldCheck size={12} aria-hidden="true"/>{t('本机加密')}</Badge></div>
                     {Object.keys(LABELS).map(key => <div className="key-row" data-key={key} key={key} hidden={!active.includes(key)}>
-                        <div className="key-label"><KeyRound size={14} aria-hidden="true"/><label htmlFor={key}>{t(LABELS[key])}</label></div>
+                        <div className="key-label"><KeyRound size={14} aria-hidden="true"/><label htmlFor={key}>{t(LABELS[key])}{!required.includes(key) && <span className="key-optional"> {t('（可选）')}</span>}</label></div>
                         <div className="key-input">
                             <input key={key} ref={el => { inputs.current[key] = el; }} id={key} type={revealed[key] ? 'text' : 'password'} autoComplete="off" spellCheck={false} onInput={() => { probeRevision.current[key] = (probeRevision.current[key] ?? 0) + 1; setResults((s: any) => ({ ...s, [key]: '' })); setResultTones((s: any) => ({ ...s, [key]: '' })); setDrafts((d: any) => ({ ...d, [key]: inputs.current[key]?.value ?? '' })); }} disabled={starting} placeholder={view?.secretsPresent?.[key] ? t('已保存，留空则继续使用') : key === 'dashscopeApiKey' ? 'sk-…' : ''}/>
                             <IconButton type="button" className="key-reveal" variant="soft" color="gray" size="2" aria-label={t(revealed[key] ? '隐藏密钥' : '显示密钥')} aria-pressed={revealed[key] === true} disabled={starting} onClick={() => setRevealed((s: any) => ({ ...s, [key]: !s[key] }))}>{revealed[key] ? <EyeOff size={15}/> : <Eye size={15}/>}</IconButton>
@@ -153,7 +156,7 @@ export default function SetupApp({ api = (window as any).novaPersonalAgentDeskto
                 <Callout.Root className="setup-note" size="1" variant="soft" color="gray"><Callout.Icon><ShieldCheck size={15} aria-hidden="true"/></Callout.Icon><Callout.Text>{t('密钥只加密保存在本机；对话和语音会发送给你选择的模型服务商。')}<span className="setup-note-extra">{t('联网搜索等能力可以稍后在设置中开启。')}</span></Callout.Text></Callout.Root>
             </div>
             <footer className="setup-foot">
-                <div className="setup-status"><span className="setup-status-dot" data-tone={tone || (starting ? 'busy' : keysReady ? 'ready' : 'idle')} aria-hidden="true"/><span id="status" aria-live="polite" data-tone={tone}>{status || t(keysReady ? '密钥已就绪，可以开始了' : '填好密钥后即可开始')}</span></div>
+                <div className="setup-status"><span className="setup-status-dot" data-tone={tone || (starting ? 'busy' : keysReady ? 'ready' : 'idle')} aria-hidden="true"/><span id="status" aria-live="polite" data-tone={tone}>{status || t(keysReady ? '密钥已就绪，可以开始了' : '填好对话模型密钥后即可开始')}</span></div>
                 <Button id="start" type="button" disabled={starting || !view} aria-busy={starting} onClick={() => void start()}>{starting ? <Loader2 size={16} className="setup-spinner"/> : <Check size={16}/>}{starting ? t('正在启动…') : t('开始使用 Nova')}</Button>
             </footer>
         </main>
