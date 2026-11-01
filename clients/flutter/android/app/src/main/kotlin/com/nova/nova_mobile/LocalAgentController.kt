@@ -78,7 +78,7 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         val prior=journal.task(id)
         if(prior!=null){
             require(prior.getString("goal")==request.getString("goal")&&prior.getString("acceptance")==request.getString("acceptance")){"task_id_conflict"}
-            return prior
+            return taskWithTier(prior)
         }
         check(active==null){"another_task_is_active"}
         val service=LocalGuiService.current?:throw IllegalStateException("accessibility_required")
@@ -92,7 +92,7 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         require(goal.isNotEmpty()&&goal.length<=4000&&acceptance.isNotEmpty()&&acceptance.length<=2000){"goal_and_acceptance_required"}
         val budget=budgetMs(tier)
         val run=Active(id,UUID.randomUUID().toString(),RunFence(id,SystemClock.elapsedRealtime()+budget,30),tier=tier)
-        val record=JSONObject().put("id",id).put("goal",goal).put("acceptance",acceptance).put("phase","running").put("created_at",System.currentTimeMillis()).put("control_token",run.secret).put("actions",JSONArray())
+        val record=taskWithTier(JSONObject().put("id",id).put("goal",goal).put("acceptance",acceptance).put("phase","running").put("created_at",System.currentTimeMillis()).put("control_token",run.secret).put("actions",JSONArray()), tier)
         if(todo!=null)record.put("todo_ref",todo)
         journal.save(record);active=run
         service.onStop={stop(id)}
@@ -125,7 +125,7 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         journal.task(request.getString("id"))?.let { previous ->
             require(previous.optJSONObject("todo_ref")?.toString()==request.optJSONObject("todo_ref")?.toString()){"task_id_conflict"}
             require(previous.getString("goal")==request.getString("goal") && previous.getString("acceptance")==request.getString("acceptance") && previous.optString("target_package")==request.getString("target_package")){"task_id_conflict"}
-            return previous
+            return taskWithTier(previous)
         }
         val config=settings.read()?:throw IllegalStateException("model_settings_required")
         val target=request.getString("target_package")
@@ -202,6 +202,7 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
     private fun experimentalAcknowledged()=app.getSharedPreferences(PHONE_PREFERENCES,Context.MODE_PRIVATE).getBoolean(PHONE_EXPERIMENTAL_ACK,false)
     /** Self-check admission: [block] runs only while no run is active, atomically with run admission; else `run_active`. */
     @Synchronized override fun <T> whileIdle(block:()->T):T {
+        check(!closed){"accessibility_unavailable"}
         check(active==null){VirtualSelfCheck.RUN_ACTIVE}
         return block()
     }
@@ -380,5 +381,5 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         task.put("phase","completed").put("verified_by","user").put("verified_at",System.currentTimeMillis());journal.save(task)
         return task
     }
-    fun tasks()=JSONArray(journal.tasks())
+    fun tasks()=JSONArray(journal.tasks().map { taskWithTier(it) })
 }

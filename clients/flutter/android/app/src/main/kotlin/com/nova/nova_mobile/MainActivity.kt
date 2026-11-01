@@ -10,6 +10,9 @@ import org.json.JSONObject
 import org.json.JSONArray
 import android.content.pm.ApplicationInfo
 import java.util.concurrent.Executors
+import com.nova.nova_mobile.phone.PhoneBridge
+import com.nova.nova_mobile.phone.VirtualSelfCheck
+import com.nova.nova_mobile.phone.setup.PairingWindowReader
 
 class MainActivity : FlutterActivity() {
     private var controller: LocalAgentController? = null
@@ -27,7 +30,7 @@ class MainActivity : FlutterActivity() {
     }
     override fun onDestroy() {
         NovaSpaceScope.removeListener(this)
-        controller?.close(); controller = null
+        closeController()
         spacePush?.close()
         spaceTools?.close()
         artifactHost?.dispose()
@@ -35,6 +38,13 @@ class MainActivity : FlutterActivity() {
         linuxWorkspaceHost = null
         artifactHost = null
         super.onDestroy()
+    }
+    private fun closeController() {
+        controller?.let { current ->
+            PhoneBridge.of(applicationContext).clearRunHooks(current)
+            controller = null
+            current.close()
+        }
     }
     override fun onCreate(savedInstanceState:android.os.Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,7 +69,12 @@ class MainActivity : FlutterActivity() {
     }
     override fun configureFlutterEngine(flutterEngine:FlutterEngine){
         super.configureFlutterEngine(flutterEngine)
-        com.nova.nova_mobile.phone.PhoneBridge.register(this, flutterEngine)
+        PhoneBridge.register(this, flutterEngine)
+        val bridge = PhoneBridge.of(applicationContext)
+        bridge.pairingWindowReader = object : PairingWindowReader {
+            override val available get() = LocalGuiService.current != null
+            override fun settingsWindowTexts() = LocalGuiService.current?.settingsWindowTexts() ?: emptyList()
+        }
         NovaScheduleBridge.install(this, flutterEngine)
         spacePush = NovaSpacePush(this, flutterEngine.dartExecutor.binaryMessenger)
         spaceTools = NovaSpaceTools(this, flutterEngine.dartExecutor.binaryMessenger)
@@ -69,8 +84,13 @@ class MainActivity : FlutterActivity() {
         artifactHost = ArtifactWebHost(this, flutterEngine.dartExecutor.binaryMessenger)
         NovaSpaceScope.install(flutterEngine.dartExecutor.binaryMessenger)
         val updateScope = {
-            controller?.close(); controller = null
-            try { controller = LocalAgentController(applicationContext, NovaSpaceScope.standalone().id) } catch (_: Exception) { }
+            closeController()
+            try {
+                val current = LocalAgentController(applicationContext, NovaSpaceScope.standalone().id, bridge, bridge)
+                controller = current
+                bridge.takeover = current
+                bridge.selfCheck = VirtualSelfCheck(applicationContext, bridge, current)
+            } catch (_: Exception) { closeController() }
         }
         NovaSpaceScope.listen(this, updateScope)
         updateScope()
