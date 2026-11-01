@@ -14,12 +14,13 @@ import kotlin.math.roundToInt
 
 /**
  * One read of a display. [hash] covers every visible node's class, text, description, bounds and state (checked,
- * selected, enabled, focus, selection), so a focus change alone counts as a change.
+ * selected, enabled, focus, selection), so a focus change alone counts as a change. [appWindowElements] counts the
+ * [entries] read from application windows; system windows (status bar, dialogs of other types) are not counted.
  */
 internal class ScreenRead(
     val entries: List<NodeEntry<AccessibilityNodeInfo>>,
     val hash: Long,
-    val hasAppWindow: Boolean,
+    val appWindowElements: Int,
     val topPackage: String?,
 )
 
@@ -55,6 +56,8 @@ internal object SnapshotReader {
         val seen = HashSet<String>()
         var hash = FNV_OFFSET
         var lastLabel: String? = null
+        var appWindowElements = 0
+        var inAppWindow = false
         val rect = Rect()
 
         fun visit(n: AccessibilityNodeInfo, depth: Int, inList: Boolean) {
@@ -88,6 +91,7 @@ internal object SnapshotReader {
                         )
                         val hint = namedByHint(n, own)
                         entries += NodeEntry(element, ElementLocator(role, label, rid, rect.centerX(), rect.centerY(), lastLabel, hint, inList), n)
+                        if (inAppWindow) appWindowElements++
                         if (label.isNotEmpty()) lastLabel = label
                     }
                 }
@@ -96,11 +100,14 @@ internal object SnapshotReader {
             for (i in 0 until n.childCount) n.getChild(i)?.let { visit(it, depth + 1, childrenInList) }
         }
 
-        for (w in content) w.root?.let { visit(it, 0, false) }
+        for (w in content) w.root?.let {
+            inAppWindow = w.type == AccessibilityWindowInfo.TYPE_APPLICATION
+            visit(it, 0, false)
+        }
         return ScreenRead(
             entries = entries,
             hash = hash,
-            hasAppWindow = content.any { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root != null },
+            appWindowElements = appWindowElements,
             topPackage = topPackage(windows),
         )
     }
@@ -236,11 +243,11 @@ internal fun nodeName(text: CharSequence?, description: CharSequence?, hint: Cha
 }
 
 /**
- * Contract `secure_frame`: the frame is (near-)black while an app window's tree still has visible elements, as a
- * FLAG_SECURE page shows. A dark splash, video or switched-off screen without readable elements is not secure.
+ * Contract `secure_frame`: the frame is (near-)black while application windows still show [appWindowElements] readable
+ * elements, as a FLAG_SECURE page does. A dark splash, video or switched-off screen without readable app elements is not
+ * secure, even when system windows on the display have elements.
  */
-internal fun isSecureFrame(black: Boolean, hasAppWindow: Boolean, visibleElements: Int): Boolean =
-    black && hasAppWindow && visibleElements > 0
+internal fun isSecureFrame(black: Boolean, appWindowElements: Int): Boolean = black && appWindowElements > 0
 
 /** Pixel [p] on an axis of [size] pixels to the snapshot's 0..[SNAPSHOT_BOUNDS_MAX] space. */
 internal fun normalize(p: Int, size: Int): Int {

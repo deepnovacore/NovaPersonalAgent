@@ -21,11 +21,11 @@ class SnapshotReaderTest {
         assertNull(nodeName("hunter2", "hunter2", " ", field = true) { null })
     }
 
-    @Test fun secureFrameNeedsABlackFrameAndReadableElements() {
-        assertTrue(isSecureFrame(black = true, hasAppWindow = true, visibleElements = 3))
-        assertFalse(isSecureFrame(black = true, hasAppWindow = true, visibleElements = 0))
-        assertFalse(isSecureFrame(black = true, hasAppWindow = false, visibleElements = 3))
-        assertFalse(isSecureFrame(black = false, hasAppWindow = true, visibleElements = 3))
+    @Test fun secureFrameNeedsABlackFrameAndReadableAppElements() {
+        assertTrue(isSecureFrame(black = true, appWindowElements = 3))
+        // Only system windows (for example the status bar) have elements: a black app without content is not secure.
+        assertFalse(isSecureFrame(black = true, appWindowElements = 0))
+        assertFalse(isSecureFrame(black = false, appWindowElements = 3))
     }
 
     @Test fun otherNodesAreNamedByTextThenDescriptionThenHint() {

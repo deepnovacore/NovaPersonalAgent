@@ -91,7 +91,7 @@ class VirtualScreen(
             elements = r.entries.map { it.element },
             image = image.jpegBase64,
             changedDuringRead = after != r.hash,
-            secureFrame = isSecureFrame(image.black, r.hasAppWindow, r.entries.size),
+            secureFrame = isSecureFrame(image.black, r.appWindowElements),
         )
     }
 

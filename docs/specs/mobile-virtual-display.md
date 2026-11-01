@@ -108,8 +108,9 @@ element `{ref:"@eN", role, name, bounds:[l,t,r,b] 0..999, resource_id?, clickabl
 - `ref_expired` is handled like `screen_changed`: observe again and ask the model (shares the `stalePlans < 3` budget). The old action is never retried.
 - `secret` elements: `type` into them fails with `private_input_requires_user`. Editable and secret elements are named
   only by their hint or their label view (`labelFor`), never by their text or description, which may be typed input.
-- `secure_frame` (FLAG_SECURE): true only when the frame is (near-)black **and** an app window's tree on the display still
-  has visible elements; a dark splash, video or switched-off screen without readable elements is not secure. While the
+- `secure_frame` (FLAG_SECURE): true only when the frame is (near-)black **and** application windows on the display still
+  have visible elements (elements of system windows such as the status bar do not count); a dark splash, video or
+  switched-off screen without readable app elements is not secure. While the
   observation is secure, only `back` and `hand_to_user` run (and the `observe`/`wait` decisions); any other action is not
   dispatched and starts a takeover (`by:"model"`, `reason:"secure_page"`), after which the loop observes again. If the
   takeover cannot start, the run ends `interrupted`/`secure_page`.
