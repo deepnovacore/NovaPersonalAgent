@@ -1,8 +1,6 @@
 package com.nova.nova_mobile.phone.setup
 
 import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -20,12 +18,11 @@ class PairingService : Service() {
     private val timeout = Runnable { stopSelf() }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Phone connection", NotificationManager.IMPORTANCE_LOW))
+        val channel = PairingNotifier.ensureChannel(this).id
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val notification = Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("Nova phone pairing").setContentText("Waiting for wireless debugging pairing. Return to Nova to cancel.")
-            .setContentIntent(open).setOngoing(true).build()
+        val notification = Notification.Builder(this, channel).setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setContentTitle(PhoneSetupCopy.NOTIFY_ENTER_TITLE).setContentText(PhoneSetupCopy.NOTIFY_WAITING)
+            .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).build()
         if (Build.VERSION.SDK_INT >= 34) startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         else startForeground(ID, notification)
         handler.removeCallbacks(timeout)
@@ -34,7 +31,6 @@ class PairingService : Service() {
     }
     override fun onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy() }
     companion object {
-        private const val CHANNEL = "phone_connection"
         private const val ID = 4402
         fun start(context: Context) { context.startForegroundService(Intent(context, PairingService::class.java)) }
         fun stop(context: Context) { context.stopService(Intent(context, PairingService::class.java)) }

@@ -1,6 +1,7 @@
 package com.nova.nova_mobile.phone
 
 import com.nova.nova_mobile.phone.shell.INovaShell
+import com.nova.phone.core.shell.PairingStage
 
 // Contract types for native phone control. Owned by the contract; see
 // docs/specs/mobile-virtual-display.md. JSON keys are the snake_case names in `wire`/comments.
@@ -88,7 +89,7 @@ data class PhoneStatus(
     val helper: HelperState,
     val helperFailure: HelperFailure?,
     val notificationsAllowed: Boolean = false,
-    val pairingStage: String = "idle",
+    val pairingStage: PairingStage = PairingStage.IDLE,
 )
 
 /**

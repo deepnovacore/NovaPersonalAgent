@@ -10,6 +10,7 @@ import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.core.app.NotificationManagerCompat
 import com.nova.phone.core.shell.BuiltinShellFix
 import com.nova.phone.core.shell.BuiltinShellStatus
 import com.nova.phone.core.shell.PairingChannelHealth
@@ -121,6 +122,19 @@ object PairingNotifier {
     /** 填码通知最多留这么久(和找配对窗口的时长一样),App 被杀了也不会一直挂着。 */
     private const val INPUT_TIMEOUT_MS = 10 * 60_000L
 
+    /** No channel yet means enabled by default; a user-disabled channel must stay disabled. */
+    fun notificationsAllowed(context: Context): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT < 26) return true
+        val nm = context.getSystemService(NotificationManager::class.java)
+        val existing = PairingChannel.IDS.mapNotNull { id ->
+            nm.getNotificationChannel(id)?.let {
+                ChannelSnapshot(id, it.importance, Build.VERSION.SDK_INT >= 29 && it.hasUserSetImportance())
+            }
+        }
+        return PairingChannel.plan(existing).health != PairingChannelHealth.Off
+    }
+
     /** 确保有一个配对频道,返回要用的那个(引导页据此提示、打开它的设置页)。 */
     fun ensureChannel(context: Context): ChannelPlan {
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -136,7 +150,14 @@ object PairingNotifier {
                 },
             )
         }
-        (PairingChannel.IDS + PairingChannel.LEGACY).filter { it != plan.id }.forEach { id ->
+        // Refresh only the localized name; keep the user's channel importance and preferences.
+        nm.getNotificationChannel(plan.id)?.let { channel ->
+            if (channel.name.toString() != PhoneSetupCopy.CHANNEL_NAME) {
+                channel.name = PhoneSetupCopy.CHANNEL_NAME
+                nm.createNotificationChannel(channel)
+            }
+        }
+        (PairingChannel.IDS + PairingChannel.LEGACY + "phone_connection").filter { it != plan.id }.forEach { id ->
             if (nm.getNotificationChannel(id) != null) nm.deleteNotificationChannel(id)
         }
         return plan

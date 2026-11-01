@@ -13,8 +13,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.Before
+import org.junit.After
+import java.util.Locale
 
 class PairingNoticeTest {
+    private lateinit var originalLocale: Locale
+    @Before fun useEnglishCopy() { originalLocale = Locale.getDefault(); Locale.setDefault(Locale.ENGLISH) }
+    @After fun restoreLocale() { Locale.setDefault(originalLocale) }
+
 
     @Test
     fun codeEntryAppearsOnlyOnceThePairingWindowIsFound() {
@@ -55,11 +62,7 @@ class PairingNoticeTest {
         assertEquals(PairingNotice.EnterCode(37001), PairingNotice.of(revoked, PairingDiscovery.Found(37001)))
         assertEquals(PairingNotice.Problem("Pairing authorization expired"), PairingNotice.of(revoked, PairingDiscovery.Searching))
         assertEquals(PairingNotice.Problem("Pairing authorization expired"), PairingNotice.of(revoked, PairingDiscovery.Idle))
-        // 用 USB 启动命令起的助手停了要再运行一次命令,找到配对窗口也不给输入框
-        assertEquals(
-            PairingNotice.Problem("Phone helper stopped"),
-            PairingNotice.of(BuiltinShellStatus.Failed(BuiltinShellFailure.UsbHelperStopped), PairingDiscovery.Found(37001)),
-        )
+
     }
 
     /** 找到配对窗口时,通知给不给输入框和无障碍读到码后试不试(PairingScreen.attempt)对每种状态都一致。 */

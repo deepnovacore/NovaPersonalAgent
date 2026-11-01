@@ -2,6 +2,7 @@ package com.nova.nova_mobile.phone
 
 import org.junit.Assert.*
 import org.junit.Test
+import com.nova.phone.core.shell.*
 
 class PhoneBridgeTest {
     private fun status(failure: HelperFailure? = null) = PhoneStatus(
@@ -11,11 +12,28 @@ class PhoneBridgeTest {
     @Test fun statusUsesContractKeysAndOmitsAbsentOptionals() {
         val json = PhoneBridge.encodeStatus(status())
         assertEquals(setOf("schema_version", "api_level", "tier", "experimental", "accessibility", "overlay",
-            "battery_whitelisted", "pairing", "helper"), json.keys().asSequence().toSet())
+            "battery_whitelisted", "pairing", "helper", "notifications_allowed", "pairing_stage"), json.keys().asSequence().toSet())
         assertEquals(1, json.getInt("schema_version"))
         assertEquals("main", json.getString("tier"))
         assertEquals("not_paired", json.getString("helper"))
         assertTrue(json.getBoolean("battery_whitelisted"))
+    }
+    @Test fun runningHelperSurvivesRepairFailureWithoutHidingFailure() {
+        val status = PhoneBridge.projectStatus(34, true, true,
+            BuiltinShellStatus.Failed(BuiltinShellFailure.WrongCode), PairingDiscovery.Found(37123),
+            true, true, true, false, PairingStage.FAILED)
+        val json = PhoneBridge.encodeStatus(status)
+        assertEquals("running", json.getString("helper"))
+        assertEquals("virtual", json.getString("tier"))
+        assertEquals("wrong_code", json.getString("helper_failure"))
+        assertEquals("re_pair", json.getString("helper_fix"))
+        assertEquals("failed", json.getString("pairing_stage"))
+        assertFalse(json.getBoolean("notifications_allowed"))
+    }
+    @Test fun everyPairingStageEncodes() {
+        PairingStage.entries.forEach { stage ->
+            assertEquals(stage.wire, PhoneBridge.encodeStatus(status().copy(pairingStage = stage)).getString("pairing_stage"))
+        }
     }
     @Test fun everyFailureEncodesItsContractFix() {
         HelperFailure.entries.forEach {

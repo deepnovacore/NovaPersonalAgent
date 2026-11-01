@@ -32,6 +32,7 @@ import com.nova.nova_mobile.phone.shell.adb.NsdAdbServiceFinder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,17 +42,20 @@ import java.io.File
 import java.net.Inet4Address
 import java.util.concurrent.atomic.AtomicReference
 
-/** Process-owned pairing transport and watchdog. Optional secure-settings auto-enable is not granted here. */
+/** Process-owned pairing transport and watchdog; secure settings are never written. */
 class BuiltinShellManager(context: Context, private val hub: HelperHub) {
     private val app = context.applicationContext
     private var started = false
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var observer: ContentObserver? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val _scanningPorts = MutableStateFlow(false)
     /** 正在扫本机找无线调试端口(引导页显示「正在本机查找…」)。 */
     val scanningPorts: StateFlow<Boolean> = _scanningPorts.asStateFlow()
 
     private val platform: AndroidPlatform by lazy {
-        AndroidPlatform(app, hub, { lastConnectCandidates = it }, { _scanningPorts.value = it })
+        AndroidPlatform(app, hub, { lastConnectCandidates = it }, { _scanningPorts.value = it }, ::stopObserving)
     }
 
     /** 最近一次找连接端口时各来源给了几个候选(诊断信息用);这次进程里还没连过为 null。 */
@@ -78,24 +82,32 @@ class BuiltinShellManager(context: Context, private val hub: HelperHub) {
         if (started || Build.VERSION.SDK_INT < MIN_SDK) return
         started = true
         val e = engine
-        // 无线调试一打开就试着连回去;关掉时状态马上变成「无线调试已关」
-        app.contentResolver.registerContentObserver(
-            DeveloperSettings.wirelessDebuggingUri, false,
-            object : ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean) = e.wirelessDebuggingChanged()
-            },
-        )
-        // 卡在「没有 Wi-Fi」或无线调试关着时,一连上任意 Wi-Fi(不用能上网)就再试
+        val settingsObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) { scope.launch { e.wirelessDebuggingChanged() } }
+        }
+        app.contentResolver.registerContentObserver(DeveloperSettings.wirelessDebuggingUri, false, settingsObserver)
+        observer = settingsObserver
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { scope.launch { e.wifiAvailable() } }
+        }
         runCatching {
             app.getSystemService(ConnectivityManager::class.java).registerNetworkCallback(
                 NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
-                object : ConnectivityManager.NetworkCallback() {
-                    override fun onAvailable(network: Network) = e.wifiAvailable()
-                },
+                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), callback,
             )
+            networkCallback = callback
         }
         e.start()
+    }
+
+    /** Forget/unpair releases process observers; a subsequent explicit start registers them again. */
+    @Synchronized
+    private fun stopObserving() {
+        observer?.let { app.contentResolver.unregisterContentObserver(it) }
+        observer = null
+        networkCallback?.let { app.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }
+        networkCallback = null
+        started = false
     }
 
     private class AndroidPlatform(
@@ -103,6 +115,7 @@ class BuiltinShellManager(context: Context, private val hub: HelperHub) {
         private val hub: HelperHub,
         private val candidates: (ConnectCandidates) -> Unit,
         private val scanning: (Boolean) -> Unit,
+        private val stopObserving: () -> Unit,
     ) : BuiltinShellPlatform {
         /** 用户填的端口,下一次连接取走。 */
         val manualPort = AtomicReference<Int?>(null)
@@ -118,12 +131,6 @@ class BuiltinShellManager(context: Context, private val hub: HelperHub) {
 
         override fun setPaired(paired: Boolean) {
             prefs.edit().putBoolean("paired", paired).apply()
-        }
-
-        override fun usbStarted() = prefs.getBoolean("usbStarted", false)
-
-        override fun setUsbStarted(on: Boolean) {
-            prefs.edit().putBoolean("usbStarted", on).apply()
         }
 
         // 这一项没写过时读出 null:看不清就不拦着
@@ -179,6 +186,7 @@ class BuiltinShellManager(context: Context, private val hub: HelperHub) {
         }
 
         override fun forget() {
+            stopObserving()
             hub.forget()
             AndroidAdb.forget(app)
             prefs.edit().remove("port").apply()
