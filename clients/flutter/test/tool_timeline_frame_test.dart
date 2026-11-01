@@ -71,6 +71,36 @@ void main() {
     });
   }
 
+  for (final frame in [false, true]) {
+    testWidgets('an expandable row keeps its full 44dp tap area '
+        '(${frame ? 'with' : 'without'} a frame button)', (tester) async {
+      await _pump(tester, [
+        _step(reasoning: '先点搜索框，再输入关键词', frame: frame),
+        _step(index: 2, frame: false),
+      ]);
+      final button = find
+          .ancestor(
+            of: find.text('点搜索').first,
+            matching: find.byType(GestureDetector),
+          )
+          .first;
+      expect(tester.getSize(button).height, greaterThanOrEqualTo(44));
+    });
+  }
+
+  testWidgets('submit has a plain label', (tester) async {
+    await _pump(tester, [
+      const ToolStep(name: 'submit', status: 'completed', stepIndex: 1),
+      const ToolStep(name: 'tap', status: 'completed', stepIndex: 2),
+    ]);
+    expect(find.text('提交'), findsOneWidget);
+    expect(find.text('使用工具'), findsNothing);
+    expect(
+      const ToolStep(name: 'submit', status: 'completed', language: 'en').label,
+      'Submit',
+    );
+  });
+
   testWidgets('a step without a frame has no button', (tester) async {
     await _pump(tester, [_step(frame: false), _step(index: 2, frame: false)]);
     expect(find.text('查看当时的画面'), findsNothing);

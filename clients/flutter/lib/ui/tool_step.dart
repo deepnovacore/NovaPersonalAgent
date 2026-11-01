@@ -102,6 +102,7 @@ class ToolStep extends StatelessWidget {
       'swipe' => t('滑动', 'Swipe'),
       'open_app' => t('打开 App', 'Open app'),
       'back' => t('返回', 'Go back'),
+      'submit' => t('提交', 'Submit'),
       'hand_to_user' => t('请你接手', 'Hand over to you'),
       _ => t('使用工具', 'Use tool'),
     };

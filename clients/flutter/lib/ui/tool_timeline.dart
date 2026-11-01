@@ -665,23 +665,32 @@ class _RailRow extends StatelessWidget {
   /// [child] alone is folded into the row's single button semantics.
   final Widget? extra;
 
+  Widget _button(Widget child) => Semantics(
+    button: true,
+    label: semanticsLabel,
+    excludeSemantics: true,
+    onTap: onTap,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: child,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     Widget content = Align(alignment: Alignment.centerLeft, child: child);
-    if (onTap != null) {
-      content = Semantics(
-        button: true,
-        label: semanticsLabel,
-        excludeSemantics: true,
-        onTap: onTap,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
+    // With [extra] below, only the content is the row's button, and it keeps
+    // the full tap height.
+    if (onTap != null && extra != null) {
+      content = _button(
+        ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: _tapTargetHeight),
           child: content,
         ),
       );
     }
-    return ConstrainedBox(
+    Widget row = ConstrainedBox(
       constraints: BoxConstraints(
         minHeight: onTap == null ? 28 : _tapTargetHeight,
       ),
@@ -714,6 +723,9 @@ class _RailRow extends StatelessWidget {
         ),
       ),
     );
+    // Without [extra] the whole 44 dp row, rail included, is the button.
+    if (onTap != null && extra == null) row = _button(row);
+    return row;
   }
 }
 
