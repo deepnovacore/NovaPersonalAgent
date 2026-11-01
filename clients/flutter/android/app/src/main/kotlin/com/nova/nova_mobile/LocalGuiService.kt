@@ -1,6 +1,7 @@
 package com.nova.nova_mobile
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Path
@@ -16,6 +17,8 @@ import android.view.Gravity
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import androidx.annotation.RequiresApi
 import android.widget.Button
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -33,8 +36,13 @@ class LocalGuiService : AccessibilityService() {
     private var nextScreenshotAt=0L
     var onStop: (() -> Unit)?=null
     var onUnavailable: (() -> Unit)?=null
-    override fun onServiceConnected(){ current=this }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onServiceConnected(){ synchronized(virtualLock){ virtualRuns=0; flagsBeforeVirtual=null }; current=this }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Only virtual-tier runs consume events; the main-tier path ignores them as before.
+        if(event==null||virtualRuns==0)return
+        val displayId=displayOf(event)
+        if(displayId!=Display.INVALID_DISPLAY&&displayId!=Display.DEFAULT_DISPLAY)displayEvents[displayId]=SystemClock.uptimeMillis()
+    }
     override fun onInterrupt(){onUnavailable?.invoke()}
     override fun onDestroy(){onUnavailable?.invoke();hideStop();current=null;observations.shutdownNow();super.onDestroy()}
 
@@ -156,4 +164,65 @@ class LocalGuiService : AccessibilityService() {
         }
     }
     fun hideStop(){main.post{stopButton?.let { getSystemService(WindowManager::class.java).removeView(it) };stopButton=null}}
+
+    // ---- Virtual display (derived from Mika ScreenAccessibility, Apache-2.0, commit 5f630d9; see phone/a11y) ----
+
+    private val virtualLock=Any()
+    @Volatile private var virtualRuns=0
+    private var flagsBeforeVirtual:Int?=null
+    private val displayEvents=java.util.concurrent.ConcurrentHashMap<Int,Long>()
+
+    /**
+     * Many apps mark result text as not important for accessibility. Include those views only while a virtual run is
+     * active, so the main-tier tree and fingerprint stay unchanged; the original flags come back at [endVirtualRun].
+     */
+    fun beginVirtualRun() = synchronized(virtualLock) {
+        if(virtualRuns++==0) serviceInfo?.let { info ->
+            flagsBeforeVirtual=info.flags
+            if(info.flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS==0) {
+                info.flags=info.flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                serviceInfo=info
+            }
+        }
+    }
+    fun endVirtualRun() = synchronized(virtualLock) {
+        if(virtualRuns==0)return@synchronized
+        if(--virtualRuns==0) {
+            val before=flagsBeforeVirtual;flagsBeforeVirtual=null
+            displayEvents.clear()
+            serviceInfo?.let { info -> if(before!=null&&info.flags!=before){ info.flags=before;serviceInfo=info } }
+        }
+    }
+
+    /** Windows on [displayId] (empty when the display has none or does not exist). Never the active main window. */
+    @RequiresApi(30)
+    fun windowsOn(displayId:Int):List<AccessibilityWindowInfo> = windowsOnAllDisplays.get(displayId).orEmpty()
+
+    /** Uptime of the last accessibility event on [displayId] during a virtual run, or 0. */
+    fun lastEventAt(displayId:Int):Long = displayEvents[displayId]?:0L
+
+    /** One gesture on [displayId]; blocks until it completed (true) or was cancelled/refused (false). Never on main. */
+    @RequiresApi(30)
+    fun gesture(displayId:Int,strokes:List<GestureDescription.StrokeDescription>):Boolean {
+        check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
+        val gesture=GestureDescription.Builder().setDisplayId(displayId).apply { strokes.forEach(::addStroke) }.build()
+        val done=CompletableFuture<Boolean>()
+        val accepted=dispatchGesture(gesture,object:GestureResultCallback(){
+            override fun onCompleted(gestureDescription:GestureDescription?){done.complete(true)}
+            override fun onCancelled(gestureDescription:GestureDescription?){done.complete(false)}
+        },main)
+        if(!accepted)return false
+        return try { done.get(15,TimeUnit.SECONDS) } catch(_:Exception) { false }
+    }
+
+    /** Display of an event: from API 33 the event carries it; earlier, look its window up on every display. */
+    private fun displayOf(event:AccessibilityEvent):Int {
+        if(Build.VERSION.SDK_INT>=33)return event.displayId
+        if(Build.VERSION.SDK_INT<30)return Display.INVALID_DISPLAY
+        val windowId=event.windowId
+        if(windowId==-1)return Display.INVALID_DISPLAY
+        val all=windowsOnAllDisplays
+        for(i in 0 until all.size()) if(all.valueAt(i).any { it.id==windowId }) return all.keyAt(i)
+        return Display.INVALID_DISPLAY
+    }
 }

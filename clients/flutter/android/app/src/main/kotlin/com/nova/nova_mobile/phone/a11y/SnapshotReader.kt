@@ -1,0 +1,217 @@
+// Derived from Mika (https://github.com/wangzan101/Mika, Apache-2.0, commit 5f630d9),
+// Copyright 2026 wangzan101. Modified by Nova: subset of cap/phone/a11y/ScreenReader.kt (numbering, locators,
+// change hash) emitting the contract UiElement; no UiTreeNode/wheel/aggregate trees; element and name caps.
+package com.nova.nova_mobile.phone.a11y
+
+import android.graphics.Rect
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import com.nova.nova_mobile.phone.UiElement
+
+/**
+ * One read of a display. [hash] covers every visible node's class, text, description, bounds and state (checked,
+ * selected, enabled, focus, selection), so a focus change alone counts as a change.
+ */
+internal class ScreenRead(
+    val entries: List<NodeEntry<AccessibilityNodeInfo>>,
+    val hash: Long,
+    val hasAppWindow: Boolean,
+    val topPackage: String?,
+)
+
+/** Reads the numbered element list and the change hash from one display's windows. Never logs screen content. */
+internal object SnapshotReader {
+    private const val MIN_SIZE = 5
+    private const val MAX_DEPTH = 80
+    private const val AGGREGATE_MAX = 60
+    /** Bounds model context; later nodes still count for [ScreenRead.hash]. */
+    private const val MAX_ELEMENTS = 300
+    private const val MAX_NAME = 200
+
+    // The keyboard and accessibility overlays are not part of the operated app.
+    private val SKIPPED_TYPES = setOf(
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+        AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY,
+        AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER,
+    )
+
+    /** Content windows, top first. */
+    fun contentWindows(windows: List<AccessibilityWindowInfo>): List<AccessibilityWindowInfo> =
+        windows.filter { it.type !in SKIPPED_TYPES }.sortedByDescending { it.layer }
+
+    // The top application window can be an unreadable popup (menus, text selection); skip those.
+    fun topPackage(windows: List<AccessibilityWindowInfo>): String? =
+        contentWindows(windows).filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .firstNotNullOfOrNull { it.root?.packageName?.toString() }
+
+    fun read(windows: List<AccessibilityWindowInfo>, width: Int, height: Int): ScreenRead {
+        val content = contentWindows(windows)
+        val entries = mutableListOf<NodeEntry<AccessibilityNodeInfo>>()
+        val seen = HashSet<String>()
+        var hash = FNV_OFFSET
+        var lastLabel: String? = null
+        val rect = Rect()
+
+        fun visit(n: AccessibilityNodeInfo, depth: Int, inList: Boolean) {
+            if (depth > MAX_DEPTH) return
+            if (n.isVisibleToUser) {
+                n.getBoundsInScreen(rect)
+                hash = mix(hash, n.className, n.text, n.contentDescription, rect.flattenToString(), states(n))
+                // Secret fields expose only their hint, never their content.
+                val own = if (n.isPassword) n.hintText?.toString()?.trim()?.ifEmpty { null } else ownLabel(n)
+                clip(rect, width, height)
+                val usable = rect.width() >= MIN_SIZE && rect.height() >= MIN_SIZE
+                val interactive = n.isClickable || n.isEditable || n.isScrollable
+                if (usable && (own != null || interactive) && entries.size < MAX_ELEMENTS) {
+                    val label = labelOf(n, own)
+                    val role = roleOf(n)
+                    if (seen.add("$role|$label|${rect.flattenToString()}")) {
+                        val rid = n.viewIdResourceName
+                        val element = UiElement(
+                            ref = "@e${entries.size + 1}",
+                            role = role,
+                            name = label.take(MAX_NAME),
+                            bounds = listOf(normalize(rect.left, width), normalize(rect.top, height),
+                                normalize(rect.right, width), normalize(rect.bottom, height)),
+                            // Fields always carry their id: a search box's name is often only a suggestion.
+                            resourceId = if (label.isEmpty() || n.isEditable) readableResourceId(rid) else null,
+                            clickable = n.isClickable,
+                            editable = n.isEditable,
+                            scrollable = n.isScrollable,
+                            focused = n.isFocused,
+                            secret = n.isPassword,
+                        )
+                        val hint = own != null && showingHint(n)
+                        entries += NodeEntry(element, ElementLocator(role, label, rid, rect.centerX(), rect.centerY(), lastLabel, hint, inList), n)
+                        if (label.isNotEmpty()) lastLabel = label
+                    }
+                }
+            }
+            val childrenInList = inList || isList(n)
+            for (i in 0 until n.childCount) n.getChild(i)?.let { visit(it, depth + 1, childrenInList) }
+        }
+
+        for (w in content) w.root?.let { visit(it, 0, false) }
+        return ScreenRead(
+            entries = entries,
+            hash = hash,
+            hasAppWindow = content.any { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root != null },
+            topPackage = topPackage(windows),
+        )
+    }
+
+    /** The node's current locator without context; null when invisible or too small. */
+    fun locatorOf(n: AccessibilityNodeInfo, width: Int, height: Int): ElementLocator? {
+        if (!n.isVisibleToUser) return null
+        val rect = Rect().also { n.getBoundsInScreen(it) }
+        clip(rect, width, height)
+        if (rect.width() < MIN_SIZE || rect.height() < MIN_SIZE) return null
+        val own = if (n.isPassword) n.hintText?.toString()?.trim()?.ifEmpty { null } else ownLabel(n)
+        return ElementLocator(
+            roleOf(n), labelOf(n, own), n.viewIdResourceName, rect.centerX(), rect.centerY(), null,
+            hint = own != null && showingHint(n), inList = inList(n),
+        )
+    }
+
+    /** Only the change hash, no element list (before/after an action). */
+    fun hash(windows: List<AccessibilityWindowInfo>): Long {
+        var hash = FNV_OFFSET
+        val rect = Rect()
+        fun visit(n: AccessibilityNodeInfo, depth: Int) {
+            if (depth > MAX_DEPTH) return
+            if (n.isVisibleToUser) {
+                n.getBoundsInScreen(rect)
+                hash = mix(hash, n.className, n.text, n.contentDescription, rect.flattenToString(), states(n))
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { visit(it, depth + 1) }
+        }
+        for (w in contentWindows(windows)) w.root?.let { visit(it, 0) }
+        return hash
+    }
+
+    /** List containers recycle their items; the same spot can show another entry. */
+    private fun isList(n: AccessibilityNodeInfo): Boolean {
+        if (n.collectionInfo != null) return true
+        val cls = n.className?.toString() ?: return false
+        return cls.endsWith("RecyclerView") || cls.endsWith("ListView") || cls.endsWith("GridView")
+    }
+
+    private fun inList(n: AccessibilityNodeInfo): Boolean {
+        var p = n.parent
+        var depth = 0
+        while (p != null && depth++ < MAX_DEPTH) {
+            if (isList(p)) return true
+            p = p.parent
+        }
+        return false
+    }
+
+    private fun clip(rect: Rect, width: Int, height: Int) {
+        if (!rect.intersect(0, 0, width, height)) rect.setEmpty()
+    }
+
+    private fun roleOf(n: AccessibilityNodeInfo) = n.className?.toString()?.substringAfterLast('.')?.ifEmpty { null } ?: "View"
+
+    private fun labelOf(n: AccessibilityNodeInfo, own: String?) = own ?: if (n.isClickable) descendantLabel(n) else ""
+
+    // isChecked is replaced by the tri-state `checked` from API 36; minSdk still needs it.
+    @Suppress("DEPRECATION")
+    private fun states(n: AccessibilityNodeInfo) =
+        "${n.isChecked}${n.isSelected}${n.isEnabled}${n.isFocused}${n.textSelectionStart}:${n.textSelectionEnd}"
+
+    /** The node's own name: its text (a hint counts, it explains a field), else its content description. */
+    fun ownLabel(n: AccessibilityNodeInfo): String? {
+        val text = n.text?.toString()?.trim()
+        if (!text.isNullOrEmpty()) return text
+        val desc = n.contentDescription?.toString()?.trim()
+        if (!desc.isNullOrEmpty()) return desc
+        return n.hintText?.toString()?.trim()?.ifEmpty { null }
+    }
+
+    /** The node shows its hint: flagged by the system, no real text, or the reported text equals the hint. */
+    private fun showingHint(n: AccessibilityNodeInfo): Boolean {
+        if (n.isShowingHintText) return true
+        val hint = n.hintText?.toString()?.trim()
+        if (hint.isNullOrEmpty()) return false
+        val text = n.text?.toString()?.trim()
+        return if (text.isNullOrEmpty()) n.contentDescription.isNullOrBlank() else text == hint
+    }
+
+    /** A clickable container without a name is named by its descendants' text. */
+    private fun descendantLabel(n: AccessibilityNodeInfo): String {
+        val parts = mutableListOf<String>()
+        fun walk(c: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 6 || parts.joinToString(" ").length > AGGREGATE_MAX) return
+            for (i in 0 until c.childCount) {
+                val child = c.getChild(i) ?: continue
+                if (!child.isVisibleToUser) continue
+                // A secret descendant contributes nothing.
+                if (!child.isPassword) ownLabel(child)?.let { if (it !in parts) parts += it }
+                walk(child, depth + 1)
+            }
+        }
+        walk(n, 0)
+        val joined = parts.joinToString(" ")
+        return if (joined.length > AGGREGATE_MAX) joined.take(AGGREGATE_MAX) + "…" else joined
+    }
+
+    /** `com.x:id/cart_icon` -> `cart_icon`; obfuscated short names say nothing and are dropped. */
+    private fun readableResourceId(id: String?): String? {
+        val short = id?.substringAfterLast('/') ?: return null
+        return short.takeIf { Regex("^[A-Za-z0-9_]{4,}$").matches(it) && Regex("[A-Za-z]{3}").containsMatchIn(it) }
+    }
+
+    private const val FNV_OFFSET = -0x340d631b7bdddcdbL
+    private const val FNV_PRIME = 0x100000001b3L
+
+    private fun mix(h0: Long, vararg parts: Any?): Long {
+        var h = h0
+        for (p in parts) {
+            val s = p?.toString() ?: "\u0000"
+            for (c in s) h = (h xor c.code.toLong()) * FNV_PRIME
+            h = (h xor 0x1f) * FNV_PRIME
+        }
+        return h
+    }
+}
