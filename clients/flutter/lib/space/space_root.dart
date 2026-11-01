@@ -981,6 +981,10 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         entries: entries,
         availableEvidenceIds:
             state.snapshot['timeline_available_evidence_ids'] as List? ?? [],
+        onAction: (draft) => setState(() {
+          tab = 0;
+          chat.text = draft;
+        }),
       ),
       onDiscuss: (text) => setState(() {
         tab = 0;

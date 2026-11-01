@@ -21,11 +21,15 @@ class TimelineBriefs extends StatefulWidget implements TimelineBriefSummary {
     this.language = 'zh',
     this.availableEvidenceIds = const [],
     this.onOpenSources,
+    this.onAction,
   });
   final List<Map> entries;
   final String language;
   final List availableEvidenceIds;
   final void Function(Map entry)? onOpenSources;
+
+  /// Called with the text to put in the chat composer; it is never sent automatically.
+  final void Function(String draft)? onAction;
   @override
   int todayBriefCount(DateTime now) => entries.where((entry) {
     final date = DateTime.tryParse(
@@ -45,6 +49,7 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
   String get language => widget.language;
   List get availableEvidenceIds => widget.availableEvidenceIds;
   void Function(Map entry)? get onOpenSources => widget.onOpenSources;
+  void Function(String draft)? get onAction => widget.onAction;
   String _signature(TimelineBriefs value) => value.entries
       .map((e) => '${e['key']}|${e['observed_at']}|${e['time']}')
       .join('\n');
@@ -288,6 +293,11 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
         .toList();
     final status = brief['status_label'] as String? ?? '';
     final uncertainty = brief['uncertainty'] as String? ?? '';
+    final actions = (brief['actions'] as List? ?? [])
+        .whereType<Map>()
+        .where((a) => a['label'] is String && (a['label'] as String).isNotEmpty)
+        .take(2)
+        .toList();
     final clock = entry['observed_at'] is String
         ? _clockLabel(entry['observed_at'] as String)
         : '';
@@ -457,6 +467,23 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                 ),
               ),
           ],
+          if (onAction != null && actions.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final action in actions)
+                  OutlinedButton(
+                    key: ValueKey(
+                      'timeline-action-${entry['key']}-${action['label']}',
+                    ),
+                    onPressed: () => onAction!(_actionDraft(action, brief)),
+                    child: Text(action['label'] as String),
+                  ),
+              ],
+            ),
+          ],
           if (uncertainty.isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(
@@ -582,4 +609,12 @@ class TimelineSourceEntry extends StatelessWidget {
     ),
     onTap: onOpenSources,
   );
+}
+
+/// The text a quick action puts in the composer. It only asks to discuss or draft; the user sends it.
+String _actionDraft(Map action, Map brief) {
+  final title = '${brief['title'] ?? ''}';
+  return action['kind'] == 'draft'
+      ? '请根据「$title」帮我写一份草稿，并标明事实缺口。'
+      : '一起看看这件事：$title';
 }
