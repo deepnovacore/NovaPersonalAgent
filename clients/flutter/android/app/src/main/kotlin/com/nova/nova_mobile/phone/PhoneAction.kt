@@ -18,7 +18,7 @@ sealed interface PhoneAction {
     data class Type(val text: String, val ref: String?, val snapshotId: String?) : PhoneAction
     /** {type:"scroll", direction, ref?, snapshot_id?} — virtual tier only; without ref, the largest scrollable. */
     data class Scroll(val direction: ScrollDirection, val ref: String?, val snapshotId: String?) : PhoneAction
-    /** {type:"open_app", package} — virtual tier only; launches on the run's virtual display. */
+    /** {type:"open_app", package} — virtual tier only; launches on the run's virtual display. Only the run's target package is allowed. */
     data class OpenApp(val packageName: String) : PhoneAction
     /** {type:"back"}. */
     data object Back : PhoneAction

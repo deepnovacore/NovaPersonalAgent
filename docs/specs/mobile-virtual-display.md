@@ -38,12 +38,14 @@ Flutter ── nova/phone/v1 (MethodChannel, JSON strings) ───────
    The same reader feeds model screenshots (no `takeScreenshot`, no 500 ms throttle) and preview frames. Flags:
    `PUBLIC|OWN_CONTENT_ONLY|SUPPORTS_TOUCH|ROTATES_WITH_CONTENT|DESTROY_CONTENT_ON_REMOVAL`, plus API 33+ `TOUCH_FEEDBACK_DISABLED`,
    API 33+ trusted `TRUSTED|OWN_DISPLAY_GROUP|ALWAYS_UNLOCKED`, API 34+ trusted `OWN_FOCUS|STEAL_TOP_FOCUS_DISABLED`. IME policy LOCAL.
-   The display is created lazily on the first `open_app` and released when the run ends.
+   The display is created lazily on the first `open_app` (the run's own launch of `target_package` is that first `open_app`)
+   and released when the run ends.
 6. **Accessibility on displayId**: `LocalGuiService` (no second service) reads `windowsOnAllDisplays[displayId]`, dispatches
    gestures with `GestureDescription.Builder().setDisplayId(displayId)`, finds input focus inside that display's window tree
-   (never `rootInActiveWindow`), and filters events by `AccessibilityEvent.displayId` (API 33+) or window id. Config adds
-   `typeWindowsChanged` and `flagIncludeNotImportantViews`; notification events stay off. Gesture failure falls back to
-   `injectTap`/`injectStroke`; keys always use `injectKey`.
+   (never `rootInActiveWindow`), and filters events by `AccessibilityEvent.displayId` (API 33+) or window id. The XML config
+   adds only `typeWindowsChanged`; notification events stay off. `flagIncludeNotImportantViews` is set at runtime through
+   `serviceInfo` only while a virtual run is active and the original flags are restored when it ends, so the main-tier
+   tree and fingerprint stay byte-for-byte unchanged. Gesture failure falls back to `injectTap`/`injectStroke`; keys always use `injectKey`.
 
 ## Capability tiers
 
@@ -56,7 +58,20 @@ Flutter ── nova/phone/v1 (MethodChannel, JSON strings) ───────
 | `main` | anything else | Existing main-screen path (`LocalGuiService.observe/perform`), unchanged, legacy action set. |
 
 Helper loss during a virtual run interrupts it with `helper_unavailable`; it never switches to `main` mid-run, because
-that would take over the user's screen. Chat, workbench `device.run_task` and voice delegation all reach
+that would take over the user's screen. Reasons keep the loop's stage prefix (`observation_helper_unavailable`,
+`tool_helper_unavailable`). A main run keeps its 5 min budget; a virtual run gets 15 min (5 min of agent time plus up to
+10 min of takeover). `RunFence` itself is unchanged.
+
+### App scope (virtual tier)
+
+The user consents to one app, the run's `target_package`. `open_app` accepts only `target_package` (anything else, and
+always Nova's own package, fails with `app_not_allowed`). Observations and actions are allowed while the display's
+foreground package is `target_package` or a system mediator: `android`, `com.android.permissioncontroller`,
+`com.google.android.permissioncontroller`, `com.android.systemui`, `com.android.documentsui`,
+`com.android.intentresolver` or the default IME package. Any other foreground package stops acting and starts a takeover
+(`by:"model"`, `reason:"outside_target_app"`); if the takeover cannot start, the run is interrupted with
+`observation_outside_target_app`. The first observation after launch keeps the existing launch grace (it waits for an
+allowed package). Nova's own package is never allowed. Chat, workbench `device.run_task` and voice delegation all reach
 `NativeChatTaskRunner` → `nova/local_agent/v1 run`; native code picks the tier.
 
 ## Numbered snapshots
@@ -86,7 +101,7 @@ element `{ref:"@eN", role, name, bounds:[l,t,r,b] 0..999, resource_id?, clickabl
 | `swipe` | `x, y, to_x, to_y` | both | as today |
 | `type` | `text` [+ `ref, snapshot_id`] | both (ref: virtual) | text string <= 4000; ref and snapshot_id both present or both absent |
 | `scroll` | `direction` [+ `ref, snapshot_id`] | virtual | direction in `up|down|left|right` |
-| `open_app` | `package` | virtual | `^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$`, <= 255; Nova's own package → `app_not_allowed` at execution |
+| `open_app` | `package` | virtual | `^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$`, <= 255; anything but the run's `target_package` (and always Nova's own package) → `app_not_allowed` at execution |
 | `back` | (none) | both | |
 | `hand_to_user` | `reason` | virtual | trimmed string 1..500 chars; needs no ActionApproval; starts a takeover |
 
@@ -195,3 +210,15 @@ None of these may be weakened. Each must have a JVM or device test where practic
 | Integration | `LICENSES/README.md`, NOTICE, `clients/flutter/android/THIRD_PARTY.md`, `docs/guides/mobile.md` |
 
 Lanes do not edit files they don't own. If a lane needs a seam that isn't here, it asks for a contract change.
+
+### Wiring between M2 and M3
+
+- `LocalAgentController(context, spaceId, shells: ShellProvider?, events: PhoneEventSink?)`: `MainActivity` passes the
+  `PhoneBridge` for both (null keeps every run on `main`). The controller implements `PhoneTakeover`; the bridge routes
+  `takeover`/`handBack` to the current controller.
+- `VirtualSelfCheck(context, shells)` implements `PhoneSelfCheck`; call `run()` off the main thread. It drives system
+  Settings on a temporary display: `tap` goes to a point outside every clickable node, `back` uses `injectKey`, and `type`
+  passes only when Settings shows an editable field (otherwise `{ok:false, detail:"no_text_field"}`). `main_focus` reads
+  `displayFlags & FLAG_OWN_FOCUS`.
+- M3 serializes `step`/`takeover`/`done` events (`phone/PhoneEventJson.kt`) and emits them only for virtual-tier runs; the
+  bridge serializes and emits `status`.
