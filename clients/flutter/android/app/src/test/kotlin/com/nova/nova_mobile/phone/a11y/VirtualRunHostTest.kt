@@ -16,6 +16,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class VirtualRunHostTest {
     private val target = "com.example.shop"
@@ -41,10 +44,17 @@ class VirtualRunHostTest {
                 else -> PreparedAction("back", null, null)
             }
         }
-        override fun dispatch(prepared: PreparedAction, allowed: () -> Boolean): DispatchResult {
-            check(allowed()) { EXECUTION_STOPPED }
-            dispatched += prepared.tool
-            dispatchError?.let { throw it }
+        /** Runs between preparation and the effect (a tree traversal on a device): races are staged here. */
+        var beforeEffect: (() -> Unit)? = null
+        /** Runs inside the admitted effect. */
+        var duringEffect: (() -> Unit)? = null
+        override fun dispatch(prepared: PreparedAction, effects: EffectAdmission): DispatchResult {
+            beforeEffect?.invoke()
+            effects.admit {
+                dispatched += prepared.tool
+                duringEffect?.invoke()
+                dispatchError?.let { throw it }
+            }
             return DispatchResult(outcome, true)
         }
         override fun forgetRefs() { forgotten++ }
@@ -173,6 +183,87 @@ class VirtualRunHostTest {
         h.decided(ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Type hunter2 into search","action":{"type":"type","text":"hunter2"}}"""), PhoneTier.VIRTUAL))
         h.execute(JSONObject("""{"type":"type","text":"hunter2"}"""))
         assertTrue(events.none { it.toString().contains("hunter2") })
+        // The field's name (here "Search", possibly its earlier contents on a device) is never the label either.
+        assertEquals(listOf("输入文字"), events.map { it.getString("label") }.distinct())
+    }
+
+    @Test fun stopDuringPreparationRefusesTheEffect() {
+        val device = Device(target)
+        val gate = Gate()
+        val h = host(device, gate, takeover())
+        h.observe()
+        val reached = CountDownLatch(1)
+        val stopped = CountDownLatch(1)
+        device.beforeEffect = { reached.countDown(); stopped.await(5, TimeUnit.SECONDS) }
+        val result = CompletableFuture<String>()
+        Thread { result.complete(runCatching { h.execute(JSONObject("""{"type":"back"}""")) }.exceptionOrNull()?.message) }.start()
+        assertTrue(reached.await(5, TimeUnit.SECONDS))
+        gate.active = false
+        stopped.countDown()
+        assertEquals("execution_stopped", result.get(5, TimeUnit.SECONDS))
+        assertTrue(device.dispatched.isEmpty())
+        assertEquals(listOf("a1" to "rejected"), gate.finished)
+    }
+
+    @Test fun takeoverAfterPreparationInvalidatesThePreparedAction() {
+        val device = Device(target)
+        val gate = Gate()
+        val port = Port()
+        val t = takeover(port)
+        val h = host(device, gate, t)
+        h.observe()
+        val reached = CountDownLatch(1)
+        val tookOver = CountDownLatch(1)
+        device.beforeEffect = { reached.countDown(); tookOver.await(5, TimeUnit.SECONDS) }
+        val result = CompletableFuture<String>()
+        Thread { result.complete(runCatching { h.execute(JSONObject("""{"type":"tap","ref":"@e1","snapshot_id":"ph-1"}""")) }.exceptionOrNull()?.message) }.start()
+        assertTrue(reached.await(5, TimeUnit.SECONDS))
+        assertEquals(TakeoverState.ACTIVE, t.request(byModel = false, reason = null))
+        tookOver.countDown()
+        assertEquals("screen_changed", result.get(5, TimeUnit.SECONDS))
+        assertTrue(device.dispatched.isEmpty())
+        assertEquals(listOf("a1" to "rejected"), gate.finished)
+        assertEquals(listOf("main"), port.moves)
+    }
+
+    @Test fun takeoverWaitsForAnEffectInProgress() {
+        val device = Device(target)
+        val port = Port()
+        val t = takeover(port)
+        val h = host(device, Gate(), t)
+        h.observe()
+        val inEffect = CountDownLatch(1)
+        val finishEffect = CountDownLatch(1)
+        device.duringEffect = { inEffect.countDown(); finishEffect.await(5, TimeUnit.SECONDS) }
+        val result = CompletableFuture<String>()
+        Thread { result.complete(h.execute(JSONObject("""{"type":"back"}"""))) }.start()
+        assertTrue(inEffect.await(5, TimeUnit.SECONDS))
+        val requested = CompletableFuture<TakeoverState>()
+        Thread { requested.complete(t.request(byModel = false, reason = null)) }.start()
+        Thread.sleep(100)
+        assertFalse(requested.isDone)
+        assertTrue(port.moves.isEmpty())
+        finishEffect.countDown()
+        assertEquals("dispatched", result.get(5, TimeUnit.SECONDS))
+        assertEquals(TakeoverState.ACTIVE, requested.get(5, TimeUnit.SECONDS))
+        assertEquals(listOf("main"), port.moves)
+    }
+
+    @Test fun uncertainGestureIsJournaledUnknownAndNeverInjected() {
+        var injections = 0
+        val device = object : VirtualDevice by Device(target) {
+            override fun dispatch(prepared: PreparedAction, effects: EffectAdmission): DispatchResult {
+                val done = try { gestureOrInjection(effects, { GestureOutcome.UNCERTAIN }, { injections++; true }) }
+                catch (e: EffectRefused) { throw e } catch (e: IllegalStateException) { throw IllegalStateException(e.message) }
+                return DispatchResult(if (done) "dispatched" else "rejected", true)
+            }
+        }
+        val gate = Gate()
+        val h = VirtualRunHost("t1", VirtualScope(target, "com.nova.app", null), device, takeover(), gate, { events += it }, { "a1" })
+        h.observe()
+        assertEquals("unknown", h.execute(JSONObject("""{"type":"tap","x":0.5,"y":0.5}""")))
+        assertEquals(0, injections)
+        assertEquals(listOf("a1" to "unknown"), gate.finished)
     }
 
     @Test fun failureInsideAnEffectIsUnknownNeverRetried() {

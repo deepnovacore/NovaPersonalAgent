@@ -19,6 +19,36 @@ import java.util.UUID
 const val EXECUTION_STOPPED = "execution_stopped"
 /** Existing observation code: the display shows a package outside the run's [VirtualScope]. */
 const val OUTSIDE_TARGET_APP = "outside_target_app"
+/** Existing replanning code; a takeover that started since the observation refuses the effect with it. */
+const val SCREEN_CHANGED = "screen_changed"
+/** Not a contract code: the effect may have happened (cancelled, timed-out or failed mid-way); the host journals `unknown`. */
+const val EFFECT_UNKNOWN = "effect_unknown"
+
+/** An effect was refused at admission ([EXECUTION_STOPPED] or [SCREEN_CHANGED]); nothing of it was dispatched. */
+class EffectRefused(code: String) : IllegalStateException(code)
+
+/**
+ * Admission of each effect on the run's display. [admit] executes [effect] only while the run may act and no takeover
+ * started since the observation, and holds off takeover moves until [effect] returns; otherwise it throws
+ * [EffectRefused]. Every effect, including a fallback after a refused first try, is admitted on its own.
+ */
+interface EffectAdmission {
+    fun <T> admit(effect: () -> T): T
+}
+
+/** Result of one accessibility gesture. Only [REFUSED] (rejected before dispatch) proves that nothing happened. */
+enum class GestureOutcome { COMPLETED, REFUSED, UNCERTAIN }
+
+/**
+ * One gesture, then the helper injection only when the system refused the gesture before dispatching it. A cancelled,
+ * timed-out or interrupted gesture may already have acted: it throws [EFFECT_UNKNOWN] and is never injected again.
+ */
+fun gestureOrInjection(effects: EffectAdmission, gesture: () -> GestureOutcome, inject: () -> Boolean): Boolean =
+    when (effects.admit(gesture)) {
+        GestureOutcome.COMPLETED -> true
+        GestureOutcome.UNCERTAIN -> throw IllegalStateException(EFFECT_UNKNOWN)
+        GestureOutcome.REFUSED -> effects.admit(inject)
+    }
 
 /** An action resolved against the current display. [ref] is the model's ref; [label] an element name or package, never typed text. */
 open class PreparedAction(val tool: String, val ref: String?, val label: String?)
@@ -39,11 +69,11 @@ interface VirtualDevice {
      */
     fun prepare(action: PhoneAction): PreparedAction
     /**
-     * Dispatches [prepared] once if [allowed] still holds and waits briefly for the display to settle. A definite
-     * pre-effect failure throws IllegalStateException with a code in [VirtualRunHost.NOTHING_DISPATCHED]; any other
-     * exception means the effect is unknown.
+     * Dispatches [prepared] once, every effect through [effects], and waits briefly for the display to settle. A definite
+     * pre-effect failure throws IllegalStateException with a code in [VirtualRunHost.NOTHING_DISPATCHED] (an
+     * [EffectRefused] passes through unchanged); any other exception means the effect is unknown.
      */
-    fun dispatch(prepared: PreparedAction, allowed: () -> Boolean): DispatchResult
+    fun dispatch(prepared: PreparedAction, effects: EffectAdmission): DispatchResult
     /** After a takeover every ref is stale. */
     fun forgetRefs()
 }
@@ -87,7 +117,8 @@ class VirtualRunHost(
         private set
     private var observation: JSONObject? = null
     private var observedOnce = false
-    private var observedReturns = 0
+    /** [RunTakeover.generation] when [observation] was read: any later takeover invalidates its plan and prepared actions. */
+    private var observedGeneration = 0
     private var seenReturns = 0
     private var summary: String? = null
 
@@ -104,8 +135,9 @@ class VirtualRunHost(
     /** The run's own launch of the target: the first `open_app`, which creates the display. Returns the journal outcome. */
     fun launch(attemptId: String): String {
         val action = JSONObject().put("type", "open_app").put("package", scope.target)
+        val generation = takeover.generation
         val prepared = device.prepare(PhoneAction.OpenApp(scope.target))
-        return journaled(attemptId, action, null, prepared, scope.target)
+        return journaled(attemptId, action, null, prepared, scope.target, generation)
     }
 
     override fun active(): Boolean = gate.active()
@@ -113,6 +145,8 @@ class VirtualRunHost(
     override fun observe(): JSONObject {
         repeat(SCOPE_TAKEOVERS + 1) {
             awaitTakeover()
+            // Read before the snapshot: a takeover that starts while reading invalidates it.
+            val generation = takeover.generation
             val snapshot = try { device.snapshot() } catch (e: IllegalStateException) {
                 // A user takeover that started meanwhile moved the app to the main display on purpose.
                 if (e.message == PhoneActionErrors.DISPLAY_UNAVAILABLE && takeover.pending) return@repeat
@@ -120,7 +154,7 @@ class VirtualRunHost(
             }
             if (scope.allows(snapshot.packageName)) {
                 observedOnce = true
-                observedReturns = takeover.returns
+                observedGeneration = generation
                 return snapshot.toJson().also { observation = it }
             }
             // The launch grace waits for the target; afterwards the user resolves the foreground app.
@@ -139,16 +173,17 @@ class VirtualRunHost(
         val parsed = ToolActionParser.parse(action, PhoneTier.VIRTUAL)
         val evidence = (observation ?: throw IllegalStateException("observation_required")).getString("snapshot_id")
         // A takeover since the observation moved the app: the plan is stale, never dispatch it.
-        if (takeover.pending || takeover.returns != observedReturns) {
+        if (takeover.pending || takeover.generation != observedGeneration) {
             awaitTakeover()
-            throw IllegalStateException("screen_changed")
+            throw IllegalStateException(SCREEN_CHANGED)
         }
         val attemptId = newAttemptId()
         if (parsed is PhoneAction.HandToUser) return handToUser(attemptId, action, parsed, evidence)
-        if (!scope.allows(device.topPackage())) throw IllegalStateException("screen_changed")
+        if (!scope.allows(device.topPackage())) throw IllegalStateException(SCREEN_CHANGED)
         val prepared = device.prepare(parsed)
-        val label = if (parsed is PhoneAction.Type) prepared.label ?: scope.target else summary ?: prepared.label ?: scope.target
-        return journaled(attemptId, action, evidence, prepared, label)
+        // Typing is labelled by a fixed text: field names and summaries can carry typed or previously entered text.
+        val label = if (parsed is PhoneAction.Type) TYPE_LABEL else summary ?: prepared.label ?: scope.target
+        return journaled(attemptId, action, evidence, prepared, label, observedGeneration)
     }
 
     override fun finish(summary: String) = gate.complete(summary, (observation ?: throw IllegalStateException("observation_required")).getString("snapshot_id"))
@@ -168,11 +203,23 @@ class VirtualRunHost(
         return "dispatched"
     }
 
+    /**
+     * Each effect is admitted only while the run is active and no takeover started since [generation]; the check and the
+     * effect hold off takeover moves together. A stop is never blocked: an effect admitted before it counts as earlier.
+     */
+    private fun admission(generation: Int) = object : EffectAdmission {
+        override fun <T> admit(effect: () -> T): T = takeover.withoutMoves {
+            if (!gate.active()) throw EffectRefused(EXECUTION_STOPPED)
+            if (takeover.pending || takeover.generation != generation) throw EffectRefused(SCREEN_CHANGED)
+            effect()
+        }
+    }
+
     /** Journal once, dispatch once. A definite failure is `rejected` and keeps its code; anything else is `unknown`. */
-    private fun journaled(attemptId: String, action: JSONObject, evidence: String?, prepared: PreparedAction, label: String): String {
+    private fun journaled(attemptId: String, action: JSONObject, evidence: String?, prepared: PreparedAction, label: String, generation: Int): String {
         val step = startStep(prepared.tool, label, prepared.ref)
         try { gate.begin(attemptId, action, evidence) } catch (e: Exception) { endStep(step, prepared.tool, label, prepared.ref, StepStatus.FAILED, null); throw e }
-        val result = try { device.dispatch(prepared, gate::active) } catch (e: Exception) {
+        val result = try { device.dispatch(prepared, admission(generation)) } catch (e: Exception) {
             val code = rootCause(e).let { if (it is IllegalStateException) it.message else null }
             if (code in NOTHING_DISPATCHED) {
                 gate.finish(attemptId, action, "rejected", evidence)
@@ -222,6 +269,7 @@ class VirtualRunHost(
         /** Codes a dispatch throws before any effect: the attempt is journaled `rejected` and the code is reported. */
         val NOTHING_DISPATCHED = setOf(
             EXECUTION_STOPPED,
+            SCREEN_CHANGED,
             PhoneActionErrors.APP_IN_USE_ON_MAIN,
             PhoneActionErrors.APP_NOT_LAUNCHABLE,
             PhoneActionErrors.DISPLAY_UNAVAILABLE,
@@ -230,5 +278,7 @@ class VirtualRunHost(
         /** Out-of-scope foregrounds handed to the user per observation before the run stops. */
         private const val SCOPE_TAKEOVERS = 2
         private const val LABEL_MAX = 200
+        /** Step label of every `type` action. */
+        const val TYPE_LABEL = "输入文字"
     }
 }

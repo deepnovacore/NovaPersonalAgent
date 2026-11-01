@@ -1,13 +1,23 @@
 package com.nova.nova_mobile.phone.a11y
 
 import com.nova.nova_mobile.phone.PHONE_VIRTUAL_MIN_API
+import com.nova.nova_mobile.phone.PHONE_VIRTUAL_STABLE_API
 import com.nova.nova_mobile.phone.PhoneActionErrors
 import com.nova.nova_mobile.phone.PhoneTier
 import com.nova.nova_mobile.phone.shell.INovaShell
 
-/** Contract tier rule, evaluated once at run start: api >= 31, accessibility on and helper running, else main. */
-fun phoneTierFor(apiLevel: Int, accessibility: Boolean, helperRunning: Boolean): PhoneTier =
-    if (apiLevel >= PHONE_VIRTUAL_MIN_API && accessibility && helperRunning) PhoneTier.VIRTUAL else PhoneTier.MAIN
+/** Native SharedPreferences file of phone control. */
+const val PHONE_PREFERENCES = "nova_phone"
+/** Boolean in [PHONE_PREFERENCES]: the user acknowledged the Android 12/13 focus warning (written through the bridge). */
+const val PHONE_EXPERIMENTAL_ACK = "phone.experimental_ack"
+
+/**
+ * Contract tier rule, evaluated once at run start: api >= 31, accessibility on and helper running, and on the
+ * experimental api 31..33 also [experimentalAcknowledged]; else main.
+ */
+fun phoneTierFor(apiLevel: Int, accessibility: Boolean, helperRunning: Boolean, experimentalAcknowledged: Boolean): PhoneTier =
+    if (apiLevel >= PHONE_VIRTUAL_MIN_API && accessibility && helperRunning &&
+        (apiLevel >= PHONE_VIRTUAL_STABLE_API || experimentalAcknowledged)) PhoneTier.VIRTUAL else PhoneTier.MAIN
 
 /**
  * Consent scope of a virtual-tier run (contract "App scope (virtual tier)"): the user chose [target]; the agent may act

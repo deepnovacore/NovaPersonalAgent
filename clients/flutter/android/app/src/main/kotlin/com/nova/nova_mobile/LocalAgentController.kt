@@ -14,9 +14,14 @@ import com.nova.nova_mobile.phone.PhoneDoneEvent
 import com.nova.nova_mobile.phone.PhoneEventSink
 import com.nova.nova_mobile.phone.PhoneTakeover
 import com.nova.nova_mobile.phone.PhoneTier
+import com.nova.nova_mobile.phone.RunIdleGate
 import com.nova.nova_mobile.phone.RunTakeover
 import com.nova.nova_mobile.phone.ShellProvider
 import com.nova.nova_mobile.phone.TakeoverState
+import com.nova.nova_mobile.phone.VirtualSelfCheck
+import com.nova.nova_mobile.phone.a11y.PHONE_EXPERIMENTAL_ACK
+import com.nova.nova_mobile.phone.a11y.PHONE_PREFERENCES
+import com.nova.nova_mobile.phone.a11y.RuntimeFlagLeases
 import com.nova.nova_mobile.phone.a11y.VirtualRunGate
 import com.nova.nova_mobile.phone.a11y.VirtualRunHost
 import com.nova.nova_mobile.phone.a11y.VirtualScope
@@ -36,21 +41,25 @@ import android.os.Looper
  * into this controller. The UI can always stop a run without a Hub or model.
  * [shells] and [events] come from the phone bridge; without a running helper every run stays on the main tier. */
 class LocalAgentController(context: Context, spaceId: String, private val shells: ShellProvider? = null,
-    private val events: PhoneEventSink? = null) : PhoneTakeover {
+    private val events: PhoneEventSink? = null) : PhoneTakeover, RunIdleGate {
     private val app = context.applicationContext
     private val journal=LocalAgentJournal(context.applicationContext, spaceId)
     private val settings = LocalModelSettings(context.applicationContext, spaceId)
     private val loopWorker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    /** A virtual-tier run's display, takeover and loop host; [close] releases the display and the runtime a11y flag. */
-    private class VirtualRun(val screen: VirtualScreen, val takeover: RunTakeover, val host: VirtualRunHost, val service: LocalGuiService) {
+    /**
+     * A virtual-tier run's display, takeover, loop host and runtime a11y flag lease. [releaseFlags] runs synchronously
+     * when the run ends, before another run can be admitted; [close] (takeover and display) may run later.
+     */
+    private class VirtualRun(val screen: VirtualScreen, val takeover: RunTakeover, val host: VirtualRunHost) {
+        @Volatile var flags: RuntimeFlagLeases.Lease? = null
         private var closed = false
+        fun releaseFlags() { flags?.release() }
         @Synchronized fun close() {
             if(closed) return
             closed = true
             takeover.cancel()
             runCatching { screen.close() }
-            service.endVirtualRun()
         }
     }
     private data class Active(val id:String,val secret:String,val fence:RunFence,var observation:JSONObject?=null,
@@ -72,6 +81,8 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         }
         check(active==null){"another_task_is_active"}
         val service=LocalGuiService.current?:throw IllegalStateException("accessibility_required")
+        // The self-check holds the runtime a11y flag; no run may observe while it is set.
+        check(service.virtualFlagLeases==0){"another_task_is_active"}
         val goal=request.getString("goal").trim();val acceptance=request.getString("acceptance").trim()
         val todo=request.optJSONObject("todo_ref")
         if(todo!=null)require(todo.keys().asSequence().toSet()==setOf("id","version") && todo.getString("id").length in 1..200 && todo.get("version") is Int && todo.getInt("version")>0){"invalid_todo_reference"}
@@ -116,8 +127,8 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         val config=settings.read()?:throw IllegalStateException("model_settings_required")
         val target=request.getString("target_package")
         require(target.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+"))){"invalid_target_app"}
-        // The tier is chosen once here and fixed for the run.
-        val tier=shells?.let { phoneTierFor(Build.VERSION.SDK_INT, LocalGuiService.current!=null, it.shell!=null) } ?: PhoneTier.MAIN
+        // The tier is chosen once here and fixed for the run. Android 12/13 need the user's experimental acknowledgement.
+        val tier=shells?.let { phoneTierFor(Build.VERSION.SDK_INT, LocalGuiService.current!=null, it.shell!=null, experimentalAcknowledged()) } ?: PhoneTier.MAIN
         check(tier!=PhoneTier.VIRTUAL || target!=app.packageName){PhoneActionErrors.APP_NOT_ALLOWED}
         val record=start(request, tier)
         val run=active!!
@@ -180,8 +191,16 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         val screen=VirtualScreen(service,provider,display,scope)
         val takeover=RunTakeover(run.id,screen.takeoverPort(),{ event -> events?.emit(event.toJson()) },SystemClock::elapsedRealtime)
         val host=VirtualRunHost(run.id,scope,screen,takeover,virtualGate(run),events?.let { sink -> { event:JSONObject -> sink.emit(event) } })
-        service.beginVirtualRun()
-        run.virtual=VirtualRun(screen,takeover,host,service)
+        // Owned by the run before anything is acquired, so the run's end releases whatever was set up.
+        val virtual=VirtualRun(screen,takeover,host)
+        run.virtual=virtual
+        virtual.flags=service.acquireVirtualFlags { interrupt(run.id,"accessibility_unavailable") }
+    }
+    private fun experimentalAcknowledged()=app.getSharedPreferences(PHONE_PREFERENCES,Context.MODE_PRIVATE).getBoolean(PHONE_EXPERIMENTAL_ACK,false)
+    /** Self-check admission: [block] runs only while no run is active, atomically with run admission; else `run_active`. */
+    @Synchronized override fun <T> whileIdle(block:()->T):T {
+        check(active==null){VirtualSelfCheck.RUN_ACTIVE}
+        return block()
     }
     private fun runVirtual(run:Active) {
         try {
@@ -269,7 +288,10 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         return task
     }
     private fun endRun(run:Active,outcome:DoneOutcome,reason:String?,summary:String?) {
-        run.fence.stop();run.approval?.cancel();active=null
+        run.fence.stop();run.approval?.cancel()
+        // The main-tier tree must be unchanged for the next run: restore the a11y flag before admitting one.
+        run.virtual?.let { virtual -> runCatching { virtual.releaseFlags() } }
+        active=null
         run.model?.let { model -> Thread { runCatching { model.cancel() } }.apply { isDaemon=true;start() } }
         LocalGuiService.current?.hideStop()
         // Release the display off the caller's thread: it may wait for a display being created.

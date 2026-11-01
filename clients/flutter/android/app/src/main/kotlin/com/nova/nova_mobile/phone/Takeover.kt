@@ -23,6 +23,8 @@ interface TakeoverPort {
  * ACTIVE; [handBack] moves it back → RETURNED. A failed move is FAILED; ACTIVE longer than [timeoutMs] is TIMED_OUT.
  * FAILED and TIMED_OUT end the run, so they are final. [request] and [handBack] do the moves on the calling thread
  * (two Binder calls); the agent loop blocks in [await] while a takeover is ACTIVE. Every state change goes to [emit].
+ * [request] is serialized against effects run through [withoutMoves]: it waits for an effect in progress and bumps
+ * [generation] before it moves anything, so an effect admitted later can see that its plan is stale.
  */
 class RunTakeover(
     private val taskId: String,
@@ -32,6 +34,8 @@ class RunTakeover(
     private val timeoutMs: Long = TAKEOVER_TIMEOUT_MS,
 ) {
     private val lock = Object()
+    /** Held by [request] around its move and by [withoutMoves] around an effect; always taken before [lock]. */
+    private val moveLock = Any()
     private var task = -1
     private var byModel = false
     private var reason: String? = null
@@ -46,14 +50,22 @@ class RunTakeover(
     @Volatile var returns = 0
         private set
 
+    /** Number of takeovers started (each [request] that left RETURNED or no state). Plans from an older generation are stale. */
+    @Volatile var generation = 0
+        private set
+
     val pending: Boolean get() = synchronized(lock) { state == TakeoverState.REQUESTED || state == TakeoverState.ACTIVE }
 
-    /** Starts a takeover; a pending or final one is returned unchanged. */
-    fun request(byModel: Boolean, reason: String?): TakeoverState = synchronized(lock) {
+    /** Runs [block] (one effect on the run's display) while no takeover move can start. */
+    fun <T> withoutMoves(block: () -> T): T = synchronized(moveLock, block)
+
+    /** Starts a takeover; a pending or final one is returned unchanged. Waits for an effect in progress first. */
+    fun request(byModel: Boolean, reason: String?): TakeoverState = synchronized(moveLock) { synchronized(lock) {
         state?.let { if (it != TakeoverState.RETURNED) return it }
         check(!cancelled) { "task_not_running" }
         this.byModel = byModel
         this.reason = reason
+        generation++
         set(TakeoverState.REQUESTED)
         val top = runCatching { port.topTask() }.getOrDefault(-1)
         if (top < 0 || !runCatching { port.moveToMain(top) }.getOrDefault(false)) return set(TakeoverState.FAILED)
@@ -61,7 +73,7 @@ class RunTakeover(
         activeSince = now()
         runCatching { port.paused(true) }
         set(TakeoverState.ACTIVE)
-    }
+    } }
 
     /** Moves the task back to the run's display. Only an ACTIVE takeover changes; otherwise the current state is returned. */
     fun handBack(): TakeoverState = synchronized(lock) {

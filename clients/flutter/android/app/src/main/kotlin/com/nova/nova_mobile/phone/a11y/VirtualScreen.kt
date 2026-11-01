@@ -47,7 +47,8 @@ class VirtualScreen(
         ref: String?,
         label: String?,
         internal val changeWaitMs: Long,
-        internal val run: (AgentDisplay) -> Boolean,
+        /** Performs the action; every effect, fallbacks included, goes through the [EffectAdmission]. */
+        internal val run: (AgentDisplay, EffectAdmission) -> Boolean,
         internal val settled: ((AgentDisplay) -> Boolean)? = null,
         /** [run] throws contract codes only for refusals that started nothing (`startApp` results). */
         internal val refusalsAreDefinite: Boolean = false,
@@ -102,37 +103,39 @@ class VirtualScreen(
             is PhoneAction.TapRef -> {
                 val d = requireDisplay()
                 val target = resolve(d, action.ref, action.snapshotId)
-                Prepared("tap", action.ref, target.element.name, CHANGE_WAIT_MS, { click(it, target.node) })
+                Prepared("tap", action.ref, target.element.name, CHANGE_WAIT_MS, { shown, effects -> click(shown, target.node, effects) })
             }
             is PhoneAction.TapPoint -> {
                 val d = requireDisplay()
                 val x = pixel(action.x, d.width)
                 val y = pixel(action.y, d.height)
-                Prepared("tap", null, null, CHANGE_WAIT_MS, { touch(it, x, y) })
+                Prepared("tap", null, null, CHANGE_WAIT_MS, { shown, effects -> touch(shown, x, y, effects) })
             }
             is PhoneAction.Swipe -> {
                 val d = requireDisplay()
                 val from = pixel(action.x, d.width) to pixel(action.y, d.height)
                 val to = pixel(action.toX, d.width) to pixel(action.toY, d.height)
-                Prepared("swipe", null, null, CHANGE_WAIT_MS, { drag(it, from, to) })
+                Prepared("swipe", null, null, CHANGE_WAIT_MS, { shown, effects -> drag(shown, from, to, effects) })
             }
             is PhoneAction.Type -> prepareType(requireDisplay(), action)
             is PhoneAction.Scroll -> prepareScroll(requireDisplay(), action)
             PhoneAction.Back -> {
                 requireDisplay()
-                Prepared("back", null, null, CHANGE_WAIT_MS, { shell().injectKey(it.displayId, KeyEvent.KEYCODE_BACK) })
+                Prepared("back", null, null, CHANGE_WAIT_MS, { shown, effects -> effects.admit { shell().injectKey(shown.displayId, KeyEvent.KEYCODE_BACK) } })
             }
             is PhoneAction.HandToUser -> throw IllegalArgumentException("unsupported_action")
         }
     }
 
-    override fun dispatch(prepared: PreparedAction, allowed: () -> Boolean): DispatchResult {
+    override fun dispatch(prepared: PreparedAction, effects: EffectAdmission): DispatchResult {
         val action = prepared as Prepared
         shell()
         val d = requireDisplay()
-        check(allowed()) { EXECUTION_STOPPED }
         val before = SnapshotReader.hash(windows(d))
-        val done = try { action.run(d) } catch (e: IllegalStateException) {
+        val done = try { action.run(d, effects) } catch (e: EffectRefused) {
+            // Admission refused before any effect of this action (every earlier try was refused too).
+            throw e
+        } catch (e: IllegalStateException) {
             // A failure in the middle of a gesture or injection may already have had an effect.
             if (action.refusalsAreDefinite) throw e
             throw IllegalStateException(EFFECT_UNKNOWN)
@@ -173,8 +176,8 @@ class VirtualScreen(
             throw IllegalStateException(PhoneActionErrors.DISPLAY_UNAVAILABLE)
         }
         shell()
-        return Prepared("open_app", null, packageName, LAUNCH_WAIT_MS, run = {
-            startAppError(shell().startApp(d.displayId, packageName))?.let { code -> throw IllegalStateException(code) }
+        return Prepared("open_app", null, packageName, LAUNCH_WAIT_MS, run = { _, effects ->
+            startAppError(effects.admit { shell().startApp(d.displayId, packageName) })?.let { code -> throw IllegalStateException(code) }
             true
         }, settled = { shown ->
             (SnapshotReader.topPackage(windows(shown)) == packageName).also { onTop ->
@@ -185,21 +188,22 @@ class VirtualScreen(
 
     private fun prepareType(d: AgentDisplay, action: PhoneAction.Type): Prepared {
         val field: AccessibilityNodeInfo
-        var label: String? = null
         if (action.ref != null && action.snapshotId != null) {
             val target = resolve(d, action.ref, action.snapshotId)
             field = if (target.node.isEditable) target.node else descendant(target.node) { it.isEditable }
                 ?: throw IllegalStateException(PhoneActionErrors.REF_NOT_EDITABLE)
-            if (!target.element.secret) label = target.element.name
         } else {
             field = focusedEditable(d) ?: throw IllegalStateException(PhoneActionErrors.NO_FOCUSED_INPUT)
         }
         if (field.isPassword) throw IllegalStateException(PhoneActionErrors.PRIVATE_INPUT_REQUIRES_USER)
         val text = action.text
-        return Prepared("type", action.ref, label, CHANGE_WAIT_MS, {
-            if (!field.isFocused) field.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
-            field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        // No label: the host labels typing with a fixed text.
+        return Prepared("type", action.ref, null, CHANGE_WAIT_MS, { _, effects ->
+            effects.admit {
+                if (!field.isFocused) field.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+                field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            }
         })
     }
 
@@ -215,11 +219,11 @@ class VirtualScreen(
                 .maxByOrNull { e -> Rect().also { e.node.getBoundsInScreen(it) }.let { it.width().toLong() * it.height() } }?.node
         }
         val direction = action.direction
-        return Prepared("scroll", action.ref, label, CHANGE_WAIT_MS, { shown ->
+        return Prepared("scroll", action.ref, label, CHANGE_WAIT_MS, { shown, effects ->
             val area = node?.let { n -> Rect().also { n.getBoundsInScreen(it) } }?.takeIf { it.intersect(0, 0, shown.width, shown.height) }
                 ?: Rect(0, 0, shown.width, shown.height)
             val (from, to) = swipeFor(area, direction)
-            (node != null && scrollAction(node, direction)) || drag(shown, from, to)
+            (node != null && scrollAction(node, direction, effects)) || drag(shown, from, to, effects)
         })
     }
 
@@ -258,41 +262,43 @@ class VirtualScreen(
 
     // ---------- low-level input ----------
 
-    /** Click the node (or its nearest clickable ancestor); otherwise touch its centre. */
-    private fun click(d: AgentDisplay, node: AccessibilityNodeInfo): Boolean {
+    /** Click the node (or its nearest clickable ancestor); a refused click falls back to touching its centre. */
+    private fun click(d: AgentDisplay, node: AccessibilityNodeInfo, effects: EffectAdmission): Boolean {
         val target = ancestorOrSelf(node) { it.isClickable && it.isEnabled }
-        if (target != null && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        if (target != null && effects.admit { target.performAction(AccessibilityNodeInfo.ACTION_CLICK) }) return true
         val rect = Rect().also { node.getBoundsInScreen(it) }
         if (!rect.intersect(0, 0, d.width, d.height)) return false
-        return touch(d, rect.centerX(), rect.centerY())
+        return touch(d, rect.centerX(), rect.centerY(), effects)
     }
 
-    /** A tap by accessibility gesture on the display, else helper injection. */
-    private fun touch(d: AgentDisplay, x: Int, y: Int): Boolean {
+    /** A tap by accessibility gesture on the display; helper injection only when the gesture was refused. */
+    private fun touch(d: AgentDisplay, x: Int, y: Int, effects: EffectAdmission): Boolean {
         val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
-        if (service.gesture(d.displayId, listOf(GestureDescription.StrokeDescription(path, 0, TAP_MS)))) return true
-        return shell().injectTap(d.displayId, x, y)
+        return gestureOrInjection(effects,
+            { service.gesture(d.displayId, listOf(GestureDescription.StrokeDescription(path, 0, TAP_MS))) },
+            { shell().injectTap(d.displayId, x, y) })
     }
 
-    /** One-finger swipe by accessibility gesture, else helper stroke injection. */
-    private fun drag(d: AgentDisplay, from: Pair<Int, Int>, to: Pair<Int, Int>): Boolean {
+    /** One-finger swipe by accessibility gesture; helper stroke injection only when the gesture was refused. */
+    private fun drag(d: AgentDisplay, from: Pair<Int, Int>, to: Pair<Int, Int>, effects: EffectAdmission): Boolean {
         val path = Path().apply { moveTo(from.first.toFloat(), from.second.toFloat()); lineTo(to.first.toFloat(), to.second.toFloat()) }
-        if (service.gesture(d.displayId, listOf(GestureDescription.StrokeDescription(path, 0, SWIPE_MS)))) return true
-        return shell().injectStroke(d.displayId, intArrayOf(from.first, to.first), intArrayOf(from.second, to.second), longArrayOf(0, SWIPE_MS))
+        return gestureOrInjection(effects,
+            { service.gesture(d.displayId, listOf(GestureDescription.StrokeDescription(path, 0, SWIPE_MS))) },
+            { shell().injectStroke(d.displayId, intArrayOf(from.first, to.first), intArrayOf(from.second, to.second), longArrayOf(0, SWIPE_MS)) })
     }
 
-    /** [direction] is where the view moves in the content: `down` shows what is below. */
-    private fun scrollAction(node: AccessibilityNodeInfo, direction: ScrollDirection): Boolean {
+    /** [direction] is where the view moves in the content: `down` shows what is below. False: every action was refused. */
+    private fun scrollAction(node: AccessibilityNodeInfo, direction: ScrollDirection, effects: EffectAdmission): Boolean {
         val directional = when (direction) {
             ScrollDirection.UP -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP
             ScrollDirection.DOWN -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
             ScrollDirection.LEFT -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT
             ScrollDirection.RIGHT -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT
         }
-        if (node.actionList.any { it.id == directional.id } && node.performAction(directional.id)) return true
+        if (node.actionList.any { it.id == directional.id } && effects.admit { node.performAction(directional.id) }) return true
         return when (direction) {
-            ScrollDirection.DOWN -> node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-            ScrollDirection.UP -> node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+            ScrollDirection.DOWN -> effects.admit { node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }
+            ScrollDirection.UP -> effects.admit { node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) }
             else -> false
         }
     }
@@ -331,8 +337,6 @@ class VirtualScreen(
     companion object {
         /** Existing safe observation code, reused when the display has no frame yet. */
         const val SCREEN_UNAVAILABLE = "screen_unavailable"
-        /** Not a contract code: the host journals the attempt as `unknown`. */
-        private const val EFFECT_UNKNOWN = "effect_unknown"
         private const val FIRST_FRAME_MS = 2_000L
         private const val CHANGE_WAIT_MS = 1_500L
         private const val LAUNCH_WAIT_MS = 5_000L

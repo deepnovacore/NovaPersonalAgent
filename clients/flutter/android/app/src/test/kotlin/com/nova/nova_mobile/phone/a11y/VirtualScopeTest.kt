@@ -57,11 +57,20 @@ class VirtualScopeTest {
     }
 
     @Test fun tierIsVirtualOnlyWithApi31AccessibilityAndARunningHelper() {
-        assertEquals(PhoneTier.VIRTUAL, phoneTierFor(31, accessibility = true, helperRunning = true))
-        assertEquals(PhoneTier.VIRTUAL, phoneTierFor(35, accessibility = true, helperRunning = true))
-        assertEquals(PhoneTier.MAIN, phoneTierFor(30, accessibility = true, helperRunning = true))
-        assertEquals(PhoneTier.MAIN, phoneTierFor(34, accessibility = false, helperRunning = true))
-        assertEquals(PhoneTier.MAIN, phoneTierFor(34, accessibility = true, helperRunning = false))
+        assertEquals(PhoneTier.VIRTUAL, phoneTierFor(31, accessibility = true, helperRunning = true, experimentalAcknowledged = true))
+        assertEquals(PhoneTier.VIRTUAL, phoneTierFor(35, accessibility = true, helperRunning = true, experimentalAcknowledged = false))
+        assertEquals(PhoneTier.MAIN, phoneTierFor(30, accessibility = true, helperRunning = true, experimentalAcknowledged = true))
+        assertEquals(PhoneTier.MAIN, phoneTierFor(34, accessibility = false, helperRunning = true, experimentalAcknowledged = true))
+        assertEquals(PhoneTier.MAIN, phoneTierFor(34, accessibility = true, helperRunning = false, experimentalAcknowledged = true))
+    }
+
+    @Test fun android12And13NeedTheExperimentalAcknowledgement() {
+        for (api in 31..33) {
+            assertEquals(PhoneTier.MAIN, phoneTierFor(api, accessibility = true, helperRunning = true, experimentalAcknowledged = false))
+            assertEquals(PhoneTier.VIRTUAL, phoneTierFor(api, accessibility = true, helperRunning = true, experimentalAcknowledged = true))
+        }
+        assertEquals(PhoneTier.VIRTUAL, phoneTierFor(34, accessibility = true, helperRunning = true, experimentalAcknowledged = false))
+        assertEquals("phone.experimental_ack", PHONE_EXPERIMENTAL_ACK)
     }
 
     @Test fun snapshotWireShapeMatchesTheContract() {

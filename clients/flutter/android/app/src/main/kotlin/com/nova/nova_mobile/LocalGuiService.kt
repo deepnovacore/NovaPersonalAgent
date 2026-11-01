@@ -20,6 +20,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.annotation.RequiresApi
 import android.widget.Button
+import com.nova.nova_mobile.phone.a11y.GestureOutcome
+import com.nova.nova_mobile.phone.a11y.RuntimeFlagLeases
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
@@ -39,15 +41,20 @@ class LocalGuiService : AccessibilityService() {
     private var nextScreenshotAt=0L
     var onStop: (() -> Unit)?=null
     var onUnavailable: (() -> Unit)?=null
-    override fun onServiceConnected(){ synchronized(virtualLock){ virtualRuns=0; flagsBeforeVirtual=null }; current=this }
+    override fun onServiceConnected(){
+        // A reconnect may keep or reset the runtime configuration: stop virtual work that relied on it, restore the saved flags.
+        flagLeases.reconnect()
+        displayEvents.clear()
+        current=this
+    }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Only virtual-tier runs consume events; the main-tier path ignores them as before.
-        if(event==null||virtualRuns==0)return
+        if(event==null||flagLeases.held==0)return
         val displayId=displayOf(event)
         if(displayId!=Display.INVALID_DISPLAY&&displayId!=Display.DEFAULT_DISPLAY)displayEvents[displayId]=SystemClock.uptimeMillis()
     }
     override fun onInterrupt(){onUnavailable?.invoke()}
-    override fun onDestroy(){onUnavailable?.invoke();hideStop();current=null;observations.shutdownNow();super.onDestroy()}
+    override fun onDestroy(){onUnavailable?.invoke();hideStop();current=null;observations.shutdownNow();gestureThread.quitSafely();super.onDestroy()}
 
     private fun <T> onMain(run: () -> T): T {
         check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
@@ -170,32 +177,31 @@ class LocalGuiService : AccessibilityService() {
 
     // ---- Virtual display (derived from Mika ScreenAccessibility, Apache-2.0, commit 5f630d9; see phone/a11y) ----
 
-    private val virtualLock=Any()
-    @Volatile private var virtualRuns=0
-    private var flagsBeforeVirtual:Int?=null
     private val displayEvents=java.util.concurrent.ConcurrentHashMap<Int,Long>()
+    /** Gesture callbacks of virtual runs: never the main thread, which may be waiting for a takeover move. */
+    private val gestureThread=android.os.HandlerThread("nova-virtual-gestures").apply { start() }
+    private val gestureHandler=Handler(gestureThread.looper)
+    private val flagLeases=RuntimeFlagLeases(object:RuntimeFlagLeases.Store {
+        override fun read():Int? = serviceInfo?.flags
+        override fun write(flags:Int) {
+            val info=serviceInfo?:return
+            if(info.flags!=flags){ info.flags=flags;serviceInfo=info }
+        }
+    },AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS)
 
     /**
-     * Many apps mark result text as not important for accessibility. Include those views only while a virtual run is
-     * active, so the main-tier tree and fingerprint stay unchanged; the original flags come back at [endVirtualRun].
+     * Many apps mark result text as not important for accessibility. Include those views only while a virtual run or
+     * the self-check holds a lease, so the main-tier tree and fingerprint stay unchanged; releasing the last lease
+     * restores the original flags synchronously. Throws when the flags cannot be set (no lease is held then).
+     * [onVoided] runs when a service reconnect voids the lease; the holder must stop its virtual work.
      */
-    fun beginVirtualRun() = synchronized(virtualLock) {
-        if(virtualRuns++==0) serviceInfo?.let { info ->
-            flagsBeforeVirtual=info.flags
-            if(info.flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS==0) {
-                info.flags=info.flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-                serviceInfo=info
-            }
-        }
+    fun acquireVirtualFlags(onVoided:()->Unit):RuntimeFlagLeases.Lease {
+        if(flagLeases.held==0)displayEvents.clear()
+        return flagLeases.acquire(onVoided)
     }
-    fun endVirtualRun() = synchronized(virtualLock) {
-        if(virtualRuns==0)return@synchronized
-        if(--virtualRuns==0) {
-            val before=flagsBeforeVirtual;flagsBeforeVirtual=null
-            displayEvents.clear()
-            serviceInfo?.let { info -> if(before!=null&&info.flags!=before){ info.flags=before;serviceInfo=info } }
-        }
-    }
+
+    /** Leases held by virtual runs and the self-check; a new run is not admitted while any is held. */
+    val virtualFlagLeases:Int get()=flagLeases.held
 
     /** Windows on [displayId] (empty when the display has none or does not exist). Never the active main window. */
     @RequiresApi(30)
@@ -204,18 +210,21 @@ class LocalGuiService : AccessibilityService() {
     /** Uptime of the last accessibility event on [displayId] during a virtual run, or 0. */
     fun lastEventAt(displayId:Int):Long = displayEvents[displayId]?:0L
 
-    /** One gesture on [displayId]; blocks until it completed (true) or was cancelled/refused (false). Never on main. */
+    /**
+     * One gesture on [displayId]; blocks until it is done. REFUSED only when the system rejected it before dispatch;
+     * a cancelled, timed-out or interrupted gesture is UNCERTAIN (it may have acted) and must not be injected again.
+     */
     @RequiresApi(30)
-    fun gesture(displayId:Int,strokes:List<GestureDescription.StrokeDescription>):Boolean {
+    fun gesture(displayId:Int,strokes:List<GestureDescription.StrokeDescription>):GestureOutcome {
         check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
         val gesture=GestureDescription.Builder().setDisplayId(displayId).apply { strokes.forEach(::addStroke) }.build()
         val done=CompletableFuture<Boolean>()
         val accepted=dispatchGesture(gesture,object:GestureResultCallback(){
             override fun onCompleted(gestureDescription:GestureDescription?){done.complete(true)}
             override fun onCancelled(gestureDescription:GestureDescription?){done.complete(false)}
-        },main)
-        if(!accepted)return false
-        return try { done.get(15,TimeUnit.SECONDS) } catch(_:Exception) { false }
+        },gestureHandler)
+        if(!accepted)return GestureOutcome.REFUSED
+        return try { if(done.get(15,TimeUnit.SECONDS)) GestureOutcome.COMPLETED else GestureOutcome.UNCERTAIN } catch(_:Exception) { GestureOutcome.UNCERTAIN }
     }
 
     /**

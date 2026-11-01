@@ -20,22 +20,32 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.RequiresApi
 import com.nova.nova_mobile.LocalGuiService
+import com.nova.nova_mobile.phone.a11y.GestureOutcome
+import com.nova.nova_mobile.phone.a11y.RuntimeFlagLeases
 import com.nova.nova_mobile.phone.a11y.SnapshotReader
 import com.nova.nova_mobile.phone.a11y.startAppError
 import com.nova.nova_mobile.phone.display.AgentDisplay
 import com.nova.nova_mobile.phone.shell.INovaShell
 
+/** Admits work that must not overlap an agent run. Implemented by LocalAgentController. */
+interface RunIdleGate {
+    /** Runs [block] only while no run is active, atomically with run admission; otherwise throws IllegalStateException(`run_active`). */
+    fun <T> whileIdle(block: () -> T): T
+}
+
 /**
  * Self-check of the virtual tier (contract `selfCheck`): creates a temporary display, opens system Settings on it, reads
  * its tree and frame, taps a point outside every clickable node, types only into an editable Settings field (or reports
- * `no_text_field`), presses back with `injectKey` and reads FLAG_OWN_FOCUS. The display is always released. Details are
- * safe codes; no screen text is reported. [run] blocks and must not run on the main thread.
+ * `no_text_field`), presses back with `injectKey` and reads FLAG_OWN_FOCUS. The runtime a11y flag and the display are
+ * always released. It refuses with `run_active` while a run is active, and no run starts while it holds the flag.
+ * Details are safe codes; no screen text is reported. [run] blocks and must not run on the main thread.
  */
-class VirtualSelfCheck(context: Context, private val shells: ShellProvider) : PhoneSelfCheck {
+class VirtualSelfCheck(context: Context, private val shells: ShellProvider, private val runs: RunIdleGate) : PhoneSelfCheck {
     private val app = context.applicationContext
 
     override fun run(): List<SelfCheckItem> {
         check(Looper.myLooper() != Looper.getMainLooper()) { "blocking_gui_call_on_main" }
+        runs.whileIdle { }
         val results = linkedMapOf<String, SelfCheckItem>()
         fun put(id: String, ok: Boolean, detail: String? = null) { results[id] = SelfCheckItem(id, ok, detail) }
         val shell = shells.shell
@@ -57,12 +67,25 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider) : Ph
         @Suppress("DEPRECATION") app.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY).getRealMetrics(metrics)
         val width = minOf(metrics.widthPixels, metrics.heightPixels)
         val height = maxOf(metrics.widthPixels, metrics.heightPixels)
-        val display = try { AgentDisplay(shell, width, height, metrics.densityDpi, null) } catch (_: Exception) {
-            put(ID_CREATE_DISPLAY, false, "create_failed")
-            return
-        }
-        service?.beginVirtualRun()
+        var flags: RuntimeFlagLeases.Lease? = null
+        var created: AgentDisplay? = null
         try {
+            // Taken while no run is active; a run cannot start until the lease is released below.
+            if (service != null) {
+                flags = try { runs.whileIdle { service.acquireVirtualFlags { } } } catch (e: IllegalStateException) {
+                    if (e.message == RUN_ACTIVE) throw e
+                    put(ID_CREATE_DISPLAY, false, "accessibility_flags_failed")
+                    return
+                } catch (_: Exception) {
+                    put(ID_CREATE_DISPLAY, false, "accessibility_flags_failed")
+                    return
+                }
+            }
+            val display = try { AgentDisplay(shell, width, height, metrics.densityDpi, null) } catch (_: Exception) {
+                put(ID_CREATE_DISPLAY, false, "create_failed")
+                return
+            }
+            created = display
             put(ID_CREATE_DISPLAY, true, null)
             val flags = runCatching { shell.displayFlags(display.displayId) }.getOrDefault(-1)
             put(ID_MAIN_FOCUS, flags >= 0 && flags and INovaShell.FLAG_OWN_FOCUS != 0, if (flags < 0) "unknown" else if (flags and INovaShell.FLAG_OWN_FOCUS == 0) "shared_focus" else null)
@@ -92,9 +115,16 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider) : Ph
             val point = freePoint(width, height, clickable)
             if (point == null) put(ID_TAP, false, "no_free_point") else {
                 val path = Path().apply { moveTo(point.first.toFloat(), point.second.toFloat()) }
-                val gesture = runCatching { service.gesture(display.displayId, listOf(GestureDescription.StrokeDescription(path, 0, TAP_MS))) }.getOrDefault(false)
-                val injected = gesture || runCatching { shell.injectTap(display.displayId, point.first, point.second) }.getOrDefault(false)
-                put(ID_TAP, injected, if (!injected) "tap_refused" else if (!gesture) "injection_only" else null)
+                val gesture = runCatching { service.gesture(display.displayId, listOf(GestureDescription.StrokeDescription(path, 0, TAP_MS))) }.getOrDefault(GestureOutcome.UNCERTAIN)
+                // Only a refused gesture is followed by an injection; an uncertain one may already have tapped.
+                when (gesture) {
+                    GestureOutcome.COMPLETED -> put(ID_TAP, true, null)
+                    GestureOutcome.UNCERTAIN -> put(ID_TAP, false, "gesture_uncertain")
+                    GestureOutcome.REFUSED -> {
+                        val injected = runCatching { shell.injectTap(display.displayId, point.first, point.second) }.getOrDefault(false)
+                        put(ID_TAP, injected, if (injected) "injection_only" else "tap_refused")
+                    }
+                }
             }
 
             val field = read.entries.firstOrNull { it.element.editable && !it.element.secret }?.node
@@ -120,8 +150,8 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider) : Ph
             }
             put(ID_BACK, accepted && left, if (!accepted) "injection_refused" else if (!left) "no_effect" else null)
         } finally {
-            display.release()
-            service?.endVirtualRun()
+            created?.release()
+            flags?.release()
         }
     }
 
@@ -143,6 +173,8 @@ class VirtualSelfCheck(context: Context, private val shells: ShellProvider) : Ph
         const val ID_TYPE = "type"
         const val ID_BACK = "back"
         const val ID_MAIN_FOCUS = "main_focus"
+        /** Refusal while an agent run is active. */
+        const val RUN_ACTIVE = "run_active"
         /** Contract order of the rows. */
         val IDS = listOf(ID_HELPER, ID_CREATE_DISPLAY, ID_START_APP, ID_READ_TREE, ID_TAP, ID_TYPE, ID_BACK, ID_MAIN_FOCUS)
         private const val TYPE_PROBE = "nova"
