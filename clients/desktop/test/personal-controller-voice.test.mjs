@@ -108,7 +108,7 @@ test('a superseded voice start still surfaces a real provider failure', async ()
   const {controller,started,request}=startingVoice()
   controller.generation++ // a newer action took ownership while the host was connecting
   controller.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'realtime_auth_rejected'})
-  await assert.rejects(started,error=>/API Key/.test(error.message)&&error.refusal_code==='realtime_auth_rejected')
+  await assert.rejects(started,error=>/密钥/.test(error.message)&&error.refusal_code==='realtime_auth_rejected')
   settle(controller)
 })
 

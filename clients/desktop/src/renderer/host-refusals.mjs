@@ -35,7 +35,8 @@ export const HOST_REFUSALS=Object.freeze({
  version_conflict:'内容已在其他操作中更新，请核对最新状态后重试。',
  brief_in_quiet_hours:'简报时间在免打扰时段内，不会发送。请调整简报时间或免打扰时段。',
  // Realtime voice connect failures (runtime RealtimeConnectError); the host never forwards provider text.
- realtime_auth_rejected:'实时语音鉴权失败，请在设置中检查语音服务的 API Key 与地域（千问为 DashScope 北京或新加坡站）。',
+ realtime_auth_rejected:'实时语音服务拒绝了这个密钥（401）：密钥无效、已停用，或不属于当前语音服务地址所在的地域（默认是 DashScope 北京站，新加坡站的密钥不能混用）。请在设置里重新保存密钥并点“测试”。',
+ realtime_forbidden:'这个账号暂无权使用所选的实时语音模型（403）：请确认已开通该模型、额度充足，且密钥属于当前地域。',
  realtime_endpoint_not_found:'找不到实时语音服务地址或模型，请检查语音服务的地域、地址与模型名称。',
  realtime_rate_limited:'实时语音服务请求过于频繁或额度不足，请稍后重试或检查账户额度。',
  realtime_handshake_rejected:'实时语音服务拒绝了连接，请稍后重试；若持续失败，请检查语音服务设置。',

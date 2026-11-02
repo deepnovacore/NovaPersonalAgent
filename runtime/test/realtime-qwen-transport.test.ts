@@ -226,7 +226,7 @@ async function rejectingServer(status: number): Promise<{endpoint: string; close
 
 for (const [status, code] of [
   [401, 'realtime_auth_rejected'],
-  [403, 'realtime_auth_rejected'],
+  [403, 'realtime_forbidden'],
   [404, 'realtime_endpoint_not_found'],
   [429, 'realtime_rate_limited'],
   [500, 'realtime_handshake_rejected'],

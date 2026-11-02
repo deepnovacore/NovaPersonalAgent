@@ -175,5 +175,5 @@ test('a realtime voice failure in the orb is shown on the orb, not only in the h
  view.controller.send=(frame:any)=>{if(frame.type==='personal.command'&&frame.method==='conversations.voice'&&frame.params.enabled){queueMicrotask(()=>view.receive({type:'personal.result',request_id:frame.request_id,ok:false,error:'realtime_auth_rejected'}));return true}return original(frame)}
  await act(async()=>{await view.controller.setPresentation('orb')})
  await waitFor(()=>assert.ok(document.querySelector('#personal-orb-host .personal-orb-error')))
- assert.match(document.querySelector('#personal-orb-host .personal-orb-error')!.textContent!,/API Key/)
+ assert.match(document.querySelector('#personal-orb-host .personal-orb-error')!.textContent!,/密钥/)
 })

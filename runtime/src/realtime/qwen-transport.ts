@@ -157,7 +157,9 @@ export function connectFailure(error: unknown): RealtimeConnectError {
   const status = /^Unexpected server response: (\d{3})$/u.exec(message)?.[1]
   if (status !== undefined) {
     const code = Number(status)
-    if (code === 401 || code === 403) return new RealtimeConnectError('realtime_auth_rejected', code)
+    if (code === 401) return new RealtimeConnectError('realtime_auth_rejected', code)
+    // 403 means the key was read but this account may not use the model, which needs a different fix than a wrong key.
+    if (code === 403) return new RealtimeConnectError('realtime_forbidden', code)
     if (code === 404) return new RealtimeConnectError('realtime_endpoint_not_found', code)
     if (code === 429) return new RealtimeConnectError('realtime_rate_limited', code)
     return new RealtimeConnectError('realtime_handshake_rejected', code)

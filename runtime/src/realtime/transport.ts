@@ -15,6 +15,7 @@ export class RealtimeSocketClosedError extends Error {
 
 export type RealtimeConnectFailureCode =
   | 'realtime_auth_rejected'
+  | 'realtime_forbidden'
   | 'realtime_endpoint_not_found'
   | 'realtime_rate_limited'
   | 'realtime_handshake_rejected'
