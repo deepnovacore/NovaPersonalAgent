@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
+import './helpers/space-host-sync-open.js'
 
 const waitScheduled=()=>new Promise(resolve=>setTimeout(resolve,160));
 

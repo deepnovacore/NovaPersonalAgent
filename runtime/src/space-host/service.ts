@@ -95,8 +95,12 @@ export class SpaceHost {
   for(const [key,op] of Object.entries(this.#state.ops))if(op.chat_status==='admitted'){const saved=this.options.host.spaceChatResult('space:'+key,displayText(op.intent.input.conversation_id,'chat:main'));await this.#finishChat(key,saved??{text:'',status:'interrupted',message_id:'turn-'+fingerprint(key)})}
   this.#unsubscribe=this.options.host.subscribe(()=>this.#scheduleSnapshot());
   this.#stop=await this.options.transport.start((from,body)=>this.receive(from,body),{load:()=>this.#state.cursor,save:n=>this.#serial(async()=>{if(!this.#opened)return;this.#state.cursor=n;await this.#save()})});
-  await this.publishSnapshot();await this.dispatchNotifications();await this.flush();
+  // Delivering queued messages needs the relay, which can be unreachable (for example a stopped tailnet) and then waits out one network
+  // timeout per queued message. Startup must not wait for that: the Host is usable locally, and the queue is retried in the background.
+  this.initialDelivery=(async()=>{try{await this.publishSnapshot();await this.dispatchNotifications();await this.flush()}catch{this.options.onError?.(undefined)}})()
  }
+ /** The first delivery pass after open(), which runs in the background; tests and shutdown can wait for it. */
+ initialDelivery:Promise<void>=Promise.resolve()
  #scheduleSnapshot(){if(!this.#opened||this.#snapshotTimer)return;this.#snapshotTimer=setTimeout(()=>{this.#snapshotTimer=undefined;if(!this.#opened)return;void this.#publishSnapshot(undefined,true).catch(error=>this.options.onError?.(error))},100);this.#snapshotTimer.unref()}
  snapshot(to?:string){const owner=to!==undefined&&this.#hostAdmin(to),turns=new Map(Object.entries(this.#state.ops).filter(([,op])=>op.intent.kind==='chat.send').map(([key,op])=>['space:'+key,op.intent.op_id]));return {...displaySnapshot(this.options.host,turns),revision:++this.#state.projection_revision,owner,...(owner?{host_settings:{devices:this.options.transport.clients(),...settingsView(this.options.host),...(this.options.models?{models:this.options.models.view()}:{})},host_credentials:credentialsView(this.options.secrets,this.options.environment??process.env),host_feishu:this.#feishuProjection()}:{})}}
  #setupUrl:string|undefined;

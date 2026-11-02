@@ -10,6 +10,7 @@ import {PersonalAgentHost} from '../src/personal-agent/host.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {spaceRelayNotificationAdapter} from '../src/notifications/adapters/space-relay.js';
 import type {NotificationInput} from '../src/notifications/contracts.js';
+import './helpers/space-host-sync-open.js'
 
 test('Host push isolates configured gateway and encrypts human content with per-handle native key',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-host-push-'));let sends=0;let expectedKey='';

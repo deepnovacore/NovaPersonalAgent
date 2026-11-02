@@ -12,6 +12,7 @@ import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets,secretClearSchema
 import {HostModelRoutesStore} from '../src/space-host/model-settings.js';
 import {environmentContract} from '../src/config/environment-contract.js';
 import {describeHostBlockingEnvironment as describeDesktopEnvironment} from '../src/desktop.js';
+import './helpers/space-host-sync-open.js'
 
 async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown;feishuPollMs?:number;revokeDevice?:(device:string)=>Promise<unknown>}={}){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-admin-')),sent:Record<string,unknown>[]=[];const calls:string[]=[];

@@ -10,6 +10,7 @@ import {PersonalAgentHost} from '../src/personal-agent/host.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {displaySnapshot} from '../src/space-host/projection.js';
+import './helpers/space-host-sync-open.js'
 
 test('source processing display exposes bounded profile text without inference source details',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-source-status-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'one-space',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
