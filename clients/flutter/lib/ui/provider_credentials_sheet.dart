@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../agent_core/model_presets.dart';
+import '../agent_core/model_settings.dart';
+import '../settings/model_settings_backend.dart';
+import 'provider_setup_page.dart';
 import '../agent_core/provider_credentials.dart';
 import 'local_dialog.dart';
 
@@ -47,10 +50,10 @@ Future<String?> showProviderCredentials(
   ProviderCredentials credentials, {
   String? endpoint,
   String? credentialId,
+  ModelSettings? modelSettings,
   String language = 'zh',
   Future<void> Function(String credentialId)? onChanged,
 }) async {
-  final entries = await credentials.list();
   if (!context.mounted) return null;
   if (endpoint != null) {
     final existing = await credentials.resolve(
@@ -67,6 +70,48 @@ Future<String?> showProviderCredentials(
       onChanged: onChanged,
     );
   }
+  final backend = _CredentialBackend(
+    modelSettings ?? ModelSettings(storage: credentials.storage),
+    credentials,
+    onChanged,
+  );
+  final view = await backend.load();
+  if (!context.mounted) return null;
+  await showProviderSetupPage(
+    context,
+    backend,
+    view,
+    language: language,
+    onManageCredentials: (context) async {
+      await _showSpeechCredentials(
+        context,
+        credentials,
+        language: language,
+        onChanged: onChanged,
+      );
+    },
+  );
+  return null;
+}
+
+/// Speech APIs need not expose a chat model or support tool calling.
+Future<String?> _showSpeechCredentials(
+  BuildContext context,
+  ProviderCredentials credentials, {
+  required String language,
+  Future<void> Function(String credentialId)? onChanged,
+}) async {
+  Future<List<ProviderCredential>> speechEntries() async =>
+      (await credentials.list())
+          .where(
+            (entry) =>
+                entry.endpoint.startsWith('wss:') ||
+                entry.endpoint.startsWith('ws:') ||
+                _speechServices.any((s) => s.$2 == entry.endpoint),
+          )
+          .toList();
+  final entries = await speechEntries();
+  if (!context.mounted) return null;
   String t(String zh, String en) => language == 'zh' ? zh : en;
   var current = entries;
   String? error;
@@ -74,7 +119,7 @@ Future<String?> showProviderCredentials(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
-        title: Text(t('模型服务密钥', 'Provider credentials')),
+        title: Text(t('语音专用密钥', 'Speech-only credentials')),
         content: SizedBox(
           width: 420,
           child: SingleChildScrollView(
@@ -84,8 +129,8 @@ Future<String?> showProviderCredentials(
               children: [
                 Text(
                   t(
-                    '在这里统一配置对话和语音服务的密钥。配置其他服务不会切换当前对话模型。',
-                    'Manage credentials for chat and voice here. Configuring another service keeps your current chat model.',
+                    '仅配置不支持对话模型测试的语音服务。对话服务密钥请返回「配置密钥」管理。',
+                    'For speech services without chat model testing. Manage chat service keys in Configure keys.',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -107,7 +152,7 @@ Future<String?> showProviderCredentials(
                           onChanged: onChanged,
                         );
                         if (id == null || !context.mounted) return;
-                        final next = await credentials.list();
+                        final next = await speechEntries();
                         if (context.mounted) setState(() => current = next);
                       } catch (_) {
                         if (context.mounted) {
@@ -133,7 +178,7 @@ Future<String?> showProviderCredentials(
                         onChanged: onChanged,
                       );
                       if (id == null || !context.mounted) return;
-                      final next = await credentials.list();
+                      final next = await speechEntries();
                       if (context.mounted) {
                         setState(() {
                           current = next;
@@ -184,10 +229,7 @@ Future<String?> _editCredential(
 }) async {
   String t(String zh, String en) => language == 'zh' ? zh : en;
   final fixed = endpoint != null || existing != null;
-  final presets = [
-    for (final p in modelPresets) (p.label(language), p.endpoint),
-    ..._speechServices,
-  ];
+  final presets = [..._speechServices];
   final url = TextEditingController(
     text: endpoint ?? existing?.endpoint ?? presets.first.$2,
   );
@@ -369,5 +411,32 @@ Future<String?> _editCredential(
   } finally {
     url.dispose();
     key.dispose();
+  }
+}
+
+/// Uses the caller's captured Space store and projection callback. Saving a key
+/// can never select an API model or disable a ChatGPT account.
+class _CredentialBackend extends LocalModelSettingsBackend {
+  _CredentialBackend(super.settings, this.credentials, this.onChanged)
+    : super(credentialsOnly: true);
+  final ProviderCredentials credentials;
+  final Future<void> Function(String)? onChanged;
+
+  @override
+  Future<void> saveCredential(ModelSettingsInput input) async {
+    final existing = await credentials.resolve(input.endpoint);
+    final saved = await credentials.save(
+      id: existing?.id,
+      endpoint: input.endpoint,
+      key: input.newKey,
+      protocol: input.protocol,
+    );
+    await onChanged?.call(saved.id);
+  }
+
+  @override
+  Future<void> deleteProvider(String id) async {
+    await credentials.delete(id);
+    await onChanged?.call(id);
   }
 }

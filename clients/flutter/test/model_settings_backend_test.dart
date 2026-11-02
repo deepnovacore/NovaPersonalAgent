@@ -33,7 +33,10 @@ void main() {
     final settings = ModelSettings(native: native);
     final backend = LocalModelSettingsBackend(settings);
     final initial = await backend.load();
-    expect(initial.providerId, 'openrouter');
+    expect(initial.providerId, isNull);
+    expect(initial.providers, isEmpty);
+    expect(initial.allowKeyEntry, isFalse);
+    expect(initial.customEndpoint, isFalse);
     expect(initial.model, 'openai/gpt-4.1-mini');
     expect(
       await backend.hasCredential(initial.providerId, initial.endpoint),
@@ -53,7 +56,11 @@ void main() {
     expect(view.endpoint, 'https://example.com/v1/responses');
     expect(view.model, 'first-model');
     expect(view.protocol, ModelProtocol.responses);
-    expect(view.providerId, isNull);
+    expect(
+      view.providerId,
+      (await settings.credentials.resolve(view.endpoint))!.id,
+    );
+    expect(view.providers.single.endpoint, view.endpoint);
     expect(await backend.hasCredential(null, view.endpoint), true);
     expect(
       await backend.hasCredential(null, 'https://other.example/v1'),

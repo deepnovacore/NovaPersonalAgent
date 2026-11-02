@@ -63,6 +63,18 @@ Nova checks device identity, foreground context and geometry before and after ap
 
 For Android with real models, run `node runtime/scripts/accept-mobile-android.mjs ENV_FILE PRIVATE_MODEL_JSON ADB_SERIAL INSTRUCTION OUTPUT_JSON`. This submits text through the production Nova frontend and `host.dispatch`, then uses the real mobile executor, host approval controller, Midscene and ADB. Enter `accept` for each reviewed action; other input declines a pending action. When no action is pending, input is sent to Nova as a follow-up. The private model JSON has `baseUrl`, `model`, `modelFamily` and `apiKey`. The report includes dispatch, approvals and terminal evidence; independently inspect the phone for the requested UI result. This does not test the desktop UI, physical microphone or speaker.
 
+## 手机端模型与密钥配置
+
+Standalone 模式的 Flutter Android/iOS 客户端在 **设置 → 配置密钥** 统一管理服务密钥：
+选择服务商卡片、打开获取密钥链接、填写密钥，再列出模型并测试连接／工具调用能力。
+测试成功只保存密钥，**不会自动切换当前对话模型或 ChatGPT 登录模式**；已保存的密钥不会回显。
+不支持对话测试的语音接口使用同页的「语音专用密钥」，语音设置仍可直接编辑其服务密钥。
+
+**设置 → 模型服务** 只负责对话模型、信息整理和语音服务的选择。
+对话／信息整理从已配置的服务中选择模型；列不出模型时可以手填模型名。
+模型选择页的「配置密钥」链接打开同一个密钥管理页，不再提供另一套密钥录入表单。
+服务密钥仍保存在当前 Space 的本机安全存储中，无需迁移；Client/Host 配置流程不变。
+
 ## Android 原生虚拟屏（手机操作）
 
 This is separate from `mobile.run` above. In the Android Flutter client's standalone Space, Nova can use apps on the phone itself, on a private virtual screen, while the user keeps using the main screen. No computer, root or Play distribution is involved: the APK is sideloaded, and Nova borrows Android's own Wireless debugging once to start a small helper. Hub/client mode and iOS are unchanged. The wire contract, security invariants and failure codes are in [`docs/specs/mobile-virtual-display.md`](../specs/mobile-virtual-display.md).

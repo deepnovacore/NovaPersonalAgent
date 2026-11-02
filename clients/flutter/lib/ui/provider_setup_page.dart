@@ -375,18 +375,14 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
             note = copy.probeNote(result);
         }
       }
-      if (selected != null) {
-        await backend.save(_input(selected, key));
-      } else {
-        await backend.saveCredential(_input('', key));
-      }
+      await backend.saveCredential(_input(selected ?? '', key));
       checkFresh();
       await _refreshSaved();
       if (!mounted) return;
-      if (selected != null && note == null) {
-        Navigator.of(context).pop();
-        return;
-      }
+      note ??= copy.t(
+        '密钥已保存，当前模型未更改。请在模型设置中选择要使用的模型。',
+        'Key saved. Your current model is unchanged. Choose a model in model settings.',
+      );
       setState(() {
         _test = _Test.idle;
         _note = note;
@@ -668,7 +664,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
                         await _refreshKeyStatus();
                       }
                     },
-                    child: Text(copy.manageCredentials),
+                    child: Text(copy.t('语音专用密钥', 'Speech-only credentials')),
                   ),
                 ),
               ),
@@ -807,13 +803,12 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   ModelListResult? _listing;
   String? _message;
   var _busy = false;
-  late ModelSettingsView _view = widget.view;
+  late final ModelSettingsView _view = widget.view;
 
   ProviderSetupCopy get _copy => ProviderSetupCopy(widget.language);
   ModelPreset? get _preset => ModelPreset.forEndpoint(widget.provider.endpoint);
   ModelProtocol? _declared;
-  ModelProtocol get _protocol =>
-      _isCurrent ? _view.protocol : _declared ?? widget.provider.protocol;
+  ModelProtocol get _protocol => _declared ?? widget.provider.protocol;
   bool get _isCurrent {
     try {
       return ProviderCredentials.scopeForEndpoint(widget.provider.endpoint) ==
@@ -875,50 +870,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     ];
   }
 
-  Future<void> _use(ModelOption option) async {
-    final copy = _copy;
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    String? message;
-    try {
-      final result = await widget.backend.probe(_input(option.id));
-      message = _probeProblem(result, option.id);
-      if (message == null) {
-        await widget.backend.save(_input(option.id));
-        _view = await widget.backend.load();
-      }
-    } catch (_) {
-      message = copy.actionFailed;
-    }
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _message = message;
-    });
-  }
-
-  /// What to tell the user when [model] did not pass the tool-call test; null
-  /// when it did.
-  String? _probeProblem(ProbeResult result, String model) => switch (result) {
-    ProbeToolCalled() => null,
-    ProbeNoToolCall() => _copy.probeFailed(
-      ProbeFailure(ProbeProblem.noTools, model),
-      example: '',
-    ),
-    ProbeFailed(:final error) => _copy.probeFailed(
-      classifyProbeFailure(error, model),
-      example: _copy.exampleModel(
-        _preset?.providerKind ?? ProviderKind.openAiCompat,
-      ),
-    ),
-  };
-
-  /// A custom endpoint's API cannot be told from its address, so it can be
-  /// declared again here (records saved before the API was stored read as
-  /// Chat Completions). The model in use must pass the test with the new API
-  /// before it is switched; otherwise only the stored declaration changes.
+  /// Changes the stored provider declaration, never the selected model route.
   Future<void> _setProtocol(ModelProtocol protocol) async {
     if (_busy || protocol == _protocol) return;
     final copy = _copy;
@@ -928,20 +880,8 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
     });
     String? message;
     try {
-      if (_isCurrent) {
-        final model = _view.model;
-        final result = await widget.backend.probe(
-          _input(model, protocol: protocol),
-        );
-        message = _probeProblem(result, model);
-        if (message == null) {
-          await widget.backend.save(_input(model, protocol: protocol));
-          _view = await widget.backend.load();
-        }
-      } else {
-        await widget.backend.saveCredential(_input('', protocol: protocol));
-        _declared = protocol;
-      }
+      await widget.backend.saveCredential(_input('', protocol: protocol));
+      _declared = protocol;
     } catch (_) {
       message = copy.actionFailed;
     }
@@ -956,7 +896,7 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
   Future<void> _chooseModel(ModelOption option) async {
     if (_busy) return;
     final copy = _copy;
-    final use = await showModalBottomSheet<bool>(
+    await showModalBottomSheet<void>(
       context: context,
       builder: (context) => SafeArea(
         child: Padding(
@@ -969,17 +909,17 @@ class _ProviderDetailPageState extends State<ProviderDetailPage> {
               const SizedBox(height: 8),
               _Tags(option: option, copy: copy),
               const SizedBox(height: 16),
-              FilledButton(
-                key: const ValueKey('provider.model.use'),
-                onPressed: () => Navigator.pop(context, true),
-                child: Text(copy.useForChat),
+              Text(
+                copy.t(
+                  '这里只查看模型能力；请在模型设置中选择使用。',
+                  'Model capabilities only. Choose a model in model settings.',
+                ),
               ),
             ],
           ),
         ),
       ),
     );
-    if (use == true && mounted) await _use(option);
   }
 
   /// Lists and probes with [key] before it replaces the stored one, so a

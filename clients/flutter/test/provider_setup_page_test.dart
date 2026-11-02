@@ -10,7 +10,6 @@ import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/model_presets.dart';
 import 'package:nova_mobile/agent_core/model_probe.dart';
 import 'package:nova_mobile/settings/model_settings_backend.dart';
-import 'package:nova_mobile/ui/model_settings_editor.dart';
 import 'package:nova_mobile/ui/provider_setup_copy.dart';
 import 'package:nova_mobile/ui/provider_setup_page.dart';
 import 'package:nova_mobile/ui/theme.dart';
@@ -128,9 +127,10 @@ Future<void> _open(
       home: Scaffold(
         body: Builder(
           builder: (context) => TextButton(
-            onPressed: () => showModelSettingsEditor(
+            onPressed: () async => showProviderSetupPage(
               context,
               backend,
+              await backend.load(),
               language: language,
               onChatGpt: onChatGpt,
               onManageCredentials: onManageCredentials,
@@ -165,13 +165,13 @@ bool _enabled(WidgetTester tester) =>
     tester.widget<FilledButton>(_key('provider.test')).onPressed != null;
 
 void main() {
-  testWidgets('a device-owned model editor opens the full page, not a dialog', (
+  testWidgets('credential setup opens the full page, not a dialog', (
     tester,
   ) async {
     await _open(tester, _Backend());
     expect(find.byType(ProviderSetupPage), findsOneWidget);
     expect(find.byType(AlertDialog), findsNothing);
-    expect(find.text('配置模型'), findsOneWidget);
+    expect(find.text('配置密钥'), findsOneWidget);
     expect(find.text('填 API Key'), findsOneWidget);
     // Chips are tiled with Wrap, one per preset plus Custom.
     final wrap = find.ancestor(
@@ -282,36 +282,36 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets(
-    'Test and save lists, probes the best candidate and saves it, key included',
-    (tester) async {
-      final backend = _Backend()
-        ..lister = (_) => ModelListOk([
-          _m('other-model', tools: true),
-          _m('deepseek-chat'),
-          _m('deepseek-v3.1'),
-        ]);
-      await _open(tester, backend);
-      await _chip(tester, 'deepseek');
-      expect(_enabled(tester), isFalse);
-      await _type(tester, 'provider.key', ' sk-deep ');
-      expect(_enabled(tester), isTrue);
-      await _test(tester);
-      expect(backend.listCalls.single.endpoint, 'https://api.deepseek.com');
-      expect(backend.listCalls.single.newKey, 'sk-deep');
-      expect(backend.probeCalls.map((i) => i.model), ['deepseek-v3.1']);
-      expect(backend.saves, hasLength(1));
-      final saved = backend.saves.single;
-      expect(saved.providerId, 'deepseek');
-      expect(saved.endpoint, 'https://api.deepseek.com');
-      expect(saved.model, 'deepseek-v3.1');
-      expect(saved.newKey, 'sk-deep');
-      expect(saved.protocol, ModelProtocol.chatCompletions);
-      expect(backend.credentialSaves, isEmpty);
-      // A clean pass closes the page.
-      expect(find.byType(ProviderSetupPage), findsNothing);
-    },
-  );
+  testWidgets('Test and save validates the key without switching the model', (
+    tester,
+  ) async {
+    final backend = _Backend()
+      ..lister = (_) => ModelListOk([
+        _m('other-model', tools: true),
+        _m('deepseek-chat'),
+        _m('deepseek-v3.1'),
+      ]);
+    await _open(tester, backend);
+    await _chip(tester, 'deepseek');
+    expect(_enabled(tester), isFalse);
+    await _type(tester, 'provider.key', ' sk-deep ');
+    expect(_enabled(tester), isTrue);
+    await _test(tester);
+    expect(backend.listCalls.single.endpoint, 'https://api.deepseek.com');
+    expect(backend.listCalls.single.newKey, 'sk-deep');
+    expect(backend.probeCalls.map((i) => i.model), ['deepseek-v3.1']);
+    expect(backend.saves, isEmpty);
+    final saved = backend.credentialSaves.single;
+    expect(saved.providerId, 'deepseek');
+    expect(saved.endpoint, 'https://api.deepseek.com');
+    expect(saved.model, 'deepseek-v3.1');
+    expect(saved.newKey, 'sk-deep');
+    expect(saved.protocol, ModelProtocol.chatCompletions);
+    expect(backend.model, 'openai/gpt-4.1-mini');
+    expect(backend.endpoint, _openRouter);
+    expect(find.byType(ProviderSetupPage), findsOneWidget);
+    expect(find.textContaining('当前模型未更改'), findsOneWidget);
+  });
 
   testWidgets(
     'switching provider clears a typed key and swaps the model hint',
@@ -328,7 +328,7 @@ void main() {
   );
 
   testWidgets(
-    'a rejected first model is reported and the next one becomes the model',
+    'a rejected first model is reported without changing the selected model',
     (tester) async {
       final backend = _Backend()
         ..lister = ((_) => ModelListOk([_m('deepseek-v4'), _m('deepseek-v3')]))
@@ -343,11 +343,11 @@ void main() {
         'deepseek-v4',
         'deepseek-v3',
       ]);
-      expect(backend.saves.single.model, 'deepseek-v3');
+      expect(backend.credentialSaves.single.model, 'deepseek-v3');
       // The note explains the fallback, so the page stays.
       expect(find.byType(ProviderSetupPage), findsOneWidget);
       expect(find.textContaining('deepseek-v4 没测试通过'), findsOneWidget);
-      expect(find.textContaining('主模型用了测试通过的「deepseek-v3」'), findsOneWidget);
+      expect(find.textContaining('「deepseek-v3」测试通过，密钥已保存'), findsOneWidget);
       expect(find.byKey(const ValueKey('provider.saved.id-0')), findsOneWidget);
     },
   );
@@ -520,8 +520,8 @@ void main() {
     await _type(tester, 'provider.model', 'my-model');
     await _test(tester);
     expect(backend.probeCalls.map((i) => i.model), ['my-model']);
-    expect(backend.saves.single.model, 'my-model');
-    expect(backend.saves.single.newKey, 'sk');
+    expect(backend.credentialSaves.single.model, 'my-model');
+    expect(backend.credentialSaves.single.newKey, 'sk');
   });
 
   testWidgets(
@@ -558,7 +558,7 @@ void main() {
     expect(_enabled(tester), isTrue);
     await _test(tester);
     expect(backend.probeCalls.single.model, 'ep-123');
-    expect(backend.saves.single.model, 'ep-123');
+    expect(backend.credentialSaves.single.model, 'ep-123');
   });
 
   testWidgets('a probe failure for a missing model names the example', (
@@ -700,8 +700,11 @@ void main() {
     expect(find.text('本地服务可不填'), findsOneWidget);
     expect(_enabled(tester), isTrue);
     await _test(tester);
-    expect(backend.saves.single.endpoint, 'http://127.0.0.1:11434/v1');
-    expect(backend.saves.single.newKey, keylessServiceKey);
+    expect(
+      backend.credentialSaves.single.endpoint,
+      'http://127.0.0.1:11434/v1',
+    );
+    expect(backend.credentialSaves.single.newKey, keylessServiceKey);
   });
 
   testWidgets('a plain-http network address is flagged and not testable', (
@@ -847,32 +850,20 @@ void main() {
       expect(_key('provider.noListNote'), findsOneWidget);
     });
 
-    testWidgets('using a listed model probes it first, then selects it', (
+    testWidgets('credential model details cannot switch the selected model', (
       tester,
     ) async {
       final backend = withProviders();
       await _open(tester, backend);
-      await tester.tap(find.byKey(const ValueKey('provider.saved.b')));
+      await tester.tap(_key('provider.saved.b'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('provider.model.m-1')));
+      await tester.tap(_key('provider.model.m-1'));
       await tester.pumpAndSettle();
-      await tester.tap(_key('provider.model.use'));
-      await tester.pumpAndSettle();
-      expect(backend.probeCalls.single.model, 'm-1');
-      expect(
-        backend.probeCalls.single.endpoint,
-        'https://api.groq.com/openai/v1',
-      );
-      expect(backend.saves.single.model, 'm-1');
-      expect(find.text('正在使用'), findsOneWidget);
-
-      backend.prober = (_) => const ProbeNoToolCall();
-      await tester.tap(find.byKey(const ValueKey('provider.model.m-2')));
-      await tester.pumpAndSettle();
-      await tester.tap(_key('provider.model.use'));
-      await tester.pumpAndSettle();
-      expect(backend.saves, hasLength(1));
-      expect(find.textContaining('m-2 没有调用工具'), findsOneWidget);
+      expect(_key('provider.model.use'), findsNothing);
+      expect(find.textContaining('这里只查看模型能力'), findsOneWidget);
+      expect(backend.probeCalls, isEmpty);
+      expect(backend.saves, isEmpty);
+      expect(backend.model, 'deepseek-chat');
     });
 
     testWidgets('a custom Responses provider keeps its protocol', (
@@ -897,10 +888,8 @@ void main() {
       expect(backend.listCalls.last.protocol, ModelProtocol.responses);
       await tester.tap(find.byKey(const ValueKey('provider.model.m-1')));
       await tester.pumpAndSettle();
-      await tester.tap(_key('provider.model.use'));
-      await tester.pumpAndSettle();
-      expect(backend.probeCalls.single.protocol, ModelProtocol.responses);
-      expect(backend.saves.single.protocol, ModelProtocol.responses);
+      expect(_key('provider.model.use'), findsNothing);
+      expect(backend.saves, isEmpty);
     });
 
     testWidgets('changing the key stores it without choosing a model', (
@@ -1107,45 +1096,39 @@ void main() {
       expect(backend.listCalls.last.protocol, ModelProtocol.responses);
       await tester.tap(find.byKey(const ValueKey('provider.model.m-1')));
       await tester.pumpAndSettle();
-      await tester.tap(_key('provider.model.use'));
-      await tester.pumpAndSettle();
-      expect(backend.probeCalls.single.protocol, ModelProtocol.responses);
-      expect(backend.saves.single.protocol, ModelProtocol.responses);
-    });
-
-    testWidgets('the provider in use is switched only if its model passes', (
-      tester,
-    ) async {
-      final backend = _Backend(
-        endpoint: 'https://relay.example/v1',
-        model: 'relay-model',
-        saved: [
-          const SavedProvider(
-            id: 'c',
-            endpoint: 'https://relay.example/v1',
-            label: 'relay.example',
-          ),
-        ],
-        keyed: {'https://relay.example/v1'},
-      )..lister = ((_) => ModelListOk([_m('relay-model')]));
-      await _open(tester, backend);
-      await tester.tap(find.byKey(const ValueKey('provider.saved.c')));
-      await tester.pumpAndSettle();
-      backend.prober = (_) => const ProbeNoToolCall();
-      await tester.tap(_key('provider.protocol.responses'));
-      await tester.pumpAndSettle();
-      expect(backend.probeCalls.single.model, 'relay-model');
-      expect(backend.probeCalls.single.protocol, ModelProtocol.responses);
+      expect(_key('provider.model.use'), findsNothing);
       expect(backend.saves, isEmpty);
-      expect(backend.credentialSaves, isEmpty);
-      expect(find.textContaining('relay-model 没有调用工具'), findsOneWidget);
-
-      backend.prober = (_) => const ProbeToolCalled();
-      await tester.tap(_key('provider.protocol.responses'));
-      await tester.pumpAndSettle();
-      expect(backend.saves.single.protocol, ModelProtocol.responses);
-      expect(backend.saves.single.model, 'relay-model');
     });
+
+    testWidgets(
+      'editing the active provider protocol leaves the model route unchanged',
+      (tester) async {
+        final backend = _Backend(
+          endpoint: 'https://relay.example/v1',
+          model: 'relay-model',
+          saved: [
+            const SavedProvider(
+              id: 'c',
+              endpoint: 'https://relay.example/v1',
+              label: 'Relay',
+            ),
+          ],
+          keyed: {'https://relay.example/v1'},
+        )..lister = ((_) => ModelListOk([_m('relay-model')]));
+        await _open(tester, backend);
+        await tester.tap(_key('provider.saved.c'));
+        await tester.pumpAndSettle();
+        await tester.tap(_key('provider.protocol.responses'));
+        await tester.pumpAndSettle();
+        expect(
+          backend.credentialSaves.single.protocol,
+          ModelProtocol.responses,
+        );
+        expect(backend.saves, isEmpty);
+        expect(backend.model, 'relay-model');
+        expect(backend.listCalls.last.protocol, ModelProtocol.responses);
+      },
+    );
 
     testWidgets('a preset has no protocol choice', (tester) async {
       await _open(tester, withProviders());

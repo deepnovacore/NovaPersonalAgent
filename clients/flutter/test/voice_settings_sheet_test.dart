@@ -478,7 +478,7 @@ void main() {
     expect(find.text('Model'), findsOneWidget);
     expect(find.text('Voice'), findsOneWidget);
     expect(find.text('API key'), findsNothing);
-    expect(find.text('Configure in Model provider'), findsOneWidget);
+    expect(find.text('Configure keys'), findsOneWidget);
     expect(find.text('Standalone voice'), findsOneWidget);
     expect(find.text('WSS endpoint'), findsNothing);
     expect(find.text('高级：分步处理'), findsNothing);

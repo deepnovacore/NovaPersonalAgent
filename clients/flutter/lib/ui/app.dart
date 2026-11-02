@@ -1027,11 +1027,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       builder: (context) => ListView(
         padding: const EdgeInsets.fromLTRB(4, 20, 4, 28),
         children: [
-          _settingGroup(
-            context,
-            _t('对话', 'Conversation'),
-            conversationSettingsRows(language),
-          ),
+          _settingGroup(context, _t('对话', 'Conversation'), [
+            ...conversationSettingsRows(language),
+            ('credentials', _t('配置密钥', 'Configure keys'), CupertinoIcons.lock),
+          ]),
           _settingGroup(context, _t('更多', 'More'), [
             ('connectors', _t('连接器', 'Connectors'), CupertinoIcons.link),
             (
@@ -1072,6 +1071,15 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         }
       case 'connectors':
         await _openConnectors();
+      case 'credentials':
+        final settings = agentCore?.settings ?? ModelSettings();
+        await showProviderCredentials(
+          context,
+          settings.credentials,
+          modelSettings: settings,
+          language: language,
+          onChanged: settings.refreshApiKeyProjection,
+        );
       case 'model_services':
         await _modelServices();
       case 'devices':
@@ -1145,11 +1153,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                         _t('语音服务', 'Voice services'),
                         CupertinoIcons.mic,
                       ),
-                      (
-                        'credentials',
-                        _t('服务密钥', 'Provider credentials'),
-                        CupertinoIcons.lock,
-                      ),
                     ],
                     subtitles: {
                       'support_model': support == null
@@ -1174,13 +1177,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                             profileGeneration?.wake();
                           case 'voice':
                             await _voiceSettings();
-                          case 'credentials':
-                            await showProviderCredentials(
-                              context,
-                              settings.credentials,
-                              language: language,
-                              onChanged: settings.refreshApiKeyProjection,
-                            );
                         }
                         final next = await settings.readSupportDraft();
                         if (context.mounted) update(() => support = next);

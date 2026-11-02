@@ -34,9 +34,8 @@ class ModelSettingsView {
   final bool allowKeyEntry;
   final String? notice, securityText, followLabel;
 
-  /// The device owns the key and the model: the full provider setup page
-  /// applies. Host-driven lanes and the follow-the-chat-model lane keep the
-  /// compact editor.
+  /// Whether this view supports provider setup in the credential manager.
+  /// Model editors do not route here automatically.
   bool get supportsProviderSetup =>
       allowKeyEntry &&
       customEndpoint &&
@@ -110,20 +109,58 @@ abstract class ModelSettingsBackend {
 }
 
 class LocalModelSettingsBackend extends ModelSettingsBackend {
-  LocalModelSettingsBackend(this.settings, {this.support = false});
+  LocalModelSettingsBackend(
+    this.settings, {
+    this.support = false,
+    this.credentialsOnly = false,
+  });
   final ModelSettings settings;
-  final bool support;
+  final bool support, credentialsOnly;
   Map<String, dynamic>? _supportDraft;
 
   @override
   Future<ModelSettingsView> load() async {
     _supportDraft = support ? await settings.readSupportDraft() : null;
     final draft = _supportDraft ?? const <String, dynamic>{};
-    final current = support ? null : await settings.read();
+    final current = support
+        ? null
+        : credentialsOnly
+        ? await settings.readApiKey()
+        : await settings.read();
     final endpoint = support ? draft['endpoint'] as String? : current?.endpoint;
     final address = endpoint ?? ModelPreset.byId('openrouter')!.endpoint;
+    final saved = await savedProviders();
+    final selected = saved
+        .where(
+          (p) =>
+              ProviderCredentials.scopeForEndpoint(p.endpoint) ==
+              ProviderCredentials.scopeForEndpoint(address),
+        )
+        .firstOrNull;
     return ModelSettingsView(
-      providerId: ModelPreset.forEndpoint(address)?.id,
+      providerId: credentialsOnly
+          ? ModelPreset.forEndpoint(address)?.id
+          : selected?.id,
+      providers: credentialsOnly
+          ? modelPresets
+          : [
+              for (final p in saved)
+                ModelPreset(
+                  id: p.id,
+                  name: p.labelFor('zh'),
+                  nameEn: p.labelFor('en'),
+                  endpoint: p.endpoint,
+                  protocol: p.protocol,
+                  recommendedModels:
+                      ModelPreset.forEndpoint(p.endpoint)?.recommendedModels ??
+                      const [],
+                  keyUrl: '',
+                  sessionHeader: ModelPreset.forEndpoint(
+                    p.endpoint,
+                  )?.sessionHeader,
+                ),
+            ],
+      customEndpoint: credentialsOnly,
       endpoint: address,
       model:
           (support ? draft['model'] as String? : current?.model) ??
@@ -135,7 +172,7 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
           : current?.protocol ?? ModelProtocol.chatCompletions,
       canFollow: support,
       following: support && _supportDraft == null,
-      allowKeyEntry: !support,
+      allowKeyEntry: credentialsOnly,
     );
   }
 
@@ -155,6 +192,7 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
 
   @override
   Future<void> save(ModelSettingsInput input) async {
+    if (credentialsOnly) throw UnsupportedError('model selection');
     if (!support) {
       await settings.save(
         endpoint: input.endpoint,

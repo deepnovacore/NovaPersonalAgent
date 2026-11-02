@@ -167,7 +167,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
                 (error.code == 'invalid_voice_settings' ||
                     error.code == 'invalid_model_settings')
             ? t(
-                '请检查服务地址和模型，并到模型服务配置密钥。地址须使用 HTTPS/WSS（本机开发地址除外），不能含查询参数、账号或片段。',
+                '请检查服务地址和模型，并到「配置密钥」检查密钥。地址须使用 HTTPS/WSS（本机开发地址除外），不能含查询参数、账号或片段。',
                 'Check the service address and model, and configure credentials in Model provider. Use HTTPS/WSS (except local development), without query parameters, account information or fragments.',
               )
             : t(
@@ -307,6 +307,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
                     final id = await showProviderCredentials(
                       context,
                       widget.settings.credentials,
+                      modelSettings: widget.settings.modelSettings,
                       endpoint: endpoint,
                       credentialId: credentialId,
                       language: widget.language,
@@ -330,7 +331,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
                     }
                   }
                 },
-          child: Text(t('去模型服务配置', 'Configure in Model provider')),
+          child: Text(t('配置密钥', 'Configure keys')),
         ),
       ],
     ),
@@ -661,7 +662,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
         const SizedBox(height: 12),
         Text(
           t(
-            '服务地址已切换为官方地址。旧地址保存的密钥不会沿用，请到模型服务配置密钥。',
+            '服务地址已切换为官方地址。旧地址保存的密钥不会沿用，请到「配置密钥」配置该服务。',
             'The service address was switched to the official endpoint. Keys saved for the old address are not reused; configure credentials in Model provider.',
           ),
           style: Theme.of(context).textTheme.bodySmall,
@@ -855,7 +856,7 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
             ] else ...[
               Text(
                 t(
-                  '手机直连所选服务，密钥统一在模型服务中配置。',
+                  '手机直连所选服务，密钥统一在「配置密钥」中管理。',
                   'Connects directly to the selected service. Manage credentials in Model provider.',
                 ),
               ),

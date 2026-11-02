@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent/local_agent.dart';
 import 'package:nova_mobile/ui/local_tasks.dart';
-import 'support/fake_model_http.dart';
 
 class TestAgent implements LocalAgent {
   String phase = 'verifying';
@@ -114,11 +113,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('模型设置'));
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('provider.key')),
-      'test-only-key',
-    );
-    await tester.pageBack();
+    await tester.enterText(find.byType(TextField), 'test-model');
+    await tester.tap(find.text('取消'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(tester.takeException(), isNull);
@@ -130,7 +126,10 @@ void main() {
     tester,
   ) async {
     final agent = TestAgent();
-    final http = installModelHttp();
+    await ModelSettings(native: agent).credentials.save(
+      endpoint: 'https://api.deepseek.com',
+      key: 'test-only-key',
+    );
     tester.view.physicalSize = const Size(800, 2600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -139,27 +138,15 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('模型设置'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('provider.chip.deepseek')));
-    await tester.pumpAndSettle();
     expect(find.text('接口地址'), findsNothing);
-    await tester.enterText(
-      find.byKey(const ValueKey('provider.key')),
-      'test-only-key',
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('provider.test')));
-    await tester.pump();
-    // DeepSeek lists no models here, so the page asks for a model name.
-    await http.lists.single.complete(tester, []);
-    await tester.enterText(
-      find.byKey(const ValueKey('provider.model')),
-      'test-model',
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('provider.test')));
-    await tester.pump();
-    await http.lists.last.complete(tester, []);
-    await http.probes.single.callTool(tester);
+    expect(find.byKey(const ValueKey('provider.key')), findsNothing);
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'test-model');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
     final shared = await ModelSettings(native: agent).read();
     expect(shared!.endpoint, 'https://api.deepseek.com');
     expect(shared.model, 'test-model');

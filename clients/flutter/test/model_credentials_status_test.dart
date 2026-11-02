@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
-import 'package:nova_mobile/conversation/local_chat_panel.dart';
+import 'package:nova_mobile/ui/provider_credentials_sheet.dart';
 
 void main() {
   testWidgets(
@@ -23,7 +23,8 @@ void main() {
           home: Scaffold(
             body: Builder(
               builder: (context) => TextButton(
-                onPressed: () => showLocalModelSettings(context, settings),
+                onPressed: () =>
+                    showProviderCredentials(context, settings.credentials),
                 child: const Text('Open'),
               ),
             ),

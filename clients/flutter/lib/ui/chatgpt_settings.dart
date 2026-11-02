@@ -178,10 +178,11 @@ Future<void> showChatGptSettings(
                             await showProviderCredentials(
                               context,
                               settings.credentials,
+                              modelSettings: settings,
                               onChanged: settings.refreshApiKeyProjection,
                             );
                           }),
-                    child: const Text('管理服务密钥'),
+                    child: const Text('配置密钥'),
                   ),
                   const SizedBox(height: 8),
                   FilledButton(

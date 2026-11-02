@@ -6,7 +6,6 @@ import '../agent_core/model_presets.dart';
 import '../settings/model_settings_backend.dart';
 import 'local_dialog.dart';
 import 'provider_credentials_sheet.dart';
-import 'provider_setup_page.dart';
 import 'theme.dart';
 
 /// One presentation for local secure storage and paired Host model settings.
@@ -20,21 +19,8 @@ Future<void> showModelSettingsEditor(
   Future<bool> Function(BuildContext)? onChatGpt,
 }) async {
   String t(String zh, String en) => language == 'zh' ? zh : en;
-  final view = await backend.load();
+  var view = await backend.load();
   if (!context.mounted) return;
-  if (view.supportsProviderSetup) {
-    // Device-owned keys get the full setup page; Host lanes and the
-    // follow-the-chat-model lane keep the compact dialog below.
-    return showProviderSetupPage(
-      context,
-      backend,
-      view,
-      language: language,
-      title: title,
-      onManageCredentials: onManageCredentials,
-      onChatGpt: onChatGpt,
-    );
-  }
   final endpoint = TextEditingController(text: view.endpoint);
   final model = TextEditingController(text: view.model);
   final key = TextEditingController();
@@ -218,7 +204,7 @@ Future<void> showModelSettingsEditor(
               title ??
                   (view.canFollow
                       ? t('信息整理', 'Information processing')
-                      : t('模型服务', 'Model provider')),
+                      : t('对话模型', 'Conversation model')),
             ),
             content: SingleChildScrollView(
               child: Column(
@@ -240,7 +226,19 @@ Future<void> showModelSettingsEditor(
                               try {
                                 await onManageCredentials(context);
                                 if (context.mounted) {
+                                  final next = await backend.load();
+                                  if (!context.mounted) return;
                                   setState(() {
+                                    view = next;
+                                    preset = findProvider(providerId);
+                                    if (preset == null &&
+                                        !view.customEndpoint) {
+                                      providerId = view.providerId;
+                                      preset = findProvider(providerId);
+                                      endpoint.text = view.endpoint;
+                                      model.text = view.model;
+                                      protocol = view.protocol;
+                                    }
                                     invalidateModels();
                                     savedCredential = resolveSavedCredential();
                                   });
@@ -256,7 +254,7 @@ Future<void> showModelSettingsEditor(
                                 }
                               }
                             },
-                      child: Text(t('管理服务密钥', 'Manage provider credentials')),
+                      child: Text(t('配置密钥', 'Configure keys')),
                     ),
                   if (onChatGpt != null)
                     TextButton(
@@ -322,6 +320,7 @@ Future<void> showModelSettingsEditor(
                     ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
+                    key: ValueKey(providerId),
                     initialValue:
                         providerId ??
                         (view.customEndpoint ? 'custom' : 'unconfigured'),
@@ -387,7 +386,7 @@ Future<void> showModelSettingsEditor(
                         ),
                       ),
                     if (view.allowKeyEntry) keyField,
-                    if (preset!.keyUrl.isNotEmpty)
+                    if (view.allowKeyEntry && preset!.keyUrl.isNotEmpty)
                       Align(
                         alignment: Alignment.centerLeft,
                         child: TextButton(

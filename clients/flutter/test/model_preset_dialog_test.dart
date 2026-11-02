@@ -7,6 +7,7 @@ import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/conversation/local_chat_panel.dart';
 import 'package:nova_mobile/ui/provider_setup_page.dart';
+import 'package:nova_mobile/ui/provider_credentials_sheet.dart';
 import 'package:nova_mobile/ui/theme.dart';
 
 import 'support/fake_model_http.dart';
@@ -61,8 +62,9 @@ Future<void> _open(
       home: Scaffold(
         body: Builder(
           builder: (context) => TextButton(
-            onPressed: () =>
-                showLocalModelSettings(context, models, support: support),
+            onPressed: () => support
+                ? showLocalModelSettings(context, models, support: true)
+                : showProviderCredentials(context, models.credentials),
             child: const Text('Open'),
           ),
         ),
@@ -143,12 +145,12 @@ void main() {
     await _test(tester);
     await http.lists.single.complete(tester, ['openai/gpt-4.1-mini']);
     await http.probes.single.callTool(tester);
-    expect(models.last, {
-      'endpoint': 'https://openrouter.ai/api/v1',
-      'model': 'openai/gpt-4.1-mini',
-      'key': 'sk-1',
-      'protocol': ModelProtocol.chatCompletions,
-    });
+    expect(models.last, isNull);
+    expect(
+      (await models.credentials.resolve('https://openrouter.ai/api/v1'))!.key,
+      'sk-1',
+    );
+    expect(await models.readApiKey(), isNull);
   });
 
   testWidgets('choosing another preset swaps endpoint and recommended model', (
@@ -171,9 +173,12 @@ void main() {
     await http.lists.last.complete(tester, []);
     expect(http.probes.single.headers.values['Authorization'], 'Bearer sk-2');
     await http.probes.single.callTool(tester);
-    expect(models.last?['endpoint'], 'https://api.deepseek.com');
-    expect(models.last?['model'], 'deepseek-flash');
-    expect(models.last?['key'], 'sk-2');
+    expect(models.last, isNull);
+    expect(
+      (await models.credentials.resolve('https://api.deepseek.com'))!.key,
+      'sk-2',
+    );
+    expect(await models.readApiKey(), isNull);
   });
 
   testWidgets('custom keeps the free-form fields and a blank key', (
@@ -200,11 +205,12 @@ void main() {
     expect(http.lists.single.headers.values['Authorization'], 'Bearer saved');
     await http.lists.single.complete(tester, ['m']);
     await http.probes.single.callTool(tester);
+    expect(models.last, isNull);
     expect(
-      models.last?['endpoint'],
+      (await models.readApiKey())!.endpoint,
       'https://model.example/v1/chat/completions',
     );
-    expect(models.last?['key'], '');
+    expect((await models.readApiKey())!.key, 'saved');
   });
 
   testWidgets('a saved preset endpoint reopens on that preset unchanged', (
@@ -236,10 +242,11 @@ void main() {
     await http.probes.single.callTool(tester);
     // Endpoint text is preserved so the stored key is still retained.
     expect(
-      models.last?['endpoint'],
+      (await models.readApiKey())!.endpoint,
       'https://api.deepseek.com/chat/completions',
     );
-    expect(models.last?['model'], 'deepseek-reasoner');
+    expect((await models.readApiKey())!.model, 'deepseek-reasoner');
+    expect(models.last, isNull);
   });
 
   testWidgets('switching provider clears an explicitly entered key', (
@@ -300,8 +307,9 @@ void main() {
         'Bearer saved-key',
       );
       await http.probes.single.callTool(tester);
-      expect(models.last?['model'], 'public-model');
-      expect(models.last?['endpoint'], 'https://model.example/v1');
+      expect(models.last, isNull);
+      expect((await models.readApiKey())!.model, 'm');
+      expect((await models.readApiKey())!.endpoint, 'https://model.example/v1');
     },
   );
 
@@ -370,8 +378,12 @@ void main() {
       expect(find.textContaining('API Key 无效或没有权限'), findsNothing);
       expect(find.text('stale-model'), findsNothing);
       await http.probes.single.callTool(tester);
-      expect(models.last?['model'], 'current-model');
-      expect(models.last?['key'], 'second-key');
+      expect(models.last, isNull);
+      expect(
+        (await models.credentials.resolve('https://openrouter.ai/api/v1'))!.key,
+        'second-key',
+      );
+      expect(await models.readApiKey(), isNull);
     });
   }
 

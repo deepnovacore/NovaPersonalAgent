@@ -12,7 +12,7 @@ class ProviderSetupCopy {
   String t(String zh, String en) => language == 'zh' ? zh : en;
 
   // Pages and groups.
-  String get setupTitle => t('配置模型', 'Set up a model');
+  String get setupTitle => t('配置密钥', 'Configure keys');
   String get providers => t('服务商', 'Providers');
   String get addProvider => t('添加服务商', 'Add a provider');
   String get accountGroup => t('用账号登录 · 不用填 Key', 'Sign in · no key needed');
@@ -45,8 +45,8 @@ class ProviderSetupCopy {
   String get testAndSave => t('测试并保存', 'Test and save');
   String get testing => t('正在测试…', 'Testing…');
   String get testNote => t(
-    '先列出这家的模型，再让其中一个调用一次工具。通过的会被选为对话模型。只要有模型回应过、但没有一个通过，就只保存 Key；一个模型都没有回应（连不上、Key 不对、地址不对、模型都用不了）则什么都不保存。',
-    'Lists this provider’s models, then asks one to call a tool once. A model that does is selected for chat. If at least one model answered but none passed, only the key is saved. If no model answered (cannot connect, key rejected, wrong address, no usable model), nothing is saved.',
+    '先列出这家的模型，再让其中一个调用一次工具。测试仅用于验证密钥，不会切换当前模型。只要有模型回应过、但没有一个通过，就只保存 Key；一个模型都没有回应（连不上、Key 不对、地址不对、模型都用不了）则什么都不保存。',
+    'Lists this provider’s models, then asks one to call a tool once. Testing validates the key without switching your current model. If at least one model answered but none passed, only the key is saved. If no model answered (cannot connect, key rejected, wrong address, no usable model), nothing is saved.',
   );
   String get manualOn => t('手动填写模型名', 'Enter a model name');
   String get manualOff => t('不填模型名', 'Don’t enter a model name');
@@ -211,8 +211,8 @@ class ProviderSetupCopy {
     final first = done.rejected.first;
     if (done.main != null) {
       return t(
-        '先试的 $names 没测试通过：${rejectionReason(first)}。主模型用了测试通过的「${done.main}」。',
-        '$names did not pass first: ${rejectionReason(first)}. Using “${done.main}”, which passed.',
+        '先试的 $names 没测试通过：${rejectionReason(first)}。「${done.main}」测试通过，密钥已保存，当前模型未更改。',
+        '$names did not pass first: ${rejectionReason(first)}. “${done.main}” passed. The key is saved; the current model is unchanged.',
       );
     }
     final head = t(
@@ -259,16 +259,16 @@ class ProviderSetupCopy {
   String viewAll(int n) => t('查看全部 $n 个', 'View all $n');
   String allModelsTitle(String name) => t('$name · 全部模型', '$name · all models');
   String get modelsNote => t(
-    '标签是服务商给的信息，只作参考；点一个模型可以拿它当对话模型。',
-    'Tags come from the provider and are for reference. Tap a model to use it for chat.',
+    '标签是服务商给的信息，只作参考；使用哪个模型请到模型设置中选择。',
+    'Tags come from the provider and are for reference. Choose a model in model settings.',
   );
   String truncatedNote(int n) => t(
     '只显示了前 $n 个模型，这家列出的比这更多。',
     'Only the first $n models are shown; this provider lists more.',
   );
   String get noListNote => t(
-    '这家不提供模型列表。要用它的模型，回到「添加服务商」手填模型名。',
-    'This provider offers no model list. To use one of its models, add it again and enter the model name.',
+    '这家不提供模型列表。请在模型设置中手填模型名。',
+    'This provider offers no model list. Enter a model name in model settings.',
   );
   String get useForChat => t('用作对话模型', 'Use as chat model');
   String get delete => t('删除这个服务商', 'Delete this provider');

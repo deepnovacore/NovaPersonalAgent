@@ -14,7 +14,7 @@ import 'support/fake_audio.dart';
 
 void main() {
   testWidgets(
-    'model hub keeps its four entries when returning from each detail',
+    'model hub separates model selection from the settings credential entry',
     (tester) async {
       SharedPreferences.setMockInitialValues({'language': 'en'});
       FlutterSecureStorage.setMockInitialValues({});
@@ -48,12 +48,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Background model'), findsNothing);
       expect(find.text('Voice settings'), findsNothing);
+      expect(find.text('Configure keys'), findsOneWidget);
       await tester.tap(find.text('Model services'));
       await tester.pumpAndSettle();
       expect(find.text('Conversation model'), findsOneWidget);
       expect(find.text('Information processing'), findsOneWidget);
       expect(find.text('Voice services'), findsOneWidget);
-      expect(find.text('Provider credentials'), findsOneWidget);
+      expect(find.text('Provider credentials'), findsNothing);
+      expect(find.text('Configure keys'), findsNothing);
       expect(find.text('Separate model · organizer'), findsOneWidget);
       await tester.tap(find.text('Information processing'));
       await tester.pumpAndSettle();
@@ -61,21 +63,10 @@ void main() {
       await tester.tap(find.text('Follow chat model'));
       await tester.pumpAndSettle();
       expect(find.text('Follow chat model'), findsOneWidget);
-      for (final entry in [
-        'Conversation model',
-        'Voice services',
-        'Provider credentials',
-      ]) {
+      for (final entry in ['Conversation model', 'Voice services']) {
         await tester.tap(find.text(entry));
         await tester.pumpAndSettle();
-        if (entry == 'Conversation model') {
-          // The provider setup page is a full page, not a dialog.
-          await tester.pageBack();
-        } else {
-          await tester.tap(
-            find.text(entry == 'Provider credentials' ? 'Done' : 'Cancel'),
-          );
-        }
+        await tester.tap(find.text('Cancel'));
         await tester.pumpAndSettle();
         expect(find.text('Model services'), findsOneWidget);
         expect(find.text('Information processing'), findsOneWidget);
@@ -84,6 +75,15 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
       expect(find.text('Me'), findsOneWidget);
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Configure keys'));
+      await tester.pumpAndSettle();
+      expect(find.text('Configure keys'), findsOneWidget);
+      expect(find.text('Providers'), findsOneWidget);
+      expect(find.text('hidden-key'), findsNothing);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
     },
   );

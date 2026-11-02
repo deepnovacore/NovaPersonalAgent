@@ -517,7 +517,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('模型设置'));
       await tester.pumpAndSettle();
-      await tester.pageBack();
+      await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(host.busy, false);

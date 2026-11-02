@@ -44,6 +44,7 @@ Future<void> showLocalModelSettings(
       await showProviderCredentials(
         context,
         settings.credentials,
+        modelSettings: settings,
         language: language,
         onChanged: settings.refreshApiKeyProjection,
       );
