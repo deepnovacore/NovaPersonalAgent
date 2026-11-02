@@ -1,3 +1,4 @@
+import {FULL_MEMORY_TOOLS, memoryToolsFor, type MemoryToolCapabilities} from '../memory/tool-capabilities.js'
 import {createWorkbenchGenerator} from '../model/workbench-writer.js'
 import {observeOperation} from '../usage/context.js'
 import {proposeGoals,type GoalProposerInput} from '../model/goal-writer.js'
@@ -78,6 +79,7 @@ export class AssemblyError extends Error {
 }
 
 export interface AssemblyOptions {
+  readonly memoryTools?: MemoryToolCapabilities
   readonly taskHost?: boolean
   readonly includeSchedules?: boolean
   readonly includeSpaceMobile?:boolean
@@ -112,6 +114,7 @@ export interface AssemblyOptions {
 }
 
 export interface Assembly {
+  readonly memoryTools: MemoryToolCapabilities
   readonly taskVerifier?: Pick<GatewayTaskVerifier, 'evaluateTask'>
   readonly settings: Settings
   readonly personalAgentConfig?: {
@@ -400,7 +403,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       || !descriptor.ownedChannels.some(channel => (options.executors ?? []).some(adapter => adapter.manifest.name === channel && adapter.manifest.roles.includes('coding')))),
     ...(cameraModuleEnabled ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
-  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeSpaceMobile:(options.includeSpaceMobile===true||!!process.env.NOVA_SPACE_HOST_CONFIG)&&options.scheduledContext!==true&&options.sourceProcessingContext!==true,includeMemoryRecall: true, includeExplicitMemory: options.scheduledContext!==true&&options.sourceProcessingContext!==true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true})
+  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeSpaceMobile:(options.includeSpaceMobile===true||!!process.env.NOVA_SPACE_HOST_CONFIG)&&options.scheduledContext!==true&&options.sourceProcessingContext!==true,memory: memoryToolsFor(options.memoryTools ?? FULL_MEMORY_TOOLS, {scheduled: options.scheduledContext === true, sourceProcessing: options.sourceProcessingContext === true}), agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true})
 
   const proactive = new GatewayProactivity({
     gateway: supportGateway,
@@ -514,6 +517,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     compressorGateway,
     watchGateway,
     tools,
+    memoryTools: options.memoryTools ?? FULL_MEMORY_TOOLS,
     manifests,
     mediaStore,
     frameSource,

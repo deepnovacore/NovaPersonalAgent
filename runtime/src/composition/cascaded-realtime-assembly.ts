@@ -1,3 +1,4 @@
+import {configuredPrerecallMeta, retrievalPrerecall} from '../memory/prerecall-port.js'
 import {SglangNativeDuplexAdapter} from '../realtime/sglang-native.js'
 import {ResponsesModelGateway} from '../model/responses-model-gateway.js'
 import {createCompatibleAsrFactory,createCompatibleTtsFactory} from '../realtime/cascaded/openai-compatible-speech.js'
@@ -46,6 +47,8 @@ import {unconfiguredModelGateway, OpenAIModelGateway, type ModelGateway} from '.
 import {stripLikePython} from '../text/python-text.js'
 import {
   composeRealtime,
+  configuredMemoryConsumer,
+  plannedMemoryTools,
   validateCodingResource,
   filterDisabledCoding,
   defaultIntake,
@@ -62,7 +65,7 @@ import {
   type TtsClient,
   type TtsFactory,
 } from '../realtime/cascaded/ports.js'
-import {CascadedRealtimeAdapter,CascadedRealtimeError} from '../realtime/cascaded/adapter.js'
+import {CascadedRealtimeAdapter,CascadedRealtimeError,type CascadedRealtimeAdapterOptions} from '../realtime/cascaded/adapter.js'
 import {CascadedRealtimeProvider} from '../realtime/cascaded/provider.js'
 import {createQwenCascadedLlmFactory} from '../realtime/cascaded/qwen-llm.js'
 import {frontendInstructions} from '../realtime/frontend-instructions.js'
@@ -127,6 +130,7 @@ export interface BuildCascadedRealtimeAssemblyOptions
     | 'preemptiveAlertHistoryRecovery'
     | 'preemptiveAlertHistoryPairs'
   > {
+  readonly prerecallPolicy?: CascadedRealtimeAdapterOptions['prerecallPolicy']
   readonly registries?: CascadedProviderRegistries
   readonly supportGateway?: ModelGateway
   readonly endpointingCapability?: EndpointingCapabilityFactory
@@ -271,7 +275,8 @@ export function buildTextRealtimeAssembly(
     ?registry.llm.qwen({...common,config:selected.config,...(options.qwenLlmFactory===undefined?{}:{factory:options.qwenLlmFactory})})
     :registry.llm.ark({...common,config:selected.config,...(options.arkLlmFactory===undefined?{}:{factory:options.arkLlmFactory})})
   const support=supportComposition(options,selected.provider,selected.config.model,selected.config.apiKey,selected.config.baseUrl,clock)
-  const core=buildAssembly({...options,settings:support.settings,clock,ids,gateway:support.gateway,...((options.executors===undefined&&options.codexResource===undefined)?{}:{executors:[...(options.executors??[]),...(options.codexResource===undefined?[]:[options.codexResource.adapter])]})})
+  const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
+  const core=buildAssembly({...options,memoryTools:options.memoryTools??plannedMemoryTools({...options,...(createPersonalMemory?{createPersonalMemory}:{})}),settings:support.settings,clock,ids,gateway:support.gateway,...((options.executors===undefined&&options.codexResource===undefined)?{}:{executors:[...(options.executors??[]),...(options.codexResource===undefined?[]:[options.codexResource.adapter])]})})
   const provider=Object.assign(new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,llm:llmFactory.open(),llmFactory,idFactory:()=>ids.next('text'),
     ...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),
   }),{
@@ -283,7 +288,6 @@ export function buildTextRealtimeAssembly(
     },
   })
   const intake=options.intake??defaultIntake(core,core.gateway,core.settings)
-  const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
   const composition=composeRealtime(core,provider,{...options,memoryReadMode:'text',...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
   return composition
 }
@@ -364,6 +368,7 @@ export function buildCascadedRealtimeAssembly(
   )
   const core = buildAssembly({
     ...options,
+    memoryTools: options.memoryTools ?? plannedMemoryTools({...options, ...(createPersonalMemory ? {createPersonalMemory} : {})}),
     settings: support.settings,
     clock,
     ids,
@@ -372,7 +377,11 @@ export function buildCascadedRealtimeAssembly(
       ? {}
       : {executors: [...(options.executors ?? []), ...(options.codexResource === undefined ? [] : [options.codexResource.adapter])]}),
   })
+  let graphRef: RealtimeAssembly | undefined = undefined
+  const consumer = configuredMemoryConsumer(options.settings, 'voice') ?? ''
   const provider = new CascadedRealtimeProvider({
+    ...(options.settings.memory_prerecall_enabled ? {prerecall: retrievalPrerecall(() => graphRef?.retrieval, () => graphRef?.memoryConsumerFingerprint ?? consumer), prerecallMeta: configuredPrerecallMeta(options.settings)} : {}),
+    ...(options.prerecallPolicy ? {prerecallPolicy: options.prerecallPolicy} : {}),
     language: options.settings.language,
     endpointingFactory,
     asrFactory,
@@ -392,6 +401,7 @@ export function buildCascadedRealtimeAssembly(
     preemptiveAlertHistoryRecovery: 'none',
     preemptiveAlertHistoryPairs: 4,
   })
+  graphRef = composition
   return composition
 }
 
@@ -590,6 +600,7 @@ export function buildQwenRealtimeAssembly(
   })
   const core = buildAssembly({
     ...options,
+    memoryTools: options.memoryTools ?? plannedMemoryTools({...options, ...(createPersonalMemory ? {createPersonalMemory} : {})}),
     settings: options.settings,
     clock,
     ids,

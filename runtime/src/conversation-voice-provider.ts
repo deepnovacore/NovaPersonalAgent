@@ -30,6 +30,8 @@ export function buildCascadedVoiceProvider(options:ConversationVoiceProviderOpti
     ...(options.captureFrame===undefined?{}:{captureFrame:options.captureFrame}),
     ...(options.prerecall===undefined?{}:{prerecall:options.prerecall}),
     ...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),
+    ...(options.prerecallPolicy===undefined?{}:{prerecallPolicy:options.prerecallPolicy}),
+    ...(options.prerecallMeta===undefined?{}:{prerecallMeta:options.prerecallMeta}),
   })
 }
 

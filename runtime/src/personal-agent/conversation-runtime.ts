@@ -1,3 +1,4 @@
+import {personalMemoryFactory} from '../memory/factory.js'
 const VOICE_CONTEXT_MESSAGES=12
 import {bindUsageReporter} from '../realtime/usage.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
@@ -21,14 +22,15 @@ import {CodingTargetController} from './coding-targets.js'
 import {ProjectResolutionError, type ProjectExecutorAdapter} from '../executors/coding-executor.js'
 import {projectExecutorEvent,type ExecutorProgress,type ExecutorResult} from '../desktop/desktop-progress.js'
 import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-config.js'
-import {prerecallContext} from '../memory/prerecall.js'
+import {configuredPrerecallMeta, retrievalPrerecall} from '../memory/prerecall-port.js'
+import {resolveMemoryToolCapabilities} from '../memory/tool-capabilities.js'
 import {ProjectConfirmationController} from '../projects/project-confirmation.js'
 import {buildConversationVoiceProvider} from '../conversation-voice-provider.js'
 import {realtimeCapabilities} from '../realtime/capabilities.js'
 import {randomUUID} from 'node:crypto'
 import {createHash} from 'node:crypto'
 import {buildAssembly,type AssemblyOptions} from '../composition/assembly.js'
-import {buildRealtimeAssembly,configuredMemoryConsumer,configuredTaskVerifierConsumer,defaultIntake,type RealtimeAssemblyOptions} from '../composition/realtime-assembly.js'
+import {plannedMemoryTools,buildRealtimeAssembly,configuredMemoryConsumer,configuredTaskVerifierConsumer,defaultIntake,type RealtimeAssemblyOptions} from '../composition/realtime-assembly.js'
 import {buildCascadedTextProvider} from '../cascaded-text-provider.js'
 import {configuredTextLlm} from '../cascaded-text-provider.js'
 import {BUILD_LLM_TRANSPORT,PLAN_LLM_TRANSPORT} from '../realtime/cascaded/llm-stream-limits.js'
@@ -132,7 +134,9 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   if(recovery){if(!options.blackboard)throw Error('task_blackboard_unavailable');try{await access(options.blackboard.path+'.conversation-'+suffix)}catch{throw Error('task_blackboard_unavailable')}}
   const usageContext:UsageContext={feature:processing?'source_processing':execution?'scheduled':mode==='voice'?'voice':'conversation',conversationId:conversation.id,...(execution?{runId:execution.run_id,taskId:execution.fence.task_id,trigger:'scheduled' as const}:{trigger:'manual' as const})}
   const onUsage=bindUsageReporter(options.onUsage,usageContext)
-  const core=buildAssembly({...options,...(onUsage?{onUsage}:{}),...(options.gateway?{gateway:gatewayWithUsage(options.gateway,usageContext)}:{}),taskHost:!execution,includeSpaceMobile:options.host.spaceHostStatus().mode==='host',includeSchedules:!execution,scheduledContext:!!execution,sourceProcessingContext:!!processing,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
+  const createPersonalMemory=personalMemoryFactory(options.settings)
+  const memoryTools=options.memoryTools??resolveMemoryToolCapabilities(options.memory(),plannedMemoryTools({...options,...(createPersonalMemory?{createPersonalMemory}:{})}))
+  const core=buildAssembly({...options,memoryTools,...(onUsage?{onUsage}:{}),...(options.gateway?{gateway:gatewayWithUsage(options.gateway,usageContext)}:{}),taskHost:!execution,includeSpaceMobile:options.host.spaceHostStatus().mode==='host',includeSchedules:!execution,scheduledContext:!!execution,sourceProcessingContext:!!processing,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
    ...(options.blackboard?{blackboard:{...options.blackboard,path:options.blackboard.path+'.conversation-'+suffix}}:{}),
    ids:{next:namespace=>namespace+'-'+randomUUID()},
    ...(options.codexResource?{executors:[...(options.executors??[]),options.codexResource.adapter],agentDescriptors:[...(options.agentDescriptors??[]),...(options.codexResource.agentDescriptor?[options.codexResource.agentDescriptor]:[])]}:{}),
@@ -144,7 +148,8 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const broker=options.executorApproval??options.codexResource?.approvalController
   const approval=broker?scopeApprovalController(broker,view=>!!view.work&&core.runtime.inFlightDelegate(view.work.work_id)!==undefined):undefined
   const unsubscribeApproval=approval?.observe(view=>{options.host.recordTaskApproval(conversation.id,conversation.generation,view);notifyWaiting();if(view.work)void options.host.rememberWorkOwner(view.work.work_id,conversation.id,view.pending_approval_id).catch(()=>{ /* durable projection retried on work event */ });const identity=view.executorIdentity??{executor:options.codexResource?.adapter.manifest.name??'agent',display_name:options.codexResource?.adapter.manifest.display_name??'Agent'};emit(JSON.parse(executorApprovalMessage(view,core.runtime.clock.now(),identity)) as Record<string,unknown>)})
-   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,chatToolPolicy:chatMode,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&mode==='text'&&options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await graph.retrieval.recall(query,{scope:'any',limit:3,signal,consumer:memoryConsumerFingerprint??''});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await graph.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();return prerecallContext(query,current)}}}:{})})
+  let graphRef: ReturnType<typeof buildRealtimeAssembly> | undefined = undefined
+   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,chatToolPolicy:chatMode,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&options.settings.memory_prerecall_enabled?{prerecall:retrievalPrerecall(()=>graphRef?.retrieval,()=>memoryConsumerFingerprint??''),prerecallMeta:configuredPrerecallMeta(settings)}:{})})
   if(provider.capabilities)emit({type:'conversation.capabilities',conversation_id:conversation.id,conversation_generation:conversation.generation,mode,capabilities:provider.capabilities})
   let pending:{resolve:(result:{assistant:string;turn_id?:string})=>void;reject:(error:unknown)=>void}|undefined
   const textOnly=mode==='text'
@@ -304,6 +309,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     }
    },
   })
+  graphRef=graph
   const bindScheduledTools=()=>{if(execution&&scheduledScope)scheduledTools=new ScheduledToolRuntime({host:options.host,grant:execution,scope:scheduledScope,tools:core.tools,retrieval:graph.retrieval,session:()=>graph.service.session,
    readonlyOperation:(executor,op)=>core.runtime.executors.get(executor)?.manifest.ops.some(operation=>operation.name===op&&operation.readonly)===true,
    dispatch:(binding,args)=>{const grant=options.host.tasks.continuationContext(execution!.fence);return core.runtime.dispatchTaskExternal({executor:binding.executor!,op:binding.op!,request:args,origin_ref:grant.origin_ref},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant)},

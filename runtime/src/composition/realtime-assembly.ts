@@ -1,3 +1,4 @@
+import {deriveMemoryToolCapabilities, planMemoryToolCapabilities, useLocalLedger} from '../memory/tool-capabilities.js'
 import {readHostSpaceConfig,loadSpaceHostController} from '../space-host/config.js'
 import type {UsageContext} from '../usage/context.js'
 import {soulRoleContext} from './soul-context.js'
@@ -291,6 +292,7 @@ type CleanupResult =
  * lower-level classes expose individually idempotent methods.
  */
 export class RealtimeAssembly {
+  readonly memoryConsumerFingerprint: string | undefined
   readonly personalAgent: PersonalAgentHost
   readonly retrieval:UnifiedRetrieval
   get personalMemory(): PersonalMemoryResource|undefined { return this.#personalMemory }
@@ -320,6 +322,7 @@ export class RealtimeAssembly {
   readonly #personalMemoryTurnTracker: PersonalMemoryTurnTracker
   readonly #idFactory: () => string
   readonly #unbindSuggestionSelected: (() => void) | undefined
+  readonly #onPersonalMemoryOpened: (resource: PersonalMemoryResource | undefined) => void
   readonly #createPersonalMemory: (() => PersonalMemoryResource) | undefined
   #knowledgeBinding:Promise<void>|undefined
   #bindKnowledge:(()=>Promise<void>)|undefined
@@ -370,6 +373,7 @@ export class RealtimeAssembly {
   readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
   readonly toolGate?: (name:string)=>boolean
   readonly onTool?: (event:{name:string;state:'running'|'ok'|'error';summary:string})=>void
+    readonly onPersonalMemoryOpened: (resource: PersonalMemoryResource | undefined) => void
     readonly personalMemory?: PersonalMemoryResource
     readonly spaceHostConfigPath?:string
     readonly spaceHostEnvironment?:NodeJS.ProcessEnv
@@ -378,6 +382,7 @@ export class RealtimeAssembly {
     readonly personalMemoryTurnTracker: PersonalMemoryTurnTracker
   }) {
     const lifecycleProjectAdapter = input.sharedPersonal ? undefined : input.projectAdapter
+    this.memoryConsumerFingerprint = input.memoryConsumerFingerprint
     this.core = input.core
     this.capabilityStatus = capabilityStatus(input.core.capabilities, input.toolCount ?? input.core.tools.schemas.length)
     this.provider = input.provider
@@ -433,6 +438,7 @@ export class RealtimeAssembly {
     })
     this.#personalMemory = input.personalMemory
     if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) {this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) });this.#personalMemory.setOnSourceChange(change=>this.personalAgent.sourceChanged(change))}
+    this.#onPersonalMemoryOpened = input.onPersonalMemoryOpened
     this.#createPersonalMemory = input.createPersonalMemory
     this.#personalMemoryTurnTracker = input.personalMemoryTurnTracker
     this.#unsubscribeProjectView = lifecycleProjectAdapter === undefined
@@ -795,13 +801,13 @@ export class RealtimeAssembly {
   }
 
   async #openPersonalMemory(): Promise<void> {
-    if (this.#sharedPersonal) return
+    if (this.#sharedPersonal) {this.#onPersonalMemoryOpened(this.#personalMemory);return}
     try {
       if (this.#personalMemory === undefined && this.#createPersonalMemory !== undefined) {
         this.#personalMemory = this.#createPersonalMemory()
         if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) {this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) });this.#personalMemory.setOnSourceChange(change=>this.personalAgent.sourceChanged(change))}
       }
-      if (this.#personalMemory === undefined) return
+      if (this.#personalMemory === undefined) {this.#onPersonalMemoryOpened(undefined);return}
       // Cold SDK/Worker initialization needs the full memory RPC deadline, not shutdown grace.
       const opened = await this.#settleWithinGrace(
         this.#personalMemory.open({deferBackground:true}),
@@ -810,6 +816,7 @@ export class RealtimeAssembly {
       )
       if (opened.kind === 'rejected') throw opened.error
       if (opened.kind === 'abandoned') throw new AssemblyError('personal memory open was abandoned')
+      this.#onPersonalMemoryOpened(this.#personalMemory)
       if(this.core.knowledge){
         const memory=this.#personalMemory
         if(memory?.recordEvidence&&memory.readEvidence&&memory.forgetSource){
@@ -1217,7 +1224,17 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   )
   const personalMemory = options.sharedPersonal ? options.sharedPersonal.memory : options.createPersonalMemory?.()
   personalMemoryHolder.current = personalMemory
+  const reportedMemoryMismatches = new Set<string>()
   return assignAssembly(new RealtimeAssembly({
+    onPersonalMemoryOpened: resource => {
+      const caps = deriveMemoryToolCapabilities(resource, core.memoryTools.engine)
+      for (const tool of ['recall', 'evidence', 'lookup', 'remember'] as const) {
+        const name = `memory__${tool}`
+        if (caps[tool] || reportedMemoryMismatches.has(name) || !providerSchemas.some(schema => (schema.function as {name?: string} | undefined)?.name === name)) continue
+        reportedMemoryMismatches.add(name)
+        try { options.telemetry?.record('memory.capability.mismatch', {tool: name, engine: caps.engine}) } catch { /* telemetry cannot own resource readiness */ }
+      }
+    },
     ...(options.spaceHostConfigPath?{spaceHostConfigPath:options.spaceHostConfigPath}:{}),
     toolCount: count,
     core,
@@ -1453,6 +1470,14 @@ export function filterDisabledCoding<T extends AssemblyOptions & Pick<RealtimeAs
 /** Local extraction and Profile share one explicitly configured model transport. */
 export const createLocalMemoryGateway=(options:OpenAIGatewayOptions)=>new OpenAIModelGateway({...options,...(options.baseUrl==='https://dashscope.aliyuncs.com/compatible-mode/v1'?{thinkingControl:'qwen' as const}:{})})
 
+/** Resolve the same Space override before tool compilation and resource composition. */
+export function plannedMemoryTools(options: Pick<AssemblyOptions, 'settings' | 'knowledge'> & Pick<RealtimeAssemblyOptions, 'createPersonalMemory' | 'spaceHostConfigPath'>) {
+  const spaceConfigPath = options.spaceHostConfigPath ?? process.env.NOVA_SPACE_HOST_CONFIG
+  const spaceConfig = spaceConfigPath ? readHostSpaceConfig(memoryPath(spaceConfigPath)) : undefined
+  return planMemoryToolCapabilities({settings: options.settings, knowledge: options.knowledge !== undefined,
+    createPersonalMemory: options.createPersonalMemory, ...(spaceConfig ? {spaceConfig} : {})})
+}
+
 /** Shared production wiring; provider policy remains at each pipeline boundary. */
 export function composeRealtime(
   core: Assembly,
@@ -1469,8 +1494,8 @@ export function composeRealtime(
   const extraction=local?.extraction??(()=>{const connection=resolveMemoryExtractionConnection(options.settings);return {baseUrl:connection.baseUrl,apiKey:connection.apiKey}})()
   const memoryGateway=local?(extraction.apiKey.trim()?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),...extraction,clock:new RealClock()}):unconfiguredModelGateway):core.gateway
   const isolatedSpace=spaceConfig!==undefined&&spaceConfig.data_mode!=='existing'
-  const useLocalLedger=isolatedSpace||local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
-  const createPersonalMemory = useLocalLedger ? () => {
+  const localLedger = useLocalLedger({knowledge: core.knowledge !== undefined, createPersonalMemory: options.createPersonalMemory, ...(spaceConfig ? {spaceConfig} : {})})
+  const createPersonalMemory = localLedger ? () => {
     const memory = new SubstrateMemoryResource({client:getClient(),userId:(spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space)??local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?resolveEmbeddingConnection(options.settings).baseUrl:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       sourceProcessingLlm:extraction,

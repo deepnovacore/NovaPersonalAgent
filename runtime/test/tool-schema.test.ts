@@ -271,3 +271,36 @@ test('hidden executors fold into descriptor-driven host tools while keeping thei
   assert.equal(bare.bindings.has('dispatch'), false)
   assert.equal(bare.hidden.size, 0)
 })
+
+import {FULL_MEMORY_TOOLS, NO_MEMORY_TOOLS, memoryToolsFor} from '../src/memory/tool-capabilities.js'
+
+test('ledger default compiled schemas are byte-identical to explicit FULL capabilities and legacy booleans', () => {
+  const legacy = compileToolSchema([], {includeMemoryRecall: true, includeExplicitMemory: true})
+  const full = compileToolSchema([], {memory: FULL_MEMORY_TOOLS})
+  assert.equal(JSON.stringify(legacy.schemas), JSON.stringify(full.schemas))
+  assert.equal(JSON.stringify([...legacy.bindings]), JSON.stringify([...full.bindings]))
+  assert.deepEqual([...full.bindings.keys()].filter(name => name.startsWith('memory__')), ['memory__remember', 'memory__lookup', 'memory__recall', 'memory__evidence'])
+  assert.equal(compileToolSchema([]).bindings.has('memory__recall'), false)
+})
+
+test('mem0 and remote caps offer recall only without source_filter or IM clauses', () => {
+  for (const engine of ['mem0', 'remote'] as const) {
+    const tools = compileToolSchema([], {memory: {...NO_MEMORY_TOOLS, recall: true, engine}})
+    assert.deepEqual([...tools.bindings.keys()].filter(name => name.startsWith('memory__')), ['memory__recall'])
+    const schema = JSON.stringify(tools.schemas.find(schema => (schema.function as {name: string}).name === 'memory__recall'))
+    assert.doesNotMatch(schema, /source_filter|飞书|feishu|IM/u)
+    assert.match(schema, /仅返回简短记忆片段，无原文引用。/u)
+  }
+})
+
+test('evidence requires recall, remember description requires lookup, and scheduled/source-processing masks explicit tools', () => {
+  assert.equal(compileToolSchema([], {memory: {...FULL_MEMORY_TOOLS, evidence: false}}).bindings.has('memory__evidence'), false)
+  assert.equal(compileToolSchema([], {memory: {...FULL_MEMORY_TOOLS, recall: false}}).bindings.has('memory__evidence'), false)
+  const withoutLookup = compileToolSchema([], {memory: {...FULL_MEMORY_TOOLS, lookup: false}})
+  assert.doesNotMatch(JSON.stringify(withoutLookup.schemas), /memory__lookup/u)
+  for (const mode of [{scheduled: true, sourceProcessing: false}, {scheduled: false, sourceProcessing: true}]) {
+    const tools = compileToolSchema([], {memory: memoryToolsFor(FULL_MEMORY_TOOLS, mode)})
+    assert.deepEqual([...tools.bindings.keys()].filter(name => name.startsWith('memory__')), ['memory__recall', 'memory__evidence'])
+  }
+  assert.deepEqual(compileToolSchema([], {includeExplicitMemory: true}).schemas, compileToolSchema([], {memory: {...FULL_MEMORY_TOOLS, recall: false, evidence: false}}).schemas)
+})
