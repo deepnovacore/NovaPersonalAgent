@@ -20,6 +20,13 @@ export function timelineRevisionId(priorId:string|undefined,refs:readonly string
  const candidates=priorCards.filter(card=>card.evidence_ids?.some(id=>refs.includes(id)))
  return candidates.length===1?candidates[0]!.id:undefined
 }
+/** How long a source recheck may run before the cards are shown as being checked. */
+const CHECKING_GRACE_MS=4000
+/** Scheduled synthesis is batched by events, not polled. */
+const TIMELINE_BATCH_INPUTS=20
+const TIMELINE_BATCH_SPACING_MS=10*60_000
+const TIMELINE_DAY_SPACING_MS=30*60_000
+const TIMELINE_IDLE_SPACING_MS=4*3600_000
 const MESSAGE_KINDS=new Set(['im','mail','calendar'])
 export const TIMELINE_MAX_REFS=16
 const ref=z.string().min(1).max(600)
@@ -87,7 +94,7 @@ export class TimelineBrief {
  #persisted:State=empty()
  #loadFailed=false
  get loadFailed(){return this.#loadFailed}
- #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
+ #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#suspendedAt=0;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
  constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void,options?:{readonly cache?:TimelineCachePort}){this.#store=new BoundedJsonStore(path,stateSchema);this.#cache=options?.cache}
  async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}
   if(this.#dropDuplicates())await this.#save()
@@ -100,7 +107,9 @@ export class TimelineBrief {
  retainedEvidenceIds(){return [...new Set(this.#state.cards.filter(card=>!this.#dismissed(card)).flatMap(card=>card.refs))]}
  basis(id?:string){return structuredClone([...new Map(this.#visibleCards().filter(card=>(!id||card.id===id)&&this.#sourcesAvailable(card)).flatMap(card=>(card.evidence_basis??this.#state.basis).filter(input=>card.refs.includes(input.id))).map(input=>[input.id,input])).values()])}
  async clear(){this.#abort.abort();await this.#run;this.#abort=new AbortController();this.#state=empty();this.#inputs=[];await this.#save();this.#loadFailed=false;this.changed()}
- suspend(){this.#pendingValidation=true;this.changed()}
+ suspend(){if(!this.#pendingValidation)this.#suspendedAt=Date.now();this.#pendingValidation=true;this.changed()}
+ /** A recheck that finishes within the grace window is invisible; only a slow one shows the checking state, so source events do not make cards and their buttons blink. */
+ #checking(){return this.#pendingValidation&&Date.now()-this.#suspendedAt>CHECKING_GRACE_MS}
  invalidate(){this.update([],this.#date,this.#timezone,this.#access?{...this.#access,legacy_refs:[]}:{scope:'local',allowed:true,legacy_refs:[]})}
  unavailable(){this.invalidate();this.#status='failed';this.#error='timeline_sources_unavailable';this.changed()}
  #key(){return hash(['timeline-scope-v15',this.#date,this.#timezone,this.#inputs.map(({id,version})=>({id,version}))])}
@@ -114,8 +123,8 @@ export class TimelineBrief {
   this.#access={...access,legacy_refs:[...access.legacy_refs]}
  }
  #dismissed(card:State['cards'][number],state=this.#state){return state.dismissed.includes(`${card.artifact_scope??''}:${card.id}`)||!card.artifact_scope&&state.dismissed.includes(card.id)}
- #sourcesAvailable(card:State['cards'][number],state=this.#state){
-  if(this.#pendingValidation)return false
+ #sourcesAvailable(card:State['cards'][number],state=this.#state,duringRecheck=false){
+  if(this.#pendingValidation&&!duringRecheck)return false
   const inputs=new Map(this.#inputs.map(input=>[input.id,input])),basis=new Map((card.evidence_basis??state.basis).map(input=>[input.id,input.version]))
   // A message's version also covers permission bookkeeping (source fence, grant revision), which changes on pause, resume and rescan
   // without the message changing; presence is the proof for messages. Files and memories keep the exact-version check.
@@ -154,7 +163,7 @@ export class TimelineBrief {
  #current(state=this.#state){return this.#visibleCards(state).length>0||state.perspective_revision===1&&!this.#pendingValidation&&state.key===this.#key()}
  snapshot(persisted=false){
   const state=persisted?this.#persisted:this.#state,counts={messages:0,files:0,memories:0},dates:string[]=[];for(const input of this.#inputs){if(input.kind==='file')counts.files++;else if(input.kind==='memory')counts.memories++;else{counts.messages++;if(Number.isFinite(Date.parse(input.observed_at)))dates.push(new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:this.#timezone}))}}dates.sort()
-  const cards=structuredClone(this.#visibleCards(state).map(card=>({...card,sources_available:this.#sourcesAvailable(card,state),sources_checking:this.#pendingValidation,historical:card.policy_revision!==1||!this.#sourcesAvailable(card,state)})))
+  const cards=structuredClone(this.#visibleCards(state).map(card=>({...card,sources_available:this.#sourcesAvailable(card,state,!this.#checking()),sources_checking:this.#checking(),historical:card.policy_revision!==1||!this.#sourcesAvailable(card,state,!this.#checking())})))
   const activeCount=cards.filter(card=>card.sources_available).length
   return {generation_id:this.#current(state)?state.key:null,diagnostics:this.#current(state)?structuredClone(state.diagnostics):null,available:!!this.generate,status:this.#status,error:this.#error,updated_at:this.#current(state)?state.updated_at:null,input_count:this.#inputs.length,coverage:`本轮资料：${counts.messages} 条消息 · ${counts.files} 份文档 · ${counts.memories} 条个人记录${dates.length?'；消息记录 '+dates[0]+'—'+dates.at(-1):''}`,cards,
    /** Active cards still have their original evidence; archived cards are retained history whose sources moved or were withdrawn. */
@@ -179,7 +188,29 @@ export class TimelineBrief {
  #schedule(){
   clearTimeout(this.#timer);this.#timer=undefined
   if(!this.#access?.allowed||this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.some(input=>!input.history_only)||this.#key()===this.#state.checkpoint.generation&&this.#state.perspective_revision===1)return
-  this.#timer=setTimeout(()=>{this.#timer=undefined;void this.refresh({force:false})},Math.max(1000,this.#state.last_attempt+300000-Date.now()));this.#timer.unref()
+  const delay=this.#scheduleDelay();if(delay===undefined)return
+  this.#timer=setTimeout(()=>{this.#timer=undefined;void this.refresh({force:false})},delay);this.#timer.unref()
+ }
+ /**
+  * Event-batched, not polled. A first synthesis (or one from an older recipe) runs promptly; afterwards a batch of new messages runs
+  * at most every ten minutes, a new day or an edited file/memory within half an hour, and a trickle of fewer new messages only after
+  * hours. Version drift on a message that is already covered (pause, resume, rescan) teaches nothing, so it never triggers a run.
+  */
+ #scheduleDelay():number|undefined{
+  const state=this.#state,now=Date.now()
+  if(state.perspective_revision!==1||!state.checkpoint.generation||!state.checkpoint.last_success_at)return 1000
+  const covered=new Map(state.checkpoint.input_versions.map(input=>[input.id,input.version]))
+  const live=this.#inputs.filter(input=>!input.history_only)
+  const added=live.filter(input=>!covered.has(input.id)).length
+  const editedStatic=live.some(input=>covered.has(input.id)&&covered.get(input.id)!==input.version&&!MESSAGE_KINDS.has(input.kind))
+  const dayChanged=!!state.local_date&&state.local_date!==this.#date
+  const wait=(spacing:number)=>Math.max(1000,state.last_attempt+spacing-now)
+  if(added>=TIMELINE_BATCH_INPUTS)return wait(TIMELINE_BATCH_SPACING_MS)
+  // The inputs are exactly what was synthesized, yet the key moved: a new day, time zone or recipe.
+  const sameInputs=live.every(input=>covered.get(input.id)===input.version)
+  if(dayChanged||editedStatic||sameInputs)return wait(TIMELINE_DAY_SPACING_MS)
+  if(added>0)return wait(TIMELINE_IDLE_SPACING_MS)
+  return undefined
  }
  /** A manual refresh may force a new synthesis even when the checkpoint already covers the same inputs; the scheduled path never does. */
  async refresh(options:{force?:boolean}={}){

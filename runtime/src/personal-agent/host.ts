@@ -1893,13 +1893,14 @@ export class PersonalAgentHost {
     }
     sourceChanged(change?:SourceChange):Promise<void>{
         this.#timelineRevision++;this.timeline.suspend();if(this.workbenchContext instanceof DailyWorkbench)this.workbenchContext.suspend();
-        void this.refreshTimeline().catch(()=>undefined);
+        const timelineRefreshed=this.refreshTimeline().catch(()=>undefined);
         // Withdrawn source files leave the card inputs now, even if the memory refresh below fails.
         if(this.#opened)this.#updateContext(this.#sources?.contextEntries?.()??[]);
         this.#notify();
         if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;
         void this.scheduledTaskTick().catch(()=>{/* periodic scheduler retries durable changes */});
-        return this.#drainSources();
+        // Callers observe the revalidated timeline once this resolves.
+        return Promise.all([timelineRefreshed,this.#drainSources()]).then(()=>undefined);
     }
     #drainSources():Promise<void>{
         if(!this.#opened||!this.#sourceReady)return Promise.resolve();

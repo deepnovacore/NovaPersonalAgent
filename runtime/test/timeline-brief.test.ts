@@ -548,3 +548,44 @@ test('version drift on a message keeps its card; a drifted file or memory does n
   assert.deepEqual(brief.snapshot().cards.map(c=>c.title),['File card'])
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('a quick source recheck does not flip cards to unavailable, so their buttons do not blink',async(t)=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-grace-'))
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve(reply),()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh()
+  t.mock.timers.enable({apis:['Date']})
+  brief.suspend()
+  const during=brief.snapshot().cards[0]!
+  assert.equal(during.sources_available,true);assert.equal(during.sources_checking,false);assert.equal(during.historical,false)
+  t.mock.timers.tick(5000)
+  const slow=brief.snapshot().cards[0]!
+  assert.equal(slow.sources_checking,true,'a slow recheck is shown as checking');assert.equal(slow.sources_available,false)
+  brief.update([input],'2026-10-17','UTC')
+  assert.equal(brief.snapshot().cards[0]!.sources_available,true)
+ }finally{t.mock.timers.reset();await brief.close();await rm(dir,{recursive:true,force:true})}
+})
+
+const batchFixture=async(t:import('node:test').TestContext,body:(brief:TimelineBrief,more:(n:number)=>TimelineInput[],calls:()=>number)=>void)=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-batch-'));let calls=0
+ const brief=new TimelineBrief(join(dir,'timeline.json'),()=>{calls++;return Promise.resolve(reply)},()=>undefined)
+ try{
+  await brief.open();brief.update([input],'2026-10-17','UTC');await brief.refresh();assert.equal(calls,1)
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:Date.now()});brief.startGeneration()
+  body(brief,n=>Array.from({length:n},(_,i)=>({...input,id:'extra-'+i})),()=>calls)
+ }finally{t.mock.timers.reset();await brief.close();await rm(dir,{recursive:true,force:true})}
+}
+test('scheduled synthesis ignores permission drift and waits hours for a trickle of new messages',async(t)=>{
+ await batchFixture(t,(brief,more,calls)=>{
+  brief.update([{...input,version:'fence-moved'}],'2026-10-17','UTC');t.mock.timers.tick(2*3600_000);assert.equal(calls(),1,'drift on a covered message never triggers')
+  brief.update([input,...more(3)],'2026-10-17','UTC');t.mock.timers.tick(3600_000);assert.equal(calls(),1,'three messages do not run before the four-hour mark')
+  assert.equal(brief.snapshot().status==='working',false)
+ })
+})
+test('a batch of new messages triggers synthesis once the minimum spacing has passed',async(t)=>{
+ await batchFixture(t,(brief,more)=>{
+  t.mock.timers.tick(60_000);brief.update([input,...more(25)],'2026-10-17','UTC')
+  t.mock.timers.tick(5*60_000);assert.equal(brief.snapshot().status==='working',false,'not before ten minutes since the last run')
+  t.mock.timers.tick(6*60_000);assert.equal(brief.snapshot().status,'working')
+ })
+})
