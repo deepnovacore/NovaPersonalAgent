@@ -544,3 +544,30 @@ test('Timeline carries pseudonymous authorship separately from the actor describ
   assert.equal(own.text,'陈雨已经替林舟完成权限配置。','authorship does not rewrite the reported actor')
  }finally{await memory.close();await rm(root,{recursive:true,force:true})}
 })
+
+
+test('cached and prepared replyPreferences preserve legacy and user rows but exclude general rows',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-memory-scope-')),path=join(root,'memory.sqlite')
+ const texts=['Legacy preference','User preference','Project constraint']
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete:()=>Promise.resolve({text:JSON.stringify({entries:texts.map((text,index)=>({key:String(index),text,topic:'scope',kind:'preference',due:null,direction:null,status:null,valid_until:null}))})})}
+ let client=new MemoryLedgerClient(path)
+ const create=()=>new SubstrateMemoryResource({client,userId:'scope',gateway,model:'fixture',inputConsent:true,conversationProviders:['consumer']})
+ let resource=create()
+ try{
+  await resource.open();await resource.remember({sourceId:'source',sessionId:'test',sequence:1,text:texts.join('; '),occurredAt:new Date().toISOString(),confirmed:true});await resource.flush()
+  const rows=await client.memory('list',{}) as EntryRevision[]
+  assert.equal(rows.length,3)
+  for(const row of rows){
+   assert.equal(row.content.memory_scope,undefined,'extracted legacy rows have no scope field')
+   const scope=row.content.text===texts[1]?'user':row.content.text===texts[2]?'general':undefined
+   if(scope)await client.memory('merge',{entry_id:row.entry_id,expected_revision:row.revision,kind:row.kind,origin:row.origin,written_by:row.written_by,evidence_refs:row.evidence_refs,content:{...row.content,memory_scope:scope},recorded_at:new Date().toISOString()})
+  }
+  await resource.close();client=new MemoryLedgerClient(path);resource=create();await resource.open()
+  for(const adaptation of [resource.responseAdaptation(),await resource.prepareResponseAdaptation('consumer')]){
+   assert.deepEqual(adaptation.replyPreferences.map(row=>row.text).sort(),texts.slice(0,2).sort())
+   assert.match(adaptation.memoryContext!.voice,/Legacy preference/);assert.match(adaptation.memoryContext!.voice,/User preference/);assert.doesNotMatch(adaptation.memoryContext!.voice,/Project constraint/)
+   assert.match(adaptation.memoryContext!.text,/Project constraint/)
+  }
+  assert.deepEqual((await resource.list()).entries.map(row=>row.content).sort(),[...texts].sort())
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
+})

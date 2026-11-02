@@ -1,3 +1,16 @@
+import {conversationToolBridge} from '../src/personal-agent/conversation-tool-bridge.js'
+import {buildAssembly} from '../src/composition/assembly.js'
+import {buildRealtimeAssembly,configuredMemoryConsumer} from '../src/composition/realtime-assembly.js'
+import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
+import {memoryDocuments} from '../src/memory-substrate/memory-documents.js'
+import type {EntryRevision} from '../src/memory-substrate/store.js'
+import {FULL_MEMORY_TOOLS, NO_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
+import type {RealtimeProvider} from '../src/realtime/protocol.js'
+import {retrievalPrerecall} from '../src/memory/prerecall-port.js'
+import {UnifiedRetrieval} from '../src/memory/retrieval.js'
+import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises'
@@ -37,12 +50,12 @@ function scripted(reply:(request:Request,step:number)=>Reply|Promise<Reply>){
 async function until<T>(read:()=>T,predicate:(value:T)=>boolean):Promise<T>{
  for(let count=0;count<500;count++){const value=read();if(predicate(value))return value;await new Promise(resolve=>setTimeout(resolve,10))}throw Error('state wait expired')
 }
-async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>,approval:'ask'|'never'='ask',factory?:CascadedLlmFactory,computerSession?:Parameters<typeof createWorkbenchRuntime>[0]['computerSession'],reasoning?:boolean){
+async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>,approval:'ask'|'never'='ask',factory?:CascadedLlmFactory,computerSession?:Parameters<typeof createWorkbenchRuntime>[0]['computerSession'],reasoning?:boolean,telemetry?:Parameters<typeof createWorkbenchRuntime>[0]['telemetry']){
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-loop-')),script=scripted(reply),invocations:{name:string;arguments:Record<string,JsonValue>}[]=[],frames:Record<string,unknown>[]=[]
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[{name:'monitor',parameters:{type:'object'}},{name:'dispatch',parameters:{type:'object',properties:{executor:{enum:['codex']}}}}],readonlyNames:['monitor'],origin:()=>Promise.resolve('memory:test-user'),invoke:(_text,call,_signal,grant)=>{invocations.push(call);if(call.name!=='dispatch'||!grant)return Promise.resolve({accepted:true});const delegate_id='fixture-work-'+invocations.length;return host.tasks.bindWork(grant.fence,delegate_id).then(()=>({accepted:true,delegate_id}))}}
  const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
- const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{}),...(reasoning===undefined?{}:{reasoning})}):plain,frame=>frames.push(frame))
+ const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({...(telemetry?{telemetry}:{}),conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{}),...(reasoning===undefined?{}:{reasoning})}):plain,frame=>frames.push(frame))
  let request=0
  const raw=(method:string,params:Record<string,unknown>={},local=true)=>host.command({type:'personal.command',request_id:'r'+request++,method,params},{client_id:local?'desktop:local':'remote:test'}) as Promise<{ok:boolean;error?:string;data:unknown}>
  const command=async(method:string,params:Record<string,unknown>={})=>{const result=await raw(method,params);if(!result.ok)throw Error(result.error);return result.data}
@@ -1363,5 +1376,241 @@ test('a long paused Plan keeps full output and directs the user to send another 
   limited=false;await f.host.submitConversationText('chat:main','continue the plan');await f.host.waitConversation('chat:main')
   assert.ok(f.host.conversationSnapshot().messages.at(-1)!.text.endsWith('Plan continued'))
   assert.equal((await f.host.workbench.checkpoint('chat:main',0)).status,'completed')
+ }finally{await f.close()}
+})
+
+async function memoryBridgeFixture(f: Awaited<ReturnType<typeof fixture>>, full = true) {
+ const gateway={complete:()=>Promise.reject(Error('automatic learning is forbidden')),async *stream(){await Promise.reject(Error('automatic learning is forbidden'))}}
+ const client=new MemoryLedgerClient(join(f.root,'memory.sqlite'))
+ const memory=new SubstrateMemoryResource({client,userId:'workbench-test',model:'fixture',gateway,inputConsent:true,conversationProviders:['workbench-model']})
+ await memory.open({deferBackground:true})
+ const core=buildAssembly({settings:settingsSchema.parse({executors:[]}),gateway,memoryTools:full?FULL_MEMORY_TOOLS:{...NO_MEMORY_TOOLS,recall:true,engine:'mem0'},blackboard:{path:join(f.root,'board.sqlite'),ownerId:'fixture'},capabilities:parseCapabilityRegistry({version:1,modules:{search:{enabled:false},camera:{enabled:false},coding:{enabled:false},knowledge:{enabled:false}}})})
+ const provider:RealtimeProvider={connect:()=>Promise.resolve({epoch:1,provider_session_id:'workbench'}),sendAudio:()=>Promise.resolve(),replaceResponseAdaptation:()=>Promise.resolve(),injectHostItem:item=>Promise.resolve({session_epoch:1,host_item_id:item.host_item_id,provider_item_id:item.host_item_id}),createResponse:()=>Promise.resolve(),cancelResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),async *events(signal){if(!signal.aborted)await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))}}
+ const graph=buildRealtimeAssembly({core,provider,createPersonalMemory:()=>memory,memoryConsumerFingerprint:'workbench-model',memoryReadMode:'text',onDiagnostic:()=>undefined})
+ await graph.start()
+ const tools=conversationToolBridge(core,graph,{memoryConsumer:'workbench-model'})
+ f.plain.toolBridge=tools
+ f.plain.close=async()=>{await graph.stop();await core.stop()}
+ return {memory,client,tools}
+}
+
+for(const mode of ['plan','build'] as const)for(const full of [true,false])test(`${mode} exposes only supported memory host tools (${full?'ledger':'recall-only'})`,{skip:mode==='build'&&!supported},async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  await memoryBridgeFixture(f,full)
+  if(mode==='build')await f.command('build.begin',{text:'Discuss constraints',project:f.root})
+  else {await f.command('conversations.mode',{id:'chat:main',mode:'plan'});await f.host.submitConversationText('chat:main','Discuss constraints')}
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  const names=f.script.requests[0]!.tools.map(tool=>tool.name)
+  for(const name of ['memory__remember','memory__lookup'])assert.equal(names.includes(name),full)
+  assert.ok(names.includes('memory__recall'))
+  assert.equal(names.includes('file_write'),mode==='build')
+  assert.ok(!f.script.requests[0]!.inputs.some(input=>input.kind==='host_context'&&input.content.includes('memory_scope')))
+ }finally{await f.close()}
+})
+
+for(const mode of ['plan','build'] as const)test(`${mode} quotes only typed user text through the real service; general memory is not user background`,{skip:mode==='build'&&!supported},async()=>{
+ const project='Use strict TypeScript in this repository',user='I prefer concise answers',legacy='I prefer examples',toolQuote='I love durian'
+ const userText=`Remember: ${project}; ${user}; ${legacy}`
+ const writes=[{scope:'general',text:project},{scope:'user',text:user},{text:legacy}]
+ const f=await fixture((_request,step)=>{
+  if(step===0)return {call:{name:'monitor',arguments:{}}}
+  if(step===1)return {call:{name:'memory__remember',arguments:{action:'set',kind:'preference',scope:'user',text:toolQuote,quote:toolQuote}}}
+  if(step===2)return {call:{name:'memory__remember',arguments:{action:'set',kind:'fact',scope:'user',text:'voice-only secret',quote:'voice-only secret'}}}
+  const write=writes[step-3]
+  if(write)return {call:{name:'memory__remember',arguments:{action:'set',kind:'preference',...write,quote:write.text}}}
+  if(step===6)return {call:{name:'memory__lookup',arguments:{}}}
+  return {text:'done'}
+ })
+ try{
+  const {memory,client,tools}=await memoryBridgeFixture(f)
+  const seen:string[]=[]
+  f.plain.toolBridge={...tools,tools:[...tools.tools,{name:'monitor',parameters:{type:'object'}}],readonlyNames:[...tools.readonlyNames,'monitor'],invoke:(text,call,signal)=>{
+   seen.push(text)
+   return call.name==='monitor'?Promise.resolve({text:toolQuote}):tools.invoke(text,call,signal)
+  }}
+  // Voice is host context, never part of the typed-user authorization snapshot.
+  f.host.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation:{...conversation,messages:[...conversation.messages,{id:'voice-only',conversation_id:conversation.id,role:'user',input_mode:'voice',text:'voice-only secret',created_at:new Date().toISOString()}]},host:f.host,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'}),frame=>f.frames.push(frame))
+  if(mode==='build')await f.command('build.begin',{text:userText,project:f.root})
+  else {await f.command('conversations.mode',{id:'chat:main',mode:'plan'});await f.host.submitConversationText('chat:main',userText)}
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  const state=await f.host.workbench.checkpoint(id,0)
+  assert.equal(state.status,'completed',JSON.stringify(state))
+  assert.equal(state.last_user,userText)
+  assert.ok(seen.length>0);assert.ok(seen.every(text=>text===userText))
+  const results=state.calls.map(call=>call.result as {code?:string;result?:{state?:string;entries?:{text:string}[]}})
+  assert.equal(results[1]?.code,'invalid_source_quote');assert.equal(results[2]?.code,'invalid_source_quote')
+  for(const result of results.slice(3,6))assert.equal(result.result?.state,'committed','same-invoke userTurn must pass superseded check')
+  const saved=await memory.lookupExplicit({},'workbench-model')
+  assert.deepEqual(saved.entries.map(entry=>entry.text).sort(),[project,user,legacy].sort())
+  assert.ok(results[6]?.result?.entries?.some(entry=>entry.text===project),'lookup keeps general facts readable')
+  assert.ok((await memory.recall('strict TypeScript',{scope:'any'})).hits.some(hit=>hit.text===project),'recall keeps general facts readable')
+  const rows=await client.memory('conversation_snapshot',{entry_prefix:memory.prefix,consumer:'workbench-model'}) as EntryRevision[]
+  const docs=memoryDocuments(rows)
+  assert.doesNotMatch(docs.get('USER.md')!,/strict TypeScript/)
+  assert.match(docs.get('MEMORY.md')!,/strict TypeScript/)
+  assert.match(docs.get('USER.md')!,/concise answers/);assert.match(docs.get('USER.md')!,/prefer examples/)
+  for(const adaptation of [memory.responseAdaptation(),await memory.prepareResponseAdaptation('workbench-model')]){
+   assert.doesNotMatch(adaptation.memoryContext!.voice,/strict TypeScript/)
+   assert.match(adaptation.memoryContext!.voice,/concise answers/);assert.match(adaptation.memoryContext!.voice,/prefer examples/)
+   assert.deepEqual(adaptation.replyPreferences.map(entry=>entry.text).sort(),[user,legacy].sort())
+   const [userContext,directory]=adaptation.memoryContext!.text.split('Memory directory')
+   assert.doesNotMatch(userContext!,/strict TypeScript/);assert.match(directory!,/strict TypeScript/)
+  }
+  const sources=JSON.stringify(await memory.lookupExplicit({},'workbench-model'))
+  assert.ok(!sources.includes(toolQuote));assert.ok(!sources.includes('voice-only secret'))
+ }finally{await f.close()}
+})
+
+for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as const)test(`workbench background memory ${outcome} is bounded, authorized and never user input`,async()=>{
+ const events:{kind:string;payload:Readonly<Record<string,JsonValue>>}[]=[]
+ const f=await fixture(()=>({text:'done'}),'ask',undefined,undefined,undefined,{record:(kind,payload)=>events.push({kind,payload}),close:()=>undefined})
+ try{
+  let allowed=true,recalls=0,authorizationChecks=0,recallSignal:AbortSignal|undefined
+  const text=outcome==='irrelevant'?'unrelated tea':'TypeScript project constraints'
+  const resource:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:(_query,options)=>{
+   recalls++;recallSignal=options?.signal
+   if(outcome==='timeout')return new Promise(()=>{ /* ignores cancellation to exercise the outer budget */ })
+   if(outcome==='failure')return Promise.reject(Error('unavailable'))
+   return Promise.resolve({source:'personal',state:'ok',scope:'any',degraded:false,hits:[{memoryId:'project',text,revision:1,evidenceIds:['source'],score:1}]})
+  },get:()=>Promise.resolve({id:'project',version:1,status:'active',kind:'fact',origin:'stated',content:text,source_refs:[],observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),topic:'',corrected_to:null,confidence_note:null}),canReadConversationEvidence:(_ref,consumer)=>{authorizationChecks++;assert.equal(consumer,'configured-text-model');return Promise.resolve(allowed)}}
+  const retrieval=new UnifiedRetrieval({memory:()=>resource})
+  const prepare=retrievalPrerecall(()=>retrieval,()=> 'configured-text-model')
+  f.plain.toolBridge={...f.bridge,prerecall:async(query,signal)=>{
+   const prepared=await prepare(query,signal)
+   if(outcome==='revoked')allowed=false
+   return prepared
+  }}
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const start=performance.now()
+  await f.host.submitConversationText('chat:main','TypeScript project constraints');await f.host.waitConversation('chat:main')
+  assert.ok(performance.now()-start<2000)
+  assert.equal(recalls,1)
+  const inputs=f.script.requests[0]!.inputs,index=inputs.findIndex(input=>input.kind==='host_context'&&input.content.includes('possible_memory'))
+  assert.equal(index>=0,outcome==='relevant')
+  if(index>=0){assert.ok(index<inputs.findIndex(input=>input.kind==='user_text'));assert.match(JSON.stringify(inputs[index]),/untrusted_external/)}
+  assert.equal((await f.host.workbench.checkpoint('chat:main',0)).last_user,'TypeScript project constraints')
+  assert.deepEqual(events,[{kind:'workbench.memory.injected',payload:{injected:outcome==='relevant'}}])
+  if(outcome==='timeout')assert.equal(recallSignal?.aborted,true)
+  if(['relevant','revoked'].includes(outcome))assert.ok(authorizationChecks>=2,'authorization is rechecked at consumption')
+ }finally{await f.close()}
+})
+
+for(const mode of ['chat','plan','build'] as const)test(`production ${mode} text memory capture and Workbench authorized retrieval with prerecall flag off`,{skip:mode==='build'&&!supported},async context=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-workbench-memory-'))
+ const settings=settingsSchema.parse({executors:[],camera_module_enabled:false,pipeline_mode:'cascaded',cascade_llm_provider:'deepseek',cascade_llm_model:'deepseek-flash',deepseek_api_key:'test',memory_prerecall_enabled:false})
+ const consumer=configuredMemoryConsumer(settings,'text'),text='TypeScript project constraints',requests:Record<string,unknown>[]=[],consumers:string[]=[]
+ let rememberCalls=0,observedSources=0
+ const memory:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'ok',scope:'any',hits:[{memoryId:'project',revision:1,text,evidenceIds:['source'],score:1}],degraded:false}),get:()=>Promise.resolve({id:'project',version:1,content:text,kind:'fact',origin:'stated',source_refs:[],observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),topic:'',status:'active',corrected_to:null,confidence_note:null}),canReadConversationEvidence:(_id,recipient)=>{consumers.push(recipient);return Promise.resolve(recipient===consumer)},remember:()=>{rememberCalls++;return Promise.resolve({sourceId:'text',state:'stored'})},observeSource:()=>{observedSources++;return Promise.resolve(null)}}
+ const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
+ context.mock.method(globalThis,'fetch',(_url:unknown,init?:RequestInit)=>{
+  requests.push(JSON.parse(init!.body as string) as Record<string,unknown>)
+  return Promise.resolve(new Response('data: '+JSON.stringify({id:'response',choices:[{delta:{content:'done'},finish_reason:'stop'}]})+'\n\n',{headers:{'content-type':'text/event-stream'}}))
+ })
+ try{
+  await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>memory,settings,gateway:{complete:()=>Promise.reject(Error('automatic learning forbidden')),async *stream(){await Promise.reject(Error('automatic learning forbidden'))}},onDiagnostic:()=>undefined}),()=>undefined)
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:mode==='chat'?'chat':'plan'}]] as const){const result=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(result.ok,true)}
+  if(mode==='build'){
+   const result=await host.command({type:'personal.command',request_id:'build',method:'build.begin',params:{text,project:root}},{client_id:'desktop:local'}) as {ok:boolean}
+   assert.equal(result.ok,true)
+  }else await host.submitConversationText('chat:main',text)
+  await host.waitConversation(host.conversationSnapshot().selected_id)
+  assert.equal(requests.length,1)
+  if(mode!=='chat'){
+   assert.match(JSON.stringify(requests[0]!.messages),/possible_memory/)
+   assert.ok(consumers.length>=2);assert.ok(consumers.every(value=>value===consumer))
+   const messages=requests[0]!.messages as {role:string;content:string}[]
+   assert.equal(messages[0]!.role,'system')
+   assert.match(messages[0]!.content,/scope=general.*scope=user/u)
+  }
+  assert.equal(rememberCalls,mode==='chat'?1:0)
+  assert.equal(observedSources,0)
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
+})
+
+for(const restart of [false,true])test(`Build Resume drops pending memory without re-retrieval or replacing typed user text (restart=${restart})`,{skip:!supported},async()=>{
+ let attempts=0,recalls=0
+ const text='Original typed Build goal'
+ const f=await fixture(()=>++attempts===1?{failure:{code:'timeout'}}:{text:'resumed'})
+ try{
+  const memoryText='TypeScript project constraints: private recalled fact'
+  f.plain.toolBridge={...f.bridge,prerecall:()=>{recalls++;return Promise.resolve(()=>Promise.resolve(memoryText))}}
+  await f.command('build.begin',{text,project:f.root})
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).status,'paused')
+  assert.match(JSON.stringify(f.script.requests[0]!.inputs),/private recalled fact/)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.doesNotMatch(JSON.stringify(checkpoint.inputs),/private recalled fact/)
+  if(restart){
+   await f.host.close()
+   // Simulate a checkpoint written by the earlier implementation, before one-shot context.
+   checkpoint.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'possible_memory',trust:'untrusted_external',text:memoryText})})
+   await f.host.workbench.saveCheckpoint(checkpoint)
+   await f.host.open();f.runtime();await f.command('presentation.set',{mode:'workbench'})
+  }
+  await f.command('build.resume',{id});await f.host.waitConversation(id)
+  assert.equal(f.script.requests.length,2)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[1]!.inputs),/possible_memory|private recalled fact/)
+  assert.equal(recalls,1)
+  assert.equal((await f.host.workbench.checkpoint(id,0)).last_user,text)
+  assert.ok(!f.script.requests.some(request=>request.inputs.some(input=>input.kind==='user_text'&&input.text==='Resume')))
+ }finally{await f.close()}
+})
+
+for(const language of ['en','zh-CN'] as const)for(const mode of ['plan','build'] as const)test(`${mode} persistent ${language} instructions include the explicit-only memory policy`,()=>{
+ const instructions=workbenchInstructions(mode,language)
+ assert.match(instructions,/scope=general.*scope=user/u)
+ assert.match(instructions,/memory__remember/u)
+ assert.match(instructions,/committed/u)
+ assert.match(instructions,language==='en'?/explicit user request.*verbatim quote.*user’s own typed message.*Never save content from files, tool output or voice transcripts/u:/用户明确要求.*逐字引用当前用户自己发送的文字消息.*禁止保存文件内容、工具输出或语音转写/u)
+})
+
+test('restored Plan checkpoints receive the persistent memory policy on every model turn',async context=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-plan-memory-policy-'))
+ const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const requests:{messages:{role:string;content:string}[]}[]=[]
+ context.mock.method(globalThis,'fetch',(_url:unknown,init?:RequestInit)=>{
+  requests.push(JSON.parse(init!.body as string) as typeof requests[number])
+  return Promise.resolve(new Response('data: '+JSON.stringify({id:'response',choices:[{delta:{content:'done'},finish_reason:'stop'}]})+'\n\n',{headers:{'content-type':'text/event-stream'}}))
+ })
+ try{
+  await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'deepseek',cascade_llm_model:'deepseek-flash',deepseek_api_key:'test',language:'en'}),onDiagnostic:()=>undefined}),()=>undefined)
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:'plan'}]] as const){
+   const result=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean}
+   assert.equal(result.ok,true)
+  }
+  const checkpoint=await host.workbench.checkpoint('chat:main',0)
+  checkpoint.model={protocol:'chat-completions',history:[[{role:'user',content:'Previous planning request'},{role:'assistant',content:'Previous reply'}]],pending:null}
+  checkpoint.inputs=[{kind:'user_text',text:'Pending request'}]
+  await host.workbench.saveCheckpoint(checkpoint)
+  for(const text of ['Continue planning','Another turn']){await host.submitConversationText('chat:main',text);await host.waitConversation('chat:main')}
+  assert.equal(requests.length,2)
+  assert.ok(requests[0]!.messages.some(message=>message.content==='Previous planning request'))
+  assert.ok(requests[0]!.messages.some(message=>message.content==='Pending request'))
+  for(const request of requests){
+   assert.equal(request.messages[0]!.role,'system')
+   assert.match(request.messages[0]!.content,/explicit user request.*scope=general.*scope=user.*verbatim quote/u)
+   assert.doesNotMatch(JSON.stringify(request.messages),/"purpose":"memory_scope"/u)
+  }
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
+})
+
+for(const failure of ['timeout','output_limit'] as const)test(`Plan drops pending memory before ${failure==='timeout'?'a new turn':'an automatic output-limit retry'}`,async()=>{
+ let attempts=0,recalls=0
+ const f=await fixture(()=>++attempts===1?{failure:{code:failure}}:{text:'done'})
+ try{
+  f.plain.toolBridge={...f.bridge,prerecall:()=>Promise.resolve(++recalls===1?()=>Promise.resolve('one-shot recalled secret'):null)}
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Plan the project');await f.host.waitConversation('chat:main')
+  if(failure==='timeout'){await f.host.submitConversationText('chat:main','Continue');await f.host.waitConversation('chat:main')}
+  assert.equal(f.script.requests.length,2)
+  assert.match(JSON.stringify(f.script.requests[0]!.inputs),/one-shot recalled secret/)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[1]!.inputs),/possible_memory|one-shot recalled secret/)
+  assert.equal(recalls,failure==='timeout'?2:1)
  }finally{await f.close()}
 })

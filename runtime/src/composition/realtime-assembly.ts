@@ -221,6 +221,7 @@ export interface RealtimeAssemblyOptions {
   readonly usageContext?: UsageContext
   readonly conversationContext?:()=>Promise<string|null>
   readonly suppressMemoryAdaptation?:boolean
+  readonly suppressConversationMemoryCapture?:boolean
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
   readonly validateScopedContext?:()=>Promise<boolean>
@@ -1070,7 +1071,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const notificationInstance=randomUUID()
   const service = new RealtimeService({
     proactiveRouting:{local:()=>assemblyHolder.current?.personalAgent.localNotifications??true,publish:async notice=>{const host=assemblyHolder.current?.personalAgent;if(!host)return;const now=Date.now();const task=notice.work_id?host.tasks.list().find(t=>t.work_ids.includes(notice.work_id!)):undefined;await host.publishNotification({guard:{requires_runtime:true,evidence_refs:(notice.evidence_refs??[]).filter(ref=>{try{parseMemoryRef(ref);return false}catch{return true}}),...(task?{task_id:task.id,goal_revision:task.goal_revision,work_id:notice.work_id}:{})},event_key:notificationInstance+':'+notice.event_id,revision:'1',occurrence:'initial',kind:notice.kind,title:notice.kind==='task_progress'?'任务进展':notice.kind==='task_result'?'任务结果':notice.kind==='alert'?'监控提醒':'Nova 提醒',body:notice.body,source:options.taskConversationId?{type:'conversation_runtime',id:options.taskConversationId,version:String(options.taskConversationGeneration??0)}:{type:'runtime',id:notificationInstance+':'+notice.event_id},created_at:now,expires_at:now+(notice.expires_in_ms??(notice.kind==='task_progress'?3600000:86400000)),not_before:0,priority:notice.priority,coalesce_key:notice.work_id?notificationInstance+':'+notice.work_id:null,feedback:[]},notice.valid)}},
-    ...((options.createPersonalMemory === undefined && options.sharedPersonal?.memory === undefined) ? {} : {onUserTranscriptAccepted: (turn: {
+    ...((options.suppressConversationMemoryCapture || (options.createPersonalMemory === undefined && options.sharedPersonal?.memory === undefined)) ? {} : {onUserTranscriptAccepted: (turn: {
       readonly confirmed?: boolean; readonly text: string; readonly originRef: string; readonly sessionEpoch: number
       readonly userInputRevision: number
     }) => {

@@ -98,7 +98,7 @@ export async function generateConsolidation(plan:ConsolidationPlan,options:{gate
 
 /** A model-facing bounded projection, not a local-user list or a grant. Never falls back to a stale summary. */
 export function memoryReadContext(entries:readonly EntryRevision[],summary:EntryRevision|null,options:{now:Date;mode:'voice'|'text'}):string{
- const current=selected(entries,options.now)
+ const current=selected(entries,options.now).filter(row=>options.mode!=='voice'||row.content.memory_scope!=='general')
  if(!current.length)return ''
  const lines=(limit:number,textLimit:number,rows:readonly EntryRevision[]=current):string=>{
   let result=''

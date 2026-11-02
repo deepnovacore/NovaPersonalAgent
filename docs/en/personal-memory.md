@@ -12,6 +12,14 @@ Tell Nova a fact, such as “My example project is Cedar, code C-731.” Later, 
 
 Learning takes time. A new fact may not be searchable immediately; check its learning state in the desktop memory panel.
 
+## Memory in Plan / Build
+
+Plan and Build text conversations can use the memory retrieval tools supported by the current backend. Backends supporting explicit saves also expose `memory__remember` and `memory__lookup`. Both modes **write only through `memory__remember` on an explicit user request**, with no automatic learning. A save requires a verbatim quote from the current typed user message and a committed receipt. Files, tool results and voice transcripts cannot authorize saves. These rules are part of the system instructions on every Workbench turn, including restored conversations. Resume retains the original user text; host context is not a new request.
+
+Use `scope=general` for project, code and repository constraints, and `scope=user` only for stable facts about the user themself. General project memories remain readable through `memory__recall`, `memory__lookup` and the Memory page, but do not enter `USER.md`, the voice “Memory facts” list or reply preferences. This general-scope exclusion from voice facts and reply preferences applies only to the Nova ledger: remote and VoiceMem-adapter preferences carry no scope. This exclusion does not cover derived summaries.
+
+At the start of a new text turn, shared authorized retrieval may inject a few relevant memories as untrusted reference context. Retrieval failures or a roughly 400 ms timeout are silently skipped. Pending retrieved context is discarded on retries and Resume, including after restart; Resume does not re-retrieve it. This does not require `MEMORY_PRERECALL_ENABLED` and never triggers automatic writes. Plan / Build voice remains a conversation and steering channel with no tools and no automatic memory capture; return to text to explicitly request a memory write. Chat voice capture is unchanged.
+
 ## View memories
 
 [![Nova Profile in the main window](../../assets/features/profile-original.en.png)](../../assets/features/profile-original.en.png)

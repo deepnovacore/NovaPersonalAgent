@@ -2,6 +2,7 @@ import {hostWorkspacePath} from '../src/executors/codex/process-owner.js'
 import {CodingTargetController} from '../src/personal-agent/coding-targets.js'
 import {fixture as projectFixture} from './fixtures/codex/project-adapter-fixture.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
+import {FULL_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
 import assert from 'node:assert/strict'
 import {mkdtemp, realpath, rm, writeFile, readFile, stat} from 'node:fs/promises'
 import {once} from 'node:events'
@@ -4438,7 +4439,7 @@ test('qwen rejects the final tool budget after evaluating the provider view once
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
   let views = 0
   assert.throws(() => buildQwenRealtimeAssembly({
-    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+    settings: configured, capabilities, memoryTools: FULL_MEMORY_TOOLS, providerToolView: tools => { views++; return tools },
   }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 7, toolBudget: 1})
   assert.equal(views, 1)
 })
@@ -5298,7 +5299,7 @@ test('cascaded rejects the final tool budget after evaluating the provider view 
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
   let views = 0
   assert.throws(() => buildCascadedRealtimeAssembly({
-    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+    settings: configured, capabilities, memoryTools: FULL_MEMORY_TOOLS, providerToolView: tools => { views++; return tools },
   }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 7, toolBudget: 1})
   assert.equal(views, 1)
 })

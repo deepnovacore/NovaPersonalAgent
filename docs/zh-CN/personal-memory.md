@@ -14,6 +14,14 @@ Nova 会从对话中整理信息，方便你在之后的会话中继续提问。
 
 记忆目录位于 `<MEMORY_LEDGER_PATH>.memory/`：`USER.md` 保存明确的个人信息，goal/todo/idea 各有独立文件，`MEMORY.md` 是生成的目录。Profile 概览仍由事实派生，不建立另一套事实存储。可编辑有标记的条目正文；身份、版本、来源、状态和关联由 Nova 管理，修改经过同一个版本合并流程。
 
+## Plan / Build 中的记忆
+
+Plan 和 Build 的文字会话可以使用当前后端支持的记忆检索工具；支持显式保存的后端还会提供 `memory__remember` 和 `memory__lookup`。两种模式都**只在用户明确要求时通过 `memory__remember` 写入**，不会自动学习。保存必须引用当前用户文字回合中的原话，并收到 committed 回执后才算成功；文件内容、工具结果和语音转写不能授权保存。这些规则属于每一轮 Workbench 的系统指令，恢复的会话也不例外。恢复执行沿用原始用户文字，不把宿主上下文当成新请求。
+
+项目、代码和仓库约束使用 `scope=general`，仅用户本人的稳定信息使用 `scope=user`。通用项目记忆仍可通过 `memory__recall`、`memory__lookup` 和记忆页读取，但不进入 `USER.md`、语音的 “Memory facts” 事实列表或回答偏好；语音事实和回答偏好的 general 范围排除规则仅适用于 Nova 账本：远程后端和 VoiceMem 适配器的偏好不携带 scope。此排除规则不覆盖派生摘要。
+
+新文字回合会在已授权的共享检索中尝试查找少量相关记忆，作为不可信参考上下文注入；约 400 毫秒内未完成或失败则跳过，不阻塞工作。重试或恢复时会丢弃待发送的检索上下文，重启后也一样；Resume 不会重新检索。这不依赖 `MEMORY_PRERECALL_ENABLED`，也不会触发自动写入。Plan / Build 的语音仅用于交流和引导，不提供任何工具，也不再自动捕获记忆；记忆写入请回到文字会话明确提出。Chat 语音的自动捕获行为保持不变。
+
 ## 查看记忆
 
 [![主窗口中的个人概览](../../assets/features/profile-original.png)](../../assets/features/profile-original.png)

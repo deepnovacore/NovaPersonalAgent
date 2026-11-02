@@ -242,7 +242,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(workEpoch!==this.#memoryWorkEpoch)return {revision:++this.#preparedRevision,replyPreferences:[],memoryContext:{text:'',voice:''}}
     const summary=rows.find(row=>row.entry_id===this.prefix+'summary:daily')??null,now=new Date()
     const soulRole=this.#soulRole(rows)
-    const projection={replyPreferences:rows.filter(row=>row.kind==='preference'&&row.origin==='stated').slice(0,16).map(row=>({id:row.entry_id,text:displayText(row.content.text),evidenceIds:row.evidence_refs})),memoryContext:{text:memoryReadContext(rows,summary,{now,mode:'text'}),voice:memoryReadContext(rows,summary,{now,mode:'voice'})}}
+    const projection={replyPreferences:rows.filter(row=>row.kind==='preference'&&row.origin==='stated'&&row.content.memory_scope!=='general').slice(0,16).map(row=>({id:row.entry_id,text:displayText(row.content.text),evidenceIds:row.evidence_refs})),memoryContext:{text:memoryReadContext(rows,summary,{now,mode:'text'}),voice:memoryReadContext(rows,summary,{now,mode:'voice'})}}
     let explicitUserContext:string|undefined
     const recipient=this.options.conversationRecipients?.[consumer]
     if(recipient&&this.options.conversationProviders?.includes(consumer)){const local=(await this.#spaceContext(recipient)).text;if(local)explicitUserContext=[explicitUserContext,local].filter(Boolean).join('\n')}
@@ -302,7 +302,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(signature===this.#snapshotSignature)return
     this.#snapshotSignature=signature
     const summary=rows.find(row=>row.entry_id===this.prefix+'summary:daily')??null,now=new Date()
-    this.#adaptation={revision:this.#adaptation.revision+1,replyPreferences:authorized.entries.filter(r=>r.kind==='preference'&&r.origin==='stated').slice(0,16).map(r=>({id:r.entry_id,text:displayText(r.content.text),evidenceIds:r.evidence_refs})),memoryContext:{text:memoryReadContext(authorized.entries,summary,{now,mode:'text'}),voice:memoryReadContext(authorized.entries,summary,{now,mode:'voice'})},...(this.#soulRole(authorized.entries)?{soulRole:this.#soulRole(authorized.entries)!}:{})}
+    this.#adaptation={revision:this.#adaptation.revision+1,replyPreferences:authorized.entries.filter(r=>r.kind==='preference'&&r.origin==='stated'&&r.content.memory_scope!=='general').slice(0,16).map(r=>({id:r.entry_id,text:displayText(r.content.text),evidenceIds:r.evidence_refs})),memoryContext:{text:memoryReadContext(authorized.entries,summary,{now,mode:'text'}),voice:memoryReadContext(authorized.entries,summary,{now,mode:'voice'})},...(this.#soulRole(authorized.entries)?{soulRole:this.#soulRole(authorized.entries)!}:{})}
     this.#queueConsolidation()
     if(notify){this.#queueIndex();this.options.onChange?.();this.#onChange?.()}
   }

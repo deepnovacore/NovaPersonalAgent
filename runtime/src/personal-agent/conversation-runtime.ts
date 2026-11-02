@@ -23,7 +23,7 @@ import {ProjectResolutionError, type ProjectExecutorAdapter} from '../executors/
 import {projectExecutorEvent,type ExecutorProgress,type ExecutorResult} from '../desktop/desktop-progress.js'
 import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-config.js'
 import {configuredPrerecallMeta, retrievalPrerecall} from '../memory/prerecall-port.js'
-import {resolveMemoryToolCapabilities} from '../memory/tool-capabilities.js'
+import {NO_MEMORY_TOOLS,resolveMemoryToolCapabilities} from '../memory/tool-capabilities.js'
 import {ProjectConfirmationController} from '../projects/project-confirmation.js'
 import {buildConversationVoiceProvider} from '../conversation-voice-provider.js'
 import {realtimeCapabilities} from '../realtime/capabilities.js'
@@ -82,6 +82,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  catch{options.host.setWorkbenchModel({provider:'',model:''})}
  options.host.setWorkbenchExecutors([...(options.agentDescriptors??[]),...(options.codexResource?.agentDescriptor?[options.codexResource.agentDescriptor]:[])].map(agent=>agent.name))
  return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution,overrides:{chat?:boolean}={})=>{
+  const telemetry:RealtimeTelemetry|undefined=options.telemetry?{
+   record:(kind,payload)=>options.telemetry!.record(kind,{...payload,conversation_id:conversation.id,conversation_generation:conversation.generation}),
+   close:()=>{/* the deployment owns the shared telemetry sink */},
+  }:undefined
   const workbenchVoice=mode==='voice'&&(conversation.kind==='build'||conversation.mode==='plan')&&!execution
   const chatMode=overrides?.chat!==false&&!execution&&['chat','topic'].includes(conversation.kind)&&(conversation.mode??'chat')==='chat'
   if((conversation.kind==='build'||conversation.mode==='plan')&&!execution&&mode==='text'){
@@ -89,7 +93,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    const reporter=bindUsageReporter(options.onUsage,{feature:'conversation',conversationId:conversation.id,trigger:'manual'})
    const factory=configuredTextLlm({settings:options.settings,clock:options.clock??new RealClock(),idFactory:randomUUID,instructions:workbenchInstructions(workbenchMode,options.settings.language,!!conversation.build?.plan_id),transport:workbenchMode==='build'?BUILD_LLM_TRANSPORT:PLAN_LLM_TRANSPORT,...(reporter?{onUsage:reporter}:{})})
    const scopedEmit=(frame:Record<string,unknown>)=>emit({...frame,...(workbenchMode==='build'?{local_build:true}:{})})
-   return createWorkbenchRuntime({conversation,host:options.host,factory,emit:scopedEmit,lifetime,language:options.settings.language,reasoning:options.settings.build_reasoning===true,approval:()=>options.host.localToolApproval??options.settings.local_tool_approval,...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
+   return createWorkbenchRuntime({...(telemetry?{telemetry}:{}),conversation,host:options.host,factory,emit:scopedEmit,lifetime,language:options.settings.language,reasoning:options.settings.build_reasoning===true,approval:()=>options.host.localToolApproval??options.settings.local_tool_approval,...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
     createBridge:()=>conversationRuntimeFactory(options)({...conversation,kind:'chat',mode:'chat'},scopedEmit,'text',lifetime,recovery,undefined,{chat:false}),
    })
   }
@@ -97,10 +101,6 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const processing=execution&&options.host.schedules.getRun(execution.run_id).processing
   const audioDrops:Record<string,number>={};let audioDropReportedAt=0
   let audioIdentityEpoch=-1;let audioIdentitySync:Promise<void>|undefined
-  const telemetry:RealtimeTelemetry|undefined=options.telemetry?{
-   record:(kind,payload)=>options.telemetry!.record(kind,{...payload,conversation_id:conversation.id,conversation_generation:conversation.generation}),
-   close:()=>{/* the deployment owns the shared telemetry sink */},
-  }:undefined
   const processingLlm=processing?options.memory()?.sourceProcessingLlm?.():undefined
   if(processing&&!processingLlm)throw Error('processing_model_unavailable')
   const settings=processingLlm?{...options.settings,cascade_llm_provider:processingLlm.baseUrl==='https://dashscope.aliyuncs.com/compatible-mode/v1'?'qwen' as const:'self-hosted' as const,dashscope_api_key:processingLlm.apiKey,cascade_llm_model:processingLlm.model,self_hosted_llm_base_url:processingLlm.baseUrl,self_hosted_llm_api_key:processingLlm.apiKey}:options.settings
@@ -149,7 +149,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const approval=broker?scopeApprovalController(broker,view=>!!view.work&&core.runtime.inFlightDelegate(view.work.work_id)!==undefined):undefined
   const unsubscribeApproval=approval?.observe(view=>{options.host.recordTaskApproval(conversation.id,conversation.generation,view);notifyWaiting();if(view.work)void options.host.rememberWorkOwner(view.work.work_id,conversation.id,view.pending_approval_id).catch(()=>{ /* durable projection retried on work event */ });const identity=view.executorIdentity??{executor:options.codexResource?.adapter.manifest.name??'agent',display_name:options.codexResource?.adapter.manifest.display_name??'Agent'};emit(JSON.parse(executorApprovalMessage(view,core.runtime.clock.now(),identity)) as Record<string,unknown>)})
   let graphRef: ReturnType<typeof buildRealtimeAssembly> | undefined = undefined
-   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,chatToolPolicy:chatMode,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&options.settings.memory_prerecall_enabled?{prerecall:retrievalPrerecall(()=>graphRef?.retrieval,()=>memoryConsumerFingerprint??''),prerecallMeta:configuredPrerecallMeta(settings)}:{})})
+   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,memoryTools:workbenchVoice?NO_MEMORY_TOOLS:core.memoryTools,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,chatToolPolicy:chatMode,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&options.settings.memory_prerecall_enabled?{prerecall:retrievalPrerecall(()=>graphRef?.retrieval,()=>memoryConsumerFingerprint??''),prerecallMeta:configuredPrerecallMeta(settings)}:{})})
   if(provider.capabilities)emit({type:'conversation.capabilities',conversation_id:conversation.id,conversation_generation:conversation.generation,mode,capabilities:provider.capabilities})
   let pending:{resolve:(result:{assistant:string;turn_id?:string})=>void;reject:(error:unknown)=>void}|undefined
   const textOnly=mode==='text'
@@ -222,7 +222,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const graph=buildRealtimeAssembly({core,provider,usageContext,...(chatToolNames?{providerToolView:tools=>({...tools,schemas:tools.schemas.filter(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&chatToolNames.has(name)})}),toolGate:name=>chatToolNames.has(name),onTool:recordToolEvent}:{}),...(options.additionalAgentControllers?{additionalAgentControllers:options.additionalAgentControllers}:{}),...(!execution?{conversationContext:()=>options.host.scheduledConversationContext(conversation.id,conversation.generation,memoryConsumerFingerprint??null)}:{}),suppressMemoryAdaptation:!!execution,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(execution?{scopedTool:event=>scheduledTools!.accept(event),validateScopedContext:()=>scheduledTools!.validateContext()}:{scheduleHost:new ScheduleAgentController(options.host,core.gateway,options.settings.support_model,conversation.id,conversation.generation)}),
    ...(execution?{providerToolView:tools=>{if(options.host.schedules.getRun(execution!.run_id).processing)return {...tools,schemas:tools.schemas.filter(schema=>(schema.function as {name?:string}|undefined)?.name==='source__process')};const context=options.host.schedules.getRun(execution!.run_id).definition.context;return {...tools,schemas:tools.schemas.filter(schema=>{const fn=schema.function;if(!fn||typeof fn!=='object'||Array.isArray(fn)||typeof fn.name!=='string')return false;const binding=tools.bindings.get(fn.name);return fn.name==='app__context'||(context.memory||context.knowledge)&&['memory__recall','memory__evidence'].includes(fn.name)||context.search&&binding?.executor==='search'&&core.runtime.executors.get('search')?.manifest.ops.some(op=>op.name===binding.op&&op.readonly)===true})}}}:{}),
-   ...(workbenchVoice?{providerToolView:tools=>({...tools,schemas:[]}),scopedTool:event=>Promise.resolve(scheduledToolResult(event,{state:'refused',code:'workbench_voice_readonly',message:'Return to text mode to confirm execution.'},'workbench_voice_readonly',false))}:{}),
+   ...(workbenchVoice?{suppressConversationMemoryCapture:true,providerToolView:tools=>({...tools,schemas:[]}),scopedTool:event=>Promise.resolve(scheduledToolResult(event,{state:'refused',code:'workbench_voice_readonly',message:'Return to text mode to confirm execution.'},'workbench_voice_readonly',false))}:{}),
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
    ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(conversation.id!=='chat:main'||options.host.voiceConversationId()===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
@@ -399,7 +399,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   })
   const unsubscribeTaskCapture=options.host.subscribe(()=>{captureTaskResponse();const response=graph.playback.current?.response_id??currentResponse;if(response&&!options.host.localNotifications&&graph.service.isProactiveResponse(response))void graph.service.session.quarantineActiveOrAwaitingResponse().catch(()=>options.onDiagnostic?.('[runtime-diagnostic] notification_audio_fence_failed'))})
   let closed=false
-  const toolBridge=conversationToolBridge(core,graph,{chat:chatMode,...(chatMode?{onTool:recordToolEvent}:{})})
+  const toolBridge=conversationToolBridge(core,graph,{chat:chatMode,memoryConsumer:memoryConsumerFingerprint??'',...(chatMode?{onTool:recordToolEvent}:{})})
   const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();unsubscribeTaskCapture();detachTaskRuntime();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
   const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {

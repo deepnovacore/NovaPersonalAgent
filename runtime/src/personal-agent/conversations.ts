@@ -1,3 +1,4 @@
+import type {retrievalPrerecall} from '../memory/prerecall-port.js'
 import {chatFailureSchema} from './chat-failure.js'
 import type {RealtimeCapabilities} from '../realtime/capabilities.js'
 import {scheduleReferenceSchema} from './schedule-reference.js'
@@ -29,7 +30,7 @@ export function nextConversationTitle(items:readonly Pick<Conversation,'title'>[
 export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat',nextConversationTitle([]),null,'chat:main')],work_owners:{},approval_owners:{}}}
 export interface ConversationRuntime {
  readonly capabilities?:RealtimeCapabilities|undefined
- toolBridge?:{readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];readonly chatTools?:readonly CascadedLlmTool[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
+ toolBridge?:{readonly prerecall?:ReturnType<typeof retrievalPrerecall>;readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];readonly chatTools?:readonly CascadedLlmTool[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
  stopBuild?():Promise<void>
  localApproval?(id:string,approved:boolean,always?:boolean):Promise<void>
  retainTasks?():boolean

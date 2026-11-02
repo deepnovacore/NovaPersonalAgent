@@ -1,9 +1,12 @@
+import {memoryHostToolNames} from './conversation-tool-bridge.js'
+import {abortable} from '../core/camera-session.js'
+import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {computerApplicationSchema} from './computer-use/contract.js'
 import {randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {Conversation,ConversationRuntime,ConversationTurnContext} from './conversations.js'
 import type {PersonalAgentHost} from './host.js'
-import {mergeTurnText,type CascadedLlmFactory,type CascadedLlmSession,type CascadedLlmTool} from '../realtime/cascaded/llm.js'
+import {mergeTurnText,type CascadedLlmFactory,type CascadedLlmSession,type CascadedLlmTool,type CascadedLlmInput} from '../realtime/cascaded/llm.js'
 import {LOCAL_TOOLS,executeLocalTool,isLocalTool,localPathEscapesProject,localToolArguments,projectResourceKey} from './local-tools.js'
 import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources} from '../executors/task-resources.js'
 import {localShellProcessGone,type LocalShellOptions} from './local-shell.js'
@@ -19,8 +22,14 @@ const publishArguments=z.object({title:z.string().min(1).max(120),content:z.stri
 const publishTool:CascadedLlmTool={name:'publish_plan',description:'Publish the complete detailed plan for the user to review and choose local Build or executor Build. This does not authorize or start execution. Call again to publish an amended version.',parameters:{type:'object',properties:{title:{type:'string',minLength:1,maxLength:120},content:{type:'string',minLength:1,maxLength:131072}},required:['title','content'],additionalProperties:false}}
 const finishArguments=z.object({summary:z.string().min(1).max(12000)}).strict()
 const finishTool:CascadedLlmTool={name:'finish_build',description:'End this Build conversation after the confirmed work and verification are complete. Provide the final user-facing summary. This permanently locks the conversation; use only when no further Build interaction is needed.',parameters:{type:'object',properties:{summary:{type:'string',minLength:1,maxLength:12000}},required:['summary'],additionalProperties:false}}
+function withoutPendingMemory(inputs:readonly CascadedLlmInput[]):CascadedLlmInput[]{
+ return inputs.filter(input=>{
+  if(input.kind!=='host_context')return true
+  try{return (JSON.parse(input.content) as {purpose?:unknown}|null)?.purpose!=='possible_memory'}catch{return true}
+ })
+}
 const RESUME_CHECK='Resume the Build goal. Inspect actual state before continuing any cancelled, timed-out or unknown operation. Never replay a completed call.'
-export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';approval:'ask'|'never'|(()=>'ask'|'never');shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'observe'|'action'|'close'>;onDiagnostic?:(message:string)=>void;reasoning?:boolean}):Promise<ConversationRuntime>{
+export async function createWorkbenchRuntime(options:{conversation:Readonly<Conversation>;host:PersonalAgentHost;factory:CascadedLlmFactory;createBridge:()=>Promise<ConversationRuntime>;emit:(frame:Record<string,unknown>)=>void;lifetime:AbortSignal;language:'zh-CN'|'en';telemetry?:RealtimeTelemetry;approval:'ask'|'never'|(()=>'ask'|'never');shell?:LocalShellOptions;computerSession?:(options:ComputerSessionOptions)=>Pick<ComputerSession,'observe'|'action'|'close'>;onDiagnostic?:(message:string)=>void;reasoning?:boolean}):Promise<ConversationRuntime>{
  const {conversation,host}=options,build=conversation.kind==='build',store=host.workbench
  const reasoningMode:'enabled'|'disabled'=options.reasoning===true?'enabled':'disabled'
  const approvalMode=():'ask'|'never'=>typeof options.approval==='function'?options.approval():options.approval
@@ -28,6 +37,7 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
  if(build&&(!conversation.build||!['darwin','win32'].includes(process.platform)))throw Error('local_build_unavailable')
  const state=await store.checkpoint(conversation.id,conversation.generation)
+ state.inputs=withoutPendingMemory(state.inputs)
  const confirmedPlan=build&&conversation.build?.plan_id&&conversation.build.plan_version?await store.plan(conversation.build.plan_id,conversation.build.plan_version):undefined
  const workspaceContext=build?JSON.stringify({...(confirmedPlan?{confirmed_plan:{id:confirmedPlan.id,version:confirmedPlan.version,title:confirmedPlan.title,content:confirmedPlan.content}}:{}),project:conversation.build!.project}):null
  let session:CascadedLlmSession|undefined,bridgeRuntime:ConversationRuntime|undefined
@@ -57,6 +67,8 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
  let saving=Promise.resolve()
  const save=()=>{
   state.updated_at=new Date().toISOString();const checkpoint=structuredClone(state),pendingApproval=approval?{id:approval.id,call_id:approval.call.id,name:approval.call.name,preview:JSON.stringify(approval.call.arguments,null,2).slice(0,1800)}:null
+  // Retrieved context is one-shot: never persist it for retries or process recovery.
+  checkpoint.inputs=withoutPendingMemory(checkpoint.inputs)
   const operation=saving.then(async()=>{await store.saveCheckpoint(checkpoint);if(build)await host.updateLocalBuild(conversation.id,conversation.generation,{status:checkpoint.status,reason:checkpoint.reason,approval:pendingApproval})})
   saving=operation.catch(()=>{ /* each caller observes its own persistence failure */ });return operation
  }
@@ -82,6 +94,8 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
    let release:(()=>void)|undefined
    try{
     if(build){const key=projectResourceKey(conversation.build!.project);if(taskResourcesBusy([key]))throw Error('project_busy');release=await acquireTaskResources([key],signal)}
+    state.inputs=withoutPendingMemory(state.inputs)
+    const toolBridge=await bridge()
     if(!state.model&&!state.inputs.length){
      if(build)state.inputs.push({kind:'host_context',content:workspaceContext!})
      else for(const message of conversation.messages.filter(message=>message.generation_status!=='pending'&&message.input_mode!=='voice').slice(-32))state.inputs.push({kind:'host_context',content:JSON.stringify({previous_message:{role:message.role,text:message.text}})})
@@ -89,12 +103,28 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
     const voiceMessages=conversation.messages.filter(message=>message.input_mode==='voice')
     for(const message of voiceMessages)if(!state.voice_message_ids?.includes(message.id))state.inputs.push({kind:'host_context',content:JSON.stringify({previous_message:{role:message.role,text:message.text},source:'voice',trust:'untrusted_external'})})
     state.voice_message_ids=voiceMessages.map(message=>message.id)
-    if(!context?.resume){state.last_user=text;state.inputs.push({kind:'user_text',text})}
+    if(!context?.resume){
+     // Only typed user input can authorize explicit writes, never any host/tool/voice context.
+     state.last_user=text
+     let injected=false
+     if(toolBridge.prerecall){
+      const budget=AbortSignal.any([signal,AbortSignal.timeout(400)])
+      try{
+       const prepared=await abortable(toolBridge.prerecall(text,budget),budget)
+       const memory=prepared?await abortable(prepared(budget),budget):null
+       budget.throwIfAborted()
+       if(memory){state.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'possible_memory',trust:'untrusted_external',text:memory})});injected=true}
+      }catch{ /* Retrieval is optional; failure or timeout must not block the turn. */ }
+     }
+     options.telemetry?.record('workbench.memory.injected',{injected})
+     signal.throwIfAborted()
+     state.inputs.push({kind:'user_text',text})
+    }
     // Resume is a control action: it never invents a user turn in the provider conversation.
     else if(!state.inputs.length&&!state.pending_calls.length)state.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'resume_control',instruction:RESUME_CHECK})})
     if(context?.resume&&state.reason==='approval_denied')return {assistant:'上次操作已拒绝，请补充新的要求后继续。'}
     state.status='running';state.reason=null;state.assistant='';delete state.model_failure;await save()
-    const toolBridge=await bridge(),baseTools=build?[...toolBridge.tools.filter(tool=>tool.name!=='dispatch'),...LOCAL_TOOLS,finishTool]:[...toolBridge.tools.filter(tool=>toolBridge.readonlyNames.includes(tool.name)),publishTool]
+    const baseTools=build?[...toolBridge.tools.filter(tool=>tool.name!=='dispatch'),...LOCAL_TOOLS,finishTool]:[...toolBridge.tools.filter(tool=>toolBridge.readonlyNames.includes(tool.name)||memoryHostToolNames.has(tool.name)),publishTool]
     const authorizedTools=[...baseTools,...(build?computerTools(true):[])]
     const allowed=new Set(authorizedTools.map(tool=>tool.name));if(allowed.size!==authorizedTools.length||authorizedTools.length>128)throw Error('workbench_tool_configuration')
     let toolRounds=0,finishedReply:string|undefined
@@ -267,6 +297,8 @@ export async function createWorkbenchRuntime(options:{conversation:Readonly<Conv
      if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
      const enabled=computerState(),tools=[...baseTools,...(enabled.enabled?computerTools(enabled.direct):[])]
      const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[];let assistant='',preview='',captionSent=false,completed=false
+     // Only this attempt may consume the freshly authorized context, including on output-limit retries.
+     state.inputs=withoutPendingMemory(state.inputs)
      // One bounded thought per model round; display-only, never model input or history.
      let thinkingChunks:string[]=[],thinkingCodepoints=0,thinkingStartedAt:string|null=null
      const addThinking=(text:string):void=>{
