@@ -1,4 +1,13 @@
+import 'dart:io';
+import 'package:nova_mobile/voice/cascaded/cascaded_voice_provider.dart';
+import 'package:nova_mobile/memory/local_memory_tools.dart';
+import 'package:nova_mobile/memory/memory_context_budget.dart';
+import 'voice_cascade_test.dart' show FakeAsr, FakeLlm, sound, until;
 import 'dart:async';
+import 'dart:convert';
+import 'package:nova_mobile/memory/local_memory_store.dart';
+import 'package:nova_mobile/space/space_storage.dart';
+import 'package:nova_mobile/personal/local_life.dart';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
@@ -77,10 +86,11 @@ class TestVoiceProvider implements VoiceProvider {
   List<Map<String, dynamic>> toolDefinitions = [];
   Completer<void>? connecting;
   Completer<void>? injecting;
+  final injectedText = <String>[];
   final injected = <String>[],
       submitted = <String>[],
       requestedItems = <String>[];
-  bool busyActivation = false, failText = false;
+  bool busyActivation = false, failText = false, failInjectionOnce = false;
   @override
   VoiceCapabilities capabilities = const VoiceCapabilities(
     automaticResponse: true,
@@ -141,7 +151,16 @@ class TestVoiceProvider implements VoiceProvider {
 
   @override
   Future<void> injectHostItem(VoiceHostItem item) async {
+    if (failInjectionOnce) {
+      failInjectionOnce = false;
+      throw StateError('delivery_failed');
+    }
+    // Match CascadedVoiceProvider.injectHostItem's real encoded-text limit.
+    if (item.text.length > voiceHostItemCharLimit) {
+      throw StateError('invalid_host_item');
+    }
     injected.add(item.id);
+    injectedText.add(item.text);
     if (injecting != null) await injecting!.future;
     emit(VoiceEventKind.hostAck, item: item.id);
   }
@@ -200,6 +219,41 @@ class FactBridge extends VoiceDelegateBridge {
   Stream<VoiceDelegateUpdate> get updates => facts.stream;
 }
 
+class _MemoryCascadeLlm implements CascadeLlm {
+  final prompts = <List<Map<String, dynamic>>>[];
+  int receipts = 0, calls = 0;
+  Completer<void>? receiptGate;
+  @override
+  Stream<CascadeLlmDelta> generate(
+    List<Map<String, dynamic>> messages,
+    List<Map<String, dynamic>> tools,
+    CascadeCancellation cancel,
+  ) async* {
+    prompts.add(messages);
+    if (tools.isNotEmpty) {
+      yield CascadeLlmDelta(
+        callId: 'recall-${++calls}',
+        name: 'memory_recall',
+        arguments: {'query': 'tea'},
+      );
+    } else {
+      receipts++;
+      final gate = receiptGate;
+      receiptGate = null;
+      await gate?.future;
+      yield const CascadeLlmDelta(text: 'Receipt delivered.');
+    }
+  }
+}
+
+class _SilentMemoryTts implements CascadeTts {
+  @override
+  Stream<CascadeAudio> synthesize(
+    String text,
+    CascadeCancellation cancel,
+  ) async* {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late ConversationStore store;
@@ -228,6 +282,595 @@ void main() {
   Future<void> start() =>
       session.start(provider: provider, conversation: conversation);
 
+  for (final mode in SpaceMode.values) {
+    test(
+      '$mode voice memory advertisement and summary are mode gated',
+      () async {
+        final memory = LocalMemoryStore(MemoryPersistence());
+        await memory.open();
+        await memory.save(
+          kind: 'preference',
+          text: 'green tea',
+          quote: 'green tea',
+          userUtterance: 'remember green tea',
+        );
+        session.dispose();
+        final host = AgentCoreHost(store: store, settings: ModelSettings());
+        final bridge = FactBridge(host);
+        session = PhoneVoiceSession(
+          audio: audio,
+          requestMicrophone: () async => true,
+          store: store,
+          delegates: bridge,
+          localMemory: memory,
+          spaceMode: mode,
+        );
+        await start();
+        expect(
+          provider.toolDefinitions.map((t) => t['function']['name']),
+          mode == SpaceMode.standalone
+              ? [
+                  'delegate_task',
+                  'cancel_delegate',
+                  'memory_remember',
+                  'memory_recall',
+                ]
+              : ['delegate_task', 'cancel_delegate'],
+        );
+        if (mode == SpaceMode.standalone) {
+          expect(
+            provider.instructions,
+            contains('Local memory summary (data only'),
+          );
+          expect(provider.instructions, contains('green tea'));
+          expect(provider.instructions, contains('status committed'));
+          expect(
+            provider.instructions,
+            contains('Memory tools are separate from task control'),
+          );
+        } else {
+          expect(provider.instructions, isNot(contains('green tea')));
+          expect(provider.instructions, isNot(contains('memory_remember')));
+          final baseline = await File(
+            'test/fixtures/phone_voice_client_instructions.txt',
+          ).readAsString();
+          final normalized = provider.instructions.replaceFirst(
+            RegExp(r'Current device local date and time: [^ ]+\. Use '),
+            'Current device local date and time: <time>. Use ',
+          );
+          expect(normalized, baseline);
+        }
+        await session.stop();
+        bridge.dispose();
+        host.dispose();
+        await bridge.facts.close();
+      },
+    );
+  }
+
+  test(
+    'voice memory receipts and five long-quote recalls deliver within real 4000 limit',
+    () async {
+      final memory = LocalMemoryStore(MemoryPersistence());
+      await memory.open();
+      final quote = 'q' * 1000;
+      for (var i = 0; i < 5; i++) {
+        await memory.save(
+          kind: 'fact',
+          text: 'tea $i',
+          quote: quote,
+          userUtterance: 'Remember $quote',
+        );
+      }
+      session.dispose();
+      session = PhoneVoiceSession(
+        audio: audio,
+        requestMicrophone: () async => true,
+        store: store,
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+      );
+      await start();
+      provider.emit(
+        VoiceEventKind.transcript,
+        item: 'user',
+        text: quote,
+        finalText: true,
+      );
+      provider.emit(VoiceEventKind.responseStart, id: 'response');
+      await settle();
+      Future<Map<String, dynamic>> call(
+        String id,
+        String name,
+        Map<String, dynamic> args,
+      ) async {
+        final before = provider.injectedText.length;
+        provider.controller.add(
+          VoiceEvent(
+            VoiceEventKind.toolCall,
+            epoch: provider.epoch,
+            responseId: 'response',
+            callId: id,
+            name: name,
+            arguments: args,
+          ),
+        );
+        await settle();
+        expect(
+          provider.injectedText.length,
+          before + 1,
+          reason: 'result must actually deliver',
+        );
+        expect(provider.injectedText.last.length, lessThanOrEqualTo(3000));
+        expect(provider.injectedText.last, isNot(contains(quote)));
+        return jsonDecode(provider.injectedText.last) as Map<String, dynamic>;
+      }
+
+      final recalled = await call('recall', 'memory_recall', {'query': 'tea'});
+      expect(recalled['entries'], hasLength(5));
+      expect(recalled['truncated'], false);
+      final saved = await call('save', 'memory_remember', {
+        'kind': 'fact',
+        'text': 'tea new',
+        'quote': quote,
+      });
+      expect(saved['status'], 'committed');
+      expect(saved.keys, unorderedEquals(['status', 'id', 'kind']));
+      // Tool results enter only provider memory, never the durable transcript store.
+      expect(
+        jsonEncode(store.conversation(conversation)['messages']),
+        isNot(contains('tea 0')),
+      );
+    },
+  );
+
+  test(
+    'actual cascaded context drops summary and recall after external forget',
+    () async {
+      final memory = LocalMemoryStore(MemoryPersistence());
+      await memory.open();
+      const forgottenText = 'private orchid tea';
+      final entry = await memory.save(
+        kind: 'fact',
+        text: forgottenText,
+        quote: forgottenText,
+        userUtterance: forgottenText,
+      );
+      session.dispose();
+      session = PhoneVoiceSession(
+        audio: audio,
+        requestMicrophone: () async => true,
+        store: store,
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+      );
+      final llm = _MemoryCascadeLlm();
+      final receiptGate = Completer<void>();
+      llm.receiptGate = receiptGate;
+      addTearDown(() {
+        if (!receiptGate.isCompleted) receiptGate.complete();
+      });
+      final cascade = CascadedVoiceProvider(
+        asr: FakeAsr(),
+        llm: llm,
+        tts: _SilentMemoryTts(),
+      );
+      await session.start(provider: cascade, conversation: conversation);
+      await session.submitText('recall tea');
+      await until(() => llm.receipts == 1);
+      await settle();
+      expect(jsonEncode(llm.prompts), contains(forgottenText));
+      expect(jsonEncode(llm.prompts.last), contains(entry.id));
+      // A second UI/tool path shares the store, not this voice session.
+      final result = await executeLocalMemoryTool(memory, 'memory_forget', {
+        'id': entry.id,
+      }, userUtterance: null);
+      expect(result['status'], 'committed');
+      expect(session.active, true);
+      final before = llm.prompts.length;
+      await session.submitText('continue');
+      await until(() => llm.prompts.length > before);
+      final nextRequest = jsonEncode(llm.prompts[before]);
+      expect(nextRequest, isNot(contains(forgottenText)));
+      expect(nextRequest, isNot(contains(entry.id)));
+      expect(nextRequest, isNot(contains('Receipt delivered')));
+      receiptGate.complete();
+      await settle();
+      await session.stop();
+    },
+  );
+
+  test(
+    'actual cascaded unfinished speech is retired by forget without speech-end',
+    () async {
+      final memory = LocalMemoryStore(MemoryPersistence());
+      await memory.open();
+      addTearDown(memory.close);
+      final entry = await memory.save(
+        kind: 'fact',
+        text: 'private tea',
+        quote: 'tea',
+        userUtterance: 'tea',
+      );
+      session.dispose();
+      final host = AgentCoreHost(store: store, settings: ModelSettings());
+      final bridge = FactBridge(host);
+      session = PhoneVoiceSession(
+        audio: audio,
+        requestMicrophone: () async => true,
+        store: store,
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+        delegates: bridge,
+      );
+      final asr = FakeAsr(), llm = FakeLlm();
+      final cascade = CascadedVoiceProvider(
+        asr: asr,
+        llm: llm,
+        tts: _SilentMemoryTts(),
+        endpointing: SilenceEndpointing(minSpeechMs: 64, silenceEndMs: 64),
+      );
+      final events = <VoiceEvent>[];
+      final subscription = cascade.events.listen(events.add);
+      await session.start(provider: cascade, conversation: conversation);
+      await cascade.sendAudio(sound(3));
+      await settle();
+      expect(session.isUserSpeaking, true);
+      expect(cascade.endpointing.speaking, true);
+      expect(
+        events.where((e) => e.kind == VoiceEventKind.speechStart),
+        hasLength(1),
+      );
+      final result = await executeLocalMemoryTool(memory, 'memory_forget', {
+        'id': entry.id,
+      }, userUtterance: null);
+      expect(result['status'], 'committed');
+      expect(session.active, true);
+      expect(session.isUserSpeaking, false);
+      expect(session.status, 'listening');
+      expect(session.captionText, isEmpty);
+      expect(session.transcript, isEmpty);
+      expect(session.reply, isEmpty);
+      await cascade.sendAudio(sound(3, 0));
+      await settle();
+      expect(cascade.endpointing.speaking, false);
+      expect(asr.inputs, isEmpty); // The unfinished utterance was discarded.
+      expect(events.where((e) => e.kind == VoiceEventKind.speechEnd), isEmpty);
+      await session.submitText('continue by typing');
+      await settle();
+      expect(llm.messages, hasLength(1));
+      expect(jsonEncode(llm.messages.single), contains('continue by typing'));
+      expect(session.error, isNull);
+      bridge.facts.add(
+        VoiceDelegateUpdate(
+          'task',
+          conversation,
+          'task completed',
+          terminal: true,
+        ),
+      );
+      await settle();
+      expect(llm.messages, hasLength(2));
+      expect(jsonEncode(llm.messages.last), contains('task completed'));
+      final journal =
+          store.conversation(conversation)['voice_deliveries'] as Map;
+      expect(journal['task:terminal']['activation'], 'requested');
+      await session.stop();
+      await subscription.cancel();
+      bridge.dispose();
+      host.dispose();
+      await bridge.facts.close();
+    },
+  );
+
+  test(
+    '100 recalls deliver with actual cascaded cumulative host budget',
+    () async {
+      final memory = LocalMemoryStore(MemoryPersistence());
+      await memory.open();
+      for (var i = 0; i < 5; i++) {
+        final text = 'tea $i${'\u0001' * 195}';
+        await memory.save(
+          kind: 'fact',
+          text: text,
+          quote: 'tea',
+          userUtterance: 'tea',
+        );
+      }
+      session.dispose();
+      session = PhoneVoiceSession(
+        audio: audio,
+        requestMicrophone: () async => true,
+        store: store,
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+      );
+      final llm = _MemoryCascadeLlm();
+      final cascade = CascadedVoiceProvider(
+        asr: FakeAsr(),
+        llm: llm,
+        tts: _SilentMemoryTts(),
+      );
+      await session.start(provider: cascade, conversation: conversation);
+      for (var i = 0; i < 100; i++) {
+        await session.submitText('recall tea');
+        await until(() => llm.receipts == i + 1);
+        await settle();
+        expect(session.error, isNull, reason: 'recall $i must deliver');
+        expect(jsonEncode(llm.prompts.last), contains('tea 4'));
+      }
+      expect(llm.calls, 100);
+      expect(llm.receipts, 100);
+      await session.stop();
+    },
+  );
+
+  test(
+    'forget closes provider without waiting for hung native audio cleanup',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'voice-forget-cleanup-',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final memory = LocalMemoryStore(
+        FileLifePersistence(File('${root.path}/local_memory.json')),
+      );
+      await memory.open();
+      final entry = await memory.save(
+        kind: 'fact',
+        text: 'tea',
+        quote: 'tea',
+        userUtterance: 'tea',
+      );
+      session.dispose();
+      session = PhoneVoiceSession(
+        audio: audio,
+        requestMicrophone: () async => true,
+        store: store,
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+      );
+      await start();
+      audio.stopping = Completer<void>();
+      var completed = false;
+      final forgetting = memory.forget(entry.id).then((_) => completed = true);
+      await forgetting.timeout(const Duration(seconds: 1));
+      expect(completed, true);
+      expect(session.active, false);
+      expect(provider.closes, 1);
+      expect(audio.stopping!.isCompleted, false);
+      final next = await memory.save(
+        kind: 'fact',
+        text: 'new tea',
+        quote: 'tea',
+        userUtterance: 'tea',
+      );
+      await memory.forget(next.id).timeout(const Duration(seconds: 1));
+      await memory.close().timeout(const Duration(seconds: 1));
+      final reopened = LocalMemoryStore(
+        FileLifePersistence(File('${root.path}/local_memory.json')),
+      );
+      await reopened.open().timeout(const Duration(seconds: 1));
+      expect(reopened.summary(), isEmpty);
+      // Native cleanup has its own deadline and cannot retain _stopping forever.
+      await session.stop().timeout(const Duration(seconds: 4));
+      expect(session.cleanupError, 'audio_stop_failed');
+      audio.stopping!.complete();
+    },
+  );
+
+  test(
+    'memory receipt delivery failure becomes a failed tool result',
+    () async {
+      final memory = LocalMemoryStore(MemoryPersistence());
+      await memory.open();
+      session.dispose();
+      session = PhoneVoiceSession(
+        audio: audio,
+        requestMicrophone: () async => true,
+        store: store,
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+      );
+      await start();
+      provider.emit(
+        VoiceEventKind.transcript,
+        item: 'user',
+        text: 'recall tea',
+        finalText: true,
+      );
+      provider.emit(VoiceEventKind.responseStart, id: 'response');
+      await settle();
+      provider.failInjectionOnce = true;
+      provider.controller.add(
+        VoiceEvent(
+          VoiceEventKind.toolCall,
+          epoch: provider.epoch,
+          responseId: 'response',
+          callId: 'failed-recall',
+          name: 'memory_recall',
+          arguments: {'query': 'tea'},
+        ),
+      );
+      await settle();
+      expect(jsonDecode(provider.injectedText.single), {
+        'status': 'failed',
+        'error': 'memory_delivery_failed',
+      });
+      expect(session.error, 'memory_delivery_failed');
+    },
+  );
+
+  test(
+    'voice memory uses only final verified current user text, never tool output',
+    () async {
+      final memory = LocalMemoryStore(MemoryPersistence());
+      await memory.open();
+      await memory.save(
+        kind: 'preference',
+        text: 'green tea',
+        quote: 'green tea',
+        userUtterance: 'green tea',
+      );
+      session.dispose();
+      session = PhoneVoiceSession(
+        audio: audio,
+        requestMicrophone: () async => true,
+        store: store,
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+      );
+      await start();
+      // No delegate bridge is required for local memory tools.
+      provider.emit(
+        VoiceEventKind.transcript,
+        item: 'user',
+        text: 'recall tea',
+        finalText: true,
+      );
+      provider.emit(VoiceEventKind.responseStart, id: 'response');
+      await settle();
+      Future<Map<String, dynamic>> call(
+        String id,
+        String name,
+        Map<String, dynamic> args,
+      ) async {
+        provider.controller.add(
+          VoiceEvent(
+            VoiceEventKind.toolCall,
+            epoch: provider.epoch,
+            responseId: 'response',
+            callId: id,
+            name: name,
+            arguments: args,
+          ),
+        );
+        await settle();
+        return jsonDecode(provider.injectedText.last) as Map<String, dynamic>;
+      }
+
+      final recalled = await call('recall', 'memory_recall', {'query': 'tea'});
+      expect(recalled['entries'].single['text'], 'green tea');
+      final refused = await call('bad', 'memory_remember', {
+        'kind': 'preference',
+        'text': 'green tea',
+        'quote': 'green tea',
+      });
+      expect(refused['error'], 'invalid_source_quote');
+      expect(memory.recall('tea'), hasLength(1));
+      final committed = await call('good', 'memory_remember', {
+        'kind': 'fact',
+        'text': 'tea requested',
+        'quote': 'recall tea',
+      });
+      expect(committed['status'], 'committed');
+      expect(memory.recall('tea'), hasLength(2));
+    },
+  );
+
+  for (final source in [
+    'missing',
+    'partial',
+    'unverified',
+    'previous turn',
+    'revised unverified',
+  ]) {
+    test('voice remember fails closed for $source transcript', () async {
+      final memory = LocalMemoryStore(MemoryPersistence());
+      await memory.open();
+      session.dispose();
+      session = PhoneVoiceSession(
+        audio: audio,
+        requestMicrophone: () async => true,
+        store: store,
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+      );
+      await start();
+      if (source == 'revised unverified') {
+        provider.emit(
+          VoiceEventKind.transcript,
+          item: 'user',
+          text: 'green tea',
+          finalText: true,
+        );
+        await settle();
+        provider.controller.add(
+          VoiceEvent(
+            VoiceEventKind.transcript,
+            epoch: provider.epoch,
+            itemId: 'user',
+            text: 'green tea',
+            isFinal: true,
+            inputOriginVerified: false,
+          ),
+        );
+      } else if (source == 'previous turn') {
+        provider.emit(
+          VoiceEventKind.transcript,
+          item: 'old',
+          text: 'green tea',
+          finalText: true,
+        );
+        await settle();
+        provider.emit(VoiceEventKind.speechStart, item: 'new');
+        provider.emit(VoiceEventKind.speechEnd, item: 'new');
+      } else if (source != 'missing') {
+        provider.controller.add(
+          VoiceEvent(
+            VoiceEventKind.transcript,
+            epoch: provider.epoch,
+            itemId: 'user',
+            text: 'green tea',
+            isFinal: source == 'unverified',
+            inputOriginVerified: source != 'unverified',
+          ),
+        );
+      }
+      provider.emit(VoiceEventKind.responseStart, id: 'response');
+      provider.controller.add(
+        VoiceEvent(
+          VoiceEventKind.toolCall,
+          epoch: provider.epoch,
+          responseId: 'response',
+          callId: 'save',
+          name: 'memory_remember',
+          arguments: {
+            'kind': 'preference',
+            'text': 'green tea',
+            'quote': 'green tea',
+          },
+        ),
+      );
+      await settle();
+      expect(
+        jsonDecode(provider.injectedText.single)['error'],
+        'invalid_source_quote',
+      );
+      expect(memory.recall('tea'), isEmpty);
+    });
+  }
+
+  test('provider without voice tools gets no memory tools', () async {
+    final memory = LocalMemoryStore(MemoryPersistence());
+    await memory.open();
+    session.dispose();
+    session = PhoneVoiceSession(
+      audio: audio,
+      requestMicrophone: () async => true,
+      store: store,
+      localMemory: memory,
+      spaceMode: SpaceMode.standalone,
+    );
+    provider.capabilities = const VoiceCapabilities(
+      automaticResponse: true,
+      serverEndpointing: true,
+      voiceTools: false,
+    );
+    await start();
+    expect(provider.toolDefinitions, isEmpty);
+  });
+
   test('native Call ended is a normal hangup and not an audio error', () async {
     await start();
     audio.controller.add({
@@ -241,37 +884,43 @@ void main() {
     expect(provider.closes, 1);
   });
 
-  test('cleanup failure preserves provider error and resets on start', () async {
-    await start();
-    audio.failStop = true;
-    provider.controller.addError(StateError('provider_failed'));
-    await session.stop();
-    expect(session.error, 'provider_failed');
-    expect(session.cleanupError, 'audio_stop_failed');
-    audio.failStop = false;
-    await start();
-    expect(session.cleanupError, isNull);
-    expect(session.error, isNull);
-  });
+  test(
+    'cleanup failure preserves provider error and resets on start',
+    () async {
+      await start();
+      audio.failStop = true;
+      provider.controller.addError(StateError('provider_failed'));
+      await session.stop();
+      expect(session.error, 'provider_failed');
+      expect(session.cleanupError, 'audio_stop_failed');
+      audio.failStop = false;
+      await start();
+      expect(session.cleanupError, isNull);
+      expect(session.error, isNull);
+    },
+  );
 
-  test('invalid current speech turn resumes listening without a response', () async {
-    await start();
-    provider.emit(VoiceEventKind.speechStart, item: 'invalid');
-    await settle();
-    provider.controller.add(
-      VoiceEvent(
-        VoiceEventKind.speechEnd,
-        epoch: provider.epoch,
-        itemId: 'invalid',
-        code: 'turn_invalid',
-      ),
-    );
-    await settle();
-    expect(session.active, isTrue);
-    expect(session.error, isNull);
-    expect(session.status, 'listening');
-    expect(provider.requests, 0);
-  });
+  test(
+    'invalid current speech turn resumes listening without a response',
+    () async {
+      await start();
+      provider.emit(VoiceEventKind.speechStart, item: 'invalid');
+      await settle();
+      provider.controller.add(
+        VoiceEvent(
+          VoiceEventKind.speechEnd,
+          epoch: provider.epoch,
+          itemId: 'invalid',
+          code: 'turn_invalid',
+        ),
+      );
+      await settle();
+      expect(session.active, isTrue);
+      expect(session.error, isNull);
+      expect(session.status, 'listening');
+      expect(provider.requests, 0);
+    },
+  );
 
   test('late invalid speech turn cannot close a newer speaking turn', () async {
     await start();
@@ -1029,11 +1678,7 @@ void main() {
       var notifications = 0;
       session.addListener(() => notifications++);
       for (var i = 0; i < 40; i++) {
-        provider.emit(
-          VoiceEventKind.audio,
-          id: 'stream',
-          pcm: Uint8List(480),
-        );
+        provider.emit(VoiceEventKind.audio, id: 'stream', pcm: Uint8List(480));
       }
       await settle();
       expect(audio.frames, hasLength(40));

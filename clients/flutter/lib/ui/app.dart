@@ -1,6 +1,9 @@
 import '../space/space_root.dart';
 import '../space/space_storage.dart';
 import 'dart:convert';
+import 'dart:io';
+import '../memory/local_memory_store.dart';
+import '../personal/local_life.dart';
 import '../connectors/feishu/host.dart';
 import '../context/profile_corrections.dart';
 import '../context/profile_agent.dart';
@@ -214,6 +217,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   PetAvatarStore? _petAvatarStore;
   int _tab = 0;
   AgentCoreHost? agentCore;
+  LocalMemoryStore? _localMemory;
+  bool _agentCoreOpening = false;
   FeishuHost? feishu;
   int _profileRevision = 0;
   (int, String, bool)? _profileUiState;
@@ -310,9 +315,23 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   /// Standalone Space chat owns local execution.
   Future<void> _openAgentCore() async {
+    if (_agentCoreOpening || agentCore != null) return;
+    _agentCoreOpening = true;
+    LocalMemoryStore? localMemory;
+    var memoryAdopted = false;
+    Object? startupFailure;
     try {
       await _restorePreferences();
       if (!mounted) return;
+      final spaceMode = SpaceStorage.scope?.mode;
+      if (spaceMode == SpaceMode.standalone) {
+        final directory = await SpaceStorage.directory();
+        localMemory = LocalMemoryStore(
+          FileLifePersistence(File('${directory.path}/local_memory.json')),
+        );
+        await localMemory.open();
+        if (!mounted) return;
+      }
       final nativeTasks = NativeChatTaskRunner();
       final iosTasks = defaultTargetPlatform == TargetPlatform.iOS
           ? nativeTasks
@@ -348,6 +367,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 : BackgroundExecution(),
             clientFactory: iosTasks == null ? null : IosModelClient.new,
             registry: ToolRegistry(
+              spaceMode: spaceMode,
+              localMemory: localMemory,
               snapshot: lifeHost.snapshot,
               mutate: lifeHost.mutate,
               hasConflict: () => lifeHost.hasConflict,
@@ -388,14 +409,19 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         if (widget.agentCore == null) host.dispose();
         return;
       }
+      final call = PhoneVoiceSession(
+        spaceMode: spaceMode,
+        localMemory: localMemory,
+        audio: phoneAudio,
+        companion: _companion,
+        requestMicrophone: requestMicrophone,
+        store: host.store,
+      )..addListener(_phoneVoiceChanged);
       setState(() {
         agentCore = host;
-        phoneVoice = PhoneVoiceSession(
-          audio: phoneAudio,
-          companion: _companion,
-          requestMicrophone: requestMicrophone,
-          store: host.store,
-        )..addListener(_phoneVoiceChanged);
+        phoneVoice = call;
+        _localMemory = localMemory;
+        memoryAdopted = true;
         phoneVoice!.onRestorePresentation = () async {
           final call = phoneVoice;
           if (!mounted || call?.active != true) return false;
@@ -425,14 +451,23 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         /* Delegation remains unavailable until durable storage opens. */
       }
     } catch (error) {
-      if (mounted) {
-        setState(
-          () => startupError = _t(
-            '无法打开本机对话，请重试。',
-            'Could not open local chat. Please retry.',
-          ),
-        );
+      startupFailure = error;
+    } finally {
+      // The attempt keeps ownership until all required startup work succeeds.
+      // Retire it before exposing Retry, including when the shell unmounts.
+      if (!memoryAdopted) {
+        await localMemory?.close();
+        if (identical(_localMemory, localMemory)) _localMemory = null;
       }
+      _agentCoreOpening = false;
+    }
+    if (startupFailure != null && mounted) {
+      setState(
+        () => startupError = _t(
+          '无法打开本机对话，请重试。',
+          'Could not open local chat. Please retry.',
+        ),
+      );
     }
   }
 
@@ -1368,6 +1403,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     localSchedules?.dispose();
     _petAvatarStore?.dispose();
     if (widget.agentCore == null) agentCore?.dispose();
+    unawaited(_localMemory?.close());
     emptyStore.dispose();
     if (widget.audio == null) unawaited(audio.disconnect());
     super.dispose();
@@ -1560,6 +1596,16 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                     children: [
                       Column(
                         children: [
+                          if (_localMemory != null && !_localMemory!.available)
+                            Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Text(
+                                _t(
+                                  '此 Space 的本地记忆不可用。聊天和语音仍可使用。',
+                                  'Local memory is unavailable in this Space. Chat and voice still work.',
+                                ),
+                              ),
+                            ),
                           if (_phoneVoiceShown &&
                               phoneVoice != null &&
                               !fullCall &&

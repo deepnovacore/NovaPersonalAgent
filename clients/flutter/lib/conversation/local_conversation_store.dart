@@ -1,3 +1,4 @@
+import '../memory/memory_tool_history.dart';
 import 'dart:convert';
 import '../personal/local_life.dart';
 import '../protocol/request_id.dart';
@@ -41,8 +42,12 @@ class ConversationStore {
           }
         }
       }
+      final before = jsonEncode(data);
       final repaired = _recover(data);
-      if (repaired) await persistence.write(jsonEncode(data));
+      _redactMemory(data);
+      if (repaired || jsonEncode(data) != before) {
+        await persistence.write(jsonEncode(data));
+      }
       _data = data;
     }
     _ready = true;
@@ -133,12 +138,24 @@ class ConversationStore {
       if (!_ready) throw StateError('conversation_store_not_open');
       final next = jsonDecode(jsonEncode(_data)) as Map<String, dynamic>;
       final value = change(next);
+      _redactMemory(next);
       await persistence.write(jsonEncode(next));
       _data = next;
       return value;
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
+  }
+
+  void _redactMemory(Map<String, dynamic> data) {
+    for (final item in data['conversations'] as List) {
+      redactMemoryToolHistory(item['messages'] as List);
+      final active = item['active_turn'];
+      if (active is Map && isMemoryTool(active['tool'])) {
+        active['draft'] = '';
+        active['reasoning'] = '';
+      }
+    }
   }
 
   static const mainId = 'chat:main';
@@ -301,7 +318,7 @@ class ConversationStore {
           };
         }
         (item['messages'] as List).add({
-          ...message,
+          ...Map<String, dynamic>.from(jsonDecode(jsonEncode(message)) as Map),
           'time': DateTime.now().toUtc().toIso8601String(),
         });
       });
