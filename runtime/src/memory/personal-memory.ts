@@ -104,6 +104,8 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  /** Host-configured internal style channel, independent of the factual recall engine. */
+  readonly supportsResponseStyle?: boolean
   /** In-memory ledger mutation fence; compare only within this resource instance. */
   readonly recallAuthorityRevision?: () => number
   /** Only the Nova ledger supplies memory to proactive/product surfaces. */

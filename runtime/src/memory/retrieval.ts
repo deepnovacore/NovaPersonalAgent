@@ -85,7 +85,7 @@ export class UnifiedRetrieval {
   /** Response adaptation only: never include style records in factual entries or tool results. */
   async prepareResponseStyle(result: UnifiedRetrievalResult, signal: AbortSignal): Promise<() => string | null> {
     const resource = this.owners.get(result), consumer = this.consumers.get(result);
-    if (resource?.recallEngine !== 'voicemem' || this.options.memory() !== resource || !consumer) return () => null;
+    if (resource?.supportsResponseStyle !== true || this.options.memory() !== resource || !consumer) return () => null;
     const hits = await validateResponseStyleHits(resource, this.styleHits.get(result) ?? [], consumer, signal);
     return () => this.options.memory() === resource ? responseStyleContext(hits) : null;
   }
@@ -240,7 +240,7 @@ export class UnifiedRetrieval {
     const resultSnippets = checked.flatMap(candidate => candidate?.evidenceId ? [snippets.get(candidate.evidenceId)!] : []);
     const result: UnifiedRetrievalResult = {state: resultEntries.length || resultSnippets.length ? 'ok' : degraded ? 'unavailable' : 'empty', scope, entries: resultEntries, snippets: resultSnippets, degraded};
     this.owners.set(result, resource);
-    if (resource.recallEngine === 'voicemem' && recalled.status === 'fulfilled' && 'contextHits' in recalled.value) this.styleHits.set(result, recalled.value.contextHits ?? []);
+    if (resource.supportsResponseStyle === true && recalled.status === 'fulfilled' && 'contextHits' in recalled.value) this.styleHits.set(result, recalled.value.contextHits ?? []);
     if(options.consumer!==undefined)this.consumers.set(result,options.consumer);
     return this.authorize(result,resource,options.consumer,signal);
   }

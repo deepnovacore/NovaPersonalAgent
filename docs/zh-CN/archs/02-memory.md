@@ -28,13 +28,15 @@ L0 黑板由专用 SQLite Worker 持久化（`runtime/src/memory/blackboard-sess
 个人记忆通过统一接口接入（`runtime/src/memory/personal-memory.ts`）。`MEMORY_CONNECTION` 选择本地、远程或关闭。
 显式本地组合使用 `MEMORY_RECALL_ENGINE=ledger` 与 `MEMORY_EXTRACTORS=ledger`；两者留空时保留默认账本及旧数据迁移。
 `MEMORY_PROVIDER` 已弃用：`voicemem` 保留该迁移，`mem0` 保留独立模式，不能与新变量共用。
-新的 voicemem/mem0 引擎组合在持久化索引管线完成前明确拒绝配置。关闭记忆不会分配个人存储。
+`MEMORY_RECALL_ENGINE=voicemem|mem0` 已通过真实 SDK 接入，账本仍是版本、证据与同意的权威。关闭记忆不会分配个人存储。
 
 **mem0（显式选择的替代引擎）** 会先把来源写入自身账本，再让模型看到它们。每个来源在 `pending → learned` 之间流转，被删除时变为 `forgotten`；`recall()` 只返回 `learned` 的来源，并在异步抽取调用之后再次检查状态，避免在用户同时删除记忆时返回已经失效的内容。待学习记录在后台异步处理，通过互斥锁保证只有一个进程执行抽取（`learning-lock.db`，`PRAGMA busy_timeout=0`），第二个进程会快速失败，而不会重复同样的工作。同一来源重复提交不会重复入库。存储按用户隔离：`memory.sqlite.mem0/<sha256(userId)>/`，其中 `ledger.db` 与 mem0 SDK 自带的向量数据库放在一起。
 
 **统一本地账本（默认）** 由生产组装接入 `runtime/src/memory-substrate/`，保存来源原文、修订历史与处理同意，并提供统一检索。旧 VoiceMem 数据可只读迁入，原数据库保留。`voicemem` 名称继续用于配置兼容；兼容层保留注入旧本地工厂的行为。**远程个人记忆**（`remote-personal-memory.ts`）是宿主管控的 HTTP 客户端，对接 `/v1/remember`、`/v1/forget`、`/v1/recall` 和 `/v1/preferences`；URL 必须是 HTTPS 或回环地址，响应体有大小上限。
 
-显式切换到 mem0 或远程记忆不会迁移统一账本数据；旧 VoiceMem 的只读迁入是独立迁移路径。
+旧独立 mem0 和远程记忆不迁移统一账本；新的 `MEMORY_RECALL_ENGINE=mem0|voicemem` 会从现有账本回填 SDK 派生索引。旧 VoiceMem 的只读迁入是独立路径。
+
+`MEMORY_EXTRACTORS=ledger,voicemem` 可选开启情绪/特质抽取，仅保存在 SDK 中，不写账本事实。特质至少需要三个不同且仍获授权的用户会话来源；背景从最早证据起最多保留十分钟，每次使用前重新校验。纠正、删除、撤回同意与清除通过事务代际 outbox 驱动幂等 SDK 对账，带租约、外部写锁和重启重试。引擎结果始终重新解析为账本 ID、版本和来源；项目/general 内容不作为用户召回。复用现有 embedding 与 fast 模型路由，无新增记忆专属密钥。详见[生产组合说明](../../design-notes/2026-11-03-memory-backend-composition.md)。
 
 ## 独立的文档知识（K）
 

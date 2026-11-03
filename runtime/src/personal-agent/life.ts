@@ -22,6 +22,7 @@ export type LifeState=z.infer<typeof lifeStateSchema>
 export interface LifeProvenance {type:'accepted_candidate'|'explicit_candidate';row:EvaluatedCandidate;resolution?:LifeResolution}
 export interface LifeSnapshot {state:LifeState;revision:number}
 export interface LifeBackend {
+ authorizationRevision?(signal?:AbortSignal):Promise<string>
  peek?():Promise<LifeSnapshot|null>
  load(legacy:LifeState,options?:{legacyPath?:string}):Promise<LifeSnapshot>
  mutate(value:{input:unknown;requestId:string;expectedRevision:number;provenance?:LifeProvenance}):Promise<LifeSnapshot&{result:{id:string;version:number}}>

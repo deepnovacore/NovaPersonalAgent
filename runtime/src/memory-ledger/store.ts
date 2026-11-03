@@ -208,6 +208,8 @@ export class MemoryLedgerStoreError extends Error {
   }
 }
 
+export type LifeAuthorizationRevision = readonly [number|null,number,number,readonly (readonly [string,number])[]]
+
 export class MemoryLedgerStore {
   readonly #path: string
   readonly #databaseFactory: LedgerDatabaseFactory
@@ -288,7 +290,7 @@ export class MemoryLedgerStore {
       const tables = [
         'memory_evidence', 'memory_message_heads', 'memory_revisions', 'memory_suppressed',
         'memory_deleted_sources', 'memory_legacy_suppressed', 'memory_purged_ids',
-        'source_grants', 'source_connections', 'source_objects',
+        'source_grants', 'source_connections', 'source_objects', 'processing_profiles',
       ]
       for (const table of tables) this.#createAuthorityTriggers(db, table, false)
       db.exec('COMMIT')
@@ -325,6 +327,28 @@ export class MemoryLedgerStore {
     return this.#database ? this.#readRecallAuthorityRevision(this.#database) : this.#recallAuthorityRevision
   }
 
+  /** Indexed metadata only; consumers must separately revalidate purely time-sensitive evidence eligibility. */
+  lifeAuthorizationRevision(namespace: string): LifeAuthorizationRevision {
+    z.string().min(1).max(256).endsWith(':life:').parse(namespace)
+    try {
+      const row = this.#requireDatabase().prepare(`SELECT
+        EXISTS(SELECT 1 FROM memory_life_meta WHERE namespace=?) AS life_present,
+        (SELECT json_type(payload_json,'$.revision') FROM memory_life_meta WHERE namespace=?) AS life_type,
+        (SELECT json_extract(payload_json,'$.revision') FROM memory_life_meta WHERE namespace=?) AS life_revision,
+        (SELECT value FROM main.recall_authority_epoch WHERE slot=1) AS authority_epoch,
+        (SELECT value FROM temp.recall_authority_revision) AS session_revision,
+        (SELECT json_group_array(json_array(provider,revision)) FROM
+          (SELECT provider,revision FROM processing_profiles WHERE prefix=? ORDER BY provider LIMIT 257)) AS products
+      `).get(namespace,namespace,namespace,namespace.slice(0,-'life:'.length))
+      const counter=(value:unknown):value is number=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0
+      if (!row||!counter(row.authority_epoch)||!counter(row.session_revision)
+        ||(row.life_present===1?(!['integer','real'].includes(String(row.life_type))||!counter(row.life_revision)):row.life_revision!==null)) throw Error('invalid_authority')
+      const products:unknown=JSON.parse(String(row.products))
+      if(!Array.isArray(products)||products.length>256||!products.every((item:unknown)=>Array.isArray(item)&&item.length===2&&typeof item[0]==='string'&&item[0].length>0&&item[0].length<=512&&!item[0].includes('\0')&&counter(item[1])))throw Error('invalid_product_authority')
+      return [row.life_present===1?row.life_revision as number:null,row.authority_epoch,row.session_revision,products as [string,number][]]
+    }catch{throw new MemoryLedgerStoreError('STORE_READ_FAILED')}
+  }
+
   memory(operation: MemoryOperation, input: unknown, openLegacy?: LedgerDatabaseFactory): unknown {
     return this.withMemoryFilesLock(()=>{
       if(operation==='enable_files'){
@@ -334,7 +358,7 @@ export class MemoryLedgerStore {
       try {
       if(operation==='purge')return purgeEntry(this.#requireDatabase(),this.#path,input)
       if(operation==='purge_index_complete')return completePurgeIndex(this.#requireDatabase(),this.#path,input)
-      if(operation==='purge_status')return purgeStatus(this.#requireDatabase(),z.object({entry_prefix:z.string().min(1)}).strict().parse(input).entry_prefix)
+      if(operation==='purge_status')return purgeStatus(this.#requireDatabase(),z.object({entry_prefix:z.string().min(1)}).strict().parse(input).entry_prefix,this.#path)
       this.#joinMemoryFileAuthority()
       return operation === 'migrate_legacy' ? migrateLegacyMemory(this.#requireDatabase(), input, openLegacy ?? (() => {throw new Error('STORE_INVALID_OPERATION')})) : memoryOperation(this.#requireDatabase(), operation, input) }
       catch (error) {
