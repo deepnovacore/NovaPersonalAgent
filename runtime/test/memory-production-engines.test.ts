@@ -101,4 +101,3 @@ for(const backend of ['mem0','voicemem'] as const)test(`production ${backend}: o
     const closing=Date.now();await memory.close();assert.ok(Date.now()-closing<2000,'shutdown bounded while provider stalls')
   }finally{provider.setHold(false);await memory.close();await provider.close();await rm(root,{recursive:true,force:true})}
 })
-

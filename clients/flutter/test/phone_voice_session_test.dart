@@ -331,9 +331,13 @@ void main() {
         } else {
           expect(provider.instructions, isNot(contains('green tea')));
           expect(provider.instructions, isNot(contains('memory_remember')));
-          final baseline = await File(
-            'test/fixtures/phone_voice_client_instructions.txt',
-          ).readAsString();
+          final baseline =
+              jsonDecode(
+                    await File(
+                      'test/fixtures/phone_voice_client_instructions.json',
+                    ).readAsString(),
+                  )
+                  as String;
           final normalized = provider.instructions.replaceFirst(
             RegExp(r'Current device local date and time: [^ ]+\. Use '),
             'Current device local date and time: <time>. Use ',

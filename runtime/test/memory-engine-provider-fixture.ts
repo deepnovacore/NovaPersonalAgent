@@ -34,4 +34,3 @@ export async function providerFixture(){
 export async function settle(memory:SubstrateMemoryResource){
   for(let n=0;n<20;n++)try{await memory.flush();return}catch(error){if(n===19)throw error;await new Promise(resolve=>setTimeout(resolve,30))}
 }
-

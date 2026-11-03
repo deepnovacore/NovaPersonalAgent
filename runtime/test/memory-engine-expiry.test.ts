@@ -19,4 +19,3 @@ test('completed engine jobs become dirty at fixed expiry without new ledger traf
     run('ack',{owner:next.owner,generation:next.generation});assert.equal(run('status'),true)
   }finally{db.close()}
 })
-
