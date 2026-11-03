@@ -987,7 +987,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     throw new AssemblyError('coding agent controller factory requires a coding executor')
   }
   const personalMemorySessionId = randomUUID()
-  const retrieval=new UnifiedRetrieval({...(options.telemetry?{telemetry:options.telemetry}:{}),...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
+  const retrieval=new UnifiedRetrieval({...(options.telemetry?{telemetry:options.telemetry}:{}),...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawRecallKind:'knowledge' as const,rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
     if(!personalMemoryHolder.current?.readEvidence)return []
     const result=await core.knowledge!.service.recall(query,Math.min(5,limit),signal)
     return result.flatMap(hit=>'evidence_id' in hit&&typeof hit.evidence_id==='string'?[{evidence_id:hit.evidence_id,score:hit.score}]:[])
@@ -1506,6 +1506,7 @@ export function composeRealtime(
     let opened=false
     return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
       recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
+      requiresConversationConsumer:true,canReadConversationEvidence:(id,consumer)=>memory.canReadConversationEvidence(id,consumer),recallAuthorityRevision:()=>memory.recallAuthorityRevision(),
       processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),feishuProcessingConsent:(...args)=>memory.feishuProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),recordEvidenceBatch:inputs=>memory.recordEvidenceBatch(inputs),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),...(memory.forgetSources?{forgetSources:(refs:readonly string[])=>memory.forgetSources(refs)}:{}),
     } satisfies PersonalMemoryResource
   } : options.createPersonalMemory ?? (composition ? factoryForMemoryComposition(composition, options.settings) : undefined)

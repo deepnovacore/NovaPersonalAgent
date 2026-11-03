@@ -271,7 +271,7 @@ function project(item:Item,rows?:ProjectionRows):MemoryEntry|null {
   // SDK timestamps are durable per item; older SDK rows fall back to canonical-content hashes.
   const version=edit?.version??createHash('sha256').update(item.updatedAt ? JSON.stringify([item.updatedAt,content]) : content).digest('hex')
   const original={type:'conversation' as const,ref:sourceId,observed_at:row.recorded_at}
-  return {id:item.id,version,content,kind:'fact',origin:'inferred',source_refs:edit?.user_source?[original,MemorySourceRefSchema.parse(JSON.parse(edit.user_source))]:[original],
+  return {id:item.id,version,content,memory_scope:'user',kind:'fact',origin:'inferred',source_refs:edit?.user_source?[original,MemorySourceRefSchema.parse(JSON.parse(edit.user_source))]:[original],
     evidence_refs:[sourceId],observed_at:row.recorded_at,recorded_at:row.recorded_at,topic:'',status:'active',corrected_to:null,confidence_note:null}
 }
 async function get(id:unknown):Promise<MemoryEntry|null> {

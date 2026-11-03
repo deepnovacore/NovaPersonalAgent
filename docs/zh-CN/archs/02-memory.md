@@ -36,7 +36,7 @@ L0 黑板由专用 SQLite Worker 持久化（`runtime/src/memory/blackboard-sess
 
 旧独立 mem0 和远程记忆不迁移统一账本；新的 `MEMORY_RECALL_ENGINE=mem0|voicemem` 会从现有账本回填 SDK 派生索引。旧 VoiceMem 的只读迁入是独立路径。
 
-`MEMORY_EXTRACTORS=ledger,voicemem` 可选开启情绪/特质抽取，仅保存在 SDK 中，不写账本事实。特质至少需要三个不同且仍获授权的用户会话来源；背景从最早证据起最多保留十分钟，每次使用前重新校验。纠正、删除、撤回同意与清除通过事务代际 outbox 驱动幂等 SDK 对账，带租约、外部写锁和重启重试。引擎结果始终重新解析为账本 ID、版本和来源；项目/general 内容不作为用户召回。复用现有 embedding 与 fast 模型路由，无新增记忆专属密钥。详见[生产组合说明](../../design-notes/2026-11-03-memory-backend-composition.md)。
+`MEMORY_EXTRACTORS=ledger,voicemem` 可选开启情绪/特质抽取，仅保存在 SDK 中，不写账本事实。特质至少需要三个不同且仍获授权的用户会话来源；背景从最早证据起最多保留十分钟，每次使用前重新校验。纠正、删除、撤回同意与清除通过事务代际 outbox 驱动幂等 SDK 对账，带租约、外部写锁和重启重试。引擎结果始终重新解析为账本 ID、版本和来源；项目/general 内容可显式读取并携带权威 scope 标签，但不进入自动用户背景召回。复用现有 embedding 与 fast 模型路由，无新增记忆专属密钥。详见[生产组合说明](../../design-notes/2026-11-03-memory-backend-composition.md)。
 
 ## 独立的文档知识（K）
 

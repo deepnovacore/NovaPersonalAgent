@@ -47,7 +47,8 @@ Both SDKs run in bounded workers. Mem0 SDK telemetry is disabled for these worke
 
 Every candidate is hydrated from the current, active ledger revision and authorized
 source references. Engine text, kind and claimed evidence are not facts. General/project
-entries are excluded at the ledger boundary. Engine selection preserves the actual
+entries remain readable through explicit authorized recall with canonical `memory_scope=general`
+metadata, but are excluded from automatic user-only recall and SDK/style admission. Engine selection preserves the actual
 `SubstrateMemoryResource`, its product surfaces and ledger mutation capabilities.
 No engine error silently falls back to ledger recall. Pending/failed indexing is marked
 degraded and exposed through content-free `engineIndexStatus()`.
@@ -137,3 +138,35 @@ consumption or 30 spoken turns. New deterministic real-SDK regressions separatel
 503/revoke, in-flight expiry, and mixed-engine prerecall consumption. The new retry-disabled
 embedding integration has HTTP-fixture evidence; no new live-provider verification is
 claimed here.
+
+
+## Explicit reads versus automatic user projection
+
+Low-level `recall()` defaults to explicit/all authorized memory scopes, preserving the
+legacy ledger and Workbench contract. The internal host-only `userOnly` option is set
+by `retrievalPrerecall`; it is not an environment setting, model tool argument or UI
+picker. Native ledger search filters this projection before ranking. SDK indexes stay
+user-only; explicit SDK recall intentionally combines their user candidates with an
+authorized general-only local lexical ledger search under one combined limit. SDK
+failure is not replaced by a successful ledger-user search; degraded/error state remains.
+
+Canonical `memory_scope` travels through MemoryEntry, recall hits and Unified entries.
+Ledger-owned missing legacy scope retains its historical recall eligibility; unknown
+provider scope is never defaulted to user. Automatic Unified retrieval and consumption
+require a current canonical user scope, even if a backend ignores the host filter.
+Unscoped standalone raw/source channels are not consulted for this automatic user
+projection; personal snippets must link to retained canonical user entries.
+The host-wired knowledge index is a separate `knowledge_reference` channel, not a
+user-fact or general-memory escape hatch. Only its canonical file evidence can
+become low-trust reference snippets, with the actual receiving consumer authorized
+at retrieval and consume. Cached references also recheck source kind, locator,
+time, text, deletion and retention; changed evidence is dropped without querying
+again. Arbitrary raw hooks do not receive this host capability. Explicit raw/source
+retrieval remains available under its canonical authorization checks. Remote transport without canonical scope
+support rejects user-only recall rather than silently mixing sources.
+
+USER.md, reply preferences and existing voice/user-background projection filters are
+unchanged. General memories can still appear in the explicitly separate text Memory
+directory. `memory-recall-projection.test.ts` covers legacy/default and selected SDK
+reads, scope labels, single limits, user-only prerecall/live revalidation, unknown or
+ignored scope filters, consent/forget, and SDK failure without fallback.

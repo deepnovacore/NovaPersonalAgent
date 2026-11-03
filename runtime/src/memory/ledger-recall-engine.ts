@@ -27,12 +27,13 @@ export class LedgerRecallEngine implements PersonalMemoryRecallPort {
     for (const [index, candidate] of candidates.entries()) {
       const row = rows[index]
       if (row?.id !== candidate.memoryId || row.status !== 'active' || row.version === null || candidate.revision !== row.version) continue
+      if(options.userOnly&&row.memory_scope!=='user')continue
       if(this.authorizeEntry&&!await this.authorizeEntry(row.id,row.version))continue
       const refs = row.evidence_refs ?? []
       if (!refs.length || !(await Promise.all(refs.map(id => abortable(this.ledger.canReadConversationEvidence!(id, this.consumer), signal)))).every(Boolean)) continue
       if(this.ledger.canProcessEvidence&&!(await Promise.all(refs.map(id=>abortable(this.ledger.canProcessEvidence!(id,'embedding'),signal)))).every(Boolean))continue
       // Engine text, evidence claims and kinds are not authoritative.
-      hits.push({memoryId: row.id, revision: row.version, text: row.content, evidenceIds: refs, kind: 'fact'})
+      hits.push({memoryId: row.id, revision: row.version, text: row.content, evidenceIds: refs, kind: 'fact',...(row.memory_scope?{memory_scope:row.memory_scope}:{})})
     }
     const contextHits = this.recallEngine === 'voicemem' ? await validateResponseStyleHits(this.ledger, (result.contextHits ?? []).slice(0, limit), this.consumer, signal) : []
     signal.throwIfAborted()

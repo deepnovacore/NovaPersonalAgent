@@ -11,7 +11,7 @@ export function prerecallContext(query: string, result: UnifiedRetrievalResult):
   }).slice(0, 3).flatMap(item => {
     const text = [...item.text].slice(0, remaining).join('')
     remaining -= [...text].length
-    return text ? [{text, reference: 'reference' in item ? item.reference : item.evidence_id}] : []
+    return text ? [{text, reference: 'reference' in item ? item.reference : item.evidence_id,...('context_kind' in item&&item.context_kind==='knowledge_reference'?{kind:'knowledge_reference',trust:'untrusted_external'}:{})}] : []
   })
   if (!items.length) return null
   const data = JSON.stringify(items).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e')

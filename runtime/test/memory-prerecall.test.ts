@@ -26,7 +26,7 @@ test('retrievalPrerecall is late-bound and revalidates with the configured consu
   const recall = t.mock.method(retrieval, 'recall', () => Promise.resolve(result))
   const revalidate = t.mock.method(retrieval, 'revalidate', () => Promise.resolve(result))
   const prepared = await port('deploy notes', signal)
-  assert.deepEqual(recall.mock.calls[0]!.arguments, ['deploy notes', {scope: 'any', limit: 3, signal, consumer: 'consumer'}])
+  assert.deepEqual(recall.mock.calls[0]!.arguments, ['deploy notes', {scope: 'any', userOnly:true, limit: 3, signal, consumer: 'consumer'}])
   assert.match((await prepared!(signal))!, /deploy notes/)
   assert.deepEqual(revalidate.mock.calls[0]!.arguments, [result, signal])
 })

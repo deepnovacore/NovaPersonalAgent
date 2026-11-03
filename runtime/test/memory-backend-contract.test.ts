@@ -226,7 +226,7 @@ function deferred() {
 
 function recallFixture() {
   const now = Date.now(), evidence = {evidence_id: 'evidence', locator: 'fixture', text: 'tea source', source_kind: 'conversation', observed_at: new Date(now).toISOString(), trust: 'untrusted_external' as const}
-  const entry: MemoryEntry = {id: 'fact-A', version: 1, content: 'I prefer tea', kind: 'preference', origin: 'stated', source_refs: [], evidence_refs: [evidence.evidence_id], observed_at: evidence.observed_at, recorded_at: evidence.observed_at, topic: 'tea', status: 'active', corrected_to: null, confidence_note: null}
+  const entry: MemoryEntry = {memory_scope:'user',id: 'fact-A', version: 1, content: 'I prefer tea', kind: 'preference', origin: 'stated', source_refs: [], evidence_refs: [evidence.evidence_id], observed_at: evidence.observed_at, recorded_at: evidence.observed_at, topic: 'tea', status: 'active', corrected_to: null, confidence_note: null}
   const fact: PersonalMemoryRecallHit = {memoryId: entry.id, revision: 1, text: entry.content, evidenceIds: entry.evidence_refs!}
   const style: PersonalMemoryRecallHit = {memoryId: 'style-B', text: 'Use a gentle tone', kind: 'experience', evidenceIds: [evidence.evidence_id], recordedAt: new Date(now).toISOString(), expiresAt: new Date(now + 1000).toISOString()}
   const ledger = {open: () => Promise.resolve(), close: () => Promise.resolve(), recallEngine: 'voicemem', supportsResponseStyle:true,

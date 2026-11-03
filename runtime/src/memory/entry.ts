@@ -15,7 +15,12 @@ export const LifeMemorySchema = z.object({
   due:z.string().date().nullable(),goal_id:z.string().nullable(),idea_id:z.string().nullable(),
   success_criteria:z.string().max(2000).nullable(),
 }).strict()
+/** Only ledger-owned records may apply this legacy default; provider metadata is never defaulted. */
+export function ledgerMemoryScope(value:unknown):'user'|'general'|null {
+  return value===undefined?'user':value==='user'||value==='general'?value:null
+}
 export const MemoryEntrySchema = z.object({
+  memory_scope:z.enum(['user','general']).optional(),
   id: text(256), version: MemoryVersionSchema, content: z.string().max(500),
   kind: z.enum(['fact', 'preference', 'plan', 'concern', 'commitment', 'entity', 'topic', 'todo', 'idea', 'goal', 'profile']),
   life:LifeMemorySchema.optional(),
