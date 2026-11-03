@@ -152,8 +152,10 @@ test('recent mem0 recall restricts candidates before ranking and validates sourc
   assert.deepEqual(await store.remember!(turn('future')), {sourceId: 'future', state: 'deleted'})
 })
 
-test('mem0 rejects SDK wildcard identities before opening storage', () => {
-  assert.throws(() => createMem0PersonalMemory({path:'/private/tmp/mem0-wildcard',userId:'*',
+test('mem0 rejects SDK wildcard identities before opening storage', async t => {
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-wildcard-'))
+  t.after(()=>rm(directory,{recursive:true,force:true}))
+  assert.throws(() => createMem0PersonalMemory({path:join(directory,'memory.sqlite'),userId:'*',
     embedding:{baseUrl:'https://example.invalid/v1',apiKey:'test',model:'embedding'}}))
 })
 
@@ -507,7 +509,9 @@ test('mem0 read failures use content-free read error codes', {timeout:20000},asy
 test('mem0 forgetSources attempts every source before a content-free aggregate failure and permits retry',async t=>{
   const attempts:string[]=[];let reject=true
   t.mock.method(PersonalMemoryStoreClient.prototype,'forgetSource',(ref:string)=>{attempts.push(ref);return ref==='second'&&reject?Promise.reject(Error('private source detail')):Promise.resolve()})
-  const store=createMem0PersonalMemory({path:'/private/tmp/nova-mem0-forget-many',userId:'host-user',embedding:{baseUrl:'https://example.invalid',apiKey:'test',model:'embedding'}})
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-forget-many-'))
+  const store=createMem0PersonalMemory({path:join(directory,'memory.sqlite'),userId:'host-user',embedding:{baseUrl:'https://example.invalid',apiKey:'test',model:'embedding'}})
+  t.after(async()=>{try{await store.close()}finally{await rm(directory,{recursive:true,force:true})}})
   await assert.rejects(store.forgetSources!(['first','second','third']),{message:'personal_memory_error'})
   assert.deepEqual(attempts,['first','second','third'])
   reject=false

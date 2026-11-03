@@ -1,4 +1,5 @@
 import {t} from './locale.mjs'
+import {publicStartupConfiguration} from '../startup-configuration.mjs'
 
 // Fixed stage labels for the bounded configuration waits. Codes carry no paths
 // or credentials, so they are safe to show and to log.
@@ -25,6 +26,13 @@ export function startupMessage(value) {
   if (value?.stage === 'backend' && value.code) return t('后台启动尚未完成，正在自动重试。')
   if (value?.stage === 'reconnecting') return t('后台连接已断开，正在自动重连。')
   if (value?.stage !== 'failed') return ''
+  const configuration = publicStartupConfiguration(value.startupConfiguration)
+  if (configuration) {
+    const hint = configuration.code === 'memory_provider_conflict'
+      ? t('请移除旧的 MEMORY_PROVIDER，或移除 MEMORY_RECALL_ENGINE 和 MEMORY_EXTRACTORS，再重试。')
+      : t('请检查这些记忆配置项的格式与连接模式，再重试。远程连接的引擎由服务端配置。')
+    return `${configuration.code} · ${configuration.variables.join(', ')} — ${hint}`
+  }
   if (value.code === 'startup_presentation_required') return t('请打开工作台或设置后重试，以便显示凭据授权提示。')
   if (value.code === 'credential_invalid') return t('已保存的凭据格式无效。请在设置中更新对应密钥后重试。')
   if (value.code === 'filesystem_permissions') return t('无法访问启动所需的文件或目录。请检查相关目录权限后重试。')

@@ -101,3 +101,13 @@ test('orb unread indicator follows host-owned conversation unread projection',as
  await act(async()=>store.set({unread:false} as any))
  assert.equal((v.container.querySelector('#unread-indicator') as HTMLElement).hidden,true)
 })
+
+test('personal memory page labels only the reported engine and defaults to generic local memory', async()=>{
+ for(const [engine,label] of [[undefined,'本机记忆'],['ledger','ledger'],['voicemem','voicemem'],['mem0','mem0'],['https://private.invalid?token=secret','本机记忆']]) {
+  const api={request:async(query:any)=>query?.channel==='personal'?{personal:{engine,entries:[{state:'learned',recordedAt:'2026-10-28',memories:['note'],original:'source'}],next:null}}:boardPayload()}
+  const v=render(<MemoryBoardApp api={api}/>);await waitFor(()=>assert.ok(v.getByText('hello')))
+  fireEvent.click(v.getByText('本机记忆'));await waitFor(()=>assert.ok(v.getByText(`${label} · 本页 1 条`)))
+  assert.doesNotMatch(v.container.textContent??'',/private\.invalid|secret/u)
+  v.unmount()
+ }
+})
